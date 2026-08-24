@@ -5,7 +5,7 @@ This document contains detailed NGINX configuration examples, verification steps
 ## Table of Contents
 
 1. [NGINX Configuration Examples](#nginx-configuration-examples)
-2. [Profile-Based Deployments](#profile-based-deployments-v090)
+2. [Explicit Deployment Presets](#explicit-deployment-presets-v092)
 3. [Quick Verification (curl)](#quick-verification-curl)
 4. [Common Deployment Notes](#common-deployment-notes)
 5. [Common Issues Quick Reference](#common-issues-quick-reference)
@@ -38,7 +38,7 @@ http {
 
 ### Minimal Enablement (PHP-FPM)
 
-If your site is served by `php-fpm` (common setup), use `fastcgi_pass` instead of `proxy_pass`:
+If your site uses `php-fpm` (common setup), use `fastcgi_pass` instead of `proxy_pass`:
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
@@ -133,12 +133,12 @@ Notes for the global-on pattern:
 - Start with `markdown_error_policy pass;` (fail-open) to reduce rollout risk
 - Exclude API/static/media/download routes explicitly for clarity
 - Existing `.md` files usually do not need conversion (module only converts eligible `text/html` responses)
-- Keep using `Accept: text/markdown` for verification; browsers with normal `Accept` headers still get HTML
+- Keep using `Accept: text/markdown` for verification. Browsers with normal `Accept` headers still get HTML
 - In PHP setups, verify the final request lands in the location block you expect
 
 ### Production-Oriented Example (gzip + php-fpm + static cache + API exceptions)
 
-This example reflects a common production PHP-FPM deployment: global enablement, explicit exclusions, static asset caching, and gzip enabled (including Markdown responses).
+This example reflects a common production PHP-FPM deployment. It shows global enablement, explicit exclusions, static asset caching, and gzip enabled (including Markdown responses).
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
@@ -164,7 +164,7 @@ http {
 
     markdown_filter on;
     markdown_error_policy pass;
-    markdown_limits memory=10m timeout=5s;
+    markdown_limits conversion_memory=10m conversion_timeout=5s parser_timeout=5s;
 
     server {
         listen 80;
@@ -215,39 +215,43 @@ http {
 }
 ```
 
-If you are using a reverse proxy upstream instead of PHP-FPM, `proxy_set_header Accept-Encoding "";` is still a useful first-step simplification, but it is optional. The module can automatically decompress upstream `gzip`, `br`, and `deflate` responses when you keep compression enabled end to end.
+If you are using a reverse proxy upstream instead of PHP-FPM, the default
+`markdown_auto_decompress on` keeps compressed upstream responses eligible for
+conversion. `proxy_set_header Accept-Encoding "";` offers an optional
+first-step simplification. It asks the upstream for an uncompressed response,
+but it does not substitute for the module's decompression policy when
+compression remains enabled end to end.
 
 ### Bot-Targeted Conversion (User-Agent Based)
 
-AI crawlers and agent bots typically do not send `Accept: text/markdown`. They use standard browser-like Accept headers when fetching pages. If you want specific bots to receive Markdown automatically, you can rewrite the Accept header at the NGINX layer based on User-Agent matching.
+AI crawlers and agent bots typically do not send `Accept: text/markdown`. They
+use standard browser-like Accept headers when fetching pages. If you want
+specific bots to receive Markdown automatically, enable the module for those
+User-Agents. Set the module's `markdown_accept force` policy for that scope.
+`proxy_set_header Accept` changes only the request sent to the upstream. It does
+not replace the module policy.
 
-This is a practical pattern because it requires no application or module code changes — the module's existing content negotiation handles the conversion once it sees `text/markdown` in the Accept header. Operators can manage the bot list entirely through NGINX configuration.
+This is a practical pattern because it requires no application or module code changes. Operators can manage the bot list entirely through NGINX configuration. The module keeps the selection decision in its own request path. The bot list stays in one place, so updates do not touch application code.
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    # Rewrite Accept header for known AI bots
-    map $http_user_agent $bot_accept_override {
-        default         "";
-        "~*ClaudeBot"   "text/markdown, text/html;q=0.9";
-        "~*GPTBot"      "text/markdown, text/html;q=0.9";
-        "~*Googlebot"   "text/markdown, text/html;q=0.9";
-    }
-
-    # Use the override when present, otherwise keep the original Accept
-    map $bot_accept_override $final_accept {
-        ""      $http_accept;
-        default $bot_accept_override;
+    # Enable the filter only for known AI bots
+    map $http_user_agent $is_ai_bot {
+        default         off;
+        "~*ClaudeBot"   on;
+        "~*GPTBot"      on;
+        "~*Googlebot"   on;
     }
 
     server {
         listen 8080;
 
         location / {
-            markdown_filter on;
+            markdown_filter $is_ai_bot;
+            markdown_accept force;
             markdown_error_policy pass;
-            proxy_set_header Accept $final_accept;
             proxy_pass http://backend;
         }
 
@@ -265,8 +269,9 @@ Verification:
 curl -sD - -o /dev/null -A "ClaudeBot/1.0" http://localhost:8080/
 # Expected: Content-Type: text/markdown; charset=utf-8
 
-# Normal browser request — should return HTML
-curl -sD - -o /dev/null -H "Accept: text/html" http://localhost:8080/
+# Normal browser request (no bot User-Agent) — filter stays off, so the
+# upstream response passes through with its original Content-Type
+curl -sD - -o /dev/null -A "Mozilla/5.0" http://localhost:8080/
 # Expected: Content-Type: text/html
 ```
 
@@ -284,28 +289,29 @@ See [examples/nginx-configs/](../../examples/nginx-configs/) for copy-paste-read
 - [Production Full](../../examples/nginx-configs/04-production-full.conf)
 - [High Performance](../../examples/nginx-configs/05-high-performance.conf)
 
-### Profile-Based Deployments (v0.9.0+)
+### Explicit Deployment Presets (v0.9.2)
 
-Profiles provide production-tuned defaults. Pick a profile, then override only
-what your deployment requires.
+The 0.9.2 public surface has no opaque profile directive. The following
+presets spell out the retained directives so they remain auditable in
+`nginx -T`.
 
-#### balanced — General-Purpose Deployment
-
-Recommended starting point for most sites. IMS-only caching avoids ETag
-computation overhead while streaming remains available for large responses.
+#### General-purpose deployment
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    markdown_profile balanced;
-
     upstream backend {
         server 127.0.0.1:8080;
     }
 
     server {
         listen 80;
+
+        markdown_cache_validation ims_only;
+        markdown_streaming auto;
+        markdown_limits conversion_memory=64m conversion_timeout=30s
+            parser_timeout=10s max_inflight=64;
 
         location /docs/ {
             markdown_filter on;
@@ -315,16 +321,17 @@ http {
 }
 ```
 
-#### strict_cache — CDN / Caching Proxy
+#### Strict cache validation — CDN / caching proxy
 
-Full ETag-based conditional request support. Streaming is disabled (forced off)
-so the module can generate a transformed ETag for the complete Markdown output.
+Full ETag-based conditional request support. Streaming stays disabled: the
+server configuration sets `markdown_streaming off` (`markdown_cache_validation
+full` also forces the `auto` default onto the full-buffer path), so the
+module can generate a transformed ETag for the complete Markdown output.
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    markdown_profile strict_cache;
     markdown_trusted_proxies 10.0.0.0/8 172.16.0.0/12;
 
     upstream backend {
@@ -334,18 +341,22 @@ http {
     server {
         listen 80;
 
+        markdown_cache_validation full;
+        markdown_streaming off;
+        markdown_limits conversion_memory=128m conversion_timeout=10s
+            parser_timeout=10s max_inflight=32;
+
         location /docs/ {
             markdown_filter on;
-            # Profile provides: cache_validation full, streaming off
-            # Override memory limit for large doc pages
-            markdown_limits memory=16m;
+            # Apply a tighter memory limit for this docs location
+            markdown_limits conversion_memory=16m;
             proxy_pass http://backend;
         }
     }
 }
 ```
 
-#### streaming_first — AI Agent Workloads
+#### Streaming-first — AI agent workloads
 
 Optimized for large document conversion with AI agent consumers. Aggressive
 streaming, wildcard Accept negotiation, no caching overhead.
@@ -354,8 +365,6 @@ streaming, wildcard Accept negotiation, no caching overhead.
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    markdown_profile streaming_first;
-
     upstream backend {
         server 127.0.0.1:8080;
     }
@@ -363,10 +372,14 @@ http {
     server {
         listen 80;
 
+        markdown_accept wildcard;
+        markdown_cache_validation off;
+        markdown_streaming force;
+        markdown_limits conversion_memory=256m conversion_timeout=30s
+            parser_timeout=10s streaming_buffer=16m max_inflight=128;
+
         location /api/docs/ {
             markdown_filter on;
-            # Profile provides: streaming force, cache_validation off,
-            #                    accept wildcard
             markdown_limits streaming_buffer=512k;
             proxy_pass http://backend;
         }
@@ -374,37 +387,47 @@ http {
 }
 ```
 
-#### Mixed Profiles per Location
+#### Mixed explicit policies per location
 
-Different paths can use different profiles via NGINX inheritance:
+Different paths can use different explicit policies via NGINX inheritance:
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    markdown_profile balanced;
-
     upstream docs_backend { server 127.0.0.1:8080; }
     upstream api_backend  { server 127.0.0.1:9090; }
 
     server {
         listen 80;
 
+        markdown_cache_validation ims_only;
+        markdown_streaming auto;
+        markdown_limits conversion_memory=64m conversion_timeout=30s
+            parser_timeout=10s max_inflight=64;
+
         # Public docs: full caching for CDN
         location /docs/ {
-            markdown_profile strict_cache;
+            markdown_cache_validation full;
+            markdown_streaming off;
+            markdown_limits conversion_memory=128m conversion_timeout=10s
+                parser_timeout=10s max_inflight=32;
             markdown_filter on;
             proxy_pass http://docs_backend;
         }
 
         # API reference: streaming for large specs
         location /api/reference/ {
-            markdown_profile streaming_first;
+            markdown_accept wildcard;
+            markdown_cache_validation off;
+            markdown_streaming force;
+            markdown_limits conversion_memory=256m conversion_timeout=30s
+                parser_timeout=10s streaming_buffer=16m max_inflight=128;
             markdown_filter on;
             proxy_pass http://api_backend;
         }
 
-        # Blog: balanced (inherited from http)
+            # Blog inherits the general-purpose policy from the server.
         location /blog/ {
             markdown_filter on;
             proxy_pass http://docs_backend;
@@ -459,7 +482,13 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost:8080/docs/ |
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost:8080/api/health | grep -i content-type
 ```
 
-Note: Prefer GET-based header checks (`curl -sD - -o /dev/null ...`) over `curl -I` for verification. In proxied deployments, `HEAD` requests may not carry an upstream body, which can cause fail-open behavior.
+Note: `curl -I` (HEAD) is a valid verification method. HEAD responses carry
+the same representation headers as a GET would select
+(`Content-Type: text/markdown; charset=utf-8`, `Vary: Accept`) with an empty
+body. The module supplies no body-derived fields (`Content-Length`, `ETag`)
+for HEAD because no conversion body is available. GET-based header checks
+(`curl -sD - -o /dev/null ...`) remain the preferred way to also confirm body
+conversion and ETag generation.
 
 ### If It Does Not Convert
 
@@ -506,16 +535,16 @@ location / {
 ### PHP (`php-fpm`) deployments
 
 - PHP pages are commonly served from `location ~ \.php$` via `fastcgi_pass`
-- If you only enable `markdown_filter on;` in `location /`, PHP requests may end up in another location block and not be converted
+- If you only enable `markdown_filter on;` in `location /`, PHP requests may end up in another location block and stay unconverted
 - Prefer enabling in the PHP location (or `server` scope)
 
 ### PHP application-level compression can interfere
 
-If PHP compresses output itself (`zlib.output_compression=On`), disable that for routes you want to convert, and let NGINX handle response compression instead.
+If PHP compresses output itself (`zlib.output_compression=On`), disable that for routes you want to convert. Let NGINX handle response compression instead.
 
 ### Existing `.md` files bypass conversion automatically
 
-The module only converts eligible `text/html` responses. Native Markdown or plain text responses are bypassed. You can still explicitly exclude `.md` paths:
+The module only converts eligible `text/html` responses. Native Markdown or plain text responses bypass conversion. You can still explicitly exclude `.md` paths:
 
 ```nginx
 location ~* \.md$ {
@@ -550,6 +579,8 @@ Complete troubleshooting guide: [OPERATIONS.md](OPERATIONS.md#troubleshooting)
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Bot-targeted verification block now sends an explicit non-bot User-Agent and explains why HTML passes through |
+| 0.9.2 | 2026-08-18 | Hermes | Split long sentence in bot-list management guidance |
 | 0.9.0 | 2026-06-28 | Kang | Added profile-based deployment examples (balanced, strict_cache, streaming_first, mixed profiles per location) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

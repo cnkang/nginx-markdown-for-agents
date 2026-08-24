@@ -1,10 +1,10 @@
 /*
  * Test: diagnostics_access_control
  *
- * Validates diagnostics endpoint access control logic:
- *   - CIDR allow list matching (IPv4 and IPv6)
- *   - Loopback-only fallback when no allow list configured
- *   - NULL sockaddr → deny
+ * Validates the diagnostics content-handler boundary:
+ *   - Native NGINX access-phase directives own CIDR allow/deny policy
+ *   - The content handler rejects a missing or non-loopback client sockaddr
+ *   - NULL/non-loopback sockaddr → deny
  *   - GET/HEAD only, other methods → 405
  *   - Ring buffer initialization and capacity clamping
  *   - Record decision with timestamp and reason code
@@ -52,30 +52,25 @@ typedef struct {
 } diag_state_t;
 
 
-static int g_allow_list_present;
-static int g_is_loopback;
 static int g_client_family;
+static int g_client_loopback;
 
 
 static int
-diagnostics_check_access(void)
+diagnostics_minimal_access_guard(void)
 {
+    /* Mirrors ngx_http_markdown_diagnostics_check_access: NULL sockaddr
+     * (family 0) is denied; a present peer is accepted only when it is
+     * loopback (127.0.0.0/8 or ::1).  Non-loopback peers are denied by
+     * the content handler — native access-phase directives may add
+     * restrictions but cannot broaden the loopback-only boundary. */
     if (g_client_family == 0) {
         return NGX_HTTP_FORBIDDEN;
     }
-
-    if (g_allow_list_present) {
-        if (g_is_loopback) {
-            return NGX_OK;
-        }
+    if (!g_client_loopback) {
         return NGX_HTTP_FORBIDDEN;
     }
-
-    if (g_is_loopback) {
-        return NGX_OK;
-    }
-
-    return NGX_HTTP_FORBIDDEN;
+    return NGX_OK;
 }
 
 
@@ -149,17 +144,16 @@ diagnostics_cleanup(diag_state_t *state)
 /* ── Access control tests ──────────────────────────────────────── */
 
 static void
-test_loopback_allowed_no_allowlist(void)
+test_sockaddr_allowed_without_module_allowlist(void)
 {
     int rc;
 
     TEST_SUBSECTION("Loopback allowed when no allow list configured");
 
-    g_allow_list_present = 0;
-    g_is_loopback = 1;
     g_client_family = 2;
+    g_client_loopback = 1;
 
-    rc = diagnostics_check_access();
+    rc = diagnostics_minimal_access_guard();
     TEST_ASSERT(rc == NGX_OK,
         "loopback allowed without allow list");
 
@@ -168,36 +162,34 @@ test_loopback_allowed_no_allowlist(void)
 
 
 static void
-test_nonloopback_denied_no_allowlist(void)
+test_nonloopback_delegated_to_native_access_phase(void)
 {
     int rc;
 
     TEST_SUBSECTION("Non-loopback denied when no allow list configured");
 
-    g_allow_list_present = 0;
-    g_is_loopback = 0;
     g_client_family = 2;
+    g_client_loopback = 0;
 
-    rc = diagnostics_check_access();
+    rc = diagnostics_minimal_access_guard();
     TEST_ASSERT(rc == NGX_HTTP_FORBIDDEN,
-        "non-loopback denied without allow list");
+        "non-loopback peer is denied by the loopback-only boundary");
 
     TEST_PASS("non-loopback denied");
 }
 
 
 static void
-test_loopback_allowed_with_allowlist(void)
+test_sockaddr_allowed_with_native_allowlist(void)
 {
     int rc;
 
     TEST_SUBSECTION("Loopback in CIDR allow list → allowed");
 
-    g_allow_list_present = 1;
-    g_is_loopback = 1;
     g_client_family = 2;
+    g_client_loopback = 1;
 
-    rc = diagnostics_check_access();
+    rc = diagnostics_minimal_access_guard();
     TEST_ASSERT(rc == NGX_OK,
         "loopback allowed by CIDR allow list");
 
@@ -206,19 +198,18 @@ test_loopback_allowed_with_allowlist(void)
 
 
 static void
-test_nonloopback_denied_with_allowlist(void)
+test_nonloopback_policy_delegated_to_native_allowlist(void)
 {
     int rc;
 
     TEST_SUBSECTION("Non-loopback not in CIDR allow list → denied");
 
-    g_allow_list_present = 1;
-    g_is_loopback = 0;
     g_client_family = 2;
+    g_client_loopback = 0;
 
-    rc = diagnostics_check_access();
+    rc = diagnostics_minimal_access_guard();
     TEST_ASSERT(rc == NGX_HTTP_FORBIDDEN,
-        "non-loopback denied by CIDR allow list");
+        "non-loopback peer is denied by the loopback-only boundary");
 
     TEST_PASS("non-loopback denied by allowlist");
 }
@@ -233,7 +224,7 @@ test_null_sockaddr_denied(void)
 
     g_client_family = 0;
 
-    rc = diagnostics_check_access();
+    rc = diagnostics_minimal_access_guard();
     TEST_ASSERT(rc == NGX_HTTP_FORBIDDEN,
         "NULL sockaddr returns FORBIDDEN");
 
@@ -430,10 +421,10 @@ main(void)
 {
     TEST_SECTION("diagnostics_access_control");
 
-    test_loopback_allowed_no_allowlist();
-    test_nonloopback_denied_no_allowlist();
-    test_loopback_allowed_with_allowlist();
-    test_nonloopback_denied_with_allowlist();
+    test_sockaddr_allowed_without_module_allowlist();
+    test_nonloopback_delegated_to_native_access_phase();
+    test_sockaddr_allowed_with_native_allowlist();
+    test_nonloopback_policy_delegated_to_native_allowlist();
     test_null_sockaddr_denied();
 
     test_init_default_capacity();

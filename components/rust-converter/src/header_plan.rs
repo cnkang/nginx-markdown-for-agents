@@ -127,6 +127,39 @@ impl HeaderPlan {
         Self::for_bypass()
     }
 
+    /// Build a header plan for a precommit PASS_HTML outcome.
+    ///
+    /// When a decoder or parser failure occurs before commit and the
+    /// `ResolvedErrorPolicy` is PASS, the module returns the original
+    /// response unchanged. No Content-Encoding, Content-Type,
+    /// Content-Length, validators, or body bytes are mutated by this plan.
+    ///
+    /// `Vary: Accept` is handled separately by the C module's
+    /// `ngx_http_markdown_add_vary_accept()` only when the URL is
+    /// eligible, cacheable, and can vary by Accept.
+    ///
+    /// This is semantically identical to `for_bypass`/`for_pass_through`
+    /// but documents the PASS_HTML intent for the HTTP representation
+    /// truth table (scenario 13).
+    pub fn for_pass_html() -> Self {
+        Self::for_bypass()
+    }
+
+    /// Build a header plan for a non-cacheable converted response.
+    ///
+    /// When a response carries `Cache-Control: private` or `no-store`,
+    /// shared caches will not store it, so no `Vary: Accept` is
+    /// synthesized by the module. The response still carries the
+    /// converted Content-Type and converted body, but the Vary header
+    /// is not added.
+    ///
+    /// This is the same plan as `for_markdown_conversion` since Vary is
+    /// handled externally by the C module (which decides NOT to call
+    /// `ngx_http_markdown_add_vary_accept` for non-cacheable responses).
+    pub fn for_non_cacheable_conversion(content_type: &str, has_etag: bool) -> Self {
+        Self::for_markdown_conversion(content_type, has_etag)
+    }
+
     /// Build a header plan for a 304 Not Modified response.
     ///
     /// A 304 response has no body, so Content-Length and Content-Encoding
@@ -358,5 +391,20 @@ mod tests {
                 name: "Content-Length".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn test_for_pass_html() {
+        let plan = HeaderPlan::for_pass_html();
+        assert!(plan.is_empty());
+        assert_eq!(plan, HeaderPlan::for_bypass());
+        assert_eq!(plan, HeaderPlan::for_pass_through());
+    }
+
+    #[test]
+    fn test_for_non_cacheable_conversion() {
+        let plan = HeaderPlan::for_non_cacheable_conversion("text/markdown; charset=utf-8", true);
+        let normal = HeaderPlan::for_markdown_conversion("text/markdown; charset=utf-8", true);
+        assert_eq!(plan, normal);
     }
 }

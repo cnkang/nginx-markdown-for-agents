@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -16,6 +17,12 @@ _HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9a-z-]+$")
 _HTTP_STATUS_LINE_RE = re.compile(
     r"^HTTP/[^\s]+[ \t]+([1-5]\d{2})",
     re.ASCII,
+)
+_PROMETHEUS_LINE_RE = re.compile(
+    r"^(?P<name>[a-zA-Z_:][a-zA-Z0-9_:]*)"
+    r"(?:\{(?P<labels>[^}]*)\})?\s+"
+    r"(?P<value>[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|[+-]?Inf|NaN)"
+    r"(?:\s+\d+)?$"
 )
 
 #: Canonical module-benchmark scenario names.
@@ -33,6 +40,27 @@ SCENARIOS: tuple[str, ...] = (
     "deflate-streaming-first",
     "brotli-streaming-first",
 )
+
+# The shell harness keeps its internal configuration selector for choosing an
+# NGINX config, but benchmark evidence must not publish the removed
+# ``profile`` vocabulary as if it were a user-facing directive.  Keep this
+# mapping at the report boundary so old internal names cannot leak into a
+# checked-in baseline.
+_SCENARIO_CONFIG_BY_PROFILE = {
+    "balanced": "explicit-defaults",
+    "streaming_first": "explicit-streaming",
+    "strict_cache": "explicit-strict-cache",
+}
+
+
+def _scenario_config_for_report(profile: str) -> str:
+    """Translate an internal harness mode to the frozen report vocabulary."""
+    try:
+        return _SCENARIO_CONFIG_BY_PROFILE[profile]
+    except KeyError as exc:
+        raise ValueError(
+            f"unsupported internal benchmark configuration: {profile!r}"
+        ) from exc
 
 
 def _normalize_header_name(name: str) -> str:
@@ -120,6 +148,160 @@ def _failure(summary: dict, reason: str) -> dict:
     summary["verdict"] = "fail"
     summary["failure_reason"] = reason
     return summary
+
+
+def _parse_prometheus_labels(label_text: str) -> dict[str, str] | None:
+    """Parse the simple quoted labels emitted by the module renderer."""
+    labels: dict[str, str] = {}
+    if not label_text:
+        return labels
+    for item in label_text.split(","):
+        key, separator, value = item.partition("=")
+        if separator != "=" or len(value) < 2:
+            return None
+        if value[0] != '"' or value[-1] != '"':
+            return None
+        labels[key] = value[1:-1]
+    return labels
+
+
+def _parse_prometheus_sample(
+    raw_line: str,
+) -> tuple[str, dict[str, str], int | float] | None:
+    """Parse one Prometheus sample, ignoring comments and malformed lines."""
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        return None
+    match = _PROMETHEUS_LINE_RE.fullmatch(line)
+    if match is None:
+        return None
+    labels = _parse_prometheus_labels(match.group("labels") or "")
+    if labels is None:
+        return None
+    try:
+        value = float(match.group("value"))
+    except ValueError:
+        return None
+    if not math.isfinite(value):
+        return None
+    if value.is_integer():
+        return match.group("name"), labels, int(value)
+    return match.group("name"), labels, value
+
+
+def _parse_prometheus_families(
+    content: str,
+) -> tuple[dict[str, list[tuple[dict[str, str], int | float]]], int]:
+    """Collect valid Prometheus samples by family name.
+
+    Returns (families, malformed_count) where malformed_count counts
+    non-comment lines that were skipped because they could not be parsed
+    as a well-formed sample (unparseable labels, non-numeric values, or
+    non-finite values).  Exposing the count lets callers distinguish a
+    clean document from one with silently dropped samples.
+    """
+    families: dict[str, list[tuple[dict[str, str], int | float]]] = {}
+    malformed_count = 0
+    for raw_line in content.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        sample = _parse_prometheus_sample(raw_line)
+        if sample is None:
+            malformed_count += 1
+            continue
+        name, labels, value = sample
+        families.setdefault(name, []).append((labels, value))
+    return families, malformed_count
+
+
+def _prometheus_total(
+    families: dict[str, list[tuple[dict[str, str], int | float]]],
+    name: str,
+    **wanted: str,
+) -> int | float:
+    """Sum one family, optionally restricted to exact label values."""
+    return sum(
+        value
+        for labels, value in families.get(name, [])
+        if all(labels.get(key) == expected for key, expected in wanted.items())
+    )
+
+
+def parse_prometheus_metrics(content: str) -> dict[str, Any]:
+    """Map the frozen Prometheus endpoint into benchmark-owned fields.
+
+    The benchmark report keeps its historical, tool-owned metric names, while
+    the module endpoint is intentionally Prometheus-only in 0.9.2. Unknown
+    families are ignored at this compatibility boundary, but malformed or
+    skipped samples are counted and exposed as ``malformed_samples`` so the
+    benchmark validation can fail closed when a metrics document silently
+    drops evidence.
+    """
+    families, malformed_count = _parse_prometheus_families(content)
+    streaming_attempts = _prometheus_total(
+        families, "nginx_markdown_conversion_attempts_total", engine="streaming"
+    )
+    full_buffer_attempts = _prometheus_total(
+        families, "nginx_markdown_conversion_attempts_total", engine="full_buffer"
+    )
+    return {
+        "streaming_path_hits": streaming_attempts,
+        "fullbuffer_path_hits": full_buffer_attempts,
+        "malformed_samples": malformed_count,
+        "streaming": {
+            "requests_total": streaming_attempts,
+            "fallback_total": _prometheus_total(
+                families, "nginx_markdown_streaming_events_total", transition="fallback"
+            ),
+        },
+        "perf": {
+            "decompression_events_total": _prometheus_total(
+                families, "nginx_markdown_decompression_events_total"
+            ),
+            "decompression_success_total": _prometheus_total(
+                families,
+                "nginx_markdown_decompression_events_total",
+                outcome="success",
+            ),
+            "decompression_budget_exceeded_total": _prometheus_total(
+                families,
+                "nginx_markdown_decompression_events_total",
+                outcome="failure",
+                reason="budget_exceeded",
+            ),
+        },
+    }
+
+
+def merge_diagnostics_metrics(
+    metrics: dict[str, Any], diagnostics: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Merge exact internal counters from the diagnostics contract.
+
+    The frozen Prometheus v1 endpoint intentionally exposes engine delivery
+    counters, not output ownership or streaming pre-commit fail-open
+    counters. Those counters are collected from the structured diagnostics
+    endpoint instead of being inferred from unrelated labels.
+    """
+    runtime = diagnostics.get("runtime")
+    if not isinstance(runtime, Mapping):
+        return metrics
+    module_metrics = runtime.get("module_metrics")
+    if not isinstance(module_metrics, Mapping):
+        return metrics
+
+    streaming = metrics.setdefault("streaming", {})
+    perf = metrics.setdefault("perf", {})
+    field_map = {
+        "streaming_requests_total": (streaming, "requests_total"),
+        "precommit_failopen_total": (streaming, "precommit_failopen_total"),
+        "copied_output_total": (perf, "copied_output_total"),
+    }
+    for source_key, (target, target_key) in field_map.items():
+        if source_key in module_metrics:
+            target[target_key] = module_metrics[source_key]
+    return metrics
 
 
 def parse_ab_result(content: str, iterations: int) -> dict:
@@ -386,10 +568,12 @@ class ScenarioResultInput:
     input_bytes: int
     ttfb: Mapping[str, Any]
     nginx_metrics: Mapping[str, Any]
+    metrics_exit_code: int = 0
+    diagnostics_exit_code: int = 0
 
 
-def build_scenario_result(data: ScenarioResultInput) -> dict:
-    """Build a scenario report gated by strict load-integrity evidence."""
+def _load_result(data: ScenarioResultInput) -> tuple[dict, float, float, float, float]:
+    """Parse the selected load generator and return performance fields."""
     if data.load_generator == "ab":
         load = parse_ab_result(data.raw_content, data.iterations)
         rps, p50, p95, p99 = _ab_performance(data.raw_content)
@@ -403,61 +587,219 @@ def build_scenario_result(data: ScenarioResultInput) -> dict:
         rps = p50 = p95 = p99 = 0.0
     if data.load_exit_code != 0:
         load = _failure(load, f"load_generator_exit: {data.load_exit_code}")
+    return load, rps, p50, p95, p99
 
-    perf = data.nginx_metrics.get("perf", {}) or {}
-    streaming = data.nginx_metrics.get("streaming", {}) or {}
-    streaming_hits = data.nginx_metrics.get("streaming_path_hits", 0)
-    fullbuffer_hits = data.nginx_metrics.get("fullbuffer_path_hits", 0)
+
+def _is_numeric_count(value) -> bool:
+    """A finite, non-negative counter; int or float, never bool."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        # An oversized Python int overflows float conversion.
+        return False
+    return finite and value >= 0
+
+
+def _path_metrics(
+    nginx_metrics: Mapping[str, Any],
+) -> tuple[
+    tuple[dict[str, Any], dict[str, Any], float, float, float | None, float | None],
+    int | float | None,
+    int | float | None,
+    float | None,
+    int | float,
+]:
+    """Derive path ratios and streaming counters from the metrics adapter."""
+    perf = nginx_metrics.get("perf", {}) or {}
+    streaming = nginx_metrics.get("streaming", {}) or {}
+    streaming_hits = _normalise_path_hits(
+        nginx_metrics.get("streaming_path_hits")
+    )
+    fullbuffer_hits = _normalise_path_hits(
+        nginx_metrics.get("fullbuffer_path_hits")
+    )
     total_hits = streaming_hits + fullbuffer_hits
     streaming_ratio = streaming_hits / total_hits if total_hits > 0 else None
     fullbuffer_ratio = fullbuffer_hits / total_hits if total_hits > 0 else None
-    requests_total = streaming.get("requests_total", 0)
-    failopen_total = streaming.get("precommit_failopen_total", 0)
-    fallback_rate = (
-        failopen_total / requests_total if requests_total > 0 else 0.0
+    requests_total = streaming.get("requests_total")
+    streaming_fallback_total = streaming.get("fallback_total")
+    streaming_failopen_total = streaming.get("precommit_failopen_total")
+
+    if _is_numeric_count(requests_total) and _is_numeric_count(
+        streaming_failopen_total
+    ):
+        # fallback_rate is the hard fail-open share:
+        # precommit_failopen_total / streaming_requests_total (1.0 when every
+        # streaming request fails open). Capability fallbacks are reported
+        # separately and must not affect the release gate.
+        assert requests_total is not None and streaming_failopen_total is not None
+        if requests_total > 0:
+            fallback_rate = streaming_failopen_total / requests_total
+        elif streaming_failopen_total == 0:
+            fallback_rate = 0.0
+        else:
+            fallback_rate = None
+    else:
+        fallback_rate = None
+    return (
+        perf,
+        streaming,
+        streaming_hits,
+        fullbuffer_hits,
+        streaming_ratio,
+        fullbuffer_ratio,
+    ), requests_total, streaming_fallback_total, fallback_rate, total_hits
+
+
+def _normalise_path_hits(value: object) -> int | float:
+    """Return a non-negative finite numeric path count, treating invalid or
+    non-finite input (NaN, infinity) as 0."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return value if value >= 0 and math.isfinite(value) else 0
+    if isinstance(value, str):
+        try:
+            parsed = float(value)
+        except ValueError:
+            return 0
+        return parsed if parsed >= 0 and math.isfinite(parsed) else 0
+    return 0
+
+
+def _decompression_path_metrics(
+    compression: str,
+    perf: Mapping[str, Any],
+    streaming_hits: float,
+    fullbuffer_hits: float,
+) -> tuple[float | None, float | None]:
+    """Map decompression events to the benchmark's path fields."""
+    # The aggregate counter also carries outcome="failure" samples; only
+    # successful decompressions may populate the path totals. Fall back to
+    # the aggregate when the success-labeled total is unavailable.
+    events = perf.get(
+        "decompression_success_total", perf.get("decompression_events_total", 0)
+    )
+    if compression != "none" and events:
+        if streaming_hits == 0 and fullbuffer_hits == 0:
+            return None, None
+        if streaming_hits == 0:
+            return 0, events
+        if fullbuffer_hits == 0:
+            return events, 0
+        # The aggregate counter cannot be attributed safely when both paths
+        # ran. Preserve the ambiguity as missing evidence instead of assigning
+        # every event to one path.
+        return None, None
+    return (
+        perf.get("decompression_streaming_total", 0),
+        perf.get("decompression_fullbuffer_total", 0),
+    )
+
+
+def _scenario_metrics(
+    data: ScenarioResultInput,
+    performance: tuple[float, float, float, float],
+    path,
+) -> dict[str, Any]:
+    """Assemble the stable metric payload for one scenario."""
+    rps, p50, p95, p99 = performance
+    (perf, streaming, streaming_hits, fullbuffer_hits, streaming_ratio,
+     fullbuffer_ratio), requests_total, _, fallback_rate, _ = path
+    decomp_streaming, decomp_fullbuffer = _decompression_path_metrics(
+        data.compression, perf, streaming_hits, fullbuffer_hits
     )
     result = {
+        "rps": rps,
+        "latency_p50_ms": p50,
+        "latency_p95_ms": p95,
+        "latency_p99_ms": p99,
+        "ttfb_p50_ms": data.ttfb.get("ttfb_p50_ms"),
+        "ttfb_p95_ms": data.ttfb.get("ttfb_p95_ms"),
+        "ttlb_p50_ms": p50,
+        "worker_rss_mb": data.worker_rss_kb / 1024.0,
+        "baseline_rss_bytes": data.baseline_rss_kb * 1024,
+        "peak_rss_bytes": data.peak_rss_kb * 1024,
+        "input_bytes": data.input_bytes,
+        "streaming_path_hits": streaming_hits,
+        "fullbuffer_path_hits": fullbuffer_hits,
+        "streaming_ratio": streaming_ratio,
+        "fullbuffer_ratio": fullbuffer_ratio,
+        "fallback_rate": fallback_rate,
+        "streaming_fallback_total": streaming.get("fallback_total", 0),
+        "streaming_requests_total": requests_total,
+        # The harness reports bytes per request and requests per second.  Keep
+        # the derived value tied to those measured fields instead of a
+        # placeholder so baseline evidence remains numerically meaningful.
+        "throughput_mbytes_per_sec": round(data.input_bytes * rps / 1_000_000.0, 6),
+        "decompression_streaming_total": decomp_streaming,
+        "decompression_fullbuffer_total": decomp_fullbuffer,
+        "pending_output_high_watermark_bytes": perf.get(
+            "pending_output_high_watermark_bytes", 0
+        ),
+    }
+    optional_fields = (
+        ("precommit_failopen_total", streaming),
+        ("copied_output_total", perf),
+    )
+    for field, source in optional_fields:
+        if field in source:
+            result[field] = source[field]
+    return result
+
+
+def build_scenario_result(data: ScenarioResultInput) -> dict:
+    """Build a scenario report gated by load and endpoint integrity evidence."""
+    load, rps, p50, p95, p99 = _load_result(data)
+    path = _path_metrics(data.nginx_metrics)
+    endpoint_failures = []
+    if data.metrics_exit_code != 0:
+        endpoint_failures.append(f"metrics_curl_exit: {data.metrics_exit_code}")
+    if data.diagnostics_exit_code != 0:
+        endpoint_failures.append(
+            f"diagnostics_curl_exit: {data.diagnostics_exit_code}"
+        )
+    # Malformed or skipped Prometheus samples silently drop evidence: a
+    # metrics document carrying unparseable lines must fail the scenario's
+    # endpoint integrity instead of being treated as a clean snapshot.
+    malformed_samples = data.nginx_metrics.get("malformed_samples", 0)
+    if malformed_samples:
+        endpoint_failures.append(
+            f"metrics_malformed_samples: {malformed_samples}"
+        )
+
+    result = {
         "name": data.name,
-        "profile": data.profile,
+        "scenario_config": _scenario_config_for_report(data.profile),
         "compression": data.compression,
         "transfer_encoding": data.transfer_encoding,
         "concurrency": data.concurrency,
-        "status": "completed" if load.get("verdict") == "pass" else "failed",
+        "status": (
+            "completed"
+            if load.get("verdict") == "pass" and not endpoint_failures
+            else "failed"
+        ),
         "load_integrity": load,
-        "metrics": {
-            "rps": rps,
-            "latency_p50_ms": p50,
-            "latency_p95_ms": p95,
-            "latency_p99_ms": p99,
-            "ttfb_p50_ms": data.ttfb.get("ttfb_p50_ms"),
-            "ttfb_p95_ms": data.ttfb.get("ttfb_p95_ms"),
-            "ttlb_p50_ms": p50,
-            "worker_rss_mb": data.worker_rss_kb / 1024.0,
-            "baseline_rss_bytes": data.baseline_rss_kb * 1024,
-            "peak_rss_bytes": data.peak_rss_kb * 1024,
-            "input_bytes": data.input_bytes,
-            "streaming_path_hits": streaming_hits,
-            "fullbuffer_path_hits": fullbuffer_hits,
-            "streaming_ratio": streaming_ratio,
-            "fullbuffer_ratio": fullbuffer_ratio,
-            "fallback_rate": fallback_rate,
-            "streaming_fallback_total": streaming.get("fallback_total", 0),
-            "streaming_requests_total": requests_total,
-            "precommit_failopen_total": failopen_total,
-            "throughput_mbps": 0.0,
-            "decompression_streaming_total": perf.get(
-                "decompression_streaming_total", 0
-            ),
-            "decompression_fullbuffer_total": perf.get(
-                "decompression_fullbuffer_total", 0
-            ),
-            "zero_copy_output_total": perf.get("zero_copy_output_total", 0),
-            "copied_output_total": perf.get("copied_output_total", 0),
-            "pending_output_high_watermark_bytes": perf.get(
-                "pending_output_high_watermark_bytes", 0
-            ),
+        "endpoint_integrity": {
+            "metrics_curl_exit_code": data.metrics_exit_code,
+            "diagnostics_curl_exit_code": data.diagnostics_exit_code,
+            "verdict": "pass" if not endpoint_failures else "fail",
+            "failure_reason": "; ".join(endpoint_failures),
         },
+        "metrics": _scenario_metrics(data, (rps, p50, p95, p99), path),
     }
     if result["status"] == "failed":
-        result["reason"] = f"load_integrity_failed: {load['failure_reason']}"
+        reasons = []
+        if load.get("verdict") != "pass":
+            reasons.append(
+                "load_integrity_failed: "
+                + str(load.get("failure_reason", "no failure reason recorded"))
+            )
+        reasons.extend(
+            f"endpoint_integrity_failed: {failure}"
+            for failure in endpoint_failures
+        )
+        result["reason"] = "; ".join(reasons)
     return result

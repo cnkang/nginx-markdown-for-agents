@@ -156,6 +156,12 @@ impl MarkdownConverter {
                 '\n' => output.push_str("\\n"),
                 '\r' => output.push_str("\\r"),
                 '\t' => output.push_str("\\t"),
+                // Escape remaining C0/C1 control characters (U+0000..U+001F,
+                // U+007F..U+009F) as \uXXXX so the generated YAML stays
+                // parseable (review LOW-1).
+                ch if ch.is_control() => {
+                    output.push_str(&format!("\\u{:04x}", ch as u32));
+                }
                 _ => output.push(ch),
             }
         }

@@ -32,7 +32,7 @@ kubectl exec -n ingress-nginx <pod> -- nginx -V 2>&1 | grep markdown
 
 ### Disable
 
-Remove `markdown_filter on` from ConfigMap; module remains loaded but inactive.
+Remove `markdown_filter on` from ConfigMap. This disables only Markdown conversion — the module remains loaded in NGINX and metrics or diagnostics handlers may still run. For full module deactivation, explicitly remove the `load_module` directive from the ConfigMap snippet and rebuild the custom image or revert to the upstream Ingress Controller image.
 
 ### Rollback
 
@@ -43,7 +43,7 @@ Revert Deployment image tag to upstream Ingress Controller image.
 ## Custom Ingress Controller Image Build
 
 This section documents how to build a custom NGINX Ingress Controller image
-that includes the `ngx_http_markdown_filter_module`. The Dockerfile is located
+that includes the `ngx_http_markdown_filter_module`. The Dockerfile lives
 at `examples/kubernetes/Dockerfile.ingress`.
 
 ### Prerequisites
@@ -145,7 +145,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ```
 
 Multi-platform builds require Docker Buildx with a builder that supports
-the target platforms (e.g., `docker buildx create --use`).
+the target platforms (for example `docker buildx create --use`).
 
 ### Customization Points
 
@@ -286,10 +286,15 @@ destination accordingly.
 
 ## Helm Chart
 
-The chart is installable by default with a stock `nginx` image. The default
-`markdown.enabled=false` keeps `load_module` and `markdown_*` directives out of
-the rendered `nginx.conf`, which is the path used by the local stock-nginx
-smoke test.
+The chart does NOT default the runtime image: Helm refuses to render the
+Deployment until both `image.repository` and `image.tag` are set explicitly.
+The chart therefore cannot install with zero overrides. The local stock-nginx
+smoke test supplies a stock `nginx` image when `markdown.enabled=false`:
+
+```bash
+helm install nginx-markdown charts/nginx-markdown \
+  --set image.repository=nginx --set image.tag=1.26.3
+```
 
 To enable the markdown module, use an image that already contains
 `ngx_http_markdown_filter_module.so`, then set both values:
@@ -302,7 +307,7 @@ helm install nginx-markdown charts/nginx-markdown \
   --set-string markdown.loadModule=/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 ```
 
-When `markdown.enabled=true`, `markdown.loadModule` is required. The chart does
+When `markdown.enabled=true`, the chart requires `markdown.loadModule`. The chart does
 not create a `hostPath` mount from that value. If a deployment needs additional
 volumes or mounts, use the explicit opt-in `extraVolumes` and
 `extraVolumeMounts` values.
@@ -335,8 +340,10 @@ module functionality after Kubernetes deployment.
    response contains markdown content
 3. **Accept negotiation** — Sends `Accept: text/html` and confirms the module
    does NOT convert (pass-through)
-4. **Metrics endpoint** — Verifies `/metrics` returns HTTP 200 with
-   Prometheus-format data
+4. **Metrics endpoint** — Verifies the module metrics path (default
+   `/_markdown_metrics`, matching `values.metrics.uri`).  Override with
+   `-m/--metrics`.  The endpoint must return HTTP 200 with Prometheus-format
+   data.
 
 #### Usage
 
@@ -364,10 +371,15 @@ All options:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-u, --url URL` | (port-forward) | Service base URL |
-| `-n, --namespace NS` | `ingress-nginx` | Kubernetes namespace |
-| `-l, --label LABEL` | `app=nginx-markdown` | Pod label selector |
+| `-n, --namespace NS` | `default` (`$K8S_NAMESPACE`) | Kubernetes namespace |
+| `-l, --label LABEL` | `app.kubernetes.io/name=nginx-markdown` | Pod label selector (Helm selectorLabels) |
 | `-p, --port PORT` | `8080` | Local port for port-forward |
+| `-m, --metrics PATH` | `/_markdown_metrics` | Module metrics path (`values.metrics.uri`) |
 | `-t, --timeout SECS` | `10` | Curl timeout in seconds |
+
+The port-forward targets the Pod's container port `8080` (the chart's
+NGINX `listen`).  The Service maps `80 → 8080`, so direct Pod forwarding
+uses `8080`, not `80`.
 
 #### Expected Output
 
@@ -387,7 +399,7 @@ All options:
 ------------------------------------------------------------
 ```
 
-Exit code `0` means all checks passed; `1` means one or more failed.
+Exit code `0` means all checks passed. `1` means one or more failed.
 
 ---
 
@@ -405,7 +417,7 @@ runs five scenarios sequentially, and cleans up on exit.
 | `curl` | Used by the embedded smoke test between scenarios |
 | Manifest directory | K8s manifests at `examples/kubernetes/manifest/` |
 
-#### What Scenarios Are Covered
+#### Covered Scenarios
 
 | # | Scenario | Description |
 |---|----------|-------------|
@@ -492,7 +504,7 @@ PASS: Scale
 ============================================================
 ```
 
-Exit code `0` means all scenarios passed; `1` means one or more failed.
+Exit code `0` means all scenarios passed. `1` means one or more failed.
 The namespace is automatically deleted on exit (cleanup trap).
 
 ---
@@ -509,7 +521,7 @@ the module is properly loaded.
 |------|---------|
 | Docker (or Podman) | Build and inspect the container image |
 
-No Kubernetes cluster is required — this test operates entirely with
+This test needs no Kubernetes cluster — it operates entirely with
 local Docker commands.
 
 #### What It Verifies
@@ -574,7 +586,7 @@ All options:
 RESULT: PASS (4/4 checks passed)
 ```
 
-Exit code `0` means all checks passed; `1` means one or more failed;
+Exit code `0` means all checks passed. `1` means one or more failed.
 `2` means a usage error or missing prerequisites.
 
 ---

@@ -4,29 +4,29 @@
 
 English | [Simplified Chinese](README_zh-CN.md)
 
-Add a machine-friendly Markdown variant to the HTML pages you already serve through NGINX.
+Add a machine-friendly Markdown variant to the HTML pages that you already serve through NGINX.
 
 > HTML in. Markdown out. When the client asks for it, or when you decide to serve it.
 
-Clients that send `Accept: text/markdown` get Markdown. Browsers and normal clients keep getting the original HTML. You can also target specific bots by User-Agent — NGINX rewrites the Accept header for matching crawlers so they receive Markdown automatically, even if they never ask for it. You do not need to rewrite your application, build a parallel API, or run a scraper beside your site.
+Clients that send `Accept: text/markdown` get Markdown. Browsers and normal clients keep getting the original HTML. You can also target specific bots by User-Agent: `$markdown_for_bot` selects the filter for matching crawlers, and `markdown_accept` handles negotiation. Matching bots receive Markdown automatically even if they never ask for it. NGINX does not rewrite the Accept header. You do not need to rewrite your application, build a parallel API, or run a scraper beside your site.
 
-This is a practical way to make existing sites easier for agents to consume while keeping deployment, caching, and rollback in the NGINX layer your team already operates.
+This is a practical way to make existing sites easier for agents to consume. It keeps deployment, caching, and rollback in the NGINX layer that your team already operates.
 
-> Inspired by Cloudflare's [Markdown for Agents](https://blog.cloudflare.com/markdown-for-agents/). This project brings the same operational idea to NGINX deployments you already control, closer to the origin server where you have more control over content semantics.
+> Inspired by Cloudflare's [Markdown for Agents](https://blog.cloudflare.com/markdown-for-agents/). This project brings the same operational idea to NGINX deployments that you already control. It runs closer to the origin server, where you have more control over content semantics.
 
 ## What Problem This Solves
 
 AI agents and LLM-powered tools often fetch pages that were built for browsers, not machines:
 
 - HTML includes navigation, layout, scripts, and other noise that adds token cost.
-- Useful content is mixed with markup that each client has to strip on its own.
+- Useful content sits inside markup that each client has to strip on its own.
 - Teams end up maintaining ad hoc scraping or extraction pipelines for content they already serve.
 
-Unlike traditional search crawlers that index pages for keyword ranking, AI crawlers extract knowledge for answer generation. They are sensitive to token cost and semantic clarity — a typical HTML page can be 3× or more the token count of its Markdown equivalent, with most of the extra tokens carrying no useful content. For AI systems operating at scale, this cost difference adds up.
+Unlike traditional search crawlers that index pages for keyword ranking, AI crawlers extract knowledge for answer generation. They are sensitive to token cost and semantic clarity. A typical HTML page can be 3× or more the token count of its Markdown equivalent. Most of the extra tokens carry no useful content. For AI systems operating at scale, this cost difference adds up.
 
-This module moves that work into the web tier. NGINX negotiates the representation and returns Markdown when the client asks for it. You can also configure NGINX to serve Markdown to specific bots by User-Agent, so crawlers that never send `Accept: text/markdown` still get a clean, token-efficient representation. Many sites — documentation portals, blogs, developer wikis — already author content in Markdown and render it to HTML for browsers. For these sites, the conversion is effectively recovering the original authoring format.
+This module moves that work into the web tier. NGINX negotiates the representation and returns Markdown when the client asks for it. You can also configure NGINX to serve Markdown to specific bots by User-Agent. Crawlers that never send `Accept: text/markdown` still get a clean, token-efficient representation. Many sites — documentation portals, blogs, developer wikis — already author content in Markdown. They render it to HTML for browsers. For these sites, the conversion effectively recovers the original authoring format.
 
-This follows the HTTP content negotiation model that has always been part of the protocol: the same URL serves different representations to different clients based on what they ask for.
+This follows the HTTP content negotiation model that has always been part of the protocol. The same URL serves different representations to different clients, based on what they ask for.
 
 ```text
 Browser      -> Accept: text/html      -> HTML (unchanged)
@@ -41,7 +41,7 @@ AI bot (by User-Agent)                 -> Markdown (via NGINX config)
 - Stay inside standard HTTP behavior with content negotiation and normal caching semantics.
 - Preserve operational familiarity: this is an NGINX module, not a separate daemon you must invent workflows around.
 - Convert at the reverse-proxy layer closest to your application, where you have full control over the HTML source and conversion configuration.
-- Give AI consumers a cleaner, lower-token representation of your content, which can reduce misinterpretation and improve the accuracy of generated answers that reference your site.
+- Give AI consumers a cleaner, lower-token representation of your content. This can reduce misinterpretation and improve the accuracy of generated answers that reference your site.
 
 ## Quick Start
 
@@ -54,11 +54,35 @@ Three steps are enough for a first trial:
 ### 1. Install the module
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+# Download the versioned release installer; do not pipe a mutable branch file
+# into a privileged shell.  The Installation Guide contains the signature and
+# installer-self-check commands required before the final sudo step.
+#
+# RELEASE_TAG below uses v0.9.2 as the example tag.  Run these commands only
+# after that release is published; until then substitute the latest published
+# release tag (see https://github.com/cnkang/nginx-markdown-for-agents/releases).
+RELEASE_TAG=v0.9.2
+RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
+INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"
+curl -fsSLo "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}"
+curl -fsSLo SHA256SUMS "${RELEASE_BASE}/SHA256SUMS"
+curl -fsSLo SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc"
+curl -fsSLo nginx-markdown-for-agents-release.asc \
+  "${RELEASE_BASE}/nginx-markdown-for-agents-release.asc"
+TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75
+GNUPGHOME="$(mktemp -d)"
+trap 'rm -rf "$GNUPGHOME"' EXIT
+gpg --batch --homedir "$GNUPGHOME" --import nginx-markdown-for-agents-release.asc
+VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 \
+  --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+  | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+[[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1
+grep -E "  ${INSTALLER}$" SHA256SUMS | sha256sum -c -
+sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 sudo nginx -t && sudo nginx -s reload
 ```
 
-The install script auto-detects the local NGINX version, downloads the matching module artifact, and wires up `load_module` and `markdown_filter on` — no manual configuration editing required. It also enforces SHA-256 artifact integrity checks by default.
+The install script auto-detects the local NGINX version, downloads the matching module artifact, and wires up `load_module` and `markdown_filter on`. It requires no manual configuration editing. It also enforces SHA-256 artifact integrity checks by default.
 
 For alternative installation methods (source builds, Docker, custom NGINX builds), troubleshooting, and detailed instructions, see the [Installation Guide](docs/guides/INSTALLATION.md).
 
@@ -69,7 +93,7 @@ brew tap cnkang/nginx-markdown
 brew install cnkang/nginx-markdown/nginx-markdown-module
 ```
 
-Tap publication and macOS post-release verification workflows are documented in [docs/guides/HOMEBREW_TAP_RELEASE.md](docs/guides/HOMEBREW_TAP_RELEASE.md).
+The [HOMEBREW_TAP_RELEASE guide](docs/guides/HOMEBREW_TAP_RELEASE.md) documents tap publication and the macOS post-release verification workflows.
 
 ### 2. Enable Markdown on a location
 
@@ -110,19 +134,25 @@ Expected result:
 - `Accept: text/markdown` returns `Content-Type: text/markdown; charset=utf-8`
 - `Accept: text/html` still returns the original HTML response
 
-If something doesn't work as expected, see the [Troubleshooting](docs/guides/INSTALLATION.md#10-troubleshooting) section in the installation guide.
+If something does not work as expected, see the [Troubleshooting](docs/guides/INSTALLATION.md#10-troubleshooting) section in the installation guide.
 
 If you want a practical production-oriented configuration next, go straight to [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md).
 
-For complete, ready-to-use production configurations covering all three profiles (balanced, strict_cache, streaming_first), see the [Production Examples](examples/production/) directory.
+For complete, ready-to-use production configurations using the frozen
+explicit directive surface, see the [Production Examples](examples/production/)
+directory.
 
-## Profiles
+## Explicit production settings
 
-For production deployments, use `markdown_profile` to apply a tested set of defaults instead of configuring each directive individually:
+The 0.9.2 contract removes opaque profiles. Configure the intended behavior
+explicitly so `nginx -T` shows every operator-visible setting:
 
 ```nginx
 http {
-    markdown_profile balanced;
+    markdown_cache_validation ims_only;
+    markdown_streaming auto;
+    markdown_limits conversion_memory=64m conversion_timeout=30s
+        parser_timeout=10s max_inflight=64;
 
     server {
         listen 80;
@@ -134,37 +164,29 @@ http {
 }
 ```
 
-Three profiles are available:
-
-| Profile | Use When |
-|---------|----------|
-| `balanced` | General-purpose (recommended starting point) |
-| `strict_cache` | CDN / caching proxy with full ETag support |
-| `streaming_first` | AI agent workloads with large documents |
-
-Merge order: explicit directives > profile defaults > built-in defaults. You can override any non-forced profile field with an explicit directive in the same context.
-
-For the full profile reference, defaults table, and conflict rules, see [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md#profiles).
+Use `markdown_cache_validation full` with `markdown_streaming off` for strict
+cache validation, or `markdown_accept wildcard` with
+`markdown_streaming force` for large agent responses. See the
+[migration guide](docs/guides/MIGRATION-0.9.2.md) for complete replacements.
 
 ## Serve Markdown to Specific Bots
 
-Most AI crawlers do not send `Accept: text/markdown`. They use standard browser-like Accept headers. You can use NGINX's `map` directive to rewrite the Accept header for specific User-Agent strings, so matching bots receive Markdown without any changes on their side.
+Most AI crawlers do not send `Accept: text/markdown`. They use standard
+browser-like Accept headers. Use NGINX's `map` directive to enable the module
+for specific User-Agent strings. Set `markdown_accept force` for that scope.
+`proxy_set_header Accept` changes only the request sent to the upstream. It does
+not change the header evaluated by this module.
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    # Rewrite Accept for known AI bots
-    map $http_user_agent $bot_accept_override {
-        default         "";
-        "~*ClaudeBot"   "text/markdown, text/html;q=0.9";
-        "~*GPTBot"      "text/markdown, text/html;q=0.9";
-        "~*Googlebot"   "text/markdown, text/html;q=0.9";
-    }
-
-    map $bot_accept_override $final_accept {
-        ""      $http_accept;
-        default $bot_accept_override;
+    # Enable Markdown for known AI bots without rewriting the upstream request
+    map $http_user_agent $markdown_for_bot {
+        default         off;
+        "~*ClaudeBot"   on;
+        "~*GPTBot"      on;
+        "~*Googlebot"   on;
     }
 
     upstream backend {
@@ -175,8 +197,8 @@ http {
         listen 80;
 
         location /docs/ {
-            markdown_filter on;
-            proxy_set_header Accept $final_accept;
+            markdown_filter $markdown_for_bot;
+            markdown_accept force;
             proxy_pass http://backend;
         }
     }
@@ -184,15 +206,15 @@ http {
 ```
 
 ```bash
-# Simulate ClaudeBot — returns Markdown
-curl -sD - -o /dev/null -A "ClaudeBot/1.0" http://localhost/docs/
+# Simulate ClaudeBot — returns Markdown despite a browser-style Accept header
+curl -sD - -o /dev/null -A "ClaudeBot/1.0" -H "Accept: text/html" http://localhost/docs/
 # Expected: Content-Type: text/markdown; charset=utf-8
 
 # Normal browser request — returns HTML as usual
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 ```
 
-This works because the module's content negotiation sees `text/markdown` in the rewritten Accept header and converts the response. All other eligibility checks (status code, content type, size limits) still apply. Browsers and non-matching clients are unaffected.
+This works because `markdown_filter $markdown_for_bot` selects the matching bot traffic. `markdown_accept force` selects Markdown regardless of the client's accepted types — the bot does not need to send `Accept: text/markdown`. The module does not rewrite the `Accept` header. It only decides conversion. All other eligibility checks (status code, content type, size limits) still apply. Browsers and non-matching clients remain unaffected.
 
 For a complete template with more bot patterns, see [examples/nginx-configs/06-bot-targeted-conversion.conf](examples/nginx-configs/06-bot-targeted-conversion.conf). For the full walkthrough, see [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user-agent-based).
 
@@ -210,7 +232,7 @@ For a complete template with more bot patterns, see [examples/nginx-configs/06-b
 | **Optional metadata** | Inject token estimates and clean YAML front matter automatically. |
 | **Metrics endpoint** | Exposes Prometheus-compatible module conversion counters for cluster observability. |
 | **Dual-engine conversion** | Full-buffer (default) for typical responses + a streaming engine for large/chunked responses. |
-| **Bounded-memory streaming** | Streaming engine converts with bounded memory (opt-in/auto) with size-based flushing (`markdown_stream_flush_min`). |
+| **Bounded-memory streaming** | Streaming conversion is selected with `markdown_streaming` and bounded by `markdown_limits streaming_buffer=`. |
 
 ## Platform Support
 
@@ -219,39 +241,55 @@ For a complete template with more bot patterns, see [examples/nginx-configs/06-b
 | NGINX | Channel | OS | libc | Arch | Artifact | Tier | Blocking |
 |-------|---------|-----|------|------|----------|------|----------|
 | 1.31.3 | mainline | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.31.3 | mainline | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.31.3 | mainline | linux | musl | arm64 | dynamic-module | supported | Yes |
 | 1.31.3 | mainline | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.31.3 | mainline | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.31.3 | mainline | linux | musl | amd64 | dynamic-module | supported | Yes |
+| 1.31.3 | mainline | debian12 | glibc | arm64 | deb-package | supported | Yes |
 | 1.31.3 | mainline | debian12 | glibc | arm64 | docker-image | supported | Yes |
+| 1.31.3 | mainline | debian12 | glibc | amd64 | deb-package | supported | Yes |
 | 1.31.3 | mainline | debian12 | glibc | amd64 | docker-image | supported | Yes |
 | 1.31.3 | mainline | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
 | 1.31.3 | mainline | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
+| 1.31.3 | mainline | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.31.3 | mainline | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
 | 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
+| 1.30.4 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
+| 1.28.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.28.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.28.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.28.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | No |
 | 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
 | 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
-| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | Yes |
+| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | Yes |
 | 1.26.3 | stable | any | n/a | any | source | best-effort | No |
 | 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
 | 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.24.0 | oldstable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.24.0 | oldstable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.24.0 | oldstable | linux | musl | arm64 | dynamic-module | supported | Yes |
 | 1.24.0 | oldstable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.24.0 | oldstable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.24.0 | oldstable | linux | musl | amd64 | dynamic-module | supported | Yes |
+| 1.24.0 | oldstable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.24.0 | oldstable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.24.0 | oldstable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.24.0 | oldstable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 <!-- END:release-matrix:support-matrix -->
 
 ## How It Works
@@ -263,7 +301,7 @@ flowchart TD
 
     subgraph edge["NGINX request path"]
         ingress["Request enters NGINX"]
-        rewrite["Accept header rewrite<br/>(for matched User-Agent)"]
+        rewrite["markdown_accept negotiation<br/>(for matched User-Agent)"]
         filter["Markdown Filter Module (C)<br/>eligibility check<br/>buffering<br/>header policy"]
         passthrough["Normal HTML response<br/>for browsers and other clients"]
     end
@@ -300,15 +338,16 @@ flowchart TD
     class passthrough passthrough;
 ```
 
-The NGINX module handles request eligibility, buffering, and response header management. For bot-targeted conversion, NGINX's `map` directive rewrites the Accept header before the module sees the request, so the module's standard content negotiation handles the rest. The Rust converter handles HTML parsing, sanitization, deterministic Markdown generation, and related transformation logic.
+The NGINX module handles request eligibility, buffering, and response header management. For bot-targeted conversion, the module's `markdown_accept` negotiation selects conversion. NGINX does not rewrite the Accept header. The Rust converter handles HTML parsing, sanitization, deterministic Markdown generation, and related transformation logic.
 
 ### Why C + Rust
 
 The split follows the actual problem boundary.
 
-- C is used where the code must integrate directly with NGINX's module APIs, filter chain, buffers, and request lifecycle.
-- Rust is used where the code must parse untrusted HTML, normalize output, and evolve safely over time.
+- The C code integrates directly with NGINX's module APIs, filter chain, buffers, and request lifecycle.
+- The Rust code parses untrusted HTML, normalizes output, and evolves safely over time.
 - The FFI boundary stays small so NGINX-facing HTTP logic and conversion logic can change with less coupling.
+- The project classifies the FFI boundary as **internal-only** (`INTERNAL_ONLY`). Struct layouts, function signatures, and constants may change between any two versions without notice. A 4-tuple ABI handshake prevents mismatched C/Rust binaries from starting.
 
 If you want the full design rationale rather than the short version, read [docs/architecture/SYSTEM_ARCHITECTURE.md](docs/architecture/SYSTEM_ARCHITECTURE.md), [docs/architecture/ADR/0001-use-rust-for-conversion.md](docs/architecture/ADR/0001-use-rust-for-conversion.md), and [docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md](docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md).
 
@@ -370,7 +409,13 @@ make supply-chain
 ### Production Rollout & Operations
 - [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md) — Step-by-step cookbook for safely introducing bounded streaming.
 - [Operations Guide](docs/guides/OPERATIONS.md) — Monitoring, log tuning, and runtime troubleshooting.
-- [Migration Guides](docs/guides/MIGRATION-0.9.md) — Upgrading from older versions ([0.8.x → 0.9.x Migration](docs/guides/MIGRATION-0.9.md) / [0.7.x → 0.8.x Migration](docs/guides/MIGRATION-0.8.md)).
+- [Migration Guides](docs/guides/MIGRATION-0.9.2.md) — 0.9.2 breaking-change migration. See also:
+  - [0.9.1+ → 0.9.2 Migration](docs/guides/MIGRATION-0.9.2.md)
+  - [Upgrade to 0.9.2](docs/guides/UPGRADE-TO-0.9.2.md)
+  - [Rollback from 0.9.2](docs/guides/ROLLBACK-0.9.2.md)
+  - [0.9.x → 0.9.1 Migration](docs/guides/MIGRATION-0.9.1.md)
+  - [0.8.x → 0.9.x Migration](docs/guides/MIGRATION-0.9.md)
+  - [0.7.x → 0.8.x Migration](docs/guides/MIGRATION-0.8.md)
 - [Dynamic Reloading](docs/guides/DYNAMIC_CONFIG.md) — Fine-tuning dynamic variables and live configuration updates.
 
 ### Technical Architecture & Harness
@@ -380,18 +425,43 @@ make supply-chain
 - [Harness Maintenance SOP](docs/guides/HARNESS_MAINTENANCE.md) — Custom lint rules and validation scripting.
 - [Frequently Asked Questions (FAQ)](docs/FAQ.md) & [Glossary](docs/glossary.md).
 
+## What's New in v0.9.2 (development candidate)
+
+The 0.9.2 branch is a development candidate. It is not a published release.
+It is the final pre-1.0 breaking release. The public configuration surface
+shrinks from 63 directives to 25, and the bundled FFI ABI advances to version 2.
+
+- **Read-only diagnostics**: `GET`/`HEAD` work, and the module rejects
+  mutation requests, including `action=rollback`. Restore dynconf by
+  atomically replacing the watched file. LKG remains failed-reload
+  protection. Rename prevents partial-file reads, but workers converge
+  through independent watcher cycles. Use diagnostics or request behavior to
+  verify convergence, or a controlled NGINX reload for a strong
+  synchronization boundary.
+- **OTel surface removal**: 0.9.2 removes the experimental OTel directives
+  and implementation. Deployments that need tracing should use NGINX's
+  native OTel integration or another external observability layer.
+- **Public-surface source metadata and ABI drift gate**: `make public-surface-drift-check`
+  checks directive, dynconf, metric, reason-code, and FFI source metadata
+  against the declared inventory. The unit, integration, and E2E test suites
+  verify runtime behavior. This gate alone does not.
+
+See the [0.9.2 release notes](docs/releases/0.9.2-release-notes.md),
+[dynconf guide](docs/guides/DYNAMIC_CONFIG.md), and
+[rollback guide](docs/guides/ROLLBACK-0.9.2.md) for the candidate contract.
+
 ## What's New in v0.9.1
 
-v0.9.1 is the **final pre-v1.0 baseline consolidation and compatibility reset**. It combines performance readiness with the last deliberate source-build and public-contract cleanup before the v1.0 freeze. v0.9.0 was intended to be the last breaking release; the freeze was extended through v0.9.1 while v1.0 remained unpublished and adoption was still limited.
+v0.9.1 is the **final pre-v1.0 baseline consolidation and compatibility reset**. It combines performance readiness with the last deliberate source-build and public-contract cleanup before the v1.0 freeze. The project intended v0.9.0 to be the last breaking release. It extended the freeze through v0.9.1 while v1.0 remained unpublished and adoption was still limited.
 
-- **Rust baseline reset**: source builds now require Rust 1.97+; repository, CI, and release builds use exact Rust 1.97.0 (MSRV 1.97). Prebuilt module users do not need Rust.
-- **Single streaming control**: `markdown_streaming off|auto|force` is now the sole processing-path selector. The duplicate `markdown_streaming_engine` directive is reject-only with exact off/auto/on migration hints.
-- **Supported flavors clarified**: `markdown_flavor` supports `commonmark` and `gfm`. The experimental `mdx` and `org-mode` values are rejected because they never had distinct production conversion semantics.
-- **Hybrid zero-copy streaming output**: `markdown_streaming_zero_copy on` (default off, opt-in) enables `ngx_buf_t` to reference Rust-owned memory directly without intermediate pool-copy, reducing memcpy for non-terminal streaming chunks. NGINX pool cleanup handlers ensure safe Rust buffer lifetime across backpressure and request teardown.
-- **Streaming decompression routing (gzip + deflate + Brotli)**: under `streaming_first` profile with `markdown_auto_decompress on` and `markdown_cache_validation` not `full`, gzip, deflate (both zlib-wrapped RFC 1950 and raw RFC 1951), and Brotli responses are decompressed incrementally through the streaming engine instead of forcing full-buffer accumulation. Gzip member boundaries and trailers are validated across chunks. Brotli streaming requires `libbrotlidec` at build time (controlled by `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off`, enabled by default in official artifacts).
-- **Full-buffer copy reduction**: internal optimization (default on, no configuration surface) eliminates redundant memcpy in the full-buffer compressed path by passing contiguous buffers directly to the decompressor and swapping output via pointer assignment.
+- **Rust baseline reset**: source builds now require Rust 1.97+. Repository, CI, and release builds use exact Rust 1.97.1 (MSRV 1.97). Prebuilt module users do not need Rust.
+- **Single streaming control**: `markdown_streaming off|auto|force` is now the sole processing-path selector. The duplicate `markdown_streaming_engine` directive is absent. Use the standard NGINX unknown-directive error to identify stale configuration.
+- **Supported flavors clarified**: `markdown_flavor` supports `commonmark` and `gfm`. The module rejects the experimental `mdx` and `org-mode` values because they never had distinct production conversion semantics.
+- **Automatic zero-copy streaming output**: buffer ownership and backpressure select the safe delivery path internally. The explicit `markdown_streaming_zero_copy` directive existed from v0.9.1 to v0.9.2. Delivery-path selection is now internal.
+- **Streaming decompression routing (gzip + deflate + Brotli)**: set `markdown_streaming force`, `markdown_auto_decompress on`, and `markdown_cache_validation` not `full`. The streaming engine then decompresses gzip, zlib-wrapped RFC 1950 deflate, and Brotli responses incrementally. The module accepts both zlib-wrapped RFC 1950 deflate and raw RFC 1951 deflate (the raw framing is a compatibility fallback for legacy servers). It does not force full-buffer accumulation. The engine validates gzip member boundaries and trailers across chunks. Brotli streaming requires `libbrotlidec` at build time. `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` controls this. Official artifacts enable it by default.
+- **Full-buffer copy reduction**: an internal optimization (default on, no configuration surface) eliminates redundant memcpy in the full-buffer compressed path. It passes contiguous buffers directly to the decompressor and swaps output via pointer assignment.
 - **`markdown_auto_decompress` directive**: now officially registered as a configurable directive (default on). Previously an internal field not settable via `nginx.conf`.
-- **Performance evidence gate**: module-level benchmark harness (`tools/perf/run_module_benchmark.sh`) with automated release gate (`make release-gates-check-091`) enforcing latency, TTFB, memory slope, and fallback rate thresholds before release promotion.
+- **Performance evidence gate**: a module-level benchmark harness (`tools/perf/run_module_benchmark.sh`) produces the evidence. An automated release gate (`make release-gates-check-091`) enforces latency, TTFB, memory slope, and fallback rate thresholds before release promotion.
 - **Doctor advice tool**: `python3 tools/perf/doctor_advice.py` analyzes runtime metrics and produces actionable tuning recommendations for operators.
 - **New ADRs**: [0020](docs/architecture/ADR/0020-hybrid-zero-copy-pool-cleanup.md), [0021](docs/architecture/ADR/0021-gzip-deflate-streaming-decompression-routing.md), [0022](docs/architecture/ADR/0022-performance-evidence-release-gate.md), [0023](docs/architecture/ADR/0023-single-streaming-policy.md), and [0024](docs/architecture/ADR/0024-brotli-streaming-decompression.md).
 
@@ -399,9 +469,11 @@ For the full list of changes across prior versions (including breaking configura
 
 ## Future Roadmap
 
-Post-v0.9.1 and towards the v1.0.0 milestone:
+Post-v0.9.2 and towards the v1.0.0 milestone:
 
-- **Observability Expansion**: Native OpenTelemetry tracing integration inside the NGINX C module filter path.
+- **Observability interoperability**: Keep the frozen Prometheus and
+  diagnostics contracts compatible with external monitoring systems without
+  adding module-specific OTel directives.
 - **Distribution Expansion**: Official APT and YUM packaging pipelines integrated into standard Linux package indexing.
 - **Diagnostic Enhancements**: Extending CLI `nginx-markdown-doctor` checks and telemetry metrics for real-time conversion monitoring.
 
@@ -413,6 +485,10 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Quick Start installer commands now state that the example tag applies only after that release is published |
+| 0.9.2 | 2026-08-15 | Hermes | Removed stale Accept-header rewrite claims from the flow diagram and bot-targeting paragraph; negotiation is markdown_accept only |
+| 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: split long sentences, removed prose semicolons, active voice, STE-inspired style per WRITING_GUIDE |
+| 0.9.2 | 2026-08-07 | Kang | Added What's New v0.9.2 section, explicit production settings section, 0.9.2/0.9.1 migration guide links, and document history sync |
 | 0.9.1 | 2026-07-29 | Kang | Release audit: finalized CHANGELOG date, release notes status, PROJECT_STATUS 0.9.1 section, VERSION_PLANNING release state, harness rule mapping (Rules 52-60), build-safety domain alignment. |
 | 0.9.1 | 2026-07-19 | Codex | Finalized the v0.9.1 release summary for Brotli streaming decompression, build controls, and release evidence. |
 | 0.9.1 | 2026-07-17 | Kang | Optimized README organization, removed historical What's New logs, consolidated capabilities table, and structured docs index for v0.9.1 release. |

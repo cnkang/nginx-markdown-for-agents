@@ -19,9 +19,9 @@ class NginxMarkdownModule < Formula
   license "BSD-2-Clause"
 
   depends_on "cbindgen" => :build
-  depends_on "nginx" => :build
   depends_on "pkgconf" => :build
   depends_on "brotli"
+  depends_on "nginx"
   depends_on "openssl@3"
   depends_on "pcre2"
 
@@ -29,7 +29,7 @@ class NginxMarkdownModule < Formula
   # rustup helper rather than the Homebrew `rust` formula, because the crate
   # MSRV can briefly exceed Homebrew's Rust version. The helper pins the
   # architecture-specific rustup-init bytes before execution.
-  TOOLCHAIN_VERSION = "1.97.0".freeze
+  TOOLCHAIN_VERSION = "1.97.1".freeze
 
   def install
     rustup_home = "#{buildpath}/rustup"

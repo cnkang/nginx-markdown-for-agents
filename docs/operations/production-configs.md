@@ -6,31 +6,30 @@ verification commands, and operational notes.
 
 ## Available Examples
 
-| Example | Profile | Use Case |
+| Example | Streaming policy | Use Case |
 |---------|---------|----------|
-| [blog-balanced](../../examples/production/blog-balanced.conf) | `balanced` | General-purpose blog/CMS with trusted proxies and metrics |
-| [docs-strict-cache](../../examples/production/docs-strict-cache.conf) | `strict_cache` | Documentation site with CDN/caching proxy and full ETag |
-| [rag-streaming-first](../../examples/production/rag-streaming-first.conf) | `streaming_first` | RAG/AI workload with large documents and inflight guard |
-| [private-internal](../../examples/production/private-internal.conf) | `balanced` | Internal service with basic auth and restricted access |
+| [blog-balanced](../../examples/production/blog-balanced.conf) | `auto` | General-purpose blog/CMS with trusted proxies and metrics |
+| [docs-strict-cache](../../examples/production/docs-strict-cache.conf) | `off` | Documentation site with CDN/caching proxy and full ETag |
+| [rag-streaming-first](../../examples/production/rag-streaming-first.conf) | `force` | RAG/AI workload with large documents and inflight guard |
+| [private-internal](../../examples/production/private-internal.conf) | `auto` | Internal service with basic auth and restricted access |
 
 The `private-internal` example intentionally keeps its Basic-authenticated
 backend on `127.0.0.1`. A co-located TLS terminator is mandatory and must be
-the only client-facing endpoint; clients must never send credentials directly
+the only client-facing endpoint. Clients must never send credentials directly
 to the cleartext backend listener.
 
-## Choosing a Profile
+## Choosing a Streaming Policy
 
-- **`balanced`** — recommended starting point for most deployments. Full-buffer
-  by default with auto-mode streaming for large responses. Suitable for blogs,
-  CMS sites, and general web applications.
+- **`auto`** — recommended starting point for most deployments. The module
+  chooses streaming only when its bounded eligibility heuristic and cache
+  constraints allow it.
 
-- **`strict_cache`** — optimized for CDN and caching proxy deployments. Full
-  ETag support with content-based validation. Streaming is disabled to ensure
-  deterministic cache keys.
+- **`off`** — optimized for deployments that require full-buffer conversion and
+  deterministic cache validation.
 
-- **`streaming_first`** — optimized for AI agent workloads that fetch large
-  documents. Streaming engine is always active with elevated inflight limits.
-  Trade-off: no full ETag support (uses If-Modified-Since only).
+- **`force`** — optimized for AI agent workloads that fetch large documents.
+  It requests streaming whenever the response is otherwise eligible. Full
+  cache validation can still require the bounded full-buffer path.
 
 ## Usage
 
@@ -44,4 +43,5 @@ to the cleartext backend listener.
 - [Configuration Reference](../guides/CONFIGURATION.md)
 - [Deployment Examples](../guides/DEPLOYMENT_EXAMPLES.md)
 - [Migration Guide: 0.9.0](../guides/MIGRATION-0.9.md)
+- [Migration Guide: 0.9.2](../guides/MIGRATION-0.9.2.md)
 - [Operations Guide](../guides/OPERATIONS.md)

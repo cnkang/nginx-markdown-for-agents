@@ -1,6 +1,6 @@
 # Repository Structure
 
-This repository uses a component-oriented layout. The directory structure is designed to mirror the runtime architecture:
+This repository uses a component-oriented layout. The directory structure mirrors the runtime architecture:
 
 - the NGINX-facing module lives under `components/nginx-module/`
 - the conversion engine lives under `components/rust-converter/`
@@ -162,7 +162,7 @@ Subgroups include:
 
 ### `tools/`
 
-Scripts are grouped by domain rather than scattered at repo root.
+Scripts group by domain rather than scatter at repo root.
 
 | Path | Purpose |
 |------|---------|
@@ -187,7 +187,7 @@ Common examples:
 - `components/rust-converter/fuzz/artifacts/`
 - `components/rust-converter/fuzz/corpus/`
 
-These directories are useful when running tests locally, but they are not the source of truth for behavior or repository structure.
+These directories are useful when running tests locally. They are not the source of truth for behavior or repository structure.
 
 ## Practical Reading Order
 

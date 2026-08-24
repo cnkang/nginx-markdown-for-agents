@@ -113,16 +113,21 @@ ngx_module_t ngx_http_core_module;
 
 static u_char g_pool_buf[1024 * 64];
 static size_t g_pool_offset;
+static size_t g_pool_allocations;
+static size_t g_fail_after_successful_allocations = (size_t) -1;
 
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
 {
     UNUSED(pool);
-    if (g_pool_offset + size > sizeof(g_pool_buf)) {
+    if (size > sizeof(g_pool_buf) - g_pool_offset
+        || g_pool_allocations >= g_fail_after_successful_allocations)
+    {
         return NULL;
     }
     void *p = g_pool_buf + g_pool_offset;
     g_pool_offset += size;
+    g_pool_allocations++;
     return p;
 }
 
@@ -169,6 +174,18 @@ static void
 reset_pool(void)
 {
     g_pool_offset = 0;
+    g_pool_allocations = 0;
+    g_fail_after_successful_allocations = (size_t) -1;
+}
+
+static void
+fail_after_successful_allocations(size_t count)
+{
+    if (count > (size_t) -1 - g_pool_allocations) {
+        g_fail_after_successful_allocations = (size_t) -1;
+        return;
+    }
+    g_fail_after_successful_allocations = g_pool_allocations + count;
 }
 
 static ngx_list_t *
@@ -833,6 +850,55 @@ test_modify_cc_public_mixed(void)
 }
 
 static void
+test_modify_cc_public_allocation_failure_is_atomic(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *first;
+    ngx_table_elt_t    *second;
+    u_char             *first_data;
+    u_char             *second_data;
+    size_t              first_len;
+    size_t              second_len;
+    ngx_int_t            rc;
+
+    reset_pool();
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    first = add_header(&r->headers_out.headers, "Cache-Control",
+                       "public, max-age=60", 1);
+    second = add_header(&r->headers_out.headers, "Cache-Control",
+                        "public, s-maxage=120", 1);
+    if (first == NULL || second == NULL) {
+        TEST_FAIL("header setup failed");
+        return;
+    }
+
+    first_data = first->value.data;
+    first_len = first->value.len;
+    second_data = second->value.data;
+    second_len = second->value.len;
+
+    /* Request metadata succeeds; the second prepared value allocation fails. */
+    fail_after_successful_allocations(2);
+    rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "allocation failure returns NGX_ERROR");
+    TEST_ASSERT(first->value.data == first_data
+                && first->value.len == first_len
+                && memcmp(first->value.data, first_data, first_len) == 0,
+                "first Cache-Control remains unchanged");
+    TEST_ASSERT(second->value.data == second_data
+                && second->value.len == second_len
+                && memcmp(second->value.data, second_data, second_len) == 0,
+                "second Cache-Control remains unchanged");
+    TEST_ASSERT(first->hash == 1 && second->hash == 1,
+                "both Cache-Control entries remain active");
+    TEST_PASS("multi-header Cache-Control rewrite is allocation-atomic");
+}
+
+static void
 test_modify_cc_already_private(void)
 {
     reset_pool();
@@ -1088,6 +1154,7 @@ main(void)
     test_modify_cc_no_store_preserved();
     test_modify_cc_public_upgraded();
     test_modify_cc_public_mixed();
+    test_modify_cc_public_allocation_failure_is_atomic();
     test_modify_cc_already_private();
     test_modify_cc_append_private();
     test_modify_cc_ignores_invalidated_no_store();

@@ -13,7 +13,19 @@ paths:
 Historical issues: `48edb7c`, `0a08d08`, `3a9f3cd`, `dcbf923`, `2a23415`, `253431c`.
 
 Required:
-- Every bug fix must be accompanied by at least one targeted regression test.
+- Every bug fix must ship with at least one targeted regression test.
+- **Harness detector fixes ship adversarial fixtures (2026-08-21)**: the
+  0.9.2 window needed ~10 commits fixing the detectors themselves
+  (`076bfdc1` reusable-workflow boundary state, `658cb4d3` future
+  annotations, `9fd3deba` regex complexity, `eaadc7fb`, `493732fe`),
+  proving detector bugs recur at boundary shapes.  A fix to any
+  `tools/harness/detect_*` script must add a test fixture that reproduces
+  the exact defect shape (the fixture fails before the fix and passes
+  after it), plus a clean-fixture case proving the detector does not
+  false-positive on the prescribed idiom.  Detector scans over the full
+  repository must stay runtime-bounded; if a detector needs optimization,
+  preserve its detection semantics and note the budget in the rule that
+  owns it.
 - For streaming/parser/sanitizer fixes, include cross-boundary and malformed-input cases.
 - For streaming text-path fixes, include non-ASCII multibyte split cases (UTF-8 boundary tests).
 - Streaming chunk-split fuzz targets must exercise multi-boundary patterns (for
@@ -25,7 +37,7 @@ Required:
 - Prefer exercising shared routing/helpers used by production semantics over
   duplicated inline test logic, so behavior drift is caught by tests.
 - Fuzz/invariance checks that compare conversion paths must evaluate both sides
-  as `Result` values and assert success/error parity before comparing outputs;
+  as `Result` values and assert success/error parity before comparing outputs,
   do not early-return on the first `Err` and silently skip asymmetry.
 - Full-buffer vs streaming parity tests must keep conversion configuration
   aligned (for example content-type/charset/options) unless the mismatch is the
@@ -35,7 +47,7 @@ Required:
   is explicitly justified and reviewed, to avoid silently masking new
   regressions in unrelated fixtures.
 - Keep fuzz target inventory de-duplicated: do not register parallel binaries
-  with equivalent logic/coverage under different names; smoke targets must
+  with equivalent logic/coverage under different names, smoke targets must
   invoke the canonical binary names only.
 - For fixture-scoped known differences, keep
   `tests/corpus/**/.meta.json -> streaming_notes.known_diff_ids` synchronized
@@ -52,8 +64,8 @@ Required:
   `tools/corpus/validate_corpus.sh` (or `make test-benchmark`) before merge.
 - Corpus `.meta.json` `page-type` values must use the validator's current
   canonical taxonomy (`clean-article`, `documentation`, `nav-heavy`,
-  `boilerplate-heavy`, or `complex-common`) unless the validator and coverage
-  checks are updated in the same change set. Use fixture-specific detail fields
+  `boilerplate-heavy`, or `complex-common`) unless the change also updates
+  the validator and coverage checks in the same change set. Use fixture-specific detail fields
   such as `archetype` or `streaming_notes.high_risk_structures` for narrower
   traits like media-rich content.
 - Regression tests for classification logic, routing decisions, or metrics
@@ -81,20 +93,20 @@ SonarCloud rules: `c:S1854`, `c:S5955`.
 
 Required:
 - Do not assign a value to a variable that is immediately overwritten before being read. In simulation-style tests, set the final (post-action) value directly and document the initial state in a comment instead.
-- Declare loop variables (`i`, `feed_count`, etc.) inside the `for` statement when they are not used after the loop. The test code already uses C99 features, so `for (size_t i = 0; ...)` is preferred over declaring `i` at function scope.
+- Declare loop variables (`i`, `feed_count`, and so on) inside the `for` statement when they are not used after the loop. The test code already uses C99 features, so prefer `for (size_t i = 0; ...)` over declaring `i` at function scope.
 - When a test assigns a variable to verify a cast or representation, ensure the variable is actually read by a `TEST_ASSERT` before the function ends.
 - Initialize variables at declaration when the compiler cannot prove they are always assigned before use (for example variables set only inside conditional branches).
-- Output variables passed by pointer to helpers (for example
-  `foo(..., &last_buf, ..., &fallback_cl)`) must be initialized before the call
-  even when the callee is expected to assign them on success; early-return
-  paths in test/prod helpers can otherwise read indeterminate storage.
+- The caller must initialize output variables before passing their pointers to
+  helpers (for example `foo(..., &last_buf, ..., &fallback_cl)`), even when the
+  callee assigns them on success. Early-return paths in test or production
+  helpers can otherwise read indeterminate storage.
 
 ---
 
 ### 20. Spec task-completion and evidence-drift guardrails
 
 Required:
-- Do not mark a spec task as complete based only on file/code presence; run the
+- Do not mark a spec task as complete based only on file/code presence. Run the
   corresponding verification path at least once in the current session.
 - For any newly added `#[ignore]` tests (for example large-fixture or evidence
   pack tests), execute them explicitly with `-- --ignored` before closing the
@@ -103,7 +115,7 @@ Required:
   evidence packs), generate them once and verify both existence and required
   shape (schema/required fields), not just file creation.
 - For bounded-memory/perf evidence tests, ensure fixture construction does not
-  trivially force output-size-linear memory growth; inputs used to validate
+  trivially force output-size-linear memory growth, inputs used to validate
   working-set bounds should separate input volume from emitted Markdown volume.
 - For bounded-memory/perf evidence fixtures, use parser-visible/pipeline-visible
   padding (for example regular elements/text), not parser-discarded constructs
@@ -113,7 +125,7 @@ Required:
   comparing against budget/threshold bounds, so unpopulated metrics cannot pass
   checks spuriously.
 - Run at least one broad umbrella target for the touched area early (for
-  example `make test-rust-streaming`) to expose non-local blockers; if it
+  example `make test-rust-streaming`) to expose non-local blockers, if it
   fails, report it as an open finding and do not present the spec as fully
   complete.
 
@@ -125,23 +137,23 @@ Required:
 - Do not add helper functions that are not consumed in the same change set.
   Speculative "this might be useful later" functions produce dead_code warnings
   that dilute real regression signals. If you add a helper, ensure at least one
-  call site uses it before merging. The only exception is shared test-support
-  modules (see next rule).
+  call site uses it before merging. Shared test-support modules are the only
+  exception (see next rule).
 - Shared test utility modules included via `#[path = "..."]` in multiple
   integration test binaries must carry `#![allow(dead_code)]` at the module
   level, because each binary only uses a subset of the shared API and the
   remaining functions produce noisy warnings.
 - Fuzz/test helper wrappers around streaming conversion must preserve
   `ConversionError` detail and variant identity by returning
-  `Result<..., ConversionError>` (or equivalent) and propagating with `?`;
+  `Result<..., ConversionError>` (or equivalent) and propagating with `?`,
   avoid `Option` wrappers and `.ok()?` conversions that erase error semantics
   needed for parity/regression assertions.
 - Never remove or modify a `#[cfg(feature = "...")]`-gated import without
   scanning the entire file for `#[cfg(feature = "...")]`-gated usages of that
   import. Feature-gated items may appear far from their import and are invisible
-  under the default feature set; removing the import silently breaks compilation
+  under the default feature set, removing the import silently breaks compilation
   under that feature flag.
-- Doc comments (`///`) must not contain blank lines between comment lines;
+- Doc comments (`///`) must not contain blank lines between comment lines,
   use `///` on every line (including blank doc-comment lines as `///` with no
   trailing text). Blank lines between `///` lines trigger
   `clippy::empty_line_after_doc_comments`.
@@ -150,7 +162,7 @@ Required:
     use `no_run` or runnable doctests with full `nginx_markdown_converter::...` imports to maintain
     compile-time regression protection.
   - Public API doctests that exercise feature-gated runtime paths must not
-    assume `Result::unwrap()` success across all feature sets; either keep them
+    assume `Result::unwrap()` success across all feature sets, either keep them
     `no_run` or match expected fallback/error variants explicitly.
   - **Internal implementation details** (for example `CharsetState`, `IncrementalEmitter`,
     `StructuralStateMachine`, `StreamingTokenizer`, helper methods): use `ignore` mode to keep
@@ -160,7 +172,7 @@ Required:
     patterns that must fail at compile time.
   - **Doctest end markers must be plain ```** (not ` ```ignore` or ` ```no_run`) to maintain
     Markdown compatibility with external renderers and editors.
-- Avoid `1 * N` identity multiplications in size-constant arrays; use `N`
+- Avoid `1 * N` identity multiplications in size-constant arrays, use `N`
   directly or underscore-separated literals (`1_024`) to satisfy
   `clippy::identity_op`.
 - **Rust 2024 edition binding modes**: do not use explicit `ref` or `ref mut`

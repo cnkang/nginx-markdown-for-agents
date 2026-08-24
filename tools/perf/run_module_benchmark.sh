@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Module-level benchmark orchestrator for nginx-markdown-for-agents.
 #
 # Starts a lightweight upstream mock (Python http.server) serving test corpus
@@ -35,20 +35,18 @@ set -euo pipefail
 
 readonly ACCEPT_MD_HEADER="Accept: text/markdown"
 readonly EX_SKIP_NOT_PRESENT=75
+readonly SYSTEM_BASENAME="/usr/bin/basename"
+readonly SYSTEM_DIRNAME="/usr/bin/dirname"
+readonly SYSTEM_READLINK="/usr/bin/readlink"
+readonly SYSTEM_STAT="/usr/bin/stat"
+readonly SYSTEM_UNAME="/usr/bin/uname"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$("$SYSTEM_DIRNAME" "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Port range 19100-19199 for isolation (Requirement 1.5)
 readonly UPSTREAM_PORT=19100
 readonly NGINX_PORT=19101
-NGINX_WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/ngx_md_bench.XXXXXX")" \
-  || {
-    echo >&2 "[bench] ERROR: failed to create benchmark workdir"
-    exit 1
-  }
-readonly NGINX_WORKDIR
-readonly PID_FILE="$NGINX_WORKDIR/bench.pid"
 
 ###############################################################################
 # Usage
@@ -83,6 +81,225 @@ die() {
 }
 
 ###############################################################################
+# Trusted tool resolution (security: no PATH-shadowable helper execution)
+###############################################################################
+
+# Trusted system directories in which a PATH-discovered helper executable may
+# legitimately live.  A helper discovered outside these roots is rejected.
+readonly TRUSTED_TOOL_ROOTS=(
+  /usr/sbin
+  /usr/bin
+  /sbin
+  /bin
+  /usr/local/sbin
+  /usr/local/bin
+  /usr/local/opt/nginx/sbin
+  /opt/homebrew/bin
+  /opt/homebrew/sbin
+  /opt/homebrew/opt/nginx/sbin
+  /opt/homebrew/Cellar
+  /usr/local/Cellar
+  /usr/lib/nginx
+  # actions/setup-python installs the runner interpreter here on GitHub-hosted
+  # Linux runners; the runner image owns this immutable toolcache.
+  /opt/hostedtoolcache
+  # Python.framework install location (macOS Homebrew python3)
+  /Library/Frameworks/Python.framework/Versions
+  /Library/Frameworks
+  # Python.framework bin directory (specific version subdirectory)
+  /Library/Frameworks/Python.framework/Versions/*/bin
+)
+
+# is_trusted_tool_path returns 0 when the given path lives directly under one
+# of the trusted system executable roots (the literal candidate location, so a
+# user-writable symlink pointing into a trusted root stays rejected).
+#
+# Arguments:
+#   $1 - path to check
+#
+# Returns:
+#   0 when trusted; 1 otherwise
+is_trusted_tool_path() {
+  local path="$1"
+  local root=""
+  for root in "${TRUSTED_TOOL_ROOTS[@]}"; do
+    case "$path" in
+      "$root"|"$root"/*)
+        return 0
+        ;;
+      *)
+        ;;
+    esac
+  done
+  return 1
+}
+
+# stat_owner prints the numeric owner of a file using the host's stat syntax.
+stat_owner() {
+  local path="$1"
+  case "$("$SYSTEM_UNAME" -s 2>/dev/null)" in
+    Darwin)
+      "$SYSTEM_STAT" -f '%u' "$path"
+      return $?
+      ;;
+    *)
+      "$SYSTEM_STAT" -c '%u' "$path"
+      return $?
+      ;;
+  esac
+}
+
+# stat_mode prints the numeric permission mode of a file using the host's stat
+# syntax. A failed stat is propagated so privileged checks fail closed.
+stat_mode() {
+  local path="$1"
+  case "$("$SYSTEM_UNAME" -s 2>/dev/null)" in
+    Darwin)
+      "$SYSTEM_STAT" -f '%Lp' "$path"
+      return $?
+      ;;
+    *)
+      "$SYSTEM_STAT" -c '%a' "$path"
+      return $?
+      ;;
+  esac
+}
+
+# is_secure_root_file returns 0 only when the file is root-owned and has no
+# group/other write bits. Metadata lookup failures are unsafe and return 1.
+#
+# Arguments:
+#   $1 - path to check
+#
+# Returns:
+#   0 when secure; 1 otherwise
+is_secure_root_file() {
+  local path="$1"
+  local owner=""
+  local mode=""
+
+  owner="$(stat_owner "$path" 2>/dev/null)" || return 1
+  [[ "$owner" == "0" ]] || return 1
+  mode="$(stat_mode "$path" 2>/dev/null)" || return 1
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  if (( (8#$mode & 8#22) == 0 )); then
+    return 0
+  fi
+  return 1
+}
+
+# canonicalize_path resolves symlinks and prints the canonical absolute path.
+#
+# Arguments:
+#   $1 - path to canonicalize (relative paths are resolved from $PWD)
+#
+# Outputs:
+#   Writes the canonical absolute path to stdout
+#
+# Returns:
+#   0 on success; 1 if the input is empty
+canonicalize_path() {
+  local path="$1"
+  local dir=""
+  local file=""
+  local target=""
+  local i=0
+
+  if [[ -z "$path" ]]; then
+    return 1
+  fi
+  if [[ "$path" != /* ]]; then
+    path="$(pwd)/$path"
+  fi
+
+  dir="$(cd "$("$SYSTEM_DIRNAME" "$path")" 2>/dev/null && pwd -P)" \
+    || dir="$("$SYSTEM_DIRNAME" "$path")"
+  file="$("$SYSTEM_BASENAME" "$path")"
+
+  while [[ -L "$dir/$file" ]] && [[ $i -lt 40 ]]; do
+    target="$("$SYSTEM_READLINK" "$dir/$file" 2>/dev/null)" || break
+    if [[ "$target" != /* ]]; then
+      target="$dir/$target"
+    fi
+    dir="$(cd "$("$SYSTEM_DIRNAME" "$target")" 2>/dev/null && pwd -P)" \
+      || dir="$("$SYSTEM_DIRNAME" "$target")"
+    file="$("$SYSTEM_BASENAME" "$target")"
+    i=$((i + 1))
+  done
+
+  printf '%s/%s\n' "$dir" "$file"
+  return 0
+}
+
+# resolve_tool resolves a command name to an approved absolute executable path
+# and stores it in the variable named by the second argument.
+#
+# The candidate must resolve to a regular executable whose literal location is
+# under a trusted system executable directory; when running as root the final
+# target must additionally be owned by root and not writable by group or other
+# users.
+#
+# Arguments:
+#   $1 - command name (e.g. curl, python3, git)
+#   $2 - destination variable name (e.g. RESOLVED_CURL)
+#
+# Returns:
+#   0 on success with the resolved path stored in the named variable;
+#   1 when the command is missing, not executable, outside a trusted root, or
+#   unsafe to run with elevated privileges.
+resolve_tool() {
+  local name="$1"
+  local varname="$2"
+  local candidate=""
+  local resolved=""
+
+  if ! candidate="$(command -v "$name" 2>/dev/null)"; then
+    return 1
+  fi
+
+  resolved="$(canonicalize_path "$candidate")"
+  if [[ -z "$resolved" ]] || [[ ! -f "$resolved" ]] || [[ ! -x "$resolved" ]]; then
+    return 1
+  fi
+
+  if ! is_trusted_tool_path "$candidate" \
+    || ! is_trusted_tool_path "$resolved"; then
+    return 1
+  fi
+
+  if [[ "$EUID" -eq 0 ]]; then
+    if ! is_secure_root_file "$resolved"; then
+      return 1
+    fi
+  fi
+
+  printf -v "$varname" '%s' "$resolved"
+  return 0
+}
+
+###############################################################################
+# Working directory
+###############################################################################
+
+if ! resolve_tool mktemp RESOLVED_MKTEMP; then
+  echo >&2 "[bench] ERROR: required command is missing or not from a trusted location: mktemp"
+  exit 1
+fi
+# rm is needed by the cleanup trap on every exit path, so it is resolved here
+# (before any early NGINX_BIN preflight exit) rather than only in preflight.
+if ! resolve_tool rm RESOLVED_RM; then
+  echo >&2 "[bench] ERROR: required command is missing or not from a trusted location: rm"
+  exit 1
+fi
+NGINX_WORKDIR="$("$RESOLVED_MKTEMP" -d "${TMPDIR:-/tmp}/ngx_md_bench.XXXXXX")" \
+  || {
+    echo >&2 "[bench] ERROR: failed to create benchmark workdir"
+    exit 1
+  }
+readonly NGINX_WORKDIR
+readonly PID_FILE="$NGINX_WORKDIR/bench.pid"
+
+###############################################################################
 # Cleanup (trap-based, Requirement 1.5)
 ###############################################################################
 
@@ -108,9 +325,9 @@ cleanup() {
   fi
 
   # Remove PID file and temp directory
-  rm -f "$PID_FILE"
+  "$RESOLVED_RM" -f "$PID_FILE"
   if [[ -d "$NGINX_WORKDIR" ]]; then
-    rm -rf "$NGINX_WORKDIR"
+    "$RESOLVED_RM" -rf "$NGINX_WORKDIR"
   fi
 
   log "Cleanup complete."
@@ -178,15 +395,76 @@ fi
 # Pre-flight: required tools
 ###############################################################################
 
-if ! command -v python3 >/dev/null 2>&1; then
-  die "python3 is required for the upstream mock server"
+required_commands=(
+  awk
+  cat
+  cp
+  cut
+  date
+  git
+  head
+  mkdir
+  mktemp
+  rm
+  curl
+  python3
+  sleep
+  tr
+  uname
+  wc
+)
+# Every helper the script executes is resolved to an approved absolute path
+# (never a PATH-shadowable bare name) and stored in a RESOLVED_* variable.
+# The mapping is explicit so the loop itself never invokes a helper that has
+# not been resolved yet (no bare 'tr' while computing uppercase names).
+for required_command in "${required_commands[@]}"; do
+  var_name=""
+  case "$required_command" in
+    awk)     var_name="RESOLVED_AWK" ;;
+    cat)     var_name="RESOLVED_CAT" ;;
+    cp)      var_name="RESOLVED_CP" ;;
+    cut)     var_name="RESOLVED_CUT" ;;
+    date)    var_name="RESOLVED_DATE" ;;
+    git)     var_name="RESOLVED_GIT" ;;
+    head)    var_name="RESOLVED_HEAD" ;;
+    mkdir)   var_name="RESOLVED_MKDIR" ;;
+    mktemp)  var_name="RESOLVED_MKTEMP" ;;
+    rm)      var_name="RESOLVED_RM" ;;
+    curl)    var_name="RESOLVED_CURL" ;;
+    python3) var_name="RESOLVED_PYTHON3" ;;
+    sleep)   var_name="RESOLVED_SLEEP" ;;
+    tr)      var_name="RESOLVED_TR" ;;
+    uname)   var_name="RESOLVED_UNAME" ;;
+    wc)      var_name="RESOLVED_WC" ;;
+    *)
+      die "unknown required command: $required_command"
+      ;;
+  esac
+  if ! resolve_tool "$required_command" "$var_name"; then
+    die "required command is missing or not from a trusted location: $required_command"
+  fi
+done
+
+RESOLVED_PS=""
+# ps is required for RSS sampling.
+if ! resolve_tool ps RESOLVED_PS; then
+  RSS_SUPPORTED=0
+  log "RSS sampling unavailable; memory evidence will fail closed"
+else
+  # RSS is optional for lifecycle execution, but a report without RSS evidence
+  # must fail the evidence gate rather than inventing a memory measurement.
+  RSS_SUPPORTED=1
+  if ! "$RESOLVED_PS" -o rss= -p "$$" >/dev/null 2>&1; then
+    RSS_SUPPORTED=0
+    log "RSS sampling unavailable; memory evidence will fail closed"
+  fi
 fi
 
 if [[ -z "$SCENARIO" || "$SCENARIO" == "brotli-streaming-first" ]]; then
   # Chunked Brotli streaming has no CLI fallback.  Fail during preflight so a
   # missing or drifting Python dependency cannot surface as a late request
   # error.
-  if ! BROTLI_VERSION="$(python3 -c 'import brotli; print(brotli.__version__)' 2>/dev/null)"; then
+  if ! BROTLI_VERSION="$("$RESOLVED_PYTHON3" -c 'import brotli; print(brotli.__version__)' 2>/dev/null)"; then
     die "Python Brotli package is required for brotli-streaming-first; install requirements-perf.txt"
   fi
   if [[ "$BROTLI_VERSION" != "1.2.0" ]]; then
@@ -195,26 +473,29 @@ if [[ -z "$SCENARIO" || "$SCENARIO" == "brotli-streaming-first" ]]; then
   log "Python Brotli: $BROTLI_VERSION"
 fi
 
-# Determine load generator: prefer 'hey' then 'ab'
+# Determine load generator: prefer 'hey' then 'ab'.  The chosen generator is
+# resolved to an approved absolute path so request generation never runs a
+# PATH-shadowable helper.
 LOAD_GEN=""
-if command -v hey >/dev/null 2>&1; then
+RESOLVED_LOAD_GEN=""
+if resolve_tool hey RESOLVED_LOAD_GEN; then
   LOAD_GEN="hey"
-elif command -v ab >/dev/null 2>&1; then
+elif resolve_tool ab RESOLVED_LOAD_GEN; then
   LOAD_GEN="ab"
 else
-  die "No load generator found. Install 'hey' (preferred) or 'ab' (Apache Bench)."
+  die "No trusted load generator found. Install 'hey' (preferred) or 'ab' (Apache Bench)."
 fi
 
-log "Load generator: $LOAD_GEN"
+log "Load generator: $LOAD_GEN ($RESOLVED_LOAD_GEN)"
 
 ###############################################################################
 # Setup working directory
 ###############################################################################
 
-mkdir -p "$NGINX_WORKDIR/logs"
-mkdir -p "$NGINX_WORKDIR/temp"
+"$RESOLVED_MKDIR" -p "$NGINX_WORKDIR/logs"
+"$RESOLVED_MKDIR" -p "$NGINX_WORKDIR/temp"
 PROBE_DIR="$NGINX_WORKDIR/probes"
-mkdir -p "$PROBE_DIR"
+"$RESOLVED_MKDIR" -p "$PROBE_DIR"
 echo "$$" > "$PID_FILE"
 log "Workdir: $NGINX_WORKDIR"
 
@@ -229,12 +510,12 @@ fi
 
 log "Starting upstream mock on port $UPSTREAM_PORT (serving $CORPUS_DIR)"
 
-python3 "$SCRIPT_DIR/upstream_mock.py" "$UPSTREAM_PORT" >/dev/null 2>&1 &
+"$RESOLVED_PYTHON3" "$SCRIPT_DIR/upstream_mock.py" "$UPSTREAM_PORT" >/dev/null 2>&1 &
 UPSTREAM_PID=$!
 
 # Wait for upstream to become ready
 _wait_attempts=0
-while ! python3 -c "
+while ! "$RESOLVED_PYTHON3" -c "
 import socket, sys
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 try:
@@ -249,7 +530,7 @@ except Exception:
   if [[ $_wait_attempts -ge 20 ]]; then
     die "Upstream mock failed to start on port $UPSTREAM_PORT"
   fi
-  sleep 0.1
+  "$RESOLVED_SLEEP" 0.1
 done
 
 log "Upstream mock ready (pid=$UPSTREAM_PID)"
@@ -281,15 +562,16 @@ generate_nginx_conf() {
         proxy_http_version 1.1;
         proxy_buffering off;
         proxy_set_header Connection \"\";
-        markdown_profile streaming_first;
-        markdown_streaming_zero_copy on;"
+        markdown_streaming force;"
       ;;
     strict_cache)
       profile_directives="
-        markdown_cache_validation full;"
+        markdown_cache_validation full;
+        markdown_streaming off;"
       ;;
     balanced)
-      profile_directives=""
+      profile_directives="
+        markdown_streaming auto;"
       ;;
     *)
       log "warning: unknown profile '$profile', using balanced"
@@ -297,7 +579,7 @@ generate_nginx_conf() {
       ;;
   esac
 
-  cat > "$conf_path" <<CONFEOF
+  "$RESOLVED_CAT" > "$conf_path" <<CONFEOF
 # Auto-generated benchmark NGINX config
 # Profile: $profile | Worker connections: $worker_conns
 daemon off;
@@ -333,16 +615,22 @@ http {
             proxy_set_header Host \$host;
 
             markdown_filter on;
-            # The 1 MiB Brotli fixture can expand from one very small wire
-            # chunk. Keep both conversion and pre-commit replay buffers large
-            # enough for that valid first batch while retaining hard caps.
-            markdown_limits memory=64m timeout=2s streaming_buffer=16m max_inflight=64;
-            markdown_stream_precommit_buffer 16m;
+            # The compressed fixtures are intentionally highly repetitive and
+            # exceed the production default expansion ratio of 100. Keep the
+            # benchmark's ratio budget explicit so these scenarios exercise
+            # conversion and backpressure rather than ratio rejection.
+            markdown_limits conversion_memory=64m parser_memory=64m
+                conversion_timeout=2s parser_timeout=2s streaming_buffer=16m
+                decompression_ratio=2000 max_inflight=64;
             $profile_directives
         }
 
         location /markdown-metrics {
             markdown_metrics;
+        }
+
+        location = /nginx-markdown/diagnostics {
+            markdown_diagnostics on;
         }
     }
 }
@@ -380,7 +668,7 @@ start_nginx() {
 
   # Wait for NGINX to be ready
   local _attempts=0
-  while ! python3 -c "
+  while ! "$RESOLVED_PYTHON3" -c "
 import socket, sys
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 try:
@@ -395,7 +683,7 @@ except Exception:
     if [[ $_attempts -ge 30 ]]; then
       die "NGINX failed to start on port $NGINX_PORT"
     fi
-    sleep 0.1
+    "$RESOLVED_SLEEP" 0.1
   done
 
   log "NGINX ready (pid=$NGINX_PID, profile=$profile)"
@@ -432,13 +720,13 @@ run_load_gen() {
 
   case "$LOAD_GEN" in
     hey)
-      hey -n "$total_requests" -c "$concurrency" \
+      "$RESOLVED_LOAD_GEN" -n "$total_requests" -c "$concurrency" \
         -H "$ACCEPT_MD_HEADER" \
         -o csv \
         "$url" > "$raw_output" 2>/dev/null
       ;;
     ab)
-      ab -n "$total_requests" -c "$concurrency" \
+      "$RESOLVED_LOAD_GEN" -n "$total_requests" -c "$concurrency" \
         -H "$ACCEPT_MD_HEADER" \
         "$url" > "$raw_output" 2>/dev/null
       ;;
@@ -491,13 +779,14 @@ run_response_probe() {
   expectations="$(probe_expectations "$fixture")"
   expected_heading="${expectations%%|*}"
   expected_tail="${expectations#*|}"
-  http_status="$(curl -sS -D "$headers_file" -o "$body_file" \
+  http_status="$("$RESOLVED_CURL" -sS -D "$headers_file" -o "$body_file" \
     -w '%{http_code}' -H "$ACCEPT_MD_HEADER" \
     "http://127.0.0.1:${NGINX_PORT}${url_path}")" || curl_exit=$?
 
-  python3 - "$REPO_ROOT" "$http_status" "$headers_file" "$body_file" \
+  "$RESOLVED_PYTHON3" - "$REPO_ROOT" "$http_status" "$headers_file" "$body_file" \
     "$CORPUS_DIR/$fixture" "$expected_heading" "$expected_tail" \
-    "$compression" "$curl_exit" <<'PROBE_PYEOF' > "$result_file"
+    "$compression" "$curl_exit" "$NGINX_WORKDIR/logs/error.log" \
+    <<'PROBE_PYEOF' > "$result_file"
 import json
 import sys
 from pathlib import Path
@@ -517,6 +806,7 @@ expected_heading = sys.argv[6]
 expected_tail = sys.argv[7]
 compressed = sys.argv[8] != "none"
 curl_exit = int(sys.argv[9])
+error_log_path = Path(sys.argv[10])
 
 header_parse_error = ""
 headers = {}
@@ -551,10 +841,14 @@ if header_parse_error:
 if curl_exit:
     result["verdict"] = "fail"
     result["failure_reason"] = f"curl_exit: {curl_exit}"
+if result.get("verdict") == "fail" and error_log_path.exists():
+    error_log_artifact = headers_path.parent / f"{headers_path.stem}.error.log"
+    error_log_artifact.write_bytes(error_log_path.read_bytes())
+    result["error_log_artifact"] = error_log_artifact.name
 print(json.dumps(result))
 PROBE_PYEOF
 
-  cat "$result_file"
+  "$RESOLVED_CAT" "$result_file"
   return 0
 }
 
@@ -562,8 +856,15 @@ PROBE_PYEOF
 # Worker RSS measurement
 ###############################################################################
 
-# get_worker_rss returns the RSS in KB of the NGINX worker process.
+# get_worker_rss returns the RSS in KB of the NGINX worker process.  It emits
+# zero when the platform cannot provide RSS; downstream evidence validation
+# treats that sentinel as missing evidence.
 get_worker_rss() {
+  if [[ "$RSS_SUPPORTED" -eq 0 ]]; then
+    echo "0"
+    return 0
+  fi
+
   if [[ -z "$NGINX_PID" ]]; then
     echo "0"
     return 0
@@ -572,8 +873,8 @@ get_worker_rss() {
   # Find worker child process (NGINX master spawns workers).
   # Use portable ps output instead of GNU-only -ppid filtering.
   local worker_pid
-  worker_pid="$(ps -axo pid=,ppid= 2>/dev/null \
-    | awk -v ppid="$NGINX_PID" '$2 == ppid { print $1; exit }')" || true
+  worker_pid="$("$RESOLVED_PS" -axo pid=,ppid= 2>/dev/null \
+    | "$RESOLVED_AWK" -v ppid="$NGINX_PID" '$2 == ppid { print $1; exit }')" || true
 
   if [[ -z "$worker_pid" ]]; then
     # Single process mode — use master PID
@@ -581,7 +882,7 @@ get_worker_rss() {
   fi
 
   local rss_kb
-  rss_kb="$(ps -o rss= -p "$worker_pid" 2>/dev/null | tr -d ' ')" || true
+  rss_kb="$("$RESOLVED_PS" -o rss= -p "$worker_pid" 2>/dev/null | "$RESOLVED_TR" -d ' ')" || true
 
   if [[ -z "$rss_kb" ]] || ! [[ "$rss_kb" =~ ^[0-9]+$ ]]; then
     echo "0"
@@ -593,14 +894,19 @@ get_worker_rss() {
 
 # get_worker_pid returns the PID of the NGINX worker process.
 get_worker_pid() {
+  if [[ "$RSS_SUPPORTED" -eq 0 ]]; then
+    echo ""
+    return 0
+  fi
+
   if [[ -z "$NGINX_PID" ]]; then
     echo ""
     return 0
   fi
 
   local worker_pid
-  worker_pid="$(ps -axo pid=,ppid= 2>/dev/null \
-    | awk -v ppid="$NGINX_PID" '$2 == ppid { print $1; exit }')" || true
+  worker_pid="$("$RESOLVED_PS" -axo pid=,ppid= 2>/dev/null \
+    | "$RESOLVED_AWK" -v ppid="$NGINX_PID" '$2 == ppid { print $1; exit }')" || true
 
   if [[ -z "$worker_pid" ]]; then
     worker_pid="$NGINX_PID"
@@ -634,20 +940,25 @@ sample_rss_background() {
   : > "$peak_file"
   echo "0" > "$peak_file"
 
+  if [[ "$RSS_SUPPORTED" -eq 0 ]]; then
+    # Preserve the zero sentinel so missing memory evidence fails closed.
+    return 0
+  fi
+
   local peak=0
   while true; do
     if ! kill -0 "$worker_pid" 2>/dev/null; then
       break
     fi
     local rss
-    rss="$(ps -o rss= -p "$worker_pid" 2>/dev/null | tr -d ' ')" || true
+    rss="$("$RESOLVED_PS" -o rss= -p "$worker_pid" 2>/dev/null | "$RESOLVED_TR" -d ' ')" || true
     if [[ -n "$rss" && "$rss" =~ ^[0-9]+$ && "$rss" -gt "$peak" ]]; then
       peak="$rss"
       # Write immediately so the file is always up-to-date,
       # even if the sampler is killed mid-loop.
       echo "$peak" > "$peak_file"
     fi
-    sleep "$interval"
+    "$RESOLVED_SLEEP" "$interval"
   done
 
   # Final write to ensure the last peak is captured
@@ -698,7 +1009,7 @@ measure_ttfb() {
   local url="http://127.0.0.1:${NGINX_PORT}${url_path}"
 
   # Verify curl is available
-  if ! command -v curl >/dev/null 2>&1; then
+  if [[ -z "${RESOLVED_CURL:-}" ]]; then
     log "  TTFB: curl not available; reporting null (limitation documented)"
     echo '{"ttfb_p50_ms":null,"ttfb_p95_ms":null}'
     return 0
@@ -713,7 +1024,7 @@ measure_ttfb() {
 
   while [[ $i -lt $TTFB_SAMPLE_COUNT ]]; do
     local ttfb_s
-    ttfb_s="$(curl -s -o /dev/null -w '%{time_starttransfer}' \
+    ttfb_s="$("$RESOLVED_CURL" -s -o /dev/null -w '%{time_starttransfer}' \
       -H "$ACCEPT_MD_HEADER" \
       "$url" 2>/dev/null)" || true
 
@@ -726,18 +1037,18 @@ measure_ttfb() {
 
   # Compute p50/p95 from samples
   local sample_count
-  sample_count="$(wc -l < "$ttfb_file" | tr -d ' ')"
+  sample_count="$("$RESOLVED_WC" -l < "$ttfb_file" | "$RESOLVED_TR" -d ' ')"
 
   if [[ "$sample_count" -lt 5 ]]; then
     log "  TTFB: insufficient samples ($sample_count); reporting null"
     echo '{"ttfb_p50_ms":null,"ttfb_p95_ms":null}'
-    rm -f "$ttfb_file"
+    "$RESOLVED_RM" -f "$ttfb_file"
     return 0
   fi
 
   # Use python3 for percentile calculation (sort + index)
   local ttfb_json
-  ttfb_json="$(python3 - "$ttfb_file" <<'TTFB_PYEOF'
+  ttfb_json="$("$RESOLVED_PYTHON3" - "$ttfb_file" <<'TTFB_PYEOF'
 import json
 import sys
 
@@ -771,7 +1082,7 @@ print(json.dumps(result))
 TTFB_PYEOF
   )" || true
 
-  rm -f "$ttfb_file"
+  "$RESOLVED_RM" -f "$ttfb_file"
 
   if [[ -z "$ttfb_json" ]]; then
     echo '{"ttfb_p50_ms":null,"ttfb_p95_ms":null}'
@@ -789,12 +1100,12 @@ TTFB_PYEOF
 # Sets: SC_NAME, SC_FIXTURE, SC_PROFILE, SC_COMPRESSION, SC_TRANSFER, SC_CONCURRENCY
 parse_scenario() {
   local def="$1"
-  SC_NAME="$(echo "$def" | cut -d'|' -f1)"
-  SC_FIXTURE="$(echo "$def" | cut -d'|' -f2)"
-  SC_PROFILE="$(echo "$def" | cut -d'|' -f3)"
-  SC_COMPRESSION="$(echo "$def" | cut -d'|' -f4)"
-  SC_TRANSFER="$(echo "$def" | cut -d'|' -f5)"
-  SC_CONCURRENCY="$(echo "$def" | cut -d'|' -f6)"
+  SC_NAME="$(printf '%s' "$def" | "$RESOLVED_CUT" -d'|' -f1)"
+  SC_FIXTURE="$(printf '%s' "$def" | "$RESOLVED_CUT" -d'|' -f2)"
+  SC_PROFILE="$(printf '%s' "$def" | "$RESOLVED_CUT" -d'|' -f3)"
+  SC_COMPRESSION="$(printf '%s' "$def" | "$RESOLVED_CUT" -d'|' -f4)"
+  SC_TRANSFER="$(printf '%s' "$def" | "$RESOLVED_CUT" -d'|' -f5)"
+  SC_CONCURRENCY="$(printf '%s' "$def" | "$RESOLVED_CUT" -d'|' -f6)"
 
   # Apply concurrency override if set
   if [[ -n "$CONCURRENCY_OVERRIDE" ]]; then
@@ -823,7 +1134,7 @@ run_scenario() {
     return 0
   fi
   local fixture_bytes
-  fixture_bytes="$(wc -c < "$CORPUS_DIR/$SC_FIXTURE")"
+  fixture_bytes="$("$RESOLVED_WC" -c < "$CORPUS_DIR/$SC_FIXTURE")"
 
   # Start NGINX with appropriate profile
   start_nginx "$SC_PROFILE" "128"
@@ -848,7 +1159,7 @@ run_scenario() {
   local raw_output="$NGINX_WORKDIR/${SC_NAME}_raw.csv"
   local url_path="/$SC_FIXTURE"
 
-  # ponytail: dynamically map scenario labels to actual traffic via query params
+  # dynamically map scenario labels to actual traffic via query params
   if [[ "$SC_COMPRESSION" == "gzip" ]]; then
     url_path="${url_path}?gzip=1"
   elif [[ "$SC_COMPRESSION" == "deflate" ]]; then
@@ -878,11 +1189,11 @@ run_scenario() {
   # The sampler writes the peak file on every iteration, so the
   # file is up-to-date even after a kill.  A short wait ensures
   # any pending I/O completes before reading.
-  sleep 0.1
+  "$RESOLVED_SLEEP" 0.1
 
   local rss_peak="0"
   if [[ -f "$peak_rss_file" ]]; then
-    rss_peak="$(cat "$peak_rss_file" | tr -d '[:space:]')"
+    rss_peak="$("$RESOLVED_CAT" "$peak_rss_file" | "$RESOLVED_TR" -d '[:space:]')"
     [[ "$rss_peak" =~ ^[0-9]+$ ]] || rss_peak="0"
   fi
 
@@ -903,9 +1214,23 @@ run_scenario() {
   # Fetch real NGINX metrics from metrics endpoint
   log "  Fetching real NGINX metrics..."
   local metrics_json
-  metrics_json="$(curl -s -H 'Accept: application/json' "http://127.0.0.1:${NGINX_PORT}/markdown-metrics" || echo '{}')"
+  local metrics_exit=0
+  metrics_json="$("$RESOLVED_CURL" -fsS --connect-timeout 10 --max-time 60 \
+    -H 'Accept: text/plain; version=0.0.4' \
+    "http://127.0.0.1:${NGINX_PORT}/markdown-metrics")" || metrics_exit=$?
   local metrics_file="$NGINX_WORKDIR/${SC_NAME}_metrics.json"
   printf '%s\n' "$metrics_json" > "$metrics_file"
+
+  # Fetch structured diagnostics for counters that are intentionally not part
+  # of the frozen Prometheus v1 surface.
+  log "  Fetching structured NGINX diagnostics..."
+  local diagnostics_json
+  local diagnostics_exit=0
+  diagnostics_json="$("$RESOLVED_CURL" -fsS --connect-timeout 10 --max-time 60 \
+    "http://127.0.0.1:${NGINX_PORT}/nginx-markdown/diagnostics")" \
+    || diagnostics_exit=$?
+  local diagnostics_file="$NGINX_WORKDIR/${SC_NAME}_diagnostics.json"
+  printf '%s\n' "$diagnostics_json" > "$diagnostics_file"
 
   # Run after the metrics snapshot so the probe cannot contaminate evidence.
   log "  Running response correctness probe..."
@@ -917,10 +1242,11 @@ run_scenario() {
   local scenario_json
   scenario_json="$(parse_load_gen_results "$raw_output" "$SC_NAME" "$SC_PROFILE" \
     "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" \
-    "$ttfb_file" "$metrics_file" "$fixture_bytes" \
-    "$rss_baseline" "$rss_peak" "$ITERATIONS" "$load_gen_exit")"
+    "$ttfb_file" "$metrics_file" "$diagnostics_file" "$fixture_bytes" \
+    "$rss_baseline" "$rss_peak" "$ITERATIONS" "$load_gen_exit" \
+    "$metrics_exit" "$diagnostics_exit")"
 
-  scenario_json="$(python3 - "$scenario_json" "$probe_json" \
+  scenario_json="$("$RESOLVED_PYTHON3" - "$scenario_json" "$probe_json" \
     "$REPO_ROOT" <<'MERGE_PYEOF'
 import json
 import sys
@@ -957,9 +1283,14 @@ MERGE_PYEOF
 #   $7  - worker RSS in KB (post-run)
 #   $8  - path to TTFB JSON (from measure_ttfb)
 #   $9  - path to NGINX metrics JSON
-#   $10 - actual input fixture size in bytes
-#   $11 - baseline worker RSS in KB (before load)
-#   $12 - peak worker RSS in KB (during load, sampled in background)
+#   $10 - path to NGINX diagnostics JSON
+#   $11 - actual input fixture size in bytes
+#   $12 - baseline worker RSS in KB (before load)
+#   $13 - peak worker RSS in KB (during load, sampled in background)
+#   $14 - configured request iterations
+#   $15 - load-generator exit code
+#   $16 - metrics curl exit code
+#   $17 - diagnostics curl exit code
 parse_load_gen_results() {
   local raw_file="$1"
   local name="$2"
@@ -970,30 +1301,65 @@ parse_load_gen_results() {
   local rss_kb="$7"
   local ttfb_file="${8:-}"
   local metrics_file="${9:-}"
-  local input_bytes="${10:-0}"
-  local rss_baseline_kb="${11:-0}"
-  local rss_peak_kb="${12:-0}"
-  local iterations="${13:-0}"
-  local load_gen_exit="${14:-1}"
+  local diagnostics_file="${10:-}"
+  local input_bytes="${11:-0}"
+  local rss_baseline_kb="${12:-0}"
+  local rss_peak_kb="${13:-0}"
+  local iterations="${14:-0}"
+  local load_gen_exit="${15:-1}"
+  local metrics_exit="${16:-1}"
+  local diagnostics_exit="${17:-1}"
 
-  python3 - "$raw_file" "$name" "$profile" "$compression" "$transfer" \
+  "$RESOLVED_PYTHON3" - "$raw_file" "$name" "$profile" "$compression" "$transfer" \
     "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_file" "$metrics_file" \
-    "$input_bytes" "$rss_baseline_kb" "$rss_peak_kb" "$iterations" \
-    "$load_gen_exit" "$REPO_ROOT" <<'PYEOF'
+    "$diagnostics_file" "$input_bytes" "$rss_baseline_kb" "$rss_peak_kb" \
+    "$iterations" "$load_gen_exit" "$metrics_exit" "$diagnostics_exit" \
+    "$REPO_ROOT" <<'PYEOF'
 import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[16])
+sys.path.insert(0, sys.argv[19])
 
-from tools.perf.benchmark_validation import ScenarioResultInput, build_scenario_result
+from tools.perf.benchmark_validation import (
+    ScenarioResultInput,
+    build_scenario_result,
+    merge_diagnostics_metrics,
+    parse_prometheus_metrics,
+)
 
 
-def read_json_file(path):
+def read_metrics_file(path):
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        content = Path(path).read_text(encoding="utf-8")
+        try:
+            value = json.loads(content)
+            return value if isinstance(value, dict) else {}
+        except json.JSONDecodeError:
+            return parse_prometheus_metrics(content)
+    except OSError:
         return {}
+
+
+def read_diagnostics_file(path):
+    try:
+        content = Path(path).read_text(encoding="utf-8")
+        value = json.loads(content)
+        return value if isinstance(value, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def read_ttfb_file(path):
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+nginx_metrics = read_metrics_file(sys.argv[10])
+merge_diagnostics_metrics(nginx_metrics, read_diagnostics_file(sys.argv[11]))
 
 
 result = build_scenario_result(ScenarioResultInput(
@@ -1005,13 +1371,15 @@ result = build_scenario_result(ScenarioResultInput(
     concurrency=int(sys.argv[6]),
     worker_rss_kb=int(sys.argv[7]),
     load_generator=sys.argv[8],
-    ttfb=read_json_file(sys.argv[9]),
-    nginx_metrics=read_json_file(sys.argv[10]),
-    input_bytes=int(sys.argv[11]),
-    baseline_rss_kb=int(sys.argv[12]),
-    peak_rss_kb=int(sys.argv[13]),
-    iterations=int(sys.argv[14]),
-    load_exit_code=int(sys.argv[15]),
+    ttfb=read_ttfb_file(sys.argv[9]),
+    nginx_metrics=nginx_metrics,
+    input_bytes=int(sys.argv[12]),
+    baseline_rss_kb=int(sys.argv[13]),
+    peak_rss_kb=int(sys.argv[14]),
+    iterations=int(sys.argv[15]),
+    load_exit_code=int(sys.argv[16]),
+    metrics_exit_code=int(sys.argv[17]),
+    diagnostics_exit_code=int(sys.argv[18]),
 ))
 print(json.dumps(result))
 PYEOF
@@ -1061,18 +1429,26 @@ fi
 # Assemble final JSON report
 ###############################################################################
 
-TIMESTAMP="$(python3 -c 'import datetime; print(datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))' 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)"
-GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
-PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+TIMESTAMP="$("$RESOLVED_PYTHON3" -c 'import datetime; print(datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))' 2>/dev/null || "$RESOLVED_DATE" -u +%Y-%m-%dT%H:%M:%SZ)"
+GIT_COMMIT="$("$RESOLVED_GIT" -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "unknown")"
+PLATFORM="$("$RESOLVED_UNAME" -s | "$RESOLVED_TR" '[:upper:]' '[:lower:]')-$("$RESOLVED_UNAME" -m)"
 
 # Capture the NGINX version for the benchmark environment identity
 NGINX_VERSION_INFO="unknown"
 if [[ -x "$NGINX_BIN" ]]; then
-  NGINX_VERSION_INFO="$("$NGINX_BIN" -v 2>&1 | head -1 || echo "unknown")"
+  NGINX_VERSION_INFO="$("$NGINX_BIN" -v 2>&1 | "$RESOLVED_HEAD" -1 || echo "unknown")"
 fi
 
-REPORT_JSON="$(python3 - "$TIMESTAMP" "$GIT_COMMIT" "$PLATFORM" "$LOAD_GEN" \
-  "$RESULTS_FILE" "$NGINX_VERSION_INFO" "$REPO_ROOT" "$PROBE_DIR" <<'PYEOF'
+# Record the resolved toolchain in the report so release gates consume only
+# evidence generated under the validated toolchain (perf-evidence F4).
+TOOLCHAIN_JSON="{"
+TOOLCHAIN_JSON+="\"load_gen\":\"$LOAD_GEN\",\"load_gen_path\":\"$RESOLVED_LOAD_GEN\","
+TOOLCHAIN_JSON+="\"git\":\"$RESOLVED_GIT\",\"python3\":\"$RESOLVED_PYTHON3\","
+TOOLCHAIN_JSON+="\"curl\":\"$RESOLVED_CURL\",\"ps\":\"${RESOLVED_PS:-}\""
+TOOLCHAIN_JSON+="}"
+
+REPORT_JSON="$("$RESOLVED_PYTHON3" - "$TIMESTAMP" "$GIT_COMMIT" "$PLATFORM" "$LOAD_GEN" \
+  "$RESULTS_FILE" "$NGINX_VERSION_INFO" "$REPO_ROOT" "$PROBE_DIR" "$TOOLCHAIN_JSON" <<'PYEOF'
 import json
 import sys
 from pathlib import Path
@@ -1088,6 +1464,7 @@ load_gen = sys.argv[4]
 results_file = sys.argv[5]
 nginx_version = sys.argv[6] if len(sys.argv) > 6 else "unknown"
 probe_dir = Path(sys.argv[8])
+toolchain = sys.argv[9]
 
 scenarios = []
 with open(results_file, encoding="utf-8") as handle:
@@ -1117,6 +1494,20 @@ for scenario in scenarios:
         scenario["response_correctness"]["verdict"] = "fail"
         scenario["response_correctness"]["failure_reason"] = reason
 
+
+def aggregate_metric(rows, metric):
+    values = [
+        row.get("metrics", {}).get(metric)
+        for row in rows
+        if row.get("status") != "skipped"
+    ]
+    if not values:
+        return None
+    if not all(isinstance(value, (int, float)) and not isinstance(value, bool)
+               for value in values):
+        return None
+    return sum(values)
+
 report = {
     "module_benchmark": {
         "version": "1.0.0",
@@ -1125,6 +1516,7 @@ report = {
         "platform": platform,
         "load_generator": load_gen,
         "nginx_version": nginx_version,
+        "toolchain": json.loads(toolchain),
         "scenarios": scenarios,
         # memory_slope is intentionally omitted here — it is computed
         # by the evidence gate from per-scenario baseline_rss_bytes and
@@ -1132,8 +1524,12 @@ report = {
         # evidence as "perfect 0 slope" and must never be written.
     },
     "decompression_coverage": {
-        "decompression_streaming_total": sum(s.get("metrics", {}).get("decompression_streaming_total", 0) for s in scenarios),
-        "decompression_fullbuffer_total": sum(s.get("metrics", {}).get("decompression_fullbuffer_total", 0) for s in scenarios),
+        "decompression_streaming_total": aggregate_metric(
+            scenarios, "decompression_streaming_total"
+        ),
+        "decompression_fullbuffer_total": aggregate_metric(
+            scenarios, "decompression_fullbuffer_total"
+        ),
     }
 }
 
@@ -1143,11 +1539,11 @@ PYEOF
 
 # Output report
 if [[ -n "$OUTPUT_PATH" ]]; then
-  mkdir -p "$(dirname "$OUTPUT_PATH")"
+  "$RESOLVED_MKDIR" -p "$("$SYSTEM_DIRNAME" "$OUTPUT_PATH")"
   echo "$REPORT_JSON" > "$OUTPUT_PATH"
   PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"
-  mkdir -p "$PROBE_OUTPUT_DIR"
-  cp -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"
+  "$RESOLVED_MKDIR" -p "$PROBE_OUTPUT_DIR"
+  "$RESOLVED_CP" -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"
   log "Report written to: $OUTPUT_PATH"
   log "Probe artifacts written to: $PROBE_OUTPUT_DIR"
 else

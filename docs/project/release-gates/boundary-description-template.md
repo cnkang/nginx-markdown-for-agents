@@ -18,9 +18,9 @@ Copy the table below into your sub-spec and populate it for each capability with
 
 ## Rules
 
-1. Use factual, non-speculative language. State what IS delivered and what IS NOT delivered.
+1. Use factual, non-speculative language. State what ships now and what does not ship now.
 2. Do not imply commitments for future releases. The 0.5.x column describes deferred work, not planned work.
-3. Every field must be filled in. A blank 0.5.x Scope or Prerequisites field defeats the purpose of the template.
+3. The author must fill in every field. A blank 0.5.x Scope or Prerequisites field defeats the purpose of the template.
 
 ## Instructions for Sub-Spec Owners
 
@@ -28,9 +28,9 @@ Copy the table below into your sub-spec and populate it for each capability with
 2. Add a `## Boundary Description: [Capability Name]` section to your sub-spec design document.
 3. Copy the template table and fill in all five fields.
 4. Write the 0.4.0 Scope as a specific, verifiable statement of what ships.
-5. Write the 0.5.x Scope as a factual description of what is deferred — avoid words like "will", "planned", or "expected".
-6. State the rationale for the boundary placement (e.g., risk, complexity, dependency, timeline).
-7. List concrete prerequisites that must exist before the deferred work can begin (e.g., APIs, infrastructure, design decisions).
+5. Write the 0.5.x Scope as a factual description of what defers — avoid words like "will", "planned", or "expected".
+6. State the rationale for the boundary placement (for example risk, complexity, dependency, timeline).
+7. List concrete prerequisites that must exist before the deferred work can begin (for example APIs, infrastructure, design decisions).
 
 ## Document Updates
 

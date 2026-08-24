@@ -2,7 +2,7 @@
 
 ## Overview
 
-The unified error policy determines how conversion failures are handled at
+The unified error policy determines how the module handles conversion failures at
 runtime. A single directive `markdown_error_policy` covers all error paths
 (full-buffer, streaming, overload) with consistent semantics.
 
@@ -12,11 +12,11 @@ runtime. A single directive `markdown_error_policy` covers all error paths
 # Context: http, server, location
 markdown_error_policy pass;            # Default: deliver original response
 markdown_error_policy status 429;      # Return explicit overload status
-markdown_error_policy status 503;      # Recommended for overload (with spec 52)
+markdown_error_policy status 503;      # Recommended for overload handling
 markdown_error_policy fail_closed;     # Return 502, never leak original content
 ```
 
-Allowed status codes: `429`, `503` (`502` is the `fail_closed` default; use `fail_closed` instead of `status 502`).
+Allowed status codes: `429`, `503` (`502` is the `fail_closed` default. Use `fail_closed` instead of `status 502`).
 
 ## Error Classes
 
@@ -30,7 +30,7 @@ Allowed status codes: `429`, `503` (`502` is the `fail_closed` default; use `fai
 | `overload` | pre-commit | Yes | Inflight limit exceeded |
 | `invalid_dynconf` | pre-commit | Yes | Dynamic config invalid |
 | `degraded_snapshot` | pre-commit | Yes | Using last-known-good snapshot |
-| `header_plan_apply_error` | post-commit | **No** | HeaderPlan commit failed |
+| `header_plan_apply_error` | pre-commit | Yes | HeaderPlan prepare/apply failed before headers were sent |
 | `streaming_mid_flight_error` | post-commit | **No** | Streaming failed mid-body |
 
 ## Pre-commit vs Post-commit
@@ -46,7 +46,7 @@ can safely:
 
 ### Post-commit Errors
 
-Errors that occur after headers have been sent (e.g., `Content-Type: text/markdown`
+Errors that occur after headers have been sent (for example `Content-Type: text/markdown`
 is already on the wire). The module **cannot** rewrite the status line.
 
 The configured policy selects one of two protocol-safe actions:
@@ -60,7 +60,7 @@ The configured policy selects one of two protocol-safe actions:
 Both actions preserve these safety invariants:
 - Cannot return original HTML content (client expects Markdown).
 - Cannot send a new status code (headers already sent).
-- Cannot synthesize Markdown closure in C; only Rust-owned state may produce
+- Cannot synthesize Markdown closure in C. Only Rust-owned state may produce
   safe-finish bytes.
 
 ## Decision Function
@@ -72,7 +72,8 @@ decide_error_behavior(class, policy) → behavior
 1. If the failure is post-commit:
    - `Pass` -> `SafeFinish`, falling back to `Abort`
    - `FailClosed` or `Status(n)` -> `Abort`
-2. Otherwise, apply the configured pre-commit policy:
+2. Otherwise, including `header_plan_apply_error`, apply the configured
+   pre-commit policy:
    - `Pass` → `PassThrough`
    - `Status(n)` → `ReturnStatus(n)`
    - `FailClosed` → `ReturnStatus(502)`
@@ -81,14 +82,14 @@ decide_error_behavior(class, policy) → behavior
 
 The NGINX C module applies the configured pass/status/fail-closed behavior at
 the request lifecycle boundary. Rust exposes `markdown_classify_error_code`
-for canonical error classification; the former zero-consumer FFI behavior
-decision structs and export were removed before the v1 ABI freeze.
+for canonical error classification. The former zero-consumer FFI behavior,
+decision structs, and export got removed before the v1 ABI freeze.
 
 ## Stability Contract
 
 - Error class enum: frozen at 0.9.0, additive-only after 1.0.
-- Post-commit never replays HTML or rewrites status; only Rust safe-finish or
-  abort is allowed.
+- Post-commit never replays HTML or rewrites status. Only Rust safe-finish or
+  abort stays allowed.
 - Error class → reason code mapping: stable, additive-only after 1.0.
 - `markdown_error_policy` directive semantics: frozen at 1.0.
 
@@ -97,4 +98,4 @@ decision structs and export were removed before the v1 ABI freeze.
 - **Config V2**: Directive syntax (see [MIGRATION-0.9.md](../guides/MIGRATION-0.9.md)).
 - **HeaderPlan**: Pre-commit/post-commit boundary (see [header mutation inventory](header-mutation-inventory.md)).
 - **Worker Inflight Guard**: Overload detection.
-- **Reason Code Registry**: See [Observability Schema v1](observability-schema-v1.md).
+- **Reason Code Registry**: See [Observability Schema v2](observability-schema-v2.md).

@@ -22,6 +22,7 @@ Security: All file reads use Path.resolve() within PROJECT_ROOT.
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import sys
@@ -30,6 +31,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # noqa: E402
 from lib.path_validation import validate_read_path  # noqa: E402
+from release.gates._directive_macros import (  # noqa: E402
+    expand_directive_macros,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MAKEFILE = PROJECT_ROOT / "Makefile"
@@ -43,6 +47,13 @@ CONFIG_DIRECTIVES_H = (
     / "nginx-module"
     / "src"
     / "ngx_http_markdown_config_directives_impl.h"
+)
+DIRECTIVE_NAMES_H = (
+    PROJECT_ROOT
+    / "components"
+    / "nginx-module"
+    / "src"
+    / "ngx_http_markdown_directive_names.h"
 )
 FILTER_MODULE_H = (
     PROJECT_ROOT
@@ -110,7 +121,9 @@ def _expected_cargo_version() -> str:
     return os.environ.get("RELEASE_GATE_EXPECTED_CARGO_VERSION", "0.8.0")
 
 
-def check_cargo_version(result: ValidationResult) -> None:
+def check_cargo_version(
+    result: ValidationResult, active_version: str | None = None
+) -> None:
     """Verify Cargo.toml package version matches the expected release version."""
     cargo_txt = read(CARGO_TOML_PATH)
     if not cargo_txt:
@@ -121,14 +134,16 @@ def check_cargo_version(result: ValidationResult) -> None:
     except tomllib.TOMLDecodeError as exc:
         result.fail(CARGO_VERSION_GATE, f"Cargo.toml parse error: {exc}")
         return
-    expected = _expected_cargo_version()
+    expected = active_version or _expected_cargo_version()
     if version == expected:
         result.pass_(CARGO_VERSION_GATE, f"Cargo version is {expected}")
     else:
         result.fail(CARGO_VERSION_GATE, f"version is {version}, expected {expected}")
 
 
-def check_release_package_workflow_version(result: ValidationResult) -> None:
+def check_release_package_workflow_version(
+    result: ValidationResult, active_version: str | None = None
+) -> None:
     """Verify tag package gates expect the active Cargo release version."""
     workflow = read(RELEASE_PACKAGES_WORKFLOW)
     if not workflow:
@@ -146,7 +161,7 @@ def check_release_package_workflow_version(result: ValidationResult) -> None:
         )
         return
     version = match.group(1)
-    expected = _expected_cargo_version()
+    expected = active_version or _expected_cargo_version()
     if version == expected:
         result.pass_(
             RELEASE_VERSION_GATE,
@@ -159,11 +174,23 @@ def check_release_package_workflow_version(result: ValidationResult) -> None:
         )
 
 
-def check_removed_directive(result: ValidationResult) -> None:
-    """Verify markdown_streaming_auto_threshold is absent from the command array."""
+def _read_directive_source(result: ValidationResult) -> str | None:
+    """Read and expand the live directive command table."""
     src = read(CONFIG_DIRECTIVES_H)
+    names = read(DIRECTIVE_NAMES_H)
     if not src:
         result.fail("prereq:directives", "config_directives_impl.h not found")
+        return None
+    if not names:
+        result.fail("prereq:directive_names", "directive_names.h not found")
+        return None
+    return expand_directive_macros(src, names)
+
+
+def check_removed_directive(result: ValidationResult) -> None:
+    """Verify markdown_streaming_auto_threshold is absent from the command array."""
+    src = _read_directive_source(result)
+    if src is None:
         return
     pattern = r'ngx_string\("markdown_streaming_auto_threshold"\)'
     if re.search(pattern, src):
@@ -232,19 +259,40 @@ def check_removed_conf_fields(result: ValidationResult) -> None:
             result.pass_(f"removed:field:{field_pat}", "absent from all sources")
 
 
-def check_new_directives(result: ValidationResult) -> None:
+def _is_release_09_or_newer(active_version: str | None) -> bool:
+    """Return whether an active version is the 0.9 release line or newer."""
+    match = re.match(
+        r"^v?(\d+)\.(\d+)(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$",
+        active_version or "",
+    )
+    if match is None:
+        return False
+    major, minor = (int(value) for value in match.groups())
+    return major > 0 or (major == 0 and minor >= 9)
+
+
+def check_new_directives(
+    result: ValidationResult, active_version: str | None = None
+) -> None:
     """Verify all v0.8.0 streaming directives are registered in the command array."""
-    src = read(CONFIG_DIRECTIVES_H)
-    if not src:
-        result.fail("prereq:directives", "config_directives_impl.h not found")
+    src = _read_directive_source(result)
+    if src is None:
         return
-    new_directives = [
-        "markdown_stream_threshold",
-        "markdown_stream_precommit_buffer",
-        "markdown_stream_flush_min",
-        "markdown_stream_excluded_types",
+
+    all_new_directives = [
+        ("markdown_stream_threshold", True),
+        ("markdown_stream_precommit_buffer", True),
+        ("markdown_stream_flush_min", True),
+        ("markdown_stream_excluded_types", False),
     ]
-    for directive in new_directives:
+    current_is_09_or_newer = _is_release_09_or_newer(active_version)
+    for directive, retired_after_08 in all_new_directives:
+        if current_is_09_or_newer and retired_after_08:
+            result.skip(
+                f"new:directive:{directive}",
+                f"not applicable to active release {active_version}",
+            )
+            continue
         pattern = rf'ngx_string\("{re.escape(directive)}"\)'
         if re.search(pattern, src):
             result.pass_(
@@ -358,14 +406,17 @@ def check_changelog(result: ValidationResult) -> None:
         result.fail("changelog:080", "CHANGELOG.md missing 0.8.0 section")
 
 
-def validate_all(result: ValidationResult) -> None:
+def validate_all(
+    result: ValidationResult, active_version: str | None = None
+) -> None:
     """Run every release gate check and record pass/fail in result."""
-    check_cargo_version(result)
-    check_release_package_workflow_version(result)
+    active_version = active_version or _expected_cargo_version()
+    check_cargo_version(result, active_version)
+    check_release_package_workflow_version(result, active_version)
     check_removed_directive(result)
     check_removed_constants(result)
     check_removed_conf_fields(result)
-    check_new_directives(result)
+    check_new_directives(result, active_version)
     check_select_processing_path(result)
     check_migration_doc(result)
     check_makefile_080_gate(result)
@@ -387,8 +438,15 @@ def print_report(result: ValidationResult) -> None:
 
 def main() -> int:
     """Entry point: run validation, print report, return exit code."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--active-version",
+        default=None,
+        help="Active release version; defaults to RELEASE_GATE_EXPECTED_CARGO_VERSION.",
+    )
+    args = parser.parse_args()
     result = ValidationResult()
-    validate_all(result)
+    validate_all(result, args.active_version)
     print_report(result)
     return 1 if result.has_failures else 0
 

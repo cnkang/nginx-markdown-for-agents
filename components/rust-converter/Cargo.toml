@@ -1,6 +1,6 @@
 [package]
 name = "nginx-markdown-converter"
-version = "0.9.1"
+version = "0.9.2"
 edition = "2024"
 rust-version = "1.97"
 authors = ["NGINX Markdown for Agents Contributors"]
@@ -18,7 +18,7 @@ html5ever = "0.39"
 # DOM tree representation
 markup5ever_rcdom = "0.39"
 # Fast hashing for ETags
-blake3 = "1.8"
+blake3 = "1.8.7"
 # Hex encoding for ETag generation
 hex = "0.4"
 # Regular expressions for charset detection

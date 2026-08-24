@@ -8,7 +8,7 @@ operator documentation, and harness reports.
 | Module | The NGINX C filter module. | Use when describing NGINX request, header, body, config, and metrics handling. |
 | Rust converter | The Rust HTML-to-Markdown library and FFI layer. | Use for parser, converter, charset, sanitizer, streaming, and ABI behavior. |
 | Full-buffer path | Conversion path that buffers the complete response before calling Rust. | Do not call this "legacy" unless discussing historical behavior. |
-| Incremental path | Large-response path backed by the Rust incremental API. | Retired in 0.9.0; the `markdown_large_body_threshold` directive is a reject-only stub with no direct Config V2 replacement. |
+| Incremental path | Large-response path backed by the Rust incremental API. | Retired in 0.9.0; the `markdown_large_body_threshold` directive was retired in 0.9.0 and removed in 0.9.2 — using it now reports an `unknown directive` error at `nginx -t` time. Distinct from `markdown_stream_threshold` (removed in 0.9.2, threshold internalized to fixed 1 MiB). See `markdown_streaming` and `markdown_limits` for current streaming and buffering controls. |
 | Streaming path | Chunked conversion path enabled by `MARKDOWN_STREAMING_ENABLED`. | Use for Pre-Commit/Post-Commit, backpressure, and streaming budget behavior. |
 | Fail-open | Error policy that serves original HTML after conversion cannot complete. | Pair with `markdown_error_policy pass`. |
 | Fail-closed | Error policy that returns an error response instead of original HTML. | Pair with `markdown_error_policy fail_closed`. |
@@ -16,7 +16,7 @@ operator documentation, and harness reports.
 | Post-Commit | Streaming phase after Markdown bytes have been sent downstream. | Use for truncated-response risks and post-commit error metrics. |
 | Decision chain | The ordered request/response checks that produce a reason code. | Use for eligibility, reason-code, and operator troubleshooting docs. |
 | Reason code | Stable snake_case outcome string emitted by the module. | Decision-chain codes are lowercase (e.g., `not_eligible`, `converted`, `failed_open`); streaming engine codes are uppercase (e.g., `STREAMING_CONVERT`, `ENGINE_STREAMING`). Use the exact emitted value. |
-| Metrics endpoint | HTTP endpoint enabled by `markdown_metrics`. | Specify output format: plain text, JSON, or Prometheus. |
+| Metrics endpoint | HTTP endpoint enabled by `markdown_metrics`. | The 0.9.2 public endpoint emits Prometheus text 0.0.4 only. |
 | Evidence pack | JSON artifact produced by performance evidence tooling. | Use for release-gate evidence, not ad hoc benchmark output. |
 
 ## Naming Style
@@ -24,12 +24,10 @@ operator documentation, and harness reports.
 - C functions, fields, and local variables use NGINX-style snake_case.
 - Rust public APIs use Rust naming conventions and Rustdoc comments.
 - Reason codes must match emitted log and metric labels exactly. Decision-chain
-  reason codes use lowercase snake_case; streaming engine reason codes use
+  reason codes use lowercase snake_case, streaming engine reason codes use
   uppercase snake_case.
-- JSON metric paths use dot notation in prose, for example
-  `streaming.postcommit_error_total`.
 - Prometheus examples use the full series name and labels, for example
-  `nginx_markdown_streaming_total{result="fallback"}`.
+  `nginx_markdown_requests_total{outcome="failed_open"}`.
 
 ## Document Updates
 

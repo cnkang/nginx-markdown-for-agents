@@ -12,20 +12,67 @@
  * on request-path orchestration.
  */
 
-/* Validate the Rust/C ABI, then reset state before parsing directives. */
+/* Validate the full Rust/C ABI 4-tuple handshake, then reset state. */
 static ngx_int_t
 ngx_http_markdown_preconfiguration(ngx_conf_t *cf)
 {
     uint32_t  actual_abi;
+    uint64_t  actual_header_hash;
+    uint64_t  actual_symbol_hash;
+    uint64_t  actual_layout_fp;
+    ngx_int_t mismatch;
 
+    mismatch = 0;
+
+    /* 1. Numeric ABI version */
     actual_abi = markdown_abi_version();
     if (!ngx_http_markdown_ffi_abi_matches(actual_abi)) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "markdown: Rust/C ABI mismatch "
-                           "(expected=%ui, actual=%ui); rebuild the module "
-                           "and bundled Rust converter together",
+                           "markdown: ABI handshake FAILED — numeric version "
+                           "mismatch (expected=%ui, actual=%ui)",
                            (ngx_uint_t) MARKDOWN_ABI_VERSION,
                            (ngx_uint_t) actual_abi);
+        mismatch = 1;
+    }
+
+    /* 2. Generated-header identity hash */
+    actual_header_hash = markdown_abi_header_hash();
+    if (actual_header_hash != MARKDOWN_HEADER_HASH) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "markdown: ABI handshake FAILED — header hash "
+                           "mismatch (expected=0x%016uxL, actual=0x%016uxL)",
+                           MARKDOWN_HEADER_HASH,
+                           actual_header_hash);
+        mismatch = 1;
+    }
+
+    /* 3. Exported-symbol-set hash */
+    actual_symbol_hash = markdown_abi_symbol_set_hash();
+    if (actual_symbol_hash != MARKDOWN_SYMBOL_SET_HASH) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "markdown: ABI handshake FAILED — symbol set hash "
+                           "mismatch (expected=0x%016uxL, actual=0x%016uxL)",
+                           MARKDOWN_SYMBOL_SET_HASH,
+                           actual_symbol_hash);
+        mismatch = 1;
+    }
+
+    /* 4. ABI struct layout fingerprint */
+    actual_layout_fp = markdown_abi_layout_fingerprint();
+    if (actual_layout_fp != MARKDOWN_LAYOUT_FINGERPRINT) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "markdown: ABI handshake FAILED — layout "
+                           "fingerprint mismatch "
+                           "(expected=0x%016uxL, actual=0x%016uxL)",
+                           MARKDOWN_LAYOUT_FINGERPRINT,
+                           actual_layout_fp);
+        mismatch = 1;
+    }
+
+    if (mismatch) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "markdown: Rust/C ABI handshake failed; rebuild "
+                           "the module and bundled Rust converter together");
         return NGX_ERROR;
     }
 
@@ -52,16 +99,17 @@ ngx_http_markdown_filter_init(ngx_conf_t *cf)
 
 /**
  * Initialize per-worker markdown resources: allocate a converter, attach the
- * shared metrics zone, optionally start the dynamic configuration watcher, and
- * apply any configured per-path metrics cardinality.
+ * shared metrics zone, and optionally start the dynamic configuration watcher.
  *
  * If the metrics shared-memory zone is unavailable or the converter cannot be
  * created, initialization fails.
  *
  * @param cycle Pointer to the nginx cycle (used for logging and to obtain the HTTP configuration).
  * @return NGX_OK on successful initialization;
- *         NGX_ERROR if the metrics shared-memory zone is missing or the converter creation fails.
- *         Note: failure to start the dynamic configuration watcher is logged as a warning but is non-fatal.
+ *         NGX_ERROR if the metrics shared-memory zone is missing, the converter
+ *         creation fails, or the dynamic-configuration watcher cannot be
+ *         started (a worker without the watcher would permanently diverge
+ *         from its peers on configuration reload).
  */
 static ngx_int_t
 ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
@@ -125,27 +173,35 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
 
         if (dynconf_conf != NULL
             && dynconf_conf->advanced.dynconf_enabled
-            && dynconf_conf->advanced.dynconf_path.len > 0
-            && ngx_http_markdown_dynconf_start(
-                   &ngx_http_markdown_dynconf_watcher,
-                   cycle, &dynconf_conf->advanced.dynconf_path,
-                   dynconf_conf, cycle->log)
-               != NGX_OK)
+            && dynconf_conf->advanced.dynconf_path.len > 0)
         {
-            ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
-                          "markdown: failed to start watcher");
-            /* Non-fatal: worker continues without hot-reload. */
+            ngx_http_markdown_dynconf_watcher.validation_summary =
+                mcf->loc_validation_summary;
+
+            if (ngx_http_markdown_dynconf_start(
+                    &ngx_http_markdown_dynconf_watcher,
+                    cycle, &dynconf_conf->advanced.dynconf_path,
+                    dynconf_conf, cycle->log) != NGX_OK)
+            {
+                ngx_log_error(NGX_LOG_CRIT, cycle->log, 0,
+                              "markdown: failed to start dynconf watcher; "
+                              "refusing to start worker without hot-reload "
+                              "(worker would permanently diverge from "
+                              "peers on configuration reload)");
+                return NGX_ERROR;
+            }
         }
 
         /*
-         * Wire per-path cardinality limit from the main configuration
-         * into the shared metrics struct.  This is a global (http-level)
-         * setting because the SHM metrics struct is process-wide.
+         * Per-path metrics removed from production in 0.9.2
+         * (unbounded cardinality risk).
          */
-        if (ngx_http_markdown_metrics != NULL && mcf != NULL) {
+#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
+        if (ngx_http_markdown_metrics != NULL) {
             ngx_http_markdown_metrics->per_path.cardinality_limit =
-                mcf->metrics_per_path_cardinality;
+                NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT;
         }
+#endif
     }
 
     return NGX_OK;
@@ -170,16 +226,16 @@ ngx_http_markdown_exit_worker(ngx_cycle_t *cycle)
     if (ngx_http_markdown_converter == NULL) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, cycle->log, 0,
                        "markdown: no converter to clean up in worker process");
-        return;
+    } else {
+        markdown_converter_free(ngx_http_markdown_converter);
+        ngx_http_markdown_converter = NULL;
+
+        ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
+                      "markdown: converter cleaned up in worker process (pid: %P)",
+                      ngx_pid);
     }
 
-    markdown_converter_free(ngx_http_markdown_converter);
-    ngx_http_markdown_converter = NULL;
     ngx_http_markdown_metrics = NULL;
-
-    ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
-                  "markdown: converter cleaned up in worker process (pid: %P)",
-                  ngx_pid);
 }
 
 #endif /* NGX_HTTP_MARKDOWN_LIFECYCLE_IMPL_H */

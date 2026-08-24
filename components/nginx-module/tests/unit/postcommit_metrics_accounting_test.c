@@ -18,6 +18,8 @@ typedef struct {
             ngx_atomic_t  output_bytes_total;
         } selection;
         ngx_atomic_t  streaming_failure_postcommit_abort;
+        ngx_atomic_t  streaming_failure_postcommit_safe_finish;
+        ngx_atomic_t  terminal_aborted_total;
     } streaming;
     struct {
         ngx_atomic_t  backpressure_total;
@@ -155,8 +157,36 @@ test_null_metrics_pointer_is_noop(void)
     ngx_http_markdown_metrics_record_postcommit_pending(4096);
     ngx_http_markdown_metrics_record_postcommit_copied_delivery(7);
     ngx_http_markdown_metrics_record_postcommit_abort();
+    ngx_http_markdown_metrics_record_postcommit_safe_finish();
+    ngx_http_markdown_metrics_record_terminal_abort();
 
     TEST_PASS("NULL metrics pointer is a no-op");
+}
+
+static void
+test_safe_finish_metric_increments(void)
+{
+    ngx_http_markdown_metrics_t  metrics;
+
+    memset(&metrics, 0, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ngx_http_markdown_metrics_record_postcommit_safe_finish();
+    TEST_ASSERT(metrics.streaming.streaming_failure_postcommit_safe_finish == 1,
+        "safe_finish() must increment its lifecycle counter");
+}
+
+static void
+test_terminal_abort_increments_total(void)
+{
+    ngx_http_markdown_metrics_t  metrics;
+
+    memset(&metrics, 0, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ngx_http_markdown_metrics_record_terminal_abort();
+    TEST_ASSERT(metrics.streaming.terminal_aborted_total == 1,
+        "terminal_abort() must increment terminal_aborted_total");
 }
 
 int
@@ -169,6 +199,8 @@ main(void)
     test_copied_delivery_accumulates_bytes_and_events();
     test_zero_copied_delivery_is_noop();
     test_abort_metric_increments_unconditionally();
+    test_safe_finish_metric_increments();
+    test_terminal_abort_increments_total();
     test_null_metrics_pointer_is_noop();
 
     TEST_PASS("postcommit production metric helper accounting");

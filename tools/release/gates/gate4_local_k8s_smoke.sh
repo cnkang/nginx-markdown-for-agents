@@ -235,10 +235,28 @@ validate_helm_lint() {
 
 validate_helm_template() {
     info "Running helm template (dry-run render)..."
+
+    # Zero-override render MUST fail: the chart has no default runtime
+    # image and Helm refuses to render the Deployment until both
+    # image.repository and image.tag are set (P1-4 Helm image contract).
+    local zero_override_out
+    if zero_override_out="$(helm template "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
+        --namespace "${HELM_NAMESPACE}" 2>&1)"; then
+        fail "helm template with zero overrides unexpectedly succeeded (image must be required)"
+        printf '%s\n' "$zero_override_out" >&2
+        return 1
+    fi
+    pass "helm template with zero overrides rejected (image.repository/image.tag required)"
+
+    # Render with an explicit stock-nginx image (the supported
+    # markdown.enabled=false path) and validate the rendered output.
     local rendered
     if ! rendered="$(helm template "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
-        --namespace "${HELM_NAMESPACE}" 2>&1)"; then
-        fail "helm template failed"
+        --namespace "${HELM_NAMESPACE}" \
+        --set image.repository=nginx \
+        --set image.tag=1.26.3 \
+        --set markdown.enabled=false 2>&1)"; then
+        fail "helm template with explicit image failed"
         printf '%s\n' "$rendered" >&2
         return 1
     fi
@@ -272,6 +290,13 @@ validate_helm_template() {
         checks_passed=$((checks_passed + 1))
     else
         fail "Rendered template missing emptyDir volumes"
+        checks_failed=$((checks_failed + 1))
+    fi
+
+    if printf '%s' "$rendered" | grep -q "image: nginx:1.26.3"; then
+        checks_passed=$((checks_passed + 1))
+    else
+        fail "Rendered template missing explicit image nginx:1.26.3"
         checks_failed=$((checks_failed + 1))
     fi
 

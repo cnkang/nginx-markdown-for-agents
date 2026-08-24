@@ -30,6 +30,11 @@
 #       to --head across all HTTP servers.  Per AGENTS.md Rule 18,
 #       prefer --head (-I) for HTTP HEAD validation.
 #
+#   (f) $? read inside a negated conditional body (Rule 11 / 6fcf1bb9)
+#       Inside `if ! cmd; then rc=$?`, bash's $? reflects the NEGATED
+#       status (always 0 when cmd failed), so the branch never observes
+#       the original exit code.  Capture with `cmd || rc=$?` instead.
+#
 # Rationale: 8+ fix commits in the review window addressed these three
 # patterns (0a43c15, 6fb0b1a, 698a2cb, 486a97a, f723235, e0f3948,
 # 495aa0e, a9ea852).  No prior automated detection existed.
@@ -107,6 +112,152 @@ readonly WARNING_ALLOWLIST=(
     # Terminal helpers deliberately exit the entire benchmark process.
     "tools/perf/run_module_benchmark.sh:return:usage:function exits with caller-selected status; return is unreachable"
     "tools/perf/run_module_benchmark.sh:return:die:function exits with status 1; return is unreachable"
+"packaging/nfpm/scripts/postinstall.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/nfpm/scripts/postinstall.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/nfpm/scripts/postinstall.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/nfpm/scripts/postinstall.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/nfpm/scripts/postinstall.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/nfpm/scripts/preremove.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/nfpm/scripts/preremove.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/nfpm/scripts/preremove.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/nfpm/scripts/preremove.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/nfpm/scripts/preremove.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/build-apt-repo.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/build-apt-repo.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/build-apt-repo.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/build-apt-repo.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/build-apt-repo.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/build-yum-repo.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/build-yum-repo.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/build-yum-repo.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/build-yum-repo.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/build-yum-repo.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/generate-checksums.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/generate-checksums.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/generate-checksums.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/generate-checksums.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/generate-checksums.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/gpg-sign-checksums.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/gpg-sign-checksums.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/gpg-sign-checksums.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/gpg-sign-checksums.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/gpg-sign-checksums.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/install-verified-rustup.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/install-verified-rustup.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/install-verified-rustup.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/install-verified-rustup.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/install-verified-rustup.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/sign-packages.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/sign-packages.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/sign-packages.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/sign-packages.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/sign-packages.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/sign-repo-metadata.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/sign-repo-metadata.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/sign-repo-metadata.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/sign-repo-metadata.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/sign-repo-metadata.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/smoke-test-basic.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/smoke-test-basic.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/smoke-test-basic.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/smoke-test-basic.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/smoke-test-basic.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/smoke-test-diagnostics.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/smoke-test-diagnostics.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/smoke-test-diagnostics.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/smoke-test-diagnostics.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/smoke-test-diagnostics.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/validate-version.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/validate-version.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/validate-version.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/validate-version.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/validate-version.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/verify-checksum.sh:return:info:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/verify-checksum.sh:return:warn:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/verify-checksum.sh:return:err:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/verify-checksum.sh:return:diag:trivial echo-only logger; implicit return is always 0"
+"packaging/scripts/verify-checksum.sh:return:section:trivial echo-only logger; implicit return is always 0"
+"packaging/tests/test-deb-install.sh:return:pass:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-deb-install.sh:return:fail:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-deb-install.sh:return:fake_nginx:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-deb-install.sh:return:diag:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-deb-install.sh:return:err:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-deb-package.sh:return:pass:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-deb-package.sh:return:fail:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-deb-package.sh:return:fake_nginx:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-deb-package.sh:return:diag:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-deb-package.sh:return:err:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-gpg-verify.sh:return:pass:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-gpg-verify.sh:return:fail:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-gpg-verify.sh:return:fake_nginx:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-gpg-verify.sh:return:diag:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-gpg-verify.sh:return:err:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-preinstall-version-policy.sh:return:pass:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-preinstall-version-policy.sh:return:fail:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-preinstall-version-policy.sh:return:fake_nginx:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-preinstall-version-policy.sh:return:diag:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-preinstall-version-policy.sh:return:err:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-repo-signatures.sh:return:pass:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-repo-signatures.sh:return:fail:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-repo-signatures.sh:return:fake_nginx:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-repo-signatures.sh:return:diag:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-repo-signatures.sh:return:err:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-rpm-install.sh:return:pass:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-rpm-install.sh:return:fail:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-rpm-install.sh:return:fake_nginx:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-rpm-install.sh:return:diag:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-rpm-install.sh:return:err:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-rpm-package.sh:return:pass:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-rpm-package.sh:return:fail:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-rpm-package.sh:return:fake_nginx:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-rpm-package.sh:return:diag:test harness helper; implicit return of echo/printf is always 0"
+"packaging/tests/test-rpm-package.sh:return:err:test harness helper; implicit return of echo/printf is always 0"
+"packaging/nfpm/scripts/postinstall.sh:return:die:function calls exit; return is unreachable"
+"packaging/nfpm/scripts/postinstall.sh:return:usage:function calls exit; return is unreachable"
+"packaging/nfpm/scripts/preremove.sh:return:die:function calls exit; return is unreachable"
+"packaging/nfpm/scripts/preremove.sh:return:usage:function calls exit; return is unreachable"
+"packaging/scripts/build-apt-repo.sh:return:die:function calls exit; return is unreachable"
+"packaging/scripts/build-apt-repo.sh:return:usage:function calls exit; return is unreachable"
+"packaging/scripts/build-yum-repo.sh:return:die:function calls exit; return is unreachable"
+"packaging/scripts/build-yum-repo.sh:return:usage:function calls exit; return is unreachable"
+"packaging/scripts/generate-checksums.sh:return:die:function calls exit; return is unreachable"
+"packaging/scripts/generate-checksums.sh:return:usage:function calls exit; return is unreachable"
+"packaging/scripts/gpg-sign-checksums.sh:return:die:function calls exit; return is unreachable"
+"packaging/scripts/gpg-sign-checksums.sh:return:usage:function calls exit; return is unreachable"
+"packaging/scripts/install-verified-rustup.sh:return:die:function calls exit; return is unreachable"
+"packaging/scripts/install-verified-rustup.sh:return:usage:function calls exit; return is unreachable"
+"packaging/scripts/sign-packages.sh:return:die:function calls exit; return is unreachable"
+"packaging/scripts/sign-packages.sh:return:usage:function calls exit; return is unreachable"
+"packaging/scripts/sign-repo-metadata.sh:return:die:function calls exit; return is unreachable"
+"packaging/scripts/sign-repo-metadata.sh:return:usage:function calls exit; return is unreachable"
+"packaging/scripts/smoke-test-basic.sh:return:die:function calls exit; return is unreachable"
+"packaging/scripts/smoke-test-basic.sh:return:usage:function calls exit; return is unreachable"
+"packaging/scripts/smoke-test-diagnostics.sh:return:die:function calls exit; return is unreachable"
+"packaging/scripts/smoke-test-diagnostics.sh:return:usage:function calls exit; return is unreachable"
+"packaging/scripts/validate-version.sh:return:die:function calls exit; return is unreachable"
+"packaging/scripts/validate-version.sh:return:usage:function calls exit; return is unreachable"
+"packaging/scripts/verify-checksum.sh:return:die:function calls exit; return is unreachable"
+"packaging/scripts/verify-checksum.sh:return:usage:function calls exit; return is unreachable"
+"packaging/tests/test-deb-install.sh:return:die:function calls exit; return is unreachable"
+"packaging/tests/test-deb-install.sh:return:usage:function calls exit; return is unreachable"
+"packaging/tests/test-deb-package.sh:return:die:function calls exit; return is unreachable"
+"packaging/tests/test-deb-package.sh:return:usage:function calls exit; return is unreachable"
+"packaging/tests/test-gpg-verify.sh:return:die:function calls exit; return is unreachable"
+"packaging/tests/test-gpg-verify.sh:return:usage:function calls exit; return is unreachable"
+"packaging/tests/test-preinstall-version-policy.sh:return:die:function calls exit; return is unreachable"
+"packaging/tests/test-preinstall-version-policy.sh:return:usage:function calls exit; return is unreachable"
+"packaging/tests/test-repo-signatures.sh:return:die:function calls exit; return is unreachable"
+"packaging/tests/test-repo-signatures.sh:return:usage:function calls exit; return is unreachable"
+"packaging/tests/test-rpm-install.sh:return:die:function calls exit; return is unreachable"
+"packaging/tests/test-rpm-install.sh:return:usage:function calls exit; return is unreachable"
+"packaging/tests/test-rpm-package.sh:return:die:function calls exit; return is unreachable"
+"packaging/tests/test-rpm-package.sh:return:usage:function calls exit; return is unreachable"
+"packaging/tests/test-deb-install.sh:return:run_diagnostics:diagnostic dump helper; last statement is a command whose return is the function result"
+"packaging/tests/test-deb-install.sh:return:check_prerequisites:prereq check helper under set -e; command returns are meaningful"
+"packaging/tests/test-deb-install.sh:return:append_sorted_file:list mutation helper; printf return is always 0"
+    # ── packaging/ scripts and tests (Rule 18 sweep of packaging/ scope) ──
+    "packaging/scripts/smoke-test-basic.sh:return:run_diagnostics:diagnostic dump helper; last statement is a command whose return is the function result"
+    "packaging/tests/test-gpg-verify.sh:return:check_prerequisites:prereq check helper under set -e; command returns are meaningful"
     # ── tools/perf/memory_observer.sh ──
     # usage() calls exit 1 — never actually returns; implicit return is unreachable
     "tools/perf/memory_observer.sh:return:usage:function calls exit 1; return is unreachable"
@@ -116,6 +267,12 @@ readonly WARNING_ALLOWLIST=(
 # Format: "relative/path"
 # (Legacy array kept for backward compat with scanning loop)
 readonly RETURN_EXEMPT_FILES=(
+)
+
+# Files exempt from pattern (f) ($? inside negated conditionals):
+# fixture tests intentionally embed the defect shapes they assert on.
+readonly NEGATION_EXEMPT_FILES=(
+    "tools/harness/tests/test_detect_shell_hygiene.sh"
 )
 
 echo "=== Shell Hygiene Detection (S7682 / S7688 / S131 / S1066 / Rule 18) ===" >&2
@@ -220,7 +377,7 @@ while IFS= read -r match; do
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
     # Skip comment lines
-    if echo "$content" | grep -qE '^\s*#'; then
+    if echo "$content" | grep -qE '^[[:space:]]*#'; then
         continue
     fi
     # Skip grep/test assertions that match the pattern but are not output
@@ -273,11 +430,11 @@ while IFS= read -r match; do
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
     # Skip comment lines
-    if echo "$content" | grep -qE '^\s*#'; then
+    if echo "$content" | grep -qE '^[[:space:]]*#'; then
         continue
     fi
     # Skip lines inside echo/printf (reporting the pattern itself)
-    if echo "$content" | grep -qE '^\s*(echo|printf)'; then
+    if echo "$content" | grep -qE '^[[:space:]]*(echo|printf)'; then
         continue
     fi
     # Skip test assertions that grep for bracket patterns
@@ -373,7 +530,7 @@ while IFS= read -r match; do
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
     # Skip comment lines (lines starting with # or echo of description strings)
-    if echo "$content" | grep -qE '^\s*#'; then
+    if echo "$content" | grep -qE '^[[:space:]]*#'; then
         continue
     fi
     # Skip echo statements that are reporting the pattern itself (self-reference)
@@ -390,6 +547,135 @@ while IFS= read -r match; do
 done < <(grep -rnE 'curl[[:space:]].*-X[[:space:]]+HEAD' "$SCAN_DIR" --include='*.sh' 2>/dev/null || true)
 
 if [[ "$curl_head_hits" -eq 0 ]]; then
+    echo "$MSG_NONE_FOUND" >&2
+fi
+echo "" >&2
+
+# ── Pattern (f): $? read inside a negated conditional body ──
+#
+# Inside `if ! cmd; then ... $? ...; fi`, bash's $? reflects the negated
+# status, so the original exit code is unobservable.  Per AGENTS.md
+# Rules 11/18 and fix 6fcf1bb9, capture with `cmd || rc=$?` instead.
+echo "--- Pattern (f): \$? inside negated conditional body ---"
+
+negation_hits=0
+while IFS= read -r script_file; do
+    # Fixture tests intentionally embed defect shapes; exempt them.
+    skip_negation=0
+    for exempt in ${NEGATION_EXEMPT_FILES[@]+"${NEGATION_EXEMPT_FILES[@]}"}; do
+        if [[ "$script_file" == *"$exempt"* ]]; then
+            skip_negation=1
+            break
+        fi
+    done
+    if [[ "$skip_negation" -eq 1 ]]; then
+        continue
+    fi
+    # Single-line form first: `if ! cmd; then rc=$?; fi`
+    while IFS=: read -r hit_line hit_content; do
+        [[ -z "$hit_line" ]] && continue
+        # Skip the prescribed capture idiom `|| rc=$?`.
+        if [[ "$hit_content" =~ \|\|[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=[\"]?\$\? ]]; then
+            continue
+        fi
+        echo "  ERROR   ${script_file}:${hit_line} — \$? inside a negated conditional reads the negated status; capture with 'cmd || rc=\$?': ${hit_content}" >&2
+        errors=$((errors + 1))
+        negation_hits=$((negation_hits + 1))
+    done < <(grep -nE '^[[:space:]]*(if|elif|while|until)[[:space:]]+!.*\$\?' "$script_file" 2>/dev/null || true)
+
+    # Multi-line form: track open negated conditions across lines.
+    while IFS=: read -r hit_line hit_content; do
+        [[ -z "$hit_line" ]] && continue
+        echo "  ERROR   ${script_file}:${hit_line} — \$? inside a negated conditional body reads the negated status; capture with 'cmd || rc=\$?': ${hit_content}" >&2
+        errors=$((errors + 1))
+        negation_hits=$((negation_hits + 1))
+    done < <(awk '
+        BEGIN { depth = 0 }
+        {
+            line = $0
+            trimmed = line
+            sub(/^[[:space:]]+/, "", trimmed)
+
+            is_comment = (trimmed ~ /^#/)
+            is_fi = (trimmed ~ /^fi([[:space:];)]|$)/)
+            is_else = (trimmed ~ /^else([[:space:];)]|$)/)
+            is_elif = (trimmed ~ /^elif([[:space:]]|$)/)
+            is_done = (trimmed ~ /^done([[:space:];)]|$)/)
+            is_esac = (trimmed ~ /^esac([[:space:];)]|$)/)
+            is_if = (trimmed ~ /^if([[:space:];]|$)/)
+            is_loop = (trimmed ~ /^(while|until|for)([[:space:];]|$)/)
+            is_case = (trimmed ~ /^case([[:space:];]|$)/)
+            is_negopen = (trimmed ~ /^(if|while|until)[[:space:]]+!/)
+            is_elifneg = (trimmed ~ /^elif[[:space:]]+!/)
+            has_then = (line ~ /(^|[;[:space:]])then([;[:space:]]|$)/)
+            has_do = (line ~ /(^|[;[:space:]])do([;[:space:]]|$)/)
+
+            active = 0
+            for (i = 1; i <= depth; i++) {
+                if (block_neg[i] && block_active[i]) {
+                    active = 1
+                }
+            }
+            if (active && !is_comment && line ~ /\$\?/ \
+                && !(is_negopen || is_elifneg) \
+                && (line !~ /\|\|[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*\$\?/)) {
+                print NR ":" line
+            }
+
+            if (is_fi || is_done || is_esac) {
+                if (depth > 0) {
+                    delete block_type[depth]
+                    delete block_neg[depth]
+                    delete block_active[depth]
+                    depth--
+                }
+                next
+            }
+            if (is_else) {
+                if (depth > 0 && block_type[depth] == "if") {
+                    block_active[depth] = 0
+                }
+                next
+            }
+            if (is_elif) {
+                if (depth > 0 && block_type[depth] == "if") {
+                    block_neg[depth] = is_elifneg
+                    block_active[depth] = has_then
+                }
+                next
+            }
+            if (is_if) {
+                depth++
+                block_type[depth] = "if"
+                block_neg[depth] = is_negopen
+                block_active[depth] = has_then
+                next
+            }
+            if (is_loop) {
+                depth++
+                block_type[depth] = "loop"
+                block_neg[depth] = is_negopen
+                block_active[depth] = has_do
+                next
+            }
+            if (is_case) {
+                depth++
+                block_type[depth] = "case"
+                block_neg[depth] = 0
+                block_active[depth] = 0
+                next
+            }
+            if (has_then && depth > 0 && block_type[depth] == "if") {
+                block_active[depth] = 1
+            }
+            if (has_do && depth > 0 && block_type[depth] == "loop") {
+                block_active[depth] = 1
+            }
+        }
+    ' "$script_file" 2>/dev/null || true)
+done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
+
+if [[ "$negation_hits" -eq 0 ]]; then
     echo "$MSG_NONE_FOUND" >&2
 fi
 echo "" >&2

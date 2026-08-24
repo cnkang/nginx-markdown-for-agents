@@ -28,6 +28,14 @@ def _write_valid_fixture(root: Path) -> None:
             "steps:\n  - uses: dtolnay/rust-toolchain@sha\n"
             "    with:\n      toolchain: nightly\n",
         )
+    for path in baseline.OBSERVATION_ACTION_WORKFLOWS:
+        _write(
+            root / path,
+            "steps:\n  - uses: dtolnay/rust-toolchain@sha\n"
+            "    with:\n      toolchain: 1.97.0\n"
+            "  - uses: dtolnay/rust-toolchain@sha\n"
+            "    with:\n      toolchain: nightly\n",
+        )
     for path in baseline.RELEASE_WORKFLOWS:
         _write(root / path, "env:\n  RUST_TOOLCHAIN: 1.97.0\n")
     for path in baseline.RELEASE_DOCKERFILES:
@@ -36,10 +44,6 @@ def _write_valid_fixture(root: Path) -> None:
             "COPY rust-toolchain.toml /src/rust-toolchain.toml\n"
             "RUN rustup toolchain install\n",
         )
-    _write(
-        root / "packaging/debian/control",
-        "Build-Depends: cargo, rustc (>= 1.97), nginx-dev\n",
-    )
     for path in baseline.CURRENT_BUILD_DOCS:
         _write(root / path, "Source builds require Rust 1.97.0 or newer.\n")
 

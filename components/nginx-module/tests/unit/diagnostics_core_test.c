@@ -200,6 +200,7 @@ typedef struct {
     const char   *conditional_result;
     const char   *conversion_status;
     const char   *reason_code;
+    const char   *stage;
     ngx_msec_t    duration_ms;
 } ngx_http_markdown_decision_path_t;
 

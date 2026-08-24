@@ -65,7 +65,8 @@ struct ngx_list_part_s {
 };
 
 typedef struct {
-    ngx_list_part_t part;
+    ngx_list_part_t *last;
+    ngx_list_part_t  part;
     size_t size;
     ngx_uint_t nalloc;
     void *pool;
@@ -87,11 +88,16 @@ typedef struct {
     ngx_str_t content_type;
     ngx_str_t charset;
     size_t content_type_len;
+    u_char *content_type_lowcase;
+    ngx_uint_t content_type_hash;
     off_t content_length_n;
+    time_t last_modified_time;
     ngx_table_elt_t *etag;
+    ngx_table_elt_t *last_modified;
     ngx_table_elt_t *content_encoding;
     ngx_table_elt_t *accept_ranges;
     ngx_list_t headers;
+    ngx_list_t trailers;
 } ngx_http_headers_out_t;
 
 typedef struct {
@@ -117,7 +123,6 @@ typedef struct {
         ngx_flag_t generate_etag;
         ngx_uint_t conditional_requests;
     } policy;
-    ngx_flag_t buffer_chunked;
     void *stream_types;
 } ngx_http_markdown_conf_t;
 
@@ -135,12 +140,21 @@ typedef struct MarkdownResult {
 
 /* ── Mock implementations for headers_impl.h ──────────────────── */
 
+static int g_pnalloc_call_count;
+static int g_fail_pnalloc_call;
+
 void *
 ngx_pnalloc(ngx_pool_t *pool, size_t size)
 {
     pool_alloc_t *node;
     void *ptr;
     if (pool == NULL) {
+        return NULL;
+    }
+    g_pnalloc_call_count++;
+    if (g_fail_pnalloc_call > 0
+        && g_pnalloc_call_count == g_fail_pnalloc_call)
+    {
         return NULL;
     }
     ptr = malloc(size);
@@ -448,6 +462,7 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
 static void
 init_headers_list(ngx_list_t *list, ngx_uint_t capacity)
 {
+    list->last = &list->part;
     list->size = sizeof(ngx_table_elt_t);
     list->nalloc = capacity;
     list->pool = NULL;
@@ -483,6 +498,7 @@ new_request(void)
     r.pool = pool;
     r.connection = conn;
     init_headers_list(&r.headers_out.headers, 32);
+    init_headers_list(&r.headers_out.trailers, 4);
     return r;
 }
 
@@ -495,6 +511,9 @@ free_request(ngx_http_request_t *r)
     free(r->headers_out.headers.part.elts);
     r->headers_out.headers.part.elts = NULL;
     r->headers_out.headers.part.nelts = 0;
+    free(r->headers_out.trailers.part.elts);
+    r->headers_out.trailers.part.elts = NULL;
+    r->headers_out.trailers.part.nelts = 0;
     free(r->connection);
     r->connection = NULL;
     destroy_pool(r->pool);
@@ -502,13 +521,14 @@ free_request(ngx_http_request_t *r)
 }
 
 static ngx_table_elt_t *
-push_header(ngx_http_request_t *r, const char *key, const char *value)
+push_header_to_list(ngx_pool_t *pool, ngx_list_t *list,
+                    const char *key, const char *value)
 {
     size_t key_data_len = test_cstrnlen(key, 256);
     size_t val_data_len = test_cstrnlen(value, 512);
-    char *key_copy = (char *) ngx_pnalloc(r->pool, key_data_len + 1);
-    char *val_copy = (char *) ngx_pnalloc(r->pool, val_data_len + 1);
-    ngx_table_elt_t *h = ngx_list_push(&r->headers_out.headers);
+    char *key_copy = (char *) ngx_pnalloc(pool, key_data_len + 1);
+    char *val_copy = (char *) ngx_pnalloc(pool, val_data_len + 1);
+    ngx_table_elt_t *h = ngx_list_push(list);
     TEST_ASSERT(h != NULL, "header list push failed");
     TEST_ASSERT(key_copy != NULL, "alloc key failed");
     TEST_ASSERT(val_copy != NULL, "alloc value failed");
@@ -520,6 +540,12 @@ push_header(ngx_http_request_t *r, const char *key, const char *value)
     h->value.data = (u_char *) val_copy;
     h->value.len = val_data_len;
     return h;
+}
+
+static ngx_table_elt_t *
+push_header(ngx_http_request_t *r, const char *key, const char *value)
+{
+    return push_header_to_list(r->pool, &r->headers_out.headers, key, value);
 }
 
 static ngx_table_elt_t *
@@ -927,8 +953,13 @@ test_304_response_properties(void)
      * by e2e tests instead:
      * - Status: 304 (NGX_HTTP_NOT_MODIFIED)
      * - Body: absent (send_304 finalizes without body)
-     * - Cache-Control: preserved from upstream (send_304 does not modify)
-     * - Last-Modified: preserved from upstream (send_304 does not modify)
+     * - Cache-Control: authenticated responses are normalized through the
+     *   shared auth helper before send_304 sends headers; no-store remains
+     *   preserved. The auth-cache e2e covers this production-only branch.
+     * - Last-Modified: REMOVED by send_304 (Decision G: the converted
+     *   representation's weak validator must not describe the source
+     *   HTML mtime; ETag is the sole validator) — see conditional.c
+     *   send_304 and conversion_impl.h resolve_conditional_result
      */
 
     free_request(&r);
@@ -1099,6 +1130,62 @@ test_head_response_parity(void)
 
     free_request(&r);
     TEST_PASS("HEAD response header parity with GET verified");
+}
+
+static void
+test_head_vary_failure_rolls_back_headers(void)
+{
+    ngx_http_request_t  r = new_request();
+    ngx_table_elt_t    *etag;
+    ngx_table_elt_t    *vary;
+    ngx_table_elt_t    *trailer;
+    ngx_int_t           rc;
+    static u_char       original_content_type[] = "text/html";
+
+    TEST_SUBSECTION("HEAD Vary allocation failure rolls back headers");
+
+    etag = push_header(&r, "ETag", "\"html-etag\"");
+    vary = push_header(&r, "Vary", "User-Agent");
+    trailer = push_header_to_list(r.pool, &r.headers_out.trailers,
+                                  "Digest", "sha-256=upstream");
+    r.headers_out.content_type.data = original_content_type;
+    r.headers_out.content_type.len = sizeof(original_content_type) - 1;
+    r.headers_out.content_type_len = sizeof(original_content_type) - 1;
+    r.headers_out.content_length_n = 2048;
+    r.headers_out.etag = etag;
+    r.allow_ranges = 1;
+
+    /* Snapshot allocation succeeds; Vary append allocation fails. */
+    g_pnalloc_call_count = 0;
+    g_fail_pnalloc_call = 2;
+    rc = ngx_http_markdown_head_representation_headers(&r);
+    g_fail_pnalloc_call = 0;
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "HEAD header rewrite reports Vary allocation failure");
+    TEST_ASSERT(r.headers_out.content_type.data == original_content_type,
+                "HEAD failure restores Content-Type storage");
+    TEST_ASSERT(r.headers_out.content_type.len
+                    == sizeof(original_content_type) - 1,
+                "HEAD failure restores Content-Type length");
+    TEST_ASSERT(r.headers_out.content_length_n == 2048,
+                "HEAD failure restores Content-Length");
+    TEST_ASSERT(r.headers_out.etag == etag && etag->hash != 0,
+                "HEAD failure restores ETag header state");
+    TEST_ASSERT(vary->value.len == sizeof("User-Agent") - 1
+                    && memcmp(vary->value.data, "User-Agent",
+                              sizeof("User-Agent") - 1) == 0,
+                "HEAD failure restores Vary value");
+    TEST_ASSERT(r.allow_ranges == 1,
+                "HEAD failure restores range support");
+    TEST_ASSERT(trailer->hash != 0
+                    && trailer->value.len == sizeof("sha-256=upstream") - 1
+                    && memcmp(trailer->value.data, "sha-256=upstream",
+                              sizeof("sha-256=upstream") - 1) == 0,
+                "HEAD failure restores actual trailer entry");
+
+    free_request(&r);
+    TEST_PASS("HEAD Vary failure rollback verified");
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1613,6 +1700,7 @@ main(void)
     /* HEAD request handling */
     test_head_routes_to_fullbuffer();
     test_head_response_parity();
+    test_head_vary_failure_rolls_back_headers();
 
     /* Content-Type and Content-Length consistency */
     test_content_type_and_length();

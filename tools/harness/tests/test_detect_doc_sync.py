@@ -27,14 +27,6 @@ static ngx_command_t commands[] = {
         0,
         NULL
     },
-    {
-        ngx_string("markdown_streaming_engine"),
-        NGX_CONF_TAKE1,
-        ngx_http_markdown_reject_streaming_engine,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        0,
-        NULL
-    },
 };
 """,
     )
@@ -64,6 +56,11 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     )
     _write(
         root,
+        detector.DIRECTIVE_NAMES_PATH,
+        '#define NGX_HTTP_MARKDOWN_DIRECTIVE_STREAMING "markdown_streaming"\n',
+    )
+    _write(
+        root,
         detector.CHART_TEMPLATE_PATH,
         "markdown_streaming {{ .Values.markdown.streaming.mode }};\n",
     )
@@ -79,18 +76,21 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 | `markdown_streaming_engine off;` | `markdown_streaming off;` |
 | `markdown_streaming_engine auto;` | `markdown_streaming auto;` |
 | `markdown_streaming_engine on;` | `markdown_streaming force;` |
+
+The requested policy is `markdown_streaming off | auto | force`.
+`markdown_limits conversion_memory=64m conversion_timeout=10s` sets the
+conversion budget; `markdown_limits streaming_buffer=2m` bounds streaming.
 """,
     )
     _write(
         root,
         detector.PUBLIC_INVENTORY_PATH,
         """
-There are 2 `markdown_*` command-table entries: 1 active parser entries and
-1 reject-only migration entries.
+There are 1 `markdown_*` command-table entries: 1 active parser entries and
+0 reject-only migration entries.
 
 ### Reject-only migration directives
 
-| `markdown_streaming_engine` | `markdown_streaming` |
 """,
     )
     _write(root, detector.STREAMING_TROUBLESHOOTING_PATH, "canonical example\n")
@@ -118,23 +118,6 @@ def test_public_config_contract_accepts_canonical_fixture(tmp_path: Path) -> Non
     _write_valid_fixture(tmp_path)
 
     assert detector.check_public_config_contract(tmp_path) == []
-
-
-def test_reject_only_directive_cannot_bind_enum_slot(tmp_path: Path) -> None:
-    _write_valid_fixture(tmp_path)
-    path = tmp_path / detector.DIRECTIVES_PATH
-    content = path.read_text(encoding="utf-8").replace(
-        "ngx_http_markdown_reject_streaming_engine,\n"
-        "        NGX_HTTP_LOC_CONF_OFFSET,\n        0,\n        NULL",
-        "ngx_conf_set_enum_slot,\n        NGX_HTTP_LOC_CONF_OFFSET,\n"
-        "        offsetof(conf_t, stream_engine),\n        stream_engine_values",
-    )
-    path.write_text(content, encoding="utf-8")
-
-    errors = detector.check_public_config_contract(tmp_path)
-
-    assert any("must bind only" in error for error in errors)
-    assert any("must not bind an enum table" in error for error in errors)
 
 
 def test_removed_production_symbol_is_blocked_in_untracked_file(tmp_path: Path) -> None:
@@ -192,17 +175,20 @@ def test_flavor_handler_cannot_reactivate_mdx(tmp_path: Path) -> None:
     assert any("explicitly reject both mdx" in error for error in errors)
 
 
-def test_configuration_guide_requires_exact_on_to_force_mapping(tmp_path: Path) -> None:
+def test_configuration_guide_requires_frozen_streaming_policy_fragment(tmp_path: Path) -> None:
+    """The configuration guide must keep the frozen streaming policy
+    fragment exactly; replacing `force` with `on` violates the contract."""
     _write_valid_fixture(tmp_path)
     path = tmp_path / detector.CONFIGURATION_GUIDE_PATH
     content = path.read_text(encoding="utf-8").replace(
-        "markdown_streaming force;", "markdown_streaming on;"
+        "markdown_streaming off | auto | force",
+        "markdown_streaming off | auto | on",
     )
     path.write_text(content, encoding="utf-8")
 
     errors = detector.check_public_config_contract(tmp_path)
 
-    assert any("on -> markdown_streaming force" in error for error in errors)
+    assert any("missing frozen explicit contract fragment" in error for error in errors)
 
 
 def test_public_inventory_counts_must_match_directive_table(tmp_path: Path) -> None:
@@ -210,7 +196,7 @@ def test_public_inventory_counts_must_match_directive_table(tmp_path: Path) -> N
     path = tmp_path / detector.PUBLIC_INVENTORY_PATH
     path.write_text(
         path.read_text(encoding="utf-8").replace(
-            "2 `markdown_*`", "3 `markdown_*`"
+            "1 `markdown_*`", "3 `markdown_*`"
         ),
         encoding="utf-8",
     )
@@ -241,12 +227,11 @@ def test_reject_only_otel_directive_requires_reject_only_docs(tmp_path: Path) ->
     inventory = tmp_path / detector.PUBLIC_INVENTORY_PATH
     inventory.write_text(
         """
-There are 3 `markdown_*` command-table entries: 1 active parser entries and
-2 reject-only migration entries.
+There are 2 `markdown_*` command-table entries: 1 active parser entries and
+1 reject-only migration entries.
 
 ### Reject-only migration directives
 
-| `markdown_streaming_engine` | migration |
 | `markdown_otel_metrics` | migration |
 """,
         encoding="utf-8",
@@ -255,6 +240,66 @@ There are 3 `markdown_*` command-table entries: 1 active parser entries and
     errors = detector.check_public_config_contract(tmp_path)
 
     assert any("markdown_otel_metrics must be documented" in error for error in errors)
+
+
+def test_migration_removed_table_requires_row_with_replacement(tmp_path: Path) -> None:
+    """A reject-only directive must appear as a ROW in the MIGRATION removed
+    table with a non-empty replacement; a prose mention alone is not enough
+   ."""
+    _write_valid_fixture(tmp_path)
+    directives = tmp_path / detector.DIRECTIVES_PATH
+    content = directives.read_text(encoding="utf-8").replace(
+        "};\n",
+        """\n    {
+        ngx_string("markdown_otel_metrics"),
+        NGX_CONF_FLAG,
+        ngx_http_markdown_reject_otel_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        hint
+    },
+};
+""",
+    )
+    directives.write_text(content, encoding="utf-8")
+
+    # Prose mention only, no table row -> must be flagged.
+    migration = tmp_path / detector.MIGRATION_GUIDE_PATH
+    migration.write_text(
+        "`markdown_otel_metrics` is removed in 0.9.2.\n",
+        encoding="utf-8",
+    )
+    errors = detector.check_public_config_contract(tmp_path)
+    assert any(
+        "markdown_otel_metrics is missing" in error for error in errors
+    ), "prose mention must not satisfy the removed-table check"
+
+    # Table row with empty replacement -> must be flagged.
+    migration.write_text(
+        "| Removed Directive | Replacement |\n"
+        "|---|---|\n"
+        "| `markdown_otel_metrics` |  |\n",
+        encoding="utf-8",
+    )
+    errors = detector.check_public_config_contract(tmp_path)
+    assert any(
+        "markdown_otel_metrics has an empty replacement" in error for error in errors
+    ), "empty replacement cell must be flagged"
+
+    # Complete row -> no MIGRATION-table error (other contract checks may
+    # still flag the fixture, which lacks inventory/reject-only docs for the
+    # added directive — scope the assertion to the migration check only).
+    migration.write_text(
+        "| Removed Directive | Replacement |\n"
+        "|---|---|\n"
+        "| `markdown_otel_metrics` | Removed (use NGINX native OTel) |\n",
+        encoding="utf-8",
+    )
+    errors = detector.check_public_config_contract(tmp_path)
+    assert not any("MIGRATION-0.9.2.md" in error for error in errors), (
+        "complete table row must satisfy the removed-table check: "
+        + str([e for e in errors if "MIGRATION-0.9.2.md" in e])
+    )
 
 
 def test_diagnostics_example_rejects_non_production_fields(tmp_path: Path) -> None:

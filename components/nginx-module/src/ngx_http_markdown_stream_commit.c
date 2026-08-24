@@ -30,6 +30,9 @@
  *   header send, no partial Markdown response may be committed.
  */
 
+#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
+#endif
 #include "ngx_http_markdown_stream_commit.h"
 
 
@@ -286,8 +289,8 @@ ngx_http_markdown_stream_commit_remove_etag(
     ngx_http_request_t *r);
 
 static ngx_int_t
-ngx_http_markdown_stream_commit_apply_auth_cache_control(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
+ngx_http_markdown_stream_commit_remove_representation_metadata(
+    ngx_http_request_t *r);
 
 
 /*
@@ -300,8 +303,10 @@ ngx_http_markdown_stream_commit_apply_auth_cache_control(
  * Phase 2 (infallible): Content-Type, Content-Length, Content-Encoding.
  *   These are pointer/integer assignments that cannot fail.
  *
- * On success, transitions stream_sm to COMMITTED with
- * headers_committed = 1.
+ * On success, applies all header mutations and records the COMMITTED state.
+ * The streaming caller treats NGX_AGAIN from the downstream header filter as
+ * accepted headers (canonical NGINX model) and publishes its commit latches
+ * and committed state; no rollback is performed on NGX_AGAIN.
  *
  * Returns:
  *   NGX_OK    - All mutations applied, committed flag set
@@ -313,7 +318,14 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
                                          const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t                        rc;
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+    ngx_flag_t                       auth_cache_control_required;
+#endif
     ngx_http_markdown_commit_snap_t  snap;
+
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+    auth_cache_control_required = 0;
+#endif
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
@@ -321,7 +333,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
 
     if (ctx->stream_sm.headers_committed) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "headers already committed");
         return NGX_ERROR;
     }
@@ -331,7 +343,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
            != NGX_HTTP_MD_STATE_PRE_COMMIT_REPLAY_UNAVAILABLE)
     {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "invalid state %ui for commit",
                       (ngx_uint_t) ctx->stream_sm.state);
         return NGX_ERROR;
@@ -348,7 +360,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     rc = ngx_http_markdown_stream_commit_take_snapshot(r, &snap);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "snapshot capacity exceeded before header mutation");
         return NGX_ERROR;
     }
@@ -356,7 +368,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     rc = ngx_http_markdown_stream_commit_set_vary(r);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "failed to set Vary header");
         ngx_http_markdown_stream_commit_rollback(r, &snap);
         return NGX_ERROR;
@@ -365,21 +377,28 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     rc = ngx_http_markdown_stream_commit_remove_etag(r);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "failed to remove ETag");
         ngx_http_markdown_stream_commit_rollback(r, &snap);
         return NGX_ERROR;
     }
 
-    rc = ngx_http_markdown_stream_commit_apply_auth_cache_control(
-        r, conf);
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+    rc = ngx_http_markdown_auth_cache_control_required(
+        r, conf, &auth_cache_control_required);
+    if (rc == NGX_OK && auth_cache_control_required) {
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+    }
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "failed to apply auth Cache-Control");
         ngx_http_markdown_stream_commit_rollback(r, &snap);
         return NGX_ERROR;
     }
+#else
+    (void) conf;
+#endif
 
     /*
      * --- Phase 2: Infallible mutations ---
@@ -396,6 +415,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     (void) ngx_http_markdown_stream_commit_remove_content_length(r);
     (void) ngx_http_markdown_stream_commit_maybe_remove_content_encoding(
         r, ctx);
+    (void) ngx_http_markdown_stream_commit_remove_representation_metadata(r);
 
     /*
      * All mutations succeeded — set committed flag.
@@ -405,7 +425,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown stream commit: "
+                   "markdown: stream commit: "
                    "headers committed successfully");
 
     return NGX_OK;
@@ -435,7 +455,7 @@ ngx_http_markdown_stream_commit_remove_content_length(
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown stream commit: "
+                   "markdown: stream commit: "
                    "removed Content-Length");
 
     return NGX_OK;
@@ -478,15 +498,13 @@ static ngx_int_t
 ngx_http_markdown_stream_commit_set_content_type(
     ngx_http_request_t *r)
 {
-    r->headers_out.content_type.data = ngx_http_markdown_content_type;
-    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
+    /* Shared representation helper: deletes stale Content-Type list
+     * entries first, then sets the dedicated field and its charset/
+     * lowcase/hash mirrors to the Markdown media type. */
+    ngx_http_markdown_set_representation_content_type(r);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown stream commit: "
+                   "markdown: stream commit: "
                    "set Content-Type: text/markdown; charset=utf-8");
 
     return NGX_OK;
@@ -531,43 +549,118 @@ ngx_http_markdown_stream_commit_remove_etag(
 }
 
 
-/**
- * Applies Cache-Control protection for authenticated requests.
+/*
+ * Invalidate a response header by name across the full headers_out list
+ * (Rule 28: iterate every list part; Rule 40: hash=0 marks invalidated).
  *
- * When the NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL compile-time gate
- * is enabled and the request is authenticated (as determined by the active
- * auth_policy via ngx_http_markdown_is_authenticated), this upgrades the
- * response Cache-Control to at least "private": a "public" directive is
- * rewritten to "private", and a missing/private-less header gets "private"
- * appended. "no-store" is preserved and never downgraded. This mirrors
- * the full-buffer path so streaming and buffered responses behave identically.
- *
- * @param r HTTP request.
- * @param conf Module location configuration (used for auth_policy check).
- * @return NGX_OK on success or when not applicable; NGX_ERROR on modification failure.
+ * Returns:
+ *   NGX_OK always (invalidation cannot fail)
  */
 static ngx_int_t
-ngx_http_markdown_stream_commit_apply_auth_cache_control(
-    ngx_http_request_t *r, /* NOSONAR: r passed to non-const modify_cache_control_for_auth */
-    const ngx_http_markdown_conf_t *conf)
+ngx_http_markdown_stream_commit_invalidate_header(
+    ngx_http_request_t *r, const u_char *name, size_t name_len)
 {
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-    ngx_int_t  rc;
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
 
-    if (conf == NULL) {
-        return NGX_OK;
-    }
+    part = &r->headers_out.headers.part;
 
-    if (ngx_http_markdown_is_authenticated(r, conf)) {
-        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
-        if (rc != NGX_OK) {
-            return rc;
+    while (part != NULL) {
+        elts = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (elts[i].hash == 0) {
+                continue;
+            }
+            if (ngx_http_markdown_stream_commit_header_matches(
+                    &elts[i], name, name_len))
+            {
+                elts[i].hash = 0;
+            }
         }
+        part = part->next;
     }
-#else
-    (void) r;
-    (void) conf;
-#endif
+
+    return NGX_OK;
+}
+
+
+/*
+ * Remove representation-integrity metadata that describes the upstream
+ * HTML representation, not the transformed Markdown body.
+ *
+ * After a successful conversion the response body bytes have changed, so
+ * the following upstream headers are stale and must not be forwarded:
+ *   - Accept-Ranges (byte ranges apply to the HTML representation; the
+ *     module bypasses transformation for Range requests)
+ *   - X-Markdown-Tokens (upstream token count for the HTML body)
+ *   - Content-MD5 / Digest / Content-Digest / Repr-Digest (digests of the
+ *     HTML body; consumers may rely on them for integrity checks)
+ *
+ * This mirrors the full-buffer path (headers_impl.h C6 Accept-Ranges
+ * removal) so streaming and buffered responses share one mutation
+ * contract.  Infallible: only pointer/integer writes and hash=0
+ * invalidations.
+ *
+ * Returns:
+ *   NGX_OK always
+ */
+static ngx_int_t
+ngx_http_markdown_stream_commit_remove_representation_metadata(
+    ngx_http_request_t *r)
+{
+    static u_char  hdr_accept_ranges[] = "Accept-Ranges";
+    static u_char  hdr_token_count[] = "X-Markdown-Tokens";
+    static u_char  hdr_content_md5[] = "Content-MD5";
+    static u_char  hdr_digest[] = "Digest";
+    static u_char  hdr_content_digest[] = "Content-Digest";
+    static u_char  hdr_repr_digest[] = "Repr-Digest";
+    static u_char  hdr_last_modified[] = "Last-Modified";
+    static u_char  hdr_trailer[] = "Trailer";
+
+    /* Accept-Ranges: clear the typed field and invalidate list entries. */
+    r->allow_ranges = 0;
+    r->headers_out.accept_ranges = NULL;
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_accept_ranges, sizeof(hdr_accept_ranges) - 1);
+
+    /* Upstream X-Markdown-Tokens describes the HTML body. */
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_token_count, sizeof(hdr_token_count) - 1);
+
+    /* Representation digests describe the HTML body. */
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_content_md5, sizeof(hdr_content_md5) - 1);
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_digest, sizeof(hdr_digest) - 1);
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_content_digest, sizeof(hdr_content_digest) - 1);
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_repr_digest, sizeof(hdr_repr_digest) - 1);
+
+    /* Decision G: the streamed Markdown representation must not carry the
+     * source HTML mtime as its weak validator; ETag is the sole validator
+     * for converted responses.  Clear the typed pointer too: the header
+     * filter synthesizes Last-Modified whenever last_modified_time != -1
+     * AND last_modified == NULL is false, so both fields must be reset. */
+    r->headers_out.last_modified_time = (time_t) -1;
+    r->headers_out.last_modified = NULL;
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_last_modified, sizeof(hdr_last_modified) - 1);
+
+    /* Upstream trailers describe the HTML body; the streamed Markdown
+     * body replaces it, so the Trailer declaration must not be
+     * forwarded. */
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_trailer, sizeof(hdr_trailer) - 1);
+
+    /* Clear the actual trailer entries too: headers_out.trailers is an
+     * independent list emitted by HTTP/2/3 and chunked encodings without
+     * an HTTP/1.1 Trailer declaration.  Suppress source-HTML trailers. */
+    ngx_http_markdown_clear_trailers(r);
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "markdown: stream commit: "
+                   "removed representation-integrity metadata");
 
     return NGX_OK;
 }

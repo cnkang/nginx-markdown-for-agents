@@ -18,11 +18,11 @@
  *      - deflate    -> SUPPORTED (zlib-wrapped or raw)
  *      - gzip       -> SUPPORTED (gzip-wrapped inflate)
  *      - brotli     -> SUPPORTED (when NGX_HTTP_BROTLI defined)
- *      - unknown    -> BYPASS (no decompression at all)
+ *      - unknown    -> ERROR_POLICY (configured fail-open/reject)
  *
  * If ANY condition is false -> full-buffer decompression for a known coding.
  * If ALL four hold -> streaming decompression.
- * If encoding is unknown -> bypass (no decompression).
+ * If encoding is unknown -> configured error policy.
  */
 
 #include "../include/test_common.h"
@@ -64,14 +64,15 @@ typedef enum {
 typedef enum {
     NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING    = 0,
     NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER   = 1,
-    NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS       = 2
+    NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS       = 2,
+    NGX_HTTP_MARKDOWN_DECOMP_ROUTE_ERROR_POLICY = 3
 } ngx_http_markdown_decomp_route_t;
 
 /* ----------------------------------------------------------------
  * Production function under test (inlined routing logic)
  *
  * This replicates the exact production routing decision:
- *   - Unknown encoding -> BYPASS (no decompression)
+ *   - Unknown encoding -> ERROR_POLICY (no decoder starts)
  *   - auto_decompress OFF -> FULLBUFFER (Req 4.1)
  *   - Streaming engine not selected -> FULLBUFFER
  *   - cache_validation == full -> FULLBUFFER (Req 4.2)
@@ -86,9 +87,11 @@ ngx_http_markdown_decomp_routing_decision(
     ngx_http_markdown_cache_validation_e cache_validation,
     ngx_http_markdown_compression_type_e encoding)
 {
-    /* Unknown encoding -> bypass (no decompression at all) */
-    if (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN
-        || encoding == NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
+    /* No encoding is not an error; unknown encoding follows on_error. */
+    if (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
+        return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_ERROR_POLICY;
+    }
+    if (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS;
     }
 
@@ -151,7 +154,8 @@ prng_seed(unsigned int seed)
  * Oracle function: computes expected routing from inputs.
  *
  * This is the specification encoded as code:
- *   - BYPASS if encoding is NONE or UNKNOWN
+ *   - ERROR_POLICY if encoding is UNKNOWN
+ *   - BYPASS if encoding is NONE
  *   - STREAMING iff all four conditions hold
  *   - FULLBUFFER otherwise
  * ---------------------------------------------------------------- */
@@ -163,9 +167,11 @@ expected_routing(
     ngx_http_markdown_cache_validation_e cache_validation,
     ngx_http_markdown_compression_type_e encoding)
 {
+    if (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
+        return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_ERROR_POLICY;
+    }
     /* Bypass: no decompression needed */
-    if (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_NONE
-        || encoding == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
+    if (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS;
     }
 
@@ -206,6 +212,8 @@ route_name(ngx_http_markdown_decomp_route_t r)
         return "FULLBUFFER";
     case NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS:
         return "BYPASS";
+    case NGX_HTTP_MARKDOWN_DECOMP_ROUTE_ERROR_POLICY:
+        return "ERROR_POLICY";
     default:
         return "UNKNOWN";
     }
@@ -349,13 +357,13 @@ test_property4_named_cases(void)
         "brotli encoding -> FULLBUFFER (NGX_HTTP_BROTLI not defined)");
 #endif
 
-    /* Unknown encoding -> BYPASS */
+    /* Unknown encoding -> ERROR_POLICY */
     result = ngx_http_markdown_decomp_routing_decision(
         1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
         NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
     TEST_ASSERT(
-        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS,
-        "unknown encoding -> BYPASS");
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_ERROR_POLICY,
+        "unknown encoding -> ERROR_POLICY");
 
     /* No encoding -> BYPASS */
     result = ngx_http_markdown_decomp_routing_decision(
@@ -541,7 +549,7 @@ test_property4_fullbuffer_implies_condition_violated(void)
                  *  - cache_validation == FULL
                  *  - encoding is neither DEFLATE nor GZIP
                  *    (but must be a real encoding,
-                 *     not NONE/UNKNOWN which is BYPASS)
+                 *     not NONE/UNKNOWN which follows its own route)
                  */
                 any_violated =
                     (auto_decomp != 1)
@@ -565,7 +573,7 @@ test_property4_fullbuffer_implies_condition_violated(void)
 }
 
 /* ----------------------------------------------------------------
- * BYPASS only occurs for NONE or UNKNOWN encoding
+ * BYPASS only occurs for NONE encoding; UNKNOWN follows on_error.
  * ---------------------------------------------------------------- */
 
 static void
@@ -580,8 +588,7 @@ test_property4_bypass_implies_no_decompression_needed(void)
     size_t j;
 
     TEST_SUBSECTION(
-        "Property 4: BYPASS implies encoding is "
-        "NONE or UNKNOWN");
+        "Property 4: BYPASS implies no encoding");
 
     for (iter = 0; iter < RANDOM_ITERATIONS; iter++) {
         prng_seed((unsigned int)(iter + 1111));
@@ -601,17 +608,14 @@ test_property4_bypass_implies_no_decompression_needed(void)
             if (result
                 == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS) {
                 TEST_ASSERT(
-                    enc == NGX_HTTP_MARKDOWN_COMPRESSION_NONE
-                    || enc
-                       == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN,
-                    "BYPASS implies NONE or UNKNOWN "
-                    "encoding");
+                    enc == NGX_HTTP_MARKDOWN_COMPRESSION_NONE,
+                    "BYPASS implies no encoding");
             }
         }
     }
 
     TEST_PASS(
-        "Property 4: BYPASS -> NONE/UNKNOWN encoding "
+        "Property 4: BYPASS -> NONE encoding "
         "(25000 inputs)");
 }
 
@@ -721,7 +725,7 @@ test_property4_only_supported_encodings_reach_streaming(void)
  *   STREAMING iff all four conditions hold AND codec is
  *   gzip/deflate/brotli(+compiled);
  *   FULLBUFFER when any condition violated for a known codec;
- *   BYPASS for NONE/UNKNOWN encoding.
+ *   ERROR_POLICY for UNKNOWN and BYPASS for NONE encoding.
  *
  * Minimum 200 iterations.
  * ================================================================ */

@@ -124,29 +124,14 @@ impl MarkdownConverter {
             return self.traverse_children(node, output, depth + 1, ctx);
         }
 
-        if !output.is_empty() && !output.ends_with("\n\n") {
-            if output.ends_with('\n') {
-                output.push('\n');
-            } else {
-                output.push_str("\n\n");
-            }
-        }
+        Self::ensure_blank_line_before(output);
 
         let mut headers: Vec<String> = Vec::new();
         let mut alignments: Vec<TableAlignment> = Vec::new();
         let mut rows: Vec<Vec<String>> = Vec::new();
 
-        // Extract explicit column alignments from <colgroup>/<col> first.
-        // Explicit <col> declarations take precedence over <th> alignment
-        // because <col> is a column-level declaration.
         let mut col_alignments: Vec<Option<TableAlignment>> = Vec::new();
-        for child in node.children.borrow().iter() {
-            if let NodeData::Element { ref name, .. } = child.data
-                && name.local.as_ref() == "colgroup"
-            {
-                self.extract_colgroup_alignments(child, &mut col_alignments);
-            }
-        }
+        self.extract_colgroup_alignments_from(node, &mut col_alignments);
 
         let mut ctx = ctx;
         for child in node.children.borrow().iter() {
@@ -161,8 +146,45 @@ impl MarkdownConverter {
             alignments.push(TableAlignment::Left);
         }
 
-        // Apply explicit <colgroup>/<col> alignments. Bare <col> elements
-        // preserve alignments derived from <th> cells.
+        Self::apply_col_alignments(&mut alignments, &col_alignments);
+
+        self.write_gfm_table(output, &headers, &alignments, &rows)?;
+
+        if !output.ends_with("\n\n") {
+            output.push('\n');
+        }
+
+        Ok(())
+    }
+
+    fn ensure_blank_line_before(output: &mut String) {
+        if !output.is_empty() && !output.ends_with("\n\n") {
+            if output.ends_with('\n') {
+                output.push('\n');
+            } else {
+                output.push_str("\n\n");
+            }
+        }
+    }
+
+    fn extract_colgroup_alignments_from(
+        &self,
+        node: &Handle,
+        col_alignments: &mut Vec<Option<TableAlignment>>,
+    ) {
+        for child in node.children.borrow().iter() {
+            if let NodeData::Element { ref name, .. } = child.data
+                && name.local.as_ref() == "colgroup"
+            {
+                self.extract_colgroup_alignments(child, col_alignments);
+            }
+        }
+    }
+
+    fn apply_col_alignments(
+        alignments: &mut Vec<TableAlignment>,
+        col_alignments: &[Option<TableAlignment>],
+    ) {
         for (i, col_align) in col_alignments.iter().enumerate() {
             if let Some(col_align) = col_align {
                 if i < alignments.len() {
@@ -172,14 +194,6 @@ impl MarkdownConverter {
                 }
             }
         }
-
-        self.write_gfm_table(output, &headers, &alignments, &rows)?;
-
-        if !output.ends_with("\n\n") {
-            output.push('\n');
-        }
-
-        Ok(())
     }
 
     /// Extract column alignments from a `<colgroup>` element.
@@ -337,46 +351,35 @@ impl MarkdownConverter {
     }
 
     fn extract_explicit_alignment(&self, attrs: &Ref<Vec<Attribute>>) -> Option<TableAlignment> {
+        if let Some(align) = self.find_align_attribute(attrs) {
+            return align;
+        }
+        self.find_text_align_in_style(attrs)
+    }
+
+    fn find_align_attribute(&self, attrs: &Ref<Vec<Attribute>>) -> Option<Option<TableAlignment>> {
         for attr in attrs.iter() {
             if attr.name.local.as_ref() == "align" {
                 let value = attr.value.to_string().to_lowercase();
-                return match value.as_str() {
+                return Some(match value.as_str() {
                     "left" => Some(TableAlignment::Left),
                     "center" => Some(TableAlignment::Center),
                     "right" => Some(TableAlignment::Right),
                     _ => None,
-                };
+                });
             }
         }
+        None
+    }
 
+    fn find_text_align_in_style(&self, attrs: &Ref<Vec<Attribute>>) -> Option<TableAlignment> {
         for attr in attrs.iter() {
-            if attr.name.local.as_ref() == "style" {
-                let style = attr.value.to_string();
-                for declaration in style.split(';') {
-                    let mut parts = declaration.splitn(2, ':');
-                    let key = parts
-                        .next()
-                        .map(str::trim)
-                        .unwrap_or_default()
-                        .to_lowercase();
-                    let value = parts
-                        .next()
-                        .map(str::trim)
-                        .unwrap_or_default()
-                        .to_lowercase();
-
-                    if key == "text-align" {
-                        return match value.as_str() {
-                            "center" => Some(TableAlignment::Center),
-                            "right" => Some(TableAlignment::Right),
-                            "left" => Some(TableAlignment::Left),
-                            _ => None,
-                        };
-                    }
-                }
+            if attr.name.local.as_ref() == "style"
+                && let Some(align) = parse_text_align_from_style(&attr.value)
+            {
+                return Some(align);
             }
         }
-
         None
     }
 
@@ -401,12 +404,12 @@ impl MarkdownConverter {
     ) -> Result<(), ConversionError> {
         let max_cols = headers
             .len()
-            .max(rows.iter().map(|r| r.len()).max().unwrap_or(0));
+            .max(rows.iter().map(Vec::len).max().unwrap_or(0));
 
         output.push('|');
         for i in 0..max_cols {
             output.push(' ');
-            let header = headers.get(i).map(|s| s.as_str()).unwrap_or("");
+            let header = headers.get(i).map(String::as_str).unwrap_or("");
             output.push_str(&self.escape_gfm_table_cell(header));
             output.push_str(" |");
         }
@@ -438,4 +441,30 @@ impl MarkdownConverter {
 
         Ok(())
     }
+}
+
+fn parse_text_align_from_style(style: &str) -> Option<TableAlignment> {
+    for declaration in style.split(';') {
+        let mut parts = declaration.splitn(2, ':');
+        let key = parts
+            .next()
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_lowercase();
+        let value = parts
+            .next()
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_lowercase();
+
+        if key == "text-align" {
+            return match value.as_str() {
+                "center" => Some(TableAlignment::Center),
+                "right" => Some(TableAlignment::Right),
+                "left" => Some(TableAlignment::Left),
+                _ => None,
+            };
+        }
+    }
+    None
 }

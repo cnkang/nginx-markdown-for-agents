@@ -132,6 +132,14 @@ make -C components/nginx-module/tests unit-config_merge
 
 **Status:** ✅ Implemented (0.9.1)
 
+> The suite keeps the raw RFC 1951 cases below as supported compatibility
+> coverage: 0.9.2 **freezes existing** raw-deflate compatibility coverage (the
+> decoder paths already supported it), formalizing it as part of the public
+> contract rather than introducing a new implementation. Raw deflate is a
+> fallback for legacy servers and must keep passing on the streaming,
+> full-buffer, and Rust chain decoder paths alongside zlib-wrapped RFC 1950
+> deflate.
+
 **Coverage:**
 - zlib-wrapped deflate + trailing garbage in same chunk → `FORMAT_ERROR`
 - raw deflate + trailing garbage in same chunk → `FORMAT_ERROR`
@@ -234,7 +242,7 @@ make -C components/nginx-module/tests unit-streaming_equiv_brotli_property
 
 6. **Size Limit Enforcement**
    - Upstream returns large compressed content
-   - Decompressed size exceeds `markdown_limits memory=<size>`
+   - Decompressed size exceeds `markdown_limits decompressed_size=<size>`
    - Module applies fail-open strategy
    - Logs error with category=resource_limit
 
@@ -326,7 +334,7 @@ cd components/nginx-module/tests
    - Streaming decompression handles arbitrary chunk boundaries
 
 3. **Error Conditions**
-   - Malformed, truncated, and trailing Brotli streams are handled without
+   - The module handles malformed, truncated, and trailing Brotli streams without
      worker failure under the configured error policy
    - Unit tests assert the exact typed error classification for each case
    - Budget exceeded preserves the original Brotli response
@@ -449,13 +457,13 @@ make -C components/nginx-module/tests unit
 
 ## Brotli Streaming Backpressure Coverage Analysis
 
-**Status:** Covered by existing codec-agnostic tests (no Brotli-specific E2E needed)
+**Status:** Covered by codec-agnostic tests plus a Brotli-specific streaming E2E scenario (`verify_brotli_streaming_e2e.sh`)
 
 The downstream backpressure mechanism (NGX_AGAIN handling, pending output save,
 resume drain) is **codec-agnostic** — it operates on the outgoing Markdown chain
 after decompression, not on compressed input. Once the decompressor produces
-bytes and those are converted to Markdown, the downstream delivery path is
-identical regardless of codec (gzip, deflate, or Brotli).
+bytes and the module converts those to Markdown, the downstream delivery path
+stays identical regardless of codec (gzip, deflate, or Brotli).
 
 **Existing coverage that proves backpressure correctness for Brotli:**
 
@@ -534,6 +542,7 @@ When modifying the decompression implementation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Brotli backpressure status line aligned with its evidence table: codec-agnostic tests plus the Brotli-specific streaming E2E scenario |
 | 0.9.1 | 2026-07-18 | Kiro | Added Brotli streaming decompression test sections: streaming_decomp_brotli unit tests, property tests (trailing, budget, error propagation, no-progress, streaming equivalence), E2E verify_brotli_streaming_e2e.sh, backpressure coverage analysis |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

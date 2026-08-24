@@ -13,13 +13,19 @@ Usage:
     python3 tools/release/matrix/validate_matrix_install_consistency.py
 """
 
-import json
 import re
 import sys
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from lib.path_validation import validate_read_path
+from lib.path_validation import validate_read_path  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from normalize_matrix import (  # noqa: E402
+    MatrixNormalizationError,
+    canonical_arch,
+    normalize_compatibility_document,
+)
 
 # Paths relative to the repository root
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -39,43 +45,63 @@ EXPECTED_ASSET_TEMPLATE = (
 
 def load_matrix(path: Path) -> list[dict]:
     """
-    Load and validate the release matrix JSON and return its "matrix" entries.
+    Load and validate the canonical release matrix JSON and return the
+    dynamic-module entries in the install.sh naming vocabulary.
     
-    Validates that the top-level JSON value is an object containing a "matrix" key
-    whose value is a list of objects.
+    Validates that the top-level JSON value is an object containing an
+    ``entries`` list. Only supported dynamic-module entries for glibc or musl
+    are projected into the legacy artifact-name fields used by install.sh.
     
     Returns:
-        list[dict]: The list of matrix entry dictionaries.
+        list[dict]: Projected install.sh-compatible rows with ``nginx``,
+            ``os_type``, ``arch``, and ``support_tier`` fields.
     
     Raises:
-        ValueError: If the parsed JSON is not an object, the "matrix" key is missing,
-        the "matrix" value is not a list, or any item in the list is not a dict.
+        ValueError: If the parsed JSON is not an object, the ``entries`` key is
+        missing, the ``entries`` value is not a list, or any item is not a dict.
     """
     validated = validate_read_path(path, purpose="install matrix")
-    with open(validated, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(validated, "r", encoding="utf-8") as f:
+            data = normalize_compatibility_document(json.load(f))
+    except (OSError, json.JSONDecodeError, MatrixNormalizationError) as exc:
+        raise ValueError(f"Invalid matrix file {path}: {exc}") from exc
 
-    if not isinstance(data, dict):
+    entries = data.get("entries")
+    if not isinstance(entries, list):
         raise ValueError(
-            f"Invalid matrix file {path}: expected a JSON object, "
-            f"got {type(data).__name__}"
+            f"Invalid matrix file {path}: 'entries' key is missing or not a list"
         )
 
-    if "matrix" not in data:
-        raise ValueError(f"Invalid matrix file {path}: missing 'matrix' key")
-
-    matrix = data["matrix"]
-    if not isinstance(matrix, list):
-        raise ValueError(
-            f"Invalid matrix file {path}: 'matrix' must be a list, "
-            f"got {type(matrix).__name__}"
-        )
-
-    for i, entry in enumerate(matrix):
+    matrix = []
+    for i, entry in enumerate(entries):
         if not isinstance(entry, dict):
             raise ValueError(
                 f"Invalid matrix entry at index {i} in {path}: "
                 f"expected dict, got {type(entry).__name__}"
+            )
+        if entry.get("artifact_type") == "dynamic-module" and entry.get(
+            "support_tier"
+        ) == "supported" and entry.get("libc") in INSTALL_DETECTABLE_OS_TYPES:
+            # Compatibility normalization stores the architecture in the
+            # canonical `target` field; canonicalize it (amd64 -> x86_64,
+            # arm64 -> aarch64, target triples collapse to the bare arch)
+            # before projecting into the install-detectable vocabulary.
+            raw_arch = entry.get("target")
+            arch = (
+                canonical_arch(raw_arch)
+                if isinstance(raw_arch, str)
+                else None
+            )
+            if arch not in INSTALL_DETECTABLE_ARCHS:
+                continue
+            matrix.append(
+                {
+                    "nginx": entry.get("nginx_version"),
+                    "os_type": entry.get("libc"),
+                    "arch": arch,
+                    "support_tier": "full",
+                }
             )
 
     return matrix

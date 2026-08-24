@@ -18,10 +18,21 @@ struct ngx_log_s {
     int dummy;
 };
 
+typedef struct ngx_http_markdown_conf_s ngx_http_markdown_conf_t;
+struct ngx_http_markdown_conf_s {
+    int dummy;
+};
+
 #define NGX_OK         0
 #define NGX_ERROR     -1
+#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED       0
+#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE    1
+#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE 2
+#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR     3
+#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL 5
 
 #define ngx_memzero(buf, n) memset(buf, 0, n)
+#define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
 
 /* ── Metrics struct (mirrors production SHM layout) ───────────── */
 
@@ -71,7 +82,6 @@ typedef struct {
         ngx_atomic_t  decompression_streaming_total;
         ngx_atomic_t  decompression_fullbuffer_total;
         ngx_atomic_t  decompression_budget_exceeded_total;
-        ngx_atomic_t  zero_copy_output_total;
         ngx_atomic_t  copied_output_total;
     } perf;
 } ngx_http_markdown_metrics_t;
@@ -83,12 +93,34 @@ static ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 /* ── Dynconf watcher struct (mirrors production) ──────────────── */
 
 typedef struct {
-    ngx_flag_t  active;
-    time_t      applied_mtime;
-    ngx_uint_t  version;
     time_t      last_mtime;
+    time_t      applied_mtime;
+} ngx_http_markdown_dynconf_file_state_t;
+
+typedef struct {
+    u_char      source_digest[72];
+    u_char      active_digest[72];
+    u_char      lkg_digest[72];
+    ngx_uint_t  generation;
     ngx_flag_t  lkg_valid;
     time_t      lkg_mtime;
+} ngx_http_markdown_dynconf_digest_state_t;
+
+typedef struct {
+    ngx_uint_t  version;
+    ngx_uint_t  last_result;
+    time_t      last_success;
+    u_char      last_error[513];
+    size_t      last_error_len;
+    ngx_uint_t  last_masked_fields;
+} ngx_http_markdown_dynconf_diagnostic_state_t;
+
+typedef struct {
+    ngx_flag_t  active;
+    ngx_http_markdown_dynconf_file_state_t file_state;
+    ngx_http_markdown_dynconf_digest_state_t digest_state;
+    ngx_http_markdown_conf_t *conf;
+    ngx_http_markdown_dynconf_diagnostic_state_t diagnostic_state;
 } ngx_http_markdown_dynconf_watcher_t;
 
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
@@ -96,11 +128,24 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
 /* ── Inflight overload stub ────────────────────────────────────── */
 
 static ngx_atomic_int_t g_inflight_overload_total;
+static ngx_atomic_uint_t g_pending_output_requests;
+
+static ngx_inline ngx_atomic_int_t
+ngx_http_markdown_inflight_current(void)
+{
+    return 0;
+}
 
 static ngx_inline ngx_atomic_int_t
 ngx_http_markdown_inflight_overload_total(void)
 {
     return g_inflight_overload_total;
+}
+
+ngx_atomic_uint_t
+ngx_http_markdown_pending_output_current(void)
+{
+    return g_pending_output_requests;
 }
 
 /* ── Production function headers and implementation ───────────── */
@@ -128,6 +173,7 @@ test_collect_metrics_null_zone(void)
     TEST_SUBSECTION("collect_metrics with NULL metrics zone");
 
     ngx_http_markdown_metrics = NULL;
+    g_pending_output_requests = 7;
     memset(&out, 0xFF, sizeof(out));
 
     ngx_http_markdown_diagnostics_collect_metrics(&out);
@@ -136,6 +182,8 @@ test_collect_metrics_null_zone(void)
     TEST_ASSERT(out.delivery_total == 0, "delivery should be 0");
     TEST_ASSERT(out.requests_total == 0, "requests should be 0");
     TEST_ASSERT(out.failopen_total == 0, "failopen should be 0");
+    TEST_ASSERT(out.pending_output == 7,
+                "pending_output should survive a NULL metrics zone");
 
     TEST_PASS("NULL zone zeroes all fields");
 }
@@ -152,7 +200,9 @@ test_collect_metrics_with_data(void)
     g_metrics_data.results.delivery_count = 100;
     g_metrics_data.requests_entered = 200;
     g_metrics_data.results.failopen_count = 3;
+    g_metrics_data.perf.copied_output_total = 2;
     ngx_http_markdown_metrics = &g_metrics_data;
+    g_pending_output_requests = 3;
 
     ngx_http_markdown_diagnostics_collect_metrics(&out);
 
@@ -160,6 +210,10 @@ test_collect_metrics_with_data(void)
     TEST_ASSERT(out.delivery_total == 100, "delivery should be 100");
     TEST_ASSERT(out.requests_total == 200, "requests should be 200");
     TEST_ASSERT(out.failopen_total == 3, "failopen should be 3");
+    TEST_ASSERT(out.copied_output_total == 2,
+                "copied_output should be 2");
+    TEST_ASSERT(out.pending_output == 3,
+                "pending_output should count requests with pending chains");
 
     TEST_PASS("Metrics collected correctly");
 }
@@ -178,6 +232,7 @@ test_collect_metrics_streaming(void)
     g_metrics_data.requests_entered = 100;
     g_metrics_data.results.failopen_count = 1;
     g_metrics_data.streaming.requests_total = 30;
+    g_metrics_data.streaming.precommit_failopen_total = 4;
     g_metrics_data.streaming.succeeded_total = 25;
     g_metrics_data.streaming.failed_total = 5;
     g_metrics_data.streaming.fallback_total = 2;
@@ -192,6 +247,8 @@ test_collect_metrics_streaming(void)
     TEST_ASSERT(out.conversions_total == 10, "conversions should be 10");
     TEST_ASSERT(out.streaming_requests_total == 30,
                 "streaming_requests should be 30");
+    TEST_ASSERT(out.precommit_failopen_total == 4,
+                "precommit_failopen should be 4");
     TEST_ASSERT(out.streaming_succeeded_total == 25,
                 "streaming_succeeded should be 25");
     TEST_ASSERT(out.streaming_failed_total == 5,
@@ -254,8 +311,9 @@ test_get_dynconf_state_active(void)
     memset(&ngx_http_markdown_dynconf_watcher, 0,
            sizeof(ngx_http_markdown_dynconf_watcher));
     ngx_http_markdown_dynconf_watcher.active = 1;
-    ngx_http_markdown_dynconf_watcher.applied_mtime = 1700000000;
-    ngx_http_markdown_dynconf_watcher.version = 5;
+    ngx_http_markdown_dynconf_watcher.file_state.applied_mtime = 1700000000;
+    ngx_http_markdown_dynconf_watcher.diagnostic_state.version = 5;
+    ngx_http_markdown_dynconf_watcher.diagnostic_state.last_masked_fields = 0x15;
     /*
      * Regression (CMOD-4): last_mtime is the most recently *observed* file
      * mtime (updated even on a rejected reload); lkg_mtime is the mtime of
@@ -263,9 +321,9 @@ test_get_dynconf_state_active(void)
      * different here so the test fails if the accessor reads last_mtime
      * instead of lkg_mtime.
      */
-    ngx_http_markdown_dynconf_watcher.last_mtime = 1699999000;
-    ngx_http_markdown_dynconf_watcher.lkg_mtime = 1699998000;
-    ngx_http_markdown_dynconf_watcher.lkg_valid = 1;
+    ngx_http_markdown_dynconf_watcher.file_state.last_mtime = 1699999000;
+    ngx_http_markdown_dynconf_watcher.digest_state.lkg_mtime = 1699998000;
+    ngx_http_markdown_dynconf_watcher.digest_state.lkg_valid = 1;
 
     ngx_http_markdown_diagnostics_get_dynconf_state(&out);
 
@@ -277,6 +335,8 @@ test_get_dynconf_state_active(void)
                 "lkg_mtime should reflect the LKG config mtime, "
                 "not last_mtime");
     TEST_ASSERT(out.lkg_valid == 1, "lkg_valid should be 1");
+    TEST_ASSERT(out.masked_fields == 0x15,
+                "masked_fields should reflect the last applied snapshot");
 
     TEST_PASS("Active watcher state collected correctly");
 }

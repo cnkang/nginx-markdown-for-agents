@@ -2,14 +2,26 @@
 
 ## Overview
 
-Every request that reaches the Markdown filter module passes through an ordered sequence of checks called the decision chain. The first failing check determines the outcome and assigns a reason code. If all checks pass, conversion is attempted and the outcome depends on whether conversion succeeds or fails.
+Every request that reaches the Markdown filter module passes through an ordered sequence of checks called the decision chain. The first failing check determines the outcome and assigns a reason code. If all checks pass, the module attempts conversion and the outcome depends on whether conversion succeeds or fails.
 
-Reason codes are the canonical, machine-readable outcome identifiers. They are emitted in two places and use the **same lowercase snake_case strings** everywhere:
+Canonical reason codes are the machine-readable, operator-visible outcome
+identifiers. The module emits those codes in two places and uses the **same
+lowercase snake_case strings** in both:
 
 - Decision log entries: `markdown: reason=<code> ...` (see `components/nginx-module/src/ngx_http_markdown_decision_log_impl.h`)
-- Prometheus metrics labels (`reason="<code>"`, see `components/nginx-module/src/ngx_http_markdown_prometheus_impl.h`)
+- Prometheus metrics labels (`reason="<code>"`, see `components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h`)
 
-The single source of truth for the reason code list is `components/rust-converter/src/decision/reason_code.rs`, mirrored in [Observability Schema v1](../architecture/observability-schema-v1.md). This document describes the check order, what each check evaluates, and how outcomes are determined. Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md); rollback procedures are in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
+C-only streaming engine labels are internal event names, not canonical reason
+codes or Prometheus label values. See the boundary below.
+
+The single source of truth for the reason code list is
+`components/rust-converter/reason_registry.toml`. The Rust, C, diagnostics, and
+the generator consume that registry. The generator creates release projections
+and mirrors them in [Observability Schema v2](../architecture/observability-schema-v2.md).
+This document describes the check order, what each check evaluates, and how the
+module determines outcomes.
+Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md).
+Rollback procedures are in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
 
 ## Decision Chain Flowchart
 
@@ -50,7 +62,7 @@ flowchart TD
 
 ## Check Order
 
-The decision chain evaluates checks in a fixed order. The first check that fails stops evaluation and assigns the corresponding reason code. This "short-circuit" behavior means a request that fails multiple checks always gets the reason code of the earliest failing check in the sequence.
+The decision chain evaluates checks in a fixed order. The first check that fails stops evaluation and assigns the corresponding reason code. This "short-circuit" behavior means a request that fails multiple checks gets the reason code of the earliest failing check.
 
 | Order | Check | What It Evaluates | Reason Code on Failure |
 |-------|-------|--------------------|------------------------|
@@ -59,17 +71,19 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 | 3 | Response status | Is the upstream response status `200 OK`? A `206 Partial Content` status is classified as a range request (same reason code as check 4). Other non-200 responses (redirects, errors, etc.) are not eligible. | `not_eligible` |
 | 4 | Range request | Is this a range request (`Range` header present)? Range requests are not eligible because partial content cannot be converted. | `not_eligible` |
 | 5 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `not_eligible` |
-| 6 | Response size | Is the response body size within the configured `markdown_limits memory=` budget? Oversized responses are not eligible. | `not_eligible` |
+| 6 | Response size | Is the response body size within the configured `markdown_limits conversion_memory=` budget? This is a hard cumulative input-size cap applied to both buffered and streaming paths. Oversized responses are not eligible. | `not_eligible` |
 | 7 | Auth policy | Is the request authenticated and `markdown_auth_policy` set to `deny`? Authenticated requests are detected through the existing `Authorization` header and auth-cookie checks. | `not_eligible` |
 | 8 | Accept negotiation | Does the `Accept` header indicate the client wants Markdown? Evaluated per `markdown_accept` (`strict` | `wildcard` | `force`). | `skipped_accept_reject` / `skipped_no_accept` / `skipped_accept` (see below) |
 | 9 | Conversion attempt | All checks passed. The module attempts HTML-to-Markdown conversion. | _(see outcome determination below)_ |
 
 ### Accept negotiation outcomes
 
-When the request is eligible on checks 1–7 but the `Accept` header does not
-resolve in favor of Markdown, one of three distinct skip reason codes is emitted
-(this is the one eligibility branch that preserves sub-case granularity, because
-the failure cause is operationally meaningful for content negotiation):
+Checks 2–7 collapse to the canonical `not_eligible` reason when they reject a
+request. Accept negotiation is the exception: when the request is otherwise
+eligible but the `Accept` header does not resolve in favor of Markdown, the module emits one of three distinct skip
+reason codes (this is the one eligibility branch that preserves sub-case
+granularity, because the failure cause is operationally meaningful for content
+negotiation):
 
 | Condition | Reason Code |
 |-----------|-------------|
@@ -77,16 +91,16 @@ the failure cause is operationally meaningful for content negotiation):
 | No `Accept` header present and `markdown_accept` is `strict` | `skipped_no_accept` |
 | `Accept` present but does not request Markdown (and not the reject case above) | `skipped_accept` |
 
-When `markdown_accept` is `wildcard`, `text/*` and `*/*` also qualify for conversion;
-when `force`, conversion is attempted regardless of the `Accept` header.
+When `markdown_accept` is `wildcard`, `text/*` and `*/*` also qualify for conversion.
+When `markdown_accept` is `force`, the module attempts conversion regardless of the `Accept` header.
 
 ## First-Failing-Check Rule
 
-The module evaluates checks 1 through 9 in the order listed above. As soon as one check fails, the module assigns the corresponding reason code and stops. No subsequent checks are evaluated.
+The module evaluates checks 1 through 9 in the order listed above. As soon as one check fails, the module assigns the corresponding reason code and stops. No subsequent checks run.
 
-For example, if a `POST` request arrives for a path where `markdown_filter` is `on`, the module assigns `not_eligible` (check 2) without evaluating status, content-type, size, auth, or Accept checks.
+For example, if a `POST` request arrives for a path where `markdown_filter` is `on`, the module assigns `not_eligible` (check 2). It skips the status, content-type, size, auth, and Accept checks.
 
-This behavior is important for operators diagnosing why a request was skipped. The reason code always points to the first condition that prevented conversion, not to all conditions that would have prevented it.
+This behavior matters for operators diagnosing why the module skipped a request. The reason code always points to the first condition that prevented conversion. It does not list all conditions that would have prevented it.
 
 ## Outcome Determination
 
@@ -94,30 +108,43 @@ When all eligibility checks pass (checks 1–9), the module attempts conversion.
 
 ### Success: converted
 
-Conversion succeeded. The client receives the Markdown representation of the HTML response. The reason code is `converted` and the request state is CONVERTED.
+Conversion succeeded. The client receives the Markdown representation of the HTML response. The reason code is `converted` and the request state becomes CONVERTED.
 
 ### Failure with `markdown_error_policy pass`: failed_open
 
-Conversion was attempted but failed (HTML parse error, timeout, resource limit, decompression error, or internal/system error). Because `markdown_error_policy` is set to `pass` (the default), the module serves the original HTML response unchanged. The client is unaffected. The reason code is `failed_open` and the request state is FAILED.
+The module attempted conversion but failed before it committed the response
+(HTML parse error, timeout, resource limit, decompression error, or internal/
+system error). Because `markdown_error_policy` is set to `pass` (the default),
+the module replays the complete original HTML response unchanged. The reason
+code is `failed_open` and the request state becomes FAILED.
 
-This is the recommended configuration for production rollouts. Conversion failures never break client responses.
+This is the recommended configuration for production rollouts. Conversion
+failures before commit do not break client responses.
+
+If a streaming conversion fails after downstream filters have already accepted
+headers or Markdown bytes, the original HTML is no longer available for replay
+and the headers/body cannot be rewritten. The module records the
+`streaming_mid_flight_error` sub-classification and completes through its
+protocol-safe finish or abort path. The client may receive a truncated Markdown
+response. This post-commit case is intentionally not described as an
+unchanged fail-open HTML response.
 
 ### Failure with `markdown_error_policy fail_closed`: failed_closed
 
-Conversion was attempted but failed. Because `markdown_error_policy` is set to `fail_closed`, the module returns a `502 Bad Gateway` error. The reason code is `failed_closed` and the request state is FAILED.
+The module attempted conversion but it failed. Because `markdown_error_policy` is set to `fail_closed`, the module returns the configured error status (`ngx_http_markdown_conf_t.error_status`), which defaults to `502 Bad Gateway` and operators may customize it. The reason code is `failed_closed` and the request state becomes FAILED.
 
 Use `fail_closed` only when you need strict guarantees that clients never receive HTML when they requested Markdown. This is not recommended during initial rollout.
 
 ## Failure Sub-Classification
 
-When conversion fails (either `failed_open` or `failed_closed`), the module also records a failure sub-classification that provides more detail about what went wrong. These appear as a separate `category=` field in decision log entries and as distinct `reason` label values on the `nginx_markdown_failures_total` metric. They do not change the primary outcome (`failed_open` or `failed_closed`), which is determined solely by the `markdown_error_policy` setting.
+When conversion fails (either `failed_open` or `failed_closed`), the module records a failure sub-classification. It provides more detail about what went wrong. These appear as a separate `category=` field in decision log entries and as distinct `reason` label values on the `nginx_markdown_requests_total` metric. They do not change the primary outcome (`failed_open` or `failed_closed`), which depends solely on the `markdown_error_policy` setting.
 
 | Failure Reason Code | Meaning |
 |---------------------|---------|
 | `conversion_error` | HTML parse or conversion error — the input HTML could not be processed |
-| `memory_budget_exceeded` | Memory limit reached (`markdown_limits memory=` or parser budget) |
-| `timeout` | Parser execution exceeded `markdown_parse_timeout` |
-| `budget_exceeded` | Parser memory exceeded `markdown_parser_budget` |
+| `memory_budget_exceeded` | Conversion-memory limit reached (`markdown_limits conversion_memory=`) |
+| `timeout` | The request exceeded the authoritative overall conversion deadline `markdown_limits conversion_timeout=`; `parser_timeout=` triggers an earlier parser checkpoint when nonzero and smaller than `conversion_timeout`, while `conversion_timeout=` remains the overall upper bound and is never extended by `parser_timeout=` |
+| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from `memory_budget_exceeded` and takes precedence for parser allocations |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
 | `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Automatic Decompression](../features/AUTOMATIC_DECOMPRESSION.md)) |
 | `replay_error` | Fail-open replay buffer init/append failure |
@@ -127,25 +154,33 @@ When conversion fails (either `failed_open` or `failed_closed`), the module also
 
 ## Request States
 
-Every request that enters the decision chain ends up in one of four mutually exclusive states. The request state is derived from the reason code — no additional runtime field is stored.
+Every request that enters the decision chain ends up in one of four mutually exclusive states. The module derives the request state from the reason code. It stores no additional runtime field.
 
 | Request State | Reason Codes | Meaning |
 |---------------|-------------|---------|
 | NOT_ENABLED | `disabled` | Module is disabled for this scope. The request was never evaluated for eligibility. |
-| SKIPPED | `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_accept_reject`, `bypass_no_transform` | Module is enabled but the request did not pass one of the eligibility checks. |
+| SKIPPED | `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_accept_reject`, `skipped_conditional`, `bypass_no_transform` | Module is enabled but the request did not pass one of the eligibility checks. |
 | CONVERTED | `converted` | All checks passed and conversion succeeded. |
 | FAILED | `failed_open`, `failed_closed` | All checks passed, conversion was attempted, but it did not succeed. |
 
 Operators can determine request state counts from metrics and logs:
 - NOT_ENABLED: count of `reason="disabled"` in decision log entries (`grep "reason=disabled" error.log`)
 - SKIPPED: count of `reason="not_eligible"`, `reason="skipped_*"` in decision log entries
-- CONVERTED: `nginx_markdown_conversions_total` metric
-- FAILED_OPEN: `nginx_markdown_failopen_total` (`failed_open`)
-- FAILED_CLOSED: `nginx_markdown_failures_total{reason="failed_closed"}` (`failed_closed`)
+- CONVERTED: `nginx_markdown_requests_total{outcome="converted"}` metric (successful deliveries are additionally tracked by `nginx_markdown_conversion_deliveries_total`)
+- FAILED_OPEN: `nginx_markdown_requests_total{outcome="failed_open"}` (`failed_open`)
+- FAILED_CLOSED: `nginx_markdown_requests_total{outcome="failed_closed"}` (`failed_closed`)
 
 ## Reason Code Reference
 
-The complete set of 26 reason codes is defined in `components/rust-converter/src/decision/reason_code.rs` and mirrored in [Observability Schema v1](../architecture/observability-schema-v1.md). All `as_str()` values are lowercase snake_case. The table below maps the high-level decision outcomes described in this document to their reason codes; the full registry (including decompression, dynconf, and streaming sub-codes) lives in the schema document.
+The registry declares the complete set of 27 reason codes in
+`components/rust-converter/reason_registry.toml`. The generator projects it
+into `reason_code.rs`, C metadata, diagnostics aliases, and release artifacts.
+The projections mirror [Observability Schema v2](../architecture/observability-schema-v2.md).
+All `as_str()` values are lowercase snake_case. The table below maps the
+high-level decision outcomes described in this document to their reason codes.
+The full registry (including decompression, dynconf, and canonical streaming
+outcome codes) lives in the schema document. C-only streaming event labels are
+not registry entries.
 
 | Decision Outcome | Reason Code | Request State | Description |
 |---|---|---|---|
@@ -162,7 +197,7 @@ The complete set of 26 reason codes is defined in `components/rust-converter/src
 
 > **Removed reason codes.** Earlier releases documented per-check uppercase codes
 > such as `SKIP_METHOD`, `SKIP_STATUS`, `SKIP_CONFIG`, and `ELIGIBLE_CONVERTED`.
-> These were consolidated in the 0.9.0 observability schema: eligibility checks
+> The 0.9.0 observability schema consolidated these: eligibility checks
 > 2–7 now emit `not_eligible`, scope-off emits `disabled`, and the conversion
 > outcomes are `converted` / `failed_open` / `failed_closed`. If you are
 > correlating old dashboards or alerts, update them to the lowercase codes above.
@@ -173,29 +208,38 @@ The complete set of 26 reason codes is defined in `components/rust-converter/src
 |------------------------|-------------|
 | `replay_error` | Fail-open replay buffer init or append failure; sets `precommit_error` flag (prevents duplicate finalize calls) |
 | `failopen_completed` | Once-then-skip flag preventing duplicate `ngx_http_finalize_request` calls within a request lifetime |
-| `decompression_budget_exceeded` | Decompression budget (`markdown_decompress_max_size`) exceeded; classified as a decompression error |
+| `decompression_budget_exceeded` | Decompression budget (`markdown_limits decompressed_size=`) exceeded; classified as a decompression error |
 | `decompression_format_error` | Compressed input has invalid format (not valid gzip/deflate/brotli) |
 | `decompression_truncated_input` | Compressed input was truncated (incomplete stream) |
 | `decompression_io_error` | I/O error during decompression operation |
-| `timeout` | Parser execution exceeded `markdown_parse_timeout` (default 30s) |
-| `budget_exceeded` | Parser memory exceeded `markdown_parser_budget` (default 64m) |
+| `timeout` | Conversion exceeded the authoritative `markdown_limits conversion_timeout=` overall deadline; `parser_timeout=` may trigger an earlier checkpoint during the parse phase |
+| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=` (default 32m) |
 | `overload` | Inflight guard rejected the request |
 | `invalid_dynconf` / `degraded_snapshot` | Dynamic configuration error / degraded snapshot |
 | `header_plan_apply_error` | Header plan apply error |
 | `streaming_mid_flight_error` | Streaming conversion mid-flight error |
 | Delivery vs Decision counter separation | `failopen_count` (delivery) increments only after downstream `NGX_OK`; decision counter increments on decision regardless of downstream status |
 
-All reason codes use lowercase snake_case format. The same strings appear in both decision log entries and Prometheus metrics labels, so operators can correlate log entries with metric counters without translation.
+All canonical reason codes use lowercase snake_case format. The same strings
+appear in both decision log entries and Prometheus metrics labels, so operators
+can correlate log entries with metric counters without translation. Internal
+C-only streaming event labels are outside this operator-visible contract.
 
 ## Implementation Details
 
 The check order matches the eligibility evaluation in `components/nginx-module/src/ngx_http_markdown_eligibility.c`, with the header-filter and Accept-negotiation additions:
 
-- Scope enablement (check 1) is evaluated before `ngx_http_markdown_check_eligibility()` is called.
-- Auth policy (check 7) is evaluated as part of eligibility.
-- Accept negotiation (check 8) is evaluated after the core eligibility checks pass.
+- The module evaluates scope enablement (check 1) before it calls `ngx_http_markdown_check_eligibility()`.
+- The module evaluates auth policy (check 7) as part of eligibility.
+- The module evaluates Accept negotiation (check 8) after the core eligibility checks pass.
 
-The reason code strings are produced by the Rust `ReasonCode::as_str()` registry and surfaced to C via the `markdown_reason_code_str()` FFI accessor. C-side code never hard-codes reason code literals; it converts the `ReasonCode` discriminant into the canonical lowercase string. See [Observability Schema v1](../architecture/observability-schema-v1.md) for the full registry and FFI accessor list.
+The generated Rust `ReasonCode::as_str()` projection produces the reason code
+strings. The `markdown_reason_code_str()` FFI accessor surfaces them to C. C-side
+canonical reason data comes from generated discriminant and metadata macros.
+the accessor converts each discriminant into the canonical lowercase string.
+Legacy C-only streaming event labels remain a separate internal compatibility
+surface. See [Observability Schema v2](../architecture/observability-schema-v2.md)
+for the full registry and FFI accessor list.
 
 ## Related Documentation
 
@@ -203,7 +247,7 @@ The reason code strings are produced by the Rust `ReasonCode::as_str()` registry
 - [Rollback Guide](../guides/ROLLBACK_GUIDE.md) — how to disable or narrow conversion scope
 - [Configuration Guide](../guides/CONFIGURATION.md) — directive reference and configuration examples
 - [Content Negotiation](CONTENT_NEGOTIATION.md) — Accept header parsing and wildcard behavior
-- [Observability Schema v1](../architecture/observability-schema-v1.md) — authoritative reason code registry, metric families, label whitelist
+- [Observability Schema v2](../architecture/observability-schema-v2.md) — authoritative reason code registry, metric families, label whitelist
 - [Operations Guide](../guides/OPERATIONS.md) — monitoring and troubleshooting
 
 ## Document Updates

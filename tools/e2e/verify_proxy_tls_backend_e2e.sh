@@ -412,6 +412,32 @@ then
   exit 1
 fi
 
+echo "==> Case 5: upstream representation trailer suppressed after conversion"
+: > "${RAW_DIR}/trailer.body"
+trailer_code="$(curl -sS -D "${RAW_DIR}/trailer.hdr" -o "${RAW_DIR}/trailer.body" \
+  -H 'Accept: text/markdown' \
+  "http://127.0.0.1:${PORT}/trailer" \
+  -w '%{http_code}')"
+[[ "${trailer_code}" == "200" ]] || { echo "Expected /trailer 200, got ${trailer_code}" >&2; exit 1; }
+grep -qi '^Content-Type: text/markdown; charset=utf-8' "${RAW_DIR}/trailer.hdr" || {
+  echo "Expected markdown Content-Type on /trailer" >&2
+  exit 1
+}
+# The upstream sent Content-Digest as a real trailer (chunked).  The
+# converted Markdown representation must not propagate source-HTML
+# trailers: neither the Trailer declaration nor a trailer block may
+# appear in the response to the client.
+if grep -qi '^Trailer:' "${RAW_DIR}/trailer.hdr"; then
+  echo "FAIL: Trailer declaration leaked to client on converted response" >&2
+  exit 1
+fi
+if grep -qi 'upstream-html-digest' "${RAW_DIR}/trailer.body"; then
+  echo "FAIL: upstream representation trailer leaked to client on converted response" >&2
+  exit 1
+fi
+trailer_suppressed=yes
+echo "Trailer suppression verified (no Trailer declaration, no Content-Digest trailer)" >&2
+
 echo "Proxy TLS backend summary:"
 echo "  nginx_version=${NGINX_VERSION}"
 echo "  arch=$(uname -m)"
@@ -420,6 +446,7 @@ echo "  passthrough_error_http=${error_code}"
 echo "  head_http=${head_code}"
 echo "  cache_control=${cache_control}"
 echo "  etag=${etag}"
+echo "  trailer_suppressed=${trailer_suppressed:-n/a}"
 echo "  artifacts=${BUILDROOT}"
 
 if [[ -n "${NGINX_BIN_OUTPUT_FILE}" ]]; then

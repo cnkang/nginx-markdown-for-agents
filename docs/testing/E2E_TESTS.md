@@ -12,8 +12,9 @@ client -> NGINX runtime -> upstream/backend -> NGINX markdown filter -> client
 
 Use this page to answer three questions:
 
-- which E2E scenarios are considered canonical
-- which script owns each scenario
+- which E2E scenarios count as canonical
+- which surface owns each scenario (`tools/e2e/` entrypoints or
+  `tools/e2e-harness/` migrated Rust scenarios)
 - how `make test-e2e` and CI reuse native NGINX runtimes
 
 ## Canonical Suite
@@ -24,12 +25,20 @@ Use this page to answer three questions:
 tools/e2e/run_e2e_suite.sh
 ```
 
+Ownership: each scenario has one logical owner. `tools/e2e/` owns the suite
+**entrypoints** (the runner and the shell-based scenario drivers), while
+`tools/e2e-harness/` owns the **migrated Rust scenario implementations**
+invoked from those entrypoints. A migrated scenario may span both surfaces:
+its entrypoint lives in `tools/e2e/` and its implementation lives in
+`tools/e2e-harness/`. See the scenario tables below.
+
 That suite currently runs focused checks across all E2E scenarios.
 
 ### Migrated scenarios (Rust e2e-harness)
 
-The following scenarios have been migrated to the Rust e2e-harness and are
-executed via `e2e-harness scenario <name>`:
+The following scenarios have migrated to the Rust e2e-harness. The harness
+owns their fixtures, requests, and assertions. They run via
+`e2e-harness scenario <name>`:
 
 | Scenario | Rust module | Former shell source |
 |----------|-------------|---------------------|
@@ -63,11 +72,13 @@ The suite keeps the public command stable:
 make test-e2e
 ```
 
-but the maintained implementation now lives entirely under `tools/e2e/`, not under `components/nginx-module/tests/e2e/`.
+Suite entrypoints live under `tools/e2e/`, and migrated Rust scenarios live
+under `tools/e2e-harness/`. Neither surface lives under
+`components/nginx-module/tests/e2e/` anymore.
 
 ## What E2E Covers
 
-The canonical E2E suite is intentionally focused on runtime paths that benefit from a native NGINX binary and real network behavior:
+The canonical E2E suite focuses intentionally on runtime paths that benefit from a native NGINX binary. It also covers real network behavior:
 
 - proxy-chain Markdown conversion through HTTPS upstreams
 - backend header preservation plus module-side `ETag` regeneration
@@ -75,7 +86,7 @@ The canonical E2E suite is intentionally focused on runtime paths that benefit f
 - `HEAD` requests through a proxy path
 - chunked buffering behavior
 - large-response handling and fail-open size protection
-- metrics endpoint format negotiation (JSON, plain-text, Prometheus exposition)
+- metrics endpoint Prometheus text 0.0.4 output and frozen family set
 - conditional request semantics (ETag, If-None-Match, If-Modified-Since, 304, HEAD parity)
 - directive merge precedence and override behavior
 - auth cookie detection, Cache-Control/ETag/Vary header handling
@@ -85,7 +96,7 @@ The canonical E2E suite is intentionally focused on runtime paths that benefit f
 
 ### Coverage E2E Scenarios
 
-The coverage script (`tools/sonar/collect_nginx_coverage.sh`) runs expanded E2E scenarios against an instrumented NGINX instance to collect gcov/lcov data. These scenarios are organized by subsystem:
+The coverage script (`tools/sonar/collect_nginx_coverage.sh`) runs expanded E2E scenarios against an instrumented NGINX instance to collect gcov/lcov data. The suite organizes the coverage scenarios by subsystem:
 
 | Category | Scenarios |
 |----------|-----------|
@@ -93,7 +104,7 @@ The coverage script (`tools/sonar/collect_nginx_coverage.sh`) runs expanded E2E 
 | **Conditional requests** | `If-None-Match: *`, quoted ETag, multi-ETag, `If-Modified-Since`, IMS-only bypass, disabled conditional bypass |
 | **Error paths** | 404 passthrough, reject-error, POST method ineligibility, Range header skip |
 | **Accept header diversity** | Exact match, subtype wildcard (`text/*`), all wildcard (`*/*`), q-value sorting, q=0 rejection, no markdown match, multi-entry tie-break, wildcard-disabled rejection |
-| **Metrics formats** | Prometheus format, auto format (text/plain), auto format (application/json), default metrics endpoint |
+| **Metrics endpoint** | Prometheus text 0.0.4 family catalog, content type, and post-conversion counter behavior |
 | **Body filter / headers** | Small file (single-buffer), large file (chain accumulation), HEAD request, GFM flavor, CommonMark flavor, size-limit rejection, auth Cache-Control modification |
 
 These checks complement, rather than replace, `make test-nginx-integration`.
@@ -112,7 +123,7 @@ Use the E2E suite for:
 
 ## Proxy/TLS Backend Check
 
-The proxy/TLS scenario is owned by:
+The proxy/TLS scenario belongs to:
 
 ```bash
 tools/e2e/verify_proxy_tls_backend_e2e.sh
@@ -196,7 +207,7 @@ tools/e2e/verify_large_markdown_response_e2e.sh --keep-artifacts
 
 For direct execution of the canonical E2E scripts:
 
-1. `curl`, `python3`, and common shell utilities are installed
+1. The host has `curl`, `python3`, and common shell utilities installed
 2. `openssl` is available for the TLS backend fixture
 3. if reusing `NGINX_BIN`, it points to a module-enabled binary
 4. if not reusing `NGINX_BIN`, native build tooling is available (`cargo`, `make`, `tar`, compiler toolchain)
@@ -230,6 +241,8 @@ That helper owns:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Fixed grammar in the coverage scenarios intro; ownership paragraph states one logical owner per scenario across both surfaces without the single-layer contradiction |
+| 0.9.2 | 2026-08-15 | Kang | Split E2E ownership: tools/e2e/ owns suite entrypoints, tools/e2e-harness/ owns migrated Rust scenarios |
 | 0.6.3 | 2026-05-12 | Kang | Added Rust e2e-harness migrated scenarios section, make test-e2e-rust, separated migrated vs non-migrated scenarios |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.0 | 2026-05-02 | v060-prod | Added new E2E scripts (metrics, conditional requests, config merge, auth/cache, status codes); listed shared helpers |

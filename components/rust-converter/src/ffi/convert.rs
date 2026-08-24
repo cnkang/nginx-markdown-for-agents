@@ -13,17 +13,17 @@
 //! 1. **Decode options** — translate C `MarkdownOptions` into Rust `ConversionOptions`
 //! 2. **Empty payload fast path** — skip DOM parsing for zero-length input
 //! 3. **Pre-parse budget check** — reject inputs exceeding `parser_memory_budget`
-//! 4. **Pre-parse deadline check** — fail early if `parse_timeout` already expired
+//! 4. **Pre-parse deadline check** — fail early if a configured deadline expired
 //! 5. **Parse HTML** — build DOM tree via html5ever with optional charset detection
-//! 6. **Post-parse deadline check** — detect if parse exceeded `parse_timeout`
-//! 7. **Convert** — traverse DOM with cooperative timeout checks (using `parse_timeout`)
+//! 6. **Post-parse deadline check** — detect if parsing exceeded `parse_timeout`
+//! 7. **Convert** — traverse DOM with cooperative checks against the overall timeout
 //! 8. **Derive ETag** — compute BLAKE3-based ETag if requested
 //! 9. **Estimate tokens** — compute LLM token count if requested
 //!
 //! Keeping these steps in one place avoids divergent behavior across exports
 //! and keeps error propagation deterministic for C callers.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::converter::{ConversionContext, MarkdownConverter};
 use crate::error::ConversionError;
@@ -31,7 +31,7 @@ use crate::parser::parse_html_with_charset;
 use crate::token_estimator::TokenEstimator;
 
 use super::abi::{ConversionOutput, MarkdownConverterHandle, MarkdownOptions};
-use super::options::decode_options;
+use super::options::{DecodedOptions, decode_options};
 
 /* Fixed parser overhead covers tokenizer/tree-builder state and the DOM root.
  * The per-input multiplier includes the source buffer, a worst-case UTF-8
@@ -74,6 +74,75 @@ pub(crate) fn max_input_for_parser_budget(parser_budget: u64) -> usize {
     usize::try_from(bytes).unwrap_or(usize::MAX)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ConversionDeadlines {
+    parser: Duration,
+    overall: Duration,
+}
+
+/// Keep the parser-specific and overall conversion budgets independent.
+fn resolve_conversion_deadlines(parser: Duration, overall: Duration) -> ConversionDeadlines {
+    ConversionDeadlines { parser, overall }
+}
+
+/// Return `Err(error)` when `deadline` is configured and has elapsed since
+/// `start`.  Unconfigured deadlines (`Duration::ZERO`) are always OK.
+fn check_deadline(
+    deadline: Duration,
+    start: Instant,
+    error: ConversionError,
+) -> Result<(), ConversionError> {
+    if !deadline.is_zero() && start.elapsed() > deadline {
+        Err(error)
+    } else {
+        Ok(())
+    }
+}
+
+/// Reject the request when the estimated parser working set exceeds the
+/// configured memory budget.  A budget of zero means unbounded.
+fn check_parser_budget(parser_budget: u64, parser_working_set: u64) -> Result<(), ConversionError> {
+    if parser_budget > 0 && parser_working_set > parser_budget {
+        // `limit` is reported for diagnostics only. Use a saturating
+        // conversion so the u64 budget never silently truncates when usize is
+        // narrower than u64 (e.g. 32-bit targets); on 64-bit targets this is
+        // an identity conversion.
+        let limit = usize::try_from(parser_budget).unwrap_or(usize::MAX);
+        Err(ConversionError::ParseBudgetExceeded {
+            used: usize::try_from(parser_working_set).unwrap_or(usize::MAX),
+            limit,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+/// Fast path for empty payloads: skip DOM/parser setup, but still preserve
+/// optional metadata behavior (token estimate and deterministic ETag).
+fn convert_empty_payload<'a>(
+    decoded: &DecodedOptions<'a>,
+    handle_ref: &MarkdownConverterHandle,
+) -> ConversionOutput {
+    let markdown = Box::<[u8]>::default();
+    let token_estimate = if decoded.estimate_tokens {
+        TokenEstimator::with_chars_per_token(decoded.effective_chars_per_token).estimate("")
+    } else {
+        0
+    };
+    let etag = decoded.generate_etag.then(|| {
+        handle_ref
+            .etag_generator
+            .generate(markdown.as_ref())
+            .into_bytes()
+            .into_boxed_slice()
+    });
+    ConversionOutput {
+        markdown,
+        etag,
+        token_estimate,
+    }
+}
+
 /// Execute one FFI conversion request end-to-end.
 ///
 /// This function is intentionally linear: decode options, parse HTML, run
@@ -92,9 +161,9 @@ pub(crate) fn max_input_for_parser_budget(parser_budget: u64) -> usize {
 ///   parsing begins, the request is rejected with `ParseTimeout`.
 /// - **Post-check (deadline):** If parsing completes but the deadline has
 ///   elapsed, the request is rejected with `ParseTimeout`.
-/// - **DOM traversal:** The `ConversionContext` uses `parse_timeout` for its
-///   cooperative checkpoint deadline, ensuring the full pipeline (parse + DOM
-///   traversal) stays within the parse budget.
+/// - **DOM traversal:** The `ConversionContext` uses the remaining general
+///   conversion timeout for its cooperative checkpoint deadline. A configured
+///   `parse_timeout` limits only the parser phase.
 ///
 /// Keeping these steps in one place avoids divergent behavior across exports
 /// and keeps error propagation deterministic for C callers.
@@ -108,77 +177,73 @@ pub(crate) fn convert_inner(
     // Fast path for empty payloads: skip DOM/parser setup, but still preserve
     // optional metadata behavior (token estimate and deterministic ETag).
     if html_slice.is_empty() {
-        let markdown = Box::<[u8]>::default();
-        let token_estimate = if decoded.estimate_tokens {
-            TokenEstimator::with_chars_per_token(decoded.effective_chars_per_token).estimate("")
-        } else {
-            0
-        };
-        let etag = decoded.generate_etag.then(|| {
-            handle_ref
-                .etag_generator
-                .generate(markdown.as_ref())
-                .into_bytes()
-                .into_boxed_slice()
-        });
-
-        return Ok(ConversionOutput {
-            markdown,
-            etag,
-            token_estimate,
-        });
+        return Ok(convert_empty_payload(&decoded, handle_ref));
     }
+
+    let deadlines = resolve_conversion_deadlines(decoded.parse_timeout, decoded.timeout);
+    let conversion_start = Instant::now();
 
     // --- Parser memory budget pre-check ---
     // html5ever does not expose allocator accounting. Estimate the complete
     // parser/transcoding/DOM working set and fail closed on arithmetic overflow.
     let input_size = html_slice.len();
-    let parser_budget = decoded.parser_memory_budget;
     let tag_openers = html_slice.iter().filter(|byte| **byte == b'<').count();
     let parser_working_set = estimate_parser_working_set(input_size, tag_openers);
-    if parser_budget > 0 && parser_working_set > parser_budget {
-        // `limit` is reported for diagnostics only. Use a saturating
-        // conversion so the u64 budget never silently truncates when usize is
-        // narrower than u64 (e.g. 32-bit targets); on 64-bit targets this is
-        // an identity conversion.
-        let limit = usize::try_from(parser_budget).unwrap_or(usize::MAX);
-        return Err(ConversionError::ParseBudgetExceeded {
-            used: usize::try_from(parser_working_set).unwrap_or(usize::MAX),
-            limit,
-        });
-    }
+    check_parser_budget(decoded.parser_memory_budget, parser_working_set)?;
 
-    // Resolve the effective parse deadline: parse_timeout constrains both the
-    // html5ever parse phase and the subsequent DOM traversal.
-    let parse_timeout = decoded.parse_timeout;
+    // The parser deadline starts immediately before parsing. The general
+    // conversion deadline started before the parser-budget estimate so it
+    // bounds the complete full-buffer pipeline.
     let parse_start = Instant::now();
 
     // --- Pre-parse deadline check ---
-    // If the deadline is already expired (e.g., upstream processing consumed
-    // the budget), fail immediately without invoking the parser.
-    if !parse_timeout.is_zero() && parse_start.elapsed() > parse_timeout {
-        return Err(ConversionError::ParseTimeout);
-    }
+    // If a deadline is already expired (e.g., upstream processing consumed
+    // the budget), fail immediately without invoking the parser.  The
+    // parser sub-deadline is measured from the pipeline entry
+    // (conversion_start), not from parse_start below: parse_start is
+    // created immediately before this check, so its elapsed time is ~0
+    // and the check could never fire — the intent is to bound
+    // pre-parse work (budget estimation, upstream delay) within the
+    // parser sub-limit too.
+    check_deadline(
+        deadlines.parser,
+        conversion_start,
+        ConversionError::ParseTimeout,
+    )?;
+    check_deadline(
+        deadlines.overall,
+        conversion_start,
+        ConversionError::Timeout,
+    )?;
 
     let dom = parse_html_with_charset(html_slice, decoded.content_type)?;
 
     // --- Post-parse deadline check ---
     // html5ever cannot be interrupted, but we detect overruns after it returns.
-    if !parse_timeout.is_zero() && parse_start.elapsed() > parse_timeout {
-        return Err(ConversionError::ParseTimeout);
-    }
+    check_deadline(deadlines.parser, parse_start, ConversionError::ParseTimeout)?;
+    check_deadline(
+        deadlines.overall,
+        conversion_start,
+        ConversionError::Timeout,
+    )?;
 
     // Compute remaining time budget for DOM traversal. The ConversionContext
     // uses this as its cooperative checkpoint deadline so the full pipeline
-    // (parse + traversal) stays within parse_timeout.
-    let traversal_budget = if parse_timeout.is_zero() {
-        parse_timeout
-    } else {
-        parse_timeout.saturating_sub(parse_start.elapsed())
-    };
+    // (parse + traversal) stays within the overall deadline.  An overall
+    // deadline that pre-parse work already exhausted is a genuine timeout:
+    // fail with Timeout instead of handing ConversionContext a ZERO budget,
+    // which it interprets as "no deadline" and would run unbounded.
+    // (ZERO from an explicitly unconfigured overall deadline never reaches
+    // here — check_deadline treats it as always-OK above.)
+    let elapsed_overall = conversion_start.elapsed();
+    if !deadlines.overall.is_zero() && elapsed_overall >= deadlines.overall {
+        return Err(ConversionError::Timeout);
+    }
+    let traversal_budget = deadlines.overall.saturating_sub(elapsed_overall);
 
     let mut ctx = ConversionContext::new(traversal_budget);
     ctx.set_input_size_hint(input_size);
+    ctx.set_output_budget(decoded.memory_budget);
     // Check once before conversion so a near-expired deadline can fail early
     // without spending cycles traversing a large DOM.
     ctx.check_timeout()?;
@@ -186,11 +251,28 @@ pub(crate) fn convert_inner(
     let converter = MarkdownConverter::with_options(decoded.conversion);
     let markdown = converter.convert_with_context(&dom, &mut ctx)?;
 
+    // --- Post-traversal deadline check ---
+    // The DOM traversal is complete; the remaining post-processing steps
+    // (token estimation, ETag generation) are bounded but still count
+    // against the overall conversion deadline.
+    check_deadline(
+        deadlines.overall,
+        conversion_start,
+        ConversionError::Timeout,
+    )?;
+
     let token_estimate = if decoded.estimate_tokens {
         TokenEstimator::with_chars_per_token(decoded.effective_chars_per_token).estimate(&markdown)
     } else {
         0
     };
+
+    // --- Post-token-estimation deadline check ---
+    check_deadline(
+        deadlines.overall,
+        conversion_start,
+        ConversionError::Timeout,
+    )?;
 
     let markdown = markdown.into_bytes().into_boxed_slice();
     let etag = decoded.generate_etag.then(|| {
@@ -235,6 +317,15 @@ mod tests {
         let budget = PARSER_FIXED_OVERHEAD + (PARSER_BYTES_PER_INPUT_BYTE * 100);
         assert_eq!(max_input_for_parser_budget(budget), 100);
         assert_eq!(max_input_for_parser_budget(PARSER_FIXED_OVERHEAD - 1), 0);
+    }
+
+    #[test]
+    fn parser_timeout_does_not_shorten_overall_conversion_timeout() {
+        let deadlines =
+            resolve_conversion_deadlines(Duration::from_secs(5), Duration::from_secs(30));
+
+        assert_eq!(deadlines.parser, Duration::from_secs(5));
+        assert_eq!(deadlines.overall, Duration::from_secs(30));
     }
 
     #[test]

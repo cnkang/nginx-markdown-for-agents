@@ -23,22 +23,30 @@ void markdown_result_free(struct MarkdownResult *result);
 static void ngx_http_markdown_record_system_failure(
     ngx_http_markdown_ctx_t *ctx);
 static void ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf);
+
+/*
+ * Clear full-buffer ownership state when request-pool teardown interrupts a
+ * backpressured response before the normal resume path can drain it.
+ */
+static void
+ngx_http_markdown_fullbuffer_cleanup(void *data)
+{
+    ngx_http_markdown_ctx_t  *ctx;
+
+    ctx = data;
+    if (ctx == NULL) {
+        return;
+    }
+
+    ngx_http_markdown_pending_output_set(
+        &ctx->fullbuffer.pending_output, NULL);
+    ctx->fullbuffer.pending_has_data = 0;
+}
 static ngx_int_t ngx_http_markdown_reject_or_fail_open_buffered_response(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf, const char *debug_message);
-static ngx_http_markdown_otel_span_t *ngx_http_markdown_otel_span_start(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
-static void ngx_http_markdown_otel_set_str_attr(
-    ngx_http_markdown_otel_span_t *span, const u_char *key, size_t key_len,
-    const u_char *value, size_t val_len);
-static void ngx_http_markdown_otel_set_int_attr(
-    ngx_http_markdown_otel_span_t *span, const u_char *key, size_t key_len,
-    int64_t value);
-static void ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span);
-static void ngx_http_markdown_otel_span_export(
-    ngx_http_markdown_otel_span_t *span, ngx_log_t *log,
-    ngx_http_request_t *r);
 
 /*
  * Local case-insensitive compare for const-qualified byte slices.
@@ -80,8 +88,11 @@ ngx_http_markdown_const_strncasecmp(const u_char *s1, const u_char *s2,
  * Implements: base_url construction via the Rust trusted-proxy decision
  */
 static u_char ngx_http_markdown_hdr_forwarded[] = "Forwarded";
+static u_char ngx_http_markdown_hdr_x_forwarded_for[] = "X-Forwarded-For";
 static u_char ngx_http_markdown_hdr_x_forwarded_proto[] = "X-Forwarded-Proto";
 static u_char ngx_http_markdown_hdr_x_forwarded_host[] = "X-Forwarded-Host";
+static u_char ngx_http_markdown_hdr_x_forwarded_port[] = "X-Forwarded-Port";
+static const u_char ngx_http_markdown_empty_header_value[] = "";
 
 /* Maximum scheme://host authority length written by the FFI decision. */
 #define NGX_HTTP_MARKDOWN_BASE_AUTHORITY_MAX  512
@@ -92,6 +103,9 @@ static u_char ngx_http_markdown_hdr_x_forwarded_host[] = "X-Forwarded-Host";
  * the validated direct Host/scheme inputs.
  */
 #define NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX  8192
+
+/* Internal result used to distinguish a matched value rejected by the cap. */
+#define NGX_HTTP_MARKDOWN_FORWARDING_HEADER_TOO_LARGE  (-1001)
 
 /* Match one request header against a case-insensitive field name. */
 static ngx_flag_t
@@ -107,7 +121,7 @@ ngx_http_markdown_request_header_matches(const ngx_table_elt_t *header,
 
 /* Find a request header value by name in the generic linked-list storage. */
 static const ngx_str_t *
-ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
+ngx_http_markdown_find_request_header_value(const ngx_http_request_t *r,
                                             const u_char *name,
                                             size_t name_len)
 {
@@ -115,7 +129,7 @@ ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
         return NULL;
     }
 
-    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+    for (const ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
     {
@@ -153,7 +167,7 @@ ngx_http_markdown_accumulate_header_value_len(ngx_uint_t match_count,
     if (*total_len > NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX
         || value_len > NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX - *total_len)
     {
-        return NGX_DECLINED;
+        return NGX_HTTP_MARKDOWN_FORWARDING_HEADER_TOO_LARGE;
     }
 
     *total_len += value_len;
@@ -165,11 +179,11 @@ ngx_http_markdown_accumulate_header_value_len(ngx_uint_t match_count,
  */
 static ngx_int_t
 ngx_http_markdown_measure_request_header_values(
-    ngx_http_request_t *r, const u_char *name, size_t name_len,
+    const ngx_http_request_t *r, const u_char *name, size_t name_len,
     const ngx_str_t **single_value, ngx_uint_t *match_count,
     size_t *total_len)
 {
-    ngx_list_part_t       *part;
+    const ngx_list_part_t *part;
     const ngx_table_elt_t *headers;
 
     *single_value = NULL;
@@ -184,12 +198,11 @@ ngx_http_markdown_measure_request_header_values(
                 continue;
             }
             if (!ngx_http_markdown_request_header_matches(
-                    &headers[i], name, name_len)
-                || headers[i].value.len == 0)
+                    &headers[i], name, name_len))
             {
                 continue;
             }
-            if (headers[i].value.data == NULL) {
+            if (headers[i].value.len > 0 && headers[i].value.data == NULL) {
                 return NGX_ERROR;
             }
 
@@ -211,10 +224,10 @@ ngx_http_markdown_measure_request_header_values(
 /* Copy validated matching values to an exactly sized output buffer. */
 static void
 ngx_http_markdown_copy_request_header_values(
-    ngx_http_request_t *r, const u_char *name, size_t name_len,
+    const ngx_http_request_t *r, const u_char *name, size_t name_len,
     u_char *data)
 {
-    ngx_list_part_t       *part;
+    const ngx_list_part_t *part;
     const ngx_table_elt_t *headers;
     ngx_uint_t             copied;
     u_char                *p;
@@ -229,8 +242,7 @@ ngx_http_markdown_copy_request_header_values(
                 continue;
             }
             if (!ngx_http_markdown_request_header_matches(
-                    &headers[i], name, name_len)
-                || headers[i].value.len == 0)
+                    &headers[i], name, name_len))
             {
                 continue;
             }
@@ -239,8 +251,10 @@ ngx_http_markdown_copy_request_header_values(
                 *p++ = ',';
                 *p++ = ' ';
             }
-            p = ngx_cpymem(p, headers[i].value.data,
-                           headers[i].value.len);
+            if (headers[i].value.len > 0) {
+                p = ngx_cpymem(p, headers[i].value.data,
+                               headers[i].value.len);
+            }
             copied++;
         }
     }
@@ -255,12 +269,14 @@ ngx_http_markdown_copy_request_header_values(
  * copies only after the allocation succeeds. A single value remains a
  * zero-copy view into NGINX request storage.
  *
- * Returns NGX_OK with `out` populated, NGX_DECLINED when no non-empty field
- * line exists, or NGX_ERROR for invalid storage, overflow, or allocation
- * failure.
+ * Returns NGX_OK with `out` populated, NGX_DECLINED when no matching field
+ * line exists, NGX_HTTP_MARKDOWN_FORWARDING_HEADER_TOO_LARGE when a matching
+ * value exceeds the input cap, or NGX_ERROR for invalid storage, overflow,
+ * or allocation failure.
  */
 static ngx_int_t
-ngx_http_markdown_collect_request_header_values(ngx_http_request_t *r,
+ngx_http_markdown_collect_request_header_values(
+    const ngx_http_request_t *r,
                                                 const u_char *name,
                                                 size_t name_len,
                                                 ngx_str_t *out)
@@ -312,15 +328,108 @@ ngx_http_markdown_collect_request_header_values(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+
+static ngx_int_t
+ngx_http_markdown_collect_forwarding_header(
+    const ngx_http_request_t *r, const u_char *name, size_t name_len,
+    ngx_str_t *value, ngx_flag_t *present)
+{
+    const ngx_str_t  *first_match;
+    ngx_int_t         rc;
+
+    if (r == NULL || name == NULL || name_len == 0
+        || value == NULL || present == NULL) {
+        return NGX_ERROR;
+    }
+
+    first_match = ngx_http_markdown_find_request_header_value(
+        r, name, name_len);
+    if (first_match == NULL) {
+        *present = 0;
+        value->data = NULL;
+        value->len = 0;
+        return NGX_OK;
+    }
+
+    rc = ngx_http_markdown_collect_request_header_values(
+        r, name, name_len, value);
+    if (rc == NGX_ERROR) {
+        return NGX_ERROR;
+    }
+    if (rc == NGX_DECLINED) {
+        *present = 0;
+        value->data = NULL;
+        value->len = 0;
+        return NGX_OK;
+    }
+    if (rc == NGX_HTTP_MARKDOWN_FORWARDING_HEADER_TOO_LARGE) {
+        /* Preserve presence so Rust keeps the malformed-header precedence. */
+        *present = 1;
+        value->data = NULL;
+        value->len = 0;
+        return NGX_OK;
+    }
+    if (rc != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    *present = 1;
+    return NGX_OK;
+}
+
+
+static void
+ngx_http_markdown_set_base_url_header(
+    const ngx_str_t *value, ngx_flag_t present,
+    const uint8_t **target, uintptr_t *target_len)
+{
+    if (!present) {
+        return;
+    }
+
+    *target = value->data != NULL
+        ? value->data : ngx_http_markdown_empty_header_value;
+    *target_len = value->len;
+}
+
+/* Resolve the original transport peer through NGINX's public variable API. */
+static ngx_int_t
+ngx_http_markdown_source_peer(ngx_http_request_t *r, ngx_str_t *source)
+{
+    static ngx_str_t           realip_remote_addr =
+        ngx_string("realip_remote_addr");
+    ngx_http_variable_value_t *value;
+
+    if (r == NULL || r->connection == NULL || source == NULL) {
+        return NGX_ERROR;
+    }
+
+    *source = r->connection->addr_text;
+    value = ngx_http_get_variable(
+        r, &realip_remote_addr,
+        ngx_hash_key_lc(realip_remote_addr.data,
+                        realip_remote_addr.len));
+    if (value != NULL && value->valid && !value->not_found
+        && value->data != NULL && value->len > 0)
+    {
+        source->data = value->data;
+        source->len = value->len;
+    }
+
+    return NGX_OK;
+}
+
 /*
  * Decide the validated "scheme://host" authority via the Rust trusted-proxy
  * decision (markdown_decide_base_url).
  *
- * This is a thin wrapper: it marshals the realip/PROXY-resolved source IP
- * (r->connection->addr_text and the AF_UNIX flag), the forwarded request
- * headers, the request Host, and the http-level trusted-proxy CIDR handle
- * into the FFI input, then copies the FFI-produced authority into out_buf.
- * It contains no trust, CIDR-matching, or host-validation branches.
+ * This is a thin wrapper: it marshals the original transport peer
+ * (the public realip_remote_addr variable when the realip module preserved
+ * it, otherwise r->connection->addr_text, plus the AF_UNIX flag), the
+ * forwarded request headers, the request Host, and the http-level
+ * trusted-proxy CIDR handle into the FFI input, then copies the FFI-produced
+ * authority into out_buf.  It contains no trust, CIDR-matching, or
+ * host-validation branches.
  *
  * Parameters:
  *   r        - HTTP request (NGINX glue source for IP/headers/config)
@@ -339,43 +448,73 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
 {
     const ngx_http_markdown_main_conf_t  *mmcf;
     ngx_str_t                             forwarded;
+    ngx_str_t                             x_forwarded_for;
     ngx_str_t                             x_forwarded_proto;
     ngx_str_t                             x_forwarded_host;
+    ngx_str_t                             x_forwarded_port;
     FFIBaseUrlInput                       input;
     FFIBaseUrlDecision                    decision;
-    ngx_int_t                              header_rc;
+    ngx_str_t                             source_peer;
     uint8_t                               rc;
+    ngx_flag_t                             forwarded_present;
+    ngx_flag_t                             x_forwarded_for_present;
+    ngx_flag_t                             x_forwarded_proto_present;
+    ngx_flag_t                             x_forwarded_host_present;
+    ngx_flag_t                             x_forwarded_port_present;
 
     mmcf = ngx_http_get_module_main_conf(r, ngx_http_markdown_filter_module);
 
-    header_rc = ngx_http_markdown_collect_request_header_values(
-        r, ngx_http_markdown_hdr_forwarded,
-        sizeof(ngx_http_markdown_hdr_forwarded) - 1, &forwarded);
-    if (header_rc == NGX_ERROR) {
+    if (ngx_http_markdown_collect_forwarding_header(
+            r, ngx_http_markdown_hdr_forwarded,
+            sizeof(ngx_http_markdown_hdr_forwarded) - 1,
+            &forwarded, &forwarded_present) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_collect_forwarding_header(
+            r, ngx_http_markdown_hdr_x_forwarded_for,
+            sizeof(ngx_http_markdown_hdr_x_forwarded_for) - 1,
+            &x_forwarded_for, &x_forwarded_for_present) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_collect_forwarding_header(
+            r, ngx_http_markdown_hdr_x_forwarded_proto,
+            sizeof(ngx_http_markdown_hdr_x_forwarded_proto) - 1,
+            &x_forwarded_proto, &x_forwarded_proto_present) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_collect_forwarding_header(
+            r, ngx_http_markdown_hdr_x_forwarded_host,
+            sizeof(ngx_http_markdown_hdr_x_forwarded_host) - 1,
+            &x_forwarded_host, &x_forwarded_host_present) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_collect_forwarding_header(
+            r, ngx_http_markdown_hdr_x_forwarded_port,
+            sizeof(ngx_http_markdown_hdr_x_forwarded_port) - 1,
+            &x_forwarded_port, &x_forwarded_port_present) != NGX_OK)
+    {
         return NGX_ERROR;
     }
 
-    header_rc = ngx_http_markdown_collect_request_header_values(
-        r, ngx_http_markdown_hdr_x_forwarded_proto,
-        sizeof(ngx_http_markdown_hdr_x_forwarded_proto) - 1,
-        &x_forwarded_proto);
-    if (header_rc == NGX_ERROR) {
-        return NGX_ERROR;
-    }
-
-    header_rc = ngx_http_markdown_collect_request_header_values(
-        r, ngx_http_markdown_hdr_x_forwarded_host,
-        sizeof(ngx_http_markdown_hdr_x_forwarded_host) - 1,
-        &x_forwarded_host);
-    if (header_rc == NGX_ERROR) {
-        return NGX_ERROR;
-    }
-
-    ngx_memzero(&input, sizeof(input));
+    markdown_base_url_input_init(&input);
 
     if (r->connection != NULL) {
-        input.source_ip = r->connection->addr_text.data;
-        input.source_ip_len = r->connection->addr_text.len;
+        /*
+         * Trusted-proxy CIDR evaluation must use the original transport
+         * peer, not the realip-resolved address.  The public
+         * realip_remote_addr variable exposes that peer without depending
+         * on private fields from ngx_http_realip_module.  When that module
+         * is absent, the variable lookup falls back to addr_text.
+         */
+        if (ngx_http_markdown_source_peer(r, &source_peer) != NGX_OK) {
+            return NGX_ERROR;
+        }
+        input.source_ip = source_peer.data;
+        input.source_ip_len = source_peer.len;
         if (r->connection->sockaddr != NULL
             && r->connection->sockaddr->sa_family == AF_UNIX)
         {
@@ -389,18 +528,21 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
             mmcf->trusted_proxies_configured ? 1 : 0;
     }
 
-    if (forwarded.len > 0) {
-        input.forwarded = forwarded.data;
-        input.forwarded_len = forwarded.len;
-    }
-    if (x_forwarded_proto.len > 0) {
-        input.x_forwarded_proto = x_forwarded_proto.data;
-        input.x_forwarded_proto_len = x_forwarded_proto.len;
-    }
-    if (x_forwarded_host.len > 0) {
-        input.x_forwarded_host = x_forwarded_host.data;
-        input.x_forwarded_host_len = x_forwarded_host.len;
-    }
+    ngx_http_markdown_set_base_url_header(
+        &forwarded, forwarded_present,
+        &input.forwarded, &input.forwarded_len);
+    ngx_http_markdown_set_base_url_header(
+        &x_forwarded_for, x_forwarded_for_present,
+        &input.x_forwarded_for, &input.x_forwarded_for_len);
+    ngx_http_markdown_set_base_url_header(
+        &x_forwarded_proto, x_forwarded_proto_present,
+        &input.x_forwarded_proto, &input.x_forwarded_proto_len);
+    ngx_http_markdown_set_base_url_header(
+        &x_forwarded_host, x_forwarded_host_present,
+        &input.x_forwarded_host, &input.x_forwarded_host_len);
+    ngx_http_markdown_set_base_url_header(
+        &x_forwarded_port, x_forwarded_port_present,
+        &input.x_forwarded_port, &input.x_forwarded_port_len);
     if (r->headers_in.server.len > 0) {
         input.host = r->headers_in.server.data;
         input.host_len = r->headers_in.server.len;
@@ -540,6 +682,87 @@ ngx_http_markdown_record_conversion_latency(ngx_msec_t elapsed_ms)
     NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency.gt_1000ms);
 }
 
+/* Record the frozen v1 histogram with the engine selected for this request. */
+static void
+ngx_http_markdown_record_conversion_latency_for_path(ngx_uint_t path,
+                                                     ngx_msec_t elapsed_ms)
+{
+    ngx_http_markdown_record_conversion_latency(elapsed_ms);
+
+    if (path == NGX_HTTP_MARKDOWN_PATH_STREAMING) {
+        NGX_HTTP_MARKDOWN_METRIC_ADD(
+            conversion_latency_v1.streaming.sum_ms, elapsed_ms);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_v1.streaming.count);
+        if (elapsed_ms <= 1) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_1ms);
+        } else if (elapsed_ms <= 5) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_5ms);
+        } else if (elapsed_ms <= 10) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_10ms);
+        } else if (elapsed_ms <= 25) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_25ms);
+        } else if (elapsed_ms <= 50) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_50ms);
+        } else if (elapsed_ms <= 100) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_100ms);
+        } else if (elapsed_ms <= 250) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_250ms);
+        } else if (elapsed_ms <= 500) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_500ms);
+        } else if (elapsed_ms <= 1000) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_1000ms);
+        } else if (elapsed_ms <= 5000) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_5000ms);
+        }
+        return;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_ADD(
+        conversion_latency_v1.full_buffer.sum_ms, elapsed_ms);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_v1.full_buffer.count);
+    if (elapsed_ms <= 1) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_1ms);
+    } else if (elapsed_ms <= 5) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_5ms);
+    } else if (elapsed_ms <= 10) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_10ms);
+    } else if (elapsed_ms <= 25) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_25ms);
+    } else if (elapsed_ms <= 50) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_50ms);
+    } else if (elapsed_ms <= 100) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_100ms);
+    } else if (elapsed_ms <= 250) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_250ms);
+    } else if (elapsed_ms <= 500) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_500ms);
+    } else if (elapsed_ms <= 1000) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_1000ms);
+    } else if (elapsed_ms <= 5000) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_5000ms);
+    }
+}
+
 /*
  * Attempt conditional-request shortcut (If-None-Match / 304).
  *
@@ -567,9 +790,11 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown: If-None-Match matched, sending 304 Not Modified");
 
-        if (ctx != NULL && ctx->last_modified.has_last_modified_time) {
-            r->headers_out.last_modified_time = ctx->last_modified.source_last_modified_time;
-        }
+        /* Decision G: the converted representation's weak validator must
+         * not describe the source HTML mtime.  ETag (Markdown-derived,
+         * strong) is the sole validator; do NOT restore the source
+         * last-modified time on the 304. */
+        r->headers_out.last_modified_time = (time_t) -1;
 
         rc = ngx_http_markdown_send_304(r, conditional_result);
         if (conditional_result != NULL) {
@@ -691,9 +916,6 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
                                              struct MarkdownOptions *options)
 {
     ngx_str_t base_url;
-#ifdef MARKDOWN_STREAMING_ENABLED
-    size_t    budget;
-#endif
 
     markdown_options_init(options);
     if (conf->flavor > UINT32_MAX) {
@@ -748,12 +970,11 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     }
 
     /*
-     * Unified memory budget with priority:
-     *   explicit per-engine > unified > default
-     * For streaming_budget: if streaming_budget was explicitly set
-     * (not NGX_CONF_UNSET_SIZE), use it; else if memory_budget is
-     * set, use it; else streaming_budget keeps its merge default.
-     * For max_size: same priority chain applies.
+     * Resolve the effective static conversion_memory budget once for this
+     * request. A zero value means no FFI-side constraint, so Rust may use its
+     * bounded full-buffer fallback; the normal NGINX default is 64 MiB from
+     * markdown_limits conversion_memory=64m. Runtime dynconf cannot replace
+     * this static public limit.
      */
     options->memory_budget =
         ngx_http_markdown_effective_memory_budget(eff, conf);
@@ -761,27 +982,11 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
         options->memory_budget = 0;
     }
 
+    /* This is the fixed flush minimum, not markdown_limits streaming_buffer. */
     options->flush_threshold =
-        (conf->stream.flush_min > UINT32_MAX)
+        (NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED > UINT32_MAX)
             ? UINT32_MAX
-            : (uint32_t) conf->stream.flush_min;
-
-    if (conf->advanced.llm_provider > UINT8_MAX) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown: llm_provider=%ui exceeds uint8 range",
-                      conf->advanced.llm_provider);
-        return NGX_ERROR;
-    }
-    if (conf->advanced.chars_per_token_fixed > UINT8_MAX) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown: chars_per_token_fixed=%ui exceeds "
-                      "uint8 range",
-                      conf->advanced.chars_per_token_fixed);
-        return NGX_ERROR;
-    }
-
-    options->llm_provider = (uint8_t) conf->advanced.llm_provider;
-    options->chars_per_token_fixed = (uint8_t) conf->advanced.chars_per_token_fixed;
+            : (uint32_t) NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED;
 
     /*
      * Parse-specific timeout and memory budget.
@@ -794,31 +999,6 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
         options->parse_timeout_ms = (uint32_t) conf->decompress.parse_timeout;
     }
     options->parser_memory_budget = (uint64_t) conf->decompress.parser_budget;
-
-    /*
-     * Apply unified budget to streaming_budget when it was not
-     * explicitly set by the operator.
-     *
-     * Priority: explicit streaming_budget > memory_budget > default
-     *
-     * streaming_budget_explicit is set during merge_conf when the
-     * operator explicitly configured markdown_limits streaming_buffer=
-     * at this or any parent configuration level.
-     *
-     * After merge_conf, streaming_budget is always resolved to a
-     * concrete default value (never NGX_CONF_UNSET_SIZE), so the
-     * previous check for effective_streaming_budget == UNSET was
-     * always false.  Simplify: apply memory_budget override
-     * whenever memory_budget is configured and the operator did
-     * not explicitly set streaming_budget.
-     */
-#ifdef MARKDOWN_STREAMING_ENABLED
-    budget = ngx_http_markdown_effective_memory_budget(eff, conf);
-
-    if (budget != NGX_CONF_UNSET_SIZE && !conf->stream.budget_explicit) {
-        options->streaming_budget = budget;
-    }
-#endif
 
     if (r->headers_out.content_type.len > 0) {
         options->content_type = r->headers_out.content_type.data;
@@ -855,7 +1035,8 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
     ctx->error.last_category = error_category;
     ctx->error.has_category = 1;
 
-    ngx_http_markdown_record_conversion_latency(elapsed_ms);
+    ngx_http_markdown_record_conversion_latency_for_path(
+        ctx->processing_path, elapsed_ms);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
 
     switch (error_category) {
@@ -873,17 +1054,25 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
     switch (result->error_code) {
         case ERROR_DECOMPRESSION_BUDGET_EXCEEDED:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+            ngx_http_markdown_record_decompression_failure_budget(
+                ctx->decompression.type);
             NGX_HTTP_MARKDOWN_METRIC_INC(
                 perf.decompression_budget_exceeded_total);
             break;
         case ERROR_DECOMPRESSION_FORMAT_ERROR:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
+            ngx_http_markdown_record_decompression_failure_format(
+                ctx->decompression.type);
             break;
         case ERROR_DECOMPRESSION_TRUNCATED_INPUT:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.truncated_input_total);
+            ngx_http_markdown_record_decompression_failure_truncated(
+                ctx->decompression.type);
             break;
         case ERROR_DECOMPRESSION_IO_ERROR:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+            ngx_http_markdown_record_decompression_failure_io(
+                ctx->decompression.type);
             break;
         case ERROR_PARSE_TIMEOUT:
             NGX_HTTP_MARKDOWN_METRIC_INC(
@@ -974,59 +1163,51 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
                                             ngx_msec_t elapsed_ms)
 {
     ctx->conversion.succeeded = 1;
-    ngx_http_markdown_record_conversion_latency(elapsed_ms);
-    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
-    NGX_HTTP_MARKDOWN_METRIC_ADD(input_bytes, ctx->buffer.size);
-    NGX_HTTP_MARKDOWN_METRIC_ADD(output_bytes, result->markdown_len);
+    ctx->conversion.input_bytes = ctx->buffer.size;
+    ctx->conversion.output_bytes = result->markdown_len;
+    ngx_http_markdown_record_conversion_latency_for_path(
+        ctx->processing_path, elapsed_ms);
 }
 
-static const ngx_str_t *
-ngx_http_markdown_otel_flavor_name(ngx_uint_t flavor)
-{
-    static ngx_str_t  gfm_name = ngx_string("gfm");
-    static ngx_str_t  commonmark_name = ngx_string("commonmark");
-
-    if (flavor == NGX_HTTP_MARKDOWN_FLAVOR_GFM) {
-        return &gfm_name;
-    }
-
-    return &commonmark_name;
-}
-
-static const ngx_str_t *
-ngx_http_markdown_otel_engine_name(ngx_uint_t path)
-{
-    static ngx_str_t incremental_name = ngx_string("incremental");
-    static ngx_str_t fullbuffer_name = ngx_string("fullbuffer");
-
-    if (path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
-        return &incremental_name;
-    }
-    return &fullbuffer_name;
-}
-
+/* Record converted bytes and outcome only after downstream accepts the body. */
 static void
-ngx_http_markdown_otel_teardown_span(ngx_http_request_t *r,
-                                     ngx_http_markdown_ctx_t *ctx,
-                                     size_t input_bytes,
-                                     size_t output_bytes,
-                                     int64_t error_code)
+ngx_http_markdown_record_buffered_delivery_success(
+    ngx_http_markdown_ctx_t *ctx)
 {
-    if (ctx->otel_span == NULL) {
+    if (ctx == NULL
+        || !ctx->conversion.succeeded
+        || ctx->conversion.delivery_recorded)
+    {
         return;
     }
 
-    ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-        (const u_char *) "input_bytes", 11, (int64_t) input_bytes);
-    ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-        (const u_char *) "output_bytes", 12, (int64_t) output_bytes);
-    ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-        (const u_char *) "error_code", 10, error_code);
-    ngx_http_markdown_otel_span_end(ctx->otel_span);
-    ngx_http_markdown_otel_span_export(ctx->otel_span, r->connection->log, r);
-    ctx->otel_span = NULL;
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
+    NGX_HTTP_MARKDOWN_METRIC_ADD(input_bytes, ctx->conversion.input_bytes);
+    NGX_HTTP_MARKDOWN_METRIC_ADD(output_bytes, ctx->conversion.output_bytes);
+    ctx->conversion.delivery_recorded = 1;
 }
 
+/* A definitive post-conversion delivery error is one terminal failure. */
+static void
+ngx_http_markdown_record_buffered_delivery_failure(
+    ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx == NULL
+        || !ctx->conversion.succeeded
+        || ctx->conversion.delivery_recorded
+        || ctx->error.has_category)
+    {
+        return;
+    }
+
+    ngx_http_markdown_record_system_failure(ctx);
+}
+
+/*
+ * Per-path RB-tree helpers removed from production in 0.9.2.
+ * Retained under debug guard only.
+ */
+#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
 /*
  * Determine which child to follow in the per-path RB tree
  * when the hash key matches but the URI path does not.
@@ -1128,15 +1309,14 @@ ngx_http_markdown_per_path_lookup_and_update(
         rbnode = child;
     }
 }
+#endif /* MARKDOWN_METRICS_PER_PATH_DEBUG */
 
 /*
  * Record per-path metrics for a successful conversion.
  *
- * Looks up the request URI in the shared RB-tree.  If the path
- * is not found and the tree is below cardinality_limit, allocates
- * a new node from the slab pool and inserts it.  If at capacity,
- * increments overflow_count.  Updates per-path and aggregate
- * counters under the slab pool mutex.
+ * No-op placeholder since 0.9.2 (per-path metrics removed;
+ * the directive was deleted).  Retained only to keep the
+ * call sites stable across releases.
  *
  * Parameters:
  *   r          - the HTTP request (provides r->uri as the path key)
@@ -1145,133 +1325,15 @@ ngx_http_markdown_per_path_lookup_and_update(
  */
 static void
 ngx_http_markdown_record_per_path_metrics(
-    ngx_http_request_t *r,
+    const ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     ngx_msec_t elapsed_ms)
 {
-    ngx_shm_zone_t                       *zone;
-    ngx_slab_pool_t                      *shpool;
-    ngx_http_markdown_metrics_t          *metrics;
-    ngx_http_markdown_path_metric_node_t *node;
-    const ngx_rbtree_node_t              *sentinel;
-    ngx_uint_t                            hash;
-    ngx_uint_t                            key;
-
-    if (!conf->ops.metrics_per_path) {
-        return;
-    }
-
-    zone = ngx_http_markdown_metrics_shm_zone;
-    if (zone == NULL || zone->data == NULL) {
-        return;
-    }
-
-    metrics = (ngx_http_markdown_metrics_t *) zone->data;
-    shpool = (ngx_slab_pool_t *) zone->shm.addr;
-
-    if (r->uri.len == 0 || r->uri.data == NULL) {
-        return;
-    }
-
-    hash = ngx_hash_key(r->uri.data, r->uri.len);
-    key = hash;
-
-    ngx_shmtx_lock(&shpool->mutex);
-
-    sentinel = &metrics->per_path.sentinel;
-
-    if (metrics->per_path.path_tree.root != sentinel
-        && ngx_http_markdown_per_path_lookup_and_update(
-               r, metrics, sentinel, key, elapsed_ms) == NGX_OK)
-    {
-        ngx_shmtx_unlock(&shpool->mutex);
-        return;
-    }
-
-    if ((ngx_uint_t) metrics->per_path.path_entries
-        >= metrics->per_path.cardinality_limit)
-    {
-        ngx_atomic_fetch_add(&metrics->per_path.overflow_count, 1);
-        ngx_atomic_fetch_add(&metrics->per_path.unretained_conversions, 1);
-        ngx_atomic_fetch_add(
-            &metrics->per_path.unretained_conversion_time_sum_ms,
-            (ngx_atomic_uint_t) elapsed_ms);
-        ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
-        ngx_atomic_fetch_add(
-            &metrics->per_path.path_conversion_time_sum_ms,
-            (ngx_atomic_uint_t) elapsed_ms);
-        ngx_shmtx_unlock(&shpool->mutex);
-        return;
-    }
-
-    /* Bound the retained path bytes to avoid cardinality_limit being
-     * bypassed by a small number of very long paths.  The shared-memory
-     * slab is smaller than a request pool, so cap locally rather than
-     * relying on the surrounding NGINX request-header configuration.
-     *
-     * Use a static upper bound rather than a configurable directive to
-     * keep the surface minimal.  1024 covers structured routing paths
-     * cleanly; if a higher value is ever required, it can be promoted to
-     * a full markdown_metrics_per_path_path_max_len directive. */
-    if (r->uri.len > NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN) {
-        ngx_atomic_fetch_add(&metrics->per_path.overflow_count, 1);
-        ngx_atomic_fetch_add(&metrics->per_path.unretained_conversions, 1);
-        ngx_atomic_fetch_add(
-            &metrics->per_path.unretained_conversion_time_sum_ms,
-            (ngx_atomic_uint_t) elapsed_ms);
-        ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
-        ngx_atomic_fetch_add(
-            &metrics->per_path.path_conversion_time_sum_ms,
-            (ngx_atomic_uint_t) elapsed_ms);
-        ngx_shmtx_unlock(&shpool->mutex);
-        return;
-    }
-
-    node = ngx_slab_alloc_locked(shpool,
-        sizeof(ngx_http_markdown_path_metric_node_t));
-    if (node == NULL) {
-        ngx_atomic_fetch_add(&metrics->per_path.unretained_conversions, 1);
-        ngx_atomic_fetch_add(
-            &metrics->per_path.unretained_conversion_time_sum_ms,
-            (ngx_atomic_uint_t) elapsed_ms);
-        ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
-        ngx_atomic_fetch_add(
-            &metrics->per_path.path_conversion_time_sum_ms,
-            (ngx_atomic_uint_t) elapsed_ms);
-        ngx_shmtx_unlock(&shpool->mutex);
-        return;
-    }
-
-    node->path = ngx_slab_alloc_locked(shpool, r->uri.len);
-    if (node->path == NULL) {
-        ngx_slab_free_locked(shpool, node);
-        ngx_atomic_fetch_add(&metrics->per_path.unretained_conversions, 1);
-        ngx_atomic_fetch_add(
-            &metrics->per_path.unretained_conversion_time_sum_ms,
-            (ngx_atomic_uint_t) elapsed_ms);
-        ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
-        ngx_atomic_fetch_add(
-            &metrics->per_path.path_conversion_time_sum_ms,
-            (ngx_atomic_uint_t) elapsed_ms);
-        ngx_shmtx_unlock(&shpool->mutex);
-        return;
-    }
-
-    ngx_memcpy(node->path, r->uri.data, r->uri.len);
-    node->path_len = r->uri.len;
-    node->rbnode.key = key;
-    node->conversions = 1;
-    node->entries = 1;
-    node->conversion_time_sum_ms = (ngx_atomic_t) elapsed_ms;
-
-    ngx_rbtree_insert(&metrics->per_path.path_tree, &node->rbnode);
-
-    ngx_atomic_fetch_add(&metrics->per_path.path_entries, 1);
-    ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
-    ngx_atomic_fetch_add(&metrics->per_path.path_conversion_time_sum_ms,
-                         (ngx_atomic_uint_t) elapsed_ms);
-
-    ngx_shmtx_unlock(&shpool->mutex);
+    /* Per-path metrics removed in 0.9.2 (directive deleted). */
+    (void) r;
+    (void) conf;
+    (void) elapsed_ms;
+    return;
 }
 
 /*
@@ -1304,7 +1366,7 @@ ngx_http_markdown_handle_converter_not_initialized(
 }
 
 
-#ifdef MARKDOWN_STREAMING_ENABLED
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
 static ngx_flag_t
 ngx_http_markdown_shadow_output_diff(const struct MarkdownResult *fb_result,
                                      const uint8_t *feed_data,
@@ -1534,7 +1596,7 @@ ngx_http_markdown_shadow_compare(
     }
     markdown_result_free(&st_result);
 }
-#endif /* MARKDOWN_STREAMING_ENABLED */
+#endif /* MARKDOWN_STREAMING_SHADOW_DEBUG */
 
 static void
 ngx_http_markdown_record_token_savings_if_enabled(
@@ -1560,41 +1622,6 @@ ngx_http_markdown_record_token_savings_if_enabled(
     savings = html_tokens - (ngx_atomic_uint_t) result->token_estimate;
     if (savings > 0) {
         NGX_HTTP_MARKDOWN_METRIC_ADD(results.estimated_token_savings, savings);
-    }
-}
-
-static void
-ngx_http_markdown_otel_start_conversion_span(
-    ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
-    const ngx_http_markdown_conf_t *conf)
-{
-    const ngx_str_t *flavor_name;
-    const ngx_str_t *engine_name;
-
-    ctx->otel_span = NULL;
-    if (!conf->ops.otel_enabled) {
-        return;
-    }
-
-    ctx->otel_span = ngx_http_markdown_otel_span_start(r, conf);
-    if (ctx->otel_span == NULL) {
-        return;
-    }
-
-    flavor_name = ngx_http_markdown_otel_flavor_name(conf->flavor);
-    engine_name = ngx_http_markdown_otel_engine_name(
-        ctx->processing_path);
-    ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-        (const u_char *) "flavor", 6,
-        flavor_name->data, flavor_name->len);
-    ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-        (const u_char *) "engine", 6,
-        engine_name->data, engine_name->len);
-    if (r->uri.len > 0) {
-        ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-            (const u_char *) "uri_route", 9,
-            (const u_char *) "redacted", 8);
     }
 }
 
@@ -1699,13 +1726,10 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
             r, ctx, conf);
     }
 
-    ngx_http_markdown_otel_start_conversion_span(r, ctx, conf);
 
     rc = ngx_http_markdown_prepare_conversion_options(
         r, conf, ctx->effective_conf, &options);
     if (rc != NGX_OK) {
-        ngx_http_markdown_otel_teardown_span(r, ctx, ctx->buffer.size, 0,
-                                             ERROR_INVALID_INPUT);
         return ngx_http_markdown_reject_or_fail_open_buffered_response(
             r, ctx, conf, NULL);
     }
@@ -1741,16 +1765,12 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     }
 
     if (result->error_code != ERROR_SUCCESS) {
-        ngx_http_markdown_otel_teardown_span(
-            r, ctx, ctx->buffer.size, 0, (int64_t) result->error_code);
         return ngx_http_markdown_handle_conversion_failure(
             r, ctx, conf, result, *elapsed_ms);
     }
 
     rc = ngx_http_markdown_validate_conversion_result(r, ctx, conf, result);
     if (rc != NGX_OK) {
-        ngx_http_markdown_otel_teardown_span(
-            r, ctx, ctx->buffer.size, 0, ERROR_INTERNAL);
         return rc;
     }
 
@@ -1758,29 +1778,8 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
 
     ngx_http_markdown_record_per_path_metrics(r, conf, *elapsed_ms);
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-    /*
-     * Shadow mode: after full-buffer conversion succeeds,
-     * run the streaming engine on the same input and compare
-     * outputs.  Any streaming error is isolated — it does not
-     * affect the client response.
-     *
-     * Only run for the full-buffer path — incremental
-     * conversions use a different pipeline and should not
-     * be compared against the streaming engine.
-     */
-    if (conf->stream.shadow
-        && ctx->processing_path != NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
-    {
-        ngx_http_markdown_shadow_compare(
-            r, ctx, conf, result, *elapsed_ms);
-    }
-#endif
-
     ngx_http_markdown_record_token_savings_if_enabled(ctx, conf, result);
 
-    ngx_http_markdown_otel_teardown_span(
-        r, ctx, ctx->buffer.size, result->markdown_len, 0);
 
     return NGX_OK;
 }
@@ -1863,6 +1862,7 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     if (b == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                      "markdown: failed to allocate output buffer, category=system");
+        ngx_http_markdown_record_buffered_delivery_failure(ctx);
         markdown_result_free(result);
         return NGX_ERROR;
     }
@@ -1881,6 +1881,7 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     } else {
         rc = ngx_http_markdown_prepare_body_output_buffer(r, b, result);
         if (rc != NGX_OK) {
+            ngx_http_markdown_record_buffered_delivery_failure(ctx);
             markdown_result_free(result);
             return NGX_ERROR;
         }
@@ -1893,6 +1894,7 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     if (out == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                      "markdown: failed to allocate output chain, category=system");
+        ngx_http_markdown_record_buffered_delivery_failure(ctx);
         markdown_result_free(result);
         return NGX_ERROR;
     }
@@ -1906,9 +1908,18 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     rc = ngx_http_markdown_update_headers(r, result, conf);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                     "markdown: failed to update response headers, category=system");
+                     "markdown: failed to update response headers, "
+                     "reason=header_plan_apply_error, category=system");
+        ngx_http_markdown_record_system_failure(ctx);
+        ngx_http_markdown_log_decision_with_category(
+            r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_header_plan_apply_err(),
+            ngx_http_markdown_reason_from_error_category(
+                NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
         markdown_result_free(result);
-        return NGX_ERROR;
+        return ngx_http_markdown_reject_or_fail_open_buffered_response(
+            r, ctx, conf,
+            "markdown: header plan failure - applying error policy");
     }
 
     /*
@@ -1918,12 +1929,32 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     markdown_result_free(result);
 
     /*
+     * subrequest: release the buffered HTML backing store now that the
+     * converted output has been copied into request-pool memory.
+     * For subrequests this frees the (potentially large) HTML
+     * buffer before the shared parent pool is destroyed
+     * (per-parent-request memory retention).  Idempotent: the pool
+     * cleanup registered by buffer_init remains as the fallback.
+     */
+    ngx_http_markdown_buffer_release(&ctx->buffer);
+
+    /*
      * Step 6: Forward headers downstream (idempotent via headers_forwarded).
      */
     rc = ngx_http_markdown_forward_headers(r, ctx);
-    if (rc != NGX_OK) {
+    if (rc != NGX_OK && rc != NGX_AGAIN) {
+        ngx_http_markdown_record_buffered_delivery_failure(ctx);
         return rc;
     }
+    /*
+     * Header-chain NGX_AGAIN means "headers accepted": the write filter
+     * queued the header block and owns delivery (NGINX core model —
+     * header-chain NGX_AGAIN = queued by write filter; proceed with body
+     * output).  Returning early here would strand the body: the re-entry
+     * sees conversion.attempted && !pending_has_data, clears r->buffered
+     * and the client receives headers with Content-Length but zero body
+     * bytes (full-buffer truncation under slow clients).
+     */
 
     /*
      * Step 7: Emit body downstream.
@@ -1931,11 +1962,14 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     rc = ngx_http_next_body_filter(r, out);
 
     if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_record_buffered_delivery_success(ctx);
         NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.full_buffer_delivery_count);
     }
 
     if (rc == NGX_AGAIN) {
-        ctx->fullbuffer.pending_output = out;
+        ngx_http_markdown_pending_output_set(
+            &ctx->fullbuffer.pending_output, out);
         ctx->fullbuffer.pending_has_data = 1;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 
@@ -1943,11 +1977,13 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
 
         /* Watermark gauge: CAS loop for pending output high-water */
-        if (b->last > b->pos) {
+        if (b->pos != NULL && b->last > b->pos) {
             NGX_HTTP_MARKDOWN_METRIC_WATERMARK(
                 perf.pending_output_high_watermark_bytes,
                 (ngx_atomic_t) (b->last - b->pos));
         }
+    } else if (rc != NGX_OK && rc != NGX_DONE) {
+        ngx_http_markdown_record_buffered_delivery_failure(ctx);
     }
 
     return rc;
@@ -1983,12 +2019,15 @@ ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
     }
 
     if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_record_buffered_delivery_success(ctx);
         NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.full_buffer_delivery_count);
         /* Backpressure resume: drain completed successfully */
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_total);
     }
 
-    ctx->fullbuffer.pending_output = NULL;
+    ngx_http_markdown_pending_output_set(
+        &ctx->fullbuffer.pending_output, NULL);
     ctx->fullbuffer.pending_has_data = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 

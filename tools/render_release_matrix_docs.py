@@ -21,7 +21,10 @@ Exit codes:
     1  Check mismatch or runtime error
     2  Schema validation error
 
-The authoritative matrix source is tools/release-matrix.json.
+The authoritative policy matrix source is tools/release-matrix.json.
+The release-contract projection at docs/releases/release-matrix.json is
+generated separately by generate_release_contract_matrix.py and is not a
+manually maintained input to this renderer.
 Schema: tools/release-matrix.schema.json.
 
 Part of release matrix source of truth.
@@ -43,6 +46,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 # Direct script execution bootstraps this module root; Pylint cannot infer it.
 from path_validation import validate_read_path  # noqa: E402  # pylint: disable=import-error
 from path_validation import validate_write_path_within_root  # noqa: E402  # pylint: disable=import-error
+sys.path.insert(0, str(Path(__file__).resolve().parent / "release" / "matrix"))
+from normalize_matrix import (  # noqa: E402
+    MatrixNormalizationError,
+    normalize_compatibility_entry,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,29 +115,34 @@ def normalize_entry(raw: dict[str, Any]) -> dict[str, Any]:
     alias mapping, arch normalization) so the generator works with both old
     and new formats.
     """
-    entry = dict(raw)
+    try:
+        entry = normalize_compatibility_entry(raw, require_fields=False)
+    except MatrixNormalizationError as exc:
+        raise ValueError(f"invalid release-matrix entry: {exc}") from exc
 
-    # Normalize nginx version field
-    if "nginx_version" not in entry and "nginx" in entry:
-        entry["nginx_version"] = entry["nginx"]
-
-    # Normalize libc field
+    # macOS is a presentation exception: its libc display is Darwin even if
+    # an old row carried a Linux os_type alias.
     if entry.get("os") == "macos":
         entry["libc"] = "darwin"
-    elif "libc" not in entry and "os_type" in entry:
-        entry["libc"] = entry["os_type"]
 
-    # Normalize arch (x86_64->amd64, aarch64->arm64)
-    arch = entry.get("arch", "")
-    if arch == "x86_64":
-        entry["arch"] = "amd64"
-    elif arch == "aarch64":
-        entry["arch"] = "arm64"
-
-    # Normalize support tier via aliases
-    tier = entry.get("support_tier", "")
-    if tier in TIER_ALIASES:
-        entry["support_tier"] = TIER_ALIASES[tier]
+    target = entry.get("target")
+    if target is None:
+        # A compatibility presentation row may already carry its arch while
+        # an older normalizer omitted target. Preserve that value instead of
+        # replacing it with an empty architecture.
+        target = entry.get("arch", "")
+    if isinstance(target, str):
+        if target.startswith("x86_64-"):
+            target = "x86_64"
+        elif target.startswith("aarch64-"):
+            target = "aarch64"
+    entry["arch"] = {"x86_64": "amd64", "aarch64": "arm64"}.get(
+        target, target
+    )
+    # ``target`` is the shared internal compatibility identity.  The
+    # compatibility renderer's public schema remains the legacy presentation
+    # shape and accepts ``arch`` instead.
+    entry.pop("target", None)
 
     return entry
 
@@ -190,6 +203,7 @@ def validate_schema(data: dict[str, Any]) -> list[str]:
         "nginx_version", "nginx_channel", "os", "libc", "arch",
         "artifact_type", "test_level", "support_tier",
         "release_blocking", "owner_workflow",
+        "feature_manifest_digest", "abi_version",
     }
     valid_tiers = {"supported", "experimental", "best-effort", "unsupported"}
     valid_channels = {"stable", "mainline", "oldstable"}
@@ -237,7 +251,14 @@ def _validate_against_jsonschema(data, jsonschema, errors):
     try:
         jsonschema.validate(validate_data, schema)
     except jsonschema.ValidationError as e:
-        errors.append(f"Schema validation: {e.message}")
+        # Surface the failing row so a malformed entry is identifiable:
+        # prefix the message with the row-level location when the error
+        # path points into the entries/matrix array (Entry 0, Entry 1, ...).
+        row_prefix = ""
+        if len(e.path) >= 2 and isinstance(e.path[0], (int, str)):
+            row_index = e.path[1] if isinstance(e.path[0], str) else e.path[0]
+            row_prefix = f"Entry {row_index}: "
+        errors.append(f"Schema validation: {row_prefix}{e.message}")
     return errors
 
 
@@ -1162,6 +1183,19 @@ def _rn_detect_tier_changes(
 # ---------------------------------------------------------------------------
 
 
+def _missing_expected_sections(rel_path: str, sections: set) -> list:
+    """Return registry sections expected for ``rel_path`` that are absent.
+
+    A partial render that silently drops a section is a failure, not a
+    warning (missing-section regression guard).
+    """
+    return [
+        f"{rel_path}: missing expected section '{name}'"
+        for name in SECTION_REGISTRY.get(rel_path, [])
+        if name not in sections
+    ]
+
+
 def check_file(
     rel_path: str,
     entries: list[dict[str, Any]],
@@ -1170,9 +1204,8 @@ def check_file(
 ) -> list[str]:
     """Check a single file for marker consistency.
 
-    Returns list of errors (mismatch = error). Missing files and missing
-    markers are treated as warnings (printed to stderr) and do not cause
-    a non-zero exit, since markers may not have been added yet (wave 2).
+    Returns list of errors. Missing files and missing markers are failures,
+    because a checked section without a source document cannot be verified.
     """
     errors: list[str] = []
     try:
@@ -1182,10 +1215,7 @@ def check_file(
         return errors
 
     if not file_path.exists():
-        print(
-            f"WARNING: {rel_path}: target file not found",
-            file=sys.stderr,
-        )
+        errors.append(f"{rel_path}: target file not found")
         return errors
 
     content = file_path.read_text(encoding="utf-8")
@@ -1197,12 +1227,13 @@ def check_file(
         return errors
 
     if not sections:
-        print(
-            f"WARNING: {rel_path}: no release-matrix markers "
-            f"(will be added in wave 2)",
-            file=sys.stderr,
-        )
+        errors.append(f"{rel_path}: no release-matrix markers")
         return errors
+
+    # Every section the registry expects for this file must be present;
+    # a partial render that silently drops a section is a failure, not a
+    # warning (missing-section regression guard).
+    errors.extend(_missing_expected_sections(rel_path, sections))
 
     # Warn about unknown sections
     for section_name in sections:
@@ -1212,15 +1243,11 @@ def check_file(
                 file=sys.stderr,
             )
 
-    # Check expected sections
+    # Check expected sections (missing ones are already reported as errors
+    # by _missing_expected_sections above).
     expected_sections = SECTION_REGISTRY.get(rel_path, [])
     for section_name in expected_sections:
         if section_name not in sections:
-            print(
-                f"WARNING: {rel_path}: expected section '{section_name}' "
-                f"not found (markers not yet added)",
-                file=sys.stderr,
-            )
             continue
 
         _, _, existing = sections[section_name]

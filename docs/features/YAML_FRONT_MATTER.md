@@ -11,9 +11,12 @@ It focuses on converter behavior and output shape. For NGINX directive syntax an
 - **FR-15.3**: Extract metadata from HTML (title, description, URL, image, author, published date)
 - **FR-15.4**: Generate YAML front matter block with extracted metadata
 - **FR-15.5**: Include resolved absolute URLs for images in front matter
-- **FR-15.6**: Feature toggle independence (can be enabled/disabled independently)
+- **FR-15.6**: Metadata extraction and front-matter emission have distinct
+  roles. `include_front_matter` controls emission and promotes metadata
+  extraction internally; `extract_metadata` alone enables metadata/ETag
+  processing without emitting front matter
 - **FR-15.7**: Configurable via `include_front_matter` option
-- **FR-15.8**: When disabled, no front matter is included
+- **FR-15.8**: When disabled, the module includes no front matter
 
 ## Implementation Details
 
@@ -53,14 +56,30 @@ published: "2024-01-15"
 
 ### Configuration
 
-Enable YAML front matter by setting both flags:
+Enable YAML front matter by setting `include_front_matter`. The converter
+automatically promotes `extract_metadata` internally when `include_front_matter`
+is set — `include_front_matter` alone gates and enables front matter output.
+
+The `extract_metadata` option by itself supports metadata/ETag processing
+without emitting front matter when enabled alone:
 
 ```rust
 let options = ConversionOptions {
-    include_front_matter: true,  // Enable front matter output
-    extract_metadata: true,       // Enable metadata extraction
+    include_front_matter: true,  // Enable front matter output; promotes extract_metadata internally
+    extract_metadata: false,      // Raised internally for front matter
     base_url: Some("https://example.com/page".to_string()),
     resolve_relative_urls: true,  // Resolve relative URLs to absolute
+    ..Default::default()
+};
+```
+
+For metadata-only workflows (ETag, conditional requests) without front matter:
+```rust
+let options = ConversionOptions {
+    include_front_matter: false,  // No front matter output
+    extract_metadata: true,       // Metadata extraction for ETag/conditional
+    base_url: Some("https://example.com/page".to_string()),
+    resolve_relative_urls: true,
     ..Default::default()
 };
 ```
@@ -89,7 +108,7 @@ Colons and other YAML special characters are safe within double-quoted strings.
 4. `test_yaml_front_matter_whitespace_escaping` - Newlines and tabs
 5. `test_yaml_front_matter_image_url_resolution` - Absolute URL resolution
 6. `test_yaml_front_matter_disabled_by_default` - Default behavior
-7. `test_yaml_front_matter_requires_both_flags` - Flag independence
+7. `test_yaml_front_matter_requires_output_flag` - Metadata without output
 8. `test_yaml_front_matter_minimal` - Minimal metadata
 9. `test_yaml_front_matter_empty_metadata` - Empty metadata handling
 10. `test_yaml_front_matter_format` - YAML structure validation
@@ -130,8 +149,11 @@ markdown_front_matter on;  # Enable YAML front matter
 ## Security Considerations
 
 - All metadata values are properly escaped to prevent YAML injection
-- Unicode characters are preserved correctly
-- No sensitive information is included in front matter by default
+- Unicode characters preserve correctly
+- Front matter is not a privacy boundary: it emits the documented metadata
+  fields when present, and those fields may contain sensitive values supplied
+  by the source document. The implementation has no general sensitive-data
+  redaction allowlist.
 - URL resolution respects the configured base_url
 
 ## Performance Impact
@@ -143,7 +165,7 @@ markdown_front_matter on;  # Enable YAML front matter
 
 ## Possible Extensions
 
-Areas that could be expanded later without changing the current feature contract:
+Areas that could expand later without changing the current feature contract:
 
 1. Configurable field selection (choose which fields to include)
 2. Custom field mapping (rename fields in output)

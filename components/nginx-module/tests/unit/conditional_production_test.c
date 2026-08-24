@@ -2,9 +2,18 @@
 #include <strings.h>
 
 #define MARKDOWN_STREAMING_ENABLED 1
+#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
+#endif
 
 #include "../../src/ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
+
+/* Provide the content type literal that send_304 needs (the production
+ * symbol lives in headers_impl.h, which is not compiled into this test
+ * binary). */
+u_char ngx_http_markdown_content_type[] =
+    NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
 
 /* Define opaque handle for test stubs */
 struct MarkdownConverterHandle { int dummy; };
@@ -143,10 +152,21 @@ struct ngx_http_request_s {
         ngx_uint_t status;
         ngx_str_t  status_line;
         ngx_list_t headers;
+        ngx_list_t trailers;
+        ngx_str_t  content_type;
+        u_char    *content_type_lowcase;
+        ngx_uint_t content_type_hash;
+        ngx_str_t  charset;
+        size_t     content_type_len;
+        ngx_table_elt_t *content_length;
+        ngx_table_elt_t *content_encoding;
         ngx_table_elt_t *etag;
+        ngx_table_elt_t *accept_ranges;
+        ngx_table_elt_t *last_modified;
         off_t      content_length_n;
         time_t     last_modified_time;
     } headers_out;
+    ngx_flag_t allow_ranges;
 };
 
 struct ngx_module_s {
@@ -158,12 +178,19 @@ ngx_module_t ngx_http_core_module;
 
 static u_char g_pool_buf[1024 * 64];
 static size_t g_pool_offset;
+static size_t g_pool_allocations;
+static size_t g_pool_fail_at;
 
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
 {
     void *p;
     UNUSED(pool);
+    if (g_pool_allocations == g_pool_fail_at) {
+        g_pool_allocations++;
+        return NULL;
+    }
+    g_pool_allocations++;
     if (g_pool_offset + size > sizeof(g_pool_buf)) {
         return NULL;
     }
@@ -299,7 +326,7 @@ ngx_http_finalize_request(ngx_http_request_t *r, ngx_int_t rc)
 void
 ngx_http_clear_content_length(ngx_http_request_t *r)
 {
-    UNUSED(r);
+    r->headers_out.content_length = NULL;
 }
 
 ngx_int_t
@@ -428,10 +455,10 @@ markdown_decomp_result_init(struct FFIDecompResult *result)
 uint32_t
 markdown_decompress_bounded(const uint8_t *input,
     uintptr_t input_len, uint8_t format,
-    uintptr_t budget, struct FFIDecompResult *result)
+    uintptr_t budget, uint64_t ratio, struct FFIDecompResult *result)
 {
     UNUSED(input); UNUSED(input_len); UNUSED(format);
-    UNUSED(budget); UNUSED(result);
+    UNUSED(budget); UNUSED(ratio); UNUSED(result);
     return 0;
 }
 
@@ -457,8 +484,73 @@ markdown_reason_code_count(void)
     return 0;
 }
 
+#ifndef ngx_http_get_module_loc_conf
+static ngx_http_markdown_conf_t *g_conditional_conf;
+#define ngx_http_get_module_loc_conf(request, module) (g_conditional_conf)
+#else
+static ngx_http_markdown_conf_t *g_conditional_conf;
+#endif
+
 #include "../../src/ngx_http_markdown_conditional.c"
 #include "../../src/ngx_http_markdown_auth.c"
+
+/* Stub for ngx_http_markdown_clear_trailers: the production implementation
+ * lives in ngx_http_markdown_headers_impl.h (not compiled into this test
+ * binary).  Mirror the production semantics: mark every trailer entry
+ * hash=0 so output filters suppress the trailer block. */
+void
+ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
+{
+    /* Test-local mirror of the production helper: invalidate all
+     * Content-Type list entries, then point the dedicated field at the
+     * shared Markdown media type and clear its mirrors.  Mirrors the
+     * semantics asserted by headers_test.c against the real helper. */
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *headers;
+
+    for (part = &r->headers_out.headers.part; part != NULL;
+         part = part->next)
+    {
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash != 0 && headers[i].key.len == 12
+                && strncasecmp((const char *) headers[i].key.data,
+                               "Content-Type", 12)
+                   == 0)
+            {
+                headers[i].hash = 0;
+            }
+        }
+    }
+
+    r->headers_out.content_type.data =
+        (u_char *) NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
+    r->headers_out.content_type.len =
+        sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
+    r->headers_out.content_type_len =
+        sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
+    r->headers_out.charset.len = 0;
+    r->headers_out.charset.data = NULL;
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
+}
+
+void
+ngx_http_markdown_clear_trailers(ngx_http_request_t *r)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+
+    part = &r->headers_out.trailers.part;
+
+    while (part != NULL) {
+        elts = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            elts[i].hash = 0;
+        }
+        part = part->next;
+    }
+}
 
 static ngx_list_t *
 create_header_list(void)
@@ -499,6 +591,9 @@ add_header(ngx_list_t *list, const char *key, const char *value)
 static ngx_http_request_t *
 make_req(void)
 {
+    g_pool_fail_at = (size_t) -1;
+    g_pool_allocations = 0;
+
     ngx_http_request_t *r = (ngx_http_request_t *)
         ngx_pcalloc(NULL, sizeof(ngx_http_request_t));
     if (r == NULL) return NULL;
@@ -508,7 +603,201 @@ make_req(void)
     if (r->connection == NULL) return NULL;
     r->headers_in.headers = *create_header_list();
     r->headers_out.headers = *create_header_list();
+    g_conditional_conf = NULL;
     return r;
+}
+
+static ngx_table_elt_t *
+fill_response_headers(ngx_http_request_t *r)
+{
+    ngx_table_elt_t *original_etag;
+
+    original_etag = add_header(&r->headers_out.headers,
+                               "ETag", "\"upstream\"");
+    r->headers_out.etag = original_etag;
+    r->headers_out.status = 200;
+    r->headers_out.status_line.data = (u_char *) "OK";
+    r->headers_out.status_line.len = 2;
+    r->headers_out.content_type.data = (u_char *) "text/html";
+    r->headers_out.content_type.len = sizeof("text/html") - 1;
+    r->headers_out.content_type_len = sizeof("text/html") - 1;
+    r->headers_out.content_length_n = 123;
+    r->allow_ranges = 1;
+
+    while (r->headers_out.headers.part.nelts
+           < r->headers_out.headers.nalloc)
+    {
+        add_header(&r->headers_out.headers, "X-Filler", "value");
+    }
+
+    return original_etag;
+}
+
+static void
+assert_304_failure_restored(ngx_http_request_t *r,
+    ngx_table_elt_t *original_etag, ngx_table_elt_t *original_trailer,
+    ngx_uint_t original_header_count)
+{
+    TEST_ASSERT(r->headers_out.status == 200,
+                "304 failure restores status");
+    TEST_ASSERT(r->headers_out.status_line.len == 2
+                && memcmp(r->headers_out.status_line.data, "OK", 2) == 0,
+                "304 failure restores status line");
+    TEST_ASSERT(r->headers_out.content_type.len == sizeof("text/html") - 1
+                && memcmp(r->headers_out.content_type.data,
+                          "text/html", sizeof("text/html") - 1) == 0,
+                "304 failure restores Content-Type");
+    TEST_ASSERT(r->headers_out.content_length_n == 123,
+                "304 failure restores Content-Length value");
+    TEST_ASSERT(r->allow_ranges == 1,
+                "304 failure restores range state");
+    TEST_ASSERT(r->headers_out.etag == original_etag
+                && original_etag->hash == 1,
+                "304 failure restores typed and list ETag");
+    TEST_ASSERT(r->headers_out.headers.part.nelts == original_header_count,
+                "304 failure restores header list length");
+    TEST_ASSERT(original_trailer == NULL || original_trailer->hash == 1,
+                "304 failure restores trailer entries");
+}
+
+static void
+test_send_304_etag_failure_restores_headers(void)
+{
+    ngx_http_request_t       *r;
+    ngx_table_elt_t          *original_etag;
+    ngx_table_elt_t          *original_trailer;
+    ngx_uint_t                original_header_count;
+    struct MarkdownResult     result;
+    static uint8_t             etag_data[] = "\"markdown\"";
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    r->headers_out.trailers = *create_header_list();
+    original_etag = fill_response_headers(r);
+    original_trailer = add_header(&r->headers_out.trailers,
+                                  "Digest", "sha-256=upstream");
+    original_header_count = r->headers_out.headers.part.nelts;
+
+    memset(&result, 0, sizeof(result));
+    result.etag = etag_data;
+    result.etag_len = sizeof(etag_data) - 1;
+
+    TEST_ASSERT(ngx_http_markdown_send_304(r, &result) == NGX_ERROR,
+                "ETag allocation failure returns NGX_ERROR");
+    assert_304_failure_restored(r, original_etag, original_trailer,
+                                original_header_count);
+    TEST_PASS("304 ETag failure rolls back all representation headers");
+}
+
+static void
+test_send_304_etag_value_failure_restores_headers(void)
+{
+    ngx_http_request_t       *r;
+    ngx_table_elt_t          *original_etag;
+    ngx_uint_t                original_header_count;
+    struct MarkdownResult     result;
+    static uint8_t             etag_data[] = "\"markdown\"";
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    r->headers_out.status = 200;
+    r->headers_out.status_line.data = (u_char *) "OK";
+    r->headers_out.status_line.len = 2;
+    r->headers_out.content_type.data = (u_char *) "text/html";
+    r->headers_out.content_type.len = sizeof("text/html") - 1;
+    r->headers_out.content_type_len = sizeof("text/html") - 1;
+    r->headers_out.content_length_n = 123;
+    r->allow_ranges = 1;
+    original_etag = add_header(&r->headers_out.headers,
+                               "ETag", "\"upstream\"");
+    r->headers_out.etag = original_etag;
+    original_header_count = r->headers_out.headers.part.nelts;
+
+    /* Snapshot allocation succeeds; the ETag value copy must fail. */
+    g_pool_fail_at = g_pool_allocations + 1;
+    memset(&result, 0, sizeof(result));
+    result.etag = etag_data;
+    result.etag_len = sizeof(etag_data) - 1;
+
+    TEST_ASSERT(ngx_http_markdown_send_304(r, &result) == NGX_ERROR,
+                "ETag value allocation failure returns NGX_ERROR");
+    assert_304_failure_restored(r, original_etag, NULL,
+                                original_header_count);
+    TEST_PASS("304 ETag value failure rolls back all representation headers");
+}
+
+static void
+test_send_304_vary_failure_restores_headers(void)
+{
+    ngx_http_request_t       *r;
+    ngx_table_elt_t          *original_etag;
+    ngx_table_elt_t          *original_trailer;
+    ngx_uint_t                original_header_count;
+    struct MarkdownResult     result;
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    r->headers_out.trailers = *create_header_list();
+    original_etag = fill_response_headers(r);
+    original_trailer = add_header(&r->headers_out.trailers,
+                                  "Digest", "sha-256=upstream");
+    original_header_count = r->headers_out.headers.part.nelts;
+
+    memset(&result, 0, sizeof(result));
+
+    TEST_ASSERT(ngx_http_markdown_send_304(r, &result) == NGX_ERROR,
+                "Vary allocation failure returns NGX_ERROR");
+    assert_304_failure_restored(r, original_etag, original_trailer,
+                                original_header_count);
+    TEST_PASS("304 Vary failure rolls back all representation headers");
+}
+
+static void
+test_send_304_auth_cache_control_failure_restores_headers(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_table_elt_t          *authorization;
+    ngx_table_elt_t          *cache_control;
+    struct MarkdownResult     result;
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    memset(&conf, 0, sizeof(conf));
+    g_conditional_conf = &conf;
+    authorization = add_header(&r->headers_in.headers,
+                               "Authorization", "Bearer token");
+    r->headers_in.authorization = authorization;
+    cache_control = add_header(&r->headers_out.headers,
+                               "Cache-Control", "public");
+
+    /* The first post-setup allocation is the snapshot; fail the auth rewrite
+     * allocation so the snapshot has to restore the pre-304 response. */
+    g_pool_fail_at = g_pool_allocations + 1;
+    memset(&result, 0, sizeof(result));
+
+    TEST_ASSERT(ngx_http_markdown_send_304(r, &result) == NGX_ERROR,
+                "auth Cache-Control allocation failure returns NGX_ERROR");
+    TEST_ASSERT(r->headers_out.status == 0,
+                "auth Cache-Control failure restores status");
+    TEST_ASSERT(cache_control->hash == 1
+                && cache_control->value.len == sizeof("public") - 1
+                && memcmp(cache_control->value.data, "public",
+                          sizeof("public") - 1) == 0,
+                "auth Cache-Control failure restores original value");
+    TEST_PASS("304 auth Cache-Control failure rolls back header mutation");
 }
 
 /* ── send_304 tests ──────────────────────────────────────────── */
@@ -516,10 +805,20 @@ make_req(void)
 static void
 test_send_304_with_etag(void)
 {
+    ngx_table_elt_t *content_encoding;
+    ngx_table_elt_t *trailer;
+
     g_pool_offset = 0;
     g_send_header_rc = NGX_OK;
     ngx_http_request_t *r = make_req();
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    content_encoding = add_header(&r->headers_out.headers,
+                                  "Content-Encoding", "gzip");
+    r->headers_out.content_encoding = content_encoding;
+    r->headers_out.trailers = *create_header_list();
+    trailer = add_header(&r->headers_out.trailers,
+                         "Digest", "sha-256=upstream");
 
     static uint8_t etag_data[] = "\"abc123\"";
     struct MarkdownResult result;
@@ -531,6 +830,11 @@ test_send_304_with_etag(void)
     TEST_ASSERT(rc == NGX_DONE, "send_304 returns NGX_DONE");
     TEST_ASSERT(r->headers_out.status == NGX_HTTP_NOT_MODIFIED,
         "Status is 304");
+    TEST_ASSERT(r->headers_out.content_encoding == NULL
+                && content_encoding->hash == 0,
+                "304 clears Content-Encoding");
+    TEST_ASSERT(trailer->hash == 0,
+                "304 clears actual trailer fields");
     TEST_PASS("send_304 with ETag");
 }
 
@@ -1285,6 +1589,10 @@ main(void)
     test_send_304_null_result();
     test_send_304_empty_etag();
     test_send_304_send_header_fails();
+    test_send_304_etag_failure_restores_headers();
+    test_send_304_etag_value_failure_restores_headers();
+    test_send_304_vary_failure_restores_headers();
+    test_send_304_auth_cache_control_failure_restores_headers();
 
     test_find_header_null_name();
     test_find_header_found();

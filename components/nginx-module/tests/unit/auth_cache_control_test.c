@@ -491,54 +491,47 @@ test_streaming_path_auth_cache_control(void)
 /*
  * Fail-open safety test.
  *
- * When conversion fails (fail-open), Cache-Control must be preserved
- * unchanged regardless of auth state. The adjust function is NOT called
- * on fail-open — this test verifies that the unadjusted value is
- * preserved by simulating the fail-open dispatch contract.
+ * When conversion fails (fail-open), the forwarded headers still go through
+ * the authenticated Cache-Control policy. This test verifies that behavior
+ * by simulating the fail-open dispatch contract.
  *
  * NOTE: This is a contract simulation, not production fail-open path
- * coverage.  The test proves that if fail-open bypasses adjust, the
- * header is preserved.  Production path coverage is provided by
- * E2E test case 10.12 in verify_streaming_failure_cache_e2e.sh,
- * which triggers a real conversion failure with an authenticated
- * request and asserts Cache-Control is preserved unchanged.
+ * coverage. The test proves that authenticated fail-open dispatch applies
+ * the same adjustment as the normal header path. Production path coverage
+ * is provided by E2E test case 10.12 in
+ * verify_streaming_failure_cache_e2e.sh,
+ * which triggers a real streaming pre-commit failure with an authenticated
+ * request and asserts the Cache-Control policy is applied.
  */
 
 /*
- * Simulate the fail-open dispatch contract: conversion failed, so
- * the module bypasses adjust_cache_control_for_auth and returns the
- * original Cache-Control unchanged.  This mirrors the contract of
- * ngx_http_markdown_fail_open_buffered_response() which calls
- * forward_headers() without touching Cache-Control, but does NOT
- * call the production function itself.
+ * Simulate the fail-open dispatch contract: conversion failed, so the module
+ * forwards headers through the same authenticated Cache-Control policy used
+ * by the normal header path. This mirrors the contract of
+ * ngx_http_markdown_fail_open_buffered_response(), but does NOT call the
+ * production function itself.
  */
 static const char *
 fail_open_dispatch_cache_control(const char *original_cc, int authenticated)
 {
-    (void) authenticated;  /* fail-open never calls adjust */
-    return original_cc;
+    return adjust_cache_control_for_auth(original_cc, authenticated);
 }
 
 static void
-test_fail_open_preserves_cache_control(void)
+test_fail_open_applies_cache_control_policy(void)
 {
-    TEST_SUBSECTION("Fail-open preserves Cache-Control");
+    TEST_SUBSECTION("Fail-open applies Cache-Control policy");
 
     /*
-     * On fail-open, the module does NOT call adjust_cache_control_for_auth.
-     * The original Cache-Control is passed through unchanged via the
-     * fail-open dispatch path.  We verify this by routing through the
-     * fail_open_dispatch helper and asserting the original header is
-     * preserved — even when the request is authenticated (which would
-     * normally trigger rewriting).
+     * On fail-open, authenticated requests use the same Cache-Control
+     * adjustment as the normal header path. Unauthenticated requests retain
+     * the original header.
      */
     {
         const char *original_cc = "public, max-age=600";
         const char *result = fail_open_dispatch_cache_control(original_cc, 1);
-        TEST_ASSERT(result == original_cc,
-                    "Fail-open: original CC pointer preserved (no copy/rewrite)");
-        TEST_ASSERT(STR_EQ(result, "public, max-age=600"),
-                    "Fail-open: original CC value preserved via dispatch (authenticated)");
+        TEST_ASSERT(STR_EQ(result, "max-age=600, private"),
+                    "Fail-open: authenticated CC should be upgraded to private");
     }
 
     {
@@ -550,16 +543,25 @@ test_fail_open_preserves_cache_control(void)
                     "Fail-open: no-store value preserved via dispatch (authenticated)");
     }
 
-    /* Control: verify that the normal (non-fail-open) path DOES adjust */
+    {
+        const char *original_cc = "public, max-age=600";
+        const char *result = fail_open_dispatch_cache_control(original_cc, 0);
+        TEST_ASSERT(result == original_cc,
+                    "Fail-open: unauthenticated CC pointer preserved");
+        TEST_ASSERT(STR_EQ(result, "public, max-age=600"),
+                    "Fail-open: unauthenticated public policy preserved");
+    }
+
+    /* Control: the normal path applies the same authenticated policy. */
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("public, max-age=600", 1),
                         "max-age=600, private"),
-                "Control: authenticated path adjusts CC (proves dispatch bypasses adjust)");
+                        "Control: authenticated path adjusts CC");
 
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("public, max-age=600", 0),
                         "public, max-age=600"),
                 "Unauthenticated: CC preserved unchanged");
 
-    TEST_PASS("Fail-open Cache-Control preservation verified");
+    TEST_PASS("Fail-open Cache-Control policy verified");
 }
 
 /*
@@ -799,7 +801,7 @@ main(void)
     test_auth_policy_deny_mode();
     test_streaming_path_auth_cache_control();
     test_streaming_header_update_integration();
-    test_fail_open_preserves_cache_control();
+    test_fail_open_applies_cache_control_policy();
     test_cache_policy_matrix();
 
     printf("\n========================================\n");

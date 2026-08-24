@@ -1,5 +1,5 @@
 #!/bin/bash
-# Bug Condition Exploration Test: Non-Canonical Log Prefix Detection
+# Regression Test: Non-Canonical Log Prefix Detection
 #
 # **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9,
 #              1.10, 1.11, 1.12, 1.14, 1.15, 1.16**
@@ -9,8 +9,8 @@
 # (space-separated qualifiers, underscore-separated qualifiers, compound forms)
 # constitutes a bug.
 #
-# This test is EXPECTED TO FAIL on unfixed code — failure confirms the bug exists.
-# After the fix is applied, this test should PASS (zero non-canonical prefixes).
+# The test exits nonzero whenever non-canonical prefixes are present.
+# A clean source tree therefore produces a passing result.
 #
 # Run:
 #   bash tests/property/test_log_prefix_canonical.sh
@@ -30,7 +30,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
-echo "=== Bug Condition Exploration Test: Non-Canonical Log Prefix Detection ==="
+echo "=== Regression Test: Non-Canonical Log Prefix Detection ==="
 echo "Source directory: $SRCDIR"
 echo ""
 

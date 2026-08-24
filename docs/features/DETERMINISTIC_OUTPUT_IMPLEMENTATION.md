@@ -1,8 +1,13 @@
 # Deterministic Output Implementation Summary
 
+> **Archived.** This file is a 0.6.2-era implementation summary. The
+> current contract lives in
+> [deterministic-output.md](deterministic-output.md). This file stays as
+> a historical record.
+
 ## Overview
 
-Implemented comprehensive deterministic output normalization for the NGINX Markdown Converter to ensure stable ETags and predictable caching behavior. Converting identical HTML input multiple times now produces byte-for-byte identical Markdown output.
+Implemented comprehensive deterministic output normalization for the NGINX Markdown Converter. This ensures stable ETags and predictable caching behavior. Converting identical HTML input multiple times now produces byte-for-byte identical Markdown output. The normalization guarantees stable output across runs.
 
 ---
 
@@ -74,9 +79,9 @@ fn normalize_line_whitespace(&self, line: &str) -> String {
 
 ## Testing
 
-### Unit Tests Added (13 new tests)
+### Unit Tests Added (14 new tests)
 
-Normalization-focused tests are located in
+Normalization-focused tests live in
 `components/rust-converter/src/converter.rs` and exercise the implementation
 in `components/rust-converter/src/converter/normalize.rs`:
 
@@ -103,8 +108,8 @@ test result: ok. 136 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 **All tests pass**, including:
-- 123 existing tests (unchanged)
-- 13 new deterministic output tests
+- 122 existing tests (unchanged)
+- 14 new deterministic output tests
 
 ### Example Program
 
@@ -310,7 +315,7 @@ cargo run --example deterministic_output
 - Consistent Markdown escaping
 - Consistent DOM attribute processing
 
-✅ **Task 2.13 Requirements**:
+✅ **Deterministic output requirements**:
 - Comprehensive tests for deterministic output ✅
 - Documentation of normalization rules ✅
 - Stable ETags and predictable output ✅
@@ -319,7 +324,7 @@ cargo run --example deterministic_output
 
 ## Conclusion
 
-The deterministic output normalization implementation is **complete and fully tested**. All 136 unit tests pass, including 13 new tests specifically for deterministic output. The implementation ensures that converting identical HTML input multiple times produces byte-for-byte identical Markdown output, which is critical for stable ETag generation and predictable HTTP caching behavior.
+The deterministic output normalization implementation is **complete and fully tested**. All 136 unit tests pass, including 14 new tests specifically for deterministic output. The implementation ensures that converting identical HTML input multiple times produces byte-for-byte identical Markdown output. This is critical for stable ETag generation and predictable HTTP caching behavior.
 
 The implementation is complete for the current design scope and supports stable, byte-for-byte deterministic Markdown output for identical HTML input.
 
@@ -327,5 +332,6 @@ The implementation is complete for the current design scope and supports stable,
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Marked archived; current contract lives in deterministic-output.md |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

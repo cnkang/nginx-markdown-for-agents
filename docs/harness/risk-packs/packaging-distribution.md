@@ -52,8 +52,7 @@ or packaging documentation.
 - `tools/install.sh` must stay consistent with new package formats
 - `tools/release-matrix.json` must include all supported platforms
 - `tools/release/matrix/` tooling must stay consistent with matrix schema
-- `.github/workflows/release-packages.yml`,
-  `.github/workflows/release-deb.yml`, `.github/workflows/release-rpm.yml`,
+- `.github/workflows/release-packages.yml`, `.github/workflows/release-rpm.yml`,
   and `.github/workflows/sign-and-publish.yml` must agree on package artifact
   names, supported NGINX versions, and architecture-specific runner labels.
 - `packaging/checksums.sha256` must cover every NGINX source version requested
@@ -66,9 +65,11 @@ or packaging documentation.
   paths as nFPM packages and must run `check_install_layout.sh` against their
   generated packages before upload.  They must validate package version inputs
   before using them in generated paths or metadata.
-- Package dependencies must be satisfiable by the target package manager; exact
-  constraints must use distro-resolvable EVRs, not naked upstream source
-  versions when release suffixes or epochs are expected.
+- Package dependencies must be satisfiable by the target package manager. Exact
+  constraints must use distro-resolvable EVRs (Epoch-Version-Release) for RPM
+  metadata and Debian version strings (including any release suffixes/epochs)
+  for DEB metadata, not naked upstream source versions when release suffixes or
+  epochs appear.
 - RPM smoke tests must derive nginx.org repository family from the target
   distribution instead of assuming CentOS-compatible paths for every RPM image.
 - Release package build environments must use a glibc baseline compatible with
@@ -88,12 +89,13 @@ or packaging documentation.
   module directives. Any module directive family, including metrics directives,
   must require module enablement plus an explicit in-container module path.
   Module-enabled renders must not auto-create node `hostPath` mounts from that
-  path; custom mounts belong behind explicit opt-in values.
+  path. Custom mounts belong behind explicit opt-in values.
 - Homebrew formula repository and repo-owned formula template must stay in sync
   with release artifacts, tag timing, checksums, and post-release verification.
-- Formula hashes cover the exact bytes at the declared URL; the downloaded
-  archive content is compared with a local archive of the resolved tag commit,
-  while Formula source and version independently bind to that same commit.
+- Formula hashes cover the exact bytes at the declared URL. The harness
+  compares the downloaded archive content with a local archive of the
+  resolved tag commit, while Formula source and version independently bind
+  to that same commit.
 - `docs/guides/INSTALLATION.md` must document all installation methods
 - Public package installation docs must distinguish active GitHub Release
   artifacts from planned APT/YUM repositories. Do not show bare repository
@@ -120,6 +122,7 @@ make release-gates-check
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-13 | Codex | Bound package dependency constraints to distro-resolvable versions and kept Homebrew formula URLs, version, commit, and checksum tied to one release source. |
 | 0.7.7 | 2026-05-27 | Codex | Added public package install docs channel-state coverage before APT/YUM repositories exist |
 | 0.7.6 | 2026-05-27 | Codex | Added Helm metrics directive gating coverage for stock-image-safe chart renders |
 | 0.7.5 | 2026-05-26 | Codex | Added package dependency satisfiability, version-input validation, distro-specific RPM repo selection, package script lifecycle args, module path/glibc runtime compatibility, and local K8s smoke context/module safety coverage |

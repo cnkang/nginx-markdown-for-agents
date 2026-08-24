@@ -46,9 +46,11 @@ CANONICAL_DYNAMIC_WORKFLOWS = {
 # Workflows explicitly marked as legacy/non-canonical.
 # Hardcoded versions here produce warnings, not errors.
 LEGACY_WORKFLOWS = {
-    "release-deb.yml",
     "release-rpm.yml",
 }
+
+RELEASE_PACKAGES_WORKFLOW = "release-packages.yml"
+OFFICIAL_DOCKER_WORKFLOW = ".github/workflows/official-nginx-docker.yml"
 
 # Candidate semantic versions are classified as NGINX versions only when the
 # same workflow line explicitly associates them with NGINX. This avoids numeric
@@ -265,10 +267,19 @@ def validate_owner_workflow_refs(matrix_path: Path) -> list[str]:
     with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Support both canonical 'entries' (release matrix canonical format) and legacy 'matrix' + 'additional_artifacts'
-    all_entries = data.get("entries", []) or (
-        data.get("matrix", []) + data.get("additional_artifacts", [])
-    )
+    # Rule 62: consumers must read ONLY the canonical 'entries' key.
+    # The legacy 'matrix'/'additional_artifacts' aliases are fail-closed in
+    # the normalizer; a validator accepting them would be more permissive
+    # than the contract it defends.  Missing/empty entries is an error here.
+    all_entries = data.get("entries")
+    if not isinstance(all_entries, list) or not all(
+        isinstance(entry, dict) for entry in all_entries
+    ):
+        errors.append(
+            "Matrix file must carry the canonical 'entries' list of objects "
+            "(legacy 'matrix'/'additional_artifacts' keys are not accepted)"
+        )
+        return errors
 
     for i, entry in enumerate(all_entries):
         wf = entry.get("owner_workflow", "")
@@ -282,6 +293,179 @@ def validate_owner_workflow_refs(matrix_path: Path) -> list[str]:
             )
 
     return errors
+
+
+def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
+    """Ensure release-blocking Docker artifacts gate canonical publication."""
+    errors: list[str] = []
+
+    validated = validate_read_path(
+        matrix_path, purpose="release-blocking publish DAG check"
+    )
+    with open(validated, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    entries = data.get("entries")
+    if not isinstance(entries, list) or not all(
+        isinstance(entry, dict) for entry in entries
+    ):
+        errors.append(
+            "Matrix file must carry the canonical 'entries' list of objects "
+            "(legacy 'matrix'/'additional_artifacts' keys are not accepted)"
+        )
+        return errors
+
+    docker_owners = {
+        entry.get("owner_workflow", "")
+        for entry in entries
+        if entry.get("artifact_type") == "docker-image"
+        and entry.get("release_blocking") is True
+    }
+    docker_owners.discard("")
+    if not docker_owners:
+        return errors
+
+    canonical_path = WORKFLOWS_DIR / RELEASE_PACKAGES_WORKFLOW
+    if not canonical_path.exists():
+        return [
+            "Release-blocking Docker entries exist but the canonical "
+            f"workflow is missing: {canonical_path}"
+        ]
+    canonical_content = canonical_path.read_text(encoding="utf-8")
+    publish_needs = _publish_job_needs(canonical_content)
+
+    if "official-docker-release-gate:" not in canonical_content:
+        errors.append(
+            "release-packages.yml does not define "
+            "official-docker-release-gate for release-blocking Docker artifacts"
+        )
+    if "./" + OFFICIAL_DOCKER_WORKFLOW not in canonical_content:
+        errors.append(
+            "release-packages.yml does not call the official Docker workflow "
+            "as a reusable release gate"
+        )
+    if "official-docker-release-gate" not in publish_needs:
+        errors.append(
+            "release-packages.yml publish job does not depend on "
+            "official-docker-release-gate"
+        )
+
+    for owner in sorted(docker_owners):
+        owner_path = REPO_ROOT / owner
+        if not owner_path.exists():
+            continue
+        owner_content = owner_path.read_text(encoding="utf-8")
+        if not _has_top_level_workflow_call(owner_content):
+            errors.append(
+                f"{owner} must expose workflow_call before it can be a "
+                "release-blocking reusable Docker gate"
+            )
+
+    return errors
+
+
+def _publish_job_needs(content: str) -> set[str]:
+    """Return scalar, flow-sequence, or block-sequence ``needs`` entries.
+
+    The workflow validator only needs the publish job's dependency names.
+    Walking the small YAML structure directly keeps the check bounded and
+    avoids a backtracking expression over the complete workflow document.
+    """
+    publish_indent = 2
+    in_publish = False
+
+    lines = content.splitlines()
+    for index, line in enumerate(lines):
+        parts = _publish_line_parts(line)
+        if parts is None:
+            continue
+        indent, stripped = parts
+
+        if not in_publish:
+            in_publish = _is_publish_job(indent, stripped, publish_indent)
+            continue
+        if indent <= publish_indent:
+            return set()
+        if indent != publish_indent + 2:
+            continue
+
+        needs_value = _needs_value(stripped)
+        if needs_value is not None:
+            if needs_value:
+                return _parse_inline_needs(needs_value)
+            return _parse_block_needs(lines, index, indent)
+
+    return set()
+
+
+def _publish_line_parts(line: str) -> tuple[int, str] | None:
+    """Return indentation and content for a meaningful workflow line."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    return len(line) - len(line.lstrip(" ")), stripped
+
+
+def _is_publish_job(indent: int, stripped: str, publish_indent: int) -> bool:
+    """Return whether a line starts the top-level ``publish`` job."""
+    return indent == publish_indent and stripped == "publish:"
+
+
+def _needs_value(stripped: str) -> str | None:
+    """Return the inline value for a job-level ``needs`` key."""
+    key, separator, value = stripped.partition(":")
+    if key != "needs" or not separator:
+        return None
+    return value.strip()
+
+
+def _parse_inline_needs(value: str) -> set[str]:
+    """Parse a scalar or bounded flow-sequence dependency value."""
+    value = value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+        entries = value.split(",")
+    elif value.startswith("[") or value.endswith("]"):
+        return set()
+    else:
+        entries = [value]
+
+    return {
+        entry.strip().strip("'\"")
+        for entry in entries
+        if entry.strip().strip("'\"")
+    }
+
+
+def _parse_block_needs(
+    lines: list[str], needs_line_index: int, needs_indent: int
+) -> set[str]:
+    """Parse a YAML block sequence immediately below ``needs:``."""
+    dependencies: set[str] = set()
+    item_indent = needs_indent + 2
+    for line in lines[needs_line_index + 1 :]:
+        parts = _publish_line_parts(line)
+        if parts is None:
+            continue
+        indent, stripped = parts
+        if indent <= needs_indent:
+            break
+        if indent != item_indent or not stripped.startswith("-"):
+            return set()
+        value = stripped[1:].strip().strip("'\"")
+        if not value:
+            return set()
+        dependencies.add(value)
+    return dependencies
+
+
+def _has_top_level_workflow_call(content: str) -> bool:
+    """Return whether a reusable workflow declares its call entry point."""
+    return any(
+        len(line) - len(line.lstrip(" ")) == 2
+        and line.strip() == "workflow_call:"
+        for line in content.splitlines()
+    )
 
 
 def main() -> int:
@@ -329,6 +513,10 @@ def main() -> int:
     # 4. owner_workflow references in matrix point to real files
     owner_errors = validate_owner_workflow_refs(MATRIX_PATH)
     all_errors.extend(owner_errors)
+
+    # 5. release-blocking Docker artifacts must be in the publish DAG
+    docker_dag_errors = validate_release_blocking_publish_dag(MATRIX_PATH)
+    all_errors.extend(docker_dag_errors)
 
     # Report results
     if all_warnings:

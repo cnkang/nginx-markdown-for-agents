@@ -26,9 +26,11 @@ Version 1 uses a **full buffering approach**:
 2. Once complete, perform conversion
 3. Output the complete Markdown response
 
-Streaming conversion remains a possible later direction, but it is not part of the current architecture.
+This ADR is the historical v1 baseline. Streaming conversion was subsequently
+implemented and is now a second, policy-selected engine. This document does
+not describe the active routing contract.
 
-> **Note (v0.8.0+):** This ADR established the baseline full-buffer architecture. True streaming conversion was added in v0.8.0 via [ADR-0004](0004-streaming-bounded-memory-conversion.md), [ADR-0011](0011-true-streaming-contract.md), and [ADR-0013](0013-streaming-default-policy.md). The dual-engine architecture (full-buffer + streaming) is documented in [SYSTEM_ARCHITECTURE.md](../SYSTEM_ARCHITECTURE.md#dual-engine-full-buffering--streaming-since-v080) and [LARGE_RESPONSE_DESIGN.md](../LARGE_RESPONSE_DESIGN.md).
+> **Note (v0.8.0+):** This ADR established the baseline full-buffer architecture. True streaming conversion arrived in v0.8.0 via [ADR-0004](0004-streaming-bounded-memory-conversion.md), [ADR-0011](0011-true-streaming-contract.md), and [ADR-0013](0013-streaming-default-policy.md). The dual-engine architecture (full-buffer + streaming) appears in [SYSTEM_ARCHITECTURE.md](../SYSTEM_ARCHITECTURE.md#dual-engine-full-buffering--streaming-since-v080) and [LARGE_RESPONSE_DESIGN.md](../LARGE_RESPONSE_DESIGN.md).
 
 ## Consequences
 
@@ -60,7 +62,7 @@ Streaming conversion remains a possible later direction, but it is not part of t
 
 1. **Memory Usage**: Requires buffering entire response
    - ~2x response size in memory (input + output)
-   - Mitigated by `markdown_max_size` limit (default 10MB)
+   - Mitigated by the then-current full-buffer size limit
 
 2. **Latency**: Must wait for complete response before conversion
    - Time to first byte (TTFB) increased
@@ -70,7 +72,7 @@ Streaming conversion remains a possible later direction, but it is not part of t
    - Mitigated by size limit and bypass
    - Most web pages are < 1MB
 
-4. **Not Suitable for Streaming Content**: Cannot convert SSE, WebSockets, etc.
+4. **Not Suitable for Streaming Content**: Cannot convert SSE, WebSockets, and so on
    - Mitigated by eligibility checks
    - Can explicitly exclude streaming endpoints
 
@@ -117,7 +119,7 @@ Streaming conversion remains a possible later direction, but it is not part of t
 ### Buffering Strategy
 
 1. **Check eligibility first**: Before buffering, verify response is eligible
-2. **Enforce size limit**: Stop buffering if exceeds `markdown_max_size`
+2. **Enforce size limit**: Stop buffering if exceeds the full-buffer size limit (historically `markdown_max_size`, now `markdown_limits conversion_memory=`)
 3. **Use NGINX buffer chain**: Leverage NGINX's existing buffer management
 4. **Single allocation**: Allocate output buffer once conversion size is known
 
@@ -137,22 +139,21 @@ Streaming conversion remains a possible later direction, but it is not part of t
 
 ## Future Considerations
 
-### When to Reconsider Streaming
+### Historical Follow-up Context
 
-Consider streaming conversion if:
+The original v1 decision recorded these questions for future maintainers:
 1. Users frequently request very large documents (> 10MB)
 2. Latency becomes a significant issue
 3. Memory usage becomes problematic
 4. Streaming use cases become important
 
-### Potential Streaming Design
+### Implemented Successor
 
-If streaming is needed in the future:
-- Use incremental HTML parser (html5ever supports this)
-- Maintain parser state across chunks
-- Output Markdown incrementally
-- Handle errors gracefully (may need to abort mid-stream)
-- Document limitations (no Content-Length, no ETag, etc.)
+The implemented streaming design answers the historical questions in
+[ADR-0004](0004-streaming-bounded-memory-conversion.md),
+[ADR-0011](0011-true-streaming-contract.md), and
+[ADR-0013](0013-streaming-default-policy.md). Those ADRs supersede the design
+bullets that were originally listed here.
 
 ## Metrics to Monitor
 

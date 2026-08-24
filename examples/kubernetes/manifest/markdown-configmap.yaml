@@ -10,5 +10,5 @@ data:
     markdown_filter on;
     markdown_flavor gfm;
     markdown_auto_decompress on;
-    markdown_decompress_max_size 20m;
+    markdown_limits decompressed_size=10m;
     markdown_streaming auto;

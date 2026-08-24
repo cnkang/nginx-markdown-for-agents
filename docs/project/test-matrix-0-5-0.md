@@ -10,57 +10,54 @@ All sub-specs map their test plans to this matrix. Combined coverage must addres
 |-----------|--------|
 | Platform | Ubuntu (primary), macOS (secondary) |
 | NGINX Version | 1.24.x (LTS), 1.26.x (stable), 1.27.x (mainline) |
-| Response Size Tier | Small (<10KB), Medium (10KB–1MB), Large (1MB–64MB), Extra-Large (>64MB) |
+| Response Size Tier | Small ([0, 10KB)), Medium ([10KB, 1MB)), Large ([1MB, 64MB)), Extra-Large ([64MB, ∞)) — half-open disjoint boundaries: exactly 10KB maps to Medium, exactly 1MB maps to Large, exactly 64MB maps to Extra-Large |
 | Conversion Engine | full-buffer, streaming |
 | Conversion Path | convert (successful conversion), skip (ineligible skip), fallback/fail-open (pre-commit fallback) |
 
 ## Coverage Mapping Template
 
-Each sub-spec fills in the following template to identify its covered cells:
+Each sub-spec fills in the following template to identify complete covered
+tuples. A row is one executable combination across all dimensions. Listing a
+value in isolation does not establish coverage for the cross-product.
+The **Combination ID** must be deterministic and globally unique: derive it
+from every listed dimension value (for example a stable hash of the
+canonical dimension tuple), or specify the complete dimension tuple as the
+canonical key — never reuse the same ID for different tuples.
 
 ```markdown
 ## Test Matrix Coverage — [Sub-Spec Name]
 
-| Dimension | Covered Values | Test Type |
-|-----------|---------------|-----------|
-| Platform | [Ubuntu, macOS] | [CI matrix / manual] |
-| NGINX Version | [1.24.x, 1.26.x, 1.27.x] | [CI matrix] |
-| Response Size Tier | [Small, Medium, Large, Extra-Large] | [Unit / e2e / benchmark] |
-| Conversion Engine | [full-buffer, streaming] | [Unit / e2e / diff test] |
-| Conversion Path | [convert, skip, fallback/fail-open] | [Unit / e2e] |
+| Combination ID | Platform | NGINX Version | Response Size Tier | Conversion Engine | Conversion Path | Test Type | Covering Sub-Spec |
+|---------------|----------|---------------|--------------------|-------------------|-----------------|-----------|------------------|
+| TM-001 (placeholder — derive from the full tuple, e.g. a stable hash) | Ubuntu | 1.26.x | Small | full-buffer | convert | CI / e2e | [sub-spec name] |
+| TM-002 (placeholder — derive from the full tuple, e.g. a stable hash) | macOS | 1.27.x | Large | streaming | fallback/fail-open | manual / benchmark | [sub-spec name] |
 ```
 
 ## Gap Record Format
 
-If a cell cannot be covered due to infrastructure or resource constraints, the gap and rationale must be recorded:
+If infrastructure or resource constraints block a cell, the sub-spec must record the gap and rationale:
 
-| Dimension | Uncovered Value | Rationale | Risk Assessment |
-|-----------|----------------|-----------|-----------------|
+| Combination ID | Missing Tuple | Rationale | Risk Assessment |
+|---------------|---------------|-----------|-----------------|
 | — | — | — | — |
 
 ## Aggregate Coverage Status
 
-Before release, aggregate all sub-spec coverage mappings to ensure each value in each dimension is covered by at least one sub-spec:
+The required coverage set is the complete Cartesian product of the listed
+dimensions: 2 platforms x 3 NGINX versions x 4 response size tiers x 2
+conversion engines x 3 conversion paths = 144 tuples. Before release,
+aggregate all sub-spec coverage mappings. Ensure every required tuple has at
+least one covering sub-spec. Covering each value independently is not
+sufficient:
 
-| Dimension | Value | Covering Sub-Spec | Status |
-|-----------|-------|-------------------|--------|
-| Platform | Ubuntu | — | Pending |
-| Platform | macOS | — | Pending |
-| NGINX Version | 1.24.x | — | Pending |
-| NGINX Version | 1.26.x | — | Pending |
-| NGINX Version | 1.27.x | — | Pending |
-| Response Size Tier | Small | — | Pending |
-| Response Size Tier | Medium | — | Pending |
-| Response Size Tier | Large | — | Pending |
-| Response Size Tier | Extra-Large | — | Pending |
-| Conversion Engine | full-buffer | — | Pending |
-| Conversion Engine | streaming | — | Pending |
-| Conversion Path | convert | — | Pending |
-| Conversion Path | skip | — | Pending |
-| Conversion Path | fallback/fail-open | — | Pending |
+| Combination ID | Platform | NGINX Version | Response Size Tier | Conversion Engine | Conversion Path | Covering Sub-Spec | Status |
+|---------------|----------|---------------|--------------------|-------------------|-----------------|------------------|--------|
+| TM-001 | Ubuntu | 1.26.x | Small | full-buffer | convert | — | Pending |
+| TM-002 | macOS | 1.27.x | Large | streaming | fallback/fail-open | — | Pending |
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Define the required coverage set as the complete 144-tuple Cartesian product |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

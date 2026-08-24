@@ -82,6 +82,9 @@ main(void)
 
 static ngx_log_t test_log;
 
+/* The production allocator requires a logger for Brotli workspace memory. */
+#define NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG (&test_log)
+
 /* Allocation failure injection flags */
 static ngx_uint_t g_palloc_fail_once = 0;
 static ngx_uint_t g_pcalloc_fail_once = 0;
@@ -317,6 +320,32 @@ test_inflateReset(z_streamp strm)
 #define inflateInit2 test_inflateInit2
 #define inflateEnd test_inflateEnd
 #define inflateReset test_inflateReset
+
+#ifdef NGX_HTTP_BROTLI
+static ngx_uint_t
+test_atomic_cmp_set(ngx_atomic_uint_t *lock, ngx_atomic_uint_t old,
+                    ngx_atomic_uint_t set)
+{
+    if (*lock == old) {
+        *lock = set;
+        return 1;
+    }
+    return 0;
+}
+
+static ngx_atomic_uint_t
+test_atomic_fetch_add(ngx_atomic_uint_t *value, ngx_atomic_int_t add)
+{
+    ngx_atomic_uint_t old;
+
+    old = *value;
+    *value = (ngx_atomic_uint_t) ((ngx_atomic_int_t) *value + add);
+    return old;
+}
+
+#define ngx_atomic_cmp_set test_atomic_cmp_set
+#define ngx_atomic_fetch_add test_atomic_fetch_add
+#endif
 
 /* Include the production streaming decompression implementation */
 #include "../src/ngx_http_markdown_streaming_decomp_impl.h"
@@ -598,6 +627,57 @@ test_property2b_next_feed_trailing_rejection(void)
         "next-feed trailing -> FORMAT_ERROR");
 }
 
+
+static void
+test_brotli_workspace_budget(void)
+{
+    ngx_http_markdown_streaming_decomp_t  first;
+    ngx_http_markdown_streaming_decomp_t  second;
+    ngx_atomic_uint_t                     shared_bytes;
+    void                                  *first_block;
+    void                                  *second_block;
+
+    memset(&first, 0, sizeof(first));
+    memset(&second, 0, sizeof(second));
+    shared_bytes = 0;
+
+    first.brotli.workspace_bytes_shared = &shared_bytes;
+    first.brotli.workspace_limit = 40;
+    first.brotli.log = &test_log;
+    second.brotli.workspace_bytes_shared = &shared_bytes;
+    second.brotli.workspace_limit = 40;
+    second.brotli.log = &test_log;
+
+    /* Workspace accounting covers the whole allocation (header + payload):
+     * 12-byte payload -> 28 bytes
+     * total; 5-byte payload -> 21 bytes total; 28 + 21 > 40 so the second
+     * allocation must be rejected. */
+    first_block = ngx_http_markdown_brotli_alloc(&first, 12);
+    TEST_ASSERT(first_block != NULL,
+        "first Brotli allocation must fit the shared workspace budget");
+    TEST_ASSERT(shared_bytes == 28,
+        "shared Brotli workspace bytes must track live allocations");
+
+    second_block = ngx_http_markdown_brotli_alloc(&second, 5);
+    TEST_ASSERT(second_block == NULL,
+        "concurrent Brotli allocation must stop at the shared budget");
+    TEST_ASSERT(shared_bytes == 28,
+        "rejected Brotli allocation must not consume the budget");
+
+    ngx_http_markdown_brotli_free(&first, first_block);
+    TEST_ASSERT(shared_bytes == 0,
+        "freeing Brotli state must release the shared budget");
+
+    second_block = ngx_http_markdown_brotli_alloc(&second, 5);
+    TEST_ASSERT(second_block != NULL,
+        "Brotli allocation must recover after another request releases bytes");
+    ngx_http_markdown_brotli_free(&second, second_block);
+    TEST_ASSERT(shared_bytes == 0,
+        "all Brotli workspace bytes must be released after cleanup");
+
+    TEST_PASS("Brotli decoder workspace is bounded across concurrent requests");
+}
+
 /* ----------------------------------------------------------------
  * Main
  * ---------------------------------------------------------------- */
@@ -615,6 +695,8 @@ main(void)
 
     /* Next-feed trailing data rejection */
     test_property2b_next_feed_trailing_rejection();
+
+    test_brotli_workspace_budget();
 
     printf("\n");
     TEST_PASS(

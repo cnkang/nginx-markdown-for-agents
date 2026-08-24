@@ -59,8 +59,13 @@
 typedef intptr_t ngx_err_t;
 typedef struct ngx_connection_s ngx_connection_t;
 
+typedef struct {
+    void  **main_conf;
+} ngx_http_conf_ctx_t;
+
 struct ngx_module_s {
-    int dummy;
+    int         dummy;
+    ngx_uint_t  ctx_index;
 };
 
 struct ngx_pool_s {
@@ -90,6 +95,8 @@ struct ngx_http_complex_value_s {
 
 struct ngx_conf_s {
     ngx_pool_t *pool;
+    ngx_log_t  *log;
+    void        *ctx;
 };
 
 typedef struct ngx_slab_pool_s ngx_slab_pool_t;
@@ -318,43 +325,6 @@ ngx_http_complex_value(ngx_http_request_t *r,
     return val->eval_rc;
 }
 
-/*
- * FFI stubs for profile conflict detection.
- *
- * The production header (config_core_impl.h) references Rust FFI types and
- * functions from markdown_converter.h.  The unit test does not link the Rust
- * library, so we include the shared header for struct definitions and provide
- * no-op function stubs.  The conflict detection returns "no conflicts" — the
- * behavior being tested in this file is the C configuration lifecycle, not
- * the Rust conflict logic.
- */
-#include "../../src/markdown_converter.h"
-
-struct FFIConflictList
-markdown_detect_conflicts(uint8_t profile,
-    const struct FFIExplicitConfig *explicit_cfg,
-    const struct FFIEffectiveConfig *effective_cfg)
-{
-    struct FFIConflictList list;
-
-    UNUSED(profile);
-    UNUSED(explicit_cfg);
-    UNUSED(effective_cfg);
-
-    list.conflicts = NULL;
-    list.count = 0;
-    return list;
-}
-
-/*
- * No-op stub: nothing to free in the test environment.
- */
-void
-markdown_free_conflicts(struct FFIConflictList *list)
-{
-    UNUSED(list);
-}
-
 #include "../../src/ngx_http_markdown_config_core_impl.h"
 
 static ngx_pool_t g_pool;
@@ -540,12 +510,39 @@ test_create_conf_defaults(void)
         "max_size should be unset");
     TEST_ASSERT(conf->timeout == NGX_CONF_UNSET_MSEC,
         "timeout should be unset");
-    TEST_ASSERT(conf->ops.metrics_format == NGX_CONF_UNSET_UINT,
-        "metrics format should be unset");
     TEST_ASSERT(conf->stream.budget == NGX_CONF_UNSET_SIZE,
         "streaming budget should be unset");
 
     TEST_PASS("create_conf defaults covered");
+}
+
+static void
+test_merge_conf_default_cache_validation(void)
+{
+    ngx_conf_t                  cf;
+    ngx_http_markdown_conf_t   *parent;
+    ngx_http_markdown_conf_t   *child;
+    char                       *rc;
+
+    TEST_SUBSECTION("merge_conf default cache validation");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    cf.log = &g_log;
+
+    parent = ngx_http_markdown_create_conf(&cf);
+    child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(parent != NULL && child != NULL,
+        "create_conf should allocate merge inputs");
+
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "default cache validation merge should succeed");
+    TEST_ASSERT(child->policy.conditional_requests
+                == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE,
+        "unset cache validation should default to if_modified_since");
+
+    TEST_PASS("merge_conf default cache validation covered");
 }
 
 /*
@@ -568,15 +565,59 @@ test_merge_conf(void)
 
     memset(&cf, 0, sizeof(cf));
     cf.pool = &g_pool;
+    cf.log = &g_log;
 
+    /*
+     * Initialize parent and child as create_conf would: all sentinel
+     * values, then selectively override the fields under test.
+     */
     memset(&parent, 0, sizeof(parent));
-    memset(&child, 0, sizeof(child));
+    parent.enabled = NGX_CONF_UNSET;
+    parent.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+    parent.max_size = NGX_CONF_UNSET_SIZE;
+    parent.timeout = NGX_CONF_UNSET_MSEC;
+    parent.on_error = NGX_CONF_UNSET_UINT;
+    parent.error_status = NGX_CONF_UNSET_UINT;
+    parent.flavor = NGX_CONF_UNSET_UINT;
+    parent.token_estimate = NGX_CONF_UNSET;
+    parent.front_matter = NGX_CONF_UNSET;
+    parent.accept_policy = NGX_CONF_UNSET_UINT;
+    parent.policy.auth_policy = NGX_CONF_UNSET_UINT;
+    parent.policy.auth_cookies = NGX_CONF_UNSET_PTR;
+    parent.policy.generate_etag = NGX_CONF_UNSET;
+    parent.policy.conditional_requests = NGX_CONF_UNSET_UINT;
+    parent.policy.log_verbosity = NGX_CONF_UNSET_UINT;
+    parent.routing.content_types = NGX_CONF_UNSET_PTR;
+    parent.decompress.auto_decompress = NGX_CONF_UNSET;
+    parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
+    parent.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+    parent.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
+    parent.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
+    parent.routing.max_inflight = NGX_CONF_UNSET_UINT;
+    parent.ops.diagnostics_enabled = NGX_CONF_UNSET;
+    parent.stream.policy = NGX_CONF_UNSET_UINT;
+    parent.stream.policy_explicit = -1;
+    parent.stream.excluded_types = NGX_CONF_UNSET_PTR;
+    parent.stream.budget = NGX_CONF_UNSET_SIZE;
+    parent.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
+    parent.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
+    parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
+    parent.limits.parser_memory = NGX_CONF_UNSET_SIZE;
+    parent.limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
+    parent.limits.decompressed_size = NGX_CONF_UNSET_SIZE;
+    parent.limits.decompression_ratio = NGX_CONF_UNSET_UINT;
+    parent.limits.max_inflight = NGX_CONF_UNSET_UINT;
+    parent.advanced.prune_noise = NGX_CONF_UNSET;
+    parent.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
+    parent.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
+    parent.advanced.dynconf_enabled = NGX_CONF_UNSET;
+    parent.advanced.dynconf_dry_run = NGX_CONF_UNSET;
 
+    /* Override parent fields under test */
     parent.enabled = 1;
     parent.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_COMPLEX;
     parent.enabled_complex = &cv;
-    parent.max_size = 2048;
-    parent.timeout = 42;
     parent.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     parent.flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
     parent.token_estimate = 1;
@@ -586,32 +627,26 @@ test_merge_conf(void)
     parent.policy.generate_etag = 0;
     parent.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     parent.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
-    parent.buffer_chunked = 0;
     parent.decompress.auto_decompress = 0;
-    parent.decompress.max_size = 2048;
-    parent.decompress.parse_timeout = 30000;
-    parent.decompress.parser_budget = 64 * 1024 * 1024;
-    parent.routing.large_body_threshold = 4096;
-    parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
-    parent.ops.metrics_per_path = 1;
-    parent.ops.otel_enabled = 0;
     parent.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
-    parent.stream.budget = 777;
-    parent.stream.budget_explicit = 1;
-    parent.stream.shadow = 1;
-    parent.stream.threshold = 32768;
     parent.advanced.prune_noise = 1;
-    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
-    parent.advanced.llm_provider = NGX_CONF_UNSET_UINT;
-    parent.advanced.chars_per_token_fixed = NGX_CONF_UNSET_UINT;
+    parent.limits.conversion_timeout = 30000;
+    parent.limits.parser_timeout = 10000;
+    parent.limits.conversion_memory = 64 * 1024 * 1024;
+    parent.limits.parser_memory = 32 * 1024 * 1024;
+    parent.limits.streaming_buffer = 2 * 1024 * 1024;
+    parent.limits.decompressed_size = 10 * 1024 * 1024;
+    parent.limits.decompression_ratio = 100;
+    parent.limits.max_inflight = 64;
 
-    /* Initially unset; enabled below reflects the post-action state. */
+    /* Child initialized with UNSET sentinels to test inheritance */
     child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
     child.enabled = 1;
     child.enabled_complex = (ngx_http_complex_value_t *) &child;
     child.max_size = NGX_CONF_UNSET_SIZE;
     child.timeout = NGX_CONF_UNSET_MSEC;
     child.on_error = NGX_CONF_UNSET_UINT;
+    child.error_status = NGX_CONF_UNSET_UINT;
     child.flavor = NGX_CONF_UNSET_UINT;
     child.token_estimate = NGX_CONF_UNSET;
     child.front_matter = NGX_CONF_UNSET;
@@ -621,33 +656,32 @@ test_merge_conf(void)
     child.policy.generate_etag = NGX_CONF_UNSET;
     child.policy.conditional_requests = NGX_CONF_UNSET_UINT;
     child.policy.log_verbosity = NGX_CONF_UNSET_UINT;
-    child.buffer_chunked = NGX_CONF_UNSET;
-    child.routing.stream_types = NGX_CONF_UNSET_PTR;
     child.routing.content_types = NGX_CONF_UNSET_PTR;
     child.decompress.auto_decompress = NGX_CONF_UNSET;
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
-    child.ops.metrics_format = NGX_CONF_UNSET_UINT;
-    child.ops.metrics_per_path = NGX_CONF_UNSET;
-    child.ops.otel_enabled = NGX_CONF_UNSET;
+    child.routing.max_inflight = NGX_CONF_UNSET_UINT;
+    child.ops.diagnostics_enabled = NGX_CONF_UNSET;
     child.stream.policy = NGX_CONF_UNSET_UINT;
-    child.stream.budget = NGX_CONF_UNSET_SIZE;
-    child.stream.budget_explicit = 0;
-    child.stream.shadow = NGX_CONF_UNSET;
-    child.stream.threshold = NGX_CONF_UNSET_SIZE;
-    child.stream.threshold_explicit = 0;
-    child.stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
-    child.stream.flush_min = NGX_CONF_UNSET_SIZE;
+    child.stream.policy_explicit = -1;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
+    child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
-    child.advanced.llm_provider = NGX_CONF_UNSET_UINT;
-    child.advanced.chars_per_token_fixed = NGX_CONF_UNSET_UINT;
-
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
+    child.advanced.dynconf_enabled = NGX_CONF_UNSET;
+    child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
+    child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
+    child.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
+    child.limits.parser_memory = NGX_CONF_UNSET_SIZE;
+    child.limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
+    child.limits.decompressed_size = NGX_CONF_UNSET_SIZE;
+    child.limits.decompression_ratio = NGX_CONF_UNSET_UINT;
+    child.limits.max_inflight = NGX_CONF_UNSET_UINT;
     rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
     TEST_ASSERT(rc == NGX_CONF_OK,
         "merge_conf should succeed");
@@ -655,12 +689,13 @@ test_merge_conf(void)
         "child should inherit complex enabled source");
     TEST_ASSERT(child.enabled_complex == &cv,
         "child should inherit complex expression");
-    TEST_ASSERT(child.max_size == 2048, "child should inherit max_size");
-    TEST_ASSERT(child.timeout == 42, "child should inherit timeout");
+    TEST_ASSERT(child.max_size == 64 * 1024 * 1024,
+        "child should inherit max_size from conversion_memory");
+    TEST_ASSERT(child.timeout == 30000, "child should inherit timeout");
     TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
         "child should inherit streaming policy");
-    TEST_ASSERT(child.stream.budget == 777,
-        "child should inherit stream budget");
+    TEST_ASSERT(child.stream.budget == 2 * 1024 * 1024,
+        "child should inherit stream budget from streaming_buffer");
     TEST_ASSERT(child.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT,
         "child should inherit unified error policy");
 
@@ -680,32 +715,27 @@ test_merge_conf(void)
     child.policy.generate_etag = NGX_CONF_UNSET;
     child.policy.conditional_requests = NGX_CONF_UNSET_UINT;
     child.policy.log_verbosity = NGX_CONF_UNSET_UINT;
-    child.buffer_chunked = NGX_CONF_UNSET;
-    child.routing.stream_types = NGX_CONF_UNSET_PTR;
     child.routing.content_types = NGX_CONF_UNSET_PTR;
     child.decompress.auto_decompress = NGX_CONF_UNSET;
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
-    child.ops.metrics_format = NGX_CONF_UNSET_UINT;
-    child.ops.metrics_per_path = NGX_CONF_UNSET;
-    child.ops.otel_enabled = NGX_CONF_UNSET;
     child.stream.policy = NGX_CONF_UNSET_UINT;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
-    child.stream.budget_explicit = 0;
-    child.stream.shadow = NGX_CONF_UNSET;
-    child.stream.threshold = NGX_CONF_UNSET_SIZE;
-    child.stream.threshold_explicit = 0;
-    child.stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
-    child.stream.flush_min = NGX_CONF_UNSET_SIZE;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
-    child.advanced.llm_provider = NGX_CONF_UNSET_UINT;
-    child.advanced.chars_per_token_fixed = NGX_CONF_UNSET_UINT;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
+    child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
+    child.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
+    child.limits.parser_memory = NGX_CONF_UNSET_SIZE;
+    child.limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
+    child.limits.decompressed_size = NGX_CONF_UNSET_SIZE;
+    child.limits.decompression_ratio = NGX_CONF_UNSET_UINT;
+    child.limits.max_inflight = NGX_CONF_UNSET_UINT;
 
     rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
     TEST_ASSERT(rc == NGX_CONF_OK,
@@ -806,10 +836,6 @@ test_name_helpers_and_levels(void)
 
     name = ngx_http_markdown_log_verbosity_name(NGX_HTTP_MARKDOWN_LOG_DEBUG);
     TEST_ASSERT(name->len == strlen("debug"), "verbosity debug name");
-
-    name = ngx_http_markdown_metrics_format_name(
-        NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS);
-    TEST_ASSERT(name->len == strlen("prometheus"), "metrics format name");
 
     name = ngx_http_markdown_compression_name(NGX_HTTP_MARKDOWN_COMPRESSION_GZIP);
     TEST_ASSERT(name->len == strlen("gzip"), "compression gzip name");
@@ -925,7 +951,6 @@ test_log_merged_conf(void)
     ngx_conf_t cf;
     ngx_http_markdown_conf_t conf;
     ngx_array_t auth;
-    ngx_array_t stream_types;
 
     TEST_SUBSECTION("log_merged_conf helper");
 
@@ -939,15 +964,10 @@ test_log_merged_conf(void)
     conf.flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
     conf.policy.auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW;
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
-    conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
 
     memset(&auth, 0, sizeof(auth));
     auth.nelts = 2;
     conf.policy.auth_cookies = &auth;
-
-    memset(&stream_types, 0, sizeof(stream_types));
-    stream_types.nelts = 1;
-    conf.routing.stream_types = &stream_types;
 
     ngx_http_markdown_log_merged_conf(NULL, &conf);
     ngx_http_markdown_log_merged_conf(&cf, &conf);
@@ -1003,7 +1023,6 @@ test_filter_flag_additional_branches(void)
  *  - auth_policy_name with unknown value
  *  - conditional_requests_name with unknown value
  *  - log_verbosity_name with unknown value
- *  - metrics_format_name with unknown value
  *  - compression_name with deflate and unknown type
  *  - enabled_source_name with unknown value
  */
@@ -1025,9 +1044,6 @@ test_name_helpers_unknown_branches(void)
 
     name = ngx_http_markdown_log_verbosity_name(999);
     TEST_ASSERT(name->len == strlen("unknown"), "verbosity unknown name");
-
-    name = ngx_http_markdown_metrics_format_name(999);
-    TEST_ASSERT(name->len == strlen("unknown"), "metrics format unknown name");
 
     name = ngx_http_markdown_compression_name(NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE);
     TEST_ASSERT(name->len == strlen("deflate"), "compression deflate name");
@@ -1070,21 +1086,22 @@ test_merge_conf_double_unset(void)
 
     /* Both parent and child have UNSET enabled_source */
     parent.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
-    parent.max_size = 4096;
+    parent.limits.conversion_memory = 64 * 1024 * 1024;
     parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
-    parent.decompress.parse_timeout = 30000;
-    parent.decompress.parser_budget = 64 * 1024 * 1024;
-    parent.timeout = 100;
+    parent.limits.parser_timeout = 10000;
+    parent.limits.parser_memory = 32 * 1024 * 1024;
+    parent.limits.conversion_timeout = 30000;
+    parent.limits.streaming_buffer = 2 * 1024 * 1024;
+    parent.limits.decompressed_size = 10 * 1024 * 1024;
+    parent.limits.decompression_ratio = 100;
+    parent.limits.max_inflight = 64;
     parent.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     parent.flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
     parent.policy.auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW;
     parent.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     parent.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
-    parent.ops.metrics_per_path = 0;
-    parent.ops.otel_enabled = 0;
     parent.advanced.dynconf_enabled = NGX_CONF_UNSET;
-    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     parent.advanced.dynconf_path.len = 0;
     parent.advanced.dynconf_path.data = NULL;
 
@@ -1101,32 +1118,27 @@ test_merge_conf_double_unset(void)
     child.policy.generate_etag = NGX_CONF_UNSET;
     child.policy.conditional_requests = NGX_CONF_UNSET_UINT;
     child.policy.log_verbosity = NGX_CONF_UNSET_UINT;
-    child.buffer_chunked = NGX_CONF_UNSET;
-    child.routing.stream_types = NGX_CONF_UNSET_PTR;
     child.routing.content_types = NGX_CONF_UNSET_PTR;
     child.decompress.auto_decompress = NGX_CONF_UNSET;
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
-    child.ops.metrics_format = NGX_CONF_UNSET_UINT;
-    child.ops.metrics_per_path = NGX_CONF_UNSET;
-    child.ops.otel_enabled = NGX_CONF_UNSET;
     child.stream.policy = NGX_CONF_UNSET_UINT;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
-    child.stream.budget_explicit = 0;
-    child.stream.shadow = NGX_CONF_UNSET;
-    child.stream.threshold = NGX_CONF_UNSET_SIZE;
-    child.stream.threshold_explicit = 0;
-    child.stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
-    child.stream.flush_min = NGX_CONF_UNSET_SIZE;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
-    child.advanced.llm_provider = NGX_CONF_UNSET_UINT;
-    child.advanced.chars_per_token_fixed = NGX_CONF_UNSET_UINT;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
+    child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
+    child.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
+    child.limits.parser_memory = NGX_CONF_UNSET_SIZE;
+    child.limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
+    child.limits.decompressed_size = NGX_CONF_UNSET_SIZE;
+    child.limits.decompression_ratio = NGX_CONF_UNSET_UINT;
+    child.limits.max_inflight = NGX_CONF_UNSET_UINT;
     child.advanced.dynconf_enabled = NGX_CONF_UNSET;
     child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
 
@@ -1141,54 +1153,6 @@ test_merge_conf_double_unset(void)
         "double-UNSET should clear complex pointer");
 
     TEST_PASS("merge_conf double-UNSET path covered");
-}
-
-static void
-test_stream_budget_explicit_maps_to_stream(void)
-{
-    ngx_conf_t cf;
-    ngx_http_markdown_conf_t *parent;
-    ngx_http_markdown_conf_t *child;
-    char *rc;
-
-    TEST_SUBSECTION("stream.budget explicit mapping");
-
-    memset(&cf, 0, sizeof(cf));
-    cf.pool = &g_pool;
-    parent = ngx_http_markdown_create_conf(&cf);
-    child = ngx_http_markdown_create_conf(&cf);
-    TEST_ASSERT(parent != NULL && child != NULL,
-                "create_conf should allocate parent and child");
-
-    child->stream.budget = 4 * 1024 * 1024;
-
-    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
-
-    TEST_ASSERT(rc == NGX_CONF_OK,
-                "merge_conf should accept stream budget");
-    TEST_ASSERT(child->stream.budget == 4 * 1024 * 1024,
-                "stream budget should be preserved");
-    TEST_ASSERT(child->stream.budget_explicit == 1,
-                "stream budget should stay explicit");
-
-    parent = ngx_http_markdown_create_conf(&cf);
-    child = ngx_http_markdown_create_conf(&cf);
-    TEST_ASSERT(parent != NULL && child != NULL,
-                "create_conf should allocate inherited budget fixtures");
-
-    parent->stream.budget = 8 * 1024 * 1024;
-    parent->stream.budget_explicit = 1;
-    child->stream.budget = 4 * 1024 * 1024;
-
-    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
-
-    TEST_ASSERT(rc == NGX_CONF_OK,
-                "merge_conf should accept child stream budget override");
-    TEST_ASSERT(child->stream.budget == 4 * 1024 * 1024,
-                "child stream budget should override parent stream budget");
-    TEST_ASSERT(child->stream.budget_explicit == 1,
-                "child stream budget override should mark explicit");
-    TEST_PASS("stream.budget explicit mapping");
 }
 
 static void
@@ -1209,7 +1173,6 @@ test_stream_preserves_explicit_defaults(void)
                 "create_conf should allocate parent and child");
 
     child->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    child->stream.shadow = 0;
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
 
@@ -1217,8 +1180,6 @@ test_stream_preserves_explicit_defaults(void)
                 "merge_conf should accept stream settings");
     TEST_ASSERT(child->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
                 "explicit unified on_error=pass should not be overwritten");
-    TEST_ASSERT(child->stream.shadow == 0,
-                "explicit shadow=off should not be overwritten");
     TEST_PASS("stream explicit defaults preserved");
 }
 
@@ -1296,36 +1257,6 @@ test_memory_budget_priority_chain(void)
                     "default max_size when nothing explicitly set");
     }
 
-    /* Case 4: streaming_budget_explicit flag works correctly */
-    {
-        ngx_flag_t streaming_budget_explicit = 0;
-        size_t memory_budget = 50 * 1024 * 1024;
-        size_t streaming_budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
-
-        /* memory_budget should apply when streaming_budget not explicit */
-        if (memory_budget != NGX_CONF_UNSET_SIZE
-            && !streaming_budget_explicit)
-        {
-            streaming_budget = memory_budget;
-        }
-
-        TEST_ASSERT(streaming_budget == 50 * 1024 * 1024,
-                    "memory_budget applies to streaming_budget when not explicit");
-
-        /* Now with explicit streaming_budget */
-        streaming_budget_explicit = 1;
-        streaming_budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
-
-        if (memory_budget != NGX_CONF_UNSET_SIZE
-            && !streaming_budget_explicit)
-        {
-            streaming_budget = memory_budget;
-        }
-
-        TEST_ASSERT(streaming_budget == NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT,
-                    "explicit streaming_budget wins over memory_budget");
-    }
-
     /*
      * Cases 5-7: Exercise the production merge_conf path directly,
      * verifying that the save-before-merge priority chain works end-to-end.
@@ -1349,22 +1280,18 @@ test_memory_budget_priority_chain(void)
         /* Case 5: memory_budget only -> overrides default max_size */
         parent_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
         parent_conf.enabled = 1;
-        parent_conf.max_size = 10 * 1024 * 1024;
+        parent_conf.limits.conversion_memory = 10 * 1024 * 1024;
         parent_conf.stream.budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
-        parent_conf.stream.budget_explicit = 0;
-        parent_conf.stream.threshold = 32768;
         parent_conf.advanced.prune_noise = 1;
-        parent_conf.advanced.memory_budget = 50 * 1024 * 1024;
+        parent_conf.limits.conversion_memory = 50 * 1024 * 1024;
 
         child_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
         child_conf.max_size = NGX_CONF_UNSET_SIZE;
         child_conf.stream.budget = NGX_CONF_UNSET_SIZE;
-        child_conf.stream.budget_explicit = 0;
-        child_conf.stream.threshold = NGX_CONF_UNSET_SIZE;
         child_conf.advanced.prune_noise = NGX_CONF_UNSET;
         child_conf.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
         child_conf.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-        child_conf.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+        child_conf.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 
         rc = ngx_http_markdown_merge_conf(&merge_cf, &parent_conf, &child_conf);
         TEST_ASSERT(rc == NGX_CONF_OK,
@@ -1372,7 +1299,12 @@ test_memory_budget_priority_chain(void)
         TEST_ASSERT(child_conf.max_size == 50 * 1024 * 1024,
                     "unified budget overrides default max_size via merge");
 
-        /* Case 6: explicit max_size + memory_budget -> max_size wins */
+        /*
+         * Case 6: explicit limits.conversion_memory + memory_budget
+         * The unified limits.conversion_memory is the source of truth;
+         * the bridge populates max_size from it.  When conversion_memory
+         * is explicitly set, memory_budget cannot override the result.
+         */
         memset(&child_conf, 0, sizeof(child_conf));
         child_conf.decompress.max_size = NGX_CONF_UNSET_SIZE;
         child_conf.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
@@ -1380,19 +1312,17 @@ test_memory_budget_priority_chain(void)
         child_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
         child_conf.enabled = 1;
         child_conf.max_size = 5 * 1024 * 1024;
+        child_conf.limits.conversion_memory = 5 * 1024 * 1024;
         child_conf.stream.budget = NGX_CONF_UNSET_SIZE;
-        child_conf.stream.budget_explicit = 0;
-        child_conf.stream.threshold = NGX_CONF_UNSET_SIZE;
         child_conf.advanced.prune_noise = NGX_CONF_UNSET;
         child_conf.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
         child_conf.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-        child_conf.advanced.memory_budget = 50 * 1024 * 1024;
 
         rc = ngx_http_markdown_merge_conf(&merge_cf, &parent_conf, &child_conf);
         TEST_ASSERT(rc == NGX_CONF_OK,
                     "merge_conf case 6 should succeed");
         TEST_ASSERT(child_conf.max_size == 5 * 1024 * 1024,
-                    "explicit max_size wins over memory_budget via merge");
+                    "explicit conversion_memory wins over memory_budget via merge");
     }
 }
 
@@ -1415,10 +1345,11 @@ test_decompress_max_size_zero_rejected(void)
 
     memset(&parent, 0, sizeof(parent));
     parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
-    parent.decompress.parse_timeout = 30000;
-    parent.decompress.parser_budget = 64 * 1024 * 1024;
-    parent.max_size = 10 * 1024 * 1024;
-    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    parent.limits.conversion_timeout = 30000;
+    parent.limits.parser_timeout = 30000;
+    parent.limits.parser_memory = 10 * 1024 * 1024;
+    parent.limits.conversion_memory = 64 * 1024 * 1024;
+    parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 
     memset(&child, 0, sizeof(child));
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
@@ -1430,9 +1361,8 @@ test_decompress_max_size_zero_rejected(void)
     child.on_error = NGX_CONF_UNSET_UINT;
     child.flavor = NGX_CONF_UNSET_UINT;
     child.decompress.auto_decompress = 1;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
-    child.stream.threshold = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -1469,10 +1399,11 @@ test_streaming_full_force_conflict_rejected(void)
 
     memset(&parent, 0, sizeof(parent));
     parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
-    parent.decompress.parse_timeout = 30000;
-    parent.decompress.parser_budget = 64 * 1024 * 1024;
-    parent.max_size = 10 * 1024 * 1024;
-    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    parent.limits.conversion_timeout = 30000;
+    parent.limits.parser_timeout = 30000;
+    parent.limits.parser_memory = 10 * 1024 * 1024;
+    parent.limits.conversion_memory = 64 * 1024 * 1024;
+    parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 
     memset(&child, 0, sizeof(child));
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
@@ -1483,9 +1414,8 @@ test_streaming_full_force_conflict_rejected(void)
     child.timeout = NGX_CONF_UNSET_MSEC;
     child.on_error = NGX_CONF_UNSET_UINT;
     child.flavor = NGX_CONF_UNSET_UINT;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
-    child.stream.threshold = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -1525,10 +1455,11 @@ test_streaming_full_auto_warns_but_succeeds(void)
 
     memset(&parent, 0, sizeof(parent));
     parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
-    parent.decompress.parse_timeout = 30000;
-    parent.decompress.parser_budget = 64 * 1024 * 1024;
-    parent.max_size = 10 * 1024 * 1024;
-    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    parent.limits.conversion_timeout = 30000;
+    parent.limits.parser_timeout = 30000;
+    parent.limits.parser_memory = 10 * 1024 * 1024;
+    parent.limits.conversion_memory = 64 * 1024 * 1024;
+    parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 
     memset(&child, 0, sizeof(child));
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
@@ -1539,9 +1470,8 @@ test_streaming_full_auto_warns_but_succeeds(void)
     child.timeout = NGX_CONF_UNSET_MSEC;
     child.on_error = NGX_CONF_UNSET_UINT;
     child.flavor = NGX_CONF_UNSET_UINT;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
-    child.stream.threshold = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -1560,6 +1490,8 @@ test_streaming_full_auto_warns_but_succeeds(void)
     printf("  \xe2\x9c\x93 full + auto warns but merge succeeds\n");
 }
 
+static void test_dynconf_block_mask_propagates_from_parent(void);
+
 int
 main(void)
 {
@@ -1570,10 +1502,11 @@ main(void)
     test_metrics_zone_init();
     test_main_conf_create_and_init();
     test_create_conf_defaults();
+    test_merge_conf_default_cache_validation();
     test_merge_conf();
     test_dynconf_owner_uses_merged_config();
+    test_dynconf_block_mask_propagates_from_parent();
     test_merge_conf_double_unset();
-    test_stream_budget_explicit_maps_to_stream();
     test_stream_preserves_explicit_defaults();
     test_name_helpers_and_levels();
     test_name_helpers_unknown_branches();
@@ -1590,4 +1523,61 @@ main(void)
     printf("========================================\n\n");
 
     return 0;
+}
+
+/*
+ * Verify dynconf block-mask propagation (Rule 46): an explicit
+ * http-level setting blocks the dynamic override of that field in every
+ * child location, because locations inherit the http block's explicit
+ * configuration.
+ */
+static void
+test_dynconf_block_mask_propagates_from_parent(void)
+{
+    ngx_conf_t                     cf;
+    ngx_http_markdown_conf_t      *parent;
+    ngx_http_markdown_conf_t      *child;
+    char                          *rc;
+
+    TEST_SUBSECTION("dynconf block mask propagation from explicit parent");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    cf.log = &g_log;
+
+    parent = ngx_http_markdown_create_conf(&cf);
+    child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(parent != NULL && child != NULL,
+        "create_conf should allocate merge inputs");
+
+    /* Explicit http-level settings must set the corresponding block bits.
+     * Merge the parent against an empty ancestor first: the block-mark
+     * pass runs inside merge and inspects the explicit fields. */
+    parent->limits.streaming_buffer = 2 * 1024 * 1024;
+    parent->advanced.prune_noise = 1;
+
+    {
+        ngx_http_markdown_conf_t *ancestor;
+
+        ancestor = ngx_http_markdown_create_conf(&cf);
+        TEST_ASSERT(ancestor != NULL,
+            "create_conf should allocate ancestor");
+        rc = ngx_http_markdown_merge_conf(&cf, ancestor, parent);
+        TEST_ASSERT(rc == NGX_CONF_OK,
+            "merge with explicit parent should succeed");
+    }
+
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "merge with explicit parent should succeed");
+    TEST_ASSERT(
+        (child->advanced.dynconf_block_mask
+         & NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER) != 0,
+        "explicit parent streaming_buffer must block child dynamic override");
+    TEST_ASSERT(
+        (child->advanced.dynconf_block_mask
+         & NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE) != 0,
+        "explicit parent prune_noise must block child dynamic override");
+
+    TEST_PASS("dynconf block mask propagation covered");
 }

@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+"""Release evidence manifest gate validator.
+
+Validates a final release evidence manifest against the v1 schema. The
+manifest binds a candidate SHA to evidence entries, each with a domain,
+status, and blocking flag. All blocking entries must have status=pass;
+no blocking entry may be pending.
+
+Fixture mode validates a pre-made evidence manifest against the schema,
+rejecting it with an identifiable reason:
+
+  - malformed             manifest is not JSON or lacks required structure
+  - stale-digest          manifest candidate_sha differs from expected
+  - blocking-pending      a blocking entry has status != pass
+  - below-threshold       missing required entries
+  - missing-observation   entry missing required fields
+
+Exit codes:
+  0 = validation passed
+  1 = validation failed or could not be established
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+
+from lib.path_validation import validate_read_path  # noqa: E402
+from lib.executable_validation import resolve_approved_executable  # noqa: E402
+
+FINAL_EVIDENCE_MANIFEST_LABEL = "final evidence manifest"
+
+CANDIDATE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Return the CLI parser for the release evidence manifest gate."""
+    parser = argparse.ArgumentParser(
+        description="Validate release evidence manifest")
+    parser.add_argument("--mode", choices=("real", "fixture"), default="real")
+    parser.add_argument("--record-input",
+                        help="fixture mode: evidence manifest to validate")
+    parser.add_argument("--expected-sha",
+                        help="optional: expected candidate sha for "
+                             "stale-digest detection")
+    parser.add_argument(
+        "--manifest",
+        default=str(
+            REPO_ROOT / "artifacts" / "release" / "0.9.2"
+            / "final-evidence-manifest.json"
+        ),
+        help="real mode: final evidence manifest to validate")
+    parser.add_argument(
+        "--verify-head",
+        action="store_true",
+        help="real mode: require the manifest candidate_sha to equal the "
+             "repository HEAD (detects committed evidence drifting from "
+             "the release candidate; regenerate at freeze)")
+    return parser
+
+
+def _git_head_sha() -> tuple[str | None, str | None]:
+    """Return (HEAD SHA, failure cause).  The SHA is None when the HEAD
+    cannot be resolved; ``cause`` carries a toolchain-specific reason so
+    callers can distinguish an unavailable or unapproved git executable
+    from a failed ``git rev-parse`` invocation or a non-git checkout."""
+    git = resolve_approved_executable("git")
+    if git is None:
+        return None, "git executable is not available or not approved"
+    try:
+        proc = subprocess.run(
+            [git, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+            cwd=REPO_ROOT,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"git rev-parse failed to start: {exc}"
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip()
+        detail = f": {stderr}" if stderr else ""
+        return None, f"git rev-parse HEAD failed{detail}"
+    head = proc.stdout.strip()
+    if CANDIDATE_SHA_PATTERN.fullmatch(head):
+        return head, None
+    return None, f"git rev-parse HEAD returned non-SHA {head!r}"
+
+
+def _verify_head_matches(candidate_sha: str | None, reasons: list[str]) -> None:
+    """Append a reason when the evidence candidate SHA drifted from HEAD.
+
+    The evidence manifest is regenerated at freeze; a committed manifest
+    whose candidate_sha no longer equals the repository HEAD means the
+    evidence no longer describes the release candidate.
+    """
+    if not isinstance(candidate_sha, str):
+        return
+    head, cause = _git_head_sha()
+    if head is None:
+        reasons.append(
+            "verify-head: cannot resolve repository HEAD "
+            f"({cause if cause is not None else 'unknown cause'})")
+    elif head != candidate_sha:
+        reasons.append(
+            f"stale-digest: candidate_sha {candidate_sha} != "
+            f"repository HEAD {head}; evidence drifted from the "
+            "release candidate — regenerate at freeze")
+
+
+def load_json(path: str | Path, label: str) -> dict:
+    """Load a JSON object, failing closed with a malformed reason."""
+    validated_path = validate_read_path(path, purpose=label)
+    try:
+        data = json.loads(validated_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"malformed: unable to read {label} {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"malformed: {label} must be a JSON object")
+    return data
+
+
+def validate_record(record: dict, expected_sha: str | None = None) -> list[str]:
+    """Validate a manifest with the same schema used by real-mode checks."""
+    reasons: list[str] = []
+    sha = record.get("candidate_sha") if isinstance(record, dict) else None
+    if not isinstance(sha, str) or not CANDIDATE_SHA_PATTERN.fullmatch(sha):
+        reasons.append("malformed: candidate_sha must be 40 lowercase hex")
+    elif expected_sha and sha != expected_sha:
+        reasons.append(
+            f"stale-digest: candidate_sha {sha} != expected {expected_sha}"
+        )
+    if not isinstance(record, dict):
+        reasons.append("malformed: final evidence manifest must be an object")
+        return reasons
+    _classify_entry_shape(record, reasons)
+    _validate_evidence_schema(record, reasons)
+    _check_blocking_semantics(record, reasons)
+    return reasons
+
+def run_fixture_gate(args) -> int:
+    """Validate a pre-made evidence manifest."""
+    if not args.record_input:
+        raise ValueError(
+            "malformed: --record-input is required in fixture mode")
+
+    if not _require_jsonschema():
+        return 1
+    record = load_json(args.record_input, "release evidence manifest")
+    reasons = validate_record(record, expected_sha=args.expected_sha)
+
+    if reasons:
+        for reason in reasons:
+            print(f"ERROR: {reason}", file=sys.stderr)
+        return 1
+
+    print(f"PASS: release evidence manifest {args.record_input} validated")
+    return 0
+
+
+def _require_jsonschema() -> bool:
+    """Return True when jsonschema is importable; else report and return
+    False."""
+    try:
+        import jsonschema  # noqa: F401
+    except ImportError:
+        print(
+            "ERROR: jsonschema required (pip install -r requirements-dev.txt)",
+            file=sys.stderr)
+        return False
+    return True
+
+
+_FORMAT_CHECKER = None
+
+
+def _format_checker():
+    """Return the shared jsonschema FormatChecker instance.
+
+    The checker is created lazily so the optional jsonschema dependency is
+    only imported when a schema validation actually runs.  Passing it to
+    validate() makes formats such as "date-time" reject malformed values
+    instead of silently ignoring them.
+    """
+    global _FORMAT_CHECKER
+    if _FORMAT_CHECKER is None:
+        from jsonschema import FormatChecker
+
+        _FORMAT_CHECKER = FormatChecker()
+    return _FORMAT_CHECKER
+
+
+def _validate_evidence_schema(manifest: dict, reasons: list) -> None:
+    """Validate the manifest instance against the release evidence schema."""
+    schema_path = REPO_ROOT / "schemas" / "final-evidence-manifest.schema.json"
+    if not schema_path.is_file():
+        reasons.append(
+            "missing-observation: final-evidence-manifest schema missing")
+        return
+    import jsonschema
+    try:
+        schema = load_json(schema_path, "final evidence manifest schema")
+        jsonschema.validate(
+            instance=manifest, schema=schema, format_checker=_format_checker()
+        )
+    except jsonschema.ValidationError as exc:
+        reasons.append(f"malformed: instance schema violation: {exc.message}")
+    except (ValueError, jsonschema.SchemaError) as exc:
+        reasons.append(f"malformed: evidence schema validation failed: {exc}")
+
+
+def _classify_entry_shape(manifest: dict, reasons: list[str]) -> None:
+    """Preserve actionable fixture diagnostics before schema validation.
+
+    The final schema remains the only structural authority.  These focused
+    classifications keep the gate's existing failure vocabulary useful when
+    a fixture has no entries or an entry omits its observation fields.
+    """
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        return
+    if not entries:
+        reasons.append(
+            "below-threshold: final evidence manifest must contain at least "
+            "one entry"
+        )
+        return
+    required = ("domain", "blocking", "status", "artifact_ref")
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        missing = [field for field in required if field not in entry]
+        if missing:
+            reasons.append(
+                f"missing-observation: entries[{index}] missing required "
+                f"field(s): {', '.join(missing)}"
+            )
+
+
+def _validate_observation_state(
+    reasons: list, expected_sha: str | None, release_dir: Path
+) -> None:
+    """Validate the observation-state record against its schema when
+    present, resolving the record from the manifest's own release
+    directory rather than a hardcoded version."""
+    obs_state_path = release_dir / "observation-state.json"
+    if not obs_state_path.is_file():
+        return
+    obs_schema_path = REPO_ROOT / "schemas" / "observation-state.schema.json"
+    if not obs_schema_path.is_file():
+        reasons.append(
+            "missing-observation: observation-state schema missing")
+        return
+    import jsonschema
+    try:
+        obs = load_json(obs_state_path, "observation state")
+        obs_schema = load_json(obs_schema_path, "observation state schema")
+        jsonschema.validate(
+            instance=obs, schema=obs_schema, format_checker=_format_checker()
+        )
+        if expected_sha and obs.get("candidate_sha") != expected_sha:
+            reasons.append(
+                "stale-digest: observation-state candidate_sha "
+                f"{obs.get('candidate_sha')} != frozen candidate {expected_sha}"
+            )
+    except ValueError as exc:
+        reasons.append(f"malformed: observation-state invalid: {exc}")
+    except jsonschema.ValidationError as exc:
+        reasons.append(
+            f"malformed: observation-state schema violation: "
+            f"{exc.message}")
+
+
+def _check_blocking_semantics(manifest: dict, reasons: list) -> None:
+    """Enforce the release-blocking semantics that the JSON schema cannot
+    express as structure: every entry with blocking=true must have
+    status=pass, and no blocking entry may be pending.  The generator
+    derives run_status from this rule; the gate re-checks it so a real
+    release cannot pass a manifest whose blocking entries did not pass."""
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        return
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("blocking") is not True:
+            continue
+        status = entry.get("status")
+        if status != "pass":
+            reasons.append(
+                f"blocking-pending: entries[{index}] "
+                f"(domain={entry.get('domain')!r}) is blocking with "
+                f"status={status!r}; blocking entries must pass")
+
+
+def _resolve_expected_sha(args) -> str | None:
+    """Resolve the frozen candidate SHA from the release-candidate-sha
+    manifest, or use the explicit --expected-sha when given."""
+    if args.expected_sha:
+        return args.expected_sha
+    # Derive the release version from the selected manifest's parent
+    # directory (artifacts/release/<version>/...) rather than hardcoding 0.9.2.
+    manifest_path = validate_read_path(
+        args.manifest, purpose=FINAL_EVIDENCE_MANIFEST_LABEL
+    )
+    candidate_path = manifest_path.parent / "release-candidate-sha-manifest.json"
+    if not candidate_path.is_file():
+        raise ValueError(
+            "missing-observation: release candidate manifest is required "
+            "for real final-evidence validation"
+        )
+    candidate = load_json(candidate_path, "release candidate manifest")
+    return candidate.get("candidate_sha")
+
+
+def run_real_gate(args) -> int:
+    """Validate the candidate-bound final evidence manifest and
+    observation-state record against the release evidence schemas."""
+    manifest_path = validate_read_path(
+        args.manifest, purpose=FINAL_EVIDENCE_MANIFEST_LABEL
+    )
+
+    manifest = load_json(manifest_path, FINAL_EVIDENCE_MANIFEST_LABEL)
+    expected_sha = _resolve_expected_sha(args)
+    reasons = []
+    candidate_sha = manifest.get("candidate_sha")
+    if not isinstance(candidate_sha, str) or not CANDIDATE_SHA_PATTERN.fullmatch(
+        candidate_sha
+    ):
+        reasons.append("malformed: candidate_sha must be 40 lowercase hex")
+    elif expected_sha and candidate_sha != expected_sha:
+        reasons.append(
+            f"stale-digest: candidate_sha {candidate_sha} != expected {expected_sha}"
+        )
+    if args.verify_head and isinstance(candidate_sha, str):
+        _verify_head_matches(candidate_sha, reasons)
+    if not _require_jsonschema():
+        if reasons:
+            for reason in reasons:
+                print(f"ERROR: {reason}", file=sys.stderr)
+        return 1
+    _validate_evidence_schema(manifest, reasons)
+    _check_blocking_semantics(manifest, reasons)
+    _validate_observation_state(reasons, expected_sha, manifest_path.parent)
+
+    if reasons:
+        for reason in reasons:
+            print(f"ERROR: {reason}", file=sys.stderr)
+        return 1
+
+    print(
+        f"PASS: final evidence manifest {manifest_path} validated "
+        f"(candidate_sha={manifest['candidate_sha']})")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the release evidence manifest gate."""
+    args = build_arg_parser().parse_args(argv)
+    try:
+        if args.mode == "fixture":
+            return run_fixture_gate(args)
+        return run_real_gate(args)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

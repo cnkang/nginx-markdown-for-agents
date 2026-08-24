@@ -123,22 +123,7 @@ impl MetadataExtractor {
                     ref attrs,
                     ..
                 } => {
-                    if name.local.as_ref() == "meta" {
-                        self.process_meta_tag(&attrs.borrow(), metadata)?;
-                    } else if name.local.as_ref() == "link" && canonical.is_none() {
-                        let attrs_ref = attrs.borrow();
-                        let has_canonical_rel = attrs_ref.iter().any(|attr| {
-                            attr.name.local.as_ref() == "rel"
-                                && attr
-                                    .value
-                                    .split_ascii_whitespace()
-                                    .any(|token| token.eq_ignore_ascii_case("canonical"))
-                        });
-                        if has_canonical_rel {
-                            canonical = self.get_attr(&attrs_ref, "href");
-                        }
-                    }
-
+                    self.process_element_for_metadata(name, attrs, metadata, &mut canonical)?;
                     for child in node.children.borrow().iter().rev() {
                         stack.push((child.clone(), depth + 1));
                     }
@@ -153,6 +138,40 @@ impl MetadataExtractor {
         }
 
         Ok(canonical)
+    }
+
+    fn process_element_for_metadata(
+        &self,
+        name: &html5ever::QualName,
+        attrs: &std::cell::RefCell<Vec<html5ever::Attribute>>,
+        metadata: &mut PageMetadata,
+        canonical: &mut Option<String>,
+    ) -> Result<(), ConversionError> {
+        if name.local.as_ref() == "meta" {
+            self.process_meta_tag(&attrs.borrow(), metadata)?;
+            return Ok(());
+        }
+        if name.local.as_ref() == "link" && canonical.is_none() {
+            self.try_extract_canonical(&attrs.borrow(), canonical);
+        }
+        Ok(())
+    }
+
+    fn try_extract_canonical(
+        &self,
+        attrs: &std::cell::Ref<Vec<html5ever::Attribute>>,
+        canonical: &mut Option<String>,
+    ) {
+        let has_canonical_rel = attrs.iter().any(|attr| {
+            attr.name.local.as_ref() == "rel"
+                && attr
+                    .value
+                    .split_ascii_whitespace()
+                    .any(|token| token.eq_ignore_ascii_case("canonical"))
+        });
+        if has_canonical_rel {
+            *canonical = self.get_attr(attrs, "href");
+        }
     }
 
     /// Merge one meta tag into the accumulated metadata structure.

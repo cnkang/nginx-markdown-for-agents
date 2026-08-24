@@ -614,7 +614,7 @@ def _check_otel_integration(streaming_report: dict) -> str:
     """Check if OTel integration is functional.
 
     OTel is functional when spans include trace_id and span_id fields,
-    indicating that W3C trace context propagation and span lifecycle
+    indicating that trace-context propagation and span lifecycle
     are wired into the conversion paths.
     """
     streaming_metrics = streaming_report.get("streaming_metrics", {})

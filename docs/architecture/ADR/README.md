@@ -4,7 +4,7 @@ This directory contains Architecture Decision Records (ADRs) documenting signifi
 
 ## What is an ADR?
 
-An Architecture Decision Record (ADR) is a document that captures an important architectural decision made along with its context and consequences.
+An Architecture Decision Record (ADR) is a document that captures an important architectural decision. It records the decision along with its context and consequences.
 
 ## ADR Format
 
@@ -59,7 +59,7 @@ What other options were considered and why were they not chosen?
 | [0003](0003-inline-origin-near-conversion.md) | Inline Origin-Near Conversion | Accepted | 2026-03-18 |
 | [0004](0004-streaming-bounded-memory-conversion.md) | Streaming Conversion with Bounded Memory and Controlled Fallback | Accepted | 2026-03-23 |
 | [0005](0005-repo-owned-harness.md) | Repo-Owned Harness for Agent Workflow and Spec Routing | Accepted | 2026-04-13 |
-| [0006](0006-otel-integration.md) | OpenTelemetry Integration Architecture | Accepted | 2026-04-28 |
+| [0006](0006-otel-integration.md) | OpenTelemetry Integration Architecture | Superseded by ADR-0027 | 2026-04-28 |
 | [0007](0007-streaming-default.md) | Streaming Engine as Default (auto mode) | Superseded by ADR-0023 | 2026-04-28 |
 | [0008](0008-noise-pruning-default.md) | Noise Pruning Enabled by Default | Accepted | 2026-04-28 |
 | [0009](0009-rust-first-e2e-test-architecture.md) | Rust-First E2E Test Architecture with Hybrid Runtime Coverage | Accepted | 2026-05-13 |
@@ -73,11 +73,14 @@ What other options were considered and why were they not chosen?
 | [0017](0017-090-headerplan-atomic-apply.md) | 0.9.0 HeaderPlan Atomic Apply (Prepare/Commit) | Accepted | 2026-06-30 |
 | [0018](0018-090-observability-schema-v1-reason-registry.md) | 0.9.0 Observability Schema v1 and Reason Code Registry | Accepted | 2026-06-30 |
 | [0019](0019-090-production-readiness-release-gates.md) | 0.9.0 Production Readiness Release Gate Framework | Accepted | 2026-06-30 |
-| [0020](0020-hybrid-zero-copy-pool-cleanup.md) | Hybrid Zero-Copy Streaming Output with Pool Cleanup | Accepted | 2026-07-08 |
+| [0020](0020-hybrid-zero-copy-pool-cleanup.md) | Hybrid Zero-Copy Streaming Output with Pool Cleanup | Superseded (removed in 0.9.2) | 2026-07-08 |
 | [0021](0021-gzip-deflate-streaming-decompression-routing.md) | Gzip and Deflate Streaming Decompression Routing | Accepted | 2026-07-08 |
 | [0022](0022-performance-evidence-release-gate.md) | 0.9.1 Performance Evidence Release Gate | Accepted | 2026-07-08 |
 | [0023](0023-single-streaming-policy.md) | Single Public Streaming Policy Before v1.0 | Accepted | 2026-07-14 |
 | [0024](0024-brotli-streaming-decompression.md) | Brotli Streaming Decompression | Accepted | 2026-07-17 |
+| [0025](0025-public-surface-inventory-drift-gate.md) | Public Surface Inventory and Drift Gate | Accepted | 2026-07-30 |
+| [0026](0026-dynconf-file-restore-contract.md) | Dynamic Configuration File Restore Without a Runtime Rollback API | Accepted | 2026-07-30 |
+| [0027](0027-otel-removal-reintroduction-conditions.md) | OpenTelemetry Removal and Reintroduction Conditions | Accepted | 2026-07-30 (decision); 2026-08-07 (published) |
 
 ## Creating a New ADR
 
@@ -111,10 +114,13 @@ What other options were considered and why were they not chosen?
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Marked ADR-0006 as Superseded by ADR-0027 (OTel removal) |
+| 0.9.2 | 2026-08-07 | Kang | Published ADR-0027 (OTel removal/reintroduction conditions), decided 2026-07-30, and moved it into the ADR/ directory with canonical NNNN-description naming |
+| 0.9.2 | 2026-07-30 | Codex | Added ADR-0025 public-surface drift gate and ADR-0026 dynconf file-restore contract |
 | 0.9.1 | 2026-07-17 | Kiro | Added ADR-0024 (Brotli Streaming Decompression) to index |
 | 0.9.1 | 2026-07-14 | Codex | Added ADR-0023 for the final pre-v1 streaming and flavor contract reset |
 | 0.9.1 | 2026-07-08 | Kang | Added ADR-0020 (Hybrid Zero-Copy), ADR-0021 (gzip/deflate streaming routing), ADR-0022 (Perf Evidence Gate) |
-| 0.9.0 | 2026-06-30 | Kang | Added ADR-0015 (Config V2), ADR-0016 (Rust-first decision core boundary), ADR-0017 (HeaderPlan atomic apply), ADR-0018 (observability schema v1 / reason registry), ADR-0019 (0.9.0 release gate framework) — Wave 1 contract freeze |
+| 0.9.0 | 2026-06-30 | Kang | Added ADR-0015 (Config V2), ADR-0016 (Rust-first decision core boundary), ADR-0017 (HeaderPlan atomic apply), ADR-0018 (observability schema v1 / reason registry), ADR-0019 (0.9.0 release gate framework) — initial contract freeze |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.8.2 | 2026-06-25 | Kang | Promoted ADR-0011 through ADR-0014 from Proposed to Accepted (implemented in 0.8.0) |
 | 0.7.0 | 2026-05-25 | Kang | Added ADR-0009 (Rust-first E2E), ADR-0010 (v0.7.0 Rust-first boundary evolution) |

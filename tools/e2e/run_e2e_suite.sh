@@ -34,6 +34,9 @@ STREAMING_FAILURE_CACHE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_streaming_fai
 SECURITY_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_security_e2e.sh"
 ERROR_HANDLING_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_error_handling_e2e.sh"
 CONFIG_MERGE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_config_merge_e2e.sh"
+FILTER_ORDERING_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/filter_ordering_test.sh"
+SUBREQUEST_SSI_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/subrequest_ssi_test.sh"
+ERROR_POLICY_VALUES_SCRIPT="${WORKSPACE_ROOT}/tests/compatibility/test_error_policy_values.sh"
 E2E_HARNESS_BIN="${WORKSPACE_ROOT}/tools/e2e-harness/target/debug/e2e-harness"
 E2E_HARNESS_MANIFEST="${WORKSPACE_ROOT}/tools/e2e-harness/Cargo.toml"
 SUITE_BUILDROOT=""
@@ -62,6 +65,17 @@ Run the canonical E2E suite:
 Environment variables:
   NGINX_BIN       Optional reusable module-enabled nginx binary
   NGINX_VERSION   Optional nginx version forwarded to the self-building checks
+  NGINX_URL       Required for filter_ordering and subrequest_ssi: a running
+                  module-enabled fixture (SSI + gzip + proxy_cache).  Final
+                  E2E qualification FAILS when unset; set
+                  RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 to skip these two
+                  scripts (non-release local runs only).
+  TEST_PATH       Required fixture path for filter_ordering.
+  GUNZIP_TEST_PATH
+                  Required upstream-gzip fixture path for filter_ordering.
+  REQUIRE_FILTER_ORDERING_ALL
+                  The canonical suite enables strict filter-ordering evidence
+                  automatically when NGINX_URL is configured.
 EOF
   return 0
 }
@@ -204,6 +218,50 @@ fi
 "${E2E_HARNESS_BIN}" scenario auth-cache "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario status-codes "${e2e_harness_args[@]}"
 
+# These three contract scripts are intentionally wired into the canonical suite:
+# the error-policy script is binary-only, while filter ordering additionally
+# needs a caller-provided running NGINX_URL and fixture paths.  Validate each
+# referenced script exists before invoking it so a missing file surfaces as a
+# clear suite-step error instead of bash's generic missing-file failure.
+require_suite_script() {
+  local script_path="$1" step_name="$2"
+  if [[ ! -f "${script_path}" ]]; then
+    echo "ERROR: canonical suite step ${step_name} references missing script: ${script_path}" >&2
+    exit 1
+  fi
+  return 0
+}
+require_suite_script "${ERROR_POLICY_VALUES_SCRIPT}" "error_policy_values"
+env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_POLICY_VALUES_SCRIPT}"
+if [[ -n "${NGINX_URL:-}" ]]; then
+  require_suite_script "${FILTER_ORDERING_SCRIPT}" "filter_ordering"
+  require_suite_script "${SUBREQUEST_SSI_SCRIPT}" "subrequest_ssi"
+  if [[ -z "${TEST_PATH:-}" ]] || [[ -z "${GUNZIP_TEST_PATH:-}" ]]; then
+    echo "FAIL: TEST_PATH and GUNZIP_TEST_PATH are required for filter_ordering qualification." >&2
+    exit 1
+  fi
+  env NGINX_BIN="${SUITE_NGINX_BIN}" NGINX_URL="${NGINX_URL}" \
+    TEST_PATH="${TEST_PATH}" GUNZIP_TEST_PATH="${GUNZIP_TEST_PATH}" \
+    REQUIRE_FILTER_ORDERING_ALL=1 \
+    bash "${FILTER_ORDERING_SCRIPT}"
+  # Final qualification requires the subrequest_in_memory path
+  # (decision D6): REQUIRE_AUTH_SUBREQUEST turns the optional scenario 5
+  # into a hard requirement so an incomplete fixture cannot pass.
+  env NGINX_BIN="${SUITE_NGINX_BIN}" REQUIRE_AUTH_SUBREQUEST=1 \
+    bash "${SUBREQUEST_SSI_SCRIPT}"
+elif [[ "${RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E:-0}" == "1" ]]; then
+  echo "  filter_ordering=skipped (RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1)"
+  echo "  subrequest_ssi=skipped (RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1)"
+else
+  # Final E2E qualification must not silently skip filter-ordering / SSI /
+  # subrequest_in_memory (decision D6): without an explicit opt-out the
+  # suite FAILS so a release cannot pass with these unexercised.
+  echo "FAIL: filter_ordering and subrequest_ssi are part of final E2E qualification and must not be skipped." >&2
+  echo "      Provide NGINX_URL pointing at a running module-enabled fixture (SSI + gzip + proxy_cache)," >&2
+  echo "      or set RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 for non-release local runs." >&2
+  exit 1
+fi
+
 echo "Canonical E2E suite summary:"
 echo "  proxy_tls_backend=passed"
 echo "  chunked_native_smoke=passed"
@@ -216,5 +274,10 @@ echo "  metrics_endpoint=passed"
 echo "  conditional_requests=passed"
 echo "  config_merge=passed"
 echo "  auth_cache=passed"
-echo "  status_codes=passed"
+  echo "  status_codes=passed"
+  echo "  error_policy_values=passed"
+  if [[ -n "${NGINX_URL:-}" ]]; then
+    echo "  filter_ordering=passed"
+    echo "  subrequest_ssi=passed"
+  fi
 echo "  reusable_nginx_bin=${SUITE_NGINX_BIN}"

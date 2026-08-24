@@ -100,6 +100,7 @@ while IFS= read -r line; do
     # Skip comments and blank lines
     case "$line" in
         '#'*|'') continue ;;
+        *) : ;;
     esac
     # Format: HASH  IDENTIFIER (two spaces)
     line_hash="${line%%  *}"
@@ -124,6 +125,7 @@ case "$EXPECTED_SHA256" in
     *PLACEHOLDER*|*placeholder*|*OBTAIN*|*obtain*)
         die "Checksum for '$IDENTIFIER' is a placeholder — replace with actual SHA256"
         ;;
+    *) : ;;
 esac
 
 ##############################################################################

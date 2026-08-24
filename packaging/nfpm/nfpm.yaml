@@ -6,8 +6,6 @@
 # Environment variables (injected by workflow matrix):
 #   PKG_VERSION          - Project version (e.g. 0.8.2)
 #   NGINX_VERSION        - Target NGINX version (e.g. 1.26.3)
-#   NGINX_VERSION_FLOOR  - Minor branch floor (e.g. 1.26.0)
-#   NGINX_VERSION_CEIL   - Minor branch ceiling exclusive (e.g. 1.27.0)
 #   NFPM_ARCH            - Target architecture (e.g. amd64, arm64)
 #
 # Usage:
@@ -15,11 +13,12 @@
 #   nfpm package --packager rpm --target "dist/${RPM_FILENAME}"
 #
 # ABI safety:
-#   NGINX dynamic modules require ABI compatibility with the exact NGINX
-#   version they were compiled against. DEB dependencies constrain the minor
-#   branch directly. RPM uses an epoch-aware floor because nginx.org RPM epochs
-#   vary across minor branches; the preinstall script enforces the minor branch
-#   ABI guard at install time.
+#   NGINX dynamic modules require ABI compatibility with the EXACT NGINX
+#   version they were compiled against; the core loader rejects any
+#   version difference (including patch) before signature checks.
+#   DEB/RPM dependency metadata therefore pins the exact NGINX version,
+#   and the preinstall script enforces the exact-version guard at install
+#   time as a second line of defense.
 
 name: "nginx-module-markdown-for-agents"
 arch: "${NFPM_ARCH}"
@@ -29,7 +28,7 @@ release: "nginx${NGINX_VERSION}"
 maintainer: "nginx-markdown-for-agents maintainers"
 description: |
   NGINX dynamic module for HTML-to-Markdown conversion.
-  Compiled for NGINX ${NGINX_VERSION}. Requires matching NGINX version.
+  Compiled for NGINX ${NGINX_VERSION}. Requires EXACTLY this NGINX version.
   Serves Markdown to AI agents via content negotiation.
 vendor: "NGINX Markdown for Agents Contributors"
 homepage: "https://github.com/cnkang/nginx-markdown-for-agents"
@@ -38,12 +37,11 @@ license: "BSD-2-Clause"
 overrides:
   deb:
     depends:
-      - "nginx (>= ${NGINX_VERSION_FLOOR})"
-      - "nginx (<< ${NGINX_VERSION_CEIL})"
+      - "nginx (= ${NGINX_VERSION})"
       - "libbrotli1"
   rpm:
     depends:
-      - "nginx >= 1:${NGINX_VERSION_FLOOR}"
+      - "nginx = 1:${NGINX_VERSION}"
       - "libbrotli"
 
 contents:

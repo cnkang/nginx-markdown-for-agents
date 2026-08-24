@@ -28,9 +28,14 @@ use std::time::Duration;
 
 use crate::converter::{ConversionOptions, MarkdownFlavor};
 use crate::error::ConversionError;
-use crate::llm_adapter::LlmProvider;
 
 use super::abi::MarkdownOptions;
+
+/// Fixed built-in chars-per-token ratio for token estimation.
+///
+/// The heuristic is deterministic: `ceil(chars / 4.0)`.  No provider
+/// branding, no BPE tokenizer; fixed default since the 0.9.2 ABI freeze.
+pub(crate) const DEFAULT_CHARS_PER_TOKEN: f32 = 4.0;
 
 /// Minimum allowed chars-per-token ratio.
 /// Values below this produce misleadingly large token estimates.
@@ -41,13 +46,11 @@ const CHARS_PER_TOKEN_MAX: f32 = 100.0;
 
 /// Clamp a chars-per-token value to the allowed range.
 ///
-/// Non-positive inputs default to 4.0 (English text heuristic).
+/// Non-positive inputs default to [`DEFAULT_CHARS_PER_TOKEN`] (4.0).
 /// Positive inputs are clamped to [CHARS_PER_TOKEN_MIN, CHARS_PER_TOKEN_MAX].
-/// FFI `u8` fixed-point callers can express raw non-zero values from 0.1 to
-/// 25.5; the wider clamp still protects internal Rust callers.
 pub(crate) fn clamp_chars_per_token(raw: f32) -> f32 {
     if raw <= 0.0 {
-        4.0
+        DEFAULT_CHARS_PER_TOKEN
     } else {
         raw.clamp(CHARS_PER_TOKEN_MIN, CHARS_PER_TOKEN_MAX)
     }
@@ -55,9 +58,10 @@ pub(crate) fn clamp_chars_per_token(raw: f32) -> f32 {
 
 pub(crate) struct DecodedOptions<'a> {
     pub(crate) content_type: Option<&'a str>,
-    /// General timeout used by streaming/incremental paths.
-    /// The full-buffer path uses `parse_timeout` instead.
-    #[allow(dead_code)]
+    /// General conversion timeout (wall-clock deadline for the full
+    /// conversion pipeline).  `parse_timeout` limits only the parser
+    /// phase; this value limits the full pipeline independently
+    /// (see `resolve_conversion_deadlines` in ffi/convert.rs).
     pub(crate) timeout: Duration,
     pub(crate) generate_etag: bool,
     pub(crate) estimate_tokens: bool,
@@ -70,14 +74,10 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) prune_selectors: Option<&'a str>,
     #[allow(dead_code)]
     pub(crate) prune_protection_selectors: Option<&'a str>,
-    /// Unified memory budget (bytes).  Currently enforced only by the
-    /// streaming and incremental paths.  The full-buffer path relies
-    /// on the NGINX-side `markdown_limits memory=<size>` limit instead;
-    /// see the FFI header contract for details.
-    #[allow(dead_code)]
+    /// Unified memory budget (bytes). The full-buffer path applies it to
+    /// generated Markdown output, and streaming/incremental paths apply it
+    /// to their working-set budgets.
     pub(crate) memory_budget: u64,
-    #[allow(dead_code)]
-    pub(crate) llm_provider: LlmProvider,
     /// Raw chars-per-token from FFI options (before normalization).
     /// Retained for diagnostics/logging; all estimation paths use
     /// [`effective_chars_per_token`](Self::effective_chars_per_token).
@@ -202,8 +202,6 @@ fn optional_utf8<'a>(
 ///     prune_protection_selectors: std::ptr::null(),
 ///     prune_protection_selector_len: 0,
 ///     memory_budget: 0,
-///     llm_provider: 0,
-///     chars_per_token_fixed: 0,
 ///     parse_timeout_ms: 0,
 ///     parser_memory_budget: 0,
 ///     flush_threshold: 0,
@@ -255,11 +253,9 @@ pub(crate) fn decode_options(
         "prune_protection_selectors",
     )?;
 
-    let raw_cpt = if options.chars_per_token_fixed > 0 {
-        options.chars_per_token_fixed as f32 / 10.0
-    } else {
-        LlmProvider::from_ffi(options.llm_provider).chars_per_token()
-    };
+    /* Token estimation uses the fixed deterministic built-in ratio.
+     * The obsolete FFI field was removed in the current ABI freeze. */
+    let raw_cpt = DEFAULT_CHARS_PER_TOKEN;
 
     /* Resolve parse_timeout: prefer parse_timeout_ms, fall back to timeout_ms */
     let parse_timeout = if options.parse_timeout_ms > 0 {
@@ -278,7 +274,6 @@ pub(crate) fn decode_options(
         prune_selectors,
         prune_protection_selectors,
         memory_budget: options.memory_budget,
-        llm_provider: LlmProvider::from_ffi(options.llm_provider),
         chars_per_token: raw_cpt,
         effective_chars_per_token: clamp_chars_per_token(raw_cpt),
         parse_timeout,
@@ -307,7 +302,7 @@ mod tests {
     use super::*;
     use crate::ffi::abi::MarkdownOptions;
 
-    fn test_options(chars_per_token_fixed: u8, llm_provider: u8) -> MarkdownOptions {
+    fn test_options() -> MarkdownOptions {
         MarkdownOptions {
             flavor: 0,
             timeout_ms: 0,
@@ -325,8 +320,6 @@ mod tests {
             prune_protection_selectors: ptr::null(),
             prune_protection_selector_len: 0,
             memory_budget: 0,
-            llm_provider,
-            chars_per_token_fixed,
             parse_timeout_ms: 0,
             parser_memory_budget: 0,
             flush_threshold: 0,
@@ -341,26 +334,13 @@ mod tests {
     }
 
     #[test]
-    fn test_chars_per_token_fixed_decoding_boundaries() {
-        let provider_options = test_options(0, 1);
-        let provider_default = decode_options(&provider_options).unwrap();
-        assert_f32_eq(provider_default.chars_per_token, 3.8);
-        assert_f32_eq(provider_default.effective_chars_per_token, 3.8);
-
-        let min_options = test_options(1, 1);
-        let min_non_zero = decode_options(&min_options).unwrap();
-        assert_f32_eq(min_non_zero.chars_per_token, 0.1);
-        assert_f32_eq(min_non_zero.effective_chars_per_token, 1.0);
-
-        let typical_options = test_options(38, 1);
-        let typical_override = decode_options(&typical_options).unwrap();
-        assert_f32_eq(typical_override.chars_per_token, 3.8);
-        assert_f32_eq(typical_override.effective_chars_per_token, 3.8);
-
-        let max_options = test_options(u8::MAX, 1);
-        let max_u8 = decode_options(&max_options).unwrap();
-        assert_f32_eq(max_u8.chars_per_token, 25.5);
-        assert_f32_eq(max_u8.effective_chars_per_token, 25.5);
+    fn test_chars_per_token_default() {
+        /* The obsolete FFI field was removed in 0.9.2; token estimation
+         * always uses the fixed 4.0 ratio. */
+        let options = test_options();
+        let decoded = decode_options(&options).unwrap();
+        assert_f32_eq(decoded.chars_per_token, 4.0);
+        assert_f32_eq(decoded.effective_chars_per_token, 4.0);
     }
 
     #[test]

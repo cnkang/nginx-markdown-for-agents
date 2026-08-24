@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # pylint: disable=too-many-lines
 # pylint: disable=import-error
-"""0.9.1 performance evidence release gate.
+"""Performance evidence release gate for the active 0.9.x baseline.
 
 Runs the module-level benchmark harness and evaluates results against
 the threshold engine module-level thresholds.  Supports two modes:
@@ -38,6 +38,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -81,11 +82,90 @@ def _stderr(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
-def _get_git_commit() -> str:
-    """Return the current short git commit hash, or 'unknown' if unavailable."""
+# Approved system directories in which a PATH-discovered helper executable may
+# legitimately live.  A helper discovered outside these roots is rejected so
+# release evidence can never be produced by a PATH-shadowable executable.
+_TRUSTED_TOOL_ROOTS = (
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/local/opt/nginx/sbin",
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/opt/homebrew/opt/nginx/sbin",
+    "/opt/homebrew/Cellar",
+    "/usr/local/Cellar",
+    "/usr/lib/nginx",
+)
+
+
+def _canonicalize_path(path: str) -> str:
+    """Return the symlink-resolved canonical absolute path of a candidate."""
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return path
+
+
+def _is_trusted_tool_path(path: str) -> bool:
+    """Return True when the candidate lives directly under a trusted root.
+
+    The literal candidate location is checked (not the canonical target) so a
+    user-writable symlink pointing into a trusted root stays rejected.
+    """
+    return any(
+        path == root or path.startswith(root.rstrip("/") + "/")
+        for root in _TRUSTED_TOOL_ROOTS
+    )
+
+
+def _resolve_tool(name: str) -> str | None:
+    """Resolve a command name to an approved absolute executable path.
+
+    The candidate must be found on PATH, canonicalize to a regular executable
+    whose literal location is under a trusted system executable directory, and
+    when running as root must be owned by root and not writable by group or
+    other users.  Returns None when the tool is missing or untrusted.
+    """
+    candidate = shutil.which(name)
+    if not candidate:
+        return None
+    resolved = _canonicalize_path(candidate)
+    if not resolved or not os.path.isfile(resolved) or not os.access(resolved, os.X_OK):
+        return None
+    if not _is_trusted_tool_path(candidate) or not _is_trusted_tool_path(resolved):
+        return None
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        try:
+            stat_result = os.stat(resolved)
+        except OSError:
+            return None
+        if stat_result.st_uid != 0:
+            return None
+        if stat_result.st_mode & 0o022:
+            return None
+    return resolved
+
+
+def _git_bin() -> str | None:
+    """Return the resolved absolute git executable path, or None when untrusted."""
+    resolved = _resolve_tool("git")
+    if not resolved:
+        _stderr(
+            "warning: git is missing or not from a trusted location; "
+            "evidence will record git_commit as 'unknown'"
+        )
+    return resolved
+
+
+def _git_rev_parse(resolved_git: str) -> str:
+    """Return the current short git commit hash via the resolved git binary."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            [resolved_git, "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -95,6 +175,57 @@ def _get_git_commit() -> str:
         return result.stdout.strip() if result.returncode == 0 else "unknown"
     except (OSError, subprocess.SubprocessError):
         return "unknown"
+
+
+def _git_rev_parse_full(resolved_git: str) -> str:
+    """Return the current full git commit hash via the resolved git binary."""
+    try:
+        result = subprocess.run(
+            [resolved_git, "rev-parse", "--verify", "HEAD^{commit}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            cwd=str(REPO_ROOT),
+        )
+        value = result.stdout.strip()
+        if result.returncode == 0 and _SHA_RE.fullmatch(value):
+            return value
+        return "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def _git_describe(resolved_git: str) -> str:
+    """Return the exact tag at HEAD via the resolved git binary, or ''."""
+    with contextlib.suppress(Exception):
+        result = subprocess.run(
+            [resolved_git, "describe", "--tags", "--exact-match", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            cwd=str(REPO_ROOT),
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    return ""
+
+
+def _get_git_commit() -> str:
+    """Return the current short git commit hash, or 'unknown' if unavailable."""
+    resolved_git = _git_bin()
+    if not resolved_git:
+        return "unknown"
+    return _git_rev_parse(resolved_git)
+
+
+def _get_git_commit_full() -> str:
+    """Return the current full git commit hash, or ``unknown``."""
+    resolved_git = _git_bin()
+    if not resolved_git:
+        return "unknown"
+    return _git_rev_parse_full(resolved_git)
 
 
 def _nginx_bin_available() -> bool:
@@ -114,16 +245,11 @@ def _is_rc_tag() -> bool:
             return True
 
     with contextlib.suppress(Exception):
-        result = subprocess.run(
-            ["git", "describe", "--tags", "--exact-match", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-            cwd=str(REPO_ROOT),
-        )
-        if result.returncode == 0 and _RC_RE.search(result.stdout.strip()):
-            return True
+        resolved_git = _git_bin()
+        if resolved_git:
+            tag = _git_describe(resolved_git)
+            if tag and _RC_RE.search(tag):
+                return True
     return False
 
 
@@ -140,17 +266,10 @@ def _is_release_tag() -> bool:
             return True
 
     with contextlib.suppress(Exception):
-        result = subprocess.run(
-            ["git", "describe", "--tags", "--exact-match", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-            cwd=str(REPO_ROOT),
-        )
-        if result.returncode == 0:
-            tag = result.stdout.strip()
-            if _RELEASE_TAG_RE.search(tag) or _RC_RE.search(tag):
+        resolved_git = _git_bin()
+        if resolved_git:
+            tag = _git_describe(resolved_git)
+            if tag and (_RELEASE_TAG_RE.search(tag) or _RC_RE.search(tag)):
                 return True
     return False
 
@@ -173,8 +292,12 @@ def _run_module_benchmark(output_path: Path) -> tuple[int, str]:
     if not script.exists():
         return 1, f"Benchmark script not found: {script}"
 
+    resolved_bash = _resolve_tool("bash")
+    if not resolved_bash:
+        return 1, "Benchmark requires a trusted bash executable"
+
     result = subprocess.run(
-        [str(script), "--output", str(output_path)],
+        [resolved_bash, str(script), "--output", str(output_path)],
         capture_output=True,
         text=True,
         timeout=600,
@@ -192,7 +315,7 @@ def _extract_evidence_metrics(report: dict) -> dict:
     scenarios = _report_scenarios(report)
 
     if not scenarios:
-        # ponytail: keep empty/legacy tests happy while failing real missing scenarios
+        # keep empty/legacy tests happy while failing real missing scenarios
         return {
             "fallback_rate_abs": 0.0,
             "memory_slope_pct": 0.0,
@@ -395,9 +518,13 @@ def _build_evidence_pack(  # pylint: disable=too-many-arguments,too-many-positio
     """Build the evidence pack JSON structure."""
     return {
         "schema_version": "1.0.0",
-        "type": "perf-evidence-091",
+        "type": "perf-evidence-{}".format(_module_baseline_version()),
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "git_commit": _get_git_commit(),
+        "toolchain": {
+            "git": _git_bin(),
+            "bash": _resolve_tool("bash"),
+        },
         "verdict": verdict,
         "skipped": skipped,
         "skip_reason": skip_reason,
@@ -428,7 +555,11 @@ def _print_evidence_summary(evidence_pack: dict) -> None:
     """Print a human-readable summary of the evidence pack."""
     _stderr("")
     _stderr("=" * 60)
-    _stderr("  Performance Evidence Gate 0.9.1 — Summary")
+    _stderr(
+        "  Performance Evidence Gate {} — Summary".format(
+            _module_baseline_version()
+        )
+    )
     _stderr("=" * 60)
     _stderr("")
 
@@ -481,7 +612,7 @@ def _print_result_entry(entry: dict) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(
-        description="0.9.1 performance evidence release gate.",
+        description="Active 0.9.x performance evidence release gate.",
     )
     parser.add_argument(
         "--mode",
@@ -501,7 +632,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output",
         default=None,
-        help="Write evidence pack JSON to this path (default: perf/reports/evidence-091.json).",
+        help="Write evidence pack JSON to this path (default: versioned evidence report).",
     )
     parser.add_argument(
         "--benchmark-report",
@@ -514,6 +645,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Run the evidence gate."""
     args = parse_args(argv)
+
+    try:
+        _module_baseline_version()
+    except ValueError as exc:
+        _stderr(f"FAIL: invalid module baseline selection: {exc}")
+        return 1
 
     blocking = args.mode == "blocking"
     nginx_available = _nginx_bin_available()
@@ -604,7 +741,10 @@ def _obtain_benchmark_report(
         report = json.loads(report_path.read_text(encoding="utf-8"))
         return report, None
 
-    output_path = Path(REPO_ROOT / "perf" / "reports" / "module-benchmark-091.json")
+    version = _module_baseline_version()
+    output_path = Path(
+        REPO_ROOT / "perf" / "reports" / f"module-benchmark-{version}.json"
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     _stderr("Running module-level benchmark harness...")
@@ -664,8 +804,29 @@ _FALLBACK_RATE_COVERAGE_LABEL = (
 _HISTORICAL_BASELINE_COMMIT = "847f90139d287446882052ec78661746541aebff"
 _HISTORICAL_BASELINE_PATH = "perf/baselines/module-baseline-091.json"
 _HISTORICAL_BASELINE_SHA256 = (
-    "8080c23974d8124e6f44fa20ecca1a83fc0a6395b42fb904dfa2e1ae02f284a0"
+    "5f2c70110458d4758f35c0c650ebbb2e43b06e0a86a5483579c8be6fe65a120c"
 )
+_LEGACY_091_BASELINE_COMMIT = (
+    "cab92df229b0b68cb02d88817a208e009f3ce106"
+)
+_LEGACY_091_BASELINE_ARTIFACT = (
+    "perf/baselines/module-baseline-091-raw.json"
+)
+_DEFAULT_MODULE_BASELINE_VERSION = "092"
+_SUPPORTED_MODULE_BASELINE_VERSIONS = frozenset({"091", "092"})
+
+
+def _module_baseline_version() -> str:
+    """Return the allowlisted baseline version selected by the caller."""
+    version = os.environ.get(
+        "MODULE_BASELINE_VERSION", _DEFAULT_MODULE_BASELINE_VERSION
+    )
+    if version not in _SUPPORTED_MODULE_BASELINE_VERSIONS:
+        raise ValueError(
+            "MODULE_BASELINE_VERSION must be one of: "
+            + ", ".join(sorted(_SUPPORTED_MODULE_BASELINE_VERSIONS))
+        )
+    return version
 
 
 def _is_exact_int(value: object) -> bool:
@@ -695,14 +856,24 @@ def _is_acceptable_fallback_rate(value: float | int | None) -> bool:
 
 
 def _scenario_metadata_checks(
-    profile: str, compression: str, transfer_encoding: str,
+    scenario_config: str, compression: str, transfer_encoding: str,
+    *, legacy: bool = False,
 ) -> list[dict]:
     """Return the frozen configuration contract for one scenario."""
-    return [
+    if legacy:
+        scenario_config = {
+            "explicit-defaults": "balanced",
+            "explicit-streaming": "streaming_first",
+            "explicit-strict-cache": "strict_cache",
+        }[scenario_config]
+        config_field = "profile"
+    else:
+        config_field = "scenario_config"
+    checks = [
         {
-            "field": "profile",
-            "expected": profile,
-            "label": f"profile must be {profile!r}",
+            "field": config_field,
+            "expected": scenario_config,
+            "label": f"{config_field} must be {scenario_config!r}",
         },
         {
             "field": "compression",
@@ -715,6 +886,13 @@ def _scenario_metadata_checks(
             "label": f"transfer_encoding must be {transfer_encoding!r}",
         },
     ]
+    if legacy:
+        checks.append({
+            "field": "scenario_config",
+            "forbidden": True,
+            "label": "scenario_config is not part of the 0.9.1 evidence contract",
+        })
+    return checks
 
 
 # Path-coverage invariants: a "completed" scenario must actually exercise
@@ -727,7 +905,7 @@ def _scenario_metadata_checks(
 # tuples.  ``predicate`` is a callable taking the metric value and
 # returning True when the path was genuinely exercised.  ``label`` is
 # used in the breach/evidence message.
-def _fullbuffer_path_invariants() -> list[dict]:
+def _fullbuffer_path_invariants(*, legacy: bool = False) -> list[dict]:
     fullbuffer_hits_label = "fullbuffer_path_hits > 0"
     return [
         {
@@ -745,7 +923,7 @@ def _fullbuffer_path_invariants() -> list[dict]:
                 },
             ],
             "metadata_checks": _scenario_metadata_checks(
-                "balanced", "none", "identity"
+                "explicit-defaults", "none", "identity", legacy=legacy
             ),
         },
         {
@@ -756,7 +934,7 @@ def _fullbuffer_path_invariants() -> list[dict]:
                 "label": fullbuffer_hits_label,
             }],
             "metadata_checks": _scenario_metadata_checks(
-                "balanced", "none", "chunked"
+                "explicit-defaults", "none", "chunked", legacy=legacy
             ),
         },
         {
@@ -767,7 +945,7 @@ def _fullbuffer_path_invariants() -> list[dict]:
                 "label": fullbuffer_hits_label,
             }],
             "metadata_checks": _scenario_metadata_checks(
-                "balanced", "none", "identity"
+                "explicit-defaults", "none", "identity", legacy=legacy
             ),
         },
     ]
@@ -827,7 +1005,7 @@ def _gzip_large_invariant() -> dict:
             },
         ],
         "metadata_checks": _scenario_metadata_checks(
-            "balanced", "gzip", "identity"
+            "explicit-defaults", "gzip", "identity"
         ),
     }
 
@@ -846,31 +1024,51 @@ def _compressed_streaming_invariant(name: str, compression: str) -> dict:
         "scenario": name,
         "checks": checks,
         "metadata_checks": _scenario_metadata_checks(
-            "streaming_first", compression, "chunked"
+            "explicit-streaming", compression, "chunked"
         ),
     }
 
 
-def _path_coverage_invariants() -> list[dict]:
+def _path_coverage_invariants(*, legacy: bool = False) -> list[dict]:
     return [
-        *_fullbuffer_path_invariants(),
+        *_fullbuffer_path_invariants(legacy=legacy),
         {
             "scenario": "streaming-first",
             "checks": _streaming_checks(),
             "metadata_checks": _scenario_metadata_checks(
-                "streaming_first", "none", "chunked"
+                "explicit-streaming", "none", "chunked", legacy=legacy
             ),
         },
-        _gzip_large_invariant(),
-        _compressed_streaming_invariant(
-            "gzip-streaming-first", "gzip"
-        ),
-        _compressed_streaming_invariant(
-            "deflate-streaming-first", "deflate"
-        ),
-        _compressed_streaming_invariant(
-            "brotli-streaming-first", "brotli"
-        ),
+        {
+            **_gzip_large_invariant(),
+            "metadata_checks": _scenario_metadata_checks(
+                "explicit-defaults", "gzip", "identity", legacy=legacy
+            ),
+        },
+        {
+            **_compressed_streaming_invariant(
+                "gzip-streaming-first", "gzip"
+            ),
+            "metadata_checks": _scenario_metadata_checks(
+                "explicit-streaming", "gzip", "chunked", legacy=legacy
+            ),
+        },
+        {
+            **_compressed_streaming_invariant(
+                "deflate-streaming-first", "deflate"
+            ),
+            "metadata_checks": _scenario_metadata_checks(
+                "explicit-streaming", "deflate", "chunked", legacy=legacy
+            ),
+        },
+        {
+            **_compressed_streaming_invariant(
+                "brotli-streaming-first", "brotli"
+            ),
+            "metadata_checks": _scenario_metadata_checks(
+                "explicit-streaming", "brotli", "chunked", legacy=legacy
+            ),
+        },
     ]
 
 def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
@@ -879,7 +1077,7 @@ def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
     A violation occurs when a critical scenario is marked "completed"
     but its target production path was never exercised (the invariant
     metric predicate returned False), or when scenario metadata does
-    not match the expected configuration (wrong profile, compression,
+    not match the expected configuration (wrong scenario_config, compression,
     or transfer_encoding).
 
     Each violation is evidence that the benchmark did not actually test
@@ -893,7 +1091,9 @@ def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
             by_name[name] = s
 
     violations: list[tuple[str, str, str]] = []
-    for invariant in _path_coverage_invariants():
+    for invariant in _path_coverage_invariants(
+        legacy=_uses_legacy_profile_contract(report)
+    ):
         name = invariant["scenario"]
         scenario = by_name.get(name)
         if scenario is None or scenario.get("status") != "completed":
@@ -933,8 +1133,16 @@ def _path_metric_value(metrics: dict, metric: str) -> float | int | None:
             else float(failopen) / float(requests)
         )
     if metric == "output_total":
+        # 0.9.2 dropped zero-copy output, so current diagnostics carry only
+        # copied_output_total; historical baselines (091) still carry a
+        # zero_copy_output_total alongside copied. Prefer the sum when the
+        # zero-copy field exists (historical), else the copied counter.
         zero_copy = metrics.get("zero_copy_output_total")
         copied = metrics.get("copied_output_total")
+        if zero_copy is None:
+            if _is_exact_int(copied) and copied >= 0:
+                return copied
+            return None
         if (
             not _is_exact_int(zero_copy)
             or zero_copy < 0
@@ -942,7 +1150,7 @@ def _path_metric_value(metrics: dict, metric: str) -> float | int | None:
             or copied < 0
         ):
             return None
-        return zero_copy + copied
+        return zero_copy + copied  # type: ignore[operator]
     return metrics.get(metric)
 
 
@@ -955,6 +1163,14 @@ def _check_metadata_fields(
     """Check metadata field expectations for a single scenario."""
     for meta_check in invariant.get("metadata_checks", []):
         field = meta_check["field"]
+        if meta_check.get("forbidden"):
+            if field in scenario:
+                violations.append((
+                    name,
+                    field,
+                    f"{meta_check['label']} (actual={scenario[field]!r})",
+                ))
+            continue
         expected = meta_check["expected"]
         actual = scenario.get(field, "")
         if actual != expected:
@@ -963,6 +1179,24 @@ def _check_metadata_fields(
                 field,
                 f"{meta_check['label']} (actual={actual!r})",
             ))
+
+
+def _legacy_scenario_contract_violations(
+    report: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Reject removed public profile metadata in frozen 0.9.2 evidence."""
+    if _uses_legacy_profile_contract(report):
+        return []
+    violations: list[tuple[str, str]] = []
+    for scenario in _report_scenarios(report):
+        if "profile" in scenario:
+            violations.append((
+                f"{role}.scenario_metadata",
+                f"{scenario.get('name', '<unnamed>')}: legacy profile field is "
+                "not part of the 0.9.2 evidence contract; use "
+                "scenario_config",
+            ))
+    return violations
 
 
 def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
@@ -986,6 +1220,36 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
 
 _SUPPORTED_POLICY_TYPES = frozenset({"verbatim_run", "conservative_normalized"})
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _baseline_head_binding_required() -> bool:
+    """Return whether the selected baseline must match the current HEAD."""
+    return os.environ.get("EVIDENCE_GATE_REQUIRE_BASELINE_HEAD", "0") == "1"
+
+
+def _baseline_head_violations(report: dict) -> list[tuple[str, str]]:
+    """Require both report identities to bind to the current full commit."""
+    head = _get_git_commit_full()
+    if not _SHA_RE.fullmatch(head):
+        return [("baseline.head", "cannot resolve a full current git HEAD SHA")]
+
+    module_benchmark = report.get("module_benchmark", {})
+    policy = report.get("baseline_policy", {})
+    if not isinstance(module_benchmark, dict):
+        module_benchmark = {}
+    if not isinstance(policy, dict):
+        policy = {}
+    violations: list[tuple[str, str]] = []
+    for field, value in (
+        ("module_benchmark.git_commit", module_benchmark.get("git_commit")),
+        ("baseline_policy.source_git_commit", policy.get("source_git_commit")),
+    ):
+        if value != head:
+            violations.append((
+                f"baseline.{field}",
+                f"{field}={value!r} does not match current git HEAD {head}",
+            ))
+    return violations
 
 
 def _is_scoped_historical_exception(report: dict) -> bool:
@@ -1014,6 +1278,24 @@ def _is_scoped_historical_exception(report: dict) -> bool:
     except (OSError, RuntimeError, ValueError):
         return False
     return report == historical_report
+
+
+def _uses_legacy_profile_contract(report: dict) -> bool:
+    """Return whether the report is the explicitly supported 0.9.1 format.
+
+    The 0.9.1 baseline is retained as a comparison input and therefore keeps
+    its historical ``profile`` field.  This exception is bound to that
+    baseline's immutable provenance; a 0.9.2 report cannot opt into the old
+    vocabulary by merely adding the old field.
+    """
+    if _is_scoped_historical_exception(report):
+        return True
+    policy = report.get("baseline_policy")
+    return (
+        isinstance(policy, dict)
+        and policy.get("source_git_commit") == _LEGACY_091_BASELINE_COMMIT
+        and policy.get("source_artifact") == _LEGACY_091_BASELINE_ARTIFACT
+    )
 
 
 def _policy_type_violations(
@@ -1268,6 +1550,20 @@ def _baseline_policy_violations(  # pylint: disable=too-many-return-statements
     )
     violations.extend(_type_specific_violations(policy, role, policy_type))
     violations.extend(_source_artifact_violations(policy, role, exception_is_scoped))
+    release_gate_eligible = policy.get("release_gate_eligible", True)
+    if not isinstance(release_gate_eligible, bool):
+        violations.append((
+            f"{role}.baseline_policy",
+            "release_gate_eligible must be a boolean when present",
+        ))
+    elif not release_gate_eligible:
+        exclusion_reason = policy.get("release_gate_exclusion_reason")
+        if not isinstance(exclusion_reason, str) or not exclusion_reason.strip():
+            violations.append((
+                f"{role}.baseline_policy",
+                "release_gate_exclusion_reason is required when the baseline "
+                "is excluded from release gates",
+            ))
     return violations
 
 
@@ -2195,6 +2491,7 @@ def _validate_benchmark_evidence(
     violations.extend(
         _fallback_rate_consistency_violations(report, role)
     )
+    violations.extend(_legacy_scenario_contract_violations(report, role))
     violations.extend(_baseline_policy_violations(report, role))
     violations.extend(_scenario_source_environment_violations(report, role))
     violations.extend(_raw_artifact_binding_violations(report, role))
@@ -2373,6 +2670,115 @@ def _check_environment_compatibility(
     return violations
 
 
+def _resolve_baseline_head_binding(
+    report: dict | None,
+    args: argparse.Namespace,
+    blocking: bool,
+    baseline_report: dict,
+) -> tuple[dict, bool, int | None] | None:
+    """Return a terminal result when the baseline is not HEAD-bound."""
+    if not _baseline_head_binding_required():
+        return None
+
+    if head_violations := _baseline_head_violations(baseline_report):
+        return {}, False, _report_integrity_failure(
+            report,
+            args,
+            head_violations,
+            "FAIL: Checked-in baseline is not bound to the current HEAD:",
+            "  Regenerate the 0.9.2 module baseline from a real module-enabled "
+            "benchmark at this exact commit before release qualification.",
+            exit_code=1 if blocking else 0,
+        )
+
+    return None
+
+
+def _resolve_ineligible_baseline(
+    report: dict | None,
+    args: argparse.Namespace,
+    blocking: bool,
+    baseline_report: dict,
+) -> tuple[dict, bool, int | None] | None:
+    """Handle a baseline excluded from percentage comparisons."""
+    policy = baseline_report.get("baseline_policy")
+    if not isinstance(policy, dict) or policy.get("release_gate_eligible") is not False:
+        return None
+
+    reason = policy.get(
+        "release_gate_exclusion_reason",
+        "no exclusion reason recorded",
+    )
+    if blocking and _is_release_tag():
+        _stderr(
+            "ERROR: checked-in module baseline is ineligible for "
+            f"release-gate comparison: {reason}"
+        )
+        # Match _resolve_missing_baseline: build and emit the evidence pack
+        # and summary before failing so the failure is documented in the
+        # output artifact, not only on stderr.
+        evidence_pack = _build_evidence_pack(
+            report=report,
+            verdict="MISSING_EVIDENCE",
+            breaches=[{
+                "metric": "baseline",
+                "reason": f"release-tag baseline ineligible for comparison: {reason}",
+            }],
+            results=[],
+        )
+        _print_evidence_summary(evidence_pack)
+        _write_output(evidence_pack, args.output)
+        return {}, False, EXIT_FAILURE
+
+    _stderr(
+        "INFO: Checked-in module baseline is excluded from release-gate "
+        f"comparisons: {reason}"
+    )
+    return {}, False, None
+
+
+def _resolve_environment_mismatch(
+    report: dict | None,
+    args: argparse.Namespace,
+    blocking: bool,
+    baseline_report: dict,
+) -> tuple[dict, bool, int | None] | None:
+    """Return a terminal result when benchmark environments differ."""
+    if not (env_violations := _check_environment_compatibility(
+        report or {}, baseline_report
+    )):
+        return None
+
+    env_violation_strs = [
+        (f"env.{field}", detail)
+        for field, detail in env_violations
+    ]
+    env_violation_strs.append(
+        (
+            "baseline.percentage_thresholds",
+            "cannot evaluate percentage thresholds across incompatible "
+            "benchmark environments",
+        )
+    )
+    heading = (
+        "FAIL: Current and baseline benchmark environments are incompatible:"
+        if blocking else
+        "MISSING_EVIDENCE: Current and baseline benchmark environments "
+        "are incompatible:"
+    )
+    return {}, False, _report_integrity_failure(
+        report,
+        args,
+        env_violation_strs,
+        heading,
+        "  Percentage thresholds cannot be evaluated across incompatible "
+        "environments.\n"
+        "  Regenerate the baseline on the same platform, load generator, "
+        "and NGINX version as the current run.",
+        exit_code=1 if blocking else 0,
+    )
+
+
 def _resolve_baseline(
     report: dict | None, args: argparse.Namespace, blocking: bool,
 ) -> tuple[dict, bool, int | None]:
@@ -2381,17 +2787,29 @@ def _resolve_baseline(
     An environment-incompatible baseline is never used for percentage
     comparisons.  Both modes report MISSING_EVIDENCE; blocking mode fails,
     while report-only mode preserves its informational exit status of zero.
+    A baseline explicitly marked ``release_gate_eligible: false`` is validated
+    for provenance but excluded from percentage comparisons until its stated
+    remeasurement condition is satisfied.
 
     Returns:
         (baseline_metrics, has_baseline, exit_rc):
             exit_rc is None on success; otherwise it is a terminal exit
             code and the caller must return it immediately.
     """
-    baseline_path = REPO_ROOT / "perf" / "baselines" / "module-baseline-091.json"
+    version = _module_baseline_version()
+    baseline_path = (
+        REPO_ROOT / "perf" / "baselines" / f"module-baseline-{version}.json"
+    )
     if not baseline_path.exists():
         return _resolve_missing_baseline(report, args, blocking)
 
     baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
+
+    head_result = _resolve_baseline_head_binding(
+        report, args, blocking, baseline_report
+    )
+    if head_result is not None:
+        return head_result
 
     integrity_rc = _validate_baseline_evidence(
         report, args, baseline_report, blocking
@@ -2399,38 +2817,17 @@ def _resolve_baseline(
     if integrity_rc is not None:
         return {}, False, integrity_rc
 
-    if env_violations := _check_environment_compatibility(
-        report or {},
-        baseline_report,
-    ):
-        env_violation_strs = [
-            (f"env.{field}", detail)
-            for field, detail in env_violations
-        ]
-        env_violation_strs.append(
-            (
-                "baseline.percentage_thresholds",
-                "cannot evaluate percentage thresholds across incompatible "
-                "benchmark environments",
-            )
-        )
-        heading = (
-            "FAIL: Current and baseline benchmark environments are incompatible:"
-            if blocking else
-            "MISSING_EVIDENCE: Current and baseline benchmark environments "
-            "are incompatible:"
-        )
-        return {}, False, _report_integrity_failure(
-            report,
-            args,
-            env_violation_strs,
-            heading,
-            "  Percentage thresholds cannot be evaluated across incompatible "
-            "environments.\n"
-            "  Regenerate the baseline on the same platform, load generator, "
-            "and NGINX version as the current run.",
-            exit_code=1 if blocking else 0,
-        )
+    ineligible_result = _resolve_ineligible_baseline(
+        report, args, blocking, baseline_report
+    )
+    if ineligible_result is not None:
+        return ineligible_result
+
+    environment_result = _resolve_environment_mismatch(
+        report, args, blocking, baseline_report
+    )
+    if environment_result is not None:
+        return environment_result
 
     return _extract_evidence_metrics(baseline_report), True, None
 
@@ -2439,12 +2836,13 @@ def _resolve_missing_baseline(
     report: dict | None, args: argparse.Namespace, blocking: bool,
 ) -> tuple[dict, bool, int | None]:
     """Handle the no-baseline case (first run or release-tag failure)."""
+    version = _module_baseline_version()
     if blocking and _is_release_tag():
         _stderr(
             "FAIL: No module baseline found and this is a release tag.\n"
             "  Release and RC tags require a baseline for percentage threshold evaluation.\n"
-            "  Create a baseline with: cp perf/reports/module-benchmark-091.json "
-            "perf/baselines/module-baseline-091.json"
+            f"  Create a baseline with: cp perf/reports/module-benchmark-{version}.json "
+            f"perf/baselines/module-baseline-{version}.json"
         )
         evidence_pack = _build_evidence_pack(
             report=report,
@@ -2517,7 +2915,10 @@ def _evaluate_and_report(
 def _write_output(evidence_pack: dict, output_path: str | None) -> None:
     """Write evidence pack to file or default location."""
     if output_path is None:
-        output_path = str(REPO_ROOT / "perf" / "reports" / "evidence-091.json")
+        version = _module_baseline_version()
+        output_path = str(
+            REPO_ROOT / "perf" / "reports" / f"evidence-{version}.json"
+        )
 
     out = validate_write_path_within_root(
         output_path, REPO_ROOT, purpose="evidence output"

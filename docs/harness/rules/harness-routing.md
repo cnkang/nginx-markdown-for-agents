@@ -22,11 +22,17 @@ Required:
 - If a new tooling area accepts CLI path inputs, add both path patterns and
   keywords to routing-manifest so `harness_route.py` can match by either
   changed files or task hints.
-- Every routing-manifest update must be mirrored in
+- Mirror every routing-manifest update into
   `docs/harness/routing-manifest.md` and the corresponding risk-pack docs in
   the same changeset.
 
 Verification:
+- `python3 tools/harness/check_harness_sync.py` — validates
+  `docs/harness/routing-manifest.md` and the corresponding risk-pack docs
+  stay synchronized with `docs/harness/routing-manifest.json` updates
+  (manifest-structure / manifest-command-reachability / risk-pack-contract
+  checks), reusing the existing synchronization checker from the harness
+  verification family.
 - `python3 skills/nginx-markdown-harness-maintenance/scripts/harness_route.py --from-git --base main`
 - `make harness-security-checks`
 - `PYTHONPATH=. pytest -q tools/perf/tests`

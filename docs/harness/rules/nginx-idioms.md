@@ -1,6 +1,6 @@
 ---
 domain: nginx-idioms
-rules: [28, 29, 30, 31, 39, 40, 50]
+rules: [28, 29, 30, 31, 39, 40, 50, 69]
 paths:
   - "components/nginx-module/src/**"
 ---
@@ -27,6 +27,23 @@ Required:
 - Single-header shortcut functions (for example "find first occurrence of
   header X") must document the first-match-only limitation explicitly in
   their doc comment.
+- **elts NULL guard**: when a chain part can carry `nelts != 0` with a
+  NULL `elts` pointer (partial/boundary list state — a real crash class
+  found in review), guard the dereference:
+  ```c
+  headers = part->elts;
+  if (headers == NULL && part->nelts != 0) {
+      return NGX_ERROR;  /* or continue — do not index a NULL elts */
+  }
+  ```
+  The guard must return the function's appropriate error or empty value
+  for its declared type, not a bare `return;` (a void function may use
+  `return;`, but a function returning a value must return that value's
+  error/empty form).
+  Standard NGINX iterations bounded by `i < part->nelts` are exempt
+  (NGINX guarantees elts non-NULL whenever nelts > 0 for request-parsed
+  lists); you must add the guard when iterating lists whose construction
+  state is not fully controlled by the request parser.
 - When aggregating flags or values from multiple headers of the same name
   (for example `X-Forwarded-For`), check the aggregated result before
   branching on per-header flags, so a later header cannot override an
@@ -36,6 +53,9 @@ Verification:
 - `grep -rn 'part.nelts\|part.elts' components/nginx-module/src/` — confirm
   every hit is inside a `while (part)` / `for (;; part = part->next)` loop.
 - `grep -rn 'r->headers_in.headers.part\b' components/nginx-module/src/`
+- `python3 tools/harness/detect_elts_null_guard.py` — advisory local
+  gate flagging elts indexing without a nelts bound or NULL guard in
+  chain loops.
 
 ---
 
@@ -44,7 +64,7 @@ Historical issues: `5e9a2b1`, `c4d7f80`.
 
 Required:
 - Flags that gate operations (for example `reload_pending`, `staging_dirty`,
-  `config_applied`) must be cleared **after** the gated operation succeeds,
+  `config_applied`) must clear **after** the gated operation succeeds,
   not before the attempt.  Clearing before the operation removes the retry
   path on failure.
 - Correct pattern: `if (flag) { rc = op(); if (rc == NGX_OK) flag = 0; }`
@@ -72,9 +92,11 @@ Required:
   `'\0'`.
 - Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`,
   `ngx_strnstr`) when the length is known, avoiding the copy entirely.
-- When a length-bounded API is not available and a copy is needed, use
-  `ngx_pnalloc(pool, len + 1)` and `ngx_memcpy` + NUL-terminate.  Free the
-  buffer from the pool when the pool lifetime covers the usage.
+- When a length-bounded API is not available and a copy becomes needed, use
+  `ngx_pnalloc(pool, len + 1)` and `ngx_memcpy` + NUL-terminate. The owning
+  pool reclaims the copy. Use `ngx_pfree()` only for a buffer that the pool
+  tracks as a large allocation; do not apply it to
+  ordinary pool allocations or `ngx_alloc()`-backed storage.
 - Line-oriented parsers that read files or buffers must handle the final
   line that lacks a trailing `\n`.  Treating `\n` as the sole line delimiter
   silently drops the last line if the file does not end with a newline.
@@ -82,7 +104,7 @@ Required:
   length equality first and use `ngx_strncasecmp(..., expected_len)` to
   prevent out-of-bounds reads on short or truncated inputs.
 - **Cross-translation-unit visibility**: When a configuration-derived field
-  (for example `effective_body_buffer_limit`) is consumed in multiple
+  (for example `effective_body_buffer_limit`) spans multiple
   source files, its declaration and accessor function must be in a shared
   header file (for example `filter_module.h`), not declared `static` in
   one `.c` file.  A `static` declaration in a source file is invisible to
@@ -98,8 +120,8 @@ Required:
 
 Verification:
 - `grep -rn 'ngx_strcasecmp\|ngx_file_info\|stat(' components/nginx-module/src/`
-- For each hit, verify the input is guaranteed NUL-terminated or that a
-  length-bounded alternative should be used instead.
+- For each hit, verify the input guarantees NUL-termination or that a
+  length-bounded alternative should run instead.
 - `grep -rn "while.*\\\\n\|split_on.*\\\\n" components/rust-converter/src/` —
   verify EOF-last-line handling in Rust line iterators.
 
@@ -122,8 +144,8 @@ Required:
   a developer copies a block within the same file (for example config
   handlers, auth/otel helper functions).  When adding a new code block
   that is similar to an existing block in the same file, check whether the
-  two blocks can be unified into a shared helper.  If a code block of 5+
-  lines is duplicated (non-adjacent) within the same file, extract the
+  two blocks can unify into a shared helper.  If a code block of 5+
+  lines repeats (non-adjacent) within the same file, extract the
   common logic into a function.  CI tooling (`detect_duplicate_code.py`)
   should flag both adjacent duplicates (3+ identical consecutive lines
   immediately repeated) and non-adjacent duplicates (5+ identical
@@ -134,7 +156,7 @@ Required:
   a single `if (zrc == Z_OK || zrc == Z_BUF_ERROR)` block), verify that
   the two branches are truly semantically equivalent before merging.
   Branches that share the same *shape* but differ in error classification,
-  log label, retry semantics, or side effects must not be collapsed into
+  log label, retry semantics, or side effects must not collapse into
   a single path — the apparent duplication encodes a real semantic
   distinction.  Before consolidating, document: (a) what the two branches
   share (control flow, resource handling), and (b) how they differ (error
@@ -180,7 +202,7 @@ Required:
   rc = ngx_http_output_filter(r, &out);  /* double-send after finalize */
   ```
 - When a helper function calls `ngx_http_finalize_request`, its doc comment
-  must state "Returns NGX_DONE after finalizing the request; caller must not
+  must state "Returns NGX_DONE after finalizing the request, caller must not
   continue processing."
 - Multi-step header/response modification operations (for example header plan
   apply with ETag set, Vary append, custom header add) must be atomic: if any
@@ -189,7 +211,7 @@ Required:
   partially applied headers — downstream consumers will see inconsistent state.
 - Fixed-capacity transaction snapshots must detect capacity overflow before
   the first mutation and return `NGX_ERROR`.  Never silently omit matching
-  state from a rollback snapshot; a rollback set that does not cover every
+  state from a rollback snapshot, a rollback set that does not cover every
   mutable entry cannot satisfy the atomicity contract.
 
 Verification:
@@ -207,7 +229,7 @@ Historical issues: `ebcf7a3c` (L-01).
 
 Required:
 - All header lookup/iteration functions must skip entries where `hash == 0`.
-  NGINX marks deleted or invalidated headers by zeroing the hash field; reading
+  NGINX marks deleted or invalidated headers by zeroing the hash field, reading
   such entries returns stale or garbage data.
 - The filter must appear inside the iteration loop, before any field access:
   ```c
@@ -226,7 +248,7 @@ Required:
 
 Verification:
 - `grep -rn 'part->nelts\|part.nelts' components/nginx-module/src/`
-- For each header iteration loop, verify `hash == 0` is checked before
+- For each header iteration loop, verify the code checks `hash == 0` before
   accessing header fields.
 - `bash tools/harness/detect_header_hash_filter.sh`
 
@@ -239,10 +261,10 @@ Required:
 - When parsing `Content-Type` headers for streaming eligibility checks,
   accept both space (`SP`, 0x20) and horizontal tab (`HTAB`, 0x09) as
   optional whitespace (OWS) separators per RFC 7230.  Some clients send
-  `text/markdown;\tcharset=utf-8` with a tab after the semicolon; rejecting
-  HTAB causes false-negative eligibility decisions.
-- Exclude trailing OWS after the parameter value.  A Content-Type like
-  `text/markdown; charset=utf-8` (trailing space) must not fail the
+  `text/markdown` followed by HTAB and `charset=utf-8` after the media-type
+  separator, rejecting HTAB causes false-negative eligibility decisions.
+- Exclude trailing OWS after the parameter value.  A Content-Type with
+  `text/markdown` followed by a space and `charset=utf-8` must not fail the
   charset check — strip trailing OWS before comparing the parameter
   value.
 - When adding or modifying a Content-Type parser, test with both SP and
@@ -253,3 +275,49 @@ Verification:
   — for each parser, verify it handles HTAB as OWS.
 - `make test-nginx-unit` — eligibility tests cover HTAB separator and
   trailing OWS exclusion.
+
+---
+
+### 69. Representation-change metadata-surface completeness
+Historical issues: `aac2f341`, `ccc320c7`, `8b3633c1`, `de6cec38`,
+`516df672`, `0db8042e`, `a47a3e40`, `1fa75117` (2026-08-19/20 cluster).
+
+Principle: when a response's representation changes (HTML to Markdown
+conversion commit, streaming commit metadata removal, 304 Decision G,
+HEAD representation rewrite), the implementation must clear or suppress
+EVERY upstream metadata surface in the same function.  NGINX emission predicates
+read paired state, so clearing one mirror while leaving its twin stale
+either resurrects source-HTML metadata or leaks it through another
+emission path.  The 2026-08 cluster fixed these surfaces one at a time
+across four paths. This rule collapses them into one contract.
+
+Required:
+- **Trailer suppression**: invalidating the `Trailer` declaration header
+  is not sufficient.  HTTP/2 and HTTP/3 emit `headers_out.trailers`
+  entries without any declaration, so every representation-change path
+  must call the shared `ngx_http_markdown_clear_trailers()` helper in
+  the same function that invalidates the declaration.
+- **Mirror-pair completeness**: NGINX core emits `Last-Modified` from
+  paired state (`last_modified_time` scalar mirror plus typed pointer)
+  and matches Content-Type through the `content_type_lowcase` /
+  `content_type_hash` cache.  A function that strips one half of a pair
+  (`last_modified_time = -1`, `content_type_lowcase = NULL`) must strip
+  the other half in the same function, or explicitly invalidate the
+  corresponding header-list entry via `ngx_http_markdown_invalidate_headers`,
+  or delegate to `ngx_http_markdown_send_304()` which performs the full
+  strip.
+- **Single shared helpers**: new representation paths must reuse
+  `ngx_http_markdown_clear_trailers()`, `ngx_http_markdown_invalidate_headers()`,
+  and `ngx_http_markdown_head_representation_headers()` rather than
+  re-implementing per-header suppression inline.
+- Fresh module-generated responses (diagnostics, 405 builders) follow the
+  same pairing convention: set `content_type_lowcase = NULL` together with
+  `content_type_hash = 0`.
+
+Verification:
+- `python3 tools/harness/detect_representation_metadata_clearing.py`
+  — blocking harness gate. It flags Trailer-declaration invalidation without
+  list clearing and unpaired mirror strips.
+- `make test-nginx-unit` — protocol correctness tests assert no digest,
+  trailer, Last-Modified, or stale Content-Type leakage on all four
+  representation-change paths.

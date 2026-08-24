@@ -3,13 +3,14 @@
 ## Overview
 
 This document describes the GPG key lifecycle for signing NGINX Markdown Filter
-Module packages (DEB/RPM) and repository metadata. It covers key generation,
+Module packages (DEB/RPM), prebuilt dynamic-module archives, and repository metadata. It covers key generation,
 distribution, import instructions for end users, key rotation, CI/CD
 integration, and security considerations.
 
 Current public package channel: GitHub Release DEB/RPM artifacts with
-checksum verification. Public APT/YUM repositories are not available yet; GPG
-key publication for repository metadata applies to future self-hosted repository publication.
+checksum verification. Public APT/YUM repositories are not available yet.
+GPG key publication for repository metadata applies to future self-hosted
+repository publication.
 
 ---
 
@@ -52,8 +53,8 @@ gpg --edit-key <KEY_ID>
 ### Future Repository Signing Key Template
 
 The current public package channel uses GitHub Release artifacts plus
-`SHA256SUMS`. Fill this table only when a public repository signing key is
-generated for a future APT/YUM repository channel.
+`SHA256SUMS`. Fill this table only when the project generates a public
+repository signing key for a future APT/YUM repository channel.
 
 | Field | Value |
 |-------|-------|
@@ -67,7 +68,7 @@ generated for a future APT/YUM repository channel.
 
 ## 2. Key Distribution
 
-The public key is distributed through multiple channels to ensure availability
+The project plans to distribute the public key through multiple channels to ensure availability
 and verifiability.
 
 ### Distribution Channels
@@ -155,16 +156,21 @@ rpm -qa gpg-pubkey* --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' \
   | grep -i markdown
 ```
 
-Expected fingerprint:
-```
-<FINGERPRINT>
-```
+The project checks the public key in at
+`packaging/nginx-markdown-for-agents-release.asc`. Its signing-subkey
+fingerprint is `15C792438EAA762B421E60D21E8D41E7D19A8A75` (primary key
+`7A3743687FEEE0313128355038724643EA12C02A`). Operators must verify the
+fingerprint with `gpg --show-keys` after import and confirm it matches this
+published value before trusting release signatures. A key ID, keyserver
+lookup, or a key file downloaded from the same release is only a transport
+mechanism and cannot establish identity by itself — the fingerprint is the
+trust anchor.
 
 ---
 
 ## 4. Key Rotation Process
 
-Key rotation is required when a key is compromised, approaching expiry, or as
+Key rotation becomes required when a key gets compromised, approaches expiry, or as
 part of periodic security hygiene.
 
 ### Step-by-Step Procedure
@@ -194,11 +200,13 @@ Update the HTTPS distribution endpoint to serve the combined key file.
 #### Step 3: Sign New Packages with New Key
 
 Update CI/CD secrets (see Section 5) to use the new key for all new package
-builds:
+builds. Export only the armored signing subkey of the new key with the exact
+`<fingerprint>!` selector, never the primary secret key, and store that
+export in `GPG_PRIVATE_KEY`:
 
-- Update `GPG_PRIVATE_KEY` secret with new private key
+- Export the new signing subkey (`gpg --armor --export-secret-subkeys '<NEW_SIGNING_SUBKEY_FINGERPRINT>!' > private-signing-subkey.asc`, see Section 5 for the full command) and update the `GPG_PRIVATE_KEY` secret with that export
 - Update `GPG_PASSPHRASE` secret with new passphrase
-- Update `GPG_KEY_ID` secret with new key ID
+- Update `GPG_KEY_ID` secret with the new signing-subkey fingerprint
 
 #### Step 4: Update Repository Metadata Signatures
 
@@ -256,36 +264,42 @@ gpg --keyserver keys.openpgp.org --send-keys <OLD_KEY_ID>
 
 ## 5. CI/CD Integration
 
-The GPG signing key is stored in GitHub Actions secrets for automated package
+GitHub Actions secrets store the GPG signing key for automated package
 signing during the release workflow.
 
 ### Required Secrets
 
 | Secret Name | Content | Format |
 |-------------|---------|--------|
-| `GPG_PRIVATE_KEY` | Armored private key (including subkeys) | ASCII-armored PEM |
+| `GPG_PRIVATE_KEY` | Armored signing-subkey-only export; the primary secret key must not be included | ASCII-armored OpenPGP |
 | `GPG_PASSPHRASE` | Key passphrase | Plain text |
-| `GPG_KEY_ID` | Key ID used for signing | 16-character hex ID |
+| `GPG_KEY_ID` | Full signing-subkey fingerprint used for signing | Exactly 40 hexadecimal characters, matching the published fingerprint |
 
 ### Setting Up Secrets
 
 ```bash
-# Export private key for CI
-gpg --armor --export-secret-keys <KEY_ID> > private-key.asc
+# Export only the signing subkey for CI. The `!` selects that exact key
+# material; never export the primary secret key into CI.
+gpg --armor --export-secret-subkeys '<SIGNING_SUBKEY_FINGERPRINT>!' \
+  > private-signing-subkey.asc
 
 # Store in GitHub Secrets:
 # Settings → Secrets and variables → Actions → New repository secret
 #   Name: GPG_PRIVATE_KEY
-#   Value: (contents of private-key.asc)
+#   Value: (contents of private-signing-subkey.asc)
 #
 #   Name: GPG_PASSPHRASE
 #   Value: (key passphrase)
 #
 #   Name: GPG_KEY_ID
-#   Value: (16-char key ID, e.g. ABCDEF1234567890)
+#   Value: (40-character signing-subkey fingerprint, e.g. 0123456789ABCDEF0123456789ABCDEF01234567)
 
-# Clean up - securely delete the exported key
-shred -u private-key.asc
+# Clean up - remove the exported key from the workspace
+# Exported signing subkeys must be handled only in an approved,
+# access-controlled workspace. Normal deletion removes only the workspace
+# entry; it does not guarantee media sanitization. Before storage reuse or
+# disposal, follow the organization's media-sanitization process.
+rm -f private-signing-subkey.asc
 ```
 
 ### Workflow Usage
@@ -297,6 +311,13 @@ The `sign-and-publish.yml` workflow uses these secrets to:
 3. Sign all `.deb` and `.rpm` packages with `dpkg-sig` and `rpm --addsign`
 4. Sign APT repository metadata (`Release.gpg`, `InRelease`)
 5. Sign YUM repository metadata (`repomd.xml.asc`)
+
+Steps 4–5 are **future/planned**: they run only when the workflow's
+repository-metadata signing job executes for the planned self-hosted APT/YUM
+repositories (the current workflow dispatches it after package signing, but
+no public APT/YUM channel exists yet, so repository metadata is not consumed
+in production). They are not active requirements for the current GitHub
+Release DEB/RPM channel (see the Overview).
 
 ### Verifying CI Signing
 
@@ -320,8 +341,8 @@ rpm -K nginx-markdown-module-*.rpm
 
 - **Primary key offline**: Keep the primary private key on an air-gapped
   machine or hardware security module (HSM). Only the signing subkey should
-  be used in CI.
-- **CI secrets**: GitHub Actions secrets are encrypted at rest and masked in
+  appear in CI.
+- **CI secrets**: GitHub Actions encrypts secrets at rest and masks them in
   logs. Limit access to repository administrators.
 - **Backup**: Store an encrypted backup of the primary key and revocation
   certificate in a secure, separate location.
@@ -335,7 +356,7 @@ rpm -K nginx-markdown-module-*.rpm
 
 ### Compromise Response
 
-If the signing key is suspected to be compromised:
+If you suspect the signing key got compromised, rotate immediately:
 
 1. **Immediately** revoke the compromised key:
    ```bash
@@ -358,7 +379,7 @@ If the signing key is suspected to be compromised:
 ### Best Practices
 
 - Use a dedicated signing subkey (not the primary key) in CI.
-- Set calendar reminders for key expiry (if expiry is configured).
+- Set calendar reminders for key expiry (if you configure expiry).
 - Periodically verify that published packages match expected signatures.
 - Monitor for unauthorized package publications.
 - Keep GPG software updated on CI runners.

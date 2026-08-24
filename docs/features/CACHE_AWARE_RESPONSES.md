@@ -15,7 +15,7 @@ flowchart LR
     style Convert fill:#009639,color:#fff
 ```
 
-This module generates cache-aware responses with proper ETags, Vary headers, and conditional request support. This ensures that Markdown variants are cached correctly and efficiently by browsers, CDNs, and reverse proxies.
+This module generates cache-aware responses with proper ETags, Vary headers, and conditional request support. This ensures that browsers, CDNs, and reverse proxies cache Markdown variants correctly and efficiently.
 
 ## Key Features
 
@@ -24,7 +24,7 @@ This module generates cache-aware responses with proper ETags, Vary headers, and
 The module generates ETags for Markdown responses based on the converted output. This ensures that:
 - Identical HTML input produces identical ETags
 - Cache validation works correctly
-- Bandwidth is saved with 304 Not Modified responses
+- 304 Not Modified responses save bandwidth
 
 ### Vary Header
 
@@ -51,13 +51,13 @@ HTML Response
 
 ### ETag Format
 
-ETags are generated as quoted strings:
+The module generates ETags as quoted strings:
 
 ```http
 ETag: "a1b2c3d4e5f6"
 ```
 
-The ETag value is computed from the Markdown output using a hash function. The same HTML input always produces the same ETag (deterministic output).
+The module computes the ETag value from the Markdown output using a hash function. The same HTML input always produces the same ETag (deterministic output).
 
 ### Vary Header Behavior
 
@@ -85,7 +85,7 @@ Module:    Vary: User-Agent, Accept
 
 ### Enable ETag Generation
 
-ETags are enabled with `markdown_cache_validation full`:
+The module enables ETags with `markdown_cache_validation full`:
 
 ```nginx
 location /docs/ {
@@ -128,11 +128,11 @@ location /docs/ {
 
 **Modes**:
 
-- `ims_only` (default): Skip module-side `If-None-Match` processing (performance optimization); `If-Modified-Since` remains handled by standard NGINX
+- `ims_only` (default): Skip module-side `If-None-Match` processing (performance optimization). `If-Modified-Since` remains handled by standard NGINX
 - `full`: Support Markdown-variant `If-None-Match` (ETag) and preserve upstream `If-Modified-Since` semantics
 - `off`: No conditional request support for Markdown variants
 
-**Performance Note**: `full_support` requires conversion to generate a Markdown-variant ETag for comparison, which has performance implications for conditional requests.
+**Performance Note**: `full` requires conversion to generate a Markdown-variant ETag for comparison, which has performance implications for conditional requests.
 
 ## Conditional Request Handling
 
@@ -150,7 +150,7 @@ The module:
 1. Converts the HTML to Markdown
 2. Generates the ETag from the Markdown output
 3. Compares with the client's ETag
-4. Returns 304 if they match, 200 with body if they don't
+4. Returns 304 if they match, 200 with body if they do not
 
 **304 Response**:
 ```http
@@ -180,6 +180,16 @@ If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT
 ```
 
 NGINX core handles this before the module runs, so the module only processes requests that pass the time-based check.
+
+**Semantic note**: the preserved `Last-Modified` value is the upstream
+HTML representation's timestamp, not a timestamp derived from the
+converted Markdown body.  This is intentional: `ims_only` cache
+validation compares against the source document's modification time, so
+a client that revalidates with `If-Modified-Since` receives a 304 when
+the upstream HTML has not changed, even though the served body is
+Markdown.  The transformed ETag (when `full` mode is on) is the
+representation-specific validator.  `Last-Modified` remains the
+source-time validator.
 
 ## Caching Strategies
 
@@ -265,7 +275,7 @@ location /private/ {
 }
 ```
 
-When authentication is detected:
+When the module detects authentication:
 - `Cache-Control: public` → `Cache-Control: private`
 - `Cache-Control: max-age=3600` → `Cache-Control: private, max-age=3600`
 
@@ -340,13 +350,13 @@ ETag generation adds minimal overhead:
 
 ### Conditional Request Cost
 
-With `full_support` mode:
+With `full` mode:
 - Conditional requests still require conversion
-- ETag must be generated to compare
+- The module must generate an ETag to compare
 - Cost: Same as normal conversion
 - Benefit: Saves bandwidth if ETag matches
 
-With `if_modified_since_only` mode:
+With `ims_only` mode:
 - Conditional requests skip module processing
 - No conversion or ETag generation
 - Cost: Minimal
@@ -399,7 +409,7 @@ Check:
 
 ## Implementation Details
 
-The cache-aware response logic is implemented in:
+The cache-aware response logic lives in:
 - `src/ngx_http_markdown_headers.c` - Header manipulation
 - `src/ngx_http_markdown_conditional.c` - Conditional request handling
 - `components/rust-converter/src/etag_generator.rs` - ETag generation
@@ -411,6 +421,7 @@ For implementation details, see the source code and inline comments.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-18 | Hermes | Document Last-Modified preservation semantics (upstream HTML timestamp, source-time validator) |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

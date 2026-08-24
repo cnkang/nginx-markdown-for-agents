@@ -2,8 +2,9 @@
  * Test: deflate_parity
  *
  * Validates that Content-Encoding: deflate decompression produces
- * identical output in both buffered and streaming paths.  Both paths
- * now use MAX_WBITS (zlib-wrapped deflate per RFC 1950/1951).
+ * identical output in both buffered and streaming paths.  The public
+ * 0.9.2 contract uses MAX_WBITS (zlib-wrapped deflate per RFC 1950).
+ * Raw fallback cases below remain legacy C compatibility coverage only.
  */
 
 #include "test_common.h"
@@ -475,11 +476,12 @@ decompress_buffered_with_fallback(const unsigned char *in, size_t in_len,
 }
 
 /*
- * test_deflate_raw_fallback - Verify raw deflate can be decompressed
- * via the buffered path's automatic fallback mechanism.
+ * test_deflate_raw_fallback - Verify the legacy C compatibility path can
+ * decompress raw deflate via the buffered path's fallback mechanism.
  *
- * This tests the N-01 fix: when a server sends raw deflate (RFC 1951
- * without zlib header), the buffered path retries with -MAX_WBITS.
+ * This preserves the N-01 regression case: when a legacy server sends raw
+ * deflate (RFC 1951 without a zlib header), the buffered path retries with
+ * -MAX_WBITS. This case does not define the frozen 0.9.2 public contract.
  */
 static void
 test_deflate_raw_fallback(void)

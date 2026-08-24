@@ -114,6 +114,25 @@ pub fn try_head(
     }
 }
 
+/// Send HEAD with custom headers and append a failed assertion on error.
+pub fn try_head_with_headers(
+    url: &str,
+    headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+    failure_assertion_name: &str,
+) -> Option<HttpResponse> {
+    match http::head_with_headers(url, headers) {
+        Ok(resp) => Some(resp),
+        Err(e) => {
+            assertions.push(failed_request_assertion(
+                failure_assertion_name,
+                &e.to_string(),
+            ));
+            None
+        }
+    }
+}
+
 /// Extract a header value as a string, returning empty string if absent.
 pub fn header_value(headers: &reqwest::header::HeaderMap, name: &str) -> String {
     headers
@@ -121,4 +140,106 @@ pub fn header_value(headers: &reqwest::header::HeaderMap, name: &str) -> String 
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string()
+}
+
+/// Parse Prometheus text-format sample lines whose metric name is exactly
+/// *family*, returning each sample as `(label_set, value)`.
+///
+/// The family match is boundary-precise: the character following the family
+/// name must be `{` (start of the label set) or whitespace, so a family never
+/// matches a longer metric name it merely prefixes. The value is the field
+/// immediately after the label set's closing brace (or after the metric name
+/// when there is no label set), never a trailing field that could be an
+/// optional timestamp.
+pub fn prometheus_samples(body: &str, family: &str) -> Vec<(String, f64)> {
+    body.lines()
+        .filter(|line| !line.starts_with('#'))
+        .filter_map(|line| {
+            let rest = line.strip_prefix(family)?;
+            let (labels, tail) = match rest.chars().next() {
+                Some('{') => {
+                    let close = rest.find('}')?;
+                    (rest[..=close].to_string(), &rest[close + 1..])
+                }
+                Some(c) if c.is_whitespace() => (String::new(), rest),
+                _ => return None,
+            };
+            let value = tail.split_whitespace().next()?.parse::<f64>().ok()?;
+            Some((labels, value))
+        })
+        .collect()
+}
+
+/// Check a converted Markdown body for a fixture token.
+///
+/// The converter escapes underscores in ordinary text to prevent accidental
+/// Markdown emphasis.  Keep accepting the raw form as well so this assertion
+/// remains compatible with fixtures that emit a token in a non-Markdown body.
+pub fn markdown_token_present(body: &str, token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+    if body.contains(token) {
+        return true;
+    }
+
+    let escaped_token = token.replace('_', r"\_");
+    body.contains(&escaped_token)
+}
+
+/// Check a wire response for a fixture token in raw or Markdown-escaped form.
+pub fn markdown_token_bytes_present(body: &[u8], token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+    let raw_token = token.as_bytes();
+    if body
+        .windows(raw_token.len())
+        .any(|window| window == raw_token)
+    {
+        return true;
+    }
+
+    let escaped_token = token.replace('_', r"\_");
+    body.windows(escaped_token.len())
+        .any(|window| window == escaped_token.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{markdown_token_bytes_present, markdown_token_present};
+
+    const TOKEN: &str = "BROTLI_SMALL_STREAM_END";
+
+    #[test]
+    fn markdown_token_present_accepts_raw_and_escaped_forms() {
+        assert!(markdown_token_present(
+            "prefix BROTLI_SMALL_STREAM_END",
+            TOKEN
+        ));
+        assert!(markdown_token_present(
+            r"prefix BROTLI\_SMALL\_STREAM\_END",
+            TOKEN
+        ));
+        assert!(!markdown_token_present(
+            "prefix BROTLI-SMALL-STREAM-END",
+            TOKEN
+        ));
+    }
+
+    #[test]
+    fn markdown_token_bytes_present_accepts_raw_and_escaped_forms() {
+        assert!(markdown_token_bytes_present(
+            b"chunk BROTLI_SMALL_STREAM_END chunk",
+            TOKEN
+        ));
+        assert!(markdown_token_bytes_present(
+            br"chunk BROTLI\_SMALL\_STREAM\_END chunk",
+            TOKEN
+        ));
+        assert!(!markdown_token_bytes_present(
+            b"chunk without marker",
+            TOKEN
+        ));
+    }
 }

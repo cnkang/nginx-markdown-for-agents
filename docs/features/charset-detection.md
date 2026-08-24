@@ -2,7 +2,11 @@
 
 ## Overview
 
-This document describes the charset detection cascade implementation for the NGINX Markdown for Agents module, as specified in Requirements FR-05.1, FR-05.2, and FR-05.3.
+This document describes the charset detection cascade implementation for the
+NGINX Markdown for Agents module. It follows Requirements FR-05.1, FR-05.2,
+and FR-05.3. Detection records the declared charset for policy and
+diagnostics. The current parser still accepts UTF-8 only and does not
+transcode non-UTF-8 bytes.
 
 ## Requirements
 
@@ -159,19 +163,22 @@ Total: 35 unit tests for charset detection
 
 ### UTF-8 Only Parsing
 
-The current implementation only supports UTF-8 parsing with html5ever. If a non-UTF-8 charset is detected:
+The current implementation detects declared charsets but only parses UTF-8
+with html5ever. If the detector finds a non-UTF-8 charset:
 
-1. A warning is logged to stderr
-2. The parser attempts to parse as UTF-8 anyway
-3. If the content is not valid UTF-8, an encoding error is returned
+1. The module logs a warning to stderr.
+2. The parser receives the bytes as UTF-8 without transcoding. If the bytes
+   are valid UTF-8 despite the non-UTF-8 charset declaration, the parser
+   handles them as UTF-8 and the conversion succeeds.
+3. If the content is not valid UTF-8, the module returns an encoding error.
 
 **Future Enhancement**: Add charset transcoding support using the `encoding_rs` crate to convert non-UTF-8 content to UTF-8 before parsing.
 
 ### Performance Considerations
 
-- Meta tag scanning is limited to the first 1024 bytes for performance
+- Meta tag scanning limits to the first 1024 bytes for performance
 - This is sufficient as meta charset tags should appear in the `<head>` section
-- Regex compilation is cached using `OnceLock` for efficiency
+- Regex compilation caches using `OnceLock` for efficiency
 
 ## Integration Points
 
@@ -182,14 +189,19 @@ When the NGINX C module calls the Rust converter:
 1. Extract Content-Type header from upstream response
 2. Pass Content-Type to `MarkdownOptions.content_type` field
 3. Rust converter uses charset detection cascade
-4. HTML is parsed with detected charset
+4. Detected charset metadata affects **diagnostics only**. The parser always
+   receives UTF-8 bytes, does not transcode, and does not parse according to
+   a non-UTF-8 declaration
 
 ### Error Handling
 
-- Invalid UTF-8 in Content-Type: Falls back to HTML meta tag detection
-- Invalid UTF-8 in HTML: Returns `ConversionError::EncodingError`
+- Missing or malformed charset parameter in Content-Type: Falls back to HTML meta tag detection
+- Invalid UTF-8 bytes in HTML: Returns `ConversionError::EncodingError`
 - Empty input: Returns `ConversionError::InvalidInput`
-- Charset detection never fails (always returns UTF-8 as fallback)
+- Charset detection never fails (always returns UTF-8 as fallback). Parsing
+  rejects only invalid UTF-8 bytes and empty input. Valid UTF-8 bytes remain
+  parseable even when the declared charset is not UTF-8. The fallback and
+  conversion-error behavior stay unchanged
 
 ## Dependencies
 
@@ -215,5 +227,6 @@ When the NGINX C module calls the Rust converter:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Error handling rejects only invalid UTF-8 bytes; valid UTF-8 passes even with a non-UTF-8 declared charset |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

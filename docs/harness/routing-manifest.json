@@ -140,13 +140,49 @@
       ],
       "notes": "0.9.1 release gate: blocking performance evidence gate for RC tags; perf-evidence-check is non-blocking report-only mode"
     },
+    "v092-gates": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-gates-check-092"
+      ],
+      "notes": "0.9.2 blocking gate: 091 prerequisite then 092 blocking performance evidence (baseline 092), source metadata/ABI drift, reason-code registry, and version consistency"
+    },
+    "public-surface-drift": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make public-surface-drift-check"
+      ],
+      "notes": "FFI/exported-symbol inventory drift vs checked-in public-surface-inventory.json; blocking step of release-gates-check-092 and ci.yml release-092-contract-gates"
+    },
+    "schema-drift": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make schema-drift-check"
+      ],
+      "notes": "Validators/gates against the checked-in schema registry (validate_schema_drift.py); part of make all and release-gates-check-092"
+    },
+    "reason-codegen": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make reason-codegen-check"
+      ],
+      "notes": "Reason registry vs generated code and error classification coverage; blocking step of release-gates-check-092 and ci.yml release-092-contract-gates"
+    },
+    "observation": {
+      "phase": "report-oriented",
+      "commands": [
+        ".github/workflows/nightly-observation.yml",
+        ".github/workflows/weekly-observation.yml"
+      ],
+      "notes": "Nightly/weekly observation workflows for release evidence and matrix drift; report-oriented, pinned action SHAs, minimal secrets"
+    },
     "release-governance": {
       "phase": "focused-semantic",
       "commands": [
         "make release-gates-check-080",
+        "make release-gates-check-092",
         "make release-gates-check",
-        "make release-gates-check-strict",
-        "make release-gates-check-055"
+        "make release-gates-check-strict"
       ]
     },
     "release-manifest": {
@@ -156,6 +192,13 @@
         "make release-gates-check"
       ],
       "notes": "Validates release-manifest.json generation, validation, and path traversal protection (Rule 54)"
+    },
+    "release-matrix": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-matrix-check"
+      ],
+      "notes": "Validates docs/releases/release-matrix.json against the immutable release-matrix schema, requires a fully canonical document (no legacy aliases or legacy top-level matrix), and binds every entry to the frozen ABI version and the official feature-manifest digest"
     },
     "version-consistency": {
       "phase": "focused-semantic",
@@ -170,7 +213,7 @@
       "commands": [
         "make complexity-check"
       ],
-      "notes": "Runs lizard (CCN/length/params) on C/Rust/Python, complexipy (cognitive) on Python, shellcheck on shell. Baseline-gated: new violations fail, existing baseline violations that worsen produce warnings. See docs/harness/rules/complexity.md."
+      "notes": "Runs lizard (CCN/length/params) on C/Rust/Python, complexipy (cognitive) on Python, and shellcheck on shell. Every violation is blocking; no baseline exceptions are permitted. See docs/harness/rules/complexity.md."
     },
     "regex-security": {
       "phase": "cheap-blocker",
@@ -193,6 +236,13 @@
       ],
       "notes": "Validates source file encoding (UTF-8, no BOM, consistent line endings) across Sonar scan roots. See tools/sonar/check_source_encoding.py."
     },
+    "diagnostics-access-phase": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make verify-diagnostics-access-phase-e2e"
+      ],
+      "notes": "Verifies native NGINX access-phase directives (allow/deny/auth_basic/satisfy) correctly restrict diagnostics and metrics content handlers. Requires NGINX_BIN and NGINX_MODULE_SO; emits SKIP when unavailable. Schema: diagnostics-access-phase-e2e.v1."
+    },
     "runtime-e2e": {
       "phase": "umbrella",
       "commands": [
@@ -212,12 +262,6 @@
         "make coverage-gate"
       ]
     },
-    "release-governance-060": {
-      "phase": "focused-semantic",
-      "commands": [
-        "make release-gates-check-060"
-      ]
-    },
     "e2e-harness-rust": {
       "phase": "focused-semantic",
       "commands": [
@@ -231,7 +275,42 @@
         "rpm -qip dist/nginx-markdown-module.rpm",
         "helm lint charts/nginx-markdown"
       ],
-      "notes": "commands validate existing artifacts; build steps are in CI workflows release-deb.yml, release-rpm.yml, and release-packages.yml"
+      "notes": "commands validate existing artifacts; build steps are in CI workflows release-rpm.yml and release-packages.yml"
+    },
+    "release-candidate-evidence": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-candidate-evidence-check"
+      ],
+      "notes": "Validates the frozen release-candidate source SHA manifest: candidate SHA, branch, source-tree digest, required input existence and digests, feature/FFI/environment digests, evidence-schema digests (fail-closed)"
+    },
+    "artifact-registry": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make artifact-registry-check"
+      ],
+      "notes": "Validates the candidate-bound release artifact index: candidate identity vs frozen manifest, per-artifact sha256/digest bindings, feature-manifest digest and ABI version consistency with official manifest and frozen ABI header, authoritative attempts"
+    },
+    "release-evidence-manifest": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-evidence-manifest-check"
+      ],
+      "notes": "Validates the final evidence manifest and observation-state record against the release evidence schemas: instance-schema conformance, candidate SHA equality, blocking-status derivation (no blocking pending, skips justified with policy reference)"
+    },
+    "fuzz-qualification": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make test-rust-fuzz-qualification"
+      ],
+      "notes": "Proves every blocking fuzz target ran at least 15 minutes or 100,000 executions (whichever is later) with fixed recorded seed, zero crashes, zero sanitizer findings; fixture mode for gate regression coverage"
+    },
+    "soak-qualification": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make test-e2e-rust-soak"
+      ],
+      "notes": "Proves the short-soak qualification contract (30 min at concurrency 16, zero errors, no monotonic worker-RSS growth after drain, per-request peak within conversion_memory); records duration, concurrency, RSS drain, per-request memory, error rate, latency"
     }
   },
   "risk_packs": [
@@ -567,7 +646,9 @@
         ".github/workflows/ci.yml",
         "tools/install.sh",
         "tools/ci/**",
-        "Makefile"
+        "Makefile",
+        "docs/releases/**",
+        "docs/releases/release-matrix.json"
       ],
       "keywords": [
         "release gate",
@@ -585,7 +666,14 @@
         "docs-tooling",
         "release-governance",
         "v080-gates",
-        "release-quality"
+        "v092-gates",
+        "release-quality",
+        "release-matrix",
+        "release-candidate-evidence",
+        "artifact-registry",
+        "release-evidence-manifest",
+        "fuzz-qualification",
+        "soak-qualification"
       ]
     },
     {
@@ -642,44 +730,6 @@
       ]
     },
     {
-      "id": "otel-integration",
-      "doc": "docs/harness/risk-packs/otel-integration.md",
-      "primary_surfaces": [
-        "otel-tracing",
-        "otel-metrics",
-        "otlp-export"
-      ],
-      "supporting_surfaces": [
-        "observability",
-        "nginx-protocol"
-      ],
-      "paths": [
-        "components/nginx-module/src/ngx_http_markdown_otel.c",
-        "components/nginx-module/src/ngx_http_markdown_otel.h",
-        "components/nginx-module/src/ngx_http_markdown_otel_impl.h",
-        "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h",
-        "components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h",
-        "components/nginx-module/src/ngx_http_markdown_conversion_impl.h",
-        "docs/architecture/ADR/0006-otel-integration.md",
-        "docs/features/otel-tracing.md",
-        "examples/nginx-configs/**"
-      ],
-      "keywords": [
-        "otel",
-        "opentelemetry",
-        "otlp",
-        "span",
-        "trace",
-        "collector"
-      ],
-      "verification_families": [
-        "harness-sync",
-        "observability-metrics",
-        "nginx-protocol",
-        "release-quality"
-      ]
-    },
-    {
       "id": "packaging-distribution",
       "doc": "docs/harness/risk-packs/packaging-distribution.md",
       "primary_surfaces": [
@@ -693,12 +743,10 @@
         "release-governance"
       ],
       "paths": [
-        ".github/workflows/release-deb.yml",
         ".github/workflows/release-rpm.yml",
         ".github/workflows/release-packages.yml",
         ".github/workflows/homebrew-*.yml",
         "charts/nginx-markdown/**",
-        "packaging/debian/**",
         "packaging/homebrew/**",
         "packaging/rpm/**",
         "docs/guides/HOMEBREW_TAP_RELEASE.md",
@@ -726,7 +774,7 @@
       "verification_families": [
         "harness-sync",
         "docs-tooling",
-        "release-governance-060",
+        "release-governance",
         "packaging-e2e",
         "release-quality"
       ]
@@ -790,6 +838,9 @@
         "tools/e2e/verify_status_codes_e2e.sh",
         "tools/e2e/verify_auth_cache_e2e.sh",
         "tools/e2e/verify_accept_negotiation_e2e.sh",
+        "tools/e2e/verify_examples_nginx_t.sh",
+        "docs/guides/MIGRATION-0.9.2.md",
+        "docs/guides/0.9.2-breaking-changes.md",
         "docs/project/0.6.3-e2e-parity.md",
         "docs/project/0.6.3-test-surface-audit.md",
         "docs/testing/E2E_TESTS.md"

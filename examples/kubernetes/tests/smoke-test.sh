@@ -16,9 +16,11 @@
 #
 # OPTIONS:
 #   -u, --url URL        Service base URL (e.g. http://localhost:8080)
-#   -n, --namespace NS   Kubernetes namespace (default: ingress-nginx)
-#   -l, --label LABEL    Pod label selector (default: app=nginx-markdown)
+#   -n, --namespace NS   Kubernetes namespace (default: $K8S_NAMESPACE or "default")
+#   -l, --label LABEL    Pod label selector (default: app.kubernetes.io/name=nginx-markdown)
 #   -p, --port PORT      Local port for port-forward (default: 8080)
+#   -m, --metrics PATH   Metrics path (default: /_markdown_metrics; the Helm chart
+#                        exposes module metrics under values.metrics.uri)
 #   -t, --timeout SECS   Curl timeout in seconds (default: 10)
 #   -h, --help           Show this help message
 #
@@ -29,8 +31,13 @@
 #   # Use an explicit service URL:
 #   ./smoke-test.sh --url http://nginx-markdown.example.com
 #
-#   # Custom namespace and label:
-#   ./smoke-test.sh --namespace my-ns --label app.kubernetes.io/name=nginx-markdown
+#   # Custom namespace and label (Helm release name nginx-markdown):
+#   ./smoke-test.sh --namespace default --label app.kubernetes.io/instance=nginx-markdown
+#
+# ENVIRONMENT:
+#   K8S_NAMESPACE        Namespace override (same as -n/--namespace)
+#   K8S_LABEL_SELECTOR   Label selector override (same as -l/--label)
+#   METRICS_PATH         Metrics path override (same as -m/--metrics)
 #
 # EXIT CODES:
 #   0  All tests passed
@@ -53,9 +60,16 @@ set -e
 # Globals
 # ---------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")"
-NAMESPACE="ingress-nginx"
-LABEL_SELECTOR="app=nginx-markdown"
+# The Helm chart's selector is app.kubernetes.io/name=<chart name> +
+# app.kubernetes.io/instance=<release> (see _helpers.tpl selectorLabels);
+# the legacy app=nginx-markdown label matches nothing the chart deploys.
+# The chart's NGINX container listens on 8080 (the Service maps 80→8080),
+# so pod port-forward uses the container port.
+NAMESPACE="${K8S_NAMESPACE:-default}"
+LABEL_SELECTOR="${K8S_LABEL_SELECTOR:-app.kubernetes.io/name=nginx-markdown}"
 LOCAL_PORT="8080"
+REMOTE_PORT="8080"
+METRICS_PATH="${METRICS_PATH:-/_markdown_metrics}"
 CURL_TIMEOUT="10"
 BASE_URL=""
 PORT_FORWARD_PID=""
@@ -133,7 +147,7 @@ setup_port_forward() {
 
     log_info "Found pod: $pod_name"
 
-    kubectl port-forward -n "$NAMESPACE" "$pod_name" "${LOCAL_PORT}:80" >/dev/null 2>&1 &
+    kubectl port-forward -n "$NAMESPACE" "$pod_name" "${LOCAL_PORT}:${REMOTE_PORT}" >/dev/null 2>&1 &
     PORT_FORWARD_PID=$!
 
     # Wait for port-forward to be ready
@@ -265,7 +279,7 @@ test_accept_negotiation() {
 }
 
 test_metrics_endpoint() {
-    log_info "Test: Prometheus metrics endpoint (/metrics)"
+    log_info "Test: Prometheus metrics endpoint (${METRICS_PATH})"
 
     local http_code
     local body
@@ -274,7 +288,7 @@ test_metrics_endpoint() {
     http_code="$(curl -s -o /tmp/smoke_metrics_body.$$ -w '%{http_code}' \
         --connect-timeout "$CURL_TIMEOUT" \
         --max-time "$CURL_TIMEOUT" \
-        "${BASE_URL}/metrics" 2>/dev/null)" || true
+        "${BASE_URL}${METRICS_PATH}" 2>/dev/null)" || true
 
     body="$(cat /tmp/smoke_metrics_body.$$ 2>/dev/null)" || true
     rm -f /tmp/smoke_metrics_body.$$
@@ -347,6 +361,14 @@ parse_args() {
                     return 2
                 fi
                 LOCAL_PORT="$2"
+                shift 2
+                ;;
+            -m|--metrics)
+                if [ $# -lt 2 ]; then
+                    log_error "Option $1 requires an argument"
+                    return 2
+                fi
+                METRICS_PATH="$2"
                 shift 2
                 ;;
             -t|--timeout)

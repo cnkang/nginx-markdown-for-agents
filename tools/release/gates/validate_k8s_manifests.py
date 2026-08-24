@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Kubernetes manifest and Helm chart validator for v0.7.0 release gates.
+Kubernetes manifest and Helm chart validator for v0.7.0 release gates. 由 0.7.0 引入，被 0.8.0+ 门禁复用
 
 Validates that K8s deployment artifacts exist and are well-formed:
 
@@ -67,7 +67,6 @@ HELM_CONFIG_REQUIRED_SNIPPETS = [
     "markdown_metrics_shm_size {{ .Values.metrics.shmSize }};",
     "location = {{ .Values.metrics.uri }} {",
     "markdown_metrics;",
-    "markdown_metrics_format {{ .Values.metrics.format }};",
 ]
 HELM_CONFIG_FORBIDDEN_SNIPPETS = [
     "markdown_metrics on;",
@@ -121,6 +120,18 @@ _CHECK_HELM_RENDER_MODULE_MISSING = "helm:render-module-missing"
 _CHECK_HELM_RENDER_METRICS_WITHOUT_MODULE = "helm:render-metrics-without-module"
 _CHECK_HELM_RENDER_MODULE_ENABLED = "helm:render-module-enabled"
 _CHECK_HELM_RENDER_MODULE_METRICS = "helm:render-module-metrics"
+_CHECK_HELM_TEMPLATE_EXPLICIT = "helm:template:explicit-image"
+
+_EXPLICIT_IMAGE_ARGS = [
+    "--set-string",
+    "image.repository=nginx",
+    "--set-string",
+    "image.tag=1.26.3",
+]
+_IMAGE_REQUIRED_MESSAGES = (
+    "image.repository must be set explicitly",
+    "image.tag must be set explicitly",
+)
 
 
 class ValidationResult:
@@ -390,17 +401,47 @@ def _validate_default_helm_template(
     helm: str,
     chart_dir: Path,
 ) -> str | None:
-    """Render default Helm output and validate stock-image-safe snippets."""
-    rendered = _run_helm_template(result, _CHECK_HELM_TEMPLATE, helm, chart_dir)
+    """Validate the empty-image contract and an explicit-image render."""
+    missing_image = _run_helm_template(
+        result, _CHECK_HELM_TEMPLATE, helm, chart_dir
+    )
+    if missing_image is None:
+        return None
+    if missing_image.returncode == 0:
+        result.fail(
+            _CHECK_HELM_TEMPLATE,
+            "helm template without image.repository/image.tag must fail",
+        )
+        return None
+    if not any(message in missing_image.stdout for message in _IMAGE_REQUIRED_MESSAGES):
+        result.fail(
+            _CHECK_HELM_TEMPLATE,
+            "empty-image Helm render failed for an unexpected reason: "
+            f"{_truncate_output(missing_image.stdout.strip())}",
+        )
+        return None
+    result.pass_(
+        _CHECK_HELM_TEMPLATE,
+        "helm template without image overrides fails on the required image contract",
+    )
+
+    rendered = _run_helm_template(
+        result,
+        _CHECK_HELM_TEMPLATE_EXPLICIT,
+        helm,
+        chart_dir,
+        _EXPLICIT_IMAGE_ARGS,
+    )
     if rendered is None:
         return None
     if rendered.returncode != 0:
         result.fail(
-            _CHECK_HELM_TEMPLATE,
-            f"helm template failed: {_truncate_output(rendered.stdout.strip())}",
+            _CHECK_HELM_TEMPLATE_EXPLICIT,
+            "explicit-image Helm template failed: "
+            f"{_truncate_output(rendered.stdout.strip())}",
         )
         return None
-    result.pass_(_CHECK_HELM_TEMPLATE, "helm template rendered successfully")
+    result.pass_(_CHECK_HELM_TEMPLATE_EXPLICIT, "explicit-image Helm template rendered successfully")
     _validate_rendered_yaml(result, rendered.stdout)
     _validate_rendered_required_snippets(result, rendered.stdout)
     _validate_rendered_default_forbidden_snippets(result, rendered.stdout)
@@ -468,7 +509,7 @@ def _validate_missing_module_guard(
         _CHECK_HELM_RENDER_MODULE_MISSING,
         helm,
         chart_dir,
-        ["--set", "markdown.enabled=true"],
+        [*_EXPLICIT_IMAGE_ARGS, "--set", "markdown.enabled=true"],
     )
     if rendered is None:
         return
@@ -493,7 +534,7 @@ def _validate_metrics_without_module_guard(
         _CHECK_HELM_RENDER_METRICS_WITHOUT_MODULE,
         helm,
         chart_dir,
-        ["--set", "metrics.enabled=true"],
+        [*_EXPLICIT_IMAGE_ARGS, "--set", "metrics.enabled=true"],
     )
     if rendered is None:
         return
@@ -510,6 +551,7 @@ def _validate_metrics_without_module_guard(
 def _module_enabled_args() -> list[str]:
     """Return Helm args that enable the markdown dynamic module."""
     return [
+        *_EXPLICIT_IMAGE_ARGS,
         "--set",
         "markdown.enabled=true",
         "--set-string",
@@ -539,18 +581,25 @@ def _validate_module_enabled_render(
             f"{_truncate_output(rendered.stdout.strip())}",
         )
         return
+    limits_lines = [
+        line.strip()
+        for line in rendered.stdout.splitlines()
+        if line.strip().startswith("markdown_limits ")
+    ]
     if (
         f"load_module {HELM_MODULE_LOAD_PATH};" in rendered.stdout
         and "markdown_filter on;" in rendered.stdout
+        and len(limits_lines) == 1
     ):
         result.pass_(
             _CHECK_HELM_RENDER_MODULE_ENABLED,
-            "module-enabled Helm render includes load_module and markdown directives",
+            "module-enabled Helm render includes load_module and one markdown_limits directive",
         )
     else:
         result.fail(
             _CHECK_HELM_RENDER_MODULE_ENABLED,
-            "module-enabled Helm render missing load_module or markdown directives",
+            "module-enabled Helm render must include load_module, markdown directives, "
+            f"and exactly one markdown_limits directive (found {len(limits_lines)})",
         )
 
 
@@ -603,7 +652,6 @@ def _metrics_config_errors(rendered: str) -> list[str]:
         for name in (
             "markdown_metrics_shm_size",
             "markdown_metrics",
-            "markdown_metrics_format",
         )
     }
     errors = _removed_metrics_directive_errors(directives)
@@ -616,19 +664,6 @@ def _metrics_config_errors(rendered: str) -> list[str]:
     )
     errors.extend(
         _metrics_handler_errors(entries_by_name["markdown_metrics"])
-    )
-    errors.extend(
-        _single_metrics_scope_errors(
-            entries_by_name["markdown_metrics_format"],
-            "markdown_metrics_format",
-            "location",
-        )
-    )
-    errors.extend(
-        _metrics_location_pair_errors(
-            entries_by_name["markdown_metrics"],
-            entries_by_name["markdown_metrics_format"],
-        )
     )
     return errors
 
@@ -690,18 +725,6 @@ def _metrics_handler_errors(
     if _scope_kind(handler_entries[0][2]) != "location":
         return ["markdown_metrics must be in location scope"]
     return []
-
-
-def _metrics_location_pair_errors(
-    handler_entries: list[tuple[str, str, tuple[str, ...]]],
-    format_entries: list[tuple[str, str, tuple[str, ...]]],
-) -> list[str]:
-    """Require handler and format directives to share the same location."""
-    if len(handler_entries) != 1 or len(format_entries) != 1:
-        return []
-    if handler_entries[0][2] == format_entries[0][2]:
-        return []
-    return ["markdown_metrics and markdown_metrics_format must share a location"]
 
 
 def _scope_kind(scopes: tuple[str, ...]) -> str:

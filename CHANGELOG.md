@@ -1,9 +1,161 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+This file documents all notable changes to the project.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+This file follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.9.2] - Unreleased candidate
+
+Maintenance and hardening release. Fixes diagnostics and reason-code mapping
+gaps, records the removal and historical disposition of the experimental OTel
+surface, removes the unsafe worker-local dynconf restore path, and establishes
+a public surface source metadata and ABI drift gate for release integrity.
+
+### Breaking Changes
+
+0.9.2 is the breaking release before 1.0. The release reduces the
+configuration surface from 63 directives to 25. Configurations that use a
+removed directive fail `nginx -t` with `unknown directive` until migrated. See
+[docs/guides/0.9.2-breaking-changes.md](docs/guides/0.9.2-breaking-changes.md)
+for the complete reference. See
+[docs/guides/MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md) for
+before/after examples.
+
+- **Directive removals (38 total):** The release deletes 19 reject-only
+  migration stubs. NGINX now reports the standard `unknown directive` error
+  instead of a migration hint. The release removes 14 active directives:
+  `markdown_profile`, `markdown_metrics_format`, `markdown_metrics_per_path`,
+  `markdown_metrics_per_path_cardinality`, `markdown_buffer_chunked`,
+  `markdown_streaming_shadow`, `markdown_streaming_zero_copy`,
+  `markdown_llm_provider`, `markdown_chars_per_token`,
+  `markdown_stream_types`, `markdown_stream_threshold`,
+  `markdown_diagnostics_allow`, `markdown_otel`, and
+  `markdown_otel_endpoint`.
+
+  The release folds 5 standalone limit directives into `markdown_limits`:
+  `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,
+  `markdown_parse_timeout`, `markdown_parser_budget`, and
+  `markdown_decompress_max_size`. `markdown_stream_flush_min` has no
+  replacement. Four directives map to `markdown_limits`. Use downstream
+  buffering for the removed flush directive. Use key=value syntax for
+  `streaming_buffer=`,
+  `parser_timeout=`, `parser_memory=`, and `decompressed_size=`.
+- **Profile presets removed.** The release removes `balanced`, `strict_cache`,
+  and `streaming_first`. Use explicit directives to configure limits.
+- **OTel subsystem removed.** The experimental `markdown_otel` /
+  `markdown_otel_endpoint` surface and OTel metrics/spans/export paths are
+  gone. Use NGINX's native OTel module.
+- **`REJECT_STATUS` action rename (internal).**
+  The code now calls `NGX_HTTP_MD_ACTION_REJECT_STATUS` instead of
+  `NGX_HTTP_MD_ACTION_REJECT_502`. This change has no configuration impact.
+- After 0.9.2, all 1.x releases maintain backward compatibility for a
+  minimum of 24 months.
+- **Dynconf JSON v1 migration.** Convert legacy line-format keys
+  `markdown_filter` → `filter` and `streaming_budget` → `streaming_buffer`.
+  0.9.2 removes `memory_budget` from runtime configuration. Set static
+  `markdown_limits conversion_memory=<size>` instead. A watcher logs
+  `legacy line format detected - migrate to JSON v1` once per worker when a
+  watched file does not begin with `{`. See the
+  [breaking-change reference](docs/guides/0.9.2-breaking-changes.md) and
+  [migration guide](docs/guides/MIGRATION-0.9.2.md).
+- **Dynconf precedence and limits.** Explicit server/location values mask
+  matching runtime keys and exposes them in diagnostics as `masked_keys`.
+  The watcher logs each masked key. The `streaming_buffer` default is 2 MiB
+  in 0.9.2. Pin `markdown_limits streaming_buffer=256k` to retain 0.9.1's
+  256 KiB default. `markdown_stream_threshold` and
+  `markdown_stream_flush_min` have no replacement.
+- **Content-Encoding policy.** Malformed, unknown, and excessively deep
+  encoding chains follow `markdown_error_policy`. Only `pass` forwards the
+  original response. The supported `deflate` coding uses the zlib-wrapped
+  RFC 1950 format and additionally accepts raw RFC 1951 deflate as a
+  compatibility fallback for legacy servers. All three decode paths
+  (streaming, full-buffer, and the Rust chain decoder) apply the same
+  sniffing decision: a valid zlib header selects zlib-wrapped, otherwise
+  raw.
+- **Diagnostics JSON schema v2.** The endpoint now declares
+  `schema_version: 2`. Migrate consumers from the old `config_snapshot`,
+  `metrics_snapshot`, `dynconf_state`, `streaming_config`, and profile-oriented
+  sections to `configuration`, `runtime`, and `configuration.dynconf` as
+  described in the 0.9.2 migration guide. `masked_keys` is part of the v2
+  dynconf object.
+
+### Fixed
+
+- Upstream response trailers are now suppressed after an HTML-to-Markdown
+  representation change. `headers_out.trailers` is an independent list
+  that HTTP/2/3 and chunked encodings emit without an HTTP/1.1 `Trailer`
+  declaration, so invalidating only the declaration left real trailers
+  (Content-Digest, Repr-Digest, ...) propagating with the Markdown body.
+  All conversion paths (full-buffer, streaming, 304, HEAD) now clear the
+  trailer list (`ngx_http_markdown_clear_trailers`).
+- DEB/RPM packages now require the EXACT NGINX version that builds them. The
+  `preinstall.sh` script rejects any full-version difference
+  (including a patch release) as fatal, the DEB/RPM dependency metadata
+  pins the exact version (`nginx (= X.Y.Z)` / `nginx = 1:X.Y.Z`), and the
+  project no longer makes the misleading "--with-compat same-minor
+  compatibility" claim.
+  NGINX's dynamic module loader rejects a version mismatch before
+  signature checks, so the previous branch-scoped tolerance produced
+  packages that installed but failed to load.
+- DEB enablement for nginx.org builds now uses a main-context
+  `load_module` directive. The previous guidance told users to symlink
+  into `/etc/nginx/modules-enabled/`, which the nginx.org default
+  `nginx.conf` never includes — the module was silently never loaded.
+  The install smoke test now verifies real module loadability
+  (`load_module` + `markdown_filter on` + `nginx -t`), and
+  `preremove.sh` only removes a symlink whose target is exactly this
+  module's config file (operator-owned regular files are never deleted).
+- Diagnostics `reason_to_code` mapping was missing `bypass_no_transform`
+  entry. The diagnostics endpoint now returns the complete mapping.
+- C reason code constants were missing the decompression error series
+  (codes 4–11). All 27 reason code constants are now synchronized between
+  Rust and C.
+- `stream_state` `PRE_COMMIT` fallthrough now logs an invariant violation
+  instead of silently advancing state.
+- Prometheus `nginx_markdown_streaming_events_total{transition="fallback"}`
+  now reports `reason="precommit_html_error"` (matching the logged reason at
+  the fallback decision) instead of the incorrect
+  `reason="bypass_no_transform"`. Operators must update dashboards that use
+  the previous label value.
+- Converted responses no longer carry the source HTML `Last-Modified` as a
+  weak validator. The Markdown-derived strong ETag is the sole validator:
+  200/streaming/full-buffer responses strip the upstream `Last-Modified`,
+  `Trailer`, and representation-digest headers (`Content-MD5`, `Digest`,
+  `Content-Digest`, `Repr-Digest`, upstream `X-Markdown-Tokens`), and 304
+  responses no longer restore the source mtime. Conditional requests
+  (`ims_only`) still accept `If-Modified-Since` for eligibility decisions.
+  The response validator surface is what changed.
+- HEAD requests now describe the Markdown representation a GET would
+  select: the module rewrites the upstream headers to
+  `Content-Type: text/markdown; charset=utf-8` with `Vary: Accept` and
+  strips source-HTML metadata (`Content-Encoding`, `Last-Modified`,
+  `Accept-Ranges`, digest headers, `Trailer`). Body-derived fields
+  (`Content-Length`, `ETag`) receive no fabricated values: a
+  proxied HEAD carries no body, so committing an empty-input ETag or
+  `Content-Length: 0` would contradict the GET representation of the
+  same URL (Rust contract scenarios 07/08). This supersedes the
+  previous fail-open behavior that forwarded the upstream HTML headers
+  unchanged.
+
+### Added
+
+- OTel removal is explicit: the experimental module directives, metrics,
+  spans, and export paths are not built into 0.9.2. The historical ownership
+  sketch remains in ADR-0006 for traceability. Use NGINX's native OTel module
+  for tracing.
+- Dynconf diagnostics is read-only. Operators restore a prior valid dynconf
+  file atomically. The watcher validates it and promotes it through the normal
+  reload path. The internal last-known-good snapshot remains available for
+  failed-reload protection and diagnostics reporting.
+- Public surface inventory and source metadata/ABI drift detection gate
+  checks FFI exports, configuration directive metadata, dynconf key schemas,
+  metric declarations, and reason codes against the declared inventory. The
+  gate reads source metadata. Unit, integration, and E2E suites verify runtime
+  behavior.
+- Release gates 0.9.2 (`make release-gates-check-092`), additive on 0.9.1
+  gates with the public surface source metadata/ABI drift gate and blocking
+  performance evidence against baseline 0.9.2.
 
 ## [0.9.1] - 2026-07-29
 
@@ -11,8 +163,8 @@ Final pre-v1.0 baseline-consolidation and compatibility-reset release. In
 addition to performance readiness and release evidence, this release closes
 toolchain and public-contract debt before the v1.0 compatibility freeze.
 
-v0.9.0 was released with the intention that it would be the last breaking
-release before v1.0. The freeze was deliberately extended through v0.9.1
+The project released v0.9.0 intending it to be the last breaking release
+before v1.0. The project deliberately extended the freeze through v0.9.1
 because v1.0 had not shipped, adoption remained limited, and the final
 toolchain, dependency, configuration, and ABI audit found cleanup worth
 completing before the long-lived contract begins.
@@ -21,18 +173,20 @@ completing before the long-lived contract begins.
 
 - **Rust source-build baseline raised from 1.91 to 1.97.** All first-party
   crates now declare MSRV 1.97 and repository/CI/release builds use exact Rust
-  1.97.0. Source builders must update their toolchain (for rustup users,
-  `rustup toolchain install 1.97.0`). Prebuilt module users do not need Rust;
+  1.97.1. Source builders must update their toolchain (for rustup users,
+  `rustup toolchain install 1.97.1`). Prebuilt module users do not need Rust.
   their runtime compatibility remains governed by the published NGINX,
   OS/libc, architecture, and exact dynamic-module compatibility matrix.
 - **Streaming configuration consolidated.** `markdown_streaming off|auto|force`
-  is the sole public processing-path selector. `markdown_streaming_engine` is
-  removed from the active contract and fails `nginx -t` with exact mappings:
+  is the sole public processing-path selector. The active contract omits
+  `markdown_streaming_engine`. Configurations that use it fail `nginx -t` with
+  exact mappings:
   `off` to `markdown_streaming off`, `auto` to `markdown_streaming auto`, and
   `on` to `markdown_streaming force`. The Helm value moves from
   `markdown.streaming.engine` to `markdown.streaming.mode`. Diagnostics expose
   the selector as `streaming_config.policy` and its origin as
-  `streaming_config.policy_source`; the old engine-named keys are removed.
+  `streaming_config.policy_source`. The current contract removes the old
+  engine-named keys.
 - **Non-semantic flavors removed.** `markdown_flavor mdx` and `org-mode` now
   fail `nginx -t` with a `commonmark`/`gfm` migration hint. They were
   experimental selectors that never produced distinct output formats.
@@ -55,24 +209,28 @@ completing before the long-lived contract begins.
   `markdown_otel_export_timeout` are reject-only because their duplicate or
   unimplemented values had no distinct production effect. The experimental
   tracing surface is `markdown_otel` plus `markdown_otel_endpoint`.
-- **Trusted proxy ownership is explicit.** `markdown_trusted_proxies` is now
-  accepted only in `http`; `server` and `location` uses fail `nginx -t`
+- **Trusted proxy ownership is explicit.** The parser accepts
+  `markdown_trusted_proxies` only in `http`. `server` and `location` contexts
+  fail `nginx -t`
   instead of creating a Rust-owned handle without safe child inheritance.
 - **Prometheus failure and latency contracts corrected before freeze.**
   `nginx_markdown_failures_total` now uses truthful bounded categories
-  `conversion_error`, `resource_limit`, and `system_error`. The misleading
-  gauge-like `nginx_markdown_conversion_duration_seconds{le=...}` is replaced
-  by the cumulative counter family
-  `nginx_markdown_conversion_latency_bucket_total{le=...}`.
+  `conversion_error`, `resource_limit`, and `system_error`. The cumulative
+  counter family `nginx_markdown_conversion_latency_bucket_total{le=...}` now
+  replaces the misleading gauge-like
+  `nginx_markdown_conversion_duration_seconds{le=...}`.
 
 ### Added
 
 - Hybrid zero-copy output path for streaming responses (`markdown_streaming_zero_copy on`,
   default off), with NGINX pool cleanup ownership guarding Rust-backed buffers
   across backpressure and request teardown.
-- Streaming decompression routing for gzip and deflate responses (both
-  zlib-wrapped RFC 1950 and raw RFC 1951 deflate) under `streaming_first` with
-  `markdown_auto_decompress on` and `markdown_cache_validation` not `full`.
+- Streaming decompression routing for gzip and zlib-wrapped RFC 1950 deflate
+  responses under the streaming path with `markdown_auto_decompress on` and
+  `markdown_cache_validation` not `full`. Raw RFC 1951 remains outside the
+  supported 0.9.2 public contract. The project keeps the legacy C streaming
+  compatibility branch only for historical coverage and makes no compatibility
+  guarantee for it.
   Gzip is member-aware across chunks.
 - Brotli streaming decompression: Brotli-compressed upstream responses now
   decompress incrementally via the streaming path (same as gzip/deflate) under
@@ -109,10 +267,10 @@ completing before the long-lived contract begins.
 
 ### Fixed
 
-- `markdown_auto_decompress` was referenced in 8+ documentation files as a
-  user-configurable directive but was never registered in the `ngx_command_t`
-  table — `nginx -t` would reject user configs using it. Now properly
-  registered as a `NGX_CONF_FLAG` directive.
+- Documentation referenced `markdown_auto_decompress` in 8+ files as a
+  user-configurable directive, but the `ngx_command_t` table never registered
+  it. `nginx -t` would reject user configs using it. The table now registers it
+  as a `NGX_CONF_FLAG` directive.
 - JSON perf metrics rendering now uses a production helper covered by a direct
   renderer unit test.
 - Module benchmark tooling now uses portable temporary files, executable
@@ -124,44 +282,42 @@ completing before the long-lived contract begins.
   gzip member-boundary reset with cumulative budget, truncated stream/member
   rejection, no-progress inflate guard, and pre-/post-commit backpressure
   lifecycle coverage. Deflate trailing-data integrity: a complete deflate
-  stream must consume every byte of compressed input; trailing bytes after
-  `Z_STREAM_END` (in the same chunk or subsequent non-empty chunks) are
-  rejected as `FORMAT_ERROR`. Gzip concatenated members remain supported.
-- Security: Forwarded header spoofing prevention (right-most element);
-  workflow input sanitization via environment variables to prevent command
-  injection; base URL FFI scheme propagation for HTTPS.
-- Configuration: profile merge preserves explicit parent directives;
-  `max_inflight=0` accepted as unlimited per documented contract;
-  error-policy reject paths return configured `error_status`.
-- Diagnostics: removed legacy directive-shaped snapshot keys, aligned the
-  streaming selector fields with `policy`/`policy_source`, and removed the
-  unexposed manual-rollback helper while retaining atomic file-based reloads
-  and last-known-good state reporting.
+  stream must consume every byte of compressed input. The converter rejects
+  trailing bytes after `Z_STREAM_END` (in the same chunk or subsequent
+  non-empty chunks) as `FORMAT_ERROR`. Gzip concatenated members remain
+  supported.
+- Security: Forwarded header spoofing prevention (right-most element).
+  Workflow input sanitization via environment variables prevents command
+  injection. Base URL FFI scheme propagation for HTTPS.
+- Configuration: The profile merge preserves explicit parent directives.
+  The documented contract treats `max_inflight=0` as unlimited.
+  Error-policy reject paths return configured `error_status`.
 - Complexity debt: split the remaining C and Rust production/test renderers,
-  streaming handlers, sanitizers, and traversal helpers; removed all 27
+  streaming handlers, sanitizers, and traversal helpers. Removed all 27
   historical complexity baseline entries. `make complexity-check` now passes
   with zero current and zero baseline violations across C, Rust, Python, and
   shell checks.
 - Performance evidence provenance: the canonical 0.9.1 baseline now records
   all eight native NGINX 1.24.0 scenarios, including Brotli streaming, and
   binds verbatim evidence to the exact source commit, workflow run/attempt,
-  UTC timestamp, and retained raw-artifact digest. The former historical
-  exception is retained only as an immutable audit record. The measured
-  `plain-small` latency p50 is recorded as 9 ms without normalization.
+  UTC timestamp, and retained raw-artifact digest. The baseline retains the
+  former historical exception only as an immutable audit record. The baseline
+  records the measured `plain-small` latency p50 as
+  9 ms without normalization.
 - Security and release gates: strict repository-contained path validation
   closes the baseline finalizer's CodeQL/SonarCloud path findings, and the
   native profile E2E helper now honors an explicit `MODULE_SO` path.
 
 ## [0.9.0] - 2026-07-06
 
-**Breaking release.** At release time, this was intended to be the last
+**Breaking release.** At release time, the project intended this to be the last
 breaking opportunity before the 1.0.0 API freeze. The project later extended
 that pre-1.0 consolidation window through v0.9.1.
 
 ### Breaking Changes
 
 - **Reason code naming**: all reason code strings renamed from
-  UPPERCASE_SNAKE_CASE to lowercase_snake_case (e.g., `PARSE_TIMEOUT` →
+  UPPERCASE_SNAKE_CASE to lowercase_snake_case (for example, `PARSE_TIMEOUT` →
   `timeout`, `FFI_CALL_ERROR` → `ffi_panic`). Affects Prometheus labels,
   structured logs, and diagnostics endpoint.
 - **Directive removals/renames**:
@@ -204,7 +360,7 @@ that pre-1.0 consolidation window through v0.9.1.
 - `markdown_error_policy` C→FFI translation: C-side `on_error`/`error_status`
   mapped to Rust FFI `error_policy` kind.
 - Per-worker inflight guard (`markdown_limits max_inflight=N`) wired into
-  filter path; `max_inflight=0` means unlimited.
+  filter path. `max_inflight=0` means unlimited.
 - `cache_validation_explicit` flag inherited across config scopes for
   correct profile merge semantics.
 - ADR-0017: HeaderPlan atomic scope boundary documentation.
@@ -216,7 +372,7 @@ that pre-1.0 consolidation window through v0.9.1.
 - `is_failure_outcome` strncmp length mismatches corrected.
 - `error_to_reason_code` aligned with specific `ReasonCode` variants instead
   of coarse error categories.
-- Bypass path must not go through `error_policy`; uses
+- Bypass path must not go through `error_policy`. It uses
   `bypass_no_transform` reason code instead.
 - `nginx-markdown-doctor` JSON escaping hardened for diagnostic fields.
 - Profile smoke test diagnostics hardened.
@@ -226,7 +382,7 @@ that pre-1.0 consolidation window through v0.9.1.
 - `markdown_on_error` — use `markdown_error_policy`.
 - `markdown_trust_forwarded_headers` — use `markdown_trusted_proxies`.
 - `markdown_on_wildcard` — use `markdown_accept wildcard`.
-- Per-reason metric counters (e.g., `markdown_skipped_accept_total`) — use
+- Per-reason metric counters (for example, `markdown_skipped_accept_total`) — use
   unified families with `reason` label.
 
 ### Migration
@@ -246,8 +402,9 @@ and 0.8.x release gate validation.
 - **`release-manifest.json`** — new release asset for DEB/RPM package releases.
   The manifest records git tag, commit SHA, package metadata, package SHA-256
   hashes, source archive hash for tag releases, and GitHub Actions workflow
-  metadata.  It is generated before `SHA256SUMS`, included in `SHA256SUMS`,
-  and protected by the `SHA256SUMS.asc` GPG signature chain for tag releases.
+  metadata. The release process generates the manifest before `SHA256SUMS`,
+  includes it in `SHA256SUMS`, and protects it with the `SHA256SUMS.asc` GPG
+  signature chain for tag releases.
 - **Version consistency detector (Rule 55)** — `detect_version_consistency.sh`
   validates version alignment across Cargo.toml, Chart.yaml, and internal
   dependencies. Integrated into `harness-security-checks` to prevent version
@@ -260,7 +417,7 @@ and 0.8.x release gate validation.
   HTML implied end tag semantics and fixing `test_misnested*` regressions
   (Rule 6).
 - **Streaming `ol`/`ul` derived state** — added `CodeBlock` handling so
-  that `in_preformatted` is cleared correctly when misnested list closures
+  that the converter clears `in_preformatted` correctly when misnested list closures
   unwind an open code block (Rule 6).
 - **Streaming emitter `ExitMany`** — new action enables batch context
   unwinding from mid-stack, fixing implied-closure ordering for nested
@@ -272,7 +429,7 @@ and 0.8.x release gate validation.
   stream commit path, supporting more complex multi-header mutation plans
   (Rule 39).
 - **FFI `Box::into_raw` correctness** — fixed use-after-free pattern in
-  converter handle allocation by ensuring `Box::into_raw` is called only
+  converter handle allocation by ensuring the code calls `Box::into_raw` only
   after initialization succeeds (Rule 15).
 - **Unit test `ngx_pfree` mock** — added missing `ngx_pfree` mock to
   `decompression_production_test.c` so decompression unit tests compile
@@ -315,7 +472,7 @@ documentation closeout.
   tracks streaming memory consumption against the module memory budget
   (Rule 3, Rule 44).
 - **Rule 49 (THIRD-PARTY-NOTICES sync)**: `THIRD-PARTY-NOTICES` must stay in
-  sync with resolved dependency versions; add/remove/update entries in the
+  sync with resolved dependency versions. Add, remove, or update entries in the
   same changeset as `Cargo.lock` changes.
 - `make release-gates-check-08x` as the canonical 0.8.x patch-line entry
   point, reusing the 0.8.0 gate logic without duplicating it.
@@ -326,11 +483,12 @@ documentation closeout.
   (fail-closed), and return values are written atomically after the closure
   completes (Rule 15).
 - **Harness ngx_log arg-count and NOSONAR discipline detectors**:
-  `detect_ngx_log_arg_count.sh` verifies `ngx_log_debugN`/`ngx_log_errorN`
-  suffix digits match actual argument count (Rule 8);
+  `detect_ngx_log_arg_count.sh` verifies `ngx_log_debugN` suffix digits match
+  actual argument count (Rule 8). `ngx_log_errorN` is an NGINX API macro and
+  remains intentionally outside this detector's proof contract.
   `detect_nosonar_discipline.sh` rejects bare `/* NOSONAR */` without a reason
-  annotation (Rule 24). Both detectors include fixture tests and are registered
-  in `harness-security-checks` and `test-harness` Makefile targets.
+  annotation (Rule 24). Fixture tests cover both detectors, and the Makefile
+  registers them in `harness-security-checks` and `test-harness` targets.
 - **Harness detector strict mode**: `detect_duplicate_code.py`,
   `detect_ffi_panic_safety.sh`, `detect_forward_decl_order.py`,
   `detect_open_without_path_validation.py`, and `detect_pool_free.sh` now
@@ -363,10 +521,10 @@ documentation closeout.
 - Updated `THIRD-PARTY-NOTICES` with current dependency versions.
 - Clarified header plan safety contract in C headers.
 - **C module deduplication**: extracted shared helpers across five C source
-  files — `fill_str_from_rust` in `reason_ffi.c`; `decomp_collect_input`,
-  `decomp_build_output_chain`, `decomp_alloc_output` in `decompression.c`;
+  files — `fill_str_from_rust` in `reason_ffi.c`, `decomp_collect_input`,
+  `decomp_build_output_chain`, and `decomp_alloc_output` in `decompression.c`,
   `for_each_header_named` iterator with visitor pattern and four helpers in
-  `header_plan.c`; `for_each_cache_control_header` iterator in `auth.c`;
+  `header_plan.c`, `for_each_cache_control_header` iterator in `auth.c`,
   `send_chain`, `acquire_terminal_buf`, `handle_send_result` in
   `stream_postcommit.c` (Rule 31).
 - Parameterized postcommit send-result helper with an explicit action context.
@@ -379,14 +537,14 @@ documentation closeout.
 ### Fixed
 
 - **Implied closure ordering (Rule 6)**: structural closures now unwind
-  inner-to-outer before enclosing block state; the Rust converter consumes
+  inner-to-outer before enclosing block state. The Rust converter consumes
   implied closures before the sanitizer Skip decision, and mirrors implied
   closures to the state machine.
 - **Streaming decompression heap leaks**: eliminated heap leaks in
-  `finish_zlib()` across all exit paths; buffer pointers are now set to NULL
+  `finish_zlib()` across all exit paths. Buffer pointers are now set to NULL
   after free to prevent double-free.
 - **Pool vs heap memory safety**: `apply_limits()` no longer calls `ngx_free`
-  on pool-allocated memory; the finish workspace uses `ngx_alloc` exclusively
+  on pool-allocated memory. The finish workspace uses `ngx_alloc` exclusively
   (Rule 43).
 - **Streaming decompression buffer expansion**: hardened error paths in buffer
   expansion with proper overflow checks and fallback behavior.
@@ -397,7 +555,7 @@ documentation closeout.
   panic-safe cleanup always restores a consistent state.
 - **FFI catch_unwind fallback hardening**: the `catch_unwind` fallback path now
   initializes output structs to safe defaults (fail-closed) and writes return
-  values only after the closure succeeds; Drop guards within `catch_unwind`
+  values only after the closure succeeds. Drop guards within `catch_unwind`
   ensure panic-safe resource cleanup (Rule 15).
 - **FFI atomic writes**: `markdown_build_header_plan` now aligns with the
   atomic-write-after-catch pattern — closure computes return values, fields
@@ -408,9 +566,9 @@ documentation closeout.
 - **`ngx_log_debug` argument count**: corrected suffix-digit / argument-count
   mismatch in `handle_send_result` (Rule 8).
 - **C const-correctness and idiom improvements**: removed unnecessary casts in
-  the auth Cache-Control streaming path; const-qualified read-only parameters;
-  suppressed typedef-dictated `S995` findings where the cast is mandated by
-  the NGINX callback signature (Rule 24).
+  the auth Cache-Control streaming path. The code const-qualifies read-only
+  parameters and suppresses typedef-dictated `S995` findings when the NGINX
+  callback signature mandates the cast (Rule 24).
 - **Header plan `copy_value_to_pool` empty value**: `copy_value_to_pool()` now
   handles empty values without abnormal behavior.
 - **CLI path validation (CWE-22)**: `render_release_matrix_docs.py` now
@@ -505,19 +663,18 @@ HTTP OWS compliance, and performance/coverage tooling hardening.
   `abspath`+`startswith` validators added to performance and coverage
   tooling path sinks.
 - **Removed threshold output path sink**: `threshold_engine.py` no longer
-  writes verdict reports to a caller-supplied file path; reports are emitted
-  to stdout, eliminating a path-escape vector.
+  writes verdict reports to a caller-supplied file path. The tool emits
+  reports to stdout, eliminating a path-escape vector.
 - **Closed perf tooling path escapes**: `run_corpus_benchmark.py` and
   related helpers now validate read/write paths through the shared
   `path_validation` module.
-- **CI supply-chain**: gitleaks is pinned by commit SHA in the security
-  workflow, and both header copies (`markdown_converter.h`) are checked for
-  consistency.
+- **CI supply-chain**: the security workflow pins gitleaks by commit SHA, and
+  the gate checks both header copies (`markdown_converter.h`) for consistency.
 
 ### Changed
 
 - **Const-correctness**: removed unnecessary `(ngx_http_request_t *)` casts
-  in the auth Cache-Control streaming path;
+  in the auth Cache-Control streaming path.
   `ngx_http_markdown_stream_commit_apply_auth_cache_control()` now takes a
   non-const `ngx_http_request_t *` (annotated `NOSONAR` for the SonarCloud
   false positive) matching `ngx_http_markdown_modify_cache_control_for_auth()`'s
@@ -527,8 +684,8 @@ HTTP OWS compliance, and performance/coverage tooling hardening.
 - **FFI contract clarification**: `markdown_streaming_safe_finish` consumes
   its handle only after validation succeeds. On `ERROR_INVALID_INPUT`, it is
   not consumed and the caller must call `markdown_streaming_abort()` or
-  otherwise free it. The bundled NGINX C module already handles this cleanup;
-  third-party FFI consumers should align their invalid-input path.
+  otherwise free it. The bundled NGINX C module already handles this cleanup.
+  Third-party FFI consumers should align their invalid-input path.
 
 ### Tests
 
@@ -620,17 +777,18 @@ configuration directives.
 
 ### Changed
 
-- `markdown_streaming_auto_threshold` is **removed** in 0.8.0. It is no
-  longer registered as a directive; `nginx -t` will fail with "unknown
+- `markdown_streaming_auto_threshold` is **removed** in 0.8.0. The module no
+  longer registers it as a directive, so `nginx -t` will fail with "unknown
   directive" if it appears in configuration. Use `markdown_stream_threshold`
   instead.
 - `markdown_streaming_engine` no longer accepts `$variable` — only the
-  enum values `off`, `auto`, and `on` are accepted. Variable-driven
-  per-request engine selection has been removed.
-- The v0.6.x compatibility bridge (`ngx_http_markdown_streaming_cfg_t`,
-  `conf->streaming`, `ngx_http_markdown_bridge_legacy_stream_values`,
-  `ngx_http_markdown_merge_streaming_values`) has been removed entirely.
-  Runtime code reads from `conf->stream.*` exclusively.
+  enum values `off`, `auto`, and `on` pass validation. The release removes
+  variable-driven per-request engine selection.
+- The release removes the v0.6.x compatibility bridge
+  (`ngx_http_markdown_streaming_cfg_t`, `conf->streaming`,
+  `ngx_http_markdown_bridge_legacy_stream_values`,
+  `ngx_http_markdown_merge_streaming_values`) entirely. Runtime code reads
+  from `conf->stream.*` exclusively.
 - Clarified FFI token-ratio fixed-point boundaries, documented streaming
   reason pointer lifetime, and kept security/supply-chain gate guidance aligned
   with the PR/push/scheduled/manual reporting workflow semantics.
@@ -641,27 +799,27 @@ configuration directives.
   that construct `MarkdownOptions` directly must rebuild against the 0.8.0
   headers and initialize the new field.
 - **BREAKING**: `FFIHeaderEntry.op_type` now supports value `3` (delete-all
-  matching entries). Old binaries must not be mixed with 0.8.0 libraries.
+  matching entries). Do not mix old binaries with 0.8.0 libraries.
 - **BREAKING**: `ngx_http_markdown_check_eligibility()` now requires a 4th
-  `effective_conf` parameter. All call sites must be updated.
-- **BREAKING**: `ctx->stream_sm` and `ctx->streaming` layout changed;
-  third-party modules must rebuild. See `docs/guides/MIGRATION-0.8.md`.
+  `effective_conf` parameter. Update all call sites.
+- **BREAKING**: `ctx->stream_sm` and `ctx->streaming` layout changed.
+  Third-party modules must rebuild. See `docs/guides/MIGRATION-0.8.md`.
 - **BREAKING**: 0.6.x `NGX_HTTP_MARKDOWN_STREAMING_ENGINE_*` constants
-  removed; use `NGX_HTTP_MARKDOWN_STREAM_ENGINE_*` (different AUTO/ON
+  are gone. Use `NGX_HTTP_MARKDOWN_STREAM_ENGINE_*` (different AUTO/ON
   values). 0.8.0 does not preserve 0.6.x streaming compatibility.
-- **BREAKING**: Rust converter and NGINX C module must be deployed as a
-  matched pair. Mixing versions causes FFI layout mismatches.
+- **BREAKING**: Deploy the Rust converter and NGINX C module as a matched pair.
+  Mixing versions causes FFI layout mismatches.
 - Auto-mode streaming threshold default changed from 32 KB to 1 MB to align
   with the true streaming contract definition (ADR-0013).
 - `markdown_max_size` directive now emits an info-level deprecation warning
-  at startup. It remains functional but may be removed in a future release.
+  at startup. It remains functional, but future releases may remove it.
 - Diagnostics endpoint resets on configuration reload cycles.
 - Release gate validation strengthened with Rust build invariant assertions
   and deeper 0.8.0 validation checks.
 
 ### Deprecated
 
-- `markdown_max_size`: emits info-level deprecation warning; use
+- `markdown_max_size`: emits info-level deprecation warning. Use
   `markdown_stream_threshold` and `markdown_stream_precommit_buffer` instead.
   Scheduled for removal in a future release.
 
@@ -736,7 +894,7 @@ dynconf dry-run/rollback, and runtime diagnostics.
   - `conditional` module: If-None-Match / If-Modified-Since conditional
     request and ETag handling in Rust. 20 unit tests.
   - `decision` module: pure decision engine with reason codes
-    (CONVERTED, SKIPPED_ACCEPT, SKIPPED_NO_ACCEPT, etc.). 11 unit tests.
+    (CONVERTED, SKIPPED_ACCEPT, SKIPPED_NO_ACCEPT, and similar). 11 unit tests.
   - `header_plan` module: declarative header mutation plan for atomic
     application. 5 unit tests.
   - `security` module extensions: `url_contains_control_chars`,
@@ -759,9 +917,9 @@ dynconf dry-run/rollback, and runtime diagnostics.
   - APT repository metadata placeholder (`dists/<codename>/...`).
   - YUM repository metadata placeholder (`repodata/repomd.xml`).
   - Public v0.7.0 package installation uses GitHub Release DEB/RPM artifacts
-    plus `SHA256SUMS`; public APT/YUM repository publishing remains planned.
+    plus `SHA256SUMS`. Public APT/YUM repository publishing remains planned.
   - DEB/RPM packages target glibc-based distributions only. Musl-based targets
-    (Alpine, etc.) are available as static binary tarballs via the separate
+    (Alpine and similar distributions) are available as static binary tarballs via the separate
     `release-binaries.yml` workflow.
 
 - **Kubernetes Deployment Examples**
@@ -811,7 +969,7 @@ dynconf dry-run/rollback, and runtime diagnostics.
 - ci: upgrade `softprops/action-gh-release` from v2.6.2 to v3 across
   3 release workflows (release-binaries, release-packages, sign-and-publish).
 - ci(cflite): reduce batch fuzz duration from 3600s to 1800s. This is an
-  intentional trade-off to reduce CI costs; nightly fuzz and periodic batch
+  intentional trade-off to reduce CI costs. Nightly fuzz and periodic batch
   runs still provide sufficient coverage. Verify the latest nightly/batch fuzz
   run passed before each release.
 - SECURITY.md supported version updated to 0.7.x.
@@ -866,7 +1024,7 @@ hardening fixes before the v0.6.3 tag.
 ### Changed
 - `make test-e2e` canonical suite now delegates migrated scenarios through
   `e2e-harness` while keeping deferred scenarios on canonical shell paths.
-- Migrated scenario shell entrypoints were reduced to thin compatibility
+- The migration reduced scenario shell entrypoints to thin compatibility
   wrappers that delegate to `e2e-harness scenario <name>`.
 - Release/test tooling now keeps performance runner paths and round-trip temp
   files under the repository root, matching the hardened path-validation
@@ -876,7 +1034,8 @@ hardening fixes before the v0.6.3 tag.
 - Release binary CI now refreshes the release matrix before resolving build
   targets, and the scheduled/manual matrix updater auto-approves and auto-merges
   validated matrix-update PRs when repository policy allows it.
-- Development test dependencies were refreshed for the 0.6.3 release line.
+- The release refreshed development test dependencies for the 0.6.3 release
+  line.
 - `PROJECT_STATUS.md` current release line advanced from 0.6.2 to 0.6.3.
 
 ### Fixed
@@ -895,13 +1054,13 @@ hardening fixes before the v0.6.3 tag.
 #### Upgrading to 0.6.3
 
 - `make test-e2e` remains the canonical entrypoint and now delegates migrated
-  scenarios to `e2e-harness`; no caller-side command change is required.
+  scenarios to `e2e-harness`. Callers need no command change.
 - For migrated scenarios, thin shell wrappers under `tools/e2e/` are
-  compatibility delegates. New product-level HTTP scenario logic should be
-  implemented in `tools/e2e-harness/src/scenarios/` rather than as new
-  independent shell assertions.
-- Python E2E spec-only files under
-  `components/nginx-module/tests/e2e/` are removed from this release line.
+  compatibility delegates. New product-level HTTP scenario logic belongs in
+  `tools/e2e-harness/src/scenarios/` rather than in new independent shell
+  assertions.
+- The release removes Python E2E spec-only files under
+  `components/nginx-module/tests/e2e/` from this release line.
   Use Rust harness scenarios and retained canonical shell runtime paths.
 
 ## [0.6.2] - 2026-05-08
@@ -913,17 +1072,17 @@ version-bearing surfaces to 0.6.2.
 ### Added
 - **Harness Rule 35** in AGENTS.md:
   - Dynconf snapshot isolation: `dynconf_enabled=0` locations must not consume
-    the global snapshot; `header_filter` passes NULL snapshot to
+    the global snapshot. `header_filter` passes NULL snapshot to
     `ngx_http_markdown_build_effective_conf()`.
-  - Reload retry contract: `applied_mtime` separated from `last_mtime`; retry
+  - Reload retry contract: `applied_mtime` separated from `last_mtime`. Retry
     on next poll cycle when they differ, regardless of mtime change detection.
   - Unknown-key atomic rejection: unrecognized dynconf keys cause `NGX_ERROR`,
     rejecting the entire file atomically (not `NGX_DECLINED` silent skip).
   - Startup apply: `dynconf_start` parses and applies the existing dynconf file
-    immediately at startup; failed parse leaves `applied_mtime=0` for retry.
+    immediately at startup. A failed parse leaves `applied_mtime=0` for retry.
   - `harness-check-full` now includes `harness-security-checks`.
 - Snapshot race elimination in `header_filter`: global `active_snapshot` read
-  exactly once at function entry into function-lifetime `snap_copy`; ctx binding
+  exactly once at function entry into function-lifetime `snap_copy`. The ctx binding
   copies from function-level variables via
   `ngx_http_markdown_bind_request_snapshot()`.
 - `dynconf_path_configured` flag moved from file-scope static to
@@ -959,10 +1118,10 @@ risk pack, and introduces the two-phase dynconf snapshot model.
 
 ### Changed
 - Dynconf: two-phase snapshot model with `active_snapshot` and
-  `staging_snapshot`; staged commit semantics (entire file must parse or
-  nothing applied).
+  `staging_snapshot`. Staged commit semantics require the entire file to parse
+  before the system applies any changes.
 - Dynconf: request-bound snapshot (`ctx->dynconf_snapshot`) bound at
-  header_filter time; no file I/O on request path.
+  header_filter time. The request path performs no file I/O.
 - Dynconf: `log_verbosity` module enum, `enabled_source`/`enabled_complex`
   override, global-only scope guard.
 - Conversion: hardened `X-Forwarded-Host` normalization (first-hop extraction,
@@ -981,29 +1140,30 @@ risk pack, and introduces the two-phase dynconf snapshot model.
   To enable hot-reload without NGINX restart, set
   `markdown_dynamic_config on` and `markdown_dynamic_config_path <path>`
   at the http or server level.
-- **X-Forwarded-Host validation** is now stricter: leading/trailing
-  whitespace in the first-hop token is trimmed; non-IPv6 hosts with a
-  `:` must be followed by digits only (port); IPv6 bracket literals
-  may include an optional `:<port>` suffix (e.g. `[::1]:8080`).
-  Previously-accepted malformed values may now be rejected with a
-  fallback to `r->headers_in.server`.
+- **X-Forwarded-Host validation** is now stricter: the parser trims
+  leading/trailing whitespace in the first-hop token. Non-IPv6 hosts must put
+  digits after `:` for the port. IPv6 bracket literals may include an optional
+  `:<port>` suffix (for example, `[::1]:8080`). The parser may now reject
+  malformed values that it previously accepted, with a fallback to
+  `r->headers_in.server`.
 - **Request-bound dynconf snapshot**: each request deep-copies the
   active snapshot at header_filter time, eliminating the window where
   a concurrent timer reload could swap the snapshot mid-request.
-  No configuration change is required; behavior is more consistent.
+  Operators need no configuration change. Behavior is more consistent.
 
 ## [0.6.0] - 2026-05-05
 
 This release upgrades nginx-markdown-for-agents from a feature-complete opt-in
-system to a production-ready default-enabled system. Streaming engine is now the
-default conversion path (auto mode), noise pruning is enabled out-of-the-box,
-and a unified memory budget simplifies configuration.
+system to a production-ready default-enabled system. The project now uses the
+streaming engine as the default conversion path (auto mode), enables noise
+pruning out-of-the-box, and simplifies configuration with a unified memory
+budget.
 
 ### Added
 - Streaming engine auto mode: `markdown_streaming_engine` default changed from
   `off` to `auto`. In auto mode, responses with Content-Length >=
   `markdown_streaming_auto_threshold` (default 32K) or chunked transfer use
-  streaming; smaller responses use full-buffer.
+  streaming. Smaller responses use full-buffer.
 - `markdown_streaming_auto_threshold` directive (default 32k, context:
   http/server/location) for controlling the auto-mode engine selection
   threshold.
@@ -1084,7 +1244,7 @@ and a unified memory budget simplifies configuration.
   upstream Cache-Control, Case 6 fails on empty ETag, Case 7
   requires `Vary:.*Cookie` (not just `Vary:`).
 - Synced `verify_config_merge_e2e.sh` top docstring to actual
-  checks; fixed `verify_proxy_tls_backend_e2e.sh` source ordering.
+  checks. Fixed `verify_proxy_tls_backend_e2e.sh` source ordering.
 - Updated installation documentation and READMEs with Homebrew tap install
   path and release-tag checksum guidance.
 
@@ -1092,7 +1252,10 @@ and a unified memory budget simplifies configuration.
 
 - **Streaming is now the default engine.** The `markdown_streaming_engine` directive defaults to `auto`, which selects the streaming path for eligible responses. To retain the previous full-buffer-only behavior, set `markdown_streaming_engine off;` in your nginx configuration.
 - **Noise pruning is now enabled by default.** The `markdown_prune_noise` directive defaults to `on`. To disable it, set `markdown_prune_noise off;`.
-- **Unified memory budget.** The `markdown_memory_budget` directive supersedes the dual `markdown_max_size` + `markdown_streaming_budget` pattern. Existing configurations using the old directives continue to work but `markdown_memory_budget` is recommended for new deployments.
+- **Unified memory budget.** The `markdown_memory_budget` directive supersedes
+  the dual `markdown_max_size` + `markdown_streaming_budget` pattern. Existing
+  configurations with the old directives continue to work, but the project
+  recommends `markdown_memory_budget` for new deployments.
 - **OpenTelemetry tracing.** If you enable OTLP tracing, ensure your collector endpoint accepts HTTP/protobuf on the configured port.
 
 ### Fixed
@@ -1154,9 +1317,9 @@ release-gate/documentation synchronization.
   routing-manifest updates for 0.5.5 verification families.
 
 ### Changed
-- Consolidated all post-0.5.0 patch work into this 0.5.5 release; no
-  intermediate release note or compatibility step is required.
-- Expanded full-buffer URL resolution so FFI `base_url` is reflected in emitted
+- Consolidated all post-0.5.0 patch work into this 0.5.5 release. Operators
+  need no intermediate release note or compatibility step.
+- Expanded full-buffer URL resolution so FFI `base_url` appears in emitted
   Markdown links and media URLs, including `http://`, host-only, trailing-slash,
   root-relative, and already-absolute URL cases.
 - Aligned streaming URL resolution behavior with full-buffer trailing-slash
@@ -1172,7 +1335,7 @@ release-gate/documentation synchronization.
   Prometheus series names, HELP text semantics, skip metrics, 206 `SKIP_RANGE`
   handling, shadow metrics, and `markdown_metrics_format prometheus`.
 - Required operator-facing verification examples to send explicit `Accept`
-  headers matching the format being parsed.
+  headers for the format under test.
 - Updated `AGENTS.md`, harness docs, routing manifest, and risk packs so
   release-gate and remediation work route through repo-owned truth surfaces.
 - Refined release-gate tooling to validate 0.5.5 document existence,
@@ -1187,7 +1350,7 @@ release-gate/documentation synchronization.
   sorted Docker package lists.
 
 ### Fixed
-- Fixed full-buffer relative-link resolution from FFI options; URL-resolution
+- Fixed full-buffer relative-link resolution from FFI options. URL-resolution
   tests now assert the emitted Markdown content, not just `error_code == 0`.
 - Fixed sanitizer coverage gaps where percent-encoded control characters could
   remain visible as unsafe URL text in converted output.
@@ -1205,8 +1368,8 @@ release-gate/documentation synchronization.
   production writes rather than initial zeroed state.
 - Fixed release-gate validator fragility: JSON top-level type errors now fail
   cleanly, changelog detection requires a real release heading, missing
-  `tomllib`/`tomli` is a hard failure with installation guidance, and missing
-  `bash` is reported before subprocess execution.
+  `tomllib`/`tomli` causes a hard failure with installation guidance, and the
+  validator reports missing `bash` before subprocess execution.
 - Fixed build and release helper diagnostics from the post-0.5.0 patch work,
   including curl/python failure tolerance, stderr routing, and release-version
   resolver timeout behavior.
@@ -1264,8 +1427,8 @@ streaming, plus the harness and release-gate surfaces needed to operate it.
 ### Changed
 - `AGENTS.md` now points explicitly at repo-owned harness entrypoints instead
   of relying on local-only steering docs
-- Local adapter summaries were reduced to thin references that point back to
-  `docs/harness/`
+- The project reduced local adapter summaries to thin references that point
+  back to `docs/harness/`
 - `Makefile` now exposes `make harness-check` and `make harness-check-full`
 - CI path filters now include `AGENTS.md` so harness contract changes trigger
   validation
@@ -1288,7 +1451,7 @@ streaming, plus the harness and release-gate surfaces needed to operate it.
   and `1.30.0`, and added a release-event freshness gate so future published
   binaries cannot silently lag behind the official nginx download page.
 - Updated harness optional-skill documentation to avoid hard local-link
-  dependency in docs checks; the skill remains documented as an optional
+  dependency in docs checks. The skill remains documented as an optional
   repo-tracked path via `docs/guides/HARNESS_SKILL_SETUP.md`.
 - Restored green `make harness-check-full` validation by aligning
   release-gate compatibility-matrix parsing with the 0.5.0 canonical document
@@ -1367,7 +1530,10 @@ This release focuses on operational visibility, rollout safety, and conversion p
 
 ## [0.3.0] - 2026-03-19
 
-This release introduces incremental processing for large responses, a matrix-driven release automation pipeline, third-party notice coverage checks, a performance baseline gating system, and improved HTML element handling for AI agent content preservation.
+This release introduces incremental processing for large responses and a
+matrix-driven release automation pipeline. It adds third-party notice coverage
+checks, performance baseline gating, and improved HTML element handling for AI
+agent content preservation.
 
 ### Added
 
@@ -1416,21 +1582,42 @@ This release introduces incremental processing for large responses, a matrix-dri
 - Baselines directory (`perf/baselines/`) with bootstrap flow documentation
 
 ### Changed
-- Event handler attribute sanitization in `security.rs` now uses `on*` prefix matching instead of a static allowlist, following the OWASP/DOMPurify convention. This is future-proof against new event handler attributes added to the HTML spec and closes the gap where newer handlers (`onpointerdown`, `ontouchstart`, etc.) could bypass the previous static list.
-- Form-related elements (`form`, `button`, `select`, `textarea`, `fieldset`, `label`, `option`, etc.) now use a strip-tag-keep-content approach instead of full removal. HTML tags are stripped but child text is preserved in Markdown output so AI agents retain meaningful content (labels, button captions, option lists). Void form controls (`input`) have descriptive text extracted from `aria-label`, `placeholder`, or `value` attributes; hidden inputs are suppressed.
-- Embedded content elements (`iframe`, `object`, `embed`) now use strip-tag-keep-content instead of full removal. The `src`/`data` URL is extracted as a Markdown link (with `title` as label when available), and fallback child text is preserved. Dangerous URL schemes (`javascript:`, `data:`, etc.) are still suppressed.
-- Image conversion now preserves the `title` attribute in Markdown syntax (`![alt](src "title")`). When the image URL is missing or blocked by URL sanitization, the `alt` text is emitted as plain text so AI agents do not lose the description.
-- Media elements (`video`, `audio`) now have their `src` URL extracted as a Markdown link before traversing fallback children. Video `poster` thumbnails are extracted as Markdown images. Child `<source>` elements have their `src` extracted with `type` as label; `<track>` elements have their `src` extracted with `label` as link text.
+- Event handler attribute sanitization in `security.rs` now uses `on*` prefix matching instead of a static allowlist, following the OWASP/DOMPurify convention. This approach covers new event handler attributes added to the HTML spec. It also closes the gap where newer handlers (`onpointerdown`, `ontouchstart`, and similar) could bypass the previous static list.
+- Form-related elements (`form`, `button`, `select`, `textarea`, `fieldset`,
+  `label`, `option`, and similar) now use a strip-tag-keep-content approach
+  instead of full removal. The converter strips HTML tags and preserves child
+  text in Markdown output. AI agents retain labels, button captions, and
+  option lists. For void `input` controls, the converter extracts descriptive
+  text from `aria-label`, `placeholder`, or `value`. It suppresses hidden
+  inputs.
+- Embedded content elements (`iframe`, `object`, `embed`) now use
+  strip-tag-keep-content instead of full removal. The converter extracts the
+  `src`/`data` URL as a Markdown link. It uses `title` as the label when
+  available, preserves fallback child text, and still suppresses dangerous URL
+  schemes (`javascript:`, `data:`, and similar).
+- Image conversion now preserves the `title` attribute in Markdown syntax
+  (`![alt](src "title")`). If the image URL is missing or URL sanitization
+  blocks it, the converter emits the `alt` text as plain text. This prevents AI
+  agents from losing the description.
+- Media elements (`video`, `audio`) now expose their `src` URL as a Markdown
+  link before the converter traverses fallback children. The converter extracts
+  `poster` thumbnails as Markdown images. It extracts `src` from child
+  `<source>` elements with `type` as the label, and from `<track>` elements with
+  `label` as link text.
 - Image map `<area>` elements now have their `href` extracted as Markdown links with `alt` (or `title`) as link text.
 - X-Forwarded-Host/Proto headers are no longer trusted by default for base URL construction. Added `markdown_trust_forwarded_headers on|off` directive (default: off) to prevent client-supplied header injection that could poison relative URLs in Markdown output. Enable only behind a trusted reverse proxy.
 - Decompression buffer estimation now logs a warning when the estimated output exceeds 50 MB, improving operator visibility into large allocation events.
 - Metrics endpoint access-control comment now documents the container/proxy limitation and provides an `allow`/`deny` configuration example for non-localhost environments.
-- Synchronized `Cargo.toml` version from `0.1.0` to `0.3.0` to align with project release tags; from this release onward, `Cargo.toml` version strictly tracks the release tag
-- `MarkdownOptions` C ABI now unconditionally includes `max_buffer_size` in all builds (ABI-breaking change requiring header/binding regeneration); external callers must set the field to 0 when the incremental feature is not in use
+- Synchronized `Cargo.toml` version from `0.1.0` to `0.3.0` to align with
+  project release tags. From this release onward, `Cargo.toml` version strictly
+  tracks the release tag.
+- The `MarkdownOptions` C ABI now includes `max_buffer_size` in all builds.
+  This ABI-breaking change requires header/binding regeneration. External
+  callers must set the field to 0 when the incremental feature is not in use.
 - `IncrementalConverter` carries `content_type` and `timeout` fields, using `parse_html_with_charset` and `ConversionContext` in `finalize()` to match full-buffer path behavior
 - Incremental routing guarded with `#ifdef MARKDOWN_INCREMENTAL_ENABLED` in both header and body filters so metrics stay accurate when the feature is not linked
 - `fullbuffer_path_hits` and `incremental_path_hits` moved to end of `ngx_http_markdown_metrics_t` to preserve shared-memory layout compatibility across hot reloads
-- Path metrics guarded behind eligibility check so only eligible requests are counted
+- Eligibility checks count path metrics only for eligible requests.
 - Incremental `new`/`feed` failures routed through `ngx_http_markdown_handle_conversion_failure` for proper `conversions_failed` and failure category counter updates
 - `markdown_incremental_new()` NULL return now uses `ERROR_INVALID_INPUT` instead of `ERROR_INTERNAL` with explicit `ngx_log_error` at the call site
 - Extended `perf_baseline.rs` with JSON Measurement Report generation, `--single` / `--json-output` / `--platform` CLI arguments, `large-1m` canonical tier naming, and per-sample stage breakdown
@@ -1468,7 +1655,9 @@ This release introduces incremental processing for large responses, a matrix-dri
 - Expanded C and Rust inline documentation around Accept-header parsing and DOM traversal paths, including complexity and borrow-context rationale for high-branching logic
 - Continued documentation pass across decompression/buffering and Rust FFI/parser hot paths, clarifying allocation bounds, amortized complexity, timeout checkpoints, and zero-copy charset decoding behavior
 - Completed a broader doc pass: filled missing Rust function docstrings across converter/metadata/FFI modules and expanded C header comments for config/lifecycle entrypoints and filter-chain responsibilities
-- Performed a consistency audit to align comments with implementation: filled remaining Rust function docs and tightened C helper/header comments so interface intent, complexity notes, and behavior descriptions stay accurate
+- Performed a consistency audit to align comments with implementation. Filled
+  remaining Rust function docs and tightened C helper/header comments so
+  interface intent, complexity notes, and behavior descriptions stay accurate.
 
 ### Fixed
 - Hardened native E2E/runtime scripts so reusable `NGINX_BIN` paths are only reused when the runtime layout and module support are actually compatible
@@ -1514,7 +1703,9 @@ This release expands runtime configurability, tightens module internals and vali
 
 ### Changed
 - Refactored the NGINX module's filter, conditional, auth, and header-handling paths into smaller helpers with a shared header-manipulation implementation used by production code and standalone tests
-- Tightened authenticated-request cache-control rewriting so public cache directives are upgraded to private while preserving stronger directives such as `no-store`
+- Tightened authenticated-request cache-control rewriting so the module
+  upgrades public cache directives to private while preserving stronger
+  directives such as `no-store`.
 - Reworked E2E proxy-chain validation to run the backend over TLS, and hardened integration/E2E runner scripts around that flow
 - Hardened CI workflows, release build images, QA scripts, and Docker build context handling
 - Refreshed the top-level README, component READMEs, guides, feature notes, testing docs, and FAQ to match the current runtime behavior and supported workflows
@@ -1599,7 +1790,7 @@ This release expands runtime configurability, tightens module internals and vali
 - Rust 1.91.0+
 
 ### Known Limitations
-- Streaming is the default engine; full-buffer is the fallback
+- Streaming is the default engine. Full-buffer is the fallback.
 - Requires uncompressed or automatically decompressed HTML input
 - Some complex HTML structures may not convert perfectly
 - Performance overhead for large documents
@@ -1618,18 +1809,18 @@ This project uses Semantic Versioning:
 #### Upgrading to 0.6.2
 
 - **Dynconf snapshot isolation**: locations with `markdown_dynamic_config off`
-  no longer consume the global dynconf snapshot. No configuration change is
-  required; behavior is more isolated for non-dynconf locations.
-- **Reload retry contract**: if a dynconf file change was detected but the
-  reload failed, the watcher now retries on the next poll cycle regardless
-  of mtime change detection. No configuration change is required.
+  no longer consume the global dynconf snapshot. Operators need no
+  configuration change. Behavior is more isolated for non-dynconf locations.
+- **Reload retry contract**: if the watcher detects a dynconf file change but
+  the reload fails, it retries on the next poll cycle regardless of mtime
+  change detection. Operators need no configuration change.
 - **Unknown-key atomic rejection**: unrecognized keys in the dynconf file
   now cause `NGX_ERROR` (entire file rejected) instead of `NGX_DECLINED`
-  (silent ignore). Previously-accepted files with unknown keys will now be
-  rejected; remove any non-standard keys from your dynconf files.
+  (silent ignore). The watcher now rejects previously accepted files with
+  unknown keys. Remove any non-standard keys from your dynconf files.
 - **Startup apply of existing dynconf file**: if a dynconf file exists at
-  startup, it is now parsed and applied immediately. Previously the first
-  apply was deferred to the first timer poll cycle.
+  startup, the module parses and applies it immediately. Previously the first
+  apply waited for the first timer poll cycle.
 
 #### Upgrading to 0.5.0
 
@@ -1653,20 +1844,29 @@ This project uses Semantic Versioning:
 #### Upgrading to 0.4.0
 
 - New `markdown_metrics_format` directive defaults to `auto` (JSON), preserving 0.3.0 behavior. Set to `prometheus` to enable Prometheus text exposition format.
-- All new configuration directives have safe defaults that preserve 0.3.0 behavior. No configuration changes are required for upgrading.
+- All new configuration directives have safe defaults that preserve 0.3.0
+  behavior. Operators need no configuration changes for upgrading.
 - Parser path optimizations are transparent — output is equivalent to 0.3.0 for all inputs.
 - Decision reason codes are now included in logs at `info` verbosity and above. Adjust `markdown_log_verbosity` if needed.
 
 #### Upgrading to 0.3.0
 
 - `MarkdownOptions` C ABI has changed: `max_buffer_size` is now unconditionally present. External callers must regenerate bindings and set the field to 0 when the incremental feature is not in use.
-- `fullbuffer_path_hits` and `incremental_path_hits` have been moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient; no data migration is needed.
+- The release moves `fullbuffer_path_hits` and `incremental_path_hits` to the
+  end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a
+  graceful reload is sufficient. No data migration is necessary.
 - The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the new `markdown_large_body_threshold` directive.
-- `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add `markdown_trust_forwarded_headers on;` to restore the previous behavior. Without this directive, only the NGINX request schema and server header are used.
+- `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by
+  default for base URL construction. If NGINX sits behind a trusted reverse
+  proxy that sets these headers, add `markdown_trust_forwarded_headers on;` to
+  restore the previous behavior. Without this directive, the module uses only
+  the NGINX request schema and server header.
 
 #### Upgrading to 0.2.0
 
-No public directive renames are introduced in this release. If you relied on older documentation, review the updated guides for clarified installation paths, compression rollout guidance, metrics fields, and architecture references.
+This release introduces no public directive renames. If you relied on older
+documentation, review the updated guides for clarified installation paths,
+compression rollout guidance, metrics fields, and architecture references.
 
 #### Upgrading to 0.1.0
 
@@ -1688,4 +1888,4 @@ For issues, questions, or feature requests, please use the repository's issue tr
 
 ## License
 
-This project is licensed under the BSD 2-Clause "Simplified" License (`BSD-2-Clause`).
+This project uses the BSD 2-Clause "Simplified" License (`BSD-2-Clause`).

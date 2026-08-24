@@ -1,14 +1,77 @@
-#!/usr/bin/env bash
-# Run the 0.9.1 performance evidence gate in non-blocking/report mode.
+#!/bin/bash
+# Run the active module performance evidence gate with a trusted Python runtime.
 
 set -uo pipefail
 
-set +e
-python3 tools/perf/evidence_gate.py --mode non-blocking
-rc=$?
-set -e
+resolve_python3() {
+  local candidate=""
+  for candidate in \
+    /opt/homebrew/bin/python3 \
+    /usr/local/bin/python3 \
+    /usr/bin/python3 \
+    /bin/python3; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  echo "FAIL: no trusted python3 executable found" >&2
+  return 1
+}
 
-if [[ $rc -eq 75 ]]; then
+PYTHON3="$(resolve_python3)" || exit 1
+GATE_MODE="${EVIDENCE_GATE_MODE:-non-blocking}"
+ALLOW_SKIP_MODULE="${EVIDENCE_GATE_ALLOW_SKIP_MODULE:-0}"
+BASELINE_VERSION="${MODULE_BASELINE_VERSION:-092}"
+
+case "$GATE_MODE" in
+  non-blocking|blocking)
+    ;;
+  *)
+    echo "FAIL: EVIDENCE_GATE_MODE must be non-blocking or blocking" >&2
+    exit 1
+    ;;
+esac
+
+case "$ALLOW_SKIP_MODULE" in
+  0|1)
+    ;;
+  *)
+    echo "FAIL: EVIDENCE_GATE_ALLOW_SKIP_MODULE must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+
+GATE_ARGS=(--mode "$GATE_MODE")
+if [[ "$ALLOW_SKIP_MODULE" == "1" ]]; then
+  GATE_ARGS+=(--allow-skip-module)
+fi
+if [[ -n "${EVIDENCE_GATE_BENCHMARK_REPORT:-}" ]]; then
+  GATE_ARGS+=(--benchmark-report "$EVIDENCE_GATE_BENCHMARK_REPORT")
+fi
+
+errexit_was_set=0
+case "$-" in
+  *e*) errexit_was_set=1 ;;
+  *) errexit_was_set=0 ;;
+esac
+
+set +e
+REQUIRE_BASELINE_HEAD="${EVIDENCE_GATE_REQUIRE_BASELINE_HEAD:-0}"
+if [[ "$GATE_MODE" == "blocking" && "$BASELINE_VERSION" == "092" ]]; then
+  REQUIRE_BASELINE_HEAD=1
+fi
+MODULE_BASELINE_VERSION="$BASELINE_VERSION" \
+    EVIDENCE_GATE_REQUIRE_BASELINE_HEAD="$REQUIRE_BASELINE_HEAD" \
+    "$PYTHON3" tools/perf/evidence_gate.py "${GATE_ARGS[@]}"
+rc=$?
+if [[ "$errexit_was_set" == "1" ]]; then
+  set -e
+else
+  set +e
+fi
+
+if [[ "$GATE_MODE" == "non-blocking" && $rc -eq 75 ]]; then
   echo "SKIP_NOT_PRESENT: Module benchmarks require NGINX_BIN." >&2
   echo "  Set NGINX_BIN=/path/to/nginx to enable." >&2
   exit 0

@@ -11,7 +11,7 @@ on:
         default: false
         type: boolean
       bootstrap_module_baseline:
-        description: "Generate the canonical 0.9.1 module baseline on native x86_64"
+        description: "Generate the canonical 0.9.2 module baseline on native x86_64"
         required: false
         default: false
         type: boolean
@@ -33,7 +33,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
           # rustfmt + clippy required by make complexity-check and cargo clippy gates
           components: rustfmt,clippy
 
@@ -103,14 +103,16 @@ jobs:
 
       - name: Run threshold engine
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
           python3 tools/perf/threshold_engine.py \
-            --baseline perf/baselines/${{ steps.platform.outputs.name }}.json \
-            --current perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json \
+            --baseline "perf/baselines/${PLATFORM}.json" \
+            --current "perf/reports/perf-measurement-${PLATFORM}.json" \
             --thresholds perf/thresholds.json \
             --metrics-schema perf/metrics-schema.json \
-            --platform ${{ steps.platform.outputs.name }} \
-            > perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json
+            --platform "${PLATFORM}" \
+            > "perf/reports/perf-verdict-${PLATFORM}.json"
 
       - name: Upload measurement report
         if: always()
@@ -138,6 +140,8 @@ jobs:
 
       - name: Run corpus benchmark comparison
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
           BASELINE="perf/baselines/corpus-baseline.json"
           if [ ! -f "$BASELINE" ]; then
@@ -150,7 +154,7 @@ jobs:
             --baseline "$BASELINE" \
             --current perf/reports/corpus-report.json \
             --thresholds perf/quality-thresholds.json \
-            --output perf/reports/corpus-verdict-${{ steps.platform.outputs.name }}.json
+            --output "perf/reports/corpus-verdict-${PLATFORM}.json"
 
       - name: Generate PR benchmark summary
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
@@ -177,8 +181,8 @@ jobs:
           name: corpus-examples
           path: perf/reports/examples/
 
-  module-baseline-091:
-    name: Canonical Module Baseline 0.9.1
+  module-baseline-092:
+    name: Canonical Module Baseline 0.9.2
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_module_baseline }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -186,7 +190,9 @@ jobs:
       contents: read
     env:
       RUST_TARGET: x86_64-unknown-linux-gnu
-      RUST_FEATURES: streaming,incremental
+      # The feature list is reviewed source configuration; the release gate
+      # validates the corresponding generated manifest before publication.
+      RUST_FEATURES: streaming,incremental,prune_noise_regions
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -208,25 +214,20 @@ jobs:
           import json
           import os
 
-          with open("tools/release-matrix.json", encoding="utf-8") as handle:
-              data = json.load(handle)
+          # The tracked performance environment is the single source for the
+          # benchmark NGINX version. The release matrix remains the supported
+          # platform matrix and is not the baseline selector.
+          with open(
+              "release/performance/canonical-environment.json",
+              encoding="utf-8",
+          ) as handle:
+              env = json.load(handle)
 
-          owner = ".github/workflows/release-packages.yml"
-          versions = sorted(
-              {
-                  entry["nginx_version"]
-                  for entry in data.get("entries", [])
-                  if entry.get("owner_workflow") == owner
-                  and entry.get("support_tier") == "supported"
-                  and entry.get("libc") == "glibc"
-                  and entry.get("release_blocking") is True
-              },
-              key=lambda value: tuple(int(part) for part in value.split(".")),
-          )
-          if not versions:
-              raise SystemExit("no canonical release-blocking NGINX version")
+          version = env.get("nginx_version")
+          if not version:
+              raise SystemExit("canonical performance environment has no nginx_version")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"version={versions[0]}\n")
+              output.write(f"version={version}\n")
           PY
         shell: bash
 
@@ -248,7 +249,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
           targets: x86_64-unknown-linux-gnu
           components: rustfmt,clippy
 
@@ -307,13 +308,13 @@ jobs:
           NGINX_BIN="${NGINX_SRC}/objs/nginx" \
           MODULE_SO="${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" \
             tools/perf/run_module_benchmark.sh \
-            --output perf/baselines/module-baseline-091-raw.json
+            --output perf/baselines/module-baseline-092-raw.json
         shell: bash
 
       - name: Verify raw module probe artifacts
         run: |
           python3 tools/perf/validate_module_probe_artifacts.py \
-            --probe-dir perf/baselines/module-baseline-091-raw-probes
+            --probe-dir perf/baselines/module-baseline-092-raw-probes
         shell: bash
 
       - name: Record full commit SHA for baseline provenance
@@ -325,19 +326,20 @@ jobs:
       - name: Finalize canonical module baseline with baseline_policy
         env:
           GITHUB_RUN_URL: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}"
+          BASELINE_GIT_COMMIT: ${{ steps.baseline-git.outputs.sha }}
         run: |
           python3 tools/perf/finalize_module_baseline.py \
-            --raw-input perf/baselines/module-baseline-091-raw.json \
-            --output perf/baselines/module-baseline-091.json \
-            --source-git-commit "${{ steps.baseline-git.outputs.sha }}" \
+            --raw-input perf/baselines/module-baseline-092-raw.json \
+            --output perf/baselines/module-baseline-092.json \
+            --source-git-commit "${BASELINE_GIT_COMMIT}" \
             --source-run "${GITHUB_RUN_URL}"
         shell: bash
 
       - name: Cross-check finalized baseline response probes
         run: |
           python3 tools/perf/validate_module_probe_artifacts.py \
-            --probe-dir perf/baselines/module-baseline-091-raw-probes \
-            --baseline perf/baselines/module-baseline-091.json
+            --probe-dir perf/baselines/module-baseline-092-raw-probes \
+            --baseline perf/baselines/module-baseline-092.json
         shell: bash
 
       - name: Validate canonical module baseline
@@ -346,7 +348,7 @@ jobs:
           import json
           from tools.perf.evidence_gate import _validate_benchmark_evidence
 
-          path = "perf/baselines/module-baseline-091.json"
+          path = "perf/baselines/module-baseline-092.json"
           with open(path, encoding="utf-8") as handle:
               baseline = json.load(handle)
           violations = _validate_benchmark_evidence(baseline, role="baseline")
@@ -359,24 +361,39 @@ jobs:
 
       - name: Run canonical performance evidence check
         run: |
+          # The raw report is the candidate's OWN measurement for this run:
+          # it was generated above from the exact checked-out candidate and
+          # finalized with BASELINE_GIT_COMMIT == $(git rev-parse HEAD), so
+          # its provenance binding is same-run verifiable.  It is NOT a
+          # substitute for the checked-in audit baseline, which stays bound
+          # to its own historical measurement commit (Rule 61); a future
+          # re-measurement regenerates both together.  A second ApacheBench
+          # run here would compare two integer-millisecond p50 samples and
+          # can turn one timing bucket into a false regression.
+          MODULE_BASELINE_VERSION=092 \
+          EVIDENCE_GATE_BENCHMARK_REPORT=perf/baselines/module-baseline-092-raw.json \
           NGINX_BIN="${NGINX_SRC}/objs/nginx" \
           MODULE_SO="${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" \
             make perf-evidence-check
 
-      - name: Run canonical 0.9.1 release gates
+      - name: Run canonical 0.9.2 performance and contract gates
         run: |
+          # Revalidate the exact raw candidate measurement after the
+          # independent 0.9.1 gate; do not introduce a second sample.
           NGINX_BIN="${NGINX_SRC}/objs/nginx" \
           MODULE_SO="${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" \
-            make release-gates-check-091
+          CANDIDATE_BENCHMARK_REPORT=perf/baselines/module-baseline-092-raw.json \
+            make release-gates-check-092-canonical \
+              CANDIDATE_BENCHMARK_REPORT=perf/baselines/module-baseline-092-raw.json
 
       - name: Upload canonical module baseline
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: module-baseline-091-${{ github.sha }}
+          name: module-baseline-092-${{ github.sha }}
           path: |
-            perf/baselines/module-baseline-091.json
-            perf/baselines/module-baseline-091-raw.json
-            perf/baselines/module-baseline-091-raw-probes/
+            perf/baselines/module-baseline-092.json
+            perf/baselines/module-baseline-092-raw.json
+            perf/baselines/module-baseline-092-raw-probes/
           if-no-files-found: error
           retention-days: 30
 
@@ -384,10 +401,10 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: module-baseline-091-debug-${{ github.sha }}
+          name: module-baseline-092-debug-${{ github.sha }}
           path: |
-            perf/baselines/module-baseline-091-raw.json
-            perf/baselines/module-baseline-091-raw-probes/
+            perf/baselines/module-baseline-092-raw.json
+            perf/baselines/module-baseline-092-raw-probes/
             perf/reports/
           if-no-files-found: ignore
           retention-days: 7

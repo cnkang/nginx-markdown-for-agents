@@ -22,8 +22,10 @@ if str(REPO_ROOT) not in sys.path:
 
 try:
     from tools.release.gates.check_stale_symbols import run_stale_symbol_check
+    from tools.release.gates._directive_macros import expand_directive_macros
 except ModuleNotFoundError:
     from check_stale_symbols import run_stale_symbol_check
+    from _directive_macros import expand_directive_macros
 
 
 def find_repo_root() -> Path:
@@ -43,10 +45,16 @@ def check_file_exists(repo: Path, rel_path: str, description: str) -> dict:
 
 
 def check_reason_code_count(repo: Path) -> dict:
-    """Verify Rust reason code count is 26 (0.9.0 frozen count).
+    """Verify the 0.9.x reason-code floor and generated-boundary parity.
 
-    0.9.0 freezes at exactly 26 reason codes. After 1.0.0, only additive
-    new codes are permitted. The gate uses == 26 to detect drift.
+    The 0.9.0 baseline contains 26 codes.  The current 0.9.2 freeze adds
+    the distinct ``encoding_header_invalid`` code, so a prior-version
+    regression gate must not reject the newer release solely because its
+    registry has grown.  It still verifies that the Rust registry and the
+    production generated C reason metadata expose the same count and that
+    the baseline floor remains present. The C projection lives in
+    ``markdown_reason_meta.h``; the older hand-written constants in
+    ``ngx_http_markdown_reason.c`` no longer exist.
     """
     rc_file = repo / "components/rust-converter/src/decision/reason_code.rs"
     if not rc_file.exists():
@@ -60,30 +68,85 @@ def check_reason_code_count(repo: Path) -> dict:
         return {"name": "reason_code_count", "status": "fail",
                 "message": "REASON_CODE_COUNT not found in reason_code.rs"}
     count = int(match.group(1))
-    if count == 26:
-        return {"name": "reason_code_count", "status": "pass",
-                "details": {"count": count}}
-    return {"name": "reason_code_count", "status": "fail",
-            "message": f"Expected exactly 26, got {count}"}
+    if count < 26:
+        return {"name": "reason_code_count", "status": "fail",
+                "message": f"Expected at least 26, got {count}"}
+
+    c_meta_file = repo / "components/nginx-module/src/markdown_reason_meta.h"
+    if not c_meta_file.exists():
+        return {"name": "reason_code_count", "status": "fail",
+                "message": "markdown_reason_meta.h not found"}
+    c_content = c_meta_file.read_text(encoding="utf-8")
+    meta_match = re.search(
+        r"^#define\s+MARKDOWN_REASON_META_COUNT\s+(\d+)\s*$",
+        c_content,
+        re.MULTILINE,
+    )
+    if not meta_match:
+        return {"name": "reason_code_count", "status": "fail",
+                "message": "MARKDOWN_REASON_META_COUNT not found"}
+    declared_count = int(meta_match.group(1))
+    c_count = len(re.findall(
+        r"^#define\s+MARKDOWN_REASON_CODE_[A-Z0-9_]+\s+\d+\s*$",
+        c_content,
+        re.MULTILINE,
+    ))
+    if c_count != declared_count:
+        return {
+            "name": "reason_code_count",
+            "status": "fail",
+            "message": (
+                "generated C reason metadata count mismatch: "
+                f"declared={declared_count}, entries={c_count}"
+            ),
+        }
+    if c_count != count:
+        return {
+            "name": "reason_code_count",
+            "status": "fail",
+            "message": f"Rust/C reason-code count mismatch: Rust={count}, C={c_count}",
+        }
+
+    return {"name": "reason_code_count", "status": "pass",
+            "details": {"count": count}}
 
 
 def check_diagnostics_schema_version(repo: Path) -> dict:
-    """Verify docs and the production C renderer emit schema_version 1."""
-    schema_file = repo / "docs/architecture/observability-schema-v1.md"
+    """Verify the documented and emitted diagnostics schema agree.
+
+    The 0.9.0 baseline introduced schema version 1.  The active 0.9.2
+    release intentionally evolves that response to version 2, so this
+    historical regression gate accepts either supported version but never
+    allows the documentation and production renderer to drift apart.
+    """
+    gate_name = "diagnostics_schema_v2"
+    supported_versions = {1, 2}
+    schema_file = repo / "docs/architecture/observability-schema-v2.md"
     if not schema_file.exists():
-        return {"name": "diagnostics_schema_v1", "status": "fail",
-                "message": "observability-schema-v1.md not found"}
+        return {"name": gate_name, "status": "fail",
+                "message": "observability-schema-v2.md not found"}
     documentation = schema_file.read_text(encoding="utf-8")
-    if not re.search(r"schema_version[^\n]*\b1\b", documentation):
-        return {"name": "diagnostics_schema_v1", "status": "fail",
-                "message": "schema_version 1 not documented"}
+    # Accept valid schema_version declarations across markdown formatting
+    # variants: backticked/emphasized names, bullet or table-row framing,
+    # and reworded prose, as long as the line declares an integer constant
+    # 1 or 2 (the supported schema versions).
+    documentation_match = re.search(
+        r"^\s*(?:\|\s*)?(?:[-*]\s*)?`?\*?schema_version\*?`?\s*[:\-|]?\s*"
+        r"[\w\s,'\"-]*?integer\s+constant\s*`?([12])`?\s*\.?\s*(?:\|\s*)?\s*$",
+        documentation,
+        flags=re.MULTILINE | re.IGNORECASE,
+    )
+    if documentation_match is None:
+        return {"name": gate_name, "status": "fail",
+                "message": "supported diagnostics schema version not documented"}
+    documented_version = int(documentation_match.group(1))
 
     renderer_file = (
         repo
         / "components/nginx-module/src/ngx_http_markdown_diagnostics.c"
     )
     if not renderer_file.exists():
-        return {"name": "diagnostics_schema_v1", "status": "fail",
+        return {"name": gate_name, "status": "fail",
                 "message": "production C renderer not found"}
 
     renderer = renderer_file.read_text(encoding="utf-8")
@@ -92,16 +155,28 @@ def check_diagnostics_schema_version(repo: Path) -> dict:
     )
     emission = re.compile(
         r'ngx_slprintf\s*\(\s*p\s*,\s*last\s*,\s*'
-        r'"  \\"schema_version\\": 1,\\n"\s*\)'
+        r'"(?:\\.|[^"\\])*\\"schema_version\\"\s*:\s*([12])\s*[,}]'
     )
-    if not emission.search(renderer_without_comments):
-        return {"name": "diagnostics_schema_v1", "status": "fail",
+    emission_match = emission.search(renderer_without_comments)
+    if emission_match is None:
+        return {"name": gate_name, "status": "fail",
                 "message": (
-                    "production C renderer does not emit exact "
-                    "schema_version 1"
+                    "production C renderer does not emit supported "
+                    "schema_version 1 or 2"
                 )}
+    emitted_version = int(emission_match.group(1))
+    if documented_version != emitted_version:
+        return {"name": gate_name, "status": "fail",
+                "message": (
+                    "production C renderer emits schema_version "
+                    f"{emitted_version}, documentation declares "
+                    f"schema_version {documented_version}"
+                )}
+    if emitted_version not in supported_versions:
+        return {"name": gate_name, "status": "fail",
+                "message": f"unsupported diagnostics schema version {emitted_version}"}
 
-    return {"name": "diagnostics_schema_v1", "status": "pass"}
+    return {"name": gate_name, "status": "pass"}
 
 
 def check_production_examples(repo: Path) -> dict:
@@ -240,30 +315,54 @@ def check_inflight_guard(repo: Path) -> dict:
         return {"name": "inflight_guard", "status": "fail",
                 "message": "request_impl.h not found"}
     content = request_impl.read_text()
-    if "return conf->error_status;" not in content:
+    has_status_return = (
+        "return conf->error_status;" in content
+        or re.search(
+            r"return\s+ngx_http_markdown_effective_error_status\s*\(",
+            content,
+        ) is not None
+    )
+    if not has_status_return:
         return {"name": "inflight_guard", "status": "fail",
                 "message": "inflight overload does not return error_status"}
     return {"name": "inflight_guard", "status": "pass"}
 
 
 def _check_removed_directives(content: str, removed: list) -> list:
-    """Verify each removed directive is present as a reject-only stub.
+    """Verify removed directives are absent from the live command registry.
 
-    For every directive name in *removed*, check that the config directives
-    implementation file contains both the ngx_string("name") entry and the
-    reject handler (ngx_http_markdown_reject_removed_directive) in the
-    surrounding 700-byte block.  Return a list of problem descriptions.
+    The 0.9.2 reset deliberately removes these names from ``ngx_command_t``.
+    NGINX then provides the standard unknown-directive error.  Older versions
+    of this validator required reject-only stubs, which contradicted the
+    frozen command table and also matched migration comments rather
+    than the live registry.
     """
     missing = []
+    registry_marker = "static ngx_command_t ngx_http_markdown_filter_commands[] = {"
+    registry_start = content.find(registry_marker)
+    registry_end = content.find("\n};", registry_start)
+    if registry_start < 0 or registry_end < 0:
+        return ["live ngx_command_t registry missing or unterminated"]
+    registry = content[registry_start:registry_end]
     for name in removed:
-        idx = content.find(f'ngx_string("{name}")')
-        if idx < 0:
-            missing.append(f"{name}: directive missing")
-            continue
-        block = content[idx:idx + 700]
-        if "ngx_http_markdown_reject_removed_directive" not in block:
-            missing.append(f"{name}: not reject-only")
+        if f'ngx_string("{name}")' in registry:
+            missing.append(f"{name}: still present in live command registry")
     return missing
+
+
+def _read_directive_registry(repo: Path) -> str | None:
+    """Read the live command registry with canonical names expanded."""
+    directives = repo / (
+        "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
+    )
+    names = repo / (
+        "components/nginx-module/src/ngx_http_markdown_directive_names.h"
+    )
+    if not directives.exists() or not names.exists():
+        return None
+    return expand_directive_macros(
+        directives.read_text(), names.read_text()
+    )
 
 
 def _check_migration_guide(migration: Path) -> list:
@@ -283,7 +382,7 @@ def _check_migration_guide(migration: Path) -> list:
 
 
 def check_config_v2_removed_directives(repo: Path) -> dict:
-    """Verify removed Config V2 directives are reject-only stubs."""
+    """Verify removed Config V2 directives are not active commands."""
     directives = (
         repo /
         "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
@@ -292,7 +391,10 @@ def check_config_v2_removed_directives(repo: Path) -> dict:
     if not directives.exists():
         return {"name": "config_v2_removed_directives", "status": "fail",
                 "message": "config_directives_impl.h not found"}
-    content = directives.read_text()
+    content = _read_directive_registry(repo)
+    if content is None:
+        return {"name": "config_v2_removed_directives", "status": "fail",
+                "message": "directive command registry or names header missing"}
     removed = [
         "markdown_max_size",
         "markdown_memory_budget",
@@ -484,11 +586,23 @@ def check_last_modified_time_fallback(repo: Path) -> dict:
 
 
 def check_profile_explicit_inheritance(repo: Path) -> dict:
-    """Verify profile cache_validation_explicit is inherited across scopes."""
+    """Check profile inheritance only when the profile surface still exists.
+
+    The 0.9.2 reset removes ``markdown_profile`` and its configuration fields.
+    A newer release gate must not fail solely because that prior-version
+    contract no longer exists.
+    """
     merge_impl = (
         repo / "components/nginx-module/src/ngx_http_markdown_config_core_impl.h"
     )
     test_file = repo / "components/nginx-module/tests/unit/profile_test.c"
+    directive_text = _read_directive_registry(repo)
+    if directive_text is None:
+        return {"name": "profile_explicit_inheritance", "status": "fail",
+                "message": "directive command registry or names header missing"}
+    if 'ngx_string("markdown_profile")' not in directive_text:
+        return {"name": "profile_explicit_inheritance", "status": "pass",
+                "message": "profile surface removed; no inheritance contract"}
     if not merge_impl.exists() or not test_file.exists():
         return {"name": "profile_explicit_inheritance", "status": "fail",
                 "message": "merge implementation or profile test missing"}
@@ -556,7 +670,7 @@ def main():
     # Key files
     results.append(check_file_exists(
         repo,
-        "docs/architecture/observability-schema-v1.md",
+        "docs/architecture/observability-schema-v2.md",
         "observability_schema_doc"))
     results.append(check_file_exists(
         repo,
@@ -564,7 +678,7 @@ def main():
         "error_policy_doc"))
     results.append(check_file_exists(
         repo,
-        "docs/release/0.9.0-release-notes.md",
+        "docs/releases/0.9.0-release-notes.md",
         "release_notes"))
     results.append(check_file_exists(
         repo,

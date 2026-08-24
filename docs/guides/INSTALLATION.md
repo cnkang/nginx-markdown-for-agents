@@ -29,25 +29,21 @@ The project consists of two main components:
 - **Rust converter**: HTML-to-Markdown conversion library (`libnginx_markdown_converter.a`)
 - **NGINX filter module (C)**: NGINX integration layer that invokes the Rust converter via FFI
 
-This guide covers every supported installation method — from a single-command install script to a full source build — along with platform compatibility, verification procedures, troubleshooting, and environment-specific notes.
+This guide covers every supported installation method. Methods range from a single-command install script to a full source build. It also covers platform compatibility, verification procedures, troubleshooting, and environment-specific notes.
 
 ---
 
 ## 2. Shortest Success Path
 
-For a system with NGINX already installed (official build), four commands get you to a verified conversion:
+For a system with NGINX already installed (official build), the following
+release-bound sequence downloads and authenticates the installer before any
+privileged execution, then verifies both Markdown and HTML responses:
 
 ```bash
-# Step 1: Install the module (auto-detects version, downloads binary, wires config)
-curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-
-# Step 2: Reload NGINX
-sudo nginx -t && sudo nginx -s reload
-
-# Step 3: Verify — request the default welcome page as Markdown
+# Step 1: Download and authenticate the versioned release installer
+RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSLo "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc" -o nginx-markdown-for-agents-release.asc "${RELEASE_BASE}/nginx-markdown-for-agents-release.asc"
+TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "$GNUPGHOME"' EXIT; gpg --batch --homedir "$GNUPGHOME" --import nginx-markdown-for-agents-release.asc; VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1; grep -E "  ${INSTALLER}$" SHA256SUMS | sha256sum -c - && sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}" && sudo nginx -t && sudo nginx -s reload
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
-
-# Step 4: Confirm HTML passthrough is preserved
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 ```
 
@@ -68,7 +64,7 @@ Content-Type: text/html
 ...
 ```
 
-The install script auto-enables `markdown_filter on` and wires the `load_module` directive, so no manual configuration editing is required. The NGINX default welcome page (`/usr/share/nginx/html/index.html`) serves as the demo content source — no upstream or proxy configuration needed.
+The install script auto-enables `markdown_filter on` and wires the `load_module` directive. When automatic wiring completes successfully, you do not need to edit the configuration manually. If the installer reports manual actions, follow its instructions to finish the wiring. The NGINX default welcome page (`/usr/share/nginx/html/index.html`) serves as the demo content source — no upstream or proxy configuration needed.
 
 > **Note:** If you need a standalone demo configuration file, see [`examples/nginx-configs/00-minimal-demo.conf`](../../examples/nginx-configs/00-minimal-demo.conf).
 
@@ -76,7 +72,7 @@ The install script auto-enables `markdown_filter on` and wires the `load_module`
 
 ## 3. Install Path Tiers
 
-Each installation method is classified into a tier that sets expectations for friction and support level.
+Each installation method falls into a tier that sets expectations for friction and support level.
 
 | Tier | Meaning | CI-Verified | Example |
 |------|---------|-------------|---------|
@@ -99,18 +95,19 @@ The install script (`tools/install.sh`) is the recommended installation method f
 
 ### Usage
 
-```bash
-curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-```
+Use the authenticated release-bound sequence in [Shortest Success Path](#2-shortest-success-path), setting `RELEASE_TAG` to the exact published tag.
 
 Optional safety switch for NGINX-upgrade scenarios with stale module snippets:
 
 ```bash
-AUTO_DISABLE_STALE_MODULE=1 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+sudo env AUTO_DISABLE_STALE_MODULE=1 VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 ```
 
+Run the optional command only after the release-bound download, signature, and
+installer checksum steps above have passed.
+
 The script requires `sudo` (root privileges) to write the module binary and modify NGINX configuration files.
-By default, the installer enforces SHA-256 integrity checks and refuses artifacts without an available SHA-256 digest.
+By default, the installer requires a release-signed `SHA256SUMS` manifest and refuses artifacts whose signature, key, manifest entry, or digest verification is unavailable.
 
 ### Auto-Wiring Behavior
 
@@ -128,9 +125,30 @@ The install script performs the following automatically:
 
 ### Integrity Guardrails (Install Script)
 
-- Default behavior: installation fails if no SHA-256 digest is available for the selected artifact.
-- `DOWNLOAD_URL_OVERRIDE` requires `DOWNLOAD_SHA256` by default.
-- Emergency bypass (not recommended): set `ALLOW_INSECURE_NO_CHECKSUM=1` only in trusted, controlled environments.
+- Default behavior: installation fails when the selected artifact cannot pass
+  authentication against the release's signed `SHA256SUMS` manifest. The
+  installer downloads `SHA256SUMS` and `SHA256SUMS.asc` from the same release,
+  verifies the detached signature with the pinned release signing key, binds the
+  artifact hash to its exact entry in the verified manifest, and cross-checks
+  the manifest digest against the release API digest when one is present. If the
+  signature, key, manifest, or fingerprint trust material is missing, the
+  installer fails closed and does not install the artifact.
+- `TRUSTED_FINGERPRINT` pins the release signing key. The default is the
+  fingerprint of the signing subkey of the checked-in release key
+  (`packaging/nginx-markdown-for-agents-release.asc`). Operators must override
+  it with an independently authenticated fingerprint before trusting a
+  different key.
+- `DOWNLOAD_URL_OVERRIDE` (operator-supplied URL) always requires `DOWNLOAD_SHA256`.
+  The operator-supplied digest is the independent trust anchor for that path.
+  The installer performs no manifest download or GPG verification.
+- The installer has no checksumless bypass. If an independently authenticated
+  digest is unavailable, withhold the binary installation and use the manual
+  source-build path instead.
+- `NGINX_BIN` optionally overrides PATH discovery with an operator-chosen
+  absolute path to the nginx executable. Without it, a PATH-discovered nginx
+  must live in a trusted system executable directory. When running as root the
+  resolved binary must also have root ownership and must not be writable by
+  group or other users.
 
 After the script completes, reload NGINX:
 
@@ -150,7 +168,7 @@ sudo nginx -t && sudo nginx -s reload
 
 **Tier: Convenience**
 
-This project can be installed from a dedicated Homebrew tap on macOS:
+You can install this project from a dedicated Homebrew tap on macOS:
 
 ```bash
 brew tap cnkang/nginx-markdown
@@ -159,9 +177,9 @@ brew install cnkang/nginx-markdown/nginx-markdown-module
 
 Notes:
 - If you publish and maintain your own tap, replace `cnkang/nginx-markdown` with your tap name.
-- The formula is tied to GitHub release tag artifacts (`refs/tags/<tag>.tar.gz`).
-- SHA-256 must be generated from the downloadable GitHub tag artifact, not local `git archive`.
-- Tap publish and macOS post-release verification automation are documented in [`docs/guides/HOMEBREW_TAP_RELEASE.md`](./HOMEBREW_TAP_RELEASE.md).
+- The formula ties to GitHub release tag artifacts (`refs/tags/<tag>.tar.gz`).
+- Generate SHA-256 from the downloadable GitHub tag artifact, not local `git archive`.
+- Tap publish and macOS post-release verification automation have documentation in [`docs/guides/HOMEBREW_TAP_RELEASE.md`](./HOMEBREW_TAP_RELEASE.md).
 
 If you need deterministic control over compiler flags or local patching, use [Manual Source Build](#6-secondary-manual-source-build).
 
@@ -173,11 +191,11 @@ If you need deterministic control over compiler flags or local patching, use [Ma
 
 Starting with v0.7.0, release workflows can build DEB and RPM artifacts for
 supported Linux distributions. Public GitHub Release asset availability is
-tag-specific: confirm that the target release contains the exact package and
-`SHA256SUMS` before running these commands. A release candidate or a
-compatibility-matrix entry is not a downloadable package. If no matching asset
-is published, use [Manual Source Build](#6-secondary-manual-source-build).
-APT/YUM repository publishing is planned, but public APT/YUM repository
+tag-specific: confirm that the target release contains the exact package,
+`SHA256SUMS`, and `SHA256SUMS.asc` before running these commands. `SHA256SUMS`
+detects transfer corruption but is not an authenticated trust anchor. A release candidate or a
+compatibility-matrix entry is not a downloadable package. If the release does not publish a matching asset, use [Manual Source Build](#6-secondary-manual-source-build).
+The project plans APT/YUM repository publishing. Public APT/YUM repository
 publishing is not part of the current GA channel. Do not use `apt-get install
 nginx-module-markdown` or `yum install nginx-module-markdown` unless you
 operate your own package repository.
@@ -188,13 +206,25 @@ Replace `VERSION` below with a published release version. `NGINX_VERSION` must
 match the NGINX ABI you run.
 
 ```bash
+set -euo pipefail
 VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=amd64
 
-curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
-curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
+curl -fsSLo SHA256SUMS "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fsSLo SHA256SUMS.asc "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
+curl -fsSLo "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb" "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
+# Import the release signing key through an independently authenticated channel before GPG verification.
+# Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
+# Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
+: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated and the key is imported}"
+[[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
+VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb" SHA256SUMS | sha256sum -c -
+dpkg-sig --verify "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 sudo apt install "./nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 ```
 
@@ -204,13 +234,25 @@ Replace `VERSION` below with a published release version. `NGINX_VERSION` must
 match the NGINX ABI you run.
 
 ```bash
+set -euo pipefail
 VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 
-curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
-curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
+curl -fsSLo SHA256SUMS "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fsSLo SHA256SUMS.asc "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
+curl -fsSLo "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm" "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
+# Import the release signing key through an independently authenticated channel before GPG verification.
+# Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
+# Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
+: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated and the key is imported}"
+[[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
+VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm" SHA256SUMS | sha256sum -c -
+rpm -Kv "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 sudo rpm -Uvh "./nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 ```
 
@@ -245,7 +287,7 @@ Strategy](PACKAGE_DISTRIBUTION.md).
 
 **Tier: Secondary**
 
-For a fully self-contained Docker image that compiles the module from source against the exact official `nginx` image you run, use the provided multi-stage Dockerfile:
+For a fully self-contained Docker image that compiles the module from source, use the provided multi-stage Dockerfile. It builds against the exact official `nginx` image you run.
 
 - [`examples/docker/Dockerfile.official-nginx-source-build`](../../examples/docker/Dockerfile.official-nginx-source-build)
 
@@ -262,7 +304,7 @@ This follows the official-image multi-stage pattern:
 ### Platform-Specific Build Notes
 
 - **Alpine-based** official images use `nginx-mod-dev`, which provides a matching NGINX source tree in the container.
-- **Debian-based** official images do not currently provide a matching `nginx-dev` package, so the Dockerfile downloads the exact matching NGINX source tarball for the build stage only.
+- **Debian-based** official images do not currently provide a matching `nginx-dev` package. The Dockerfile downloads the exact matching NGINX source tarball for the build stage only.
 - In all cases, the runtime stage keeps the official `nginx` image and adds
   only the module, example content, and the non-root runtime configuration.
 
@@ -330,7 +372,7 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://127.0.0.1:8080/
 
 **Tier: Secondary**
 
-If you use a custom NGINX build, or a platform not supported by the pre-built binaries, compile the module from source. This section covers the Rust library build, NGINX module compilation, and platform prerequisites.
+Compile the module from source when you use a custom NGINX build or a platform without pre-built binaries. This section covers the Rust library build, NGINX module compilation, and platform prerequisites. See the [Manual Source Build](#6-secondary-manual-source-build) section for the full procedure. The manual path fits custom builds and unsupported platforms.
 
 ### Scope and Verification Notes
 
@@ -343,8 +385,8 @@ If you use a custom NGINX build, or a platform not supported by the pre-built bi
 
 | Component | Minimum Version | Purpose |
 |-----------|----------------|---------|
-| **Rust Toolchain** | 1.97.0+ | Building the Rust converter |
-| **Cargo** | 1.97.0+ | Rust package manager (included with Rust) |
+| **Rust Toolchain** | 1.97.1+ | Building the Rust converter (pinned baseline) |
+| **Cargo** | 1.97.1+ | Rust package manager (included with Rust) |
 | **cbindgen** | 0.29.2 | Generating C header files from Rust |
 | **NGINX** | 1.24.0+ | Web server (source code required for module compilation) |
 | **GCC/Clang** | GCC 4.8+ or Clang 3.4+ | C compiler for NGINX module |
@@ -358,7 +400,7 @@ If you use a custom NGINX build, or a platform not supported by the pre-built bi
 - PCRE development headers (`pcre-devel` or `libpcre3-dev`)
 - zlib development headers (`zlib-devel` or `zlib1g-dev`)
 - Brotli decoder development headers (`brotli-devel` or `libbrotli-dev`) —
-  required only for `NGX_MARKDOWN_BROTLI_STREAMING=on`; `auto` falls back to
+  required only for `NGX_MARKDOWN_BROTLI_STREAMING=on`. `auto` falls back to
   the Rust bounded full-buffer decoder when they are unavailable
 - OpenSSL development headers (`openssl-devel` or `libssl-dev`) — optional
 
@@ -549,7 +591,7 @@ export MODULE_PATH=/path/to/nginx-markdown-for-agents/components/nginx-module
 
 #### Configure as a Dynamic Module (Recommended)
 
-Dynamic modules can be loaded/unloaded without recompiling NGINX.
+Dynamic modules load/unload without recompiling NGINX.
 
 The default shown below matches the Rust library's Cargo default features. If
 you built Rust with a different final feature set, export the matching
@@ -570,7 +612,7 @@ export NGX_MARKDOWN_RUST_FEATURES=default
 
 #### Configure as a Static Module
 
-Static modules are compiled directly into the NGINX binary.
+Static modules compile directly into the NGINX binary.
 
 ```bash
 export NGX_MARKDOWN_RUST_FEATURES=default
@@ -647,7 +689,7 @@ http {
     markdown_filter on;
 
     # Safe defaults
-    markdown_limits memory=10m timeout=5s;
+    markdown_limits conversion_memory=10m conversion_timeout=5s parser_timeout=5s;
     markdown_error_policy pass;  # Fail-open: return original HTML on conversion error
 
     server {
@@ -685,18 +727,18 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 
 ## 7. Compatibility Matrix
 
-> **Canonical source:** [`tools/release-matrix.json`](../../tools/release-matrix.json) is the canonical, machine-readable source of truth for platform support. The table below is a human-readable snapshot; always consult the JSON file for automation and CI.
+> **Canonical source:** [`tools/release-matrix.json`](../../tools/release-matrix.json) is the canonical, machine-readable source of truth for platform support. The table below is a human-readable snapshot. Always consult the JSON file for automation and CI.
 
 ### Support Tiers
 
 - **Full** — Pre-built binary available, install script supported, CI-verified.
-- **Source Only** — No pre-built binary; build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions.
+- **Source Only** — No pre-built binary. Build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions.
 
 ### Minimum Supported Version
 
 The minimum supported NGINX version is **1.24.0**. Older versions are out of scope due to differences in the dynamic module ABI.
 
-If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [Manual Source Build](#6-secondary-manual-source-build) instructions to compile the module for your version.
+If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [Manual Source Build](#6-secondary-manual-source-build) instructions. They compile the module for your version.
 
 ### Platform Compatibility Matrix
 
@@ -723,6 +765,7 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.3 | glibc | x86_64 | Full |
 | 1.31.3 | musl | aarch64 | Full |
 | 1.31.3 | musl | x86_64 | Full |
+
 <!-- END AUTO-GENERATED MATRIX -->
 
 <!-- BEGIN:release-matrix:installation-matrix -->
@@ -733,8 +776,16 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
+| 1.31.3 | mainline | debian12 | glibc | arm64 | supported |
+| 1.31.3 | mainline | debian12 | glibc | amd64 | supported |
+| 1.30.4 | stable | debian12 | glibc | arm64 | supported |
+| 1.30.4 | stable | debian12 | glibc | amd64 | supported |
+| 1.28.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.28.3 | stable | debian12 | glibc | amd64 | supported |
 | 1.26.3 | stable | debian12 | glibc | arm64 | supported |
 | 1.26.3 | stable | debian12 | glibc | amd64 | supported |
+| 1.24.0 | oldstable | debian12 | glibc | arm64 | supported |
+| 1.24.0 | oldstable | debian12 | glibc | amd64 | supported |
 
 ### docker-image
 
@@ -784,8 +835,16 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
+| 1.31.3 | mainline | almalinux9 | glibc | arm64 | supported |
+| 1.31.3 | mainline | almalinux9 | glibc | amd64 | supported |
+| 1.30.4 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.30.4 | stable | almalinux9 | glibc | amd64 | supported |
+| 1.28.3 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.28.3 | stable | almalinux9 | glibc | amd64 | supported |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | supported |
 | 1.26.3 | stable | almalinux9 | glibc | amd64 | supported |
+| 1.24.0 | oldstable | almalinux9 | glibc | arm64 | supported |
+| 1.24.0 | oldstable | almalinux9 | glibc | amd64 | supported |
 
 ### source
 
@@ -816,7 +875,7 @@ ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
 
 ### Exact Version Match Requirement
 
-NGINX dynamic modules require an **exact version match**. A module built for NGINX 1.26.2 will **not** load on NGINX 1.26.3. The NGINX module ABI is tied to the exact patch version, so approximate version matching is not supported.
+NGINX dynamic modules require an **exact version match**. A module built for NGINX 1.26.2 will **not** load on NGINX 1.26.3. The NGINX module ABI ties to the exact patch version. Approximate version matching is not supported.
 
 ### Determining the Correct Artifact
 
@@ -891,7 +950,8 @@ Vary: Accept
 
 #### 3. HTML Passthrough Curl
 
-Confirms that requests without `Accept: text/markdown` are served unchanged:
+Confirms that requests without `Accept: text/markdown` pass through unchanged
+under the default `markdown_accept strict` policy:
 
 ```bash
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
@@ -920,24 +980,27 @@ Look for initialization messages such as:
 
 #### 5. Metrics Endpoint (When Enabled)
 
-If a metrics endpoint location is configured, confirm conversion counters are incrementing:
+If you configure a metrics endpoint location, confirm that the frozen Prometheus
+families are present:
 
 ```bash
-# Plain text
-curl -H "Accept: text/plain" http://localhost/markdown-metrics
-
-# JSON
-curl -H "Accept: application/json" http://localhost/markdown-metrics
+# Prometheus text exposition format 0.0.4
+curl --fail-with-body \
+  -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics
 ```
 
-Look for counters such as `conversions_attempted`, `conversions_succeeded`, `conversions_failed`, and `conversions_bypassed`.
+Look for `nginx_markdown_requests_total`,
+`nginx_markdown_conversion_attempts_total`, and
+`nginx_markdown_conversion_deliveries_total`. The complete catalog is in
+[`prometheus-metrics.md`](prometheus-metrics.md).
 
 ### Understanding Fail-Open Behavior
 
 The default configuration uses `markdown_error_policy pass` (fail-open). This means:
 
-- If the module attempts a conversion and the conversion **fails** (e.g., timeout, converter error), the original HTML response is returned with `Content-Type: text/html`.
-- This is **distinct** from requests that were never eligible for conversion (e.g., wrong `Content-Type`, non-200 status, missing `Accept: text/markdown` header). Those are "skipped" requests, not "fail-open."
+- If the module attempts a conversion and the conversion **fails** (for example timeout, converter error), it returns the original HTML response with `Content-Type: text/html`.
+- This is **distinct** from requests that were never eligible for conversion (for example wrong `Content-Type`, non-200 status, missing `Accept: text/markdown` header). Those are "skipped" requests, not "fail-open."
 - To detect fail-open events, inspect the NGINX error log for conversion failure messages.
 
 ---
@@ -966,7 +1029,7 @@ dlopen() "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so" failed
 ```
 
 **Root Cause:**
-The `load_module` directive is missing from `nginx.conf`, or the path to the `.so` file is incorrect. This can happen when the install script's auto-wiring was incomplete or the module file was moved after installation.
+The `load_module` directive is missing from `nginx.conf`, or the path to the `.so` file is incorrect. This can happen when the install script's auto-wiring was incomplete or the module file moved after installation.
 
 **Resolution Steps:**
 
@@ -993,10 +1056,8 @@ The `load_module` directive is missing from `nginx.conf`, or the path to the `.s
    fi
    ```
    If `MODULES_PATH` is empty, resolve the path first (see the error message above) before continuing with the steps below.
-2. If the file is missing, re-run the install script:
-   ```bash
-   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-   ```
+2. If the file is missing, repeat the authenticated release-bound sequence in
+   [Shortest Success Path](#2-shortest-success-path).
 3. If the file exists, confirm the `load_module` directive is present at the top of `nginx.conf` (before the `http {}` block):
    ```bash
    # If your NGINX uses a custom --conf-path, replace /etc/nginx/nginx.conf accordingly
@@ -1033,8 +1094,7 @@ module is not binary compatible
 **Root Cause:**
 NGINX dynamic modules require an exact version match. A module built for NGINX 1.26.2 will not load on NGINX 1.26.3. The pre-built binary does not exist for your exact NGINX version.
 
-Another common variant is a **stale previously-installed module** still being
-loaded by `load_module`. In that case `nginx -t` may fail with:
+Another common variant is a **stale previously-installed module** that `load_module` still loads. In that case `nginx -t` may fail with:
 
 ```text
 module ".../ngx_http_markdown_filter_module.so" version 1024000 instead of 1028003
@@ -1053,7 +1113,7 @@ still enabled in config.
    ```bash
    curl -sL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/release-matrix.json | python3 -m json.tool
    ```
-3. If your version is not in the matrix but is >= 1.24.0, build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions.
+3. If your version is not in the matrix but is >= 1.24.0, build from source. Use the [Manual Source Build](#6-secondary-manual-source-build) instructions.
 4. If your version is below 1.24.0, upgrade NGINX to a supported version.
 5. If you see `version ... instead of ...`, disable stale module loader snippets before retry:
    ```bash
@@ -1063,14 +1123,11 @@ still enabled in config.
    # or comment out the load_module line in that file.
    sudo nginx -t
    ```
-6. Re-run installer only after cleanup:
-   ```bash
-   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-   ```
-7. For automated cleanup during reinstall, you can enable:
-   ```bash
-   AUTO_DISABLE_STALE_MODULE=1 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-   ```
+6. Re-run the installer only after cleanup, using the authenticated
+   release-bound sequence in [Shortest Success Path](#2-shortest-success-path).
+7. For automated cleanup during reinstall, set
+   `AUTO_DISABLE_STALE_MODULE=1` on the verified installer invocation from
+   [Primary: Install Script](#4-primary-install-script).
    This mode renames matched loader snippets to `*.disabled` before exiting with
    `version_mismatch` when no prebuilt binary exists for your exact NGINX version.
 
@@ -1088,7 +1145,7 @@ ERROR: Architecture "s390x" is not supported. Supported: x86_64, aarch64
 ```
 
 **Root Cause:**
-Pre-built binaries are only available for `x86_64` and `aarch64` architectures. Other architectures (e.g., `s390x`, `ppc64le`, `armv7l`) are not in the release matrix.
+Pre-built binaries are only available for `x86_64` and `aarch64` architectures. Other architectures (for example `s390x`, `ppc64le`, `armv7l`) are not in the release matrix.
 
 **Resolution Steps:**
 
@@ -1115,7 +1172,7 @@ dlopen() ... failed (Error relocating ... symbol not found)
 or the install script reports a libc detection mismatch.
 
 **Root Cause:**
-A glibc-linked binary was installed on a musl-based system (e.g., Alpine Linux) or vice versa. The two C standard library implementations are not ABI-compatible.
+The user installed a glibc-linked binary on a musl-based system (for example Alpine Linux), or the reverse. The two C standard library implementations are not ABI-compatible.
 
 **Resolution Steps:**
 
@@ -1151,10 +1208,9 @@ A glibc-linked binary was installed on a musl-based system (e.g., Alpine Linux) 
    If `MODULES_PATH` is empty, resolve the path first (see the error message above) before continuing with the steps below.
    - **glibc**: output references `libc.so.6` and `/lib/x86_64-linux-gnu/` (or similar)
    - **musl**: output references `ld-musl-*.so.1` or shows "statically linked"
-4. Re-run the install script — it auto-detects the libc type from `nginx -V` metadata:
-   ```bash
-   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-   ```
+4. Re-run the install script — it auto-detects the libc type from `nginx -V`
+   metadata. Use the authenticated release-bound sequence in [Shortest
+   Success Path](#2-shortest-success-path).
 5. If the auto-detection fails, build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions to ensure native libc linkage.
 
 ---
@@ -1195,7 +1251,7 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    nslookup github.com
    ```
 4. If the system is air-gapped, manually download the binary and checksum on a connected machine.
-   Manual download is intended only for air-gapped or troubleshooting scenarios — prefer the [install script](#4-primary-install-script) for normal installations.
+   Use manual download only for air-gapped or troubleshooting scenarios. Prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Set these values from a GitHub Release that lists both assets.
    RELEASE_TAG="<published-release-tag>"
@@ -1224,20 +1280,18 @@ ERROR: SHA-256 checksum verification failed
 or:
 
 ```text
-Release asset does not provide a SHA256 digest; refusing to install without an available SHA-256 digest.
+The release does not provide a usable signed `SHA256SUMS` manifest/signature, or the downloaded artifact does not match the signed manifest.
 ```
 
 **Root Cause:**
-The SHA-256 hash of the downloaded binary does not match the expected checksum from the release. This can be caused by a corrupted download, an incomplete transfer, a network intermediary modifying the file, or a tampered artifact.
+The SHA-256 hash of the downloaded binary does not match the expected checksum from the release. Possible causes: a corrupted download, an incomplete transfer, a network intermediary modifying the file, or a tampered artifact.
 
 **Resolution Steps:**
 
-1. Remove the cached download and retry:
-   ```bash
-   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-   ```
+1. Remove the cached download and repeat the authenticated release-bound
+   sequence in [Shortest Success Path](#2-shortest-success-path).
 2. If the failure persists, manually verify the checksum.
-   Manual download is intended only for troubleshooting — prefer the [install script](#4-primary-install-script) for normal installations.
+   Use manual download only for troubleshooting. Prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Set these values from a GitHub Release that lists both assets.
    RELEASE_TAG="<published-release-tag>"
@@ -1252,8 +1306,11 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    sha256sum -c "ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz.sha256"
    ```
 3. If the checksum still fails, try downloading from a different network or machine to rule out a network intermediary.
-4. If the issue persists, report it on the project's GitHub issue tracker — the release artifact may need to be re-published.
-5. If you must install in a controlled emergency scenario without a published digest, set `ALLOW_INSECURE_NO_CHECKSUM=1` explicitly and document the exception in your change record.
+4. If the issue persists, report it on the project's GitHub issue tracker. The release artifact may need to be re-published.
+5. Do not bypass verification for a published release. If the release lacks an
+   independently authenticated fingerprint or digest, withhold installation and
+   report the release-gate failure. The install-script emergency switch cannot
+   establish provenance.
 
 ---
 
@@ -1263,22 +1320,22 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
 Requests that should return Markdown are returning HTML instead. The response has `Content-Type: text/html` even though the client sends `Accept: text/markdown`.
 
 **Root Cause:**
-The module only converts a response when all eligibility requirements are met. If any requirement is not satisfied, the original response is passed through unchanged.
+The module only converts a response when all eligibility requirements are met. If any requirement is not satisfied, it passes the original response through unchanged.
 
 The eligibility requirements are:
 
 1. **HTTP status 200** — the upstream response must have status code `200 OK`. Redirects (3xx), client errors (4xx), and server errors (5xx) are not eligible.
-2. **Upstream `Content-Type: text/html`** — the upstream response must have `Content-Type: text/html` (with any charset parameter). Other content types (e.g., `application/json`, `text/plain`) are not eligible.
+2. **Upstream `Content-Type: text/html`** — the upstream response must have `Content-Type: text/html` (with any charset parameter). Other content types (for example `application/json`, `text/plain`) are not eligible.
 3. **Request `Accept` includes `text/markdown`** — the client request must include `text/markdown` in the `Accept` header. Without this, the module does not activate.
-4. **Response size within effective limits** — the upstream response body must
-   not exceed the effective full-buffer or streaming limit. If
-   `markdown_limits memory=<size>` is set, it acts as a unified override
-   unless a path-specific streaming buffer
-   (`markdown_limits streaming_buffer=<size>`) is explicitly set.
+4. **Response size within the body-size limit** — the upstream response body
+   must not exceed the effective `markdown_limits conversion_memory=<size>`
+   limit. `markdown_limits streaming_buffer=<size>` only bounds the streaming
+   working and replay budget. It does not change the response-body eligibility
+   limit.
 
 **Resolution Steps:**
 
-1. Confirm the module is enabled:
+1. Confirm that the module loads and `markdown_filter on` activates:
    ```bash
    grep -r 'markdown_filter' /etc/nginx/
    ```
@@ -1306,7 +1363,7 @@ The eligibility requirements are:
 #### SOP 8: Upstream Response Not Eligible
 
 **Symptom:**
-The module is loaded and `markdown_filter on` is set, but specific pages are not being converted. Other pages may convert correctly.
+The module loads and `markdown_filter on` is set, but specific pages are not converting. Other pages may convert correctly.
 
 **Root Cause:**
 The upstream response for those pages does not meet the eligibility criteria. Common reasons:
@@ -1326,17 +1383,17 @@ The upstream response for those pages does not meet the eligibility criteria. Co
    curl -sI http://localhost/path/to/page | grep -i content-type
    ```
 4. If the upstream returns a different content type, the module correctly skips conversion. Conversion only applies to HTML content.
-5. If the upstream returns a non-200 status, resolve the upstream issue first (e.g., fix the redirect chain, resolve the 404).
+5. If the upstream returns a non-200 status, resolve the upstream issue first. For example, fix the redirect chain or resolve the 404.
 
 ---
 
 #### SOP 9: Compression / Decompression Issues
 
 **Symptom:**
-The module fails to convert responses that are compressed by the upstream. The error log may show conversion failures, or the response is passed through as HTML despite meeting all other eligibility requirements.
+The module fails to convert responses that the upstream compressed. The error log may show conversion failures. Alternatively, the response passes through as HTML despite meeting all other eligibility requirements.
 
 **Root Cause:**
-The upstream server sends a compressed response (gzip, brotli, or deflate), and the module cannot decompress it before conversion. This can happen when the module's built-in decompression is not handling the encoding, or when NGINX's own compression interacts with the module's pipeline.
+The upstream server sends a compressed response (gzip, brotli, or deflate). The module supports automatic gzip, Brotli, and deflate decompression. Conversion failures can happen when the module's built-in decompression is not enabled or not handling the encoding correctly. It can also happen when NGINX's own compression interacts with the module's pipeline.
 
 **Resolution Steps:**
 
@@ -1364,10 +1421,11 @@ The upstream server sends a compressed response (gzip, brotli, or deflate), and 
 
 ### Bare-Metal Linux (glibc)
 
-This is the standard path. The install script runs with `sudo` and auto-detects the glibc environment. No special considerations.
+This is the standard path. The install script runs with `sudo` and auto-detects the glibc environment. Use the authenticated release-bound sequence in [Shortest Success Path](#2-shortest-success-path). Do not execute a mutable branch copy.
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+# After completing the authenticated release-bound download and verification:
+sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 ```
 
 ### Alpine Linux (musl)
@@ -1531,7 +1589,7 @@ sudo nginx -s reload
 
 1. Module disabled — ensure `markdown_filter on;` is set.
 2. `Accept` header missing — ensure the request includes `Accept: text/markdown`.
-3. Response not eligible — status code must be 200, `Content-Type` must be `text/html`, response size must be within `markdown_limits memory=<size>`.
+3. Response not eligible — status code must be 200, `Content-Type` must be `text/html`, response size must be within `markdown_limits conversion_memory=<size>`.
 4. Check NGINX error log for details:
    ```bash
    sudo tail -f /var/log/nginx/error.log
@@ -1544,10 +1602,10 @@ sudo nginx -s reload
 **Solution:**
 ```nginx
 # Increase timeout in nginx.conf
-markdown_limits timeout=10s;  # Increase from default 5s
+markdown_limits conversion_timeout=60s;  # Increase beyond the 30s default
 
 # Or increase max size if large pages are timing out
-markdown_limits memory=20m;  # Unified override; path-specific limits still win
+markdown_limits conversion_memory=20m;  # Unified override; path-specific limits still win
 ```
 
 ### Issue: High Memory Usage
@@ -1557,7 +1615,7 @@ markdown_limits memory=20m;  # Unified override; path-specific limits still win
 **Solution:**
 ```nginx
 # Reduce max response size
-markdown_limits memory=5m;
+markdown_limits conversion_memory=5m;
 
 # Disable conversion for large pages
 location /large-content {
@@ -1604,7 +1662,7 @@ sudo tail -50 /var/log/nginx/error.log
 
 1. Optimize resource limits:
    ```nginx
-   markdown_limits memory=5m timeout=3s;
+   markdown_limits conversion_memory=5m conversion_timeout=3s parser_timeout=3s;
    ```
 
 2. Disable for specific paths:
@@ -1649,6 +1707,7 @@ If you encounter issues not covered in this guide:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | DEB/RPM download commands now save responses to their intended artifact file names with curl -o options; AUTO_DISABLE_STALE_MODULE is passed through sudo env alongside VERSION |
 | 0.9.1 | 2026-07-28 | Codex | Clarified that Linux package commands require published tag assets and checksums; release-candidate matrix entries are not downloadable packages. |
 | 0.9.1 | 2026-07-17 | Codex | Verified installation guides, curl command patterns, and dynamic package naming for the upcoming v0.9.1 release. |
 | 0.8.3 | 2026-06-26 | Kang | 0.8.x release-line closeout: updated DEB/RPM and SOP manual-download examples to VERSION=0.8.3; refreshed release-line version references to current patch |

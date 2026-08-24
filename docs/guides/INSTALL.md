@@ -10,7 +10,7 @@ tag-specific: verify that the selected GitHub Release contains the exact asset
 and `SHA256SUMS` before downloading. If it does not, use the
 [Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
 
-> **Important:** Prebuilt packages are compiled against a specific nginx.org
+> **Important:** The project compiles prebuilt packages against a specific nginx.org
 > stable version. They are NOT universal shared libraries. NGINX validates
 > the module binary compatibility signature at load time, and loading will
 > fail if the signatures do not match. See
@@ -25,7 +25,7 @@ source build, Homebrew), see [INSTALLATION.md](./INSTALLATION.md).
 
 Each prebuilt package targets a specific combination of:
 
-- **NGINX version** (exact nginx.org stable release, e.g., `1.26.3`)
+- **NGINX version** (exact nginx.org stable release, for example `1.26.3`)
 - **Architecture** (`amd64`/`x86_64` or `arm64`/`aarch64`)
 
 ### Determine Your Environment
@@ -148,8 +148,34 @@ Content-Type: text/markdown; charset=utf-8
 Vary: Accept
 ```
 
-If the response returns `Content-Type: text/markdown`, the module is loaded and
-converting HTML to Markdown for agent clients.
+To verify the module loaded and conversion works, request a known HTML page
+and assert the converted Markdown body. For example, an `<h1>Welcome</h1>`
+heading must appear as `# Welcome` in the response body. Do not treat a
+`Content-Type: text/markdown` response alone as evidence that conversion
+succeeded — it only confirms the label applied to the response. The check
+below captures the HTTP status and Content-Type from the response headers and
+fails (non-zero exit) unless the status is `200`, the media type is
+`text/markdown`, and the body actually contains the converted heading, so a
+successful exit is deterministic evidence of conversion:
+
+```bash
+# Serve an <h1>Welcome</h1> page from a local fixture, or point the first
+# curl at any page on your site that renders a known <h1>:
+headers=$(mktemp)
+body=$(mktemp)
+status=$(curl -s -o "$body" -D "$headers" -H "Accept: text/markdown" \
+    -w '%{http_code}' http://localhost/)
+content_type=$(awk 'BEGIN{IGNORECASE=1} /^Content-Type:/{sub(/\r$/,""); print $2}' "$headers")
+if [[ "$status" == "200" ]] \
+    && [[ "$content_type" == text/markdown* ]] \
+    && grep -Fq '# Welcome' "$body"; then
+    echo "conversion verified"
+    exit 0
+else
+    echo "conversion NOT verified: status=$status content_type=$content_type" >&2
+    exit 1
+fi
+```
 
 ---
 
@@ -202,9 +228,10 @@ For the full list of supported versions and architectures, see the
 [Compatibility Matrix](./INSTALLATION.md#7-compatibility-matrix).
 
 For Kubernetes and Helm deployments, see
-[`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md); the Helm chart runs
-with stock NGINX by default and requires an explicit module-enabled image plus
-`markdown.loadModule` when markdown directives are enabled.
+[`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md). The Helm chart runs
+with stock NGINX by default. To use the module, deploy an explicit
+module-enabled image. When `markdown.enabled=true`, set `markdown.loadModule`
+to the in-container module path.
 
 ### Automated Diagnostics
 

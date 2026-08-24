@@ -58,7 +58,7 @@ def test_version_classification_correctness(minor, patch):
 
 
 @pytest.mark.skipif(
-    um.filter_versions is None, reason="filter_versions not yet implemented (Task 1.4)"
+    um.filter_versions is None, reason="filter_versions is not implemented"
 )
 @given(
     versions=st.lists(_nginx_version, min_size=0, max_size=30),
@@ -278,6 +278,29 @@ def test_load_matrix_valid(tmp_path):
     assert len(manual_entries) == 1
     assert manual_entries[0]["nginx"] == "1.24.0"
     assert manual_entries[0]["managed_by"] == "manual"
+
+
+def test_merge_matrix_omits_redundant_source_only_version():
+    """A source fallback row must not duplicate a fully covered version."""
+    auto_entries = [
+        {
+            "nginx": "1.26.3",
+            "os_type": "glibc",
+            "arch": "x86_64",
+            "support_tier": "full",
+        },
+    ]
+    manual_entries = [
+        {
+            "nginx": "1.26.3",
+            "os_type": "n/a",
+            "arch": "any",
+            "support_tier": "source_only",
+            "managed_by": "manual",
+        },
+    ]
+
+    assert um.merge_matrix(auto_entries, manual_entries) == auto_entries
 
 
 def test_load_matrix_auto_explicit(tmp_path):
@@ -645,6 +668,160 @@ def test_property11_pin_entry_preservation(auto_versions, manual_entries):
         ), f"Support tier changed for manual entry {key}"
 
 
+def test_replace_canonical_dynamic_entries_preserves_stale_supported_rows():
+    """Keep every non-generated row while replacing generated rows.
+
+    Stale supported/candidate rows survive the update but are rebound to the
+    current digest/ABI alongside the regenerated rows (uniform rebind).
+    """
+    data = {
+        "entries": [
+            {
+                "nginx_version": "1.26.3",
+                "libc": "glibc",
+                "arch": "amd64",
+                "artifact_type": "dynamic-module",
+                "support_tier": "supported",
+            },
+            {
+                "nginx_version": "1.24.0",
+                "libc": "glibc",
+                "arch": "amd64",
+                "artifact_type": "dynamic-module",
+                "support_tier": "candidate",
+            },
+            {
+                "nginx_version": "1.22.1",
+                "libc": "glibc",
+                "arch": "amd64",
+                "artifact_type": "dynamic-module",
+                "support_tier": "supported",
+            },
+            {"artifact_type": "source-archive", "name": "source"},
+        ]
+    }
+    merged = [
+        {
+            "nginx": "1.26.3",
+            "os_type": "glibc",
+            "arch": "x86_64",
+        }
+    ]
+
+    um._replace_canonical_dynamic_entries(data, merged)
+
+    dynamic = [
+        entry
+        for entry in data["entries"]
+        if entry.get("artifact_type") == "dynamic-module"
+    ]
+    # One generated row replaces the canonical 1.26.3 row; the two stale
+    # supported/candidate rows (1.24.0, 1.22.1) must survive untouched.
+    assert len(dynamic) == 3
+
+    keys = {
+        (
+            entry.get("nginx_version"),
+            entry.get("libc"),
+            # The shared identity resolver normalizes arch to the
+            # x86_64/aarch64 form; map back to the presentation form
+            # (amd64/arm64) used by the matrix document.
+            {"x86_64": "amd64", "aarch64": "arm64"}.get(
+                um._matrix_entry_identity(entry)[2],
+                um._matrix_entry_identity(entry)[2],
+            ),
+        )
+        for entry in dynamic
+    }
+    assert ("1.26.3", "glibc", "amd64") in keys
+    assert ("1.24.0", "glibc", "amd64") in keys
+    assert ("1.22.1", "glibc", "amd64") in keys
+
+    # Non-generated artifacts must pass through unchanged.
+    assert {"artifact_type": "source-archive", "name": "source"} in data["entries"]
+
+    # Every dynamic-module row — generated or stale — carries the current
+    # binding keys (uniform rebind contract).
+    for entry in dynamic:
+        assert entry.get("feature_manifest_digest") == um._feature_manifest_digest()
+        assert entry.get("abi_version") == um._frozen_abi_version()
+
+
+def test_replace_canonical_dynamic_entries_normalizes_alias_rows():
+    """Alias-shaped rows must match generated entries without a KeyError."""
+    data = {
+        "entries": [
+            {
+                "nginx": "1.26.3",
+                "os_type": "glibc",
+                "target": "amd64",
+                "artifact_type": "dynamic-module",
+                "support_tier": "supported",
+            }
+        ]
+    }
+    merged = [
+        {
+            "nginx_version": "1.26.3",
+            "libc": "glibc",
+            "target": "amd64",
+            "support_tier": "full",
+        }
+    ]
+
+    um._replace_canonical_dynamic_entries(data, merged)
+
+    dynamic = [
+        entry
+        for entry in data["entries"]
+        if entry.get("artifact_type") == "dynamic-module"
+    ]
+    assert len(dynamic) == 1
+    assert dynamic[0]["nginx_version"] == "1.26.3"
+    assert dynamic[0]["libc"] == "glibc"
+    assert dynamic[0]["target"] == "amd64"
+    assert "nginx" not in dynamic[0]
+    assert "os_type" not in dynamic[0]
+    assert "arch" not in dynamic[0]
+    # support_tier is REQUIRED by the compatibility-document schema and
+    # is retained on existing rows (the alias row carries "supported").
+    assert dynamic[0]["support_tier"] == "supported"
+
+
+def test_replace_canonical_dynamic_entries_rejects_duplicate_identities():
+    """Conflicting metadata must not be silently selected by dictionary order."""
+    data = {
+        "entries": [
+            {
+                "nginx_version": "1.26.3",
+                "libc": "glibc",
+                "arch": "amd64",
+                "artifact_type": "dynamic-module",
+                "release_blocking": True,
+                "owner_workflow": "release-packages.yml",
+            },
+            {
+                "nginx": "1.26.3",
+                "os_type": "glibc",
+                "target": "amd64",
+                "artifact_type": "dynamic-module",
+                "release_blocking": False,
+                "owner_workflow": "release-binaries.yml",
+            },
+        ]
+    }
+    merged = [
+        {
+            "nginx_version": "1.26.3",
+            "libc": "glibc",
+            "target": "x86_64",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="duplicate existing dynamic"):
+        um._replace_canonical_dynamic_entries(data, merged)
+
+
 # ---------------------------------------------------------------------------
 # Property 12 — Key Uniqueness After Merge
 # ---------------------------------------------------------------------------
@@ -906,3 +1083,133 @@ def test_write_matrix_cleans_up_temp_on_failure(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # Helper for doc-marker tests
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Canonical dynamic entry shape (release-matrix validator contract)
+# ---------------------------------------------------------------------------
+
+
+DROPPED_CANONICAL_KEYS = {
+    "nginx_channel",
+    "test_level",
+    "release_blocking",
+    "owner_workflow",
+    "managed_by",
+}
+
+LEGACY_ALIAS_KEYS = {"nginx", "os_type", "arch"}
+
+CANONICAL_REQUIRED_KEYS = {
+    "nginx_version",
+    "os",
+    "libc",
+    "target",
+    "artifact_type",
+    "support_tier",
+    "feature_manifest_digest",
+    "abi_version",
+}
+
+
+def test_canonical_dynamic_entry_new_row_binds_frozen_artifacts():
+    """A new dynamic-module row carries the frozen binding keys and no
+    dropped legacy keys, matching the release-matrix validator contract."""
+    row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.28.0",
+            "libc": "glibc",
+            "target": "x86_64-unknown-linux-gnu",
+        }
+    )
+    assert set(row) == CANONICAL_REQUIRED_KEYS
+    assert not DROPPED_CANONICAL_KEYS.intersection(row)
+    assert not LEGACY_ALIAS_KEYS.intersection(row)
+    assert row["feature_manifest_digest"] == um._feature_manifest_digest()
+    assert row["abi_version"] == um._frozen_abi_version()
+    assert row["target"] == "x86_64-unknown-linux-gnu"
+
+
+def test_canonical_dynamic_entry_new_row_constructs_target_from_arch():
+    """An aarch64 identity without an explicit target still produces a
+    valid canonical target string."""
+    row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.28.0",
+            "libc": "musl",
+            "arch": "aarch64",
+        }
+    )
+    assert row["target"] == "aarch64-unknown-linux-musl"
+
+
+def test_canonical_dynamic_entry_existing_row_refreshes_bindings():
+    """An existing canonical row is rebound to the current digest/ABI and
+    gains no dropped legacy keys or legacy aliases."""
+    existing = {
+        "nginx_version": "1.24.0",
+        "os": "debian12",
+        "libc": "glibc",
+        "target": "x86_64-unknown-linux-gnu",
+        "artifact_type": "dynamic-module",
+        "feature_manifest_digest": "sha256:abc",
+        "abi_version": 2,
+    }
+    row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.24.0",
+            "libc": "glibc",
+            "target": "x86_64-unknown-linux-gnu",
+        },
+        existing,
+    )
+    assert row["feature_manifest_digest"] == um._feature_manifest_digest()
+    assert row["abi_version"] == um._frozen_abi_version()
+    assert not DROPPED_CANONICAL_KEYS.intersection(row)
+    # `arch` is the compatibility document's presentation key (the
+    # evidence document's legacy-alias semantics do not apply here);
+    # only the true legacy updater aliases must be absent.
+    assert not {"nginx", "os_type"}.intersection(row)
+
+
+def test_canonical_dynamic_entry_existing_row_preserves_arch_key():
+    """An existing compatibility row carrying the `arch` presentation key
+    (the real tools/release-matrix.json shape, which has no `target` key)
+    must keep `arch` intact so the projected row still resolves a complete
+    nginx/os/arch identity."""
+    existing = {
+        "nginx_version": "1.24.0",
+        "os": "linux",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "dynamic-module",
+        "feature_manifest_digest": "sha256:abc",
+        "abi_version": 2,
+        "nginx_channel": "oldstable",
+        "test_level": "smoke-test",
+        "support_tier": "supported",
+        "release_blocking": True,
+        "owner_workflow": ".github/workflows/release-packages.yml",
+    }
+    row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.24.0",
+            "libc": "glibc",
+            "arch": "amd64",
+        },
+        existing,
+    )
+    assert row["arch"] == "amd64"
+    assert row["nginx_version"] == "1.24.0"
+    assert row["libc"] == "glibc"
+    # The projected row must still resolve a complete identity (the P1
+    # regression: `entry.pop("arch")` made _matrix_entry_identity raise).
+    assert um._matrix_entry_identity(row) == ("1.24.0", "glibc", "x86_64")
+    assert row["feature_manifest_digest"] == um._feature_manifest_digest()
+    assert row["abi_version"] == um._frozen_abi_version()
+    assert not DROPPED_CANONICAL_KEYS.intersection(row)
+    assert not {"nginx", "os_type"}.intersection(row)
+    # support_tier is REQUIRED by the compatibility-document schema and
+    # must be retained on existing rows (CRITICAL regression: it was
+    # previously dropped, producing schema-invalid rows).
+    assert row["support_tier"] == "supported"

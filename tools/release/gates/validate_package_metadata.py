@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Package metadata validator for v0.7.0 release gates.
+Package metadata validator for v0.7.0 release gates. 由 0.7.0 引入，被 0.8.0+ 门禁复用
 
 Validates that the package metadata files used by the v0.7.0 workflow exist
 and contain required fields/paths:
@@ -37,7 +37,6 @@ RPM_SPEC = (
 )
 GITHUB_WORKFLOWS_DIR = PROJECT_ROOT / ".github" / "workflows"
 RELEASE_PACKAGES_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-packages.yml"
-RELEASE_DEB_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-deb.yml"
 RELEASE_RPM_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-rpm.yml"
 SIGN_AND_PUBLISH_WORKFLOW = GITHUB_WORKFLOWS_DIR / "sign-and-publish.yml"
 CHECKSUMS_FILE = PROJECT_ROOT / "packaging" / "checksums.sha256"
@@ -69,9 +68,8 @@ NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
-    'nginx (>= ${NGINX_VERSION_FLOOR})',
-    'nginx (<< ${NGINX_VERSION_CEIL})',
-    "nginx >= 1:${NGINX_VERSION_FLOOR}",
+    'nginx (= ${NGINX_VERSION})',
+    "nginx = 1:${NGINX_VERSION}",
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
     "packager: deb",
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
@@ -93,11 +91,9 @@ MODULE_NAME_SURFACES = [
     NFPM_CONFIG,
     RPM_SPEC,
     PROJECT_ROOT / "packaging" / "rpm" / "nginx-markdown-module.spec",
-    PROJECT_ROOT / "packaging" / "debian" / "postinst",
     PROJECT_ROOT / "packaging" / "snippets" / "mod-markdown-for-agents.conf",
     PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / "mod-markdown.conf",
     NFPM_POSTINSTALL,
-    PROJECT_ROOT / "packaging" / "scripts" / "build-deb.sh",
     SMOKE_TEST_BASIC,
     PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-diagnostics.sh",
     PROJECT_ROOT / "tools" / "release" / "gates" / "check_install_layout.sh",
@@ -106,12 +102,10 @@ MODULE_NAME_SURFACES = [
     PROJECT_ROOT / "docs" / "COMPATIBILITY.md",
     PROJECT_ROOT / "docs" / "guides" / "INSTALL.md",
     RELEASE_PACKAGES_WORKFLOW,
-    RELEASE_DEB_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
 ]
 RELEASE_VERSION_SURFACES = [
     RELEASE_PACKAGES_WORKFLOW,
-    RELEASE_DEB_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
     *RELEASE_DOCKERFILES,
 ]
@@ -120,9 +114,6 @@ RELEASE_ARTIFACT_SNIPPETS = {
         "name: pkg-deb-${{ matrix.nginx_version }}-${{ matrix.arch }}",
         "name: pkg-rpm-${{ matrix.nginx_version }}-${{ matrix.arch }}",
         "name: pkg-${{ matrix.format }}-${{ matrix.nginx_version }}-${{ matrix.arch }}",
-    ],
-    RELEASE_DEB_WORKFLOW: [
-        "name: pkg-deb-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.nginx_channel }}",
     ],
     RELEASE_RPM_WORKFLOW: [
         "name: pkg-rpm-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.nginx_channel }}",
@@ -134,27 +125,13 @@ ARCH_RUNNER_SNIPPET = (
     "'ubuntu-24.04' }}"
 )
 STANDALONE_CONTAINER_BASH_SHELL = "defaults:\n      run:\n        shell: bash"
-STANDALONE_DEB_SNIPPETS = [
-    "INPUT_VERSION: ${{ inputs.version }}",
-    './packaging/scripts/validate-version.sh "$INPUT_VERSION"',
-    f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
-    "/usr/share/doc/nginx-markdown-for-agents",
-    "/usr/share/licenses/nginx-markdown-for-agents",
-    "docs/guides/INSTALL.md",
-    "docs/COMPATIBILITY.md",
-    'NGINX_VERSION_FLOOR="${NGINX_MAJOR}.${NGINX_MINOR}.0"',
-    'NGINX_VERSION_CEIL="${NGINX_MAJOR}.$((NGINX_MINOR + 1)).0"',
-    "tools/release/gates/check_install_layout.sh dist/*.deb",
-    '"dist/${PKG_NAME}_${PKG_VERSION}_nginx-${NGINX_VERSION}_${PKG_ARCH}.deb"',
-]
 STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     "INPUT_VERSION: ${{ inputs.version }}",
     './packaging/scripts/validate-version.sh "$INPUT_VERSION"',
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "docs/guides/INSTALL.md",
     "docs/COMPATIBILITY.md",
-    'NGINX_VERSION_FLOOR="${NGINX_MAJOR}.${NGINX_MINOR}.0"',
-    'NGINX_VERSION_CEIL="${NGINX_MAJOR}.$((NGINX_MINOR + 1)).0"',
+    '--define "nginx_version ${NGINX_VERSION}"',
     "tools/release/gates/check_install_layout.sh dist/*.rpm",
 ]
 STANDALONE_VERSION_FORBIDDEN_SNIPPETS = [
@@ -178,7 +155,7 @@ SIGN_AND_PUBLISH_FORBIDDEN_SNIPPETS = [
 ]
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
-    "Requires:       nginx >= 1:%{nginx_version_floor}",
+    "Requires:       nginx = 1:%{nginx_version}",
     "Source0:        %{name}-%{version}.tar.gz",
     f"%setup -q -n {CANONICAL_PACKAGE_NAME}-%{{version}}",
     "# No-op: release-rpm.yml packages a prebuilt dynamic module.",
@@ -186,7 +163,6 @@ STANDALONE_RPM_SPEC_SNIPPETS = [
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
 ]
 FORBIDDEN_NAKED_EXACT_NGINX_DEPS = [
-    "nginx (= ${NGINX_VERSION})",
     "Requires:       nginx = %{nginx_version}",
 ]
 SMOKE_RPM_REPO_SNIPPETS = [
@@ -263,25 +239,25 @@ PACKAGE_DOC_REQUIRED_SNIPPETS = {
     INSTALLATION_DOC: [
         "## 4.2 Linux Package Artifacts",
         "**Tier: Secondary** (v0.7.0+)",
-        "APT/YUM repository publishing is planned",
+        "The project plans APT/YUM repository publishing",
         CANONICAL_PACKAGE_NAME,
         CANONICAL_MODULE_SO,
     ],
     PACKAGE_INSTALLATION_DOC: [
         "GitHub Releases are the current distribution channel",
-        "Public APT/YUM repositories are planned but not available yet",
+        "The project plans public APT/YUM repositories but has not launched them yet",
         CANONICAL_PACKAGE_NAME,
         CANONICAL_MODULE_SO,
         "SHA256SUMS",
     ],
     PACKAGE_DISTRIBUTION_DOC: [
         "GitHub Releases",
-        "Active for v0.7.0+ release artifacts",
+        "Active for published release artifacts",
         "APT/YUM repository publishing is intentionally tracked as a future",
     ],
     GPG_KEY_MANAGEMENT_DOC: [
         "Public APT/YUM repositories are not available yet",
-        "future self-hosted repository publication",
+        "GPG key publication for repository metadata applies to future self-hosted",
         "PACKAGE_INSTALLATION.md",
     ],
 }
@@ -428,7 +404,15 @@ def validate_rpm_spec(result: ValidationResult) -> None:
 
 
 def validate_nginx_dependency_constraints(result: ValidationResult) -> None:
-    """Reject exact dependencies that use only the upstream source version."""
+    """Reject naked exact RPM dependencies without the nginx.org epoch prefix.
+
+    RPM requires the epoch prefix (1:) to disambiguate nginx.org package
+    epochs across minor branches; a naked `nginx = %{nginx_version}`
+    resolves against whatever epoch the local distro's nginx carries and
+    is therefore not a reliable exact pin.  DEB has no epoch concept and
+    `nginx (= ${NGINX_VERSION})` IS the correct exact form (asserted
+    positively via NFPM_REQUIRED_SNIPPETS).
+    """
     for path in (NFPM_CONFIG, RPM_SPEC):
         rel = path.relative_to(PROJECT_ROOT)
         content = read_safe(path)
@@ -880,24 +864,6 @@ def _check_minimum_count(
         result.fail(check_id, f"{message} ({count}/{minimum})")
 
 
-def _validate_standalone_deb(result: ValidationResult) -> None:
-    """Validate standalone DEB workflow matches canonical package layout."""
-    deb_workflow = read_safe(RELEASE_DEB_WORKFLOW)
-    if not deb_workflow:
-        result.fail("standalone-deb:exists",
-                    f"{RELEASE_DEB_WORKFLOW.name} not found")
-        return
-    _check_container_bash_shell(deb_workflow, "standalone-deb", result)
-    _check_snippets(
-        deb_workflow, STANDALONE_DEB_SNIPPETS, "standalone-deb",
-        RELEASE_DEB_WORKFLOW.name, result,
-    )
-    _check_forbidden_snippets(
-        deb_workflow, STANDALONE_VERSION_FORBIDDEN_SNIPPETS, "standalone-deb",
-        RELEASE_DEB_WORKFLOW.name, result,
-    )
-
-
 def _validate_standalone_rpm_workflow(result: ValidationResult) -> None:
     """Validate standalone RPM workflow matches canonical package layout."""
     rpm_workflow = read_safe(RELEASE_RPM_WORKFLOW)
@@ -939,8 +905,7 @@ def _validate_standalone_rpm_spec(result: ValidationResult) -> None:
 
 
 def validate_standalone_workflow_packaging(result: ValidationResult) -> None:
-    """Validate standalone DEB/RPM workflows match canonical package layout."""
-    _validate_standalone_deb(result)
+    """Validate the retained standalone RPM workflow and spec."""
     _validate_standalone_rpm_workflow(result)
     _validate_standalone_rpm_spec(result)
 

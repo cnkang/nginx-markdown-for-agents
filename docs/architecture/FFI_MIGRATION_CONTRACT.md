@@ -1,18 +1,20 @@
-# FFI Migration Contract — v0.9.1 Baseline
+# FFI Migration Contract — Historical v0.9.1 / Final v0.9.2
 
 ## Purpose and ownership
 
-This document inventories the coordinated Rust↔C boundary after the v0.9.1
-pre-v1 reset. Rust owns conversion and pure decision logic. C owns NGINX
-lifecycle, pools, chains, filters, headers, and request finalization.
+This document inventories the coordinated Rust↔C boundary after the v0.9.2
+release post-freeze. Rust owns conversion and pure decision logic. C owns
+NGINX lifecycle, pools, chains, filters, headers, and request finalization.
 
 This is a bundled internal ABI, not an external converter SDK. The canonical
-declarations are Rust source plus the generated header; the NGINX module is the
-supported consumer.
+declarations are Rust source plus the generated header. The NGINX module is
+the supported consumer.
 
-## ABI identity
+## Historical ABI identity
 
-The baseline identifier is `MARKDOWN_ABI_VERSION = 1`.
+The v0.9.1 baseline identifier was `MARKDOWN_ABI_VERSION = 1`. The current
+0.9.2 bundled boundary uses ABI version 2. See
+[FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) for the active values.
 `markdown_abi_version()` returns the linked Rust value. NGINX checks it during
 preconfiguration and refuses directive parsing and startup on mismatch. Cargo
 package version is
@@ -31,24 +33,28 @@ The following families have current NGINX production consumers:
 | Conditional | `markdown_decide_conditional` | Cache mode, precedence, and bypass decision |
 | Header plan | `markdown_build_header_plan`, `markdown_header_plan_init`, `markdown_header_plan_free` | Rust-owned atomic plan, C application |
 | Base URL | `markdown_trusted_proxies_new`, `markdown_trusted_proxies_push`, `markdown_trusted_proxies_free`, `markdown_decide_base_url` | CIDR-aware trusted forwarding decision |
+| Initialization helpers | `markdown_base_url_input_init` | Base URL input initialization for trusted-proxy decision |
 | Decompression | `markdown_decompress_bounded`, `markdown_decomp_result_init`, `markdown_decompress_free` | Bounded Rust decompression path |
-| Config conflicts | `markdown_detect_conflicts`, `markdown_free_conflicts` | Config-time profile/explicit conflict list |
 | Error/reason | `markdown_classify_error_code`, `markdown_reason_code_str`, `markdown_reason_code_metric_key`, `markdown_reason_code_count` | Canonical cross-language classification and labels |
 | Streaming | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` | Streaming request lifecycle |
-| Incremental | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | Bounded incremental conversion |
-| ABI alignment | `markdown_abi_version` | Startup-enforced Rust/C version match |
+| Incremental | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | **Retained internal legacy ABI symbols** (not production consumers): exported for the feature-gated C callers under `MARKDOWN_INCREMENTAL_ENABLED`; supported configurations do not route production requests through this path |
+| ABI alignment | `markdown_abi_version`, `markdown_abi_header_hash`, `markdown_abi_symbol_set_hash`, `markdown_abi_layout_fingerprint` | Startup-enforced version, generated-header, exported-symbol, and layout match |
+| Dynamic configuration | `markdown_dynconf_parse`, `markdown_dynconf_result_init`, `markdown_dynconf_result_free` | Runtime dynconf parsing and result handling |
+| Encoding chain and hash helpers | `markdown_chain_decode_free`, `markdown_chain_decode_result_init`, `markdown_decode_encoding_chain`, `markdown_parse_encoding_chain`, `markdown_sha256_hex` | Bounded decompression chain decode and SHA-256 hex helpers |
 
 The generated header contains only the bundled production boundary. Test-only
 Rust helpers are not emitted as C declarations.
 
 The canonical reason-code source is
-`components/rust-converter/src/decision/reason_code.rs`. The
+`components/rust-converter/reason_registry.toml`. The generated
+`components/rust-converter/src/decision/reason_code.rs` is a projection. The
 `markdown_reason_code_str`, `markdown_reason_code_metric_key`, and
-`markdown_reason_code_count` exports expose that source to the C consumer;
-reason-code variants and discriminants must remain synchronized across this
-boundary.
+`markdown_reason_code_count` exports expose that source to the C consumer.
+Diagnostics use the generated C reason metadata header for bounded lookup and
+compatibility aliases. Reason-code variants and discriminants must
+remain synchronized across both generated projections and this FFI boundary.
 
-## Removed v0.9.1 entries
+## Historical v0.9.1 removals
 
 | Removed entry | Evidence | Replacement |
 |---------------|----------|-------------|
@@ -67,28 +73,27 @@ boundary.
 | `markdown_incremental_new`, `markdown_streaming_new` | Redundant wrappers hid constructor error codes | Corresponding `_new_with_code` exports |
 | `markdown_streaming_finish`, `markdown_streaming_free`, `markdown_streaming_reason` | No production caller; duplicated finalize/abort/error-code paths | `finalize`, `abort`, `safe_finish`, and return codes |
 
+## Final v0.9.2 removals
+
+| Removed entry | Evidence | Replacement |
+|---------------|----------|-------------|
+| Profile/conflict FFI snapshots and `markdown_*conflicts` | No production C consumer; the pre-v1 profile model was not part of the active request boundary | C owns the active merged configuration and Rust exposes only consumed request-path decisions |
+
 ## Shared struct policy
 
 ### `MarkdownOptions` and `StreamingOptions`
 
 These remain separate because their lifecycles and consumers differ. Repeated
-semantic fields must be updated together, but v0.9.1 does not combine the
+semantic fields must update together, but the final v0.9.2 contract does not combine the
 structs merely for aesthetic deduplication. Both flavor fields accept only 0
-(CommonMark) and 1 (GFM).
-
-### Config/profile structs
-
-`FFIExplicitConfig` and `FFIEffectiveConfig` contain one streaming field:
-`streaming` (`off=0`, `auto=1`, `force=2`). There is no independent engine
-field. `markdown_detect_conflicts` consumes these snapshots at configuration
-time; request-path semantics remain in the C effective configuration.
+(CommonMark) and 1 (GFM) in the final v0.9.2 contract.
 
 ### Results and handles
 
 Result pointer fields are Rust-owned until their matching free function.
-Opaque converter, streaming, incremental, header-plan, and trusted-proxy
-handles are consumed only by their documented finalizer/free operation. C must
-not use a handle or borrowed pointer after consumption.
+The documented finalizer/free operation consumes each opaque converter,
+streaming, incremental, header-plan, and trusted-proxy handle. C must not use a
+handle or borrowed pointer after consumption.
 
 ## Initialization contract
 
@@ -108,24 +113,25 @@ explicitly adopted and validated size-tagged struct protocol.
 
 ## Error and panic contract
 
-Error constants are defined in Rust and emitted to the header. C classification
+Rust defines error constants and emits them to the header. C classification
 must cover every code in the relevant category. Non-trivial exports catch Rust
-panics; output structs are fail-safe before the catch and committed only after
+panics. Output structs are fail-safe before the catch and committed only after
 success. Cleanup helpers also catch panics so unwinding never crosses C.
 
-NULL and empty inputs are validated independently on both sides of the
-boundary. Empty output buffers are represented as `NULL`/0. No C allocator may
+Both sides of the boundary validate NULL and empty inputs independently at
+the boundary. Empty output buffers appear as `NULL`/0. No C allocator may
 free Rust-owned memory.
 
 ## v1 freeze
 
-After v0.9.1, existing layouts, discriminants, ownership rules, and export
-signatures are frozen for the bundled v1 contract. Prefer new structs or
+After the v0.9.2 release post-freeze, existing layouts, discriminants,
+ownership rules, and export signatures are frozen for the bundled v1 contract.
+Prefer new structs or
 exports for additive work. Any permitted incompatible change increments
 `MARKDOWN_ABI_VERSION`, updates both halves atomically, adds mismatch and layout
-tests, and is called out as breaking release behavior.
+tests, and the release notes call it out as breaking behavior.
 
-An external third-party ABI can be promised only through a separate decision
+The project can promise an external third-party ABI only through a separate decision
 that publishes a standalone SDK/library, support matrix, symbol/versioning
 policy, and conformance suite. Until then, third-party consumers must not infer
 support from the generated header.

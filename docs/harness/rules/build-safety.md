@@ -1,6 +1,6 @@
 ---
 domain: build-safety
-rules: [56, 57, 58, 59]
+rules: [56, 57, 58, 59, 70]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/**"
@@ -8,7 +8,7 @@ paths:
   - "tools/**"
 ---
 
-# Build Safety Rules (56–59)
+# Build Safety Rules (56–59, 70)
 
 ## Rule 56: Orphan Comment Closers
 
@@ -33,24 +33,38 @@ compilation.
 
 ## Rule 57: #ifdef-Guarded Function Visibility
 
-**Principle**: Functions declared inside `#ifdef FEATURE_GUARD` blocks must
-not be referenced outside that guard. When a function is needed in both
-feature-enabled and feature-disabled builds, it must be declared outside the
-`#ifdef` guard. This catches the common mistake of adding a function
-declaration inside an `#ifdef` but forgetting to move it outside when the
-function is referenced from non-feature-gated code.
+**Principle**: Code outside an `#ifdef FEATURE_GUARD` block must not reference
+functions whose declaration or definition exists only inside that guard. Any
+function referenced by non-feature-gated code must have both its declaration
+and its definition available in every supported feature build, including the
+feature-disabled build. When both builds need a function, keep the declaration
+and implementation outside the `#ifdef` (or provide equivalent definitions in
+both branches). This catches the common mistake of adding a function inside a
+feature guard but forgetting that non-feature-gated paths still call it.
+
+The detector enforces this today for `MARKDOWN_STREAMING_ENABLED` — the only
+feature guard that gates function visibility in the module. A new feature
+guard that gates functions must extend `GUARD_NAME` in
+`detect_ifdef_guard_visibility.sh` (and its tests) before the rule claims
+coverage for it.
 
 **Historical issue**: `a29d1a7b` — `ngx_http_markdown_reason_streaming_skip_compressed`
-was declared inside `#ifdef MARKDOWN_STREAMING_ENABLED` but was referenced
-from non-streaming code paths. The function had to be moved outside the
+the function sat inside `#ifdef MARKDOWN_STREAMING_ENABLED` but code referenced it
+from non-streaming code paths. The team had to move the function outside the
 `#ifdef` guard so it remains available in feature-disabled builds.
 
 **Detection**: `bash tools/harness/detect_ifdef_guard_visibility.sh`
 - Parses the header file to find function identifiers declared inside
   `#ifdef MARKDOWN_STREAMING_ENABLED` blocks
+- Also collects function **definitions** inside the guard across every
+  `.c`/`.h` file, so a guarded-only definition behind an unguarded
+  declaration is still checked
 - For each guarded function, searches all .c and .h files for references
   that appear outside the `#ifdef` guard
-- Flags any reference found outside the guard as a visibility gap
+- Flags any reference found outside the guard as a visibility gap, unless
+  the symbol also has an equivalent feature-disabled definition (available
+  in the non-streaming build), in which case the call is linkable and is
+  not reported
 
 **Verification**: `bash tools/harness/detect_ifdef_guard_visibility.sh`
 
@@ -58,11 +72,20 @@ from non-streaming code paths. The function had to be moved outside the
 
 **Principle**: Direct interpolation of GitHub Actions inputs (`${{ inputs.* }}`)
 into shell `run:` blocks allows command injection via crafted input values.
-Inputs must be routed through environment variables (`env:`) and referenced
+Inputs must route through environment variables (`env:`) and reference
 only as env vars in shell scripts. This prevents command substitution attacks
 where a malicious input value contains shell metacharacters.
 
-**Historical issue**: `d0d5730c` — `inputs.version` was interpolated directly
+**Shell-safety requirements**: Expand environment variables that carry
+workflow input values inside double quotes when passing them to tools
+(for example `"$VERSION"`), so the value arrives as a single argument
+even when it contains whitespace or shell metacharacters. Shells must not
+evaluate those values with `eval`, and the scripts must not rely on
+unquoted expansion or word splitting to transform them. Any validation
+of the value (regex or otherwise) must run before the scripts expand the
+value into a command.
+
+**Historical issue**: `d0d5730c` — the workflow interpolated `inputs.version` directly
 into shell `run:` blocks before regex validation, allowing command substitution
 in the signing environment. Also found in `release-rpm.yml` during harness
 analysis.
@@ -93,6 +116,33 @@ code (429/503). The fix returned `conf->error_status` in all reject paths.
 - Scans C source files containing reject/error handling code
 - Flags `return NGX_HTTP_BAD_GATEWAY` in reject/error context
 - Skips lines containing `conf->error_status` (correct pattern)
-- Advisory mode by default; `--strict` for blocking
+- Advisory mode by default, `--strict` for blocking
 
 **Verification**: `bash tools/harness/detect_hardcoded_http_status.sh`
+
+---
+
+### 70. Scratch and temporary file hygiene
+Historical issues: `0e32598a` (five CodeRabbit-digest helper scripts
+swept into a functional commit), `8df10b9c` (`pr_body.md` draft tracked
+at repository root).  All six remained tracked at HEAD for days, yet no gate
+detected them.
+
+Required:
+- One-off analysis scripts, PR drafts, and notes files must not enter
+  functional commits.  Repository-root-level `*.py`/`*.sh` files are
+  forbidden unless they are a documented external contract (the only
+  current exception is `build.sh`, the ClusterFuzzLite/OSS-Fuzz
+  entrypoint).
+- Never commit editor and system junk (`*.bak`, `*.orig`, `*.rej`, `*~`,
+  `.swp`, `.DS_Store`, `Thumbs.db`).
+- Test sources legitimately named `parse_*_test.*` / `test_*` are exempt.
+  The scratch-prefix rule applies only to non-test script/doc files.
+- Intentional exceptions require an allowlist entry with a written
+  justification in the detector.
+
+Verification:
+- `python3 tools/harness/detect_scratch_files.py` — full tracked-tree
+  audit; blocking harness gate.
+- `python3 tools/harness/detect_scratch_files.py --staged` — pre-commit
+  mode wired into `.pre-commit-config.yaml`.

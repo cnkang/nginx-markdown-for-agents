@@ -40,9 +40,13 @@ impl PageMetadata {
         Self::default()
     }
 
-    /// Estimate the total byte length of all populated metadata fields.
+    /// Estimate the physical heap bytes retained by populated metadata fields.
     ///
-    /// Counts the UTF-8 byte length of each `Some(String)` field and returns their saturating sum.
+    /// Counts each `Some(String)` field by allocated capacity (not logical
+    /// length) and returns their saturating sum.  The streaming parser
+    /// budget uses this to bound retained heap, so capacity — the memory
+    /// actually held — is the honest measure; `len` under-counts whenever
+    /// an allocation is larger than its content.
     ///
     /// # Examples
     ///
@@ -54,27 +58,27 @@ impl PageMetadata {
     ///     description: Some("bc".into()),
     ///     ..Default::default()
     /// };
-    /// assert_eq!(meta.bytes_estimate(), 3);
+    /// assert!(meta.bytes_estimate() >= 3);
     /// ```
     pub fn bytes_estimate(&self) -> usize {
         let mut total = 0usize;
         if let Some(s) = self.title.as_ref() {
-            total = total.saturating_add(s.len());
+            total = total.saturating_add(s.capacity());
         }
         if let Some(s) = self.description.as_ref() {
-            total = total.saturating_add(s.len());
+            total = total.saturating_add(s.capacity());
         }
         if let Some(s) = self.url.as_ref() {
-            total = total.saturating_add(s.len());
+            total = total.saturating_add(s.capacity());
         }
         if let Some(s) = self.image.as_ref() {
-            total = total.saturating_add(s.len());
+            total = total.saturating_add(s.capacity());
         }
         if let Some(s) = self.author.as_ref() {
-            total = total.saturating_add(s.len());
+            total = total.saturating_add(s.capacity());
         }
         if let Some(s) = self.published.as_ref() {
-            total = total.saturating_add(s.len());
+            total = total.saturating_add(s.capacity());
         }
         total
     }

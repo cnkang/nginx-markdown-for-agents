@@ -15,6 +15,9 @@
 #include <limits.h>
 #include <zlib.h>
 
+#include "markdown_converter.h"
+#include "ngx_http_markdown_filter_module.h"
+
 #ifndef NGX_MAX_SIZE_T_VALUE
 #define NGX_MAX_SIZE_T_VALUE ((size_t) -1)
 #endif
@@ -22,13 +25,442 @@
 /* Conditionally include brotli header if support is compiled in */
 #ifdef NGX_HTTP_BROTLI
 #include <brotli/decode.h>
-#endif
 
-#include "ngx_http_markdown_filter_module.h"
+typedef struct {
+    ngx_atomic_uint_t  *counter;
+    size_t              limit;
+    ngx_log_t          *log;
+} ngx_http_markdown_full_brotli_alloc_ctx_t;
+
+typedef struct {
+    ngx_atomic_uint_t  *counter;
+    size_t              reserved_size;
+} ngx_http_markdown_full_brotli_allocation_t;
+
+
+static ngx_int_t
+ngx_http_markdown_full_brotli_reserve(
+    ngx_atomic_uint_t *counter, size_t limit, size_t size)
+{
+    ngx_atomic_uint_t  current;
+    ngx_atomic_uint_t  next;
+
+    if (counter == NULL || limit == 0) {
+        return NGX_ERROR;
+    }
+
+    current = *counter;
+    for ( ;; ) {
+        if (current > limit || size > limit - current)
+        {
+            return NGX_ERROR;
+        }
+
+        next = current + (ngx_atomic_uint_t) size;
+        if (ngx_atomic_cmp_set(counter, current, next)) {
+            return NGX_OK;
+        }
+        current = *counter;
+    }
+}
+
+
+static void *
+ngx_http_markdown_full_brotli_alloc(void *opaque, size_t size)
+{
+    ngx_http_markdown_full_brotli_alloc_ctx_t  *ctx;
+    ngx_http_markdown_full_brotli_allocation_t  *allocation;
+    size_t                                       total;
+
+    ctx = opaque;
+    if (ctx == NULL || ctx->log == NULL || size == 0
+        || size > (size_t) -1
+            - sizeof(ngx_http_markdown_full_brotli_allocation_t))
+    {
+        return NULL;
+    }
+
+    if (size > (size_t) -1
+        - sizeof(ngx_http_markdown_full_brotli_allocation_t))
+    {
+        return NULL;
+    }
+    total = sizeof(ngx_http_markdown_full_brotli_allocation_t) + size;
+    if (ngx_http_markdown_full_brotli_reserve(
+            ctx->counter, ctx->limit, total) != NGX_OK)
+    {
+        return NULL;
+    }
+
+    allocation = ngx_alloc(total, ctx->log);
+    if (allocation == NULL) {
+        /*
+         * Roll back the reserved budget.  NGINX workers are single-threaded
+         * event loops (one worker per process), so the atomic counter has no
+         * real contention here — the CAS/atomic discipline is retained for
+         * Rule 42 volatile/atomic consistency and metrics-snapshot safety,
+         * not for cross-thread synchronization.
+        */
+        (void) ngx_atomic_fetch_add(
+            ctx->counter, -((ngx_atomic_int_t) total));
+        return NULL;
+    }
+
+    allocation->counter = ctx->counter;
+    allocation->reserved_size = total;
+    return allocation + 1;
+}
+
+
+static void
+ngx_http_markdown_full_brotli_free(void *opaque, void *address)
+{
+    ngx_http_markdown_full_brotli_allocation_t  *allocation;
+    ngx_atomic_uint_t                           *counter;
+    size_t                                       reserved_size;
+
+    (void) opaque;
+    if (address == NULL) {
+        return;
+    }
+
+    allocation =
+        ((ngx_http_markdown_full_brotli_allocation_t *) address) - 1;
+    counter = allocation->counter;
+    reserved_size = allocation->reserved_size;
+    ngx_free(allocation);
+    (void) ngx_atomic_fetch_add(
+        counter, -((ngx_atomic_int_t) reserved_size));
+}
+#endif
 
 static u_char ngx_http_markdown_encoding_gzip[] = "gzip";
 static u_char ngx_http_markdown_encoding_deflate[] = "deflate";
 static u_char ngx_http_markdown_encoding_br[] = "br";
+static u_char ngx_http_markdown_content_encoding_header[] =
+    "Content-Encoding";
+
+static ngx_flag_t ngx_http_markdown_is_content_encoding_header(
+    const ngx_table_elt_t *header);
+static ngx_int_t ngx_http_markdown_measure_content_encoding(
+    ngx_http_request_t *r, const ngx_str_t **single_value,
+    ngx_uint_t *match_count, size_t *total_len);
+static ngx_int_t ngx_http_markdown_add_content_encoding_length(
+    size_t value_len, ngx_uint_t match_count, size_t *total_len);
+static ngx_int_t ngx_http_markdown_copy_content_encoding(
+    ngx_http_request_t *r, u_char *data, size_t *written_out);
+
+
+static ngx_flag_t
+ngx_http_markdown_is_content_encoding_header(const ngx_table_elt_t *header)
+{
+    return header != NULL && header->hash != 0
+           && header->key.data != NULL
+           && header->key.len == sizeof("Content-Encoding") - 1
+           && ngx_strncasecmp(header->key.data,
+                              ngx_http_markdown_content_encoding_header,
+                              sizeof("Content-Encoding") - 1) == 0;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_add_content_encoding_length(
+    size_t value_len, ngx_uint_t match_count, size_t *total_len)
+{
+    if (match_count != 0) {
+        if (*total_len > ((size_t) -1) - 2) {
+            return NGX_ERROR;
+        }
+        *total_len += 2;
+    }
+    if (value_len > ((size_t) -1) - *total_len) {
+        return NGX_ERROR;
+    }
+    *total_len += value_len;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_measure_content_encoding(
+    ngx_http_request_t *r, const ngx_str_t **single_value,
+    ngx_uint_t *match_count, size_t *total_len)
+{
+    if (r == NULL || single_value == NULL || match_count == NULL
+        || total_len == NULL)
+    {
+        return NGX_ERROR;
+    }
+
+    *single_value = NULL;
+    *match_count = 0;
+    *total_len = 0;
+
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        const ngx_table_elt_t *headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
+            if (!ngx_http_markdown_is_content_encoding_header(&headers[i])) {
+                continue;
+            }
+            if (headers[i].value.len > 0 && headers[i].value.data == NULL) {
+                return NGX_ERROR;
+            }
+
+            if (*match_count == 0) {
+                *single_value = &headers[i].value;
+            }
+            if (ngx_http_markdown_add_content_encoding_length(
+                    headers[i].value.len, *match_count, total_len)
+                != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+            (*match_count)++;
+        }
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data,
+                                        size_t *written_out)
+{
+    ngx_flag_t        first;
+    size_t             written;
+
+    if (r == NULL || data == NULL || written_out == NULL) {
+        return NGX_ERROR;
+    }
+
+    first = 1;
+    written = 0;
+    *written_out = 0;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        const ngx_table_elt_t *headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
+            if (!ngx_http_markdown_is_content_encoding_header(&headers[i])) {
+                continue;
+            }
+            if (!first) {
+                data[written++] = ',';
+                data[written++] = ' ';
+            }
+            if (headers[i].value.len > 0) {
+                ngx_memcpy(data + written, headers[i].value.data,
+                           headers[i].value.len);
+            }
+            written += headers[i].value.len;
+            first = 0;
+        }
+    }
+
+    *written_out = written;
+    return NGX_OK;
+}
+
+/*
+ * Collect all Content-Encoding response header fields in received order.
+ *
+ * The values are concatenated with a comma+space separator, matching the
+ * RFC 9110 field-line combination semantics, and returned as a pool-owned
+ * string. A single field line remains a zero-copy view into NGINX response
+ * header storage.
+ *
+ * No separate per-header cap is applied: the total is bounded by the
+ * upstream response-header buffering accepted by the active upstream module
+ * (for example, proxy_buffer_size) and the module's accepted header limits.
+ *
+ * Returns NGX_OK with `out` populated, NGX_DECLINED when no Content-Encoding
+ * field exists, or NGX_ERROR for allocation failure.
+ */
+ngx_int_t
+ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
+                                           ngx_str_t *out)
+{
+    ngx_uint_t        match_count;
+    size_t             total_len;
+    size_t             written;
+    u_char            *data;
+    const ngx_str_t  *single_value;
+
+    if (r == NULL || r->pool == NULL || out == NULL) {
+        return NGX_ERROR;
+    }
+
+    out->data = NULL;
+    out->len = 0;
+
+    if (ngx_http_markdown_measure_content_encoding(
+            r, &single_value, &match_count, &total_len) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    if (match_count == 0) {
+        return NGX_DECLINED;
+    }
+    if (match_count == 1) {
+        *out = *single_value;
+        return NGX_OK;
+    }
+
+    data = ngx_pnalloc(r->pool, total_len);
+    if (data == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_copy_content_encoding(r, data, &written) != NGX_OK
+        || written != total_len)
+    {
+        out->data = NULL;
+        out->len = 0;
+        return NGX_ERROR;
+    }
+
+    out->data = data;
+    out->len = total_len;
+    return NGX_OK;
+}
+
+/*
+ * Parse the Content-Encoding chain grammar and populate the request
+ * context decompression state.
+ *
+ * Calls the Rust FFI chain parser on the concatenated header value. The
+ * classification outcome decides precommit routing:
+ *
+ *   VALID            - ctx->decompression.layer_count and layers[] hold the
+ *                      non-identity decoder list in application order
+ *   MALFORMED        - canonical ENCODING_HEADER_INVALID (stage=decompression,
+ *                      error_origin=format); no decoder is started
+ *   UNKNOWN_TOKEN    - unsupported token; the caller routes it through the
+ *                      configured error policy without starting a decoder
+ *   DEPTH_EXCEEDED   - unsupported chain depth; the caller routes it through
+ *                      the configured error policy without starting a decoder
+ *
+ * Returns the ENCODING_CHAIN_* classification (including
+ * ENCODING_CHAIN_INVALID_ARGS for NULL/empty argument violations and
+ * capacity failures) on error.
+ */
+/*
+ * FFI encoding-chain layer codes.  These mirror the Rust `Format` enum
+ * (Gzip = 0, Deflate = 1, Br = 2) in decompress.rs; the C switch below must
+ * use these names so a Rust renumbering cannot silently misroute layers.
+ */
+#define NGX_HTTP_MARKDOWN_FFI_LAYER_GZIP    0
+#define NGX_HTTP_MARKDOWN_FFI_LAYER_DEFLATE 1
+#define NGX_HTTP_MARKDOWN_FFI_LAYER_BROTLI  2
+
+u_char
+ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
+                                           ngx_http_markdown_ctx_t *ctx,
+                                           const ngx_str_t *combined)
+{
+    FFIEncodingChainResult   result;
+    u_char                   classification;
+    ngx_uint_t               layer_capacity;
+
+    (void) r;
+    ngx_memzero(&result, sizeof(result));
+
+    if (ctx == NULL || combined == NULL
+        || (combined->len > 0 && combined->data == NULL))
+    {
+        if (ctx != NULL) {
+            ctx->decompression.chain_parsed = 1;
+            ctx->decompression.layer_count = 0;
+            ctx->decompression.needed = 0;
+            ctx->decompression.done = 0;
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+            ngx_memzero(ctx->decompression.layers,
+                        sizeof(ctx->decompression.layers));
+        }
+        return ENCODING_CHAIN_INVALID_ARGS;
+    }
+
+    classification = markdown_parse_encoding_chain(
+        (const uint8_t *) combined->data, combined->len, &result);
+
+    ctx->decompression.chain_parsed = 1;
+
+    if (classification != ENCODING_CHAIN_VALID) {
+        ctx->decompression.layer_count = 0;
+        ctx->decompression.needed = 0;
+        ctx->decompression.done = 0;
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+        ngx_memzero(ctx->decompression.layers,
+                    sizeof(ctx->decompression.layers));
+        return classification;
+    }
+
+    layer_capacity = sizeof(ctx->decompression.layers)
+                     / sizeof(ctx->decompression.layers[0]);
+    if (result.layer_count > layer_capacity
+        || result.layer_count > MAX_DECODER_DEPTH) {
+        ctx->decompression.layer_count = 0;
+        ctx->decompression.needed = 0;
+        ctx->decompression.done = 0;
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+        ngx_memzero(ctx->decompression.layers,
+                    sizeof(ctx->decompression.layers));
+        return ENCODING_CHAIN_INVALID_ARGS;
+    }
+
+    ctx->decompression.layer_count = result.layer_count;
+    ngx_memzero(ctx->decompression.layers,
+                sizeof(ctx->decompression.layers));
+    if (result.layer_count > 0) {
+        ngx_memcpy(ctx->decompression.layers, result.layers,
+                   result.layer_count
+                   * sizeof(ctx->decompression.layers[0]));
+    }
+
+    if (result.layer_count == 0) {
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+        return ENCODING_CHAIN_VALID;
+    }
+
+    /* Map the first layer to the legacy type enum for routing
+     * compatibility (single-layer streaming path).  The layer codes are the
+     * Rust `Format` enum values (Gzip=0, Deflate=1, Br=2); keep them in
+     * named constants so a renumbering cannot silently misroute. */
+    switch (result.layers[0]) {
+    case NGX_HTTP_MARKDOWN_FFI_LAYER_GZIP:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
+        break;
+    case NGX_HTTP_MARKDOWN_FFI_LAYER_DEFLATE:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
+        break;
+    case NGX_HTTP_MARKDOWN_FFI_LAYER_BROTLI:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
+        break;
+    default:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
+        break;
+    }
+
+    return classification;
+}
 
 /*
  * Detect compression type from Content-Encoding header
@@ -61,7 +493,22 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
     if (h == NULL || h->value.len == 0) {
         return NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
     }
-    
+
+    /*
+     * Content-Encoding is a chain grammar, not a single token.  The
+     * precommit path parses comma-separated values with the Rust chain
+     * validator; do not emit the single-token "unsupported" warning before
+     * that parser has classified a valid multi-layer response.
+     *
+     * Intentional (comma-value): a comma-containing value is reported UNKNOWN
+     * here so the single-token classifier does not double-report what the
+     * chain parser owns; the precommit chain validator then classifies the
+     * real layers (valid multi-layer chains still reach decompression).
+     */
+    if (ngx_strlchr(h->value.data, h->value.data + h->value.len, ',') != NULL) {
+        return NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
+    }
+
     /* Check for gzip compression (case-insensitive, gzip compression detection) */
     if (h->value.len == sizeof("gzip") - 1
         && ngx_strncasecmp(h->value.data,
@@ -151,14 +598,14 @@ ngx_http_markdown_chain_to_buffer(const ngx_chain_t *in, u_char *dest,
     size_t  len;
     
     copied = 0;
-    
+
     for (const ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
         if (cl->buf == NULL) {
             continue;
         }
-        
+
         len = ngx_http_markdown_buf_len_safe(cl->buf);
-        
+
         if (copied > size || len > size - copied) {
             return NGX_ERROR;
         }
@@ -166,11 +613,11 @@ ngx_http_markdown_chain_to_buffer(const ngx_chain_t *in, u_char *dest,
         if (len == 0) {
             continue;
         }
-        
+
         ngx_memcpy(dest + copied, cl->buf->pos, len);
         copied += len;
     }
-    
+
     return NGX_OK;
 }
 
@@ -778,6 +1225,158 @@ ngx_http_markdown_decomp_brotli_fail(BrotliDecoderState *decoder,
     ngx_free(output_data);
     return rc;
 }
+
+
+static ngx_int_t
+ngx_http_markdown_full_brotli_prepare_alloc_ctx(
+    ngx_http_request_t *r,
+    ngx_http_markdown_full_brotli_alloc_ctx_t *alloc_ctx)
+{
+    ngx_http_markdown_main_conf_t  *main_conf;
+
+    if (r == NULL || r->connection == NULL || r->connection->log == NULL
+        || alloc_ctx == NULL)
+    {
+        return NGX_ERROR;
+    }
+
+    main_conf = ngx_http_get_module_main_conf(
+        r, ngx_http_markdown_filter_module);
+    if (main_conf == NULL) {
+        return NGX_ERROR;
+    }
+
+    alloc_ctx->counter = &main_conf->brotli_workspace_bytes;
+    alloc_ctx->limit = ngx_http_markdown_brotli_workspace_limit(
+        main_conf->brotli_workspace_limit);
+    alloc_ctx->log = r->connection->log;
+
+    return NGX_OK;
+}
+
+
+typedef struct {
+    u_char  *data;
+    size_t   size;
+    size_t   total_out;
+} ngx_http_markdown_decomp_output_t;
+
+
+static ngx_int_t
+ngx_http_markdown_decomp_brotli_stream(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    BrotliDecoderState *decoder, const u_char *input_data, size_t input_size,
+    ngx_http_markdown_decomp_output_t *output)
+{
+    BrotliDecoderResult  result;
+    size_t               available_in;
+    size_t               available_out;
+    size_t               used;
+    const uint8_t       *next_in;
+    uint8_t             *next_out;
+    ngx_int_t             grow_rc;
+
+    output->total_out = 0;
+    available_in = input_size;
+    next_in = input_data;
+    available_out = output->size;
+    next_out = output->data;
+
+    for ( ;; ) {
+        result = BrotliDecoderDecompressStream(
+            decoder, &available_in, &next_in, &available_out,
+            &next_out, &output->total_out);
+
+        if (result == BROTLI_DECODER_RESULT_SUCCESS) {
+            output->total_out = output->size - available_out;
+            if (available_in > 0) {
+                /* Trailing compressed bytes after stream completion are
+                 * a format violation.  The streaming path classifies
+                 * this case as FORMAT_ERROR; keep both paths aligned
+                 * (parity rule). */
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "markdown: brotli trailing data: %uz bytes "
+                              "after stream completion, "
+                              "category=conversion",
+                              available_in);
+                return ngx_http_markdown_decomp_brotli_fail(
+                    decoder, output->data,
+                    NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR);
+            }
+            return NGX_OK;
+        }
+
+        if (result == BROTLI_DECODER_RESULT_ERROR) {
+            BrotliDecoderErrorCode                  error_code;
+            ngx_http_markdown_brotli_error_class_e  error_class;
+            const char                             *error_str;
+
+            error_code = BrotliDecoderGetErrorCode(decoder);
+            error_class = ngx_http_markdown_brotli_error_classify(
+                (int) error_code);
+            error_str = BrotliDecoderErrorString(error_code);
+
+            /*
+             * Keep buffered classification aligned with the streaming
+             * decoder.  Only documented invalid-input codes are format
+             * errors; allocation and internal decoder failures are system
+             * errors and must not be reported as corrupt input.
+             */
+            if (error_class == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "markdown: brotli decompression failed, "
+                              "error: %s, category=conversion",
+                              error_str);
+                return ngx_http_markdown_decomp_brotli_fail(
+                    decoder, output->data,
+                    NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR);
+            }
+
+            if (error_class == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "markdown: brotli decompression failed, "
+                              "error: %s, class=allocation, category=system",
+                              error_str);
+            } else {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "markdown: brotli decompression failed, "
+                              "error: %s, class=internal, category=system",
+                              error_str);
+            }
+
+            return ngx_http_markdown_decomp_brotli_fail(
+                decoder, output->data, NGX_ERROR);
+        }
+
+        if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
+            used = output->size - available_out;
+            grow_rc = ngx_http_markdown_grow_output_buffer(
+                r, conf, &output->data, &output->size, used);
+            if (grow_rc != NGX_OK) {
+                return ngx_http_markdown_decomp_brotli_fail(
+                    decoder, output->data, grow_rc);
+            }
+            available_out = output->size - used;
+            next_out = output->data + used;
+            continue;
+        }
+
+        if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown: brotli decompression incomplete, "
+                          "truncated input, category=conversion");
+            return ngx_http_markdown_decomp_brotli_fail(
+                decoder, output->data,
+                NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT);
+        }
+
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: brotli decompression incomplete, "
+                      "result=%d, category=conversion", result);
+        return ngx_http_markdown_decomp_brotli_fail(
+            decoder, output->data, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR);
+    }
+}
 #endif
 
 
@@ -893,6 +1492,73 @@ ngx_http_markdown_decomp_build_output_chain(ngx_http_request_t *r,
 }
 
 
+/*
+ * Deflate compatibility fallback: retry a failed zlib-wrapped (RFC 1950)
+ * decode as raw RFC 1951 (-MAX_WBITS).  Raw RFC 1951 deflate is part of the
+ * 0.9.2 public contract as a compatibility fallback for legacy servers
+ * (Microsoft IIS 5/6, older Java servlets send raw RFC 1951 under
+ * Content-Encoding: deflate).  The caller invokes this only after a
+ * FORMAT_ERROR with zero output produced, so a partial decode (already
+ * committed with zlib framing) is never replayed.  The retry result is
+ * propagated to the caller: on failure it returns the raw attempt's own
+ * classification (budget, truncation, or format), which is more informative
+ * than the original wrapped-mode error; only an inflateInit2 failure (raw
+ * mode could not even start) returns the original format error.
+ */
+static ngx_int_t
+ngx_http_markdown_deflate_raw_retry(ngx_http_request_t *r,
+                                    const ngx_http_markdown_conf_t *conf,
+                                    z_stream *stream,
+                                    u_char *input_data, size_t input_size,
+                                    ngx_http_markdown_inflate_ctx_t *ctx)
+{
+    ngx_int_t  loop_rc;
+    int        zrc;
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "markdown: deflate zlib-wrapped failed, "
+                   "retrying with raw deflate (-MAX_WBITS)");
+
+    inflateEnd(stream);
+
+    ngx_memzero(stream, sizeof(z_stream));
+    stream->next_in = input_data;
+    stream->avail_in = (uInt) input_size;
+
+    zrc = inflateInit2(stream, -MAX_WBITS);
+    if (zrc != Z_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: raw deflate inflateInit2 "
+                      "error: %d, category=conversion", zrc);
+        ngx_free(*ctx->output_data);
+        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+    }
+
+    stream->next_out = *ctx->output_data;
+    stream->avail_out = (uInt) *ctx->output_size;
+
+    loop_rc = ngx_http_markdown_inflate_loop(r, conf, stream,
+                                             ctx->output_data, ctx->output_size,
+                                             NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+                                             &ctx->completed_out);
+    if (loop_rc != NGX_OK) {
+        /*
+         * The retry owns the output buffer on failure: free it here and
+         * let the caller propagate the error without touching the
+         * (possibly freed) buffer again.  NGX_DONE is not a success code
+         * for the full-buffer inflate path, so any non-NGX_OK return
+         * takes this branch.
+         */
+        inflateEnd(stream);
+        ngx_free(*ctx->output_data);
+        /* Propagate the raw attempt's own classification (budget,
+         * truncation, or format) rather than masking it. */
+        return loop_rc;
+    }
+    return loop_rc;
+}
+
+
 ngx_int_t
 ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                    ngx_http_markdown_compression_type_e type,
@@ -904,12 +1570,12 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     size_t                             input_size;
     u_char                            *output_data;
     size_t                             output_size;
-    size_t                             total_decompressed;
+    size_t                             total_decompressed = 0;
     ngx_int_t                          loop_rc;
     int                                zrc;
     int                                window_bits;
     const ngx_http_markdown_conf_t    *conf;
-    
+
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     
     /* Log that we're using zlib for decompression (zlib decompression path) */
@@ -963,7 +1629,8 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Allocate transferable output using the ctx->buffer allocator family. */
+    /* Allocate transferable output using the same ngx_alloc/ngx_free
+     * allocator family as ctx->buffer (Rule 43). */
     output_data = ngx_http_markdown_decomp_alloc_output(r, output_size,
         ngx_http_markdown_decomp_zlib_cleanup, &stream);
     if (output_data == NULL) {
@@ -979,45 +1646,40 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                              type, &total_decompressed);
     if (loop_rc != NGX_OK) {
         /*
-         * Fallback: if deflate decompression fails with FORMAT_ERROR,
-         * retry with raw deflate (-MAX_WBITS).  Some legacy servers
-         * (Microsoft IIS 5/6, older Java servlets) send raw deflate
-         * (RFC 1951 only) under Content-Encoding: deflate instead of
-         * zlib-wrapped (RFC 1950).  For gzip, no fallback is attempted.
+         * Deflate compatibility fallback: if the zlib-wrapped (RFC 1950)
+         * decode fails with FORMAT_ERROR, retry with raw deflate
+         * (-MAX_WBITS). Raw RFC 1951 deflate is part of the 0.9.2 public
+         * contract as a compatibility fallback for legacy servers
+         * (Microsoft IIS 5/6, older Java servlets send raw RFC 1951 under
+         * Content-Encoding: deflate).  For gzip, no fallback is attempted.
+         *
+         * The retry is allowed only when NO output was produced before the
+         * format error: a partial decode has already committed
+         * bytes with zlib framing and cannot be replayed as raw without
+         * mismatched output accounting.
          */
         if (loop_rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
-            && type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
+            && type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+            && total_decompressed == 0)
         {
-            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                           "markdown: deflate zlib-wrapped failed, "
-                           "retrying with raw deflate (-MAX_WBITS)");
+            {
+                ngx_http_markdown_inflate_ctx_t  retry_ctx;
 
-            inflateEnd(&stream);
+                ngx_memzero(&retry_ctx, sizeof(retry_ctx));
+                retry_ctx.output_data = &output_data;
+                retry_ctx.output_size = &output_size;
 
-            ngx_memzero(&stream, sizeof(z_stream));
-            stream.next_in = input_data;
-            stream.avail_in = (uInt) input_size;
-
-            zrc = inflateInit2(&stream, -MAX_WBITS);
-            if (zrc != Z_OK) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                             "markdown: raw deflate inflateInit2 "
-                             "error: %d, category=conversion", zrc);
-                ngx_free(output_data);
-                return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
-            }
-
-            stream.next_out = output_data;
-            stream.avail_out = (uInt) output_size;
-
-            loop_rc = ngx_http_markdown_inflate_loop(r, conf, &stream,
-                                                     &output_data,
-                                                     &output_size, type,
-                                                     &total_decompressed);
-            if (loop_rc != NGX_OK) {
-                inflateEnd(&stream);
-                ngx_free(output_data);
-                return loop_rc;
+                loop_rc = ngx_http_markdown_deflate_raw_retry(
+                    r, conf, &stream, input_data, input_size, &retry_ctx);
+                if (loop_rc != NGX_OK) {
+                    /*
+                     * The retry frees the output buffer on any non-NGX_OK
+                     * return (Rule 43); propagate the error without
+                     * touching the possibly-freed buffer again.
+                     */
+                    return loop_rc;
+                }
+                total_decompressed = retry_ctx.completed_out;
             }
             /* fallthrough to success path below */
         } else {
@@ -1107,22 +1769,24 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
                                     const ngx_chain_t *in,
                                     ngx_chain_t **out)
 {
+    if (r == NULL || r->connection == NULL || r->connection->log == NULL) {
+        return NGX_ERROR;
+    }
+
 #ifdef NGX_HTTP_BROTLI
     /* Brotli support is compiled in */
     BrotliDecoderState          *decoder;
-    BrotliDecoderResult          result;
     u_char                      *input_data;
     size_t                       input_size;
-    u_char                      *output_data;
-    size_t                       output_size;
-    size_t                       available_in;
-    size_t                       available_out;
-    const uint8_t               *next_in;
-    uint8_t                     *next_out;
-    size_t                       total_out;
+    ngx_http_markdown_decomp_output_t  output;
     const ngx_http_markdown_conf_t    *conf;
+    ngx_http_markdown_full_brotli_alloc_ctx_t  alloc_ctx;
+    ngx_int_t                   rc;
     
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
+    if (conf == NULL) {
+        return NGX_ERROR;
+    }
     /* Log that we're using brotli library for decompression (brotli decompression path) */
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: using brotli library for decompression");
@@ -1134,8 +1798,17 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     {
         return NGX_ERROR;
     }
+
+    if (ngx_http_markdown_full_brotli_prepare_alloc_ctx(r, &alloc_ctx)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
     /* Create brotli decoder instance (brotli decoder instance creation) */
-    decoder = BrotliDecoderCreateInstance(NULL, NULL, NULL);
+    decoder = BrotliDecoderCreateInstance(
+        ngx_http_markdown_full_brotli_alloc,
+        ngx_http_markdown_full_brotli_free, &alloc_ctx);
     if (decoder == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: failed to create brotli decoder, "
@@ -1143,105 +1816,34 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     /* Estimate output size with independent decompression budget. */
-    if (ngx_http_markdown_calc_output_size(r, input_size, conf->decompress.max_size, &output_size)
+    if (ngx_http_markdown_calc_output_size(
+            r, input_size, conf->decompress.max_size, &output.size)
         != NGX_OK)
     {
         BrotliDecoderDestroyInstance(decoder);
         return NGX_ERROR;
     }
-    /* Allocate transferable output using the ctx->buffer allocator family. */
-    output_data = ngx_http_markdown_decomp_alloc_output(r, output_size,
+    /* Allocate transferable output using the same ngx_alloc/ngx_free
+     * allocator family as ctx->buffer (Rule 43). */
+    output.data = ngx_http_markdown_decomp_alloc_output(r, output.size,
         ngx_http_markdown_decomp_brotli_cleanup, decoder);
-    if (output_data == NULL) {
+    if (output.data == NULL) {
         return NGX_ERROR;
     }
-    /* Set up decompression parameters */
-    available_in = input_size;
-    next_in = input_data;
-    available_out = output_size;
-    next_out = output_data;
-    total_out = 0;
-    
-    /*
-     * Perform decompression in a loop. If the decoder signals
-     * NEEDS_MORE_OUTPUT, reallocate the output buffer (up to
-     * decompress.max_size) and continue, rather than immediately
-     * classifying as budget_exceeded. This avoids misclassifying
-     * high-compression-ratio payloads that exceed the 10x heuristic
-     * estimate but are still within budget.
-     */
-    for ( ;; ) {
-        result = BrotliDecoderDecompressStream(
-            decoder,
-            &available_in,
-            &next_in,
-            &available_out,
-            &next_out,
-            &total_out
-        );
-
-        if (result == BROTLI_DECODER_RESULT_SUCCESS) {
-            break;
-        }
-
-        if (result == BROTLI_DECODER_RESULT_ERROR) {
-            BrotliDecoderErrorCode error_code = BrotliDecoderGetErrorCode(decoder);
-            const char *error_str = BrotliDecoderErrorString(error_code);
-
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: brotli decompression failed, "
-                         "error: %s, category=conversion",
-                         error_str);
-            return ngx_http_markdown_decomp_brotli_fail(
-                decoder, output_data,
-                NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR);
-        }
-
-        if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
-            size_t     used;
-            ngx_int_t  grow_rc;
-
-            used = output_size - available_out;
-            grow_rc = ngx_http_markdown_grow_output_buffer(
-                r, conf, &output_data, &output_size, used);
-            if (grow_rc != NGX_OK) {
-                return ngx_http_markdown_decomp_brotli_fail(
-                    decoder, output_data, grow_rc);
-            }
-            available_out = output_size - used;
-            next_out = output_data + used;
-            continue;
-        }
-
-        if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: brotli decompression "
-                         "incomplete, truncated input, "
-                         "category=conversion");
-            return ngx_http_markdown_decomp_brotli_fail(
-                decoder, output_data,
-                NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT);
-        }
-
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: brotli decompression "
-                     "incomplete, result=%d, category=conversion",
-                     result);
-        return ngx_http_markdown_decomp_brotli_fail(
-            decoder, output_data, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR);
+    rc = ngx_http_markdown_decomp_brotli_stream(
+        r, conf, decoder, input_data, input_size, &output);
+    if (rc != NGX_OK) {
+        return rc;
     }
-    
-    /* Calculate actual decompressed size */
-    total_out = output_size - available_out;
-    
+
     /* Check if decompressed size exceeds decompression budget */
-    if (total_out > conf->decompress.max_size) {
+    if (output.total_out > conf->decompress.max_size) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: decompressed size (%uz) exceeds decompression budget (%uz), "
                      "category=resource_limit",
-                     total_out, conf->decompress.max_size);
+                     output.total_out, conf->decompress.max_size);
         return ngx_http_markdown_decomp_brotli_fail(
-            decoder, output_data,
+            decoder, output.data,
             NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED);
     }
     
@@ -1252,20 +1854,19 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
      * (avoids a second allocation + memcpy). Shared with the zlib path
      * via ngx_http_markdown_decomp_build_output_chain so the two backends
      * cannot drift apart on buffer/chain setup. */
-    if (ngx_http_markdown_decomp_build_output_chain(r, output_data, output_size,
-                                                    total_out, 1,
-                                                    out) != NGX_OK)
+    if (ngx_http_markdown_decomp_build_output_chain(
+            r, output.data, output.size, output.total_out, 1, out) != NGX_OK)
     {
-        ngx_free(output_data);
+        ngx_free(output.data);
         return NGX_ERROR;
     }
     
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: brotli decompression succeeded, "
                   "compressed=%uz bytes, decompressed=%uz bytes, ratio=%.1f",
-                  input_size, total_out,
+                  input_size, output.total_out,
                   input_size > 0
-                      ? (float)total_out / input_size : 0.0f);
+                      ? (float) output.total_out / input_size : 0.0f);
     
     return NGX_OK;
     

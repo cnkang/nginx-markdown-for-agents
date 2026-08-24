@@ -16,12 +16,15 @@ const SMALL_END: &str = "BROTLI_SMALL_STREAM_END";
 const LARGE_END: &str = "BROTLI_LARGE_STREAM_END";
 const PRESSURE_END: &str = "BROTLI_PRESSURE_STREAM_END";
 const SLOW_READER_BUFFER_SIZE: usize = 16 * 1024;
+const PRESSURE_PARAGRAPHS: usize = 20_000;
 
 /// Return deterministic Brotli upstream routes for this scenario.
 pub fn fixture_spec(listen_port: u16) -> FixtureSpec {
     let small = html_document("Brotli Small", SMALL_END, 1);
     let large = html_document("Brotli Large", LARGE_END, 10_000);
-    let pressure = html_document("Brotli Pressure", PRESSURE_END, 150_000);
+    // Keep the fixture below the configured 10,000:1 ratio ceiling while
+    // retaining enough output to exercise a slow-reader backpressure path.
+    let pressure = html_document("Brotli Pressure", PRESSURE_END, PRESSURE_PARAGRAPHS);
     FixtureSpec {
         listen_port: Some(listen_port),
         routes: vec![
@@ -78,7 +81,8 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
 
     let mut assertions = Vec::new();
     let base_url = format!("http://127.0.0.1:{}", ctx.port);
-    let metrics_before = metric_value(&base_url, "decompression_streaming_total")?;
+    let metrics_before = metric_value(&base_url, "decompression_brotli_success")?;
+    let streaming_attempts_before = metric_value(&base_url, "conversion_attempts_streaming")?;
     let small = request_markdown(&base_url, "/streaming/small-brotli")?;
     append_converted_assertions(
         &mut assertions,
@@ -115,13 +119,21 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         LARGE_END,
         100_000,
     );
-    let metrics_after = metric_value(&base_url, "decompression_streaming_total")?;
+    let metrics_after = metric_value(&base_url, "decompression_brotli_success")?;
     push_assertion(
         &mut assertions,
         "streaming_metric_delta",
         metrics_after >= metrics_before + 3,
-        "at least three streaming decompressions",
+        "at least three successful Brotli decompressions",
         format!("before={metrics_before} after={metrics_after}"),
+    );
+    let streaming_attempts_after = metric_value(&base_url, "conversion_attempts_streaming")?;
+    push_assertion(
+        &mut assertions,
+        "streaming_attempt_metric_delta",
+        streaming_attempts_after >= streaming_attempts_before + 3,
+        "at least three streaming conversion attempts",
+        format!("before={streaming_attempts_before} after={streaming_attempts_after}"),
     );
 
     append_fullbuffer_assertions(&base_url, &mut assertions)?;
@@ -194,7 +206,7 @@ fn append_converted_assertions(
         assertions,
         &format!("{prefix}_body_complete"),
         response.body.contains(heading)
-            && response.body.contains(end_token)
+            && common::markdown_token_present(&response.body, end_token)
             && response.body.len() >= minimum_size,
         format!("heading, end token, and at least {minimum_size} bytes"),
         format!("body_bytes={}", response.body.len()),
@@ -205,7 +217,8 @@ fn append_fullbuffer_assertions(
     base_url: &str,
     assertions: &mut Vec<AssertionResult>,
 ) -> Result<()> {
-    let before = metric_value(base_url, "decompression_fullbuffer_total")?;
+    let before = metric_value(base_url, "decompression_brotli_success")?;
+    let attempts_before = metric_value(base_url, "conversion_attempts_full_buffer")?;
     for (name, path) in [
         ("cache_full", "/cache-full/small-brotli"),
         ("streaming_off", "/non-streaming/small-brotli"),
@@ -213,13 +226,21 @@ fn append_fullbuffer_assertions(
         let response = request_markdown(base_url, path)?;
         append_converted_assertions(assertions, name, &response, "# Brotli Small", SMALL_END, 20);
     }
-    let after = metric_value(base_url, "decompression_fullbuffer_total")?;
+    let after = metric_value(base_url, "decompression_brotli_success")?;
     push_assertion(
         assertions,
         "fullbuffer_metric_delta",
         after >= before + 2,
-        "two Brotli full-buffer decompressions",
+        "two additional successful Brotli decompressions",
         format!("before={before} after={after}"),
+    );
+    let attempts_after = metric_value(base_url, "conversion_attempts_full_buffer")?;
+    push_assertion(
+        assertions,
+        "fullbuffer_attempt_metric_delta",
+        attempts_after >= attempts_before + 2,
+        "two full-buffer conversion attempts",
+        format!("before={attempts_before} after={attempts_after}"),
     );
     Ok(())
 }
@@ -250,7 +271,7 @@ fn append_fault_assertions(base_url: &str, assertions: &mut Vec<AssertionResult>
     push_assertion(
         assertions,
         "worker_survives_faults",
-        health.status == 200 && health.body.contains(SMALL_END),
+        health.status == 200 && common::markdown_token_present(&health.body, SMALL_END),
         "subsequent conversion succeeds",
         format!("status={} bytes={}", health.status, health.body.len()),
     );
@@ -262,14 +283,13 @@ fn append_backpressure_assertions(
     base_url: &str,
     assertions: &mut Vec<AssertionResult>,
 ) -> Result<()> {
-    let before = metric_value(base_url, "backpressure_total")?;
+    let before = metric_value(base_url, "streaming_events")?;
     let raw = slow_read_response(ctx.port, ctx.timeout)?;
-    let after = metric_value(base_url, "backpressure_total")?;
+    let after = metric_value(base_url, "streaming_events")?;
     push_assertion(
         assertions,
         "slow_reader_body_complete",
-        raw.windows(PRESSURE_END.len())
-            .any(|window| window == PRESSURE_END.as_bytes()),
+        common::markdown_token_bytes_present(&raw, PRESSURE_END),
         "complete response contains the pressure end token",
         format!("wire_bytes={}", raw.len()),
     );
@@ -277,7 +297,7 @@ fn append_backpressure_assertions(
         assertions,
         "backpressure_metric_delta",
         after > before,
-        "backpressure_total increases",
+        "streaming lifecycle events increase",
         format!("before={before} after={after}"),
     );
     Ok(())
@@ -325,16 +345,53 @@ Connection: close\r\n\r\n",
 
 fn metric_value(base_url: &str, name: &str) -> Result<u64> {
     let mut headers = HashMap::new();
-    headers.insert("Accept".to_string(), "application/json".to_string());
+    headers.insert(
+        "Accept".to_string(),
+        "text/plain; version=0.0.4".to_string(),
+    );
     let response =
         crate::http::get_with_headers(&format!("{base_url}/markdown-metrics"), &headers)?;
-    let document: serde_json::Value = serde_json::from_str(&response.body)
-        .with_context(|| format!("invalid metrics JSON: {}", response.body))?;
-    document
-        .get("perf")
-        .and_then(|perf| perf.get(name))
-        .and_then(serde_json::Value::as_u64)
-        .with_context(|| format!("metrics field perf.{name} is missing"))
+    let (family, label) = match name {
+        "decompression_brotli_success" => (
+            "nginx_markdown_decompression_events_total",
+            Some("encoding=\"brotli\",outcome=\"success\""),
+        ),
+        "conversion_attempts_streaming" => (
+            "nginx_markdown_conversion_attempts_total",
+            Some("engine=\"streaming\""),
+        ),
+        "conversion_attempts_full_buffer" => (
+            "nginx_markdown_conversion_attempts_total",
+            Some("engine=\"full_buffer\""),
+        ),
+        "streaming_events" => ("nginx_markdown_streaming_events_total", None),
+        other => return Err(anyhow::anyhow!("unsupported metric name: {other}")),
+    };
+    let mut matched_samples = 0_u64;
+    let value = common::prometheus_samples(&response.body, family)
+        .into_iter()
+        // Match required labels independently: each required fragment must
+        // appear in the sample's label set.  Relying on one combined label
+        // string breaks if the renderer orders labels differently.
+        .filter(|(labels, _)| {
+            label
+                .is_none_or(|required| required.split(',').all(|part| labels.contains(part.trim())))
+        })
+        .filter_map(|(_, sample_value)| {
+            if !sample_value.is_finite() || sample_value < 0.0 {
+                return None;
+            }
+            matched_samples += 1;
+            Some(sample_value)
+        })
+        .sum::<f64>();
+    if matched_samples > 0 {
+        Ok(value as u64)
+    } else {
+        // Prometheus may omit an optional sample on a fresh endpoint. Treat
+        // absent or unusable optional samples as zero for delta checks.
+        Ok(0)
+    }
 }
 
 fn push_assertion(

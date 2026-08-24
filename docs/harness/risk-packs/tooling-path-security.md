@@ -17,7 +17,7 @@ file write safety, subprocess argument safety, shell hygiene, or C const-correct
 ## Risks
 
 - CLI-derived paths bypass validation and allow traversal outside repo root
-- write paths are created from unresolved parents and follow symlink escapes
+- write paths get created from unresolved parents and follow symlink escapes
 - in-tree executable symlinks satisfy lexical containment but target external
   commands
 - subprocess invocations use shell interpolation with user-influenced values

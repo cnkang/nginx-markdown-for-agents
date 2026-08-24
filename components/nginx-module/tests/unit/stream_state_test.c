@@ -10,6 +10,9 @@
 
 #include "../include/test_common.h"
 
+#include <stdarg.h>
+#include <string.h>
+
 /* Pull in base NGINX types from stubs */
 #include <ngx_config.h>
 #include <ngx_core.h>
@@ -48,6 +51,40 @@
 #endif
 
 typedef intptr_t ngx_err_t;
+
+static ngx_uint_t test_log_count;
+static ngx_uint_t test_log_level;
+static const char *test_log_format;
+static ngx_uint_t test_log_headers_committed;
+static ngx_uint_t test_log_state;
+static ngx_uint_t test_log_event;
+
+#define TEST_PRE_COMMIT_INVARIANT_FORMAT \
+    "markdown: PRE_COMMIT invariant violation: " \
+    "headers_committed=%ui, current_state=%ui, event=%ui"
+
+static void
+test_capture_log(ngx_uint_t level, const char *fmt, ...)
+{
+    va_list args;
+
+    test_log_count++;
+    test_log_level = level;
+    test_log_format = fmt;
+    if (fmt != NULL && strcmp(fmt, TEST_PRE_COMMIT_INVARIANT_FORMAT) == 0) {
+        va_start(args, fmt);
+        test_log_headers_committed = va_arg(args, ngx_uint_t);
+        test_log_state = va_arg(args, ngx_uint_t);
+        test_log_event = va_arg(args, ngx_uint_t);
+        va_end(args);
+    }
+}
+
+#undef ngx_log_error
+#define ngx_log_error(level, log, err, fmt, ...) \
+    do { \
+        test_capture_log((level), (fmt), ##__VA_ARGS__); \
+    } while (0)
 
 /* Define structs that the stubs only forward-declare */
 struct ngx_log_s { int dummy; };
@@ -357,9 +394,9 @@ static void test_pre_commit_replay_unavail_overflow_no_limits(void)
 
     TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "REPLAY_UNAVAILABLE + OVERFLOW (no limits) -> PASSTHROUGH");
-    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_502,
-                "action = REJECT_502");
-    TEST_PASS("PRE_COMMIT_REPLAY_UNAVAILABLE -> PASSTHROUGH/REJECT_502");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
+                "action = REJECT_STATUS");
+    TEST_PASS("PRE_COMMIT_REPLAY_UNAVAILABLE -> PASSTHROUGH/REJECT_STATUS");
 }
 
 /* --- COMMITTED transitions --- */
@@ -701,9 +738,9 @@ static void test_pre_commit_on_error_reject(void)
 
     TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "PRE_COMMIT + ON_ERROR_REJECT -> PASSTHROUGH");
-    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_502,
-                "action = REJECT_502");
-    TEST_PASS("PRE_COMMIT + ON_ERROR_REJECT -> REJECT_502");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
+                "action = REJECT_STATUS");
+    TEST_PASS("PRE_COMMIT + ON_ERROR_REJECT -> REJECT_STATUS");
 }
 
 static void test_pre_commit_resource_limit(void)
@@ -771,11 +808,16 @@ static void test_pre_commit_headers_committed_passthrough(void)
 {
     ngx_http_markdown_stream_ctx_t ctx;
     ngx_http_markdown_decision_t   d;
+    ngx_log_t                      log;
 
     memset(&ctx, 0, sizeof(ctx));
+    memset(&log, 0, sizeof(log));
     ctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
     ctx.replay_available = 1;
     ctx.headers_committed = 1;
+    ctx.log = &log;
+    test_log_count = 0;
+    test_log_format = NULL;
 
     d = ngx_http_markdown_stream_decide(&ctx,
             NGX_HTTP_MD_EVENT_PARSER_UNSUITABLE);
@@ -784,6 +826,15 @@ static void test_pre_commit_headers_committed_passthrough(void)
                 "PRE_COMMIT + headers_committed -> PASSTHROUGH");
     TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
                 "action = PASSTHROUGH (fallthrough)");
+    TEST_ASSERT(test_log_count == 1 && test_log_level == NGX_LOG_ERR
+                && test_log_format != NULL
+                && strcmp(test_log_format, TEST_PRE_COMMIT_INVARIANT_FORMAT)
+                   == 0,
+                "expected invariant violation message is captured once");
+    TEST_ASSERT(test_log_headers_committed == 1
+                && test_log_state == NGX_HTTP_MD_STATE_PRE_COMMIT
+                && test_log_event == NGX_HTTP_MD_EVENT_PARSER_UNSUITABLE,
+                "log carries headers flag, current_state, and event");
     TEST_PASS("PRE_COMMIT with headers_committed falls through");
 }
 
@@ -804,9 +855,9 @@ static void test_pre_commit_replay_unavail_resource_limit(void)
 
     TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "REPLAY_UNAVAIL + RESOURCE_LIMIT -> PASSTHROUGH");
-    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_502,
-                "action = REJECT_502");
-    TEST_PASS("REPLAY_UNAVAILABLE + RESOURCE_LIMIT -> REJECT_502");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
+                "action = REJECT_STATUS");
+    TEST_PASS("REPLAY_UNAVAILABLE + RESOURCE_LIMIT -> REJECT_STATUS");
 }
 
 static void test_pre_commit_replay_unavail_default_event(void)
@@ -825,7 +876,7 @@ static void test_pre_commit_replay_unavail_default_event(void)
     TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "REPLAY_UNAVAIL + default -> PASSTHROUGH");
     TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
-                "action = PASSTHROUGH (safe, not REJECT_502)");
+                "action = PASSTHROUGH (safe, not REJECT_STATUS)");
     TEST_PASS("REPLAY_UNAVAILABLE + default -> safe PASSTHROUGH");
 }
 

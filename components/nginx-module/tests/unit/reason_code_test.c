@@ -51,9 +51,10 @@ static const char *stub_reason_strs[] = {
     "header_plan_apply_error",       /* 23 */
     "streaming_mid_flight_error",    /* 24 */
     "bypass_no_transform",           /* 25 */
+    "encoding_header_invalid",        /* 26 */
 };
 
-#define STUB_REASON_CODE_COUNT 26
+#define STUB_REASON_CODE_COUNT 27
 
 ngx_int_t
 ngx_http_markdown_get_reason_code_str(uint32_t code, ngx_str_t *out_str)
@@ -94,6 +95,18 @@ const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
 const ngx_str_t *ngx_http_markdown_reason_skip_no_accept(void);
 const ngx_str_t *ngx_http_markdown_reason_skip_accept_reject(void);
 const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_error(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_budget_exceeded(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_format_error(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_truncated_input(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_io_error(void);
+const ngx_str_t *ngx_http_markdown_reason_timeout(void);
+const ngx_str_t *ngx_http_markdown_reason_budget_exceeded(void);
+const ngx_str_t *ngx_http_markdown_reason_replay_error(void);
+const ngx_str_t *ngx_http_markdown_reason_invalid_dynconf(void);
+const ngx_str_t *ngx_http_markdown_reason_degraded_snapshot(void);
+const ngx_str_t *ngx_http_markdown_reason_header_plan_apply_err(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_mid_flight_err(void);
 
 
 /*
@@ -358,6 +371,71 @@ test_skip_conditional_code(void)
 }
 
 
+/*
+ * Test: newly added non-streaming reason accessors return their Rust names.
+ */
+static void
+test_additional_reason_codes(void)
+{
+    static const struct {
+        const ngx_str_t *(*accessor)(void);
+        const char       *accessor_name;
+        const char       *expected;
+    } cases[] = {
+        { ngx_http_markdown_reason_decompression_error,
+          "ngx_http_markdown_reason_decompression_error",
+          "decompression_error" },
+        { ngx_http_markdown_reason_decompression_budget_exceeded,
+          "ngx_http_markdown_reason_decompression_budget_exceeded",
+          "decompression_budget_exceeded" },
+        { ngx_http_markdown_reason_decompression_format_error,
+          "ngx_http_markdown_reason_decompression_format_error",
+          "decompression_format_error" },
+        { ngx_http_markdown_reason_decompression_truncated_input,
+          "ngx_http_markdown_reason_decompression_truncated_input",
+          "decompression_truncated_input" },
+        { ngx_http_markdown_reason_decompression_io_error,
+          "ngx_http_markdown_reason_decompression_io_error",
+          "decompression_io_error" },
+        { ngx_http_markdown_reason_timeout,
+          "ngx_http_markdown_reason_timeout", "timeout" },
+        { ngx_http_markdown_reason_budget_exceeded,
+          "ngx_http_markdown_reason_budget_exceeded", "budget_exceeded" },
+        { ngx_http_markdown_reason_replay_error,
+          "ngx_http_markdown_reason_replay_error", "replay_error" },
+        { ngx_http_markdown_reason_overload,
+          "ngx_http_markdown_reason_overload", "overload" },
+        { ngx_http_markdown_reason_invalid_dynconf,
+          "ngx_http_markdown_reason_invalid_dynconf", "invalid_dynconf" },
+        { ngx_http_markdown_reason_degraded_snapshot,
+          "ngx_http_markdown_reason_degraded_snapshot", "degraded_snapshot" },
+        { ngx_http_markdown_reason_header_plan_apply_err,
+          "ngx_http_markdown_reason_header_plan_apply_err",
+          "header_plan_apply_error" },
+        { ngx_http_markdown_reason_streaming_mid_flight_err,
+          "ngx_http_markdown_reason_streaming_mid_flight_err",
+          "streaming_mid_flight_error" },
+        { ngx_http_markdown_reason_bypass_no_transform,
+          "ngx_http_markdown_reason_bypass_no_transform",
+          "bypass_no_transform" },
+    };
+
+    TEST_SUBSECTION("Additional reason code accessors");
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        char failure_message[256];
+
+        snprintf(failure_message, sizeof(failure_message),
+                 "%s() should return %s", cases[i].accessor_name,
+                 cases[i].expected);
+        TEST_ASSERT(ngx_str_eq(cases[i].accessor(), cases[i].expected),
+                    failure_message);
+    }
+
+    TEST_PASS("Additional reason code accessors are correct");
+}
+
+
 #ifdef MARKDOWN_STREAMING_ENABLED
 /*
  * Test: streaming reason code accessor functions return
@@ -406,9 +484,11 @@ test_streaming_reason_codes(void)
     TEST_ASSERT(ngx_str_eq(rc, "STREAMING_PRECOMMIT_REJECT"),
         "streaming_precommit_reject() -> STREAMING_PRECOMMIT_REJECT");
 
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
     rc = ngx_http_markdown_reason_streaming_shadow();
     TEST_ASSERT(ngx_str_eq(rc, "STREAMING_SHADOW"),
         "streaming_shadow() -> STREAMING_SHADOW");
+#endif
 
     TEST_PASS("All streaming reason codes correct");
 }
@@ -483,6 +563,7 @@ main(void)
     test_skip_no_accept_code();
     test_skip_accept_reject_code();
     test_skip_conditional_code();
+    test_additional_reason_codes();
 #ifdef MARKDOWN_STREAMING_ENABLED
     test_streaming_reason_codes();
 #endif

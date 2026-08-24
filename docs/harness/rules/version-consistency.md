@@ -8,7 +8,8 @@ paths:
   - "tools/e2e-harness/Cargo.toml"
   - "tools/corpus/test-corpus-conversion/Cargo.toml"
   - ".github/workflows/**"
-  - "packaging/debian/control"
+  - "packaging/nfpm/nfpm.yaml"
+  - "packaging/rpm/SPECS/nginx-module-markdown.spec"
   - "charts/nginx-markdown/Chart.yaml"
   - "AGENTS.md"
   - "CONTRIBUTING.md"
@@ -32,22 +33,21 @@ paths:
 **P1 - Important**: Version mismatches can cause user confusion, deployment failures, and release inconsistencies.
 
 ## Description
-All version numbers across the project must be synchronized to reflect the current release version. This includes:
-- Main `Cargo.toml` (source of truth)
+All version numbers across the project must synchronize to reflect the current release version. This includes:
+- `components/rust-converter/Cargo.toml` (the version-owning manifest — source of truth)
 - Helm Chart `version` and `appVersion` fields
 - Internal Cargo.toml dependencies (fuzz targets, corpus tools)
-- Documentation examples (INSTALLATION.md, etc.)
+- Documentation examples (INSTALLATION.md, and so on)
 
 The Rust build contract is a second, independently synchronized baseline:
 
 - `rust-toolchain.toml` owns the exact repository/release compiler.
 - Every first-party Cargo manifest declares the matching major/minor MSRV.
-- Blocking CI and release workflows use the exact compiler; nightly fuzzing is
+- Blocking CI and release workflows use the exact compiler, nightly fuzzing is
   the only intentionally nightly lane.
 - Release Dockerfiles consume `rust-toolchain.toml` instead of embedding an
   independent compiler version.
-- Source-build packaging and current build documentation declare the same
-  MSRV.
+- Release workflows and current build documentation declare the same MSRV.
 
 ## Rationale
 Version inconsistencies have been a recurring issue in past releases:
@@ -71,18 +71,18 @@ The harness detector `tools/harness/detect_version_consistency.sh` performs the 
 4. **Homebrew Formula**: Reports version (informational only - intentionally kept at previous release, updated by publish workflow)
 5. **Rust Baseline**: Calls the blocking
    `tools/harness/check_rust_baseline.py` validator, which checks:
-   - exact `MAJOR.MINOR.PATCH` toolchain identity;
-   - all four first-party manifest MSRVs;
-   - classified blocking, release, and nightly workflows;
-   - release Dockerfile consumption of the canonical toolchain;
-   - Debian source-build compiler floor; and
+   - exact `MAJOR.MINOR.PATCH` toolchain identity,
+   - all four first-party manifest MSRVs,
+   - classified blocking, release, and nightly workflows,
+   - release Dockerfile consumption of the canonical toolchain,
+   - release workflow compiler identity, and
    - current contributor, install, compatibility, and operations docs.
 
 An unclassified workflow that installs Rust is a failure so a new workflow
 cannot silently introduce a floating compiler.
 
 The documentation gate also enforces release-state consistency: an
-`Unreleased` changelog entry must not be described as stable in the project
+`Unreleased` changelog entry must not appear as stable in the project
 status or release notes. The tag-only
 `tools/release/gates/validate_release_metadata.py` gate applies the inverse
 contract at publication time: the tagged version must have a concrete,
@@ -92,11 +92,11 @@ release notes.
 ## Exclusions
 The following are intentionally NOT checked:
 - **Homebrew Formula** (`packaging/homebrew/nginx-markdown-module.rb`): The `url` and `sha256` fields are intentionally kept at the previous release version. The `homebrew-tap-publish.yml` workflow automatically rewrites these fields during release.
-- **Historical CHANGELOG entries**: Version numbers in changelog history are expected to reference past versions.
-- **Documentation historical references**: Mentions of past versions in migration guides, compatibility notes, etc.
+- **Historical CHANGELOG entries**: Version numbers in changelog history reference past versions.
+- **Documentation historical references**: Mentions of past versions in migration guides, compatibility notes, and so on
 
 ## Remediation
-When version inconsistency is detected:
+When the detector finds a version inconsistency:
 
 1. **Identify the source of truth**: Check `components/rust-converter/Cargo.toml` for the current version
 2. **Update Helm Chart**:
@@ -118,19 +118,22 @@ When version inconsistency is detected:
    use floating `stable` for blocking or release builds.
 
 ## Integration
-This detector is integrated into:
-- `make harness-security-checks`: Runs as part of the standard harness check suite
-- `make harness-check`: Validates harness synchronization (includes version consistency)
+This detector integrates into:
+- `make harness-security-checks`: Runs as part of the harness security check suite
+- `make release-gates-check-092`: Blocking step of the current 0.9.2 release gate
+- CI `release-092-contract-gates` job: Runs version consistency on PRs
+- `make harness-check` does not run this detector, use `make harness-check-full`
+  for the full suite including security checks
 
 ## Example Output
 ```text
 INFO: Checking version consistency...
-PASS: Main Cargo.toml version: 0.9.1
-PASS: Chart.yaml version: 0.9.1
-PASS: Chart.yaml appVersion: 0.9.1
-PASS: fuzz/Cargo.toml dep version: 0.9.1
-PASS: corpus/Cargo.toml dep version: 0.9.1
-Rust baseline consistency check PASSED: toolchain=1.97.0, MSRV=1.97
+PASS: components/rust-converter/Cargo.toml version: 0.9.2
+PASS: Chart.yaml version: 0.9.2
+PASS: Chart.yaml appVersion: 0.9.2
+PASS: fuzz/Cargo.toml dep version: 0.9.2
+PASS: corpus/Cargo.toml dep version: 0.9.2
+Rust baseline consistency check PASSED: toolchain=1.97.1, MSRV=1.97
 INFO: Homebrew formula: 0.8.3 (intentionally previous; updated by publish workflow)
 
 PASS: All version checks passed

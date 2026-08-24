@@ -62,6 +62,12 @@ SKIP_DIR_PARTS: frozenset[str] = frozenset({
     "venv", ".venv", ".pytest_cache", ".mypy_cache",
 })
 
+# This fuzz seed is a deliberately binary gzip stream despite its `.txt`
+# corpus name. It is an input fixture, not source text for Sonar's parser.
+BINARY_FIXTURE_PREFIXES: tuple[Path, ...] = (
+    Path("components/rust-converter/fuzz/corpus/fuzz_multilayer_decode"),
+)
+
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST: Path = Path("tools/sonar/encoding_exceptions.json")
 
@@ -134,6 +140,11 @@ def _should_skip_path(path: Path) -> bool:
     # Brotli fixtures are binary by design.
     if path.suffix.lower() == ".br":
         return True
+    if any(
+        path == prefix or prefix in path.parents
+        for prefix in BINARY_FIXTURE_PREFIXES
+    ):
+        return True
     return False
 
 
@@ -194,13 +205,27 @@ def _validate_file(
 
 
 def _audit_tracked(manifest: dict[str, dict[str, Any]]) -> tuple[int, int]:
-    """Audit git-tracked text files.  Returns (exit_code, checked_count)."""
+    """Audit present git-tracked text files.
+
+    ``git ls-files`` also reports paths deleted in an unstaged worktree.  A
+    deletion is a valid transition for a tracked file, so the encoding gate
+    must omit that path until the deletion is staged rather than reporting a
+    misleading read error.
+    """
     files = _run_git_ls_files()
-    text_files = [
-        p for p in files
-        if _is_text_file(p) and not _should_skip_path(p)
-    ]
     failures: list[str] = []
+    text_files: list[Path] = []
+
+    for path in files:
+        if not _is_text_file(path) or _should_skip_path(path):
+            continue
+        try:
+            abs_path = _resolve_repository_path(path, "Tracked path")
+        except RuntimeError as exc:
+            failures.append(str(exc))
+            continue
+        if abs_path.is_file():
+            text_files.append(path)
 
     for path in text_files:
         try:

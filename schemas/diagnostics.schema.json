@@ -1,0 +1,641 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "diagnostics.schema.json",
+  "title": "nginx-markdown-for-agents Diagnostics Endpoint Schema v2",
+  "description": "JSON Schema for the diagnostics endpoint response body. Defines exactly 7 top-level fields with strict typing, nullability, and bounds, plus bounded module evidence counters and explicit error provenance.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "product_version",
+    "worker",
+    "build",
+    "configuration",
+    "runtime",
+    "recent_decisions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2,
+      "description": "Schema version identifier. Always 2 for this version."
+    },
+    "product_version": {
+      "type": "string",
+      "description": "Module version string (semver).",
+      "minLength": 1
+    },
+    "worker": {
+      "type": "object",
+      "description": "Worker process identity. Worker-local scope.",
+      "required": [
+        "pid",
+        "scope"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Worker process ID."
+        },
+        "scope": {
+          "type": "string",
+          "const": "worker-local",
+          "description": "Diagnostics scope. Always worker-local."
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "description": "Build identity. Global scope.",
+      "required": [
+        "source_sha",
+        "nginx_version",
+        "rust_version",
+        "features"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Git commit SHA of the module source."
+        },
+        "nginx_version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "NGINX version string."
+        },
+        "rust_version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Rust compiler version used to build the converter."
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0,
+          "maxItems": 20,
+          "description": "Compiled feature flags."
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "description": "Configuration state for the diagnostics handler location.",
+      "required": [
+        "static_digest",
+        "dynconf",
+        "effective",
+        "effective_sources"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "static_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 over the canonical static_config_manifest_v1 for this location. Location-specific."
+        },
+        "dynconf": {
+          "$ref": "#/$defs/dynconf_state",
+          "description": "Discriminated dynconf state object. Always present, never null or absent."
+        },
+        "effective": {
+          "$ref": "#/$defs/effective_config",
+          "description": "Effective values of the 5 dynconf-mutable fields after precedence resolution."
+        },
+        "effective_sources": {
+          "$ref": "#/$defs/effective_sources",
+          "description": "Provenance of each effective field value."
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "description": "Live worker state. Worker-local scope.",
+      "required": [
+        "inflight",
+        "pending_output",
+        "module_metrics"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "inflight": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of requests currently in the conversion pipeline."
+        },
+        "pending_output": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of requests with pending output buffers."
+        },
+        "module_metrics": {
+          "type": "object",
+          "description": "Exact module counters used by local performance evidence adapters.",
+          "required": [
+            "streaming_requests_total",
+            "precommit_failopen_total",
+            "copied_output_total"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "streaming_requests_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "precommit_failopen_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "copied_output_total": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "recent_decisions": {
+      "type": "array",
+      "description": "Ring buffer of recent conversion decisions. Worker-local scope.",
+      "minItems": 0,
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/decision_entry"
+      }
+    }
+  },
+  "$defs": {
+    "dynconf_state": {
+      "type": "object",
+      "description": "Discriminated dynconf state. The state field determines nullability of other fields.",
+      "required": [
+        "state",
+        "generation",
+        "source_digest",
+        "active_digest",
+        "lkg_digest",
+        "last_success",
+        "last_error",
+        "masked_keys"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "no_file",
+            "invalid_without_lkg",
+            "active",
+            "lkg_preserved"
+          ],
+          "description": "Discriminator for the dynconf lifecycle state."
+        },
+        "generation": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "Reload generation counter. Null when state is disabled, no_file, or invalid_without_lkg."
+        },
+        "source_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 of the raw file bytes that produced the served snapshot. Null when state is disabled, no_file, or invalid_without_lkg."
+        },
+        "active_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Canonical digest of the active/LKG configuration. Null when state is disabled, no_file, or invalid_without_lkg."
+        },
+        "lkg_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Canonical digest of the previous active dynconf configuration. Null when the LKG is the bootstrap static configuration, or when state is disabled, no_file, or invalid_without_lkg."
+        },
+        "last_success": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of the last successful reload. Null when state is disabled, no_file, or invalid_without_lkg."
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128,
+          "x-maxUtf8Bytes": 512,
+          "description": "Validation failure description. Max 512 UTF-8 bytes (128 Unicode characters). No raw file paths, no secrets, no raw config content. Null when no error."
+        },
+        "masked_keys": {
+          "type": "array",
+          "description": "Dynconf keys masked by explicit static server/location configuration.",
+          "uniqueItems": true,
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "enum": [
+              "filter",
+              "prune_noise",
+              "log_verbosity",
+              "error_policy",
+              "streaming_buffer"
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "disabled"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "generation": {
+                "type": "null"
+              },
+              "source_digest": {
+                "type": "null"
+              },
+              "active_digest": {
+                "type": "null"
+              },
+              "lkg_digest": {
+                "type": "null"
+              },
+              "last_success": {
+                "type": "null"
+              },
+              "last_error": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "no_file"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "generation": {
+                "type": "null"
+              },
+              "source_digest": {
+                "type": "null"
+              },
+              "active_digest": {
+                "type": "null"
+              },
+              "lkg_digest": {
+                "type": "null"
+              },
+              "last_success": {
+                "type": "null"
+              },
+              "last_error": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "invalid_without_lkg"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "generation": {
+                "type": "null"
+              },
+              "source_digest": {
+                "type": "null"
+              },
+              "active_digest": {
+                "type": "null"
+              },
+              "lkg_digest": {
+                "type": "null"
+              },
+              "last_success": {
+                "type": "null"
+              },
+              "last_error": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-maxUtf8Bytes": 512
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "active"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "generation": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "source_digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "active_digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "lkg_digest": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "last_success": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "last_error": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "lkg_preserved"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "generation": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "source_digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "active_digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "lkg_digest": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "last_success": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "last_error": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-maxUtf8Bytes": 512
+              }
+            }
+          }
+        }
+      ]
+    },
+    "effective_config": {
+      "type": "object",
+      "description": "Effective values of the 5 dynconf-mutable fields after precedence resolution for the diagnostics handler location.",
+      "required": [
+        "filter",
+        "prune_noise",
+        "log_verbosity",
+        "error_policy",
+        "streaming_buffer"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "type": "string",
+          "enum": [
+            "on",
+            "off"
+          ],
+          "description": "Effective markdown filter toggle."
+        },
+        "prune_noise": {
+          "type": "string",
+          "enum": [
+            "on",
+            "off"
+          ],
+          "description": "Effective noise pruning toggle."
+        },
+        "log_verbosity": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug"
+          ],
+          "description": "Effective log verbosity level."
+        },
+        "error_policy": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail_closed",
+            "status 429",
+            "status 503"
+          ],
+          "description": "Effective error policy."
+        },
+        "streaming_buffer": {
+          "type": "integer",
+          "minimum": 65536,
+          "maximum": 1073741824,
+          "description": "Effective streaming buffer size in bytes."
+        }
+      }
+    },
+    "effective_sources": {
+      "type": "object",
+      "description": "Provenance of each effective field value. Only filter may report request_variable.",
+      "required": [
+        "filter",
+        "prune_noise",
+        "log_verbosity",
+        "error_policy",
+        "streaming_buffer"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "type": "string",
+          "enum": [
+            "static",
+            "dynconf",
+            "request_variable",
+            "http_baseline",
+            "default"
+          ],
+          "description": "Source of the effective filter value."
+        },
+        "prune_noise": {
+          "type": "string",
+          "enum": [
+            "static",
+            "dynconf",
+            "http_baseline",
+            "default"
+          ],
+          "description": "Source of the effective prune_noise value."
+        },
+        "log_verbosity": {
+          "type": "string",
+          "enum": [
+            "static",
+            "dynconf",
+            "http_baseline",
+            "default"
+          ],
+          "description": "Source of the effective log_verbosity value."
+        },
+        "error_policy": {
+          "type": "string",
+          "enum": [
+            "static",
+            "dynconf",
+            "http_baseline",
+            "default"
+          ],
+          "description": "Source of the effective error_policy value."
+        },
+        "streaming_buffer": {
+          "type": "string",
+          "enum": [
+            "static",
+            "dynconf",
+            "http_baseline",
+            "default"
+          ],
+          "description": "Source of the effective streaming_buffer value."
+        }
+      }
+    },
+    "decision_entry": {
+      "type": "object",
+      "description": "A single recent decision record.",
+      "required": [
+        "timestamp",
+        "outcome",
+        "stage",
+        "reason",
+        "error_origin",
+        "duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of the decision."
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "converted",
+            "skipped",
+            "failed_open",
+            "failed_closed",
+            "aborted"
+          ],
+          "description": "Terminal outcome of the request."
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "eligibility",
+            "decompression",
+            "parsing",
+            "conversion",
+            "precommit",
+            "postcommit",
+            "delivery",
+            "dynconf"
+          ],
+          "description": "Processing stage where the decision was made."
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Specific reason code (lowercase_snake_case from reason registry)."
+        },
+        "error_origin": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "allocation",
+            "downstream",
+            "invariant",
+            "format",
+            "truncated",
+            "timeout",
+            "memory_budget",
+            "internal",
+            null
+          ],
+          "description": "Error origin dimension. Null when outcome is not a failure."
+        },
+        "duration_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Processing duration in milliseconds."
+        }
+      }
+    }
+  }
+}

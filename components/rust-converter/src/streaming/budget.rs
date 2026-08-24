@@ -16,7 +16,7 @@ use crate::error::ConversionError;
 /// | Field | Default | Rationale |
 /// |-------|---------|-----------|
 /// | `total` | 2 MiB | Covers bounded state for most documents |
-/// | `state_stack` | 64 KiB | ~1000 nesting levels at ~64 B each |
+/// | `state_stack` | 64 KiB | ~1000 fixed-size nesting levels; retained String payloads are charged separately |
 /// | `output_buffer` | 256 KiB | One large block-level element |
 /// | `charset_sniff` | 1024 B | Matches `detect_charset` scan range |
 /// | `lookahead` | 64 KiB | Sufficient for `<head>` metadata |
@@ -75,7 +75,15 @@ impl MemoryBudget {
     /// - `total >= default.total`: scale the variable stage caps in proportion
     ///   to the configured total while keeping the charset sniff cap fixed.
     /// - `total < default.total`: scale stage caps proportionally so stage-cap
-    ///   sum equals `total`.
+    ///   sum equals `total`, with one floor: `charset_sniff` stays at its
+    ///   documented fixed size even when the caller configures a smaller
+    ///   total.  Shrinking the sniff window would change decode behavior
+    ///   (a meta charset declared after a reduced scan window would be
+    ///   missed), which is an observable protocol change rather than a
+    ///   resource adjustment — so the effective sub-budget sum may exceed
+    ///   a pathologically small configured total by up to the sniff
+    ///   reservation.  Callers that need a hard ceiling must not configure
+    ///   totals below the sniff minimum.
     pub fn for_total(total: usize) -> Self {
         let defaults = Self::default();
         if total == 0 {
@@ -99,23 +107,42 @@ impl MemoryBudget {
             };
         }
 
+        // The charset sniff cap is documented as FIXED (1024 B): a smaller
+        // total must not shrink it, or a meta charset declared after the
+        // reduced sniff window would be missed and change decode behavior.
+        // Keep the full reservation and scale only the variable stages;
+        // for pathological totals below the sniff reservation the variable
+        // stages collapse to their minimum share of what remains.
+        let sniff_fixed = defaults.charset_sniff;
+        let remaining = total.saturating_sub(sniff_fixed);
+
+        if remaining == 0 {
+            return Self {
+                total,
+                state_stack: 0,
+                output_buffer: 0,
+                charset_sniff: sniff_fixed,
+                lookahead: 0,
+            };
+        }
+
+        // Scale the remaining variable stages against `remaining`.
         let weights = [
             defaults.state_stack,
             defaults.output_buffer,
-            defaults.charset_sniff,
             defaults.lookahead,
         ];
         let weight_sum = weights.iter().copied().sum::<usize>();
 
-        let mut scaled = [0usize; 4];
+        let mut scaled = [0usize; 3];
         for (idx, weight) in weights.iter().copied().enumerate() {
-            scaled[idx] = total.saturating_mul(weight) / weight_sum;
+            scaled[idx] = remaining.saturating_mul(weight) / weight_sum.max(1);
         }
 
         // Distribute integer-division remainder deterministically so the
         // sub-budget sum stays exactly equal to `total`.
-        let mut assigned = scaled.iter().copied().sum::<usize>();
-        let priority = [1usize, 0usize, 3usize, 2usize];
+        let mut assigned = scaled.iter().copied().sum::<usize>() + sniff_fixed;
+        let priority = [0usize, 2usize, 1usize];
         let mut pidx = 0usize;
         while assigned < total {
             let slot = priority[pidx % priority.len()];
@@ -128,8 +155,8 @@ impl MemoryBudget {
             total,
             state_stack: scaled[0],
             output_buffer: scaled[1],
-            charset_sniff: scaled[2],
-            lookahead: scaled[3],
+            charset_sniff: sniff_fixed,
+            lookahead: scaled[2],
         }
     }
 
@@ -317,6 +344,19 @@ mod tests {
         assert_eq!(budget.total, 256 * 1024);
         assert_eq!(sum, budget.total);
         assert!(budget.output_buffer > 0);
+    }
+
+    #[test]
+    fn test_for_total_below_sniff_keeps_sniff_fixed() {
+        // Regression: a total below the sniff reservation must keep the
+        // documented fixed sniff window (decode-behavior invariant), not
+        // shrink it via min(total, sniff).
+        let budget = MemoryBudget::for_total(512);
+        assert_eq!(budget.charset_sniff, 1024);
+        assert_eq!(budget.total, 512);
+        assert_eq!(budget.state_stack, 0);
+        assert_eq!(budget.output_buffer, 0);
+        assert_eq!(budget.lookahead, 0);
     }
 
     #[test]

@@ -12,7 +12,7 @@ For the full request flow, read [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md). Fo
 
 ## How to Read This Map
 
-Each directive is described in four dimensions:
+The map describes each directive in four dimensions:
 
 - behavior: what it changes from the user's point of view
 - lifecycle impact: which phase or branch it affects
@@ -29,24 +29,19 @@ flowchart LR
         CV["markdown_cache_validation"]
         LV["markdown_log_verbosity"]
         SP["markdown_streaming"]
-        PR["markdown_profile"]
         AD["markdown_auto_decompress"]
+        SE["markdown_stream_excluded_types"]
     end
 
     subgraph BodyPhase["Body Filter Phase"]
         ML["markdown_limits"]
         OE["markdown_error_policy"]
         FL["markdown_flavor"]
-        BC["markdown_buffer_chunked"]
-        ST["markdown_stream_types"]
         TF["markdown_trusted_proxies"]
-        SS["markdown_streaming_shadow"]
-        ZC["markdown_streaming_zero_copy"]
     end
 
     subgraph Metrics["Metrics"]
         MM["markdown_metrics"]
-        MFmt["markdown_metrics_format"]
         MSHM["markdown_metrics_shm_size"]
     end
 
@@ -80,10 +75,10 @@ flowchart LR
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Unified resource limits block: `memory=<size>`, `timeout=<time>`, `streaming_buffer=<size>`, `max_inflight=<N>` (Config V2, 0.9.0) |
+| Behavior | Unified resource limits block with eight bounded keys: conversion/parser timeouts and memory, streaming buffer, decompressed size, decompression ratio, and max in-flight requests |
 | Lifecycle impact | Body-phase buffering budget, conversion timeout, streaming memory, and inflight guard |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_buffer.c`, `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h` |
-| Practical note | Consolidates the removed `markdown_max_size`, `markdown_memory_budget`, `markdown_timeout`, and `markdown_streaming_budget` directives. Any subset of keys may be given; unspecified keys inherit. |
+| Practical note | Each key is independently inherited and validated. Unknown, duplicate, zero, out-of-range, and overflow values fail closed. |
 
 ### `markdown_error_policy`
 
@@ -103,7 +98,7 @@ flowchart LR
 | Behavior | Selects the Markdown flavor emitted by the Rust converter |
 | Lifecycle impact | Rust conversion options preparation before FFI call |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/converter.rs` |
-| Practical note | `commonmark` and `gfm` are the supported values. The former `mdx` and `org-mode` selectors are rejected in v0.9.1 because they never provided distinct conversion semantics. |
+| Practical note | `commonmark` and `gfm` are the supported values. The former `mdx` and `org-mode` selectors are rejected in 0.9.2 because they never provided distinct conversion semantics. |
 
 ### `markdown_token_estimate`
 
@@ -172,36 +167,18 @@ flowchart LR
 | Behavior | Enables a dedicated metrics endpoint at a location |
 | Lifecycle impact | Separate location-handler path, not the normal conversion filter chain |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h`, `components/nginx-module/src/ngx_http_markdown_config_directives_impl.h`, `components/nginx-module/src/ngx_http_markdown_metrics_impl.h` |
-| Practical note | When debugging this directive, think “handler mode”, not “header/body filter mode”. |
+| Practical note | The wire format is exclusively Prometheus text 0.0.4 with exactly twelve bounded families; Accept negotiation cannot restore removed JSON or legacy text output. |
 
 ## Transfer and Streaming-Oriented Controls
 
-### `markdown_buffer_chunked`
+### `markdown_stream_excluded_types`
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Controls whether chunked transfer responses may be buffered and converted |
-| Lifecycle impact | Eligibility and body-buffering path for chunked upstream responses |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_eligibility.c`, `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_payload_impl.h` |
-| Practical note | This directive does not provide streaming conversion; it only controls whether chunked responses may still enter the full-buffering path. |
-
-### `markdown_stream_types`
-
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Excludes configured content types from conversion, typically for streaming-style responses |
-| Lifecycle impact | Header-phase eligibility branch |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_eligibility.c` |
-| Practical note | Treat this as an explicit bypass list for response shapes that do not fit the buffering model well. |
-
-### `markdown_profile`
-
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Applies a named preset of defaults (`balanced`, `strict_cache`, `streaming_first`) to simplify configuration |
-| Lifecycle impact | Config merge phase; overrides built-in defaults before explicit directives are applied |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_config_core_impl.h`, Rust `Profile` enum |
-| Practical note | Use this to quickly align with a known deployment pattern. Explicit directives still override profile defaults. |
+| Behavior | Prevents selected media types from entering the streaming path |
+| Lifecycle impact | Header-phase streaming eligibility branch |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_streaming_impl.h` |
+| Practical note | Excluded responses may still use bounded full-buffer conversion when other eligibility checks pass. |
 
 ### `markdown_auto_decompress`
 
@@ -219,16 +196,7 @@ flowchart LR
 | Behavior | Selects the processing path: `off` requires full-buffer, `auto` routes by size/response shape, and `force` prefers streaming for every eligible response |
 | Lifecycle impact | Header-phase routing and body-filter path selection after hard eligibility and cache-validation gates |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_streaming_impl.h` |
-| Practical note | This is the sole public streaming selector in v0.9.1. The removed `markdown_streaming_engine` directive is reject-only and reports the exact migration. |
-
-### `markdown_streaming_zero_copy`
-
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Enables zero-copy output path for streaming conversion to reduce internal copying |
-| Lifecycle impact | Streaming body filter output path |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_zerocopy_buf.h` |
-| Practical note | Opt-in feature (default `off`). Use in high-throughput environments to reduce CPU/memory overhead. |
+| Practical note | This is the sole public streaming selector in 0.9.2. The removed `markdown_streaming_engine` directive is absent from the command table; using it reports an `unknown directive` error at `nginx -t` time. |
 
 ## Practical Use Cases
 
@@ -239,8 +207,7 @@ Start with directives that affect entry and bypass:
 - `markdown_filter`
 - `markdown_accept`
 - `markdown_auth_policy`
-- `markdown_stream_types`
-- `markdown_buffer_chunked`
+- `markdown_stream_excluded_types`
 
 Then move to [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md) and trace header-phase eligibility.
 

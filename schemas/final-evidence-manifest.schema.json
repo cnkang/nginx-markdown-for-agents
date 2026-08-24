@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cnkang/nginx-markdown-for-agents/schemas/final-evidence-manifest.schema.json",
+  "title": "Final Evidence Manifest",
+  "description": "Instance schema for the candidate-bound final evidence manifest (artifacts/release/0.9.2/final-evidence-manifest.json). Top-level run_status is derived: every blocking=true entry must be pass, no blocking entry may be pending, every policy-allowed skip must carry a justification and policy_reference, candidate SHA and schema digests must match, and no accepted residual-risk record may convert a P0/P1 blocking failure into a pass.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "candidate_sha",
+    "evidence_schema_digest",
+    "observation_schema_digest",
+    "entries",
+    "run_status",
+    "generated_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "candidate_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Frozen release candidate source SHA; must equal artifacts/release/0.9.2/release-candidate-sha-manifest.json candidate_sha."
+    },
+    "evidence_schema_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "sha256 of the canonical serialization of schemas/final-evidence-manifest.schema.json."
+    },
+    "observation_schema_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "sha256 of the canonical serialization of schemas/observation-state.schema.json."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "entries": {
+      "type": "array",
+      "description": "One evidence entry per qualifying domain; the blocking-entry rule applies per entry.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/evidence_entry"
+      }
+    },
+    "run_status": {
+      "enum": ["pass", "fail", "pending"],
+      "description": "Derived: pass only when every blocking=true entry is pass, no blocking entry is pending, every skip is policy-allowed and justified, and candidate SHA/schema digests match."
+    },
+    "residual_risk": {
+      "type": "array",
+      "description": "Accepted residual-risk records. A record may not convert a P0/P1 blocking failure into a pass.",
+      "items": {
+        "$ref": "#/$defs/residual_risk_record"
+      }
+    }
+  },
+  "$defs": {
+    "evidence_entry": {
+      "type": "object",
+      "required": [
+        "domain",
+        "blocking",
+        "status",
+        "artifact_ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "domain": {
+          "enum": [
+            "coverage",
+            "performance",
+            "fuzz",
+            "soak",
+            "security",
+            "signature",
+            "provenance",
+            "documentation",
+            "residual-risk"
+          ]
+        },
+        "blocking": {
+          "type": "boolean",
+          "description": "true = release-blocking evidence; false = advisory/report-only."
+        },
+        "status": {
+          "enum": ["pass", "fail", "pending", "skip"]
+        },
+        "artifact_ref": {
+          "type": "string",
+          "description": "Immutable artifact path or retrieval ID for the evidence record."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "justification": {
+          "type": "string",
+          "description": "Required when status=skip: why the policy allows the skip."
+        },
+        "policy_reference": {
+          "type": "string",
+          "description": "Required when status=skip: policy rule that allows the skip."
+        },
+        "details": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "skip"}}
+          },
+          "then": {
+            "required": ["justification", "policy_reference"]
+          }
+        }
+      ]
+    },
+    "residual_risk_record": {
+      "type": "object",
+      "required": ["id", "severity", "description", "acceptance_reference"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": ["P0", "P1", "P2", "P3"]
+        },
+        "description": {
+          "type": "string"
+        },
+        "acceptance_reference": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

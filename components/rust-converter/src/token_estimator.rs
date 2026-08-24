@@ -1,12 +1,34 @@
 //! Token count estimation for LLM context windows.
 //!
-//! Provides a fast, allocation-free heuristic estimate based on character
-//! count divided by a configurable `chars_per_token` ratio (default 4.0,
-//! typical for English text).  This is **not** a replacement for actual
-//! BPE/tokenizer-based counting — accuracy varies significantly for
-//! code-heavy content (~1.5–2 chars/token), CJK text (~1.5–2 chars/char),
-//! and mixed-language documents.  Use when a quick upper bound suffices
-//! (e.g., context-window budget checks, progress logging).
+//! Provides a fast, deterministic, allocation-free heuristic estimate based
+//! on character count divided by a fixed `chars_per_token` ratio (default
+//! 4.0, typical for English prose).  No BPE tokenizer is used and no
+//! provider-specific ratios exist; the algorithm is a fixed heuristic:
+//! `ceil(chars / chars_per_token)`.
+//!
+//! # Accuracy (quantified error margin)
+//!
+//! - English prose at the 4.0 default: ±20% typical, up to ±30% worst case
+//! - Code-heavy content (~1.5–2 chars/token): often underestimated by up to ~2×
+//! - CJK text (~1.5–2 chars/token): often underestimated by up to ~2×
+//! - Mixed-language documents: within ±50% in practice
+//!
+//! These bounds are heuristic estimates, not guarantees; use the value when
+//! a quick approximate estimate is useful (e.g., progress logging), never as
+//! a guaranteed budget upper bound or an exact tokenizer-equivalent count.
+//!
+//! # Determinism
+//!
+//! Identical input always produces identical output for a given
+//! `chars_per_token`: no randomness, no language detection, no model-specific
+//! behavior.
+//!
+//! # Valid input domain
+//!
+//! `chars_per_token` must be finite and greater than zero.  A zero or
+//! non-finite value would make the estimate undefined (division by zero or
+//! NaN propagation); callers must validate the value before constructing a
+//! `TokenEstimator`.
 
 /// Token estimator using character-based heuristic
 pub struct TokenEstimator {
@@ -23,6 +45,10 @@ impl TokenEstimator {
     }
 
     /// Create a new estimator with custom chars_per_token
+    ///
+    /// `chars_per_token` must be finite and greater than zero.  A zero or
+    /// non-finite value makes the estimate undefined (division by zero or
+    /// NaN propagation); callers must validate the value before calling.
     pub fn with_chars_per_token(chars_per_token: f32) -> Self {
         Self { chars_per_token }
     }

@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "metrics-v1.registry.json",
+  "title": "nginx-markdown-for-agents Metrics v1 Contract",
+  "description": "Canonical Prometheus metrics family, label, and histogram contract. Histogram bucket_count and max_histogram_buckets count only explicit finite buckets; Prometheus emits the +Inf bucket implicitly and it is not included in either count.",
+  "schema_version": 1,
+  "format": "prometheus_text_004",
+  "constraints": {
+    "family_prefix": "nginx_markdown_",
+    "forbidden_labels": [
+      "address",
+      "client",
+      "host",
+      "path",
+      "query",
+      "uri"
+    ],
+    "max_histogram_buckets": 10,
+    "valid_types": [
+      "counter",
+      "gauge",
+      "histogram"
+    ]
+  },
+  "families": [
+    {
+      "name": "nginx_markdown_requests_total",
+      "type": "counter",
+      "labels": [
+        {
+          "name": "outcome",
+          "values": [
+            "aborted",
+            "converted",
+            "failed_closed",
+            "failed_open",
+            "skipped"
+          ]
+        },
+        {
+          "name": "reason",
+          "values": [
+            "bypass_no_transform",
+            "converted",
+            "disabled",
+            "failed_closed",
+            "failed_open",
+            "not_eligible",
+            "skipped_accept",
+            "skipped_conditional",
+            "skipped_no_accept",
+            "streaming_mid_flight_error"
+          ]
+        },
+        {
+          "name": "stage",
+          "values": [
+            "conversion",
+            "delivery",
+            "eligibility"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "nginx_markdown_conversion_attempts_total",
+      "type": "counter",
+      "labels": [
+        {
+          "name": "engine",
+          "values": [
+            "full_buffer",
+            "streaming"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "nginx_markdown_conversion_deliveries_total",
+      "type": "counter",
+      "labels": [
+        {
+          "name": "engine",
+          "values": [
+            "full_buffer",
+            "streaming"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "nginx_markdown_conversion_duration_seconds",
+      "type": "histogram",
+      "labels": [
+        {
+          "name": "engine",
+          "values": [
+            "full_buffer",
+            "streaming"
+          ]
+        }
+      ],
+      "bucket_count": 10,
+      "bucket_boundaries": [
+        0.001,
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        5.0
+      ]
+    },
+    {
+      "name": "nginx_markdown_input_bytes_total",
+      "type": "counter",
+      "labels": []
+    },
+    {
+      "name": "nginx_markdown_output_bytes_total",
+      "type": "counter",
+      "labels": []
+    },
+    {
+      "name": "nginx_markdown_inflight_requests",
+      "type": "gauge",
+      "labels": []
+    },
+    {
+      "name": "nginx_markdown_streaming_peak_memory_bytes",
+      "type": "gauge",
+      "labels": []
+    },
+    {
+      "name": "nginx_markdown_streaming_events_total",
+      "type": "counter",
+      "labels": [
+        {
+          "name": "reason",
+          "values": [
+            "converted",
+            "precommit_html_error",
+            "streaming_mid_flight_error"
+          ]
+        },
+        {
+          "name": "transition",
+          "values": [
+            "commit",
+            "fallback",
+            "safe_finish_start",
+            "abort_start",
+            "resume_success",
+            "resume_failure"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "nginx_markdown_decompression_events_total",
+      "type": "counter",
+      "labels": [
+        {
+          "name": "encoding",
+          "values": [
+            "brotli",
+            "deflate",
+            "gzip"
+          ]
+        },
+        {
+          "name": "outcome",
+          "values": [
+            "failure",
+            "success"
+          ]
+        },
+        {
+          "name": "reason",
+          "values": [
+            "budget_exceeded",
+            "format_error",
+            "io_error",
+            "ok",
+            "truncated_input"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "nginx_markdown_dynconf_reloads_total",
+      "type": "counter",
+      "labels": [
+        {
+          "name": "outcome",
+          "values": [
+            "failure",
+            "success"
+          ]
+        },
+        {
+          "name": "reason",
+          "values": [
+            "duplicate_key",
+            "file_error",
+            "invalid_type",
+            "ok",
+            "out_of_range",
+            "parse_error",
+            "schema_version",
+            "size_exceeded",
+            "unknown_key"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "nginx_markdown_build_info",
+      "type": "gauge",
+      "labels": [
+        {
+          "name": "features",
+          "values": [],
+          "dynamic": true,
+          "description": "Runtime-determined value rendered from module build identity; not a closed allowlist."
+        },
+        {
+          "name": "nginx_version",
+          "values": [],
+          "dynamic": true,
+          "description": "Runtime-determined value rendered from module build identity; not a closed allowlist."
+        },
+        {
+          "name": "version",
+          "values": [],
+          "dynamic": true,
+          "description": "Runtime-determined value rendered from module build identity; not a closed allowlist."
+        }
+      ],
+      "value": 1
+    }
+  ]
+}

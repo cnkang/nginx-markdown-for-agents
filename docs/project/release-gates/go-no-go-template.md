@@ -2,7 +2,12 @@
 
 Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 
-This is the final checkpoint before the 0.4.0 release. The Go/No-Go review verifies that all P0 sub-specs have passed their DoD evaluation, all release gates are satisfied, and any exceptions are documented with risk assessment and mitigation.
+This is the final checkpoint before the 0.4.0 release. The Go/No-Go review
+verifies that all P0 sub-specs have passed their DoD evaluation. It also
+verifies that all release gates pass. An unresolved release-gate failure is
+No-Go. An approved exception can permit Go only for a non-P0, non-safety gate
+when the release owner approves it. The record must include risk assessment
+and mitigation evidence. P0 or safety failures remain No-Go.
 
 ## Decision Record
 
@@ -24,7 +29,7 @@ All P0 sub-specs must pass their DoD evaluation before a Go decision can be made
 
 ## P1 Sub-Spec Status
 
-The P1 sub-spec may be excluded without blocking the release (Req 7.5).
+The team may exclude the P1 sub-spec without blocking the release (Req 7.5).
 
 | Sub-Spec | DoD Status | Decision |
 |----------|-----------|----------|
@@ -41,17 +46,17 @@ The P1 sub-spec may be excluded without blocking the release (Req 7.5).
 
 ## Exceptions
 
-Unresolved failures with documented exceptions must be recorded here with risk assessment and mitigation (Req 7.6).
+Every unresolved failure must have an exception record here that includes its rationale, risk assessment, and mitigation (Req 7.6). Each exception must carry a non-P0, non-safety classification to be eligible for approval, and the release owner must approve it.
 
-| # | Gate Item | Exception Rationale | Risk Assessment | Mitigation |
-|---|----------|-------------------|-----------------|------------|
-| | | | | |
+| # | Gate Item | Eligibility (non-P0, non-safety) | Exception Rationale | Risk Assessment | Mitigation | Approver (release owner) |
+|---|----------|--------------------------------|-------------------|-----------------|------------|--------------------------|
+| | | | | | | |
 
 ## Rules
 
 1. All P0 sub-specs must pass their DoD evaluation before a Go decision.
-2. The P1 sub-spec (parser-path-optimization) may be excluded without blocking the release (Req 7.5).
-3. Any unresolved failure with a documented exception must be recorded in this decision record with risk assessment and mitigation (Req 7.6).
+2. The team may exclude the P1 sub-spec (parser-path-optimization) without blocking the release (Req 7.5).
+3. The release owner must approve any exception before the release proceeds. The record must state why the exception is eligible for Go, include risk assessment and mitigation evidence, and identify the approver. An unapproved or P0/safety exception is No-Go (Req 7.6).
 
 ## Document Updates
 

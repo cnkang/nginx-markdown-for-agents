@@ -2,7 +2,7 @@
 # pylint: disable=import-error
 # pylint: disable=wrong-import-position
 # pylint: disable=protected-access
-"""Unit tests for the 0.9.1 performance evidence release gate.
+"""Unit tests for the active module performance evidence release gate.
 
 Covers:
   - GO verdict when all metrics within thresholds
@@ -19,6 +19,8 @@ Requirements: 9.1, 9.3, 9.4
 import copy
 import hashlib
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -256,8 +258,15 @@ def test_tag_release_job_supplies_module_enabled_nginx():
         "--env NGINX_BIN=/workspace/module-runtime/nginx" in workflow
     )
     assert "libxcrypt" in workflow
-    assert "python3 tools/perf/evidence_gate.py --mode blocking" in workflow
-    assert "evidence_gate.py --blocking" not in workflow
+    evidence_invocations = [
+        "make release-perf-evidence-blocking BASELINE_VERSION=091",
+        "make release-perf-evidence-blocking BASELINE_VERSION=092",
+    ]
+    assert all(workflow.count(invocation) == 1 for invocation in evidence_invocations)
+    assert workflow.index(evidence_invocations[0]) < workflow.index(
+        evidence_invocations[1]
+    ), "Tag release evidence must run baseline 091 before baseline 092"
+    assert "RELEASE_GATE_ALLOW_SKIP_MODULE=1" not in workflow
 
 
 def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
@@ -278,28 +287,28 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
         "if: ${{ !(github.event_name == 'workflow_dispatch' "
         "&& inputs.bootstrap_module_baseline) }}"
     ) in workflow
-    assert "name: Canonical Module Baseline 0.9.1" in workflow
+    assert "name: Canonical Module Baseline 0.9.2" in workflow
     assert "runs-on: ubuntu-24.04" in workflow
     assert '[[ "$(uname -m)" == "x86_64" ]]' in workflow
     assert "Determine canonical benchmark NGINX version" in workflow
-    assert "tools/release-matrix.json" in workflow
+    assert "release/performance/canonical-environment.json" in workflow
     assert "apache2-utils" in workflow
     assert "components: rustfmt,clippy" in workflow, (
         "Canonical job must install repository-required Rust components with "
         "the toolchain instead of deferring rustup to cargo install"
     )
     assert "tools/perf/run_module_benchmark.sh" in workflow
-    assert "perf/baselines/module-baseline-091.json" in workflow
+    assert "perf/baselines/module-baseline-092.json" in workflow
     assert "_validate_benchmark_evidence" in workflow
     assert "make perf-evidence-check" in workflow
-    assert "make release-gates-check-091" in workflow
-    assert "module-baseline-091-${{ github.sha }}" in workflow
+    assert "make release-gates-check-092-canonical" in workflow
+    assert "module-baseline-092-${{ github.sha }}" in workflow
 
 
 def test_module_baseline_contains_completed_environment_consistent_scenarios():
     """The checked-in canonical baseline contains eight completed scenarios
     that all share its declared canonical environment (linux-x86_64, ab,
-    NGINX 1.24.0), including the Brotli streaming path.
+    NGINX 1.30.4), including the Brotli streaming path.
     """
     baseline_path = (
         Path(__file__).resolve().parents[3]
@@ -337,12 +346,15 @@ def test_module_baseline_contains_completed_environment_consistent_scenarios():
     assert baseline["module_benchmark"]["nginx_version"].startswith(
         "nginx version: nginx/"
     )
+    assert baseline["module_benchmark"]["nginx_version"] == (
+        "nginx version: nginx/1.30.4"
+    )
     streaming = by_name["streaming-first"]["metrics"]
     assert streaming["input_bytes"] == 1_048_516
     assert streaming["streaming_path_hits"] > 0
     assert streaming["streaming_ratio"] == 1.0
     assert streaming["streaming_fallback_total"] == 0
-    assert streaming["zero_copy_output_total"] > 0
+    assert streaming["copied_output_total"] > 0
 
     # Verify decompression path evidence in compressed streaming scenarios
     if "gzip-streaming-first" in by_name:
@@ -919,6 +931,118 @@ class TestRCAndReleaseTagEnforcement:
         assert is_rc or is_release, f"tag {value} matched neither RC nor release pattern"
 
 
+class TestToolResolution:
+    """PATH-shadowable helper execution must never be used (perf-evidence F4)."""
+
+    def test_resolve_tool_rejects_missing_binary(self, monkeypatch):
+        """A command absent from PATH must not resolve."""
+        monkeypatch.setattr(evidence_gate.shutil, "which", lambda name: None)
+        assert evidence_gate._resolve_tool("nonexistent-tool") is None
+
+    def test_resolve_tool_rejects_untracked_location(self, monkeypatch):
+        """A candidate outside a trusted system root must be rejected."""
+        untrusted = "/tmp/untrusted/tool"
+        monkeypatch.setattr(evidence_gate.shutil, "which", lambda name: untrusted)
+        assert evidence_gate._is_trusted_tool_path(untrusted) is False
+        assert evidence_gate._resolve_tool("tool") is None
+
+    def test_resolve_tool_accepts_trusted_location(self, monkeypatch):
+        """A candidate inside a trusted system root resolves to its real path."""
+        trusted = "/usr/bin/env"
+        monkeypatch.setattr(evidence_gate.shutil, "which", lambda name: trusted)
+        monkeypatch.setattr(evidence_gate.os.path, "isfile", lambda path: True)
+        monkeypatch.setattr(evidence_gate.os, "access", lambda path, mode: True)
+        monkeypatch.setattr(evidence_gate.os.path, "realpath", lambda path: trusted)
+        monkeypatch.setattr(evidence_gate.os, "geteuid", lambda: 1000)
+        resolved = evidence_gate._resolve_tool("env")
+        assert resolved is not None
+        assert evidence_gate.os.path.isabs(resolved)
+
+    def test_git_functions_use_resolved_binary(self, monkeypatch):
+        """git subprocess invocations must use the resolved absolute path."""
+        captured = []
+
+        def fake_run(cmd, **kwargs):
+            captured.append(cmd[0])
+            return type(
+                "Proc",
+                (),
+                {"returncode": 0, "stdout": "abc123\n", "stderr": ""},
+            )()
+
+        monkeypatch.setattr(evidence_gate.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            evidence_gate, "_git_bin", lambda: "/usr/bin/git"
+        )
+        assert evidence_gate._get_git_commit() == "abc123"
+        assert captured
+        assert captured[0] == "/usr/bin/git"
+
+    def test_git_bin_returns_none_when_untrusted(self, monkeypatch):
+        """An untrusted git candidate must yield 'unknown', never a bare run."""
+        monkeypatch.setattr(
+            evidence_gate, "_resolve_tool", lambda name: None
+        )
+        assert evidence_gate._git_bin() is None
+        assert evidence_gate._get_git_commit() == "unknown"
+
+    def test_evidence_pack_records_resolved_git_toolchain(self, monkeypatch):
+        """The evidence pack must record the resolved git path (F4)."""
+        monkeypatch.setattr(
+            evidence_gate, "_git_bin", lambda: "/usr/bin/git"
+        )
+        pack = evidence_gate._build_evidence_pack(
+            None, "GO", [], [], skipped=False, skip_reason=""
+        )
+        assert pack["toolchain"]["git"] == "/usr/bin/git"
+
+    def test_benchmark_invocation_uses_resolved_bash(self, monkeypatch, tmp_path):
+        """The harness must not re-enter PATH through an env-based shebang."""
+        script = tmp_path / "tools" / "perf" / "run_module_benchmark.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(
+            evidence_gate,
+            "_resolve_tool",
+            lambda name: "/usr/bin/bash" if name == "bash" else None,
+        )
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return type("Proc", (), {"returncode": 75, "stderr": "skipped"})()
+
+        monkeypatch.setattr(evidence_gate.subprocess, "run", fake_run)
+        rc, stderr = evidence_gate._run_module_benchmark(tmp_path / "out.json")
+
+        assert rc == 75
+        assert stderr == "skipped"
+        assert captured["cmd"][0] == "/usr/bin/bash"
+
+    def test_wrapper_uses_fixed_python_with_hostile_path(self, tmp_path):
+        """The public wrapper must not select Python from PATH."""
+        wrapper = evidence_gate.REPO_ROOT / "tools" / "perf" / "run_evidence_gate.sh"
+        env = os.environ.copy()
+        env["PATH"] = str(tmp_path)
+        env.pop("NGINX_BIN", None)
+        env["EVIDENCE_GATE_MODE"] = "non-blocking"
+        env["MODULE_BASELINE_VERSION"] = "092"
+
+        result = subprocess.run(
+            [str(wrapper)],
+            cwd=evidence_gate.REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=20,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert "SKIP_NOT_PRESENT" in result.stderr
+
+
 # ---------------------------------------------------------------------------
 # Test: Evidence metric extraction from benchmark reports
 # ---------------------------------------------------------------------------
@@ -1151,7 +1275,7 @@ class TestPathCoverageInvariants:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -1178,7 +1302,7 @@ class TestPathCoverageInvariants:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -1218,7 +1342,7 @@ class TestPathCoverageInvariants:
                     {
                         "name": "gzip-large",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "gzip",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -1241,7 +1365,7 @@ class TestPathCoverageInvariants:
                     {
                         "name": "gzip-large",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "gzip",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -1302,23 +1426,48 @@ class TestBaselineEvidenceIntegrity:
 
         assert violations == []
 
+    def test_current_contract_rejects_legacy_profile_metadata(self):
+        """A non-0.9.1 report cannot reintroduce the removed profile field."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [{
+                    "name": "plain-small",
+                    "profile": "balanced",
+                }],
+            },
+            "baseline_policy": {
+                "source_git_commit": "a" * 40,
+                "source_artifact": "perf/baselines/module-baseline-092-raw.json",
+            },
+        }
+
+        violations = evidence_gate._legacy_scenario_contract_violations(
+            report, role="current"
+        )
+
+        assert violations == [(
+            "current.scenario_metadata",
+            "plain-small: legacy profile field is not part of the 0.9.2 "
+            "evidence contract; use scenario_config",
+        )]
+
     @pytest.mark.parametrize(
         ("scenario", "field", "value"),
         [
-            ("plain-small", "profile", "streaming_first"),
+            ("plain-small", "scenario_config", "explicit-streaming"),
             ("plain-small", "compression", "gzip"),
             ("plain-small", "transfer_encoding", "chunked"),
-            ("chunked-medium", "profile", "streaming_first"),
+            ("chunked-medium", "scenario_config", "explicit-streaming"),
             ("chunked-medium", "compression", "gzip"),
             ("chunked-medium", "transfer_encoding", "identity"),
             ("gzip-large", "transfer_encoding", "chunked"),
-            ("large-body", "profile", "streaming_first"),
+            ("large-body", "scenario_config", "explicit-streaming"),
             ("large-body", "compression", "gzip"),
             ("large-body", "transfer_encoding", "chunked"),
-            ("streaming-first", "profile", "balanced"),
+            ("streaming-first", "scenario_config", "explicit-defaults"),
             ("streaming-first", "compression", "gzip"),
             ("streaming-first", "transfer_encoding", "identity"),
-            ("brotli-streaming-first", "profile", "balanced"),
+            ("brotli-streaming-first", "scenario_config", "explicit-defaults"),
             ("brotli-streaming-first", "compression", "gzip"),
             ("brotli-streaming-first", "transfer_encoding", "identity"),
         ],
@@ -1372,7 +1521,6 @@ class TestBaselineEvidenceIntegrity:
     @pytest.mark.parametrize(
         ("scenario", "metric"),
         [
-            ("streaming-first", "zero_copy_output_total"),
             ("streaming-first", "copied_output_total"),
             ("streaming-first", "streaming_path_hits"),
             ("plain-small", "fullbuffer_path_hits"),
@@ -1505,6 +1653,15 @@ class TestBaselineEvidenceIntegrity:
 class TestScenarioSourceEnvironment:
     """scenario_sources entries must prove a matching environment."""
 
+    @staticmethod
+    def _canonical_source(report: dict) -> dict:
+        """Return the source environment declared by the canonical report."""
+        module_benchmark = report["module_benchmark"]
+        return {
+            field: module_benchmark[field]
+            for field in ("platform", "load_generator", "nginx_version")
+        }
+
     def _baseline_with_source(self, source: dict) -> dict:
         report = _load_canonical_module_baseline()
         report["baseline_policy"]["scenario_sources"] = {
@@ -1514,12 +1671,10 @@ class TestScenarioSourceEnvironment:
 
     def test_matching_structured_environment_is_accepted(self):
         """Scenario source with matching environment is accepted."""
-        report = self._baseline_with_source({
-            "platform": "linux-x86_64",
-            "load_generator": "ab",
-            "nginx_version": "nginx version: nginx/1.24.0",
-            "source_run": "same canonical run",
-        })
+        canonical = _load_canonical_module_baseline()
+        source = self._canonical_source(canonical)
+        source["source_run"] = "same canonical run"
+        report = self._baseline_with_source(source)
 
         assert _scenario_source_environment_violations(
             report, role="baseline"
@@ -1530,17 +1685,15 @@ class TestScenarioSourceEnvironment:
         [
             ("platform", "darwin-arm64"),
             ("load_generator", "hey"),
-            ("nginx_version", "nginx version: nginx/1.30.4"),
+            ("nginx_version", "nginx version: nginx/1.24.0"),
         ],
     )
     def test_diverging_source_environment_is_rejected(self, field, actual):
         """Scenario source with diverging environment field is rejected."""
-        source = {
-            "platform": "linux-x86_64",
-            "load_generator": "ab",
-            "nginx_version": "nginx version: nginx/1.24.0",
-            field: actual,
-        }
+        canonical = _load_canonical_module_baseline()
+        source = self._canonical_source(canonical)
+        source["source_run"] = "diverging source run"
+        source[field] = actual
         report = self._baseline_with_source(source)
 
         violations = _scenario_source_environment_violations(
@@ -1559,11 +1712,8 @@ class TestScenarioSourceEnvironment:
     )
     def test_undeclared_source_environment_field_is_rejected(self, field):
         """Scenario source missing a required environment field is rejected."""
-        source = {
-            "platform": "linux-x86_64",
-            "load_generator": "ab",
-            "nginx_version": "nginx version: nginx/1.24.0",
-        }
+        canonical = _load_canonical_module_baseline()
+        source = self._canonical_source(canonical)
         del source[field]
         report = self._baseline_with_source(source)
 
@@ -1581,9 +1731,7 @@ class TestScenarioSourceEnvironment:
         report = _load_canonical_module_baseline()
         report["baseline_policy"]["scenario_sources"] = {
             "no-such-scenario": {
-                "platform": "linux-x86_64",
-                "load_generator": "ab",
-                "nginx_version": "nginx version: nginx/1.24.0",
+                **self._canonical_source(report),
             }
         }
 
@@ -1611,12 +1759,11 @@ class TestScenarioSourceEnvironment:
 
     def test_mixed_environment_baseline_fails_full_validation(self):
         """A mixed-environment scenario merge surfaces in the blocking contract."""
-        report = self._baseline_with_source({
-            "platform": "linux-x86_64",
-            "load_generator": "ab",
-            "nginx_version": "nginx version: nginx/1.30.4",
-            "source_run": "1000 requests at 2026-07-19T09:03:37Z",
-        })
+        canonical = _load_canonical_module_baseline()
+        source = self._canonical_source(canonical)
+        source["nginx_version"] = "nginx version: nginx/1.24.0"
+        source["source_run"] = "1000 requests at 2026-07-19T09:03:37Z"
+        report = self._baseline_with_source(source)
 
         violations = _validate_benchmark_evidence(report, role="baseline")
 
@@ -1683,7 +1830,11 @@ class TestScenarioSourceEnvironment:
             scenarios.append({
                 "name": name,
                 "status": "completed",
-                "profile": profile,
+                "scenario_config": (
+                    "explicit-streaming"
+                    if profile == "streaming_first"
+                    else "explicit-defaults"
+                ),
                 "compression": comp,
                 "transfer_encoding": te,
                 "metrics": metrics,
@@ -1801,7 +1952,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "plain-small",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -1816,7 +1967,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "large-body",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -1829,7 +1980,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "chunked-medium",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -1842,7 +1993,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -1861,7 +2012,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "gzip-large",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "gzip",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -1875,7 +2026,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "gzip-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "gzip",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -1895,7 +2046,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "deflate-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "deflate",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -1915,7 +2066,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "brotli-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "brotli",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -2246,7 +2397,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "chunked-medium",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -2258,7 +2409,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -2279,7 +2430,7 @@ class TestScenarioSourceEnvironment:
 
 
 # ---------------------------------------------------------------------------
-# Critical scenario completeness (P1-2): missing and incomplete scenarios
+# Critical scenario completeness (subrequest): missing and incomplete scenarios
 # ---------------------------------------------------------------------------
 
 class TestCriticalScenarioCompleteness:
@@ -2393,7 +2544,7 @@ class TestCriticalScenarioCompleteness:
 
 
 # ---------------------------------------------------------------------------
-# Memory evidence completeness (P2-1): >= 2 memory points required
+# Memory evidence completeness: >= 2 memory points required
 # ---------------------------------------------------------------------------
 
 class TestMemoryEvidenceCompleteness:
@@ -2495,16 +2646,186 @@ class TestMemoryEvidenceCompleteness:
 
 
 # ---------------------------------------------------------------------------
-# Environment compatibility (P2-2): platform/load_generator/nginx_version match
+# Environment compatibility: platform/load_generator/nginx_version match
 # ---------------------------------------------------------------------------
 
 class TestEnvironmentCompatibility:
     """Current and baseline environments must match for regression comparison."""
 
+    def test_selected_baseline_version_changes_only_the_resolved_path(
+        self, tmp_path, monkeypatch,
+    ):
+        """The 0.9.2 gate must read its generated baseline, not the 0.9.1 file."""
+        baseline_path = (
+            tmp_path / "perf" / "baselines" / "module-baseline-092.json"
+        )
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(json.dumps({
+            "module_benchmark": {
+                "platform": "linux-x86_64",
+                "load_generator": "ab",
+                "nginx_version": "nginx version: nginx/1.24.0",
+                "scenarios": [],
+            },
+        }), encoding="utf-8")
+        current = {
+            "module_benchmark": {
+                "platform": "linux-x86_64",
+                "load_generator": "ab",
+                "nginx_version": "nginx version: nginx/1.24.0",
+                "scenarios": [],
+            },
+        }
+
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "092")
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(
+            evidence_gate, "_validate_baseline_evidence",
+            lambda *_args: None,
+        )
+
+        metrics, has_baseline, exit_rc = evidence_gate._resolve_baseline(
+            current,
+            parse_args(["--output", str(tmp_path / "evidence.json")]),
+            blocking=False,
+        )
+
+        assert metrics == {
+            "memory_slope_pct": 0.0,
+            "fallback_rate_abs": 0.0,
+        }
+        assert has_baseline is True
+        assert exit_rc is None
+
+    def test_release_gate_excluded_baseline_is_not_compared(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """An explicitly excluded baseline is validated but not used for thresholds."""
+        baseline_path = (
+            tmp_path / "perf" / "baselines" / "module-baseline-092.json"
+        )
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(json.dumps({
+            "module_benchmark": {
+                "platform": "linux-x86_64",
+                "load_generator": "ab",
+                "nginx_version": "nginx version: nginx/1.24.0",
+                "scenarios": [],
+            },
+            "baseline_policy": {
+                "release_gate_eligible": False,
+                "release_gate_exclusion_reason": "remeasure first",
+            },
+        }), encoding="utf-8")
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "092")
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(
+            evidence_gate, "_validate_baseline_evidence",
+            lambda *_args: None,
+        )
+        # Pin the release-tag check to False so the assertion below is
+        # independent of the environment (a tag on HEAD or a release env
+        # var would otherwise change the blocking path).
+        monkeypatch.setattr(evidence_gate, "_is_release_tag", lambda: False)
+
+        metrics, has_baseline, exit_rc = evidence_gate._resolve_baseline(
+            {},
+            parse_args(["--output", str(tmp_path / "evidence.json")]),
+            blocking=True,
+        )
+
+        assert metrics == {}
+        assert has_baseline is False
+        assert exit_rc is None
+        assert "remeasure first" in capsys.readouterr().err
+
+    def test_invalid_baseline_version_is_rejected(self, monkeypatch):
+        """Unrecognized baseline versions must not become path components."""
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "../../latest")
+
+        with pytest.raises(ValueError, match="must be one of"):
+            evidence_gate._module_baseline_version()
+
+    def test_baseline_head_binding_requires_both_provenance_fields(
+        self, monkeypatch,
+    ):
+        """The report and policy source must identify the same current HEAD."""
+        monkeypatch.setattr(
+            evidence_gate, "_get_git_commit_full", lambda: "c" * 40
+        )
+        report = {
+            "module_benchmark": {"git_commit": "a" * 40},
+            "baseline_policy": {"source_git_commit": "b" * 40},
+        }
+
+        violations = evidence_gate._baseline_head_violations(report)
+
+        assert {violation[0] for violation in violations} == {
+            "baseline.module_benchmark.git_commit",
+            "baseline.baseline_policy.source_git_commit",
+        }
+
+    def test_stale_ineligible_baseline_fails_head_binding_before_bypass(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """An excluded stale baseline cannot silently bypass release binding."""
+        baseline_path = (
+            tmp_path / "perf" / "baselines" / "module-baseline-092.json"
+        )
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(json.dumps({
+            "module_benchmark": {"git_commit": "a" * 40},
+            "baseline_policy": {
+                "source_git_commit": "b" * 40,
+                "release_gate_eligible": False,
+                "release_gate_exclusion_reason": "remeasure first",
+            },
+        }), encoding="utf-8")
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "092")
+        monkeypatch.setenv("EVIDENCE_GATE_REQUIRE_BASELINE_HEAD", "1")
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(
+            evidence_gate, "_get_git_commit_full", lambda: "c" * 40
+        )
+
+        _metrics, has_baseline, exit_rc = evidence_gate._resolve_baseline(
+            {},
+            parse_args(["--output", str(tmp_path / "evidence.json")]),
+            blocking=True,
+        )
+
+        assert has_baseline is False
+        assert exit_rc == 1
+        assert "not bound to the current HEAD" in capsys.readouterr().err
+
+    def test_missing_selected_baseline_reports_versioned_guidance(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """Release-tag failures must name the selected baseline file safely."""
+        output_path = tmp_path / "evidence.json"
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "092")
+        monkeypatch.setenv("CI_COMMIT_TAG", "v0.9.2")
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+
+        _metrics, has_baseline, exit_rc = evidence_gate._resolve_baseline(
+            {},
+            parse_args(["--output", str(output_path)]),
+            blocking=True,
+        )
+
+        assert has_baseline is False
+        assert exit_rc == 1
+        assert "module-baseline-092.json" in capsys.readouterr().err
+
     def test_non_blocking_incompatible_baseline_is_not_compared(
         self, tmp_path, monkeypatch, capsys,
     ):
-        """Report-only runs expose incompatible percentage evidence as missing."""
+        """Expose incompatible percentage evidence as missing in report-only mode.
+
+        The fixture selects the legacy 0.9.1 baseline explicitly; production
+        runs now select the 0.9.2 baseline by default.
+        """
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "091")
         baseline_path = (
             tmp_path / "perf" / "baselines" / "module-baseline-091.json"
         )
@@ -2604,7 +2925,12 @@ class TestNonBlockingIntegrityVisibility:
     def test_baseline_malformed_fallback_is_missing_evidence(
         self, tmp_path, monkeypatch, capsys, blocking, expected_rc,
     ):
-        """A malformed baseline rate cannot produce a GO verdict."""
+        """A malformed baseline rate cannot produce a GO verdict.
+
+        The fixture selects the legacy 0.9.1 baseline explicitly; production
+        runs now select the 0.9.2 baseline by default.
+        """
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "091")
         baseline = _load_canonical_module_baseline()
         _scenario(baseline, "chunked-medium")["metrics"][
             "fallback_rate"
@@ -3098,7 +3424,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "gzip-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "gzip",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3259,7 +3585,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3275,7 +3601,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "gzip-large",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "gzip",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -3286,7 +3612,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "gzip-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "gzip",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3303,7 +3629,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "deflate-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "deflate",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3330,7 +3656,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "gzip-streaming-first",
                     "status": "completed",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "gzip",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3344,7 +3670,7 @@ class TestCompressedStreamingPathTruthfulness:
         }
         violations = _check_path_coverage(report)
         assert any(
-            v[0] == "gzip-streaming-first" and v[1] == "profile"
+            v[0] == "gzip-streaming-first" and v[1] == "scenario_config"
             for v in violations
         )
 
@@ -3355,7 +3681,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "gzip-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "deflate",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3380,7 +3706,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "deflate-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "deflate",
                     "transfer_encoding": "identity",
                     "metrics": {
@@ -3405,7 +3731,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "brotli-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "brotli",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3430,7 +3756,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "brotli-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "gzip",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3458,7 +3784,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "plain-small",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -3475,7 +3801,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "large-body",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -3491,7 +3817,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "chunked-medium",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3507,7 +3833,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3527,7 +3853,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "gzip-large",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "gzip",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -3544,7 +3870,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "gzip-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "gzip",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3565,7 +3891,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "deflate-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "deflate",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3586,7 +3912,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "brotli-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "brotli",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3627,7 +3953,7 @@ def _full_valid_raw_report() -> dict:
     return {
         "module_benchmark": {
             "timestamp": "2026-07-28T00:00:00Z",
-            "git_commit": _FULL_SHA[:7],
+            "git_commit": _FULL_SHA,
             "platform": "linux-x86_64",
             "load_generator": "ab",
             "nginx_version": "nginx version: nginx/1.24.0",
@@ -3635,7 +3961,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "plain-small",
                     "status": "completed",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "identity",
                     "metrics": {
@@ -3649,7 +3975,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "chunked-medium",
                     "status": "completed",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3662,7 +3988,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "large-body",
                     "status": "completed",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "identity",
                     "metrics": {
@@ -3675,7 +4001,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "gzip-large",
                     "status": "completed",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "gzip",
                     "transfer_encoding": "identity",
                     "metrics": {
@@ -3689,7 +4015,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "none",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3708,7 +4034,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "gzip-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "gzip",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3728,7 +4054,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "deflate-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "deflate",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3748,7 +4074,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "brotli-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "brotli",
                     "transfer_encoding": "chunked",
                     "metrics": {

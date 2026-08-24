@@ -10,7 +10,7 @@
 #   - For APT: apt-key or gpg keyring available
 #   - For YUM: rpm --import available
 #   - Network access to repository URL (or local repo mirror)
-#   - GPG_KEY_URL environment variable (default: project signing key URL)
+#   - GPG_KEY_URL environment variable (default: checked-in project public key)
 #
 # Usage:
 #   ./test-gpg-verify.sh [apt|yum|both]
@@ -28,9 +28,10 @@
 
 set -e
 
-GPG_KEY_URL="${GPG_KEY_URL:-https://packages.nginx-markdown.dev/gpg-key.asc}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GPG_KEY_URL="${GPG_KEY_URL:-file://${SCRIPT_DIR}/../nginx-markdown-for-agents-release.asc}"
 REPO_BASE_URL="${REPO_BASE_URL:-https://packages.nginx-markdown.dev}"
-EXPECTED_FINGERPRINT="${EXPECTED_FINGERPRINT:-}"
+EXPECTED_FINGERPRINT="${EXPECTED_FINGERPRINT:-15C792438EAA762B421E60D21E8D41E7D19A8A75}"
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -53,9 +54,9 @@ usage() {
     echo "  both  — verify both (default)" >&2
     echo "" >&2
     echo "Environment:" >&2
-    echo "  GPG_KEY_URL          — URL to GPG public key" >&2
+    echo "  GPG_KEY_URL          — URL to GPG public key (default: checked-in file)" >&2
     echo "  REPO_BASE_URL        — base URL of package repository" >&2
-    echo "  EXPECTED_FINGERPRINT — expected GPG key fingerprint" >&2
+    echo "  EXPECTED_FINGERPRINT — expected GPG signing-subkey fingerprint (default: published)" >&2
     exit 2
 }
 
@@ -102,7 +103,14 @@ echo "Step 1: Downloading GPG key..." >&2
 
 KEY_FILE="${TMPDIR}/signing-key.asc"
 
-if curl -sf -o "$KEY_FILE" "$GPG_KEY_URL" 2>/dev/null; then
+if [[ "$GPG_KEY_URL" == file://* ]]; then
+    if cp "${GPG_KEY_URL#file://}" "$KEY_FILE" 2>/dev/null; then
+        pass "GPG key loaded from local file ${GPG_KEY_URL#file://}"
+    else
+        fail "failed to read GPG key from local file ${GPG_KEY_URL#file://}"
+        echo "Set GPG_KEY_URL to a valid key URL or provide a local key." >&2
+    fi
+elif curl -sf -o "$KEY_FILE" "$GPG_KEY_URL" 2>/dev/null; then
     pass "GPG key downloaded from $GPG_KEY_URL"
 else
     fail "failed to download GPG key from $GPG_KEY_URL"
@@ -114,7 +122,7 @@ fi
 # Import key into temporary keyring
 KEYRING="${TMPDIR}/keyring.gpg"
 
-if [ -f "$KEY_FILE" ] && [ -s "$KEY_FILE" ]; then
+if [[ -f "$KEY_FILE" ]] && [ -s "$KEY_FILE" ]; then
     GPG_IMPORT=$(gpg --no-default-keyring --keyring "$KEYRING" \
         --import "$KEY_FILE" 2>&1) || true
 
@@ -126,10 +134,20 @@ if [ -f "$KEY_FILE" ] && [ -s "$KEY_FILE" ]; then
     fi
 
     # Verify fingerprint if expected value provided
-    if [ -n "$EXPECTED_FINGERPRINT" ]; then
+    if [[ -n "$EXPECTED_FINGERPRINT" ]]; then
+        # Select a signing-capable subkey: field 12 must contain "s",
+        # and field 2 must not mark the subkey revoked/expired/invalid/
+        # disabled.  The fingerprint is the fpr record that follows the
+        # matching sub record.
         KEY_FP=$(gpg --no-default-keyring --keyring "$KEYRING" \
-            --fingerprint 2>/dev/null | grep -o '[A-F0-9 ]\{40,\}' | tr -d ' ' | head -1)
-        if [ "$KEY_FP" = "$EXPECTED_FINGERPRINT" ]; then
+            --with-colons --with-subkey-fingerprint --list-keys 2>/dev/null \
+            | awk -F: '
+                $1 == "sub" {
+                    want = ($12 ~ /s/ && $2 !~ /^[reid]/) ? 1 : 0
+                    next
+                }
+                $1 == "fpr" && want { print $10; exit }')
+        if [[ "$KEY_FP" = "$EXPECTED_FINGERPRINT" ]]; then
             pass "key fingerprint matches expected value"
         else
             fail "key fingerprint mismatch (got: $KEY_FP)"
@@ -143,7 +161,7 @@ fi
 
 # --- Step 2: APT repository verification ---
 
-if [ "$MODE" = "apt" ] || [ "$MODE" = "both" ]; then
+if [[ "$MODE" = "apt" ]] || [ "$MODE" = "both" ]; then
     echo "" >&2
     echo "Step 2: APT repository signature verification..." >&2
 
@@ -197,7 +215,7 @@ fi
 
 # --- Step 3: YUM repository verification ---
 
-if [ "$MODE" = "yum" ] || [ "$MODE" = "both" ]; then
+if [[ "$MODE" = "yum" ]] || [ "$MODE" = "both" ]; then
     echo "" >&2
     echo "Step 3: YUM repository signature verification..." >&2
 
@@ -233,7 +251,7 @@ if [ "$MODE" = "yum" ] || [ "$MODE" = "both" ]; then
     # Verify RPM package signature if an .rpm file is available
     if command -v rpm >/dev/null 2>&1; then
         RPM_FILES=$(find "${TMPDIR}" -name "*.rpm" 2>/dev/null)
-        if [ -n "$RPM_FILES" ]; then
+        if [[ -n "$RPM_FILES" ]]; then
             for rpm_file in $RPM_FILES; do
                 RPM_SIG=$(rpm -K "$rpm_file" 2>&1) || true
                 if echo "$RPM_SIG" | grep -qi "pgp\|gpg.*OK"; then
@@ -256,7 +274,7 @@ echo "" >&2
 echo "=== GPG Verification Results ===" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi

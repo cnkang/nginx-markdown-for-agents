@@ -1,0 +1,686 @@
+#!/usr/bin/env python3
+"""Non-native-reader writing-style checks for maintained Markdown docs.
+
+STE-inspired prose audit (see docs/development/WRITING_GUIDE.md):
+- sentence length (descriptive > 25 words, instruction > 20 words)
+- semicolons in prose
+- Latin abbreviations (e.g., i.e., etc.)
+- contractions (don't, isn't, can't, ...)
+- multi-word noun chains (>= 4 consecutive capitalized words)
+- passive-voice-ish patterns (is/was/... + past participle)
+
+Design: WARNING-ONLY by default (exit 0) so it never blocks existing CI.
+It never edits files. Code blocks, fenced blocks, tables, headings, inline
+code, links, and HTML comments are excluded from the prose scan.
+
+Modes:
+    (default)      advisory scan of all maintained Markdown docs (exit 0)
+    --strict       fail (exit 1) when any warning is found
+    --changed      fail (exit 1) when any warning appears in files changed
+                   since the explicitly supplied --base commit: working-tree
+                   + staged diffs + untracked Markdown files. The base is
+                   required and must resolve to a valid commit. An empty diff
+                   is valid only when the caller explicitly selected a valid
+                   base such as HEAD.
+    --baseline [N] fail (exit 1) when the total warning count exceeds the
+                   baseline N (default 0). Guards against regressions on
+                   the retained-warning budget; lower N as docs improve.
+
+Usage:
+    python3 tools/docs/check_writing_style.py [--strict|--changed|--baseline [N]]
+        [--base REF] [--limit N] [paths...]
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import shutil
+import subprocess
+import sys
+from collections import Counter
+from collections.abc import Iterator
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+AGENTS_FILENAME = "AGENTS.md"
+ARCHIVE_SEGMENT = "docs/archive/"
+# CHANGELOG.md keeps historical release prose. Changed-mode still audits it so
+# an edited historical entry cannot add a new warning. Baseline mode excludes
+# the retained historical warning set and covers current reader-facing docs.
+MAINTAINED_ROOT_DOCS = {
+    AGENTS_FILENAME,
+    "README.md",
+    "README_zh-CN.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+}
+HISTORICAL_ROOT_DOCS = {"CHANGELOG.md"}
+
+# Retained-warning budget for --baseline mode. Lower this constant as docs
+# improve; the Makefile target docs-style-check-baseline enforces it.
+# 0 = full cleanup complete: the maintained docs pass the STE-inspired audit
+# with zero warnings. The checker exempts structural surfaces (rule-checklist
+# items, formal titles in the allowlist, reference lines, quoted source
+# citations) so the remaining scan targets genuine prose violations only.
+DEFAULT_BASELINE = 0
+
+SEMICOLON_WARNING_RE = re.compile(
+    r"^(?P<count>\d+) semicolon\(s\) in prose:"
+)
+SAFE_GIT_REF_RE = re.compile(
+    r"^(?:HEAD|[0-9A-Fa-f]{7,40}|"
+    r"[A-Za-z0-9][A-Za-z0-9._/-]*)$"
+)
+
+SENT_DESCRIPTIVE_MAX = 25
+SENT_INSTRUCTION_MAX = 20
+NOUN_CHAIN_MAX = 3
+
+LATIN_RE = re.compile(r"\b(?:e\.g\.|i\.e\.|etc\.|vs\.|et al\.)(?=\s|[.,;:!?)]|$)", re.IGNORECASE)
+CONTRACTION_RE = re.compile(
+    r"\b(?:don't|doesn't|isn't|aren't|wasn't|weren't|won't|can't|couldn't|"
+    r"shouldn't|wouldn't|it's|that's|we're|you're|they're|there's|let's)\b",
+    re.IGNORECASE,
+)
+PASSIVE_RE = re.compile(
+    r"\b(?:is|are|was|were|be|been|being)\s+\w+ed\b", re.IGNORECASE
+)
+CAPITALIZED_WORD_RE = re.compile(r"\b[A-Z][a-z]+\b")
+SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"`(])")
+SOURCE_CITATION_LINE_RE = re.compile(
+    r"^(?:>\s*)?(?:[-*]\s*)?(?:\*\*)?"
+    r"(?:source(?:\s+(?:comment|citation))?|citation|requirement|external citation|reference|[A-Z]{2,}-\d+(?:\.\d+)*)"
+    r"(?:\*\*)?\s*:",
+    re.IGNORECASE,
+)
+INSTRUCTION_RE = re.compile(
+    r"^(?:always|avoid|call|check|compare|confirm|create|delete|do not|"
+    r"ensure|follow|include|install|keep|make|never|preserve|read|record|"
+    r"remove|run|set|store|test|use|verify|write)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_ignored(path: Path) -> bool:
+    if ARCHIVE_SEGMENT in path.as_posix():
+        return True
+    try:
+        out = subprocess.run(
+            ["git", "check-ignore", "-q", str(path)],
+            cwd=ROOT,
+            capture_output=True,
+        )
+        return out.returncode == 0
+    except Exception:
+        return False
+
+
+def _is_maintained(rel: str) -> bool:
+    """Return whether a path belongs to the current docs style scope."""
+    if rel in MAINTAINED_ROOT_DOCS:
+        return True
+    return rel.startswith("docs/") and not rel.startswith(ARCHIVE_SEGMENT)
+
+
+def _tracked_md_files() -> list[Path]:
+    git = _require_git()
+    out = subprocess.run(
+        [git, "ls-files", "--cached", "--others", "--exclude-standard", "--", "*.md"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    candidates: list[Path] = []
+    if out.returncode == 0:
+        candidates = [ROOT / rel for rel in out.stdout.splitlines() if rel.strip()]
+    else:
+        candidates = list(ROOT.rglob("*.md"))
+    return sorted(
+        p
+        for p in candidates
+        if p.is_file()
+        and _is_maintained(p.relative_to(ROOT).as_posix())
+        and p.relative_to(ROOT).as_posix() not in HISTORICAL_ROOT_DOCS
+    )
+
+
+def _prose_only(raw: str) -> str:
+    # Rust doc-comment examples use a fenced block whose backticks have a
+    # leading ``///`` prefix. Remove that prefix before stripping fenced code.
+    t = re.sub(
+        r"^[ \t]*///[ \t]*```[^\n]*\n.*?^[ \t]*///[ \t]*```[ \t]*$",
+        " ",
+        raw,
+        flags=re.M | re.S,
+    )
+    t = re.sub(r"^[ \t]*///[ \t]*```[^\n]*\n?", " ", t, flags=re.M)
+    t = re.sub(r"^[ \t]*///[ \t]?", "", t, flags=re.M)
+    t = _strip_fenced_blocks(t)
+    t = re.sub(r"<!--.*?-->", " ", t, flags=re.S)
+    t = re.sub(r"\|[^\n]*\|", " ", t)
+    t = re.sub(r"^\s*#{1,6}\s.*$", " ", t, flags=re.M)
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    t = re.sub(r"`[^`]*`", " ", t)
+    # Only an explicitly labelled citation may preserve quoted source text.
+    # Ordinary prose in quotes remains part of the audit surface.
+    lines = []
+    for line in t.splitlines():
+        if SOURCE_CITATION_LINE_RE.match(line.strip()):
+            line = re.sub(r'"[^"\n]*"', " ", line)
+        lines.append(line)
+    t = "\n".join(lines)
+    # Keep line breaks: each line is a candidate sentence unit, so list
+    # items / blockquote lines don't merge into one giant pseudo-sentence.
+    t = re.sub(r"[ \t]+", " ", t)
+    return t
+
+
+def _strip_fenced_blocks(text: str) -> str:
+    """Replace fenced code blocks without treating code as fence syntax.
+
+    A regex-only replacement closes early when an example contains a literal
+    triple-backtick marker, such as code that detects Markdown fences. Track
+    fence boundaries by line so those literals remain inside the code block.
+    """
+    lines: list[str] = []
+    in_fence = False
+    for line in text.splitlines(keepends=True):
+        is_fence = re.match(r"^[ \t]*```", line) is not None
+        if is_fence:
+            in_fence = not in_fence
+            lines.append(" ")
+        elif in_fence:
+            lines.append(" ")
+        else:
+            lines.append(line)
+    return "".join(lines)
+
+
+# Rule-checklist item line: "- **Title**: ..." or "N. **Title**: ...".
+# Only this explicit structure is exempt from prose length checks.
+RULE_ITEM_RE = re.compile(
+    r"^(?:[-*]\s+|\d+[.)]\s+)\*\*[^*\n]+\*\*:\s+"
+)
+LIST_MARKER_RE = re.compile(r"^(?:[-*]|\d+[.)])\s+")
+
+# Rule/governance documents whose list items are atomic checkpoints even
+# without a bold title (AGENTS.md required-list, harness rule docs).
+RULE_DOC_PREFIXES = (AGENTS_FILENAME, "docs/harness/rules/")
+
+# Rule-format items may contain several atomic requirements. Keep the
+# exemption narrow: ordinary guide prose still uses the length and semicolon
+# checks, while explicit rule items, release-gate templates, and MUST clauses
+# on repo-owned specification surfaces retain their structure.
+RELEASE_GATE_TEMPLATE_RE = re.compile(
+    r"(?:release[-_]gate|go[-_]no[-_]go)[^\n]*template", re.IGNORECASE
+)
+MUST_SPECIFICATION_RE = re.compile(r"\bMUST\b")
+MUST_SPECIFICATION_PREFIXES = (
+    AGENTS_FILENAME,
+    "docs/architecture/",
+    "docs/harness/",
+    "docs/project/release-gates/",
+)
+
+# Reference line carrying a formal title: "- ADR-0019: 0.9.0 Production
+# Readiness Release Gate Framework", "- RFC 7932 (Brotli Compressed Data
+# Format)", "- Rule 55: ...". Noun chains inside these are document names.
+REF_LINE_RE = re.compile(r"^(?:-\s+)?(?:ADR-\d+|RFC\s+\d+|Rule\s+\d+)\s*[:,(]")
+
+# Noun-chain tokens that are proper nouns / formal titles and must stay as
+# written (standard names, ADR titles, product names, tool names).
+NOUN_CHAIN_ALLOWLIST = {
+    "An Architecture Decision Record",
+    "Brotli Compressed Data Format",
+    "Common Issues Quick Reference",
+    "Deflate Streaming Decompression Routing",
+    "Deterministic Markdown Output Constraints",
+    "If Upstream Has Vary",
+    "Large Response Path Optimization",
+    "Latest Canonical Module Measurement",
+    "Noise Region Early Pruning",
+    "Normal Brotli Streaming Operation",
+    "Page Types Not Recommended",
+    "Performance Evidence Release Gate",
+    "Production Readiness Breaking Release",
+    "Production Readiness Release Gate Framework",
+    "Production Readiness Release Gates",
+    "Progress Guard No False Positives",
+    "Prometheus Metrics Guide",
+    "Simple Structure Fast Path",
+    "Single Public Streaming Policy Before",
+    "Streaming Bounded Memory Conversion",
+    "True Streaming Contract",
+    "Version Consistency Across All Artifacts",
+    "Version Mismatch Error Troubleshooting",
+    "Why These Defaults Matter",
+    "Why These Page Types Are Risky",
+    "Xcode Command Line Tools",
+    "Changing Defaults During Rollout",
+    "No-Progress Guard No False Positives",
+}
+
+
+def _is_structural_rule_line(line: str, rel: str) -> bool:
+    """Return whether a line belongs to an exempt rule-format structure."""
+    stripped = line.strip()
+    if RULE_ITEM_RE.match(stripped):
+        return True
+    if rel.startswith(RULE_DOC_PREFIXES) and LIST_MARKER_RE.match(stripped):
+        return True
+    if RELEASE_GATE_TEMPLATE_RE.search(rel) and LIST_MARKER_RE.match(stripped):
+        return True
+    return rel.startswith(MUST_SPECIFICATION_PREFIXES) and bool(
+        MUST_SPECIFICATION_RE.search(stripped)
+    )
+
+
+def _structural_rule_lines(prose: str, rel: str) -> Iterator[tuple[str, bool]]:
+    """Yield prose lines and whether they belong to a structural rule item."""
+    in_structural_item = False
+    for line in prose.splitlines():
+        if not line.strip():
+            in_structural_item = False
+            continue
+        structural_line = _is_structural_rule_line(line, rel)
+        continuation = in_structural_item and line.startswith((" ", "\t"))
+        structural = structural_line or continuation
+        if structural_line:
+            in_structural_item = True
+        elif not continuation:
+            in_structural_item = False
+        yield line, structural
+
+
+def _sentences(prose: str, rel: str) -> list[tuple[str, bool, bool]]:
+    """Split prose into (sentence, structural_line, ref_line) units.
+
+    Each line is processed first; the line's flags decide which checks apply.
+    Structural rule items and their continuations keep their formatting.
+    Reference lines keep formal-title exemptions (see REF_LINE_RE).
+    """
+    out: list[tuple[str, bool, bool]] = []
+    for raw_line, structural in _structural_rule_lines(prose, rel):
+        line = raw_line
+        line = line.strip()
+        if not line:
+            continue
+        ref_line = bool(REF_LINE_RE.match(line))
+        for s in SENT_SPLIT_RE.split(line):
+            s = s.strip()
+            if len(s) > 3:
+                out.append((s, structural, ref_line))
+    return out
+
+
+def _prose_semicolon_count(prose: str, rel: str) -> int:
+    """Count semicolons outside structural rule lines."""
+    count = 0
+    for line, structural in _structural_rule_lines(prose, rel):
+        if ";" in line and not structural:
+            count += line.count(";")
+    return count
+
+
+def _sentence_warnings(prose: str, rel: str) -> list[str]:
+    warnings: list[str] = []
+    for s, rule_item, _ in _sentences(prose, rel):
+        if rule_item:
+            continue  # rule-checklist item: length is structural
+        rule_text = LIST_MARKER_RE.sub("", s, count=1)
+        n = len(rule_text.split())
+        if n > SENT_DESCRIPTIVE_MAX:
+            warnings.append(
+                f"long sentence ({n}w > {SENT_DESCRIPTIVE_MAX}): {s[:100]}"
+            )
+        elif n > SENT_INSTRUCTION_MAX and INSTRUCTION_RE.match(rule_text):
+            warnings.append(
+                f"long instruction ({n}w > {SENT_INSTRUCTION_MAX}): {s[:100]}"
+            )
+    return warnings
+
+
+def _noun_chain_warnings(prose: str) -> list[str]:
+    warnings: list[str] = []
+    for chain, chain_start in _noun_chains(prose):
+        if any(al in chain for al in NOUN_CHAIN_ALLOWLIST):
+            continue
+        line_start = prose.rfind("\n", 0, chain_start) + 1
+        line_end = prose.find("\n", chain_start)
+        if line_end == -1:
+            line_end = len(prose)
+        line = prose[line_start:line_end]
+        if REF_LINE_RE.match(line.strip()):
+            continue
+        warnings.append(
+            f"multi-word noun chain '{chain}': expand with prepositions"
+        )
+    return warnings
+
+
+def _pattern_warnings(prose: str, rel: str) -> list[str]:
+    warnings: list[str] = []
+    for m in LATIN_RE.finditer(prose):
+        warnings.append(f"Latin abbreviation '{m.group(0)}': spell it out")
+    for m in CONTRACTION_RE.finditer(prose):
+        warnings.append(f"contraction '{m.group(0)}': avoid in prose")
+    for m in PASSIVE_RE.finditer(prose):
+        warnings.append(f"passive-ish '{m.group(0)}': prefer active voice")
+    warnings.extend(_noun_chain_warnings(prose))
+    semi = _prose_semicolon_count(prose, rel)
+    if semi:
+        warnings.append(f"{semi} semicolon(s) in prose: split into sentences")
+    return warnings
+
+
+def audit(text: str, path: Path, limit: int | None) -> list[str]:
+    """Return warning lines for one file."""
+    prose = _prose_only(text)
+    warnings: list[str] = []
+    rel = path.relative_to(ROOT).as_posix() if path.is_absolute() else path.as_posix()
+    warnings.extend(_sentence_warnings(prose, rel))
+    warnings.extend(_pattern_warnings(prose, rel))
+    if limit is None:
+        return warnings
+    return warnings[:limit]
+
+
+def _noun_chains(text: str) -> Iterator[tuple[str, int]]:
+    """Yield runs of four or more capitalized words on one line."""
+    for line_start, line in _lines_with_offsets(text):
+        words = list(CAPITALIZED_WORD_RE.finditer(line))
+        run: list[re.Match[str]] = []
+        for word in words:
+            if run and not all(
+                char in " \t" for char in line[run[-1].end():word.start()]
+            ):
+                if len(run) > NOUN_CHAIN_MAX:
+                    yield (
+                        " ".join(item.group(0) for item in run),
+                        line_start + run[0].start(),
+                    )
+                run = []
+            run.append(word)
+        if len(run) > NOUN_CHAIN_MAX:
+            yield (
+                " ".join(item.group(0) for item in run),
+                line_start + run[0].start(),
+            )
+
+
+def _lines_with_offsets(text: str) -> Iterator[tuple[int, str]]:
+    """Yield each line and its offset without relying on regex repetition."""
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        yield offset, line
+        offset += len(line)
+
+
+def _require_git() -> str:
+    """Return the git executable path, or raise a clear error when git is
+    missing from PATH.
+
+    Shared pre-check for the git-dependent helpers so a missing git never
+    surfaces as a raw FileNotFoundError from subprocess.run.
+    """
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError(
+            "git executable not found on PATH; --changed and --base modes "
+            "need git to compare maintained docs against repository history"
+        )
+    return git
+
+
+def _changed_md_files(base: str) -> list[Path]:
+    """Maintained .md files changed since base (working tree + staged + untracked)."""
+    git = _require_git()
+    out = subprocess.run(
+        [git, "diff", "--name-only", base, "--", "*.md"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    cached = subprocess.run(
+        [git, "diff", "--cached", "--name-only", "--", "*.md"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    untracked = subprocess.run(
+        [git, "ls-files", "--others", "--exclude-standard", "--", "*.md"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    rels: set[str] = set()
+    if out.returncode == 0:
+        rels.update(out.stdout.splitlines())
+    if cached.returncode == 0:
+        rels.update(cached.stdout.splitlines())
+    if untracked.returncode == 0:
+        rels.update(untracked.stdout.splitlines())
+    return sorted(
+        ROOT / rel
+        for rel in rels
+        if rel.strip() and _is_maintained(rel) and (ROOT / rel).is_file()
+    )
+
+
+def _base_warning_counts(files: list[Path], base: str) -> dict[Path, Counter]:
+    """Warning counts for the base revision of each file (empty for new files)."""
+    git = _require_git()
+    counts: dict[Path, Counter] = {}
+    for f in files:
+        rel = f.relative_to(ROOT).as_posix()
+        out = subprocess.run(
+            [git, "show", f"{base}:{rel}"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if out.returncode != 0:
+            counts[f] = Counter()
+            continue
+        counts[f] = Counter(audit(out.stdout, f, None))
+    return counts
+
+
+def _warning_is_new(warning: str, before: Counter) -> bool:
+    """Return whether a warning exceeds the matching base warning budget."""
+    match = SEMICOLON_WARNING_RE.match(warning)
+    if match:
+        current_count = int(match.group("count"))
+        base_counts = [
+            int(base_match.group("count"))
+            for base_warning in before
+            if (base_match := SEMICOLON_WARNING_RE.match(base_warning))
+        ]
+        return current_count > max(base_counts, default=0)
+
+    return before.get(warning, 0) <= 0
+
+
+def _report_warning(
+    rel: Path, warning: str, before: Counter, base: str | None
+) -> int:
+    """Print a warning and return one when it exceeds the base budget."""
+    print(f"WARN {rel}: {warning}")
+    if base is None:
+        return 0
+    if _warning_is_new(warning, before):
+        print(f"  (NEW in {base} -> now)")
+        return 1
+    if not SEMICOLON_WARNING_RE.match(warning):
+        before[warning] -= 1
+    return 0
+
+
+def _resolve_base(ref: str) -> str | None:
+    """Resolve a user-supplied base ref, or return None when it is invalid."""
+    base_ref, separator, suffix = ref.partition("~")
+    if not separator:
+        base_ref, separator, suffix = ref.partition("^")
+    if not base_ref or base_ref.startswith("-"):
+        return None
+    if SAFE_GIT_REF_RE.fullmatch(base_ref) is None:
+        return None
+    revision = f"{separator}{suffix}" if separator else ""
+    position = 0
+    while position < len(revision):
+        if revision[position] not in "~^":
+            return None
+        position += 1
+        while position < len(revision) and revision[position].isdigit():
+            position += 1
+
+    validated_ref = f"{base_ref}{revision}"
+    # Keep the validated revision out of argv. The subprocess command remains
+    # fixed, and Git receives the revision only through its standard input.
+    git = _require_git()
+    resolved = subprocess.run(
+        [git, "cat-file", "--batch-check"],
+        cwd=ROOT,
+        capture_output=True,
+        input=f"{validated_ref}^{{commit}}\n",
+        text=True,
+    )
+    if resolved.returncode != 0:
+        return None
+    fields = resolved.stdout.strip().split()
+    if len(fields) < 2 or fields[1] != "commit":
+        return None
+    commit = fields[0]
+    if not re.fullmatch(r"[0-9A-Fa-f]{40}", commit):
+        return None
+    return commit
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Audit maintained Markdown prose for Rule 63 violations."
+    )
+    parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--changed", action="store_true")
+    parser.add_argument(
+        "--baseline",
+        nargs="?",
+        type=int,
+        const=DEFAULT_BASELINE,
+        metavar="N",
+    )
+    parser.add_argument("--base", metavar="REF")
+    parser.add_argument("--limit", type=int, metavar="N")
+    parser.add_argument("paths", nargs="*")
+    return parser
+
+
+def _select_files(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> tuple[list[Path], str | None]:
+    if args.changed:
+        if not args.base:
+            parser.error("--base is required with --changed")
+        try:
+            base = _resolve_base(args.base)
+        except RuntimeError as exc:
+            parser.error(str(exc))
+        if base is None:
+            parser.error(f"--base does not name a valid commit: {args.base}")
+        try:
+            return _changed_md_files(base), base
+        except RuntimeError as exc:
+            parser.error(str(exc))
+    if args.paths:
+        files: list[Path] = []
+        root = ROOT.resolve()
+        for supplied in args.paths:
+            candidate = (ROOT / supplied).resolve()
+            try:
+                candidate.relative_to(root)
+            except ValueError:
+                parser.error(f"path is outside repository root: {supplied}")
+            files.append(candidate)
+        return files, None
+    return _tracked_md_files(), None
+
+
+def _audit_files(
+    files: list[Path], args: argparse.Namespace, base: str | None
+) -> tuple[int, int]:
+    total = 0
+    new_total = 0
+    base_counts = _base_warning_counts(files, base) if args.changed else {}
+    for f in files:
+        if not f.exists():
+            continue
+        text = f.read_text(encoding="utf-8", errors="ignore")
+        before = base_counts.get(f, Counter())
+        for warning in audit(text, f, args.limit):
+            total += 1
+            new_total += _report_warning(
+                f.relative_to(ROOT), warning, before, base if args.changed else None
+            )
+    return total, new_total
+
+
+def _report_result(args: argparse.Namespace, total: int, new_total: int) -> int:
+    if args.strict and total:
+        print("FAIL: strict mode found warnings")
+        return 1
+    if args.changed and new_total:
+        print(
+            f"FAIL: --changed found {new_total} new warning(s) in changed "
+            f"files since {args.base}"
+        )
+        return 1
+    if args.baseline is not None and total > args.baseline:
+        print(
+            f"FAIL: warning count {total} exceeds baseline {args.baseline}; "
+            "reduce warnings, do not add new ones"
+        )
+        return 1
+    if args.changed:
+        print(f"OK: no new warnings in changed files since {args.base}")
+    elif args.baseline is not None:
+        print(f"OK: {total} warnings within baseline {args.baseline}")
+    else:
+        print("OK: advisory only (no exit-code failure)")
+    return 0
+
+
+def main() -> int:
+    parser = _build_parser()
+    args = parser.parse_args()
+    if args.limit is not None and args.limit < 0:
+        parser.error("--limit must be non-negative")
+    if args.baseline is not None and args.baseline < 0:
+        parser.error("--baseline must be non-negative")
+    if args.limit is not None and (
+        args.strict or args.changed or args.baseline is not None
+    ):
+        parser.error(
+            "--limit cannot be combined with a gate mode; it truncates the "
+            "warnings being counted"
+        )
+
+    files, base = _select_files(parser, args)
+    if args.changed and not files:
+        print(
+            "No changed maintained Markdown files since "
+            f"{args.base}; nothing to check."
+        )
+        print("OK: --changed found no changed files")
+        return 0
+
+    total, new_total = _audit_files(files, args, base)
+
+    print(f"\nWriting-style warnings: {total} (file(s): {len(files)})")
+    print("This check is advisory (STE-inspired, non-native-reader friendly).")
+    return _report_result(args, total, new_total)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

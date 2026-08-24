@@ -17,12 +17,15 @@ sys.path.insert(
 from validate_workflow_matrix_consumers import (  # noqa: E402  # pylint: disable=import-error
     NGINX_VERSION_RE,
     _is_excluded_line,
+    _has_top_level_workflow_call,
+    _publish_job_needs,
     _uses_dynamic_resolution,
     extract_hardcoded_versions,
     load_matrix_versions,
     validate_canonical_workflows,
     validate_legacy_workflows,
     validate_owner_workflow_refs,
+    validate_release_blocking_publish_dag,
 )
 
 
@@ -226,11 +229,6 @@ class TestValidateLegacyWorkflows:
         wf_dir = tmp_path / ".github" / "workflows"
         wf_dir.mkdir(parents=True)
 
-        (wf_dir / "release-deb.yml").write_text(
-            'name: "Legacy: Release DEB (nginx 1.26.3 only)"\n'
-            'env:\n'
-            '  NGINX_VERSION: "1.26.3"\n'
-        )
         (wf_dir / "release-rpm.yml").write_text(
             'name: "Legacy: Release RPM (nginx 1.26.3 only)"\n'
             'env:\n'
@@ -252,7 +250,7 @@ class TestValidateLegacyWorkflows:
         wf_dir = tmp_path / ".github" / "workflows"
         wf_dir.mkdir(parents=True)
 
-        (wf_dir / "release-deb.yml").write_text(
+        (wf_dir / "release-rpm.yml").write_text(
             'NGINX_VERSION="1.22.0"\n'
         )
 
@@ -287,12 +285,42 @@ class TestValidateOwnerWorkflowRefs:
         assert len(errors) == 1
         assert "nonexistent.yml" in errors[0]
 
+    def test_rejects_legacy_matrix_shape(self, tmp_path: Path) -> None:
+        """Rule 62: legacy 'matrix'/'additional_artifacts' shapes are rejected."""
+        matrix_file = tmp_path / "tools" / "release-matrix.json"
+        matrix_file.parent.mkdir(parents=True)
+        legacy = {
+            "matrix": [
+                {
+                    "nginx": "1.26.3",
+                    "owner_workflow": ".github/workflows/release-packages.yml",
+                }
+            ],
+            "additional_artifacts": [],
+        }
+        matrix_file.write_text(json.dumps(legacy))
+        with patch("validate_workflow_matrix_consumers.REPO_ROOT", tmp_path):
+            errors = validate_owner_workflow_refs(matrix_file)
+        assert len(errors) == 1
+        assert "canonical 'entries'" in errors[0]
+
+    def test_rejects_non_object_entries(self, tmp_path: Path) -> None:
+        """A list of non-objects is a malformed canonical shape, not a crash."""
+        matrix_file = tmp_path / "tools" / "release-matrix.json"
+        matrix_file.parent.mkdir(parents=True)
+        matrix_file.write_text(json.dumps({"entries": [None]}))
+        with patch("validate_workflow_matrix_consumers.REPO_ROOT", tmp_path):
+            errors = validate_owner_workflow_refs(matrix_file)
+        assert len(errors) == 1
+        assert "canonical 'entries'" in errors[0]
+
     def _write_matrix_with_owner_workflow(
         self, owner_workflow: str, tmp_path: Path
     ) -> list[str]:
         matrix = {
-            "matrix": [{"nginx": "1.26.3", "owner_workflow": owner_workflow}],
-            "additional_artifacts": [],
+            "entries": [
+                {"nginx": "1.26.3", "owner_workflow": owner_workflow},
+            ],
         }
         matrix_file = tmp_path / "tools" / "release-matrix.json"
         matrix_file.parent.mkdir(parents=True)
@@ -300,3 +328,109 @@ class TestValidateOwnerWorkflowRefs:
         with patch("validate_workflow_matrix_consumers.REPO_ROOT", tmp_path):
             result = validate_owner_workflow_refs(matrix_file)
         return result
+
+
+class TestValidateReleaseBlockingPublishDag:
+    """Tests for release-blocking Docker workflow wiring."""
+
+    def test_requires_official_docker_gate_in_publish(self, tmp_path: Path) -> None:
+        matrix_file, wf_dir = self._make_fixture(
+            tmp_path,
+            "  publish:\n"
+            "    needs: [release-gate]\n",
+        )
+
+        with patch("validate_workflow_matrix_consumers.REPO_ROOT", tmp_path), patch(
+            "validate_workflow_matrix_consumers.WORKFLOWS_DIR", wf_dir
+        ):
+            errors = validate_release_blocking_publish_dag(matrix_file)
+
+        assert any("publish job does not depend" in error for error in errors)
+
+    def test_accepts_exact_reusable_docker_gate(self, tmp_path: Path) -> None:
+        matrix_file, wf_dir = self._make_fixture(
+            tmp_path,
+            "  official-docker-release-gate:\n"
+            "    uses: ./.github/workflows/official-nginx-docker.yml\n"
+            "  publish:\n"
+            "    needs: [release-gate, official-docker-release-gate]\n",
+        )
+
+        with patch("validate_workflow_matrix_consumers.REPO_ROOT", tmp_path), patch(
+            "validate_workflow_matrix_consumers.WORKFLOWS_DIR", wf_dir
+        ):
+            errors = validate_release_blocking_publish_dag(matrix_file)
+
+        assert errors == []
+
+    def test_publish_needs_does_not_cross_job_boundary(self) -> None:
+        content = (
+            "  publish:\n"
+            "    runs-on: ubuntu-latest\n"
+            "  other:\n"
+            "    needs: [official-docker-release-gate]\n"
+        )
+
+        assert _publish_job_needs(content) == set()
+
+    def test_publish_needs_returns_inline_dependencies(self) -> None:
+        content = "  publish:\n    needs: [release-gate, official-docker-release-gate]\n"
+
+        assert _publish_job_needs(content) == {
+            "release-gate",
+            "official-docker-release-gate",
+        }
+
+    def test_publish_needs_returns_scalar_dependency(self) -> None:
+        assert _publish_job_needs(
+            "  publish:\n    needs: official-docker-release-gate\n"
+        ) == {"official-docker-release-gate"}
+
+    def test_publish_needs_returns_block_dependencies(self) -> None:
+        content = (
+            "  publish:\n"
+            "    needs:\n"
+            "      - release-gate\n"
+            "      - official-docker-release-gate\n"
+        )
+        assert _publish_job_needs(content) == {
+            "release-gate",
+            "official-docker-release-gate",
+        }
+
+    def test_workflow_call_requires_two_space_job_indent(self) -> None:
+        assert _has_top_level_workflow_call("  workflow_call:\n")
+        assert not _has_top_level_workflow_call("    workflow_call:\n")
+
+    def _make_fixture(
+        self, tmp_path: Path, release_workflow_body: str
+    ) -> tuple[Path, Path]:
+        wf_dir = tmp_path / ".github" / "workflows"
+        wf_dir.mkdir(parents=True)
+        (wf_dir / "official-nginx-docker.yml").write_text(
+            "on:\n"
+            "  workflow_call:\n"
+        )
+        (wf_dir / "release-packages.yml").write_text(
+            "  official-docker-release-gate:\n"
+            "    uses: ./.github/workflows/official-nginx-docker.yml\n"
+            + release_workflow_body
+        )
+        matrix_file = tmp_path / "tools" / "release-matrix.json"
+        matrix_file.parent.mkdir(parents=True)
+        matrix_file.write_text(
+            json.dumps(
+                {
+                    "entries": [
+                        {
+                            "artifact_type": "docker-image",
+                            "release_blocking": True,
+                            "owner_workflow": (
+                                ".github/workflows/official-nginx-docker.yml"
+                            ),
+                        }
+                    ]
+                }
+            )
+        )
+        return matrix_file, wf_dir

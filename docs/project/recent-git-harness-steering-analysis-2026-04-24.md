@@ -6,11 +6,14 @@ scan confirmed that the earliest reachable local/remote commit is 2026-02-27,
 so the 60-day reassessment covers the complete repository history available in
 this clone.
 
-Remote state was refreshed with `git fetch --all --prune --tags` before
-analysis. Local and remote refs were enumerated from `refs/heads` and
-`refs/remotes`, excluding `origin/HEAD`, and commits were deduplicated by SHA.
+We refreshed remote state with `git fetch --all --prune --tags` before
+analysis. We enumerated local, remote, and tag refs from `refs/heads`,
+`refs/remotes`, and `refs/tags`, excluding `origin/HEAD`, and deduplicated
+commits by SHA. The tag walk also recorded six tag-only commits that were not
+reachable from the scanned heads/remotes, so tag history was not silently
+omitted.
 `tools/harness/resolve_spec.py --hint "recent git harness steering analysis and
-remediation"` returned `WARN_NEEDS_AUTHOR_REVIEW`; this work is therefore
+remediation"` returned `WARN_NEEDS_AUTHOR_REVIEW`. This work is therefore
 treated as cross-cutting harness maintenance rather than a single bound spec.
 
 ## Phase 1 Analysis
@@ -55,7 +58,7 @@ Representative high-risk commits inspected:
 
 Recurring problem patterns:
 
-- Review and CI fixes repeatedly added rules after regressions; the missing
+- Review and CI fixes repeatedly added rules after regressions, the missing
   contract was not the individual rule, but traceable closeout from finding to
   remediation and verification.
 - Harness and steering docs already pointed at repo-owned truth surfaces, but
@@ -95,7 +98,7 @@ The 30-day window already covered most harness/steering churn.  The extra
   removal, validation/governance refinements, release automation, source-build
   target fixes, traversable temp build roots, and matrix/checklist tooling.
 
-Those surfaces were covered indirectly by AGENTS rules and docs-tooling checks,
+AGENTS rules and docs-tooling checks covered those surfaces indirectly,
 but they were not first-class harness risk packs.
 
 ## Full-History Reassessment
@@ -175,8 +178,8 @@ Commands run during this session:
 
 Final reassessment:
 
-- All P0 and P1 findings are implemented.
-- All worthwhile P2 findings are implemented.
+- All P0 and P1 findings landed.
+- All worthwhile P2 findings landed.
 - No finding is intentionally deferred.
 - Final routing and verification covered `harness-remediation`,
   `docs-tooling-drift`, `nginx-protocol-safety`, `release-governance`,

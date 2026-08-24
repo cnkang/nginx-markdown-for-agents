@@ -40,7 +40,7 @@ ngx_http_markdown_effective_memory_budget(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf)
 {
-    return (eff != NULL) ? eff->memory_budget : conf->advanced.memory_budget;
+    return (eff != NULL) ? eff->memory_budget : conf->limits.conversion_memory;
 }
 
 /*
@@ -66,8 +66,6 @@ struct MarkdownOptions {
     const uint8_t *prune_protection_selectors;
     uintptr_t      prune_protection_selector_len;
     uint64_t       memory_budget;
-    uint8_t        llm_provider;
-    uint8_t        chars_per_token_fixed;
     uint32_t       parse_timeout_ms;
     uint64_t       parser_memory_budget;
     uint32_t       flush_threshold;
@@ -110,10 +108,14 @@ struct FFIBaseUrlInput {
     const struct MarkdownTrustedProxies *trusted;
     const uint8_t                       *forwarded;
     uintptr_t                            forwarded_len;
+    const uint8_t                       *x_forwarded_for;
+    uintptr_t                            x_forwarded_for_len;
     const uint8_t                       *x_forwarded_proto;
     uintptr_t                            x_forwarded_proto_len;
     const uint8_t                       *x_forwarded_host;
     uintptr_t                            x_forwarded_host_len;
+    const uint8_t                       *x_forwarded_port;
+    uintptr_t                            x_forwarded_port_len;
     const uint8_t                       *host;
     uintptr_t                            host_len;
     const uint8_t                       *direct_scheme;
@@ -185,6 +187,10 @@ static ngx_chain_t *g_next_body_filter_last_input = NULL;
 static ngx_uint_t g_next_body_filter_call_count = 0;
 static ngx_uint_t g_markdown_result_free_calls = 0;
 static ngx_uint_t g_log_decision_calls = 0;
+static const ngx_str_t *g_last_decision_reason = NULL;
+static const ngx_str_t *g_last_decision_category = NULL;
+static ngx_uint_t g_last_failure_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+static ngx_uint_t g_last_failure_status = 0;
 static ngx_uint_t g_reason_streaming_shadow_calls = 0;
 static ngx_uint_t g_streaming_new_with_code_calls = 0;
 static ngx_uint_t g_streaming_feed_calls = 0;
@@ -202,6 +208,37 @@ static ngx_uint_t g_slab_alloc_calls = 0;
 static ngx_uint_t g_slab_alloc_fail_after = 0;
 static ngx_uint_t g_shmtx_lock_calls = 0;
 static ngx_uint_t g_shmtx_unlock_calls = 0;
+
+/* Decompression failure helpers are owned by module_state_impl.h in the
+ * production translation unit.  Keep this direct conversion-header test
+ * independent of that implementation-only include. */
+static void
+ngx_http_markdown_record_decompression_failure_budget(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_format(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_truncated(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_io(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
 
 /* FFI stub constants and functions used by conversion_impl.h */
 #define ERROR_SUCCESS 0
@@ -311,6 +348,16 @@ markdown_result_init(struct MarkdownResult *result)
     memset(result, 0, sizeof(*result));
 }
 
+/* FFI lifecycle stub for the borrowed base-URL input snapshot. */
+static void
+markdown_base_url_input_init(struct FFIBaseUrlInput *result)
+{
+    if (result == NULL) {
+        return;
+    }
+    memset(result, 0, sizeof(*result));
+}
+
 const ngx_str_t *
 ngx_http_markdown_reason_streaming_shadow(void)
 {
@@ -334,6 +381,60 @@ ngx_http_markdown_log_decision(ngx_http_request_t *r,
     UNUSED(eff);
     UNUSED(reason_code);
     g_log_decision_calls++;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_header_plan_apply_err(void)
+{
+    static ngx_str_t reason = {
+        sizeof("header_plan_apply_error") - 1,
+        (u_char *) "header_plan_apply_error"
+    };
+
+    return &reason;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_from_error_category(
+    ngx_http_markdown_error_category_t category, ngx_log_t *log)
+{
+    static ngx_str_t conversion = {
+        sizeof("conversion_error") - 1,
+        (u_char *) "conversion_error"
+    };
+    static ngx_str_t resource = {
+        sizeof("memory_budget_exceeded") - 1,
+        (u_char *) "memory_budget_exceeded"
+    };
+    static ngx_str_t system = {
+        sizeof("ffi_panic") - 1,
+        (u_char *) "ffi_panic"
+    };
+
+    UNUSED(log);
+    if (category == NGX_HTTP_MARKDOWN_ERROR_CONVERSION) {
+        return &conversion;
+    }
+    if (category == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT) {
+        return &resource;
+    }
+    return &system;
+}
+
+static void
+ngx_http_markdown_log_decision_with_category(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code,
+    const ngx_str_t *error_category)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(eff);
+    g_log_decision_calls++;
+    g_last_decision_reason = reason_code;
+    g_last_decision_category = error_category;
 }
 
 void
@@ -395,6 +496,7 @@ typedef struct ngx_http_core_srv_conf_s ngx_http_core_srv_conf_t;
 typedef struct ngx_connection_s ngx_connection_t;
 typedef struct ngx_log_s ngx_log_t;
 typedef struct ngx_pool_s ngx_pool_t;
+typedef struct ngx_http_variable_value_s ngx_http_variable_value_t;
 typedef ngx_uint_t ngx_atomic_uint_t;
 typedef struct ngx_time_s ngx_time_t;
 
@@ -424,8 +526,17 @@ struct ngx_connection_s {
     ngx_str_t        addr_text;
 };
 
+struct ngx_http_variable_value_s {
+    unsigned         len:28;
+    unsigned         valid:1;
+    unsigned         no_cacheable:1;
+    unsigned         not_found:1;
+    unsigned         escape:1;
+    u_char           *data;
+};
+
 struct ngx_pool_s {
-    int dummy;
+    ngx_log_t  *log;
 };
 
 /* struct ngx_buf_s provided by nginx_stubs/ngx_core.h */
@@ -468,6 +579,45 @@ struct ngx_http_request_s {
     void             *loc_conf;
     void             *srv_conf;
 };
+
+static ngx_str_t g_realip_remote_addr;
+
+ngx_uint_t
+ngx_hash_key_lc(u_char *data, size_t len)
+{
+    UNUSED(data);
+    UNUSED(len);
+    return 0;
+}
+
+ngx_http_variable_value_t *
+ngx_http_get_variable(ngx_http_request_t *r, ngx_str_t *name,
+    ngx_uint_t key)
+{
+    static ngx_http_variable_value_t not_found = {
+        0, 0, 0, 1, 0, NULL
+    };
+    static ngx_http_variable_value_t realip_remote_addr;
+
+    UNUSED(r);
+    UNUSED(key);
+
+    if (name == NULL
+        || name->len != sizeof("realip_remote_addr") - 1
+        || memcmp(name->data, "realip_remote_addr", name->len) != 0
+        || g_realip_remote_addr.len == 0)
+    {
+        return &not_found;
+    }
+
+    realip_remote_addr.len = g_realip_remote_addr.len;
+    realip_remote_addr.valid = 1;
+    realip_remote_addr.no_cacheable = 0;
+    realip_remote_addr.not_found = 0;
+    realip_remote_addr.escape = 0;
+    realip_remote_addr.data = g_realip_remote_addr.data;
+    return &realip_remote_addr;
+}
 
 #ifndef ngx_memzero
 #define ngx_memzero(buf, n) memset((buf), 0, (n))
@@ -568,6 +718,39 @@ ngx_pfree(ngx_pool_t *pool, void *p)
     free(p);
     return NGX_OK;
 }
+
+/*
+ * subrequest: buffer.c symbols.  conversion_impl.h calls
+ * ngx_http_markdown_buffer_release() at the conversion terminal; the
+ * implementation lives in buffer.c and needs these pool/alloc stubs
+ * (same pattern as eligibility_impl_test.c).
+ */
+typedef struct ngx_pool_cleanup_s {
+    void                         (*handler)(void *data);
+    void                          *data;
+    struct ngx_pool_cleanup_s     *next;
+} ngx_pool_cleanup_t;
+
+static ngx_pool_cleanup_t  test_cleanup;
+
+ngx_pool_cleanup_t *
+ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
+{
+    (void) pool;
+    (void) size;
+    memset(&test_cleanup, 0, sizeof(test_cleanup));
+    return &test_cleanup;
+}
+
+void *
+ngx_alloc(size_t size, ngx_log_t *log)
+{
+    (void) log;
+    return malloc(size);
+}
+
+#define ngx_free free
+#define ngx_memcpy memcpy
 
 /*
  * Pool allocator stub delegating to malloc(3).  When g_pnalloc_fail_once
@@ -744,8 +927,10 @@ ngx_http_markdown_forward_headers(
 __attribute__((unused))
 static void
 ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf)
 {
+    UNUSED(eff);
     UNUSED(conf);
 }
 
@@ -762,9 +947,16 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
 {
     UNUSED(r);
     UNUSED(ctx);
-    UNUSED(conf);
     UNUSED(debug_message);
     g_failopen_call_count++;
+    if (conf != NULL) {
+        g_last_failure_policy = conf->on_error;
+        g_last_failure_status = conf->error_status;
+    } else {
+        /* Safe fallbacks matching the stub-state initializers. */
+        g_last_failure_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+        g_last_failure_status = 0;
+    }
     return g_failopen_rc;
 }
 
@@ -879,52 +1071,13 @@ ngx_http_markdown_send_304(
     return NGX_OK;
 }
 
-static ngx_inline ngx_http_markdown_otel_span_t *
-ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf)
-{
-    UNUSED(r);
-    UNUSED(conf);
-    return NULL;
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_set_str_attr(ngx_http_markdown_otel_span_t *span,
-    const u_char *key, size_t key_len,
-    const u_char *val, size_t val_len)
-{
-    UNUSED(span);
-    UNUSED(key);
-    UNUSED(key_len);
-    UNUSED(val);
-    UNUSED(val_len);
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_set_int_attr(ngx_http_markdown_otel_span_t *span,
-    const u_char *key, size_t key_len,
-    int64_t val)
-{
-    UNUSED(span);
-    UNUSED(key);
-    UNUSED(key_len);
-    UNUSED(val);
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
-{
-    UNUSED(span);
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
-    ngx_log_t *log, ngx_http_request_t *r)
-{
-    UNUSED(span);
-    UNUSED(log);
-    UNUSED(r);
-}
+/*
+ * subrequest: conversion_impl.h calls ngx_http_markdown_buffer_release() at the
+ * conversion terminal.  The implementation lives in buffer.c; include it
+ * directly (same pattern as eligibility_impl_test.c) so the symbol
+ * resolves at link time.  Must follow the stub definitions above.
+ */
+#include "../../src/ngx_http_markdown_buffer.c"
 
 #include "../../src/ngx_http_markdown_conversion_impl.h" /* SONAR_NOTE: must follow stub definitions */
 
@@ -950,154 +1103,11 @@ init_request(ngx_http_request_t *r)
 }
 
 
-static void
-init_per_path_metrics(ngx_http_markdown_metrics_t *metrics,
-    ngx_slab_pool_t *shpool, ngx_shm_zone_t *zone, ngx_uint_t limit)
-{
-    memset(metrics, 0, sizeof(*metrics));
-    memset(shpool, 0, sizeof(*shpool));
-    memset(zone, 0, sizeof(*zone));
-    metrics->per_path.sentinel.left = &metrics->per_path.sentinel;
-    metrics->per_path.sentinel.right = &metrics->per_path.sentinel;
-    metrics->per_path.sentinel.parent = &metrics->per_path.sentinel;
-    metrics->per_path.path_tree.root = &metrics->per_path.sentinel;
-    metrics->per_path.cardinality_limit = limit;
-    zone->data = metrics;
-    zone->shm.addr = shpool;
-    ngx_http_markdown_metrics_shm_zone = zone;
-    g_slab_alloc_calls = 0;
-    g_slab_alloc_fail_after = 0;
-    g_shmtx_lock_calls = 0;
-    g_shmtx_unlock_calls = 0;
-}
+/*
+ * Per-path metrics infrastructure removed in 0.9.2 — markdown_metrics_per_path
+ * directive deleted; init_per_path_metrics helper no longer needed.
+ */
 
-
-static void
-test_record_per_path_retention_limits(void)
-{
-    ngx_http_markdown_conf_t    conf;
-    ngx_http_markdown_metrics_t metrics;
-    ngx_http_request_t          r;
-    ngx_shm_zone_t              zone;
-    ngx_slab_pool_t             shpool;
-    ngx_shm_zone_t             *saved_zone;
-    u_char                      exact[NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN];
-    u_char                      oversized[NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN + 1];
-
-    TEST_SUBSECTION("record per-path metrics retention limits");
-
-    memset(&conf, 0, sizeof(conf));
-    conf.ops.metrics_per_path = 1;
-    memset(exact, 'a', sizeof(exact));
-    memset(oversized, 'b', sizeof(oversized));
-    init_request(&r);
-    saved_zone = ngx_http_markdown_metrics_shm_zone;
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 2);
-    r.uri.data = NULL;
-    r.uri.len = 0;
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 1);
-    TEST_ASSERT(metrics.per_path.path_entries == 0,
-                "empty URI must not create a retained entry");
-    TEST_ASSERT(g_shmtx_lock_calls == 0 && g_shmtx_unlock_calls == 0,
-                "empty or NULL URI must not take the SHM mutex");
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 2);
-    r.uri.data = exact;
-    r.uri.len = sizeof(exact);
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 7);
-    TEST_ASSERT(metrics.per_path.path_entries == 1,
-                "1024-byte URI must be retained");
-    TEST_ASSERT(metrics.per_path.overflow_count == 0,
-                "exact retained-length URI must not overflow");
-    TEST_ASSERT(metrics.per_path.path_conversions == 1,
-                "retained URI must update aggregate conversions");
-    TEST_ASSERT(metrics.per_path.path_conversion_time_sum_ms == 7,
-                "retained URI must update aggregate time");
-
-    metrics.per_path.cardinality_limit = 1;
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 9);
-    TEST_ASSERT(metrics.per_path.path_entries == 1,
-                "an existing path must update after cardinality is reached");
-    TEST_ASSERT(metrics.per_path.overflow_count == 0,
-                "an existing path must not be folded into overflow");
-    TEST_ASSERT(metrics.per_path.path_conversions == 2,
-                "an existing path must retain aggregate conversions");
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 2);
-    r.uri.data = oversized;
-    r.uri.len = sizeof(oversized);
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 11);
-    TEST_ASSERT(metrics.per_path.path_entries == 0,
-                "1025-byte URI must not allocate a retained node");
-    TEST_ASSERT(metrics.per_path.overflow_count == 1,
-                "1025-byte URI must increment conversion overflow");
-    TEST_ASSERT(metrics.per_path.path_conversions == 1,
-                "overflow URI must retain aggregate conversions");
-    TEST_ASSERT(metrics.per_path.path_conversion_time_sum_ms == 11,
-                "overflow URI must retain aggregate time");
-    TEST_ASSERT(metrics.per_path.unretained_conversions == 1,
-                "overflow URI must enter unretained conversions");
-    TEST_ASSERT(metrics.per_path.unretained_conversion_time_sum_ms == 11,
-                "overflow URI must enter unretained time");
-    TEST_ASSERT(g_slab_alloc_calls == 0,
-                "oversized URI must avoid slab allocation");
-
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 13);
-    TEST_ASSERT(metrics.per_path.overflow_count == 2,
-                "repeated oversized URI counts each omitted conversion");
-    TEST_ASSERT(metrics.per_path.path_conversions == 2,
-                "repeated oversized URI updates aggregate conversions");
-    TEST_ASSERT(metrics.per_path.path_conversion_time_sum_ms == 24,
-                "repeated oversized URI updates aggregate time");
-    TEST_ASSERT(metrics.per_path.unretained_conversions == 2,
-                "repeated oversized URI updates unretained conversions");
-    TEST_ASSERT(metrics.per_path.unretained_conversion_time_sum_ms == 24,
-                "repeated oversized URI updates unretained time");
-    TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
-                "every retained-length return path must release the SHM mutex");
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 0);
-    r.uri.data = exact;
-    r.uri.len = sizeof(exact);
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 3);
-    TEST_ASSERT(metrics.per_path.overflow_count == 1,
-                "cardinality limit must be enforced before retention allocation");
-    TEST_ASSERT(g_slab_alloc_calls == 0,
-                "cardinality overflow must avoid slab allocation");
-    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
-                && metrics.per_path.unretained_conversion_time_sum_ms == 3,
-                "cardinality overflow must enter unretained accounting");
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 2);
-    g_slab_alloc_fail_after = 1;
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 5);
-    TEST_ASSERT(metrics.per_path.path_entries == 0,
-                "node allocation failure must not create a retained entry");
-    TEST_ASSERT(metrics.per_path.path_conversions == 1,
-                "node allocation failure must retain aggregate conversion");
-    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
-                && metrics.per_path.unretained_conversion_time_sum_ms == 5,
-                "node allocation failure must enter unretained accounting");
-    TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
-                "node allocation failure must release the SHM mutex");
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 2);
-    g_slab_alloc_fail_after = 2;
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 5);
-    TEST_ASSERT(metrics.per_path.path_entries == 0,
-                "path allocation failure must not create a retained entry");
-    TEST_ASSERT(metrics.per_path.path_conversions == 1,
-                "path allocation failure must retain aggregate conversion");
-    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
-                && metrics.per_path.unretained_conversion_time_sum_ms == 5,
-                "path allocation failure must enter unretained accounting");
-    TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
-                "path allocation failure must release the SHM mutex");
-
-    ngx_http_markdown_metrics_shm_zone = saved_zone;
-    TEST_PASS("per-path retention limits are recorded safely");
-}
 
 static void
 set_single_header_list(ngx_http_request_t *r, ngx_table_elt_t *headers,
@@ -1131,6 +1141,15 @@ test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     return g_next_body_filter_rc;
 }
 
+/* Minimal module-state shim for full-buffer pending-chain tests. */
+void
+ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
+{
+    if (slot != NULL) {
+        *slot = value;
+    }
+}
+
 /*
  * Reset all stub state to deterministic defaults for each test section.
  *
@@ -1156,6 +1175,10 @@ reset_stub_state(void)
     g_next_body_filter_call_count = 0;
     g_markdown_result_free_calls = 0;
     g_log_decision_calls = 0;
+    g_last_decision_reason = NULL;
+    g_last_decision_category = NULL;
+    g_last_failure_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    g_last_failure_status = 0;
     g_reason_streaming_shadow_calls = 0;
     g_streaming_new_with_code_calls = 0;
     g_streaming_feed_calls = 0;
@@ -1184,6 +1207,8 @@ reset_base_url_stub(void)
     g_stub_decide_rc = DECIDE_BASE_URL_OK;
     g_stub_decide_reason = 0;
     g_stub_decide_source = 0;
+    g_realip_remote_addr.data = NULL;
+    g_realip_remote_addr.len = 0;
 }
 
 /*
@@ -1199,7 +1224,7 @@ test_base_url_marshals_request_fields(void)
     ngx_http_request_t            r;
     ngx_http_markdown_conf_t      conf;
     ngx_http_markdown_main_conf_t main_conf;
-    ngx_table_elt_t               headers[4];
+    ngx_table_elt_t               headers[6];
     ngx_str_t                     base_url;
     struct MarkdownTrustedProxies *handle;
 
@@ -1225,12 +1250,18 @@ test_base_url_marshals_request_fields(void)
     set_str(&headers[1].key, "Forwarded");
     set_str(&headers[1].value, "host=fwd.example.com;proto=https");
     headers[1].hash = 1;
-    set_str(&headers[2].key, "X-Forwarded-Proto");
-    set_str(&headers[2].value, "https");
+    set_str(&headers[2].key, "X-Forwarded-For");
+    set_str(&headers[2].value, "203.0.113.9");
     headers[2].hash = 1;
-    set_str(&headers[3].key, "X-Forwarded-Host");
-    set_str(&headers[3].value, "xfwd.example.com");
+    set_str(&headers[3].key, "X-Forwarded-Proto");
+    set_str(&headers[3].value, "https");
     headers[3].hash = 1;
+    set_str(&headers[4].key, "X-Forwarded-Host");
+    set_str(&headers[4].value, "xfwd.example.com");
+    headers[4].hash = 1;
+    set_str(&headers[5].key, "X-Forwarded-Port");
+    set_str(&headers[5].value, "443");
+    headers[5].hash = 1;
     set_single_header_list(&r, headers, ARRAY_SIZE(headers));
 
     r.loc_conf = &conf;
@@ -1272,12 +1303,131 @@ test_base_url_marshals_request_fields(void)
     TEST_ASSERT(g_captured_base_url_input.x_forwarded_host_len
             == sizeof("xfwd.example.com") - 1,
         "X-Forwarded-Host must be marshaled");
+    TEST_ASSERT(g_captured_base_url_input.x_forwarded_for_len
+            == sizeof("203.0.113.9") - 1,
+        "X-Forwarded-For must be marshaled");
+    TEST_ASSERT(g_captured_base_url_input.x_forwarded_port_len == 3,
+        "X-Forwarded-Port must be marshaled");
     TEST_ASSERT(g_captured_base_url_input.host_len
             == sizeof("origin.example.com") - 1,
         "Host must be marshaled from headers_in.server");
 
     free((void *) (uintptr_t) g_captured_base_url_input.forwarded);
     TEST_PASS("base_url wrapper marshals all request/config fields");
+}
+
+/*
+ * Test: an empty Forwarded field remains present across the C/FFI boundary.
+ *
+ * The current forwarding contract requires any present Forwarded field,
+ * including an empty one, to
+ * suppress the X-Forwarded fallback after Rust classifies it as malformed.
+ */
+static void
+test_base_url_preserves_empty_forwarded_presence(void)
+{
+    ngx_http_request_t            r;
+    ngx_http_markdown_conf_t      conf;
+    ngx_http_markdown_main_conf_t main_conf;
+    ngx_table_elt_t               headers[2];
+    ngx_str_t                     base_url;
+
+    TEST_SUBSECTION("base_url preserves empty Forwarded presence");
+
+    reset_base_url_stub();
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    memset(&main_conf, 0, sizeof(main_conf));
+
+    set_str(&r.connection->addr_text, "10.1.2.3");
+    set_str(&r.uri, "/articles/page.html");
+    set_str(&r.headers_in.server, "origin.example.com");
+
+    memset(headers, 0, sizeof(headers));
+    set_str(&headers[0].key, "Forwarded");
+    headers[0].hash = 1;
+    headers[0].value.data = NULL;
+    headers[0].value.len = 0;
+    set_str(&headers[1].key, "X-Forwarded-For");
+    set_str(&headers[1].value, "203.0.113.9");
+    headers[1].hash = 1;
+    set_single_header_list(&r, headers, ARRAY_SIZE(headers));
+
+    r.loc_conf = &conf;
+    r.main_conf = (void *) &main_conf;
+
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_OK,
+                "construct_base_url should accept the captured stub result");
+    free(base_url.data);
+
+    TEST_ASSERT(g_captured_base_url_input.forwarded != NULL,
+        "present empty Forwarded must use a non-NULL FFI pointer");
+    TEST_ASSERT(g_captured_base_url_input.forwarded_len == 0,
+        "empty Forwarded must retain its zero length");
+    TEST_ASSERT(g_captured_base_url_input.x_forwarded_for != NULL
+        && g_captured_base_url_input.x_forwarded_for_len
+            == sizeof("203.0.113.9") - 1,
+        "X-Forwarded-For must remain marshaled alongside empty Forwarded");
+
+    TEST_PASS("empty Forwarded presence crosses the FFI boundary");
+}
+
+/*
+ * Test: an oversized Forwarded field remains present even when collection
+ * rejects its value, so valid X-Forwarded-* fields cannot become a fallback.
+ */
+static void
+test_base_url_preserves_oversized_forwarded_presence(void)
+{
+    ngx_http_request_t            r;
+    ngx_http_markdown_conf_t      conf;
+    ngx_http_markdown_main_conf_t main_conf;
+    ngx_table_elt_t               headers[2];
+    ngx_str_t                     base_url;
+    u_char                        oversized[
+        NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX + 1];
+
+    TEST_SUBSECTION("base_url preserves oversized Forwarded presence");
+
+    reset_base_url_stub();
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    memset(&main_conf, 0, sizeof(main_conf));
+    memset(oversized, 'a', sizeof(oversized));
+
+    set_str(&r.connection->addr_text, "10.1.2.3");
+    set_str(&r.uri, "/articles/page.html");
+    set_str(&r.headers_in.server, "origin.example.com");
+
+    memset(headers, 0, sizeof(headers));
+    set_str(&headers[0].key, "Forwarded");
+    headers[0].value.data = oversized;
+    headers[0].value.len = sizeof(oversized);
+    headers[0].hash = 1;
+    set_str(&headers[1].key, "X-Forwarded-For");
+    set_str(&headers[1].value, "203.0.113.9");
+    headers[1].hash = 1;
+    set_single_header_list(&r, headers, ARRAY_SIZE(headers));
+
+    r.loc_conf = &conf;
+    r.main_conf = (void *) &main_conf;
+
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_OK,
+                "construct_base_url should accept the captured stub result");
+    free(base_url.data);
+
+    TEST_ASSERT(g_captured_base_url_input.forwarded != NULL,
+        "oversized Forwarded must retain a non-NULL presence sentinel");
+    TEST_ASSERT(g_captured_base_url_input.forwarded_len == 0,
+        "oversized Forwarded must not cross the configured input cap");
+    TEST_ASSERT(g_captured_base_url_input.x_forwarded_for != NULL
+        && g_captured_base_url_input.x_forwarded_for_len
+            == sizeof("203.0.113.9") - 1,
+        "X-Forwarded-For remains available without changing precedence");
+
+    TEST_PASS("oversized Forwarded presence crosses the FFI boundary");
 }
 
 /*
@@ -1321,6 +1471,60 @@ test_base_url_unix_socket_flag(void)
     r.connection->sockaddr = NULL;
 
     TEST_PASS("Unix-socket peers are flagged for the decision");
+}
+
+/*
+ * Test: when the realip module exposes the original transport peer through
+ * its public variable, the wrapper marshals it (not the rewritten addr_text)
+ * as the trusted-proxy evaluation source.
+ *
+ * Validates ADR-0016 trusted-proxies model: CIDR evaluation uses the
+ * original transport peer preserved by ngx_http_realip_module rather than
+ * r->connection->addr_text.
+ */
+static void
+test_base_url_prefers_realip_peer(void)
+{
+    ngx_http_request_t            r;
+    ngx_http_markdown_conf_t      conf;
+    ngx_http_markdown_main_conf_t main_conf;
+    ngx_str_t                     base_url;
+
+    TEST_SUBSECTION("base_url wrapper prefers public realip peer");
+
+    reset_base_url_stub();
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    memset(&main_conf, 0, sizeof(main_conf));
+
+    /* addr_text has been rewritten by realip to the XFF-derived client;
+     * the public variable preserves the original proxy peer that the CIDR
+     * must match. */
+    set_str(&r.connection->addr_text, "203.0.113.9");
+    set_str(&g_realip_remote_addr, "10.1.2.3");
+    set_str(&r.uri, "/articles/page.html");
+    r.loc_conf = &conf;
+    r.main_conf = (void *) &main_conf;
+
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_OK,
+                "construct_base_url should succeed via the FFI decision");
+    TEST_ASSERT(g_captured_base_url_input.source_ip_len == 8
+        && memcmp(g_captured_base_url_input.source_ip, "10.1.2.3", 8) == 0,
+        "source IP must be marshaled from public realip variable when present");
+    free(base_url.data);
+
+    /* Without the public realip variable, the wrapper falls back to addr_text. */
+    reset_base_url_stub();
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_OK,
+                "construct_base_url should succeed without public realip variable");
+    TEST_ASSERT(g_captured_base_url_input.source_ip_len == 11
+        && memcmp(g_captured_base_url_input.source_ip, "203.0.113.9", 11) == 0,
+        "source IP must fall back to connection addr_text when realip is absent");
+    free(base_url.data);
+
+    TEST_PASS("public realip peer takes precedence over rewritten addr_text");
 }
 
 /*
@@ -1767,44 +1971,6 @@ TEST_PASS("prepare_conversion_options schema+server fallback correct");
  * Verify shadow compare exits early when prepare_conversion_options
  * rejects invalid shadow-mode options.
  */
-static void
-test_shadow_compare_prepare_options_failure(void)
-{
-    ngx_http_request_t        r;
-    ngx_http_markdown_ctx_t   ctx;
-    ngx_http_markdown_conf_t  conf;
-    struct MarkdownResult     fb_result;
-
-    TEST_SUBSECTION("shadow compare: prepare options failure");
-
-    reset_stub_state();
-    init_request(&r);
-    memset(&ctx, 0, sizeof(ctx));
-    memset(&conf, 0, sizeof(conf));
-    memset(&fb_result, 0, sizeof(fb_result));
-
-    ctx.buffer.data = (u_char *) "shadow body";
-    ctx.buffer.size = sizeof("shadow body") - 1;
-    ctx.effective_conf = NULL;
-
-    conf.advanced.llm_provider = (ngx_uint_t) UINT8_MAX + 1;
-    conf.advanced.chars_per_token_fixed = 1;
-
-    ngx_http_markdown_shadow_compare(&r, &ctx, &conf, &fb_result, 7);
-
-    TEST_ASSERT(g_reason_streaming_shadow_calls == 0,
-                "shadow compare must not resolve the shadow reason after option failure");
-    TEST_ASSERT(g_log_decision_calls == 0,
-                "shadow compare must not log a shadow decision after option failure");
-    TEST_ASSERT(g_streaming_new_with_code_calls == 0,
-                "shadow compare must not initialize streaming after option failure");
-    TEST_ASSERT(g_streaming_feed_calls == 0,
-                "shadow compare must not feed streaming after option failure");
-    TEST_ASSERT(g_streaming_finish_calls == 0,
-                "shadow compare must not finish streaming after option failure");
-
-    TEST_PASS("shadow compare aborts on prepare options failure");
-}
 
 
 /*
@@ -1921,7 +2087,7 @@ test_collect_request_header_values_multi_part(void)
 }
 
 /*
- * Test: oversized forwarding metadata is ignored without allocating.
+ * Test: oversized forwarding metadata is classified without allocating.
  */
 static void
 test_collect_request_header_values_enforces_cap(void)
@@ -1948,11 +2114,11 @@ test_collect_request_header_values_enforces_cap(void)
         &r, (const u_char *) "Forwarded",
         sizeof("Forwarded") - 1, &result);
 
-    TEST_ASSERT(rc == NGX_DECLINED,
-                "oversized forwarding metadata must be ignored");
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_FORWARDING_HEADER_TOO_LARGE,
+                "oversized forwarding metadata must be classified");
     TEST_ASSERT(result.data == NULL && result.len == 0,
                 "oversized metadata must not allocate output");
-    TEST_PASS("forwarding metadata cap enforced");
+    TEST_PASS("forwarding metadata cap classification enforced");
 }
 
 /*
@@ -2179,9 +2345,60 @@ test_send_conversion_output_paths(void)
     result.markdown = out;
     result.markdown_len = sizeof(out) - 1;
     g_update_headers_rc = NGX_ERROR;
+    g_failopen_rc = NGX_DONE;
     rc = ngx_http_markdown_send_conversion_output(
         &r, &ctx, &conf, &result, 1);
-    TEST_ASSERT(rc == NGX_ERROR, "header update failure should return NGX_ERROR");
+    TEST_ASSERT(rc == NGX_DONE,
+                "header update failure should apply pass policy");
+    TEST_ASSERT(g_failopen_call_count == 1,
+                "header update failure should route through error policy");
+    TEST_ASSERT(ctx.error.has_category == 1
+                && ctx.error.last_category == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+                "header update failure should record system category");
+    TEST_ASSERT(g_last_decision_reason != NULL
+                && STR_EQ((char *) g_last_decision_reason->data,
+                          "header_plan_apply_error"),
+                "header update failure should log canonical reason");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = 503;
+    g_update_headers_rc = NGX_ERROR;
+    g_failopen_rc = NGX_ERROR;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "header update failure should route status policy");
+    TEST_ASSERT(g_failopen_call_count == 1
+                && g_last_failure_policy == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+                && g_last_failure_status == 503,
+                "header update failure should preserve status 503 policy");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = 502;
+    g_update_headers_rc = NGX_ERROR;
+    g_failopen_rc = NGX_ERROR;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "header update failure should route fail-closed policy");
+    TEST_ASSERT(g_failopen_call_count == 1
+                && g_last_failure_policy == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+                && g_last_failure_status == 502,
+                "header update failure should preserve fail-closed 502 policy");
 
     reset_stub_state();
     init_request(&r);
@@ -2359,6 +2576,29 @@ test_fullbuffer_resume_pending_lifecycle(void)
     TEST_PASS("Full-buffer resume pending lifecycle is symmetric");
 }
 
+static void
+test_fullbuffer_cleanup_clears_aborted_pending_state(void)
+{
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_chain_t              pending;
+
+    TEST_SUBSECTION("full-buffer cleanup clears aborted pending state");
+
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&pending, 0, sizeof(pending));
+    ctx.fullbuffer.pending_output = &pending;
+    ctx.fullbuffer.pending_has_data = 1;
+
+    ngx_http_markdown_fullbuffer_cleanup(&ctx);
+
+    TEST_ASSERT(ctx.fullbuffer.pending_output == NULL,
+                "cleanup must clear the full-buffer pending chain");
+    TEST_ASSERT(ctx.fullbuffer.pending_has_data == 0,
+                "cleanup must clear the full-buffer pending latch");
+
+    TEST_PASS("Full-buffer cleanup clears state after client abort");
+}
+
 /*
  * Verify miscellaneous conversion helper branches:
  * record_conversion_latency, record_system_failure, and
@@ -2465,7 +2705,10 @@ main(void)
     printf("========================================\n");
 
     test_base_url_marshals_request_fields();
+    test_base_url_preserves_empty_forwarded_presence();
+    test_base_url_preserves_oversized_forwarded_presence();
     test_base_url_unix_socket_flag();
+    test_base_url_prefers_realip_peer();
     test_base_url_not_configured_marshaled();
     test_base_url_decision_failure_propagates();
     test_base_url_add_len_overflow_guard();
@@ -2478,7 +2721,6 @@ main(void)
     test_prepare_conversion_options_prune_selectors();
     test_prepare_conversion_options_prune_protection_selectors();
     test_prepare_conversion_options_schema_server_fallback();
-    test_shadow_compare_prepare_options_failure();
     test_find_request_header_multi_part();
     test_collect_request_header_values_multi_part();
     test_collect_request_header_values_enforces_cap();
@@ -2488,9 +2730,9 @@ main(void)
     test_send_conversion_output_paths();
     test_fullbuffer_resume_does_not_resubmit_pending_chain();
     test_fullbuffer_resume_pending_lifecycle();
+    test_fullbuffer_cleanup_clears_aborted_pending_state();
     test_misc_conversion_helpers();
     test_conditional_bypass_bypasses_error_policy();
-    test_record_per_path_retention_limits();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

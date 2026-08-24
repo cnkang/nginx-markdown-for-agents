@@ -174,7 +174,8 @@ fn sniff_buffer_at_limit_with_transcoded_output_within_budget() {
     while input.len() < 64 {
         input.push(b' ');
     }
-    input.extend_from_slice(b"caf\xe9</body></html>");
+    // "café" encoded as valid UTF-8 (0xC3 0xA9).
+    input.extend_from_slice("caf\u{e9}</body></html>".as_bytes());
     let result = conv.feed_chunk(&input);
     assert!(
         result.is_ok(),
@@ -443,15 +444,15 @@ fn from_utf8_lossy_owned_allocation_within_budget() {
     let mut input = b"<p>".to_vec();
     input.push(0xFF);
     input.extend_from_slice(b"text</p>");
-    let r = conv.feed_chunk(&input);
-    assert!(r.is_ok(), "lossy conversion should succeed: {:?}", r);
-    let mut all_md = Vec::new();
-    if let Ok(ref r) = r {
-        all_md.extend_from_slice(&r.markdown);
-    }
-    let result = conv.finalize().expect("finalize should succeed");
-    all_md.extend_from_slice(&result.final_markdown);
-    assert!(!all_md.is_empty(), "should produce some markdown output");
+    // 0xFF is not valid UTF-8: under the fail-closed contract the feed must
+    // reject it with EncodingError instead of silently replacing it.
+    let err = conv
+        .feed_chunk(&input)
+        .expect_err("invalid UTF-8 must fail closed");
+    assert!(
+        matches!(err, ConversionError::EncodingError(_)),
+        "expected EncodingError, got: {err:?}"
+    );
 }
 
 #[test]

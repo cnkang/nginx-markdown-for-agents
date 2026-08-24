@@ -37,14 +37,14 @@ values, rationale, and update procedures.
 
 Triggers when Rust code, perf config, or workflow files change. Runs small
 and medium tiers, then invokes the threshold engine. Blocking verdicts fail
-the job; warnings are logged but the job passes.
+the job. The engine logs warnings but the job passes.
 
 Artifacts uploaded:
-- `perf-measurement-<platform>.json` (Measurement Report, e.g. `perf-measurement-linux-x86_64.json`)
-- `perf-verdict-<platform>.json` (Verdict Report, e.g. `perf-verdict-linux-x86_64.json`)
+- `perf-measurement-<platform>.json` (Measurement Report, for example `perf-measurement-linux-x86_64.json`)
+- `perf-verdict-<platform>.json` (Verdict Report, for example `perf-verdict-linux-x86_64.json`)
 
 Platform identifiers use `uname`-style naming: `linux-x86_64` for GitHub
-Actions Ubuntu runners, `darwin-arm64` for Apple Silicon macOS, etc.
+Actions Ubuntu runners, `darwin-arm64` for Apple Silicon macOS, and so on.
 
 ### Nightly Full (`nightly-perf.yml`)
 
@@ -80,23 +80,34 @@ The script builds the release binary, runs benchmarks, generates a
 Measurement Report, invokes the threshold engine for a Verdict Report,
 and prints a text summary to stderr.
 
-### 0.9.1 Release Gate Evidence
-For the 0.9.1 release, evidence is gathered via the following targets:
-- `make release-gates-check-091`: (Blocking) Verifies all core architectural and functional requirements.
-- `make perf-evidence-check`: (Non-blocking) Verifies that 0.9.1 meets performance baselines across the target matrix.
+### 0.9.2 Release Gate Evidence
+For the 0.9.2 release, the team gathers evidence via the following targets:
+- `make release-gates-check-092`: (Blocking) Verifies all core architectural and functional requirements.
+- `make perf-evidence-check`: (Non-blocking) Verifies that 0.9.2 meets performance baselines across the target matrix.
 
 For deep analysis, use:
 - `python3 tools/perf/doctor_advice.py`: Analyzes measurement reports and suggests configuration tuning.
 - `tools/perf/run_module_benchmark.sh`: Runs a standalone benchmark of the module.
 
+The benchmark harness and evidence gate never execute PATH-shadowable helper
+binaries. Every external helper (`bash`, `git`, `curl`, `python3`, `ps`, `awk`,
+`cat`, `cp`, `cut`, `head`, `mkdir`, `mktemp`, `rm`, `sleep`, `tr`, `uname`,
+`wc`, `date`, and the load generator `hey`/`ab`) passes through an approved
+absolute-executable resolver that rejects candidates outside trusted system
+roots and, when running as root, candidates not owned by root or writable by
+group/other. The harness records the resolved toolchain in the benchmark
+report and the release evidence pack (`module_benchmark.toolchain` and
+`toolchain.git` respectively), so release gates consume only evidence that
+comes from the validated toolchain.
+
 When invoked directly, `threshold_engine.py` emits the Verdict Report JSON to
-stdout and diagnostics to stderr. Redirect stdout to the intended artifact;
-the Python process does not accept a caller-controlled output path.
+stdout and diagnostics to stderr. Redirect stdout to the intended artifact.
+The Python process does not accept a caller-controlled output path.
 
 ## Baseline Management
 
-Baselines are stored in `perf/baselines/<platform>.json` and must be
-generated on the target platform:
+`perf/baselines/<platform>.json` stores the baselines. You must generate
+them on the target platform:
 
 1. Run `tools/perf/run_perf_baseline.sh --update-baseline` on the target
    CI runner (or locally for local baselines), or trigger `nightly-perf`
@@ -107,17 +118,17 @@ generated on the target platform:
 
 ### Canonical Module Baseline Policy
 
-Do not fabricate or improve measured evidence. Only documented conservative
-normalization of latency/throughput is allowed; path, fallback, output, memory,
+Do not fabricate or improve measured evidence. The policy allows only documented conservative
+normalization of latency/throughput. Path, fallback, output, memory,
 and environment evidence must remain verbatim.
 
 The immutable truth fields are `streaming_path_hits`, `fullbuffer_path_hits`,
 `streaming_requests_total`, `precommit_failopen_total`,
 `decompression_streaming_total`, `decompression_fullbuffer_total`,
-`zero_copy_output_total`, `copied_output_total`, `baseline_rss_bytes`,
+`copied_output_total`, `baseline_rss_bytes`,
 `peak_rss_bytes`, `input_bytes`, scenario status and metadata, platform, load
-generator, and NGINX version. RPS may only be rounded downward or lowered;
-latency and TTFB may only be rounded upward or raised. Never increase RPS,
+generator, and NGINX version. You may only round RPS downward or lower it.
+You may only round latency and TTFB upward or raise them. Never increase RPS,
 decrease latency/TTFB, or alter truth evidence.
 
 Keep the raw workflow artifact and record the artifact/run, source Git commit,
@@ -125,38 +136,49 @@ adjustment rule, person or reason, and date in `baseline_policy`. Missing raw
 artifact provenance is an audit failure to disclose, not a reason to invent a
 workflow identifier.
 
-The checked-in 0.9.1 baseline is now a verbatim eight-scenario canonical run.
+The checked-in 0.9.2 baseline is now a verbatim eight-scenario canonical run.
 Its `baseline_policy` binds the measured data to source commit
-`cab92df229b0b68cb02d88817a208e009f3ce106`, workflow run
-`30405031983/attempts/1`, measurement timestamp `2026-07-28T22:41:12Z`, and
+`97672b57d4479febbf6d9a3d947a339236b698f3`, workflow run
+`30604344481/attempts/1`, measurement timestamp `2026-07-31T04:36:09Z`, and
 the retained raw artifact SHA-256
-`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
+`ebcd73ec55c4e85a6cdbc85371832342d97b2edcdf06c56cf5bb7a91f0ab5c92`.
 Machine validation recomputes that digest and requires the finalized report to
 match the raw report exactly apart from `baseline_policy`.
+
+**Release-status note**: this checked-in baseline is `release_gate_eligible:
+false` (measured with Rust 1.93.1, not the current 1.97.1 toolchain). It
+serves as **regression-only** evidence — compare against it to detect
+regressions, but do **not** use it for release-threshold comparisons. A
+release-eligible baseline must be re-measured from the final candidate SHA
+with the project Rust 1.97.1 toolchain and then pass
+`make release-gates-check-092` in blocking mode.
 
 The evidence objects remain layered: `baseline_policy` carries policy
 provenance, top-level `module_benchmark` carries platform/load-generator/NGINX
 environment plus `git_commit` and `timestamp`, and each scenario carries its
 metadata, `load_integrity`, `metrics`, and `response_correctness`. Optional
-`baseline_policy.scenario_sources` entries are checked for environment
+`baseline_policy.scenario_sources` entries get checked for environment
 consistency only when supplied.
 
 The canonical workflow retains response probes at
-`perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
-path. It validates every scenario's non-empty `.headers`, `.body`, and `.json`
-files, requires a passing probe with `curl_exit_code == 0`, verifies the body
-SHA-256, validates the complete response-correctness schema, parses the final
+`perf/baselines/module-baseline-092-raw-probes/`, derived from the raw report
+path. It validates that every scenario's `.headers`, `.body`, and `.json` files
+exist and that `.headers` and `.json` are non-empty. A zero-byte `.body`
+remains valid for bodyless responses (for example 304 or HEAD probes), and
+the gate checks its SHA-256 against the standard empty-input digest. The gate requires a
+passing probe with `curl_exit_code == 0`, verifies each body SHA-256,
+validates the complete response-correctness schema, parses the final
 HTTP response block from each `.headers` file, and requires its status,
 normalized headers, Markdown content type, and empty content encoding to match
 the probe JSON. It then requires exact finalized/probe
 `response_correctness` object equality and enforces strict boolean/integer
 tail and curl fields before
-running the performance evidence and release gates. The canonical upload is
-performed only after those checks pass and contains the finalized JSON, raw
-JSON, and this probe directory. Canonical artifacts are retained for 30 days;
-failure-only debug artifacts use the shorter diagnostic retention period.
+running the performance evidence and release gates. The canonical upload
+happens only after those checks pass and contains the finalized JSON, raw
+JSON, and this probe directory. Canonical artifacts stay retained for 30 days.
+Failure-only debug artifacts use the shorter diagnostic retention period.
 
-The former `historical_audit_exception` is retained only for historical
+The former `historical_audit_exception` stays only for historical
 validator coverage and is not used by the active release baseline. Future
 baselines must identify a repository-contained raw artifact and must not use
 an empty, `unknown`, or `not-recorded` `source_artifact`.
@@ -195,7 +217,7 @@ above to bootstrap.
 
 ### Threshold engine errors
 
-- **Schema version mismatch**: The baseline was generated with a different
+- **Schema version mismatch**: The generator produced the baseline with a different
   schema version. Re-generate the baseline with `--update-baseline`.
 - **JSON parse error**: Check that the measurement and baseline files are
   valid JSON. The error message includes the file path and parse details.
@@ -205,6 +227,7 @@ above to bootstrap.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Canonical workflow now accepts zero-byte .body files for bodyless probes (304/HEAD) with empty-input SHA-256 validation |
 | 0.9.1 | 2026-07-28 | Codex | Documented exact baseline provenance validation and the zero-entry complexity release gate. |
 | 0.9.1 | 2026-07-08 | Agent | Updated performance gate evidence and tool references for 0.9.1 release |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

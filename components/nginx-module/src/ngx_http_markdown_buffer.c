@@ -21,7 +21,7 @@ static ngx_int_t ngx_http_markdown_buffer_ensure_capacity(ngx_http_markdown_buff
  *
  * Initializes the buffer structure and registers request-pool cleanup.
  * The backing store is allocated lazily on first append (and grows on demand)
- * while enforcing the configured markdown_max_size limit.
+ * while enforcing the configured buffer-size limit.
  *
  * Parameters:
  *   buf      - Buffer structure to initialize
@@ -265,4 +265,34 @@ ngx_http_markdown_buffer_cleanup(void *data)
 
     buf->size = 0;
     buf->capacity = 0;
+}
+
+/*
+ * Actively release the heap-allocated backing store (subrequest).
+ *
+ * Conversion terminal paths call this once the buffered response has
+ * been converted and the output copied into request-pool memory, so
+ * the ngx_alloc backing store is freed before the request pool is
+ * destroyed.  This matters for subrequests: they share the parent
+ * request's pool, and pool-cleanup alone would retain the (potentially
+ * large) HTML buffer until the whole main request completes
+ * (per-parent-request memory retention).
+ *
+ * The release is idempotent: after the first call buf->data is NULL
+ * and the pool cleanup handler (registered by init) becomes a no-op.
+ * The buffer struct itself remains valid and may be re-appended to
+ * (for example by a later fail-open replay) — append reallocates the
+ * backing store on demand.
+ *
+ * Parameters:
+ *   buf - buffer whose backing store to release (may be NULL)
+ */
+void
+ngx_http_markdown_buffer_release(ngx_http_markdown_buffer_t *buf)
+{
+    if (buf == NULL) {
+        return;
+    }
+
+    ngx_http_markdown_buffer_cleanup(buf);
 }

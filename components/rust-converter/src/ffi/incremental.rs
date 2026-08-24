@@ -99,6 +99,8 @@ pub struct IncrementalConverterHandle {
 ///
 /// - `options` must point to a valid, properly aligned `MarkdownOptions` that
 ///   remains readable for the duration of this call.
+/// - `out_handle` must be a valid, writable pointer to
+///   `*mut IncrementalConverterHandle`.
 /// - The returned pointer is heap-allocated; the caller owns it and must not
 ///   dereference it except via the `markdown_incremental_*` family of functions.
 ///
@@ -124,8 +126,6 @@ pub struct IncrementalConverterHandle {
 ///     prune_protection_selectors: std::ptr::null(),
 ///     prune_protection_selector_len: 0,
 ///     memory_budget: 0,
-///     llm_provider: 0,
-///     chars_per_token_fixed: 0,
 ///     parse_timeout_ms: 0,
 ///     parser_memory_budget: 0,
 ///     flush_threshold: 0,
@@ -137,17 +137,6 @@ pub struct IncrementalConverterHandle {
 /// // Either finalize to produce output or free when done without producing output.
 /// unsafe { markdown_incremental_free(handle) };
 /// ```
-///
-/// This constructor gives C callers actionable
-/// failure classification. On success, `*out_handle` receives a non-NULL handle.
-/// On error, `*out_handle` is set to NULL and the function returns an error code.
-///
-/// # Safety
-///
-/// - `out_handle` must be a valid, writable pointer to
-///   `*mut IncrementalConverterHandle`.
-/// - `options` must point to a valid, properly aligned `MarkdownOptions` that
-///   remains readable for the duration of this call.
 ///
 /// # Returns
 ///
@@ -182,7 +171,11 @@ pub unsafe extern "C" fn markdown_incremental_new_with_code(
             IncrementalConverter::with_max_buffer_size(decoded.conversion, max_buffer_size)
         };
         converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
-        converter.set_timeout(decoded.parse_timeout);
+        converter.set_timeout(decoded.timeout);
+        // The incremental path now expresses the parse-phase sub-limit:
+        // apply parse_timeout_ms around the buffered-parse step while
+        // conversion_timeout remains the overall pipeline deadline.
+        converter.set_parse_timeout(decoded.parse_timeout);
         Ok(Box::into_raw(Box::new(IncrementalConverterHandle {
             inner: converter,
             parser_memory_budget: decoded.parser_memory_budget,
@@ -464,10 +457,10 @@ mod tests {
     }
 
     #[test]
-    fn constructor_uses_parse_timeout_for_finalize() {
+    fn constructor_uses_conversion_timeout_for_finalize() {
         let mut options = options();
-        options.timeout_ms = 60_000;
-        options.parse_timeout_ms = 1;
+        options.timeout_ms = 1;
+        options.parse_timeout_ms = 60_000;
         let handle = unsafe { new_handle(&options) };
         assert!(!handle.is_null());
 

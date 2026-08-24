@@ -3,9 +3,8 @@
 #
 # Runs lizard (CCN/length/params) on C, Rust, and Python source,
 # complexipy (cognitive complexity) on Python tooling, and shellcheck
-# on shell scripts.  Compares violations against a checked-in baseline
-# to prevent new complexity growth without requiring immediate cleanup
-# of all historical complex functions.
+# on shell scripts.  Every reported violation fails the check; there is
+# no checked-in exception list or historical-complexity waiver.
 #
 # Output lands in target/complexity/ (not committed).
 #
@@ -31,14 +30,13 @@ mkdir -p "$OUTDIR"
 # ── Thresholds ──────────────────────────────────────────────────────
 # C: generous thresholds — NGINX glue layers have inherent complexity
 #    from lifecycle, error branches, macros, and state machines.
-#    Goal: prevent further growth, not zero out all complex functions.
 C_CCN_THRESHOLD=25
 C_LENGTH_THRESHOLD=180
 C_PARAMS_THRESHOLD=8
 
 # Rust: moderate thresholds — pure-logic functions should be simpler,
 #        but streaming state machines and HTML traversal are inherently
-#        complex.  Goal: catch new hot spots.
+#        complex.
 RUST_CCN_THRESHOLD=25
 RUST_LENGTH_THRESHOLD=200
 RUST_PARAMS_THRESHOLD=8
@@ -56,11 +54,25 @@ C_SRC="components/nginx-module/src"
 RUST_SRC="components/rust-converter/src"
 PY_SRC="tools"
 
+# Keep the final summary safe when a source tree is absent.
+c_count=0
+rust_count=0
+py_lizard_count=0
+
 # ── Shell scripts ───────────────────────────────────────────────────
 # Discover tracked shell scripts (same scope as security-shellcheck)
 SHELL_FILES="$(mktemp)"
-trap 'rm -f "$SHELL_FILES"' EXIT
+SHELL_EXISTING_FILES="$(mktemp)"
+trap 'rm -f "$SHELL_FILES" "$SHELL_EXISTING_FILES"' EXIT
 git ls-files -z -- ":(glob)*.sh" ":(glob)tools/**/*.sh" ":(glob)packaging/**/*.sh" ":(glob).clusterfuzzlite/*.sh" ":(glob)examples/**/*.sh" > "$SHELL_FILES" 2>/dev/null || true
+
+# A deleted-but-still-indexed path can appear in a dirty worktree.  ShellCheck
+# must inspect the current filesystem, not a stale index entry.
+while IFS= read -r -d '' shell_file; do
+    if [[ -f "$shell_file" ]]; then
+        printf '%s\0' "$shell_file" >> "$SHELL_EXISTING_FILES"
+    fi
+done < "$SHELL_FILES"
 
 # ── Tool checks ─────────────────────────────────────────────────────
 MISSING_TOOLS=()
@@ -103,16 +115,26 @@ C_WARNINGS="$OUTDIR/c-lizard-warnings.txt"
 C_REPORT="$OUTDIR/c-lizard-report.txt"
 echo "--- C (lizard) ---"
 if [[ -d "$C_SRC" ]]; then
+    set +e
     python3 -m lizard "$C_SRC" -l cpp \
         --CCN "$C_CCN_THRESHOLD" \
         --length "$C_LENGTH_THRESHOLD" \
         --arguments "$C_PARAMS_THRESHOLD" \
-        > "$C_REPORT" 2>/dev/null || true
+        --ignore_warnings -1 \
+        > "$C_REPORT" 2>&1
+    c_lizard_rc=$?
     python3 -m lizard "$C_SRC" -l cpp \
         --CCN "$C_CCN_THRESHOLD" \
         --length "$C_LENGTH_THRESHOLD" \
         --arguments "$C_PARAMS_THRESHOLD" \
-        -w 2>&1 | grep "warning:" > "$C_WARNINGS" || true
+        --ignore_warnings -1 \
+        -w > "$C_WARNINGS" 2>/dev/null
+    c_lizard_warn_rc=$?
+    set -e
+    if [[ $c_lizard_rc -ne 0 || $c_lizard_warn_rc -ne 0 ]]; then
+        echo "ERROR: lizard failed for C sources" >&2
+        exit 1
+    fi
     c_count=$(wc -l < "$C_WARNINGS" | tr -d ' ')
     echo "  C violations: $c_count (thresholds: CCN=$C_CCN_THRESHOLD length=$C_LENGTH_THRESHOLD params=$C_PARAMS_THRESHOLD)"
     echo "  Report: $C_REPORT"
@@ -127,16 +149,26 @@ RUST_WARNINGS="$OUTDIR/rust-lizard-warnings.txt"
 RUST_REPORT="$OUTDIR/rust-lizard-report.txt"
 echo "--- Rust (lizard) ---"
 if [[ -d "$RUST_SRC" ]]; then
+    set +e
     python3 -m lizard "$RUST_SRC" -l rust \
         --CCN "$RUST_CCN_THRESHOLD" \
         --length "$RUST_LENGTH_THRESHOLD" \
         --arguments "$RUST_PARAMS_THRESHOLD" \
-        > "$RUST_REPORT" 2>/dev/null || true
+        --ignore_warnings -1 \
+        > "$RUST_REPORT" 2>&1
+    rust_lizard_rc=$?
     python3 -m lizard "$RUST_SRC" -l rust \
         --CCN "$RUST_CCN_THRESHOLD" \
         --length "$RUST_LENGTH_THRESHOLD" \
         --arguments "$RUST_PARAMS_THRESHOLD" \
-        -w 2>&1 | grep "warning:" > "$RUST_WARNINGS" || true
+        --ignore_warnings -1 \
+        -w > "$RUST_WARNINGS" 2>/dev/null
+    rust_lizard_warn_rc=$?
+    set -e
+    if [[ $rust_lizard_rc -ne 0 || $rust_lizard_warn_rc -ne 0 ]]; then
+        echo "ERROR: lizard failed for Rust sources" >&2
+        exit 1
+    fi
     rust_count=$(wc -l < "$RUST_WARNINGS" | tr -d ' ')
     echo "  Rust violations: $rust_count (thresholds: CCN=$RUST_CCN_THRESHOLD length=$RUST_LENGTH_THRESHOLD params=$RUST_PARAMS_THRESHOLD)"
     echo "  Report: $RUST_REPORT"
@@ -151,16 +183,26 @@ PY_LIZARD_WARNINGS="$OUTDIR/py-lizard-warnings.txt"
 PY_LIZARD_REPORT="$OUTDIR/py-lizard-report.txt"
 echo "--- Python (lizard) ---"
 if [[ -d "$PY_SRC" ]]; then
+    set +e
     python3 -m lizard "$PY_SRC" -l python \
         --CCN "$PY_CCN_THRESHOLD" \
         --length "$PY_LENGTH_THRESHOLD" \
         --arguments "$PY_PARAMS_THRESHOLD" \
-        > "$PY_LIZARD_REPORT" 2>/dev/null || true
+        --ignore_warnings -1 \
+        > "$PY_LIZARD_REPORT" 2>&1
+    py_lizard_rc=$?
     python3 -m lizard "$PY_SRC" -l python \
         --CCN "$PY_CCN_THRESHOLD" \
         --length "$PY_LENGTH_THRESHOLD" \
         --arguments "$PY_PARAMS_THRESHOLD" \
-        -w 2>&1 | grep "warning:" > "$PY_LIZARD_WARNINGS" || true
+        --ignore_warnings -1 \
+        -w > "$PY_LIZARD_WARNINGS" 2>/dev/null
+    py_lizard_warn_rc=$?
+    set -e
+    if [[ $py_lizard_rc -ne 0 || $py_lizard_warn_rc -ne 0 ]]; then
+        echo "ERROR: lizard failed for Python sources" >&2
+        exit 1
+    fi
     py_lizard_count=$(wc -l < "$PY_LIZARD_WARNINGS" | tr -d ' ')
     echo "  Python lizard violations: $py_lizard_count (thresholds: CCN=$PY_CCN_THRESHOLD length=$PY_LENGTH_THRESHOLD params=$PY_PARAMS_THRESHOLD)"
     echo "  Report: $PY_LIZARD_REPORT"
@@ -197,9 +239,9 @@ echo ""
 # ── Shell: shellcheck ───────────────────────────────────────────────
 SHELLCHECK_OUT="$OUTDIR/shellcheck.txt"
 echo "--- Shell (shellcheck) ---"
-if [[ -s "$SHELL_FILES" ]]; then
+if [[ -s "$SHELL_EXISTING_FILES" ]]; then
     set +e
-    xargs -0 shellcheck --severity=error -x -P tools/e2e -P tools/lib < "$SHELL_FILES" > "$SHELLCHECK_OUT" 2>&1
+    xargs -0 shellcheck --severity=error -x -P tools/e2e -P tools/lib < "$SHELL_EXISTING_FILES" > "$SHELLCHECK_OUT" 2>&1
     shellcheck_rc=$?
     set -e
     if [[ $shellcheck_rc -eq 0 ]]; then
@@ -215,47 +257,29 @@ else
 fi
 echo ""
 
-# ── Baseline comparison ─────────────────────────────────────────────
-BASELINE="$SCRIPT_DIR/baseline.json"
-BASELINE_REPORT="$OUTDIR/baseline-report.txt"
-
-echo "--- Baseline Comparison ---"
-if [[ -f "$BASELINE" ]]; then
-    python3 "$SCRIPT_DIR/_compare_baseline.py" \
-        --baseline "$BASELINE" \
-        --lizard-c "$C_WARNINGS" \
-        --lizard-rust "$RUST_WARNINGS" \
-        --lizard-py "$PY_LIZARD_WARNINGS" \
-        --complexipy "$PY_COMPLEXIPY_OUT" \
-        --output "$BASELINE_REPORT"
-    baseline_rc=$?
-    echo "  Report: $BASELINE_REPORT"
-else
-    echo "  WARNING: baseline.json not found at $BASELINE — running without baseline gating" >&2
-    echo "  All violations are reported but not gated. Create a baseline with:" >&2
-    echo "    python3 tools/complexity/_generate_baseline.py" >&2
-    baseline_rc=0
-fi
-echo ""
-
 # ── Final summary ───────────────────────────────────────────────────
 echo "=== Complexity Check Summary ==="
 echo "Reports: $OUTDIR/"
 ls -la "$OUTDIR/" 2>/dev/null || true
 
-if [[ $baseline_rc -ne 0 ]]; then
+if [[ $c_count -ne 0 || $rust_count -ne 0 || $py_lizard_count -ne 0 ]]; then
     echo ""
-    echo "FAIL: complexity check found new violations not in baseline"
-    echo "  Review: $BASELINE_REPORT"
-    echo "  If the new violations are acceptable, update the baseline:"
-    echo "    python3 tools/complexity/_generate_baseline.py"
+    echo "FAIL: complexity check found lizard violations" >&2
+    echo "  Review: $C_WARNINGS $RUST_WARNINGS $PY_LIZARD_WARNINGS" >&2
+    exit 1
+fi
+
+if [[ ${complexipy_rc:-0} -ne 0 ]]; then
+    echo ""
+    echo "FAIL: complexipy failed or found cognitive-complexity violations" >&2
+    echo "  Review: $PY_COMPLEXIPY_OUT" >&2
     exit 1
 fi
 
 if [[ ${shellcheck_rc:-0} -ne 0 ]]; then
     echo ""
-    echo "FAIL: shellcheck found errors"
-    echo "  Review: $SHELLCHECK_OUT"
+    echo "FAIL: shellcheck found errors" >&2
+    echo "  Review: $SHELLCHECK_OUT" >&2
     exit 1
 fi
 

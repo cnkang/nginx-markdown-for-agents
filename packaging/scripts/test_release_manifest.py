@@ -256,6 +256,47 @@ class TestGenerateManifest(unittest.TestCase):
         self.assertFalse(manifest["integrity"]["signature_available"])
         self.assertIsNone(manifest["integrity"]["signed_file"])
 
+    def test_dynamic_module_tarball_generate(self):
+        """generate-release-manifest must include dynamic-module tarballs."""
+        expected_sha = self._write_package(
+            "ngx_http_markdown_filter_module-1.28.3-musl-x86_64.tar.gz",
+            b"fake-tarball",
+        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--tag", "v0.8.3",
+            "--commit", "abc1234def5678",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        manifest = json.loads(result.stdout)
+        self.assertEqual(len(manifest["packages"]), 1)
+        pkg = manifest["packages"][0]
+        self.assertEqual(pkg["format"], "dynamic-module")
+        self.assertEqual(pkg["nginx_version"], "1.28.3")
+        self.assertEqual(pkg["libc"], "musl")
+        self.assertEqual(pkg["arch"], "amd64")
+        self.assertEqual(pkg["sha256"], expected_sha)
+        # dynamic-module entries do not carry a project version key
+        self.assertNotIn("version", pkg)
+
+    def test_tarball_only_no_version_does_not_keyerror(self):
+        """generate without --version and only tarballs must not raise
+        KeyError on the missing entry version (dynamic-module entries
+        carry nginx_version instead of a project version)."""
+        self._write_package(
+            "ngx_http_markdown_filter_module-1.28.3-musl-x86_64.tar.gz",
+            b"fake-tarball",
+        )
+        result = self._run_generate([
+            "--no-source",
+            "--ref-type", "branch",
+        ])
+        self.assertEqual(result.returncode, 1, "expected failure without any version")
+        # The failure must be the controlled 'no version' error, not a KeyError.
+        self.assertIn("version", result.stderr.lower())
+
 
 class TestValidateManifest(unittest.TestCase):
     def setUp(self):
@@ -331,7 +372,12 @@ class TestValidateManifest(unittest.TestCase):
         if self.sha256sums_path.exists():
             args.extend(["--sha256sums", str(self.sha256sums_path)])
         for k, v in kwargs.items():
-            args.extend([f"--{k.replace('_', '-')}", str(v)])
+            flag = f"--{k.replace('_', '-')}"
+            if isinstance(v, bool):
+                if v:
+                    args.append(flag)
+            else:
+                args.extend([flag, str(v)])
         result = subprocess.run(
             args, capture_output=True, text=True, timeout=30, check=False
         )
@@ -360,6 +406,53 @@ class TestValidateManifest(unittest.TestCase):
         )
         self.sha256sums_path.write_text("\n".join(entries) + "\n")
         errors = self._validate()
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_bootstrap_assets_are_optional_by_default(self):
+        """A tag manifest may omit optional bootstrap files and sums entries."""
+        self._make_valid_manifest()
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        self._make_sha256sums()
+        errors = self._validate()
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_bootstrap_assets_can_be_required_explicitly(self):
+        """The explicit strict mode requires both bootstrap assets."""
+        self._make_valid_manifest()
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        self._make_sha256sums()
+        errors = self._validate(require_bootstrap_assets=True)
+        self.assertTrue(
+            any("Bootstrap asset" in error for error in errors),
+            f"Expected required bootstrap asset errors, got: {errors}",
+        )
+
+    def test_prerelease_build_tag_bootstrap_assets_validate(self):
+        """Bootstrap filenames support full semantic release tags."""
+        manifest = self._make_valid_manifest()
+        tag = "v0.8.3-rc.1+build.7"
+        manifest["git"]["tag"] = tag
+        self.manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+        installer = f"nginx-markdown-for-agents-installer-{tag}.sh"
+        (self.artifact_dir / installer).write_bytes(b"installer")
+        (self.artifact_dir / "nginx-markdown-for-agents-release.asc").write_bytes(
+            b"signature"
+        )
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        entries = [
+            f"{sha256_bytes(path.read_bytes())}  {path.name}"
+            for path in sorted(self.artifact_dir.iterdir())
+        ]
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+
+        errors = self._validate(require_bootstrap_assets=True)
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
     def test_missing_top_level_key(self):
@@ -689,6 +782,69 @@ class TestValidateManifest(unittest.TestCase):
         self.assertTrue(
             any("filename escapes artifact directory" in e for e in errors),
             f"Expected path traversal error, got: {errors}",
+        )
+
+    def test_dynamic_module_tarball_validate_passes(self):
+        """Validator must accept dynamic-module entries without version."""
+        fname = "ngx_http_markdown_filter_module-1.28.3-glibc-x86_64.tar.gz"
+        self.artifact_dir.joinpath(fname).write_bytes(b"fake-glibc-tarball")
+        self._make_valid_manifest([
+            {
+                "filename": fname,
+                "format": "dynamic-module",
+                "nginx_version": "1.28.3",
+                "libc": "glibc",
+                "arch": "amd64",
+                "sha256": sha256_bytes(b"fake-glibc-tarball"),
+            }
+        ])
+        # SHA256SUMS must include all artifacts + release-manifest.json
+        entries = []
+        for f in sorted(self.artifact_dir.iterdir()):
+            entries.append(f"{sha256_bytes(f.read_bytes())}  {f.name}")
+        # Copy the manifest into the artifact dir (validator cross-checks
+        # CLI manifest against artifact_dir/release-manifest.json)
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        entries.append(
+            f"{sha256_bytes((self.artifact_dir / 'release-manifest.json').read_bytes())}  release-manifest.json"
+        )
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+        errors = self._validate()
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_dynamic_module_tarball_missing_identity_rejected(self):
+        """Validator must reject dynamic-module entries missing the
+        nginx_version/libc/arch identity keys (run20 P3-5 regression:
+        the required_keys negative branch was untested)."""
+        fname = "ngx_http_markdown_filter_module-1.28.3-glibc-x86_64.tar.gz"
+        self.artifact_dir.joinpath(fname).write_bytes(b"fake-glibc-tarball")
+        self._make_valid_manifest([
+            {
+                "filename": fname,
+                "format": "dynamic-module",
+                # nginx_version deliberately omitted
+                "libc": "glibc",
+                "arch": "amd64",
+                "sha256": sha256_bytes(b"fake-glibc-tarball"),
+            }
+        ])
+        # SHA256SUMS must include all artifacts + release-manifest.json
+        entries = []
+        for f in sorted(self.artifact_dir.iterdir()):
+            entries.append(f"{sha256_bytes(f.read_bytes())}  {f.name}")
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        entries.append(
+            f"{sha256_bytes((self.artifact_dir / 'release-manifest.json').read_bytes())}  release-manifest.json"
+        )
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+        errors = self._validate()
+        self.assertTrue(
+            any("packages[0]: missing nginx_version" in e for e in errors),
+            f"Expected missing nginx_version error, got: {errors}",
         )
 
 

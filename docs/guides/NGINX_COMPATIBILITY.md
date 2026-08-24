@@ -13,9 +13,11 @@ For full troubleshooting and package-level compatibility details, see the
 
 The minimum supported NGINX version is **1.24.0**. The compatibility matrix
 lists the selected nginx.org official stable and mainline releases targeted by
-the release workflows. A matrix entry does not guarantee that a package asset
-is published for a particular tag; verify the GitHub Release assets before
-downloading or build from source.
+the release workflows. "Full (prebuilt binary)" in the matrix indicates CI/
+build support and that the release workflows produce a binary for that tag.
+it does not guarantee a published GitHub Release asset for every listed tag.
+Before downloading a prebuilt asset, verify the GitHub Release assets for the
+exact tag. Building from source needs no asset verification.
 
 > **Canonical source:** [`tools/release-matrix.json`](../../tools/release-matrix.json)
 > is the machine-readable source of truth. The table below is a human-readable
@@ -61,7 +63,7 @@ configure options than the module expects.
 
 ### When It Is Not Required
 
-Prebuilt packages from this project are compiled against the exact nginx.org
+The project compiles prebuilt packages against the exact nginx.org
 official source for each target version. If you install a prebuilt package on
 a matching nginx.org official build, `--with-compat` is not required because
 the signatures already match.
@@ -72,8 +74,8 @@ the signatures already match.
   NGINX 1.26.3 will not load on NGINX 1.24.0, regardless of `--with-compat`.
 - **Does not eliminate all signature differences.** Some configure options
   still affect the signature even with `--with-compat` enabled.
-- **Does not make modules universally portable.** The module must still be
-  compiled against the exact NGINX version it will run on.
+- **Does not make modules universally portable.** The module must still
+  compile against the exact NGINX version it will run on.
 
 ---
 
@@ -110,13 +112,13 @@ NGINX source tree and configuration.
 ### libc Constraints
 
 - When published, prebuilt packages may target both glibc and musl variants.
-- A glibc-built module will not load on a musl-based system (e.g., Alpine
+- A glibc-built module will not load on a musl-based system (for example Alpine
   Linux) and vice versa.
 - Use `ldd --version` to determine your libc type.
 
 ### macOS Limitations
 
-- No prebuilt macOS binaries are provided.
+- The project provides no prebuilt macOS binaries.
 - macOS users must build from source or use the Homebrew tap (convenience
   tier).
 - Apple Silicon (M1/M2/M3) requires the `aarch64-apple-darwin` Rust target.
@@ -124,10 +126,15 @@ NGINX source tree and configuration.
 ### Fail-Open Behavior
 
 The module defaults to `markdown_error_policy pass` (fail-open). If the
-conversion fails at runtime (timeout, memory budget exceeded, converter
-error), the original HTML response is returned unchanged. This is a safety
+conversion fails **before the module commits the response headers** —
+pre-commit or full-buffer conversion failure (timeout, memory budget
+exceeded, converter error) — the module returns the original HTML
+response unchanged, because the original content is still available for
+pass-through. After the module has committed the converted headers and
+begun streaming the body, the module can no longer return the original
+HTML. Post-commit errors follow the safe-finish-or-abort contract instead. This is a safety
 design choice, not a compatibility limitation, but operators should be aware
-that conversion failures are silent from the client perspective.
+that pre-commit conversion failures are silent from the client perspective.
 
 ---
 
@@ -192,6 +199,7 @@ prebuilt package for an nginx.org official build, or build from source with
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Release-asset verification applies before downloading a prebuilt asset only |
 | 0.9.1 | 2026-07-28 | Codex | Synced the human-readable NGINX compatibility matrix with the canonical 1.30.4 and 1.31.3 release entries; clarified that matrix coverage does not guarantee published package assets. |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.7.0 | 2026-05-20 | Kiro | Initial NGINX compatibility guide for docs/guides/ |

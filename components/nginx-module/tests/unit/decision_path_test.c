@@ -44,6 +44,7 @@ typedef struct {
     const char   *conditional_result;
     const char   *conversion_status;
     const char   *reason_code;
+    const char   *stage;
     ngx_msec_t    duration_ms;
 } ngx_http_markdown_decision_path_t;
 
@@ -309,6 +310,7 @@ test_decision_path_struct_init(void)
     dp.conditional_result = NGX_HTTP_MARKDOWN_COND_PROCEED;
     dp.conversion_status = NGX_HTTP_MARKDOWN_CONV_SUCCESS;
     dp.reason_code = "converted";
+    dp.stage = "conversion";
     dp.duration_ms = 42;
 
     TEST_ASSERT(
@@ -325,6 +327,8 @@ test_decision_path_struct_init(void)
         "conversion_status set correctly");
     TEST_ASSERT(strcmp(dp.reason_code, "converted") == 0,
         "reason_code set correctly");
+    TEST_ASSERT(strcmp(dp.stage, "conversion") == 0,
+        "stage set correctly");
     TEST_ASSERT(dp.duration_ms == 42,
         "duration_ms set correctly");
 
@@ -333,6 +337,7 @@ test_decision_path_struct_init(void)
     dp.conditional_result = NGX_HTTP_MARKDOWN_COND_SKIPPED;
     dp.conversion_status = NGX_HTTP_MARKDOWN_CONV_SKIPPED;
     dp.reason_code = "SKIP_ACCEPT";
+    dp.stage = "eligibility";
     dp.duration_ms = 0;
 
     TEST_ASSERT(
@@ -341,12 +346,15 @@ test_decision_path_struct_init(void)
         "skip path: accept_result correct");
     TEST_ASSERT(dp.duration_ms == 0,
         "skip path: duration_ms is 0");
+    TEST_ASSERT(strcmp(dp.stage, "eligibility") == 0,
+        "skip path: stage is eligibility");
 
     /* Simulate a 304 Not Modified path */
     dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
     dp.conditional_result = NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED;
     dp.conversion_status = NGX_HTTP_MARKDOWN_CONV_SKIPPED;
     dp.reason_code = "converted";
+    dp.stage = "eligibility";
     dp.duration_ms = 5;
 
     TEST_ASSERT(

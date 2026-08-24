@@ -37,6 +37,13 @@ CONFIG_DIRECTIVES_H = (
     / "src"
     / "ngx_http_markdown_config_directives_impl.h"
 )
+DIRECTIVE_NAMES_H = (
+    PROJECT_ROOT
+    / "components"
+    / "nginx-module"
+    / "src"
+    / "ngx_http_markdown_directive_names.h"
+)
 CONFIG_CORE_H = (
     PROJECT_ROOT
     / "components"
@@ -54,101 +61,80 @@ FILTER_MODULE_H = (
 CONFIGURATION_MD = PROJECT_ROOT / "docs" / "guides" / "CONFIGURATION.md"
 
 
-# ── Active directives (v0.7.0 additions) ──────────────────────────────────
+# ── Current public command registry (0.9.2 freeze) ────────────────────────
 
-V070_DIRECTIVES = [
-    {
-        "name": "markdown_decompress_max_size",
-        "type": "size",
-        "doc_heading": "markdown_decompress_max_size",
-        "merge_pattern": r"conf->decompress\.max_size",
-        "description": "decompression budget (max decompressed output size)",
-    },
-    {
-        "name": "markdown_parse_timeout",
-        "type": "msec",
-        "doc_heading": "markdown_parse_timeout",
-        "merge_pattern": r"conf->decompress\.parse_timeout",
-        "description": "parse phase timeout",
-    },
-    {
-        "name": "markdown_parser_budget",
-        "type": "size",
-        "doc_heading": "markdown_parser_budget",
-        "merge_pattern": r"conf->decompress\.parser_budget",
-        "description": "parser memory budget",
-    },
-    {
-        "name": "markdown_diagnostics",
-        "type": "flag",
-        "doc_heading": "markdown_diagnostics",
-        "merge_pattern": r"diagnostics",
-        "description": "runtime diagnostics endpoint toggle",
-    },
-    {
-        "name": "markdown_dynconf_dry_run",
-        "type": "flag",
-        "doc_heading": "markdown_dynconf_dry_run",
-        "merge_pattern": r"conf->advanced\.dynconf_dry_run",
-        "description": "dynconf dry-run validation mode",
-    },
+# The 0.9.2 freeze deliberately removes the old one-directive-per-limit
+# surface.  Keep this list aligned with the checked-in command table;
+# nested resource limits are validated separately below.
+CURRENT_DIRECTIVES = [
+    "markdown_filter",
+    "markdown_limits",
+    "markdown_error_policy",
+    "markdown_flavor",
+    "markdown_token_estimate",
+    "markdown_front_matter",
+    "markdown_accept",
+    "markdown_auth_policy",
+    "markdown_auth_cookies",
+    "markdown_cache_validation",
+    "markdown_streaming",
+    "markdown_log_verbosity",
+    "markdown_content_types",
+    "markdown_trusted_proxies",
+    "markdown_metrics_shm_size",
+    "markdown_metrics",
+    "markdown_prune_noise",
+    "markdown_prune_selectors",
+    "markdown_prune_protection_selectors",
+    "markdown_auto_decompress",
+    "markdown_dynamic_config",
+    "markdown_dynamic_config_path",
+    "markdown_dynconf_dry_run",
+    "markdown_diagnostics",
+    "markdown_stream_excluded_types",
 ]
 
-# ── Active directives (v0.8.0 additions) ──────────────────────────────────
-
-V080_DIRECTIVES = [
-    {
-        "name": "markdown_stream_threshold",
-        "type": "size",
-        "doc_heading": "markdown_stream_threshold",
-        "merge_pattern": r"conf->stream\.threshold",
-        "default_pattern": (
-            r"NGX_MD_MERGE_STREAM\(\s*threshold\s*,\s*size_t\s*,\s*-1\s*,"
-            r"\s*NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT\s*,\s*0\s*\)"
-        ),
-        "description": "auto-mode streaming threshold (replaces markdown_streaming_auto_threshold)",
-    },
-    {
-        "name": "markdown_stream_precommit_buffer",
-        "type": "size",
-        "doc_heading": "markdown_stream_precommit_buffer",
-        "merge_pattern": r"conf->stream\.precommit_buffer",
-        "default_pattern": (
-            r"NGX_MD_MERGE_STREAM\(\s*precommit_buffer\s*,\s*size_t\s*,"
-            r"\s*-1\s*,\s*262144\s*,\s*0\s*\)"
-        ),
-        "description": "pre-commit replay buffer size",
-    },
-    {
-        "name": "markdown_stream_flush_min",
-        "type": "size",
-        "doc_heading": "markdown_stream_flush_min",
-        "merge_pattern": r"conf->stream\.flush_min",
-        "default_pattern": (
-            r"NGX_MD_MERGE_STREAM\(\s*flush_min\s*,\s*size_t\s*,"
-            r"\s*-1\s*,\s*16384\s*,\s*0\s*\)"
-        ),
-        "description": "minimum Markdown output batch size before flush",
-    },
-    {
-        "name": "markdown_stream_excluded_types",
-        "type": "string_list",
-        "doc_heading": "markdown_stream_excluded_types",
-        "merge_pattern": r"conf->stream\.excluded_types",
-        "default_pattern": (
-            r"conf->stream\.excluded_types\s*=.*\?"
-            r"\s*prev->stream\.excluded_types\s*:\s*NULL\s*;"
-        ),
-        "description": "additional MIME types excluded from streaming",
-    },
+CURRENT_LIMIT_KEYS = [
+    "conversion_timeout",
+    "parser_timeout",
+    "conversion_memory",
+    "parser_memory",
+    "streaming_buffer",
+    "decompressed_size",
+    "decompression_ratio",
+    "max_inflight",
 ]
 
-# ── Removed directives (v0.8.0 cleanup) ────────────────────────────────────
+# ── Removed directives (0.9.2 public-surface freeze) ───────────────────────
 
 REMOVED_DIRECTIVES = [
     {
         "name": "markdown_streaming_auto_threshold",
         "doc_heading": "markdown_streaming_auto_threshold",
+    },
+    {
+        "name": "markdown_decompress_max_size",
+        "doc_heading": "markdown_decompress_max_size",
+    },
+    {
+        "name": "markdown_parse_timeout",
+        "doc_heading": "markdown_parse_timeout",
+    },
+    {
+        "name": "markdown_parser_budget",
+        "doc_heading": "markdown_parser_budget",
+    },
+    {
+        "name": "markdown_stream_threshold",
+        "doc_heading": "markdown_stream_threshold",
+    },
+    {
+        "name": "markdown_stream_precommit_buffer",
+        "doc_heading": "markdown_stream_precommit_buffer",
+    },
+    {
+        "name": "markdown_stream_flush_min",
+        "doc_heading": "markdown_stream_flush_min",
     },
 ]
 
@@ -190,7 +176,9 @@ class ValidationResult:
 def read_safe(path: Path) -> str:
     """Read a file only if it resolves within PROJECT_ROOT; return \'\' otherwise."""
     resolved = path.resolve()
-    if not str(resolved).startswith(str(PROJECT_ROOT)):
+    try:
+        resolved.relative_to(PROJECT_ROOT.resolve())
+    except ValueError:
         return ""
     if resolved.is_file():
         return resolved.read_text(encoding="utf-8")
@@ -198,24 +186,50 @@ def read_safe(path: Path) -> str:
 
 
 def check_directive_in_source(
-    directive_name: str, source: str, result: ValidationResult
+    directive_name: str,
+    source: str,
+    directive_macros: dict[str, str],
+    result: ValidationResult,
 ) -> None:
-    """Verify a new directive is registered in the ngx_string command array."""
+    """Verify a directive is registered in the ngx_string command array."""
     check_id = f"source:{directive_name}"
-    pattern = rf'ngx_string\("{re.escape(directive_name)}"\)'
-    if re.search(pattern, source):
+    literal_pattern = rf'ngx_string\("{re.escape(directive_name)}"\)'
+    macro_names = [
+        name for name, value in directive_macros.items() if value == directive_name
+    ]
+    macro_pattern = (
+        rf"ngx_string\(\s*(?:{'|'.join(map(re.escape, macro_names))})\s*\)"
+        if macro_names
+        else None
+    )
+    if re.search(literal_pattern, source) or (
+        macro_pattern is not None and re.search(macro_pattern, source)
+    ):
         result.pass_(check_id, "directive found in command array")
     else:
         result.fail(check_id, "directive NOT found in config_directives_impl.h")
 
 
 def check_directive_not_in_source(
-    directive_name: str, source: str, result: ValidationResult
+    directive_name: str,
+    source: str,
+    directive_macros: dict[str, str],
+    result: ValidationResult,
 ) -> None:
-    """Verify a removed directive is absent from the ngx_string command array."""
+    """Verify a removed directive is absent from the command array and names."""
     check_id = f"removed-source:{directive_name}"
-    pattern = rf'ngx_string\("{re.escape(directive_name)}"\)'
-    if re.search(pattern, source):
+    literal_pattern = rf'ngx_string\("{re.escape(directive_name)}"\)'
+    macro_names = [
+        name for name, value in directive_macros.items() if value == directive_name
+    ]
+    macro_pattern = (
+        rf"ngx_string\(\s*(?:{'|'.join(map(re.escape, macro_names))})\s*\)"
+        if macro_names
+        else None
+    )
+    if re.search(literal_pattern, source) or (
+        macro_pattern is not None and re.search(macro_pattern, source)
+    ):
         result.fail(
             check_id,
             "removed directive still present in config_directives_impl.h",
@@ -232,7 +246,11 @@ def check_directive_in_docs(
     if not docs:
         result.fail(check_id, "CONFIGURATION.md not found")
         return
-    if doc_heading in docs:
+    heading_pattern = (
+        rf"(?<![A-Za-z0-9_]){re.escape(doc_heading)}"
+        rf"(?![A-Za-z0-9_])"
+    )
+    if re.search(heading_pattern, docs):
         result.pass_(check_id, "documented in CONFIGURATION.md")
     else:
         result.fail(check_id, "NOT documented in CONFIGURATION.md")
@@ -268,6 +286,25 @@ def check_directive_merge(
         result.pass_(check_id, "merge function found")
     else:
         result.fail(check_id, "merge function NOT found in config_core_impl.h")
+
+
+def check_limit_key(
+    key: str, handler_src: str, docs: str, result: ValidationResult
+) -> None:
+    """Verify that a frozen markdown_limits key is implemented and documented."""
+    if not handler_src or not docs:
+        return
+    source_id = f"limits-source:{key}"
+    if re.search(rf'"{re.escape(key)}"', handler_src):
+        result.pass_(source_id, "nested limit key found in handler")
+    else:
+        result.fail(source_id, "nested limit key NOT found in handler")
+
+    docs_id = f"limits-docs:{key}"
+    if re.search(rf"\b{re.escape(key)}\s*=", docs):
+        result.pass_(docs_id, "nested limit key documented")
+    else:
+        result.fail(docs_id, "nested limit key NOT documented in CONFIGURATION.md")
 
 
 def check_directive_default(
@@ -313,6 +350,9 @@ def check_constant_not_in_source(
 ) -> None:
     """Verify a removed constant is not #defined in filter_module.h."""
     check_id = f"removed-constant:{constant_name}"
+    if not source:
+        result.fail(check_id, "filter_module.h not found")
+        return
     pattern = rf"#define\s+{re.escape(constant_name)}\b"
     if re.search(pattern, source):
         result.fail(
@@ -333,6 +373,9 @@ def check_conf_field_not_in_source(
     check_id = f"removed-field:{field_pattern}"
     found_in = []
     for name, content in sources.items():
+        if not content:
+            result.fail(check_id, f"source file missing: {name}")
+            return
         if re.search(field_pattern, content):
             found_in.append(name)
     if found_in:
@@ -344,64 +387,131 @@ def check_conf_field_not_in_source(
         result.pass_(check_id, "removed field pattern absent from all sources")
 
 
-def validate_all(result: ValidationResult) -> None:
-    """Run every directive check and record pass/fail in result."""
-    directives_src = read_safe(CONFIG_DIRECTIVES_H)
-    core_src = read_safe(CONFIG_CORE_H)
-    filter_h = read_safe(FILTER_MODULE_H)
-    docs = read_safe(CONFIGURATION_MD)
+def _read_directive_validation_sources() -> tuple[str, str, str, str, str, str]:
+    """Read the source surfaces used by the directive contract checks."""
+    handler_path = (
+        PROJECT_ROOT
+        / "components"
+        / "nginx-module"
+        / "src"
+        / "ngx_http_markdown_config_handlers_impl.h"
+    )
+    return (
+        read_safe(CONFIG_DIRECTIVES_H),
+        read_safe(DIRECTIVE_NAMES_H),
+        read_safe(CONFIG_CORE_H),
+        read_safe(FILTER_MODULE_H),
+        read_safe(CONFIGURATION_MD),
+        read_safe(handler_path),
+    )
 
+
+def _record_directive_prerequisite_failures(
+    result: ValidationResult,
+    directives_src: str,
+    directive_names_src: str,
+    core_src: str,
+    filter_h: str,
+) -> dict[str, str]:
+    """Record missing source prerequisites and return the directive macros."""
     if not directives_src:
         result.fail(
             "prereq:config_directives_impl.h",
-            "source file not found \u2014 cannot validate directives",
+            "source file not found — cannot validate directives",
         )
-        return
-
+    directive_macros = dict(
+        re.findall(
+            r"#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)"
+            r"[ \t]+(?:\\[ \t]*\r?\n[ \t]*)?\"([^\"]+)\"",
+            directive_names_src,
+        )
+    )
+    if not directive_names_src or not directive_macros:
+        result.fail(
+            "prereq:directive_names.h",
+            "directive name registry not found — cannot validate macro references",
+        )
     if not core_src:
         result.fail(
             "prereq:config_core_impl.h",
-            "source file not found \u2014 cannot validate merge functions",
+            "source file not found — cannot validate merge functions",
         )
-
     if not filter_h:
         result.fail(
             "prereq:filter_module.h",
-            "source file not found \u2014 cannot validate removed constants",
+            "source file not found — cannot validate removed constants",
         )
+    return directive_macros
 
-    default_src = "\n".join([core_src, filter_h])
 
-    # v0.7.0 directives: source + docs + merge + default(merge pattern)
-    for directive in V070_DIRECTIVES:
-        name = directive["name"]
-        doc_heading = directive["doc_heading"]
-        merge_pat = directive["merge_pattern"]
-
-        check_directive_in_source(name, directives_src, result)
-        check_directive_in_docs(name, doc_heading, docs, result)
-        check_directive_merge(name, merge_pat, core_src, result)
-        check_directive_default_merge(name, merge_pat, core_src, result)
-
-    # v0.8.0 directives: source + docs + merge + default(explicit pattern)
-    for directive in V080_DIRECTIVES:
-        name = directive["name"]
-        doc_heading = directive["doc_heading"]
-        merge_pat = directive["merge_pattern"]
-        default_pat = directive["default_pattern"]
-
-        check_directive_in_source(name, directives_src, result)
-        check_directive_in_docs(name, doc_heading, docs, result)
-        check_directive_merge(name, merge_pat, core_src, result)
-        check_directive_default(name, default_pat, default_src, result)
-
-    # Removed directives: absent from source + documented as REMOVED
+def _check_directive_contract(
+    directives_src: str,
+    directive_macros: dict[str, str],
+    docs: str,
+    handler_src: str,
+    result: ValidationResult,
+) -> None:
+    """Validate active, limit, and removed directive contracts."""
+    if not handler_src:
+        result.fail(
+            "limits-prerequisite:handler",
+            "config handler source not found; cannot validate markdown_limits keys",
+        )
+    if not docs:
+        result.fail(
+            "limits-prerequisite:docs",
+            "configuration documentation not found; cannot validate markdown_limits keys",
+        )
+    for name in CURRENT_DIRECTIVES:
+        check_directive_in_source(name, directives_src, directive_macros, result)
+        check_directive_in_docs(name, name, docs, result)
+    for key in CURRENT_LIMIT_KEYS:
+        check_limit_key(key, handler_src, docs, result)
     for directive in REMOVED_DIRECTIVES:
         name = directive["name"]
-        doc_heading = directive["doc_heading"]
+        check_directive_not_in_source(name, directives_src, directive_macros, result)
+        check_removed_directive_in_docs(name, directive["doc_heading"], docs, result)
 
-        check_directive_not_in_source(name, directives_src, result)
-        check_removed_directive_in_docs(name, doc_heading, docs, result)
+
+def _read_c_sources() -> dict[str, str]:
+    """Read C source files used to prove removed fields are gone.
+
+    Discovered source paths are retained in the mapping even when
+    read_safe returns empty content, so a missing/unreadable file surfaces
+    as a source-file failure instead of silently dropping the file (which
+    would let a removed field hide in an unreadable source).
+    """
+    src_dir = PROJECT_ROOT / "components" / "nginx-module" / "src"
+    sources: dict[str, str] = {}
+    for c_path in src_dir.rglob("*.[ch]"):
+        rel = c_path.relative_to(PROJECT_ROOT).as_posix()
+        sources[rel] = read_safe(c_path)
+    return sources
+
+
+def validate_all(result: ValidationResult) -> None:
+    """Run every directive check and record pass/fail in result."""
+    (
+        directives_src,
+        directive_names_src,
+        core_src,
+        filter_h,
+        docs,
+        handler_src,
+    ) = _read_directive_validation_sources()
+
+    if not directives_src:
+        _record_directive_prerequisite_failures(
+            result, directives_src, directive_names_src, core_src, filter_h
+        )
+        return
+
+    directive_macros = _record_directive_prerequisite_failures(
+        result, directives_src, directive_names_src, core_src, filter_h
+    )
+    _check_directive_contract(
+        directives_src, directive_macros, docs, handler_src, result
+    )
 
     # Removed constants: absent from filter_module.h
     if filter_h:
@@ -409,14 +519,7 @@ def validate_all(result: ValidationResult) -> None:
             check_constant_not_in_source(constant, filter_h, result)
 
     # Removed conf->streaming.* fields: absent from all C sources
-    c_sources: dict[str, str] = {}
-    src_dir = (
-        PROJECT_ROOT / "components" / "nginx-module" / "src"
-    )
-    for c_path in src_dir.rglob("*.[ch]"):
-        content = read_safe(c_path)
-        if content:
-            c_sources[c_path.name] = content
+    c_sources = _read_c_sources()
     for field_pat in REMOVED_CONF_FIELDS:
         check_conf_field_not_in_source(field_pat, c_sources, result)
 

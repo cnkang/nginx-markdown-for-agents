@@ -26,10 +26,10 @@
 //! 3. Otherwise the trusted forwarded data is parsed and **strictly
 //!    validated** (trusted source is not blindly believed): the `Forwarded`
 //!    header (RFC 7239) takes precedence over `X-Forwarded-*`; multi-hop
-//!    comma chains take the **right-most** element (closest to the trusted
-//!    proxy) so a client-prepended malicious `host=` cannot poison the base
-//!    URL.  The left-most element is attacker-controlled when the client
-//!    pre-builds the header before the trusted proxy appends its own.
+//!    comma chains are walked right-to-left, trusted proxy hops are stripped,
+//!    and the first untrusted hop supplies the client-facing value. Bracketed
+//!    IPv6 addresses are accepted for matching; bracketed IPv4 addresses are
+//!    not trusted.
 //! 4. Invalid host/proto values fall back to the `Host` header or a safe
 //!    default with an explicit reason code.
 //!
@@ -67,6 +67,23 @@ pub enum BaseUrlReason {
     FallbackToHost = 5,
     /// `fallback_to_default` — base URL fell back to the safe default.
     FallbackToDefault = 6,
+    /// `forwarded_malformed` — the RFC 7239 `Forwarded` source is malformed
+    /// (grammar, duplicate parameters, or invalid value); the entire
+    /// forwarded set is discarded and direct peer/direct request metadata is
+    /// used. X-Forwarded-* is never retried after a malformed Forwarded.
+    ForwardedMalformed = 7,
+    /// `xforwarded_mismatch` — X-Forwarded-* metadata lists are partial or
+    /// have mismatched lengths; the entire forwarded set is discarded.
+    XForwardedMismatch = 8,
+    /// `chain_exhausted` — right-to-left trusted-hop stripping removed every
+    /// address in the chain; the forwarded set is discarded and direct
+    /// peer/direct request metadata is used.
+    ChainExhausted = 9,
+    /// `forwarded_invalid_value` — an address/scheme/host/port value in the
+    /// forwarded set failed validation (unknown, obfuscated, userinfo,
+    /// control character, malformed IPv6, zone ID, invalid scheme/port/host);
+    /// the entire forwarded set is discarded.
+    ForwardedInvalidValue = 10,
 }
 
 impl BaseUrlReason {
@@ -255,92 +272,35 @@ fn apply_mask(octets: &mut [u8], prefix_len: u8) {
 
 /// Return `true` if `source_ip` matches any trusted CIDR.
 ///
-/// The source IP is parsed from its textual form (the NGINX
-/// `connection->addr_text` value, already realip/PROXY-protocol resolved).
-/// A non-parseable or empty address never matches.  The `X-Forwarded-For`
-/// header is intentionally **not** consulted here (spoofing avoidance).
+/// The source IP is parsed from its textual form (the NGINX original
+/// transport peer: `connection->realip` when the realip module preserved
+/// it, otherwise `connection->addr_text` — never the realip-rewritten
+/// client address).  A non-parseable or empty address never matches.  The
+/// `X-Forwarded-For` header is intentionally **not** consulted here
+/// (spoofing avoidance).
 pub fn is_trusted_source(source_ip: &str, trusted: &[Cidr]) -> bool {
-    let ip: IpAddr = match source_ip.trim().parse() {
+    let trimmed = source_ip.trim();
+    /* validate_forwarded_addr returns bracketed IPv6 literals (e.g.
+     * "[2001:db8::1]") as-is.  IpAddr::parse rejects the bracketed form,
+     * so strip a single matching pair of brackets before parsing.
+     * Only strip when the inner content is a valid IPv6 address; a
+     * bracketed IPv4 literal (e.g. "[1.2.3.4]") is not a valid forwarded
+     * address form and must not be trusted. */
+    let normalized: &str =
+        if trimmed.len() >= 2 && trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let inner = &trimmed[1..trimmed.len() - 1];
+            if inner.parse::<Ipv6Addr>().is_err() {
+                return false;
+            }
+            inner
+        } else {
+            trimmed
+        };
+    let ip: IpAddr = match normalized.parse() {
         Ok(ip) => ip,
         Err(_) => return false,
     };
     trusted.iter().any(|cidr| cidr.contains(ip))
-}
-
-/// Parsed view of the right-most element of an RFC 7239 `Forwarded` header.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct ForwardedHeader {
-    /// `host=` parameter value (quotes stripped), if present.
-    pub host: Option<String>,
-    /// `proto=` parameter value (quotes stripped, lowercased), if present.
-    pub proto: Option<String>,
-}
-
-/// Parse the right-most element of an RFC 7239 `Forwarded` header.
-///
-/// Multi-hop chains are comma-separated; trusted proxies append on the right,
-/// so the right-most element is the value set by the trusted proxy (the
-/// directly-connected source we validated).  The left-most element is
-/// closest to the original client and is attacker-controlled when the
-/// client pre-builds a `Forwarded` header before the trusted proxy appends
-/// its own.  Using the right-most element prevents the client from
-/// poisoning the base URL via a pre-pended malicious `host=`.
-///
-/// Each element is a list of `;`-separated `key=value` pairs.  Quoted values
-/// (`host="example.com:8080"`) are unquoted.  Returns `None` when the header
-/// is empty or the right-most element carries neither `host` nor `proto`.
-pub fn parse_forwarded_header(s: &str) -> Option<ForwardedHeader> {
-    // Use the right-most (last) comma-separated element: this is the value
-    // the trusted proxy appended.  The left-most is client-controlled.
-    let last = rightmost_nonempty_list_value(s)?;
-
-    let mut result = ForwardedHeader::default();
-    for pair in last.split(';') {
-        let pair = pair.trim();
-        let Some((key, value)) = pair.split_once('=') else {
-            continue;
-        };
-        let key = key.trim().to_ascii_lowercase();
-        let value = unquote(value.trim());
-        match key.as_str() {
-            "host" if result.host.is_none() => {
-                result.host = Some(value.to_string());
-            }
-            "proto" if result.proto.is_none() => {
-                result.proto = Some(value.to_ascii_lowercase());
-            }
-            _ => {}
-        }
-    }
-
-    if result.host.is_none() && result.proto.is_none() {
-        None
-    } else {
-        Some(result)
-    }
-}
-
-/// Return the right-most non-empty member of a comma-separated field value.
-///
-/// NGINX combines repeated forwarded field lines in wire order before the
-/// value reaches Rust. Trusted proxies append their value on the right, so
-/// selecting the final non-empty member prevents an earlier field line from
-/// overriding the directly connected proxy's assertion.
-fn rightmost_nonempty_list_value(value: &str) -> Option<&str> {
-    value
-        .rsplit(',')
-        .map(str::trim)
-        .find(|item| !item.is_empty())
-}
-
-/// Strip a single layer of surrounding double quotes from a token.
-fn unquote(value: &str) -> &str {
-    let bytes = value.as_bytes();
-    if bytes.len() >= 2 && bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"' {
-        &value[1..value.len() - 1]
-    } else {
-        value
-    }
 }
 
 /// Validate a forwarded/host-header host value, covering all known attack
@@ -425,29 +385,6 @@ fn validate_bracketed_ipv6(rest: &str) -> Option<String> {
     Some(format!("[{addr}]:{port}"))
 }
 
-/// Validate a TCP port string in the range 1-65535.
-fn validate_port(port: &str) -> Option<()> {
-    if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let value: u32 = port.parse().ok()?;
-    if (1..=65535).contains(&value) {
-        Some(())
-    } else {
-        None
-    }
-}
-
-/// Validate a forwarded scheme/proto value: only `http` / `https` are valid.
-pub fn validate_proto(proto: &str) -> Option<String> {
-    let lower = proto.trim().to_ascii_lowercase();
-    if lower == "http" || lower == "https" {
-        Some(lower)
-    } else {
-        None
-    }
-}
-
 /// Outcome of a base-URL trust decision.
 #[derive(Debug, PartialEq, Eq)]
 pub struct BaseUrlDecision {
@@ -462,8 +399,10 @@ pub struct BaseUrlDecision {
 /// Inputs for [`decide_base_url`], marshaled by the C thin wrapper.
 #[derive(Debug, Default)]
 pub struct BaseUrlInput<'a> {
-    /// Textual source IP from `r->connection->addr_text` (realip/PROXY
-    /// resolved). Empty / non-parseable means "no usable source IP".
+    /// Textual source IP: the original transport peer
+    /// (`r->connection->realip` when the realip module preserved it,
+    /// otherwise `r->connection->addr_text`).  Empty / non-parseable
+    /// means "no usable source IP".
     pub source_ip: &'a str,
     /// `true` when the source is a Unix-domain socket peer (never trusted
     /// unless an explicit loopback CIDR is configured, which a Unix socket
@@ -474,10 +413,15 @@ pub struct BaseUrlInput<'a> {
     pub trusted_configured: bool,
     /// `Forwarded` header value (RFC 7239), if present.
     pub forwarded: Option<&'a str>,
+    /// `X-Forwarded-For` header value (address chain), if present.  Contains
+    /// only addresses, never host/scheme/port.
+    pub x_forwarded_for: Option<&'a str>,
     /// `X-Forwarded-Proto` header value, if present.
     pub x_forwarded_proto: Option<&'a str>,
     /// `X-Forwarded-Host` header value, if present.
     pub x_forwarded_host: Option<&'a str>,
+    /// `X-Forwarded-Port` header value, if present.
+    pub x_forwarded_port: Option<&'a str>,
     /// `Host` request header value, if present.
     pub host: Option<&'a str>,
     /// The direct connection scheme from `r->schema` (e.g. "https"),
@@ -488,13 +432,30 @@ pub struct BaseUrlInput<'a> {
     pub direct_scheme: Option<&'a str>,
 }
 
-/// Pure base-URL trust decision (spec 47 small API).
+/// Pure base-URL trust decision for the multi-hop forwarding algorithm.
 ///
-/// Same input → same output.  See the module docs for the decision order.
-/// The returned base URL is always non-empty; on total failure it is
-/// [`DEFAULT_BASE_URL`].
+/// Same input → same output.  Implements the authoritative trusted-proxy
+/// decision algorithm of Requirement 13:
+///
+/// 1. Trust not configured → ignore every forwarded header.
+/// 2. Direct peer not trusted → ignore every forwarded header.
+/// 3. Any `Forwarded` field present → parse repeated fields in received
+///    order and use that source as a unit; a malformed `Forwarded` source is
+///    never repaired by trying `X-Forwarded-*`.
+/// 4. Otherwise require `X-Forwarded-For`; optional host/proto/port metadata
+///    lists are valid only when all absent or all present with the same
+///    length as the address list.
+/// 5. Reject `unknown`, obfuscated identifiers, userinfo, control
+///    characters, malformed IPv6, zone IDs, invalid schemes, invalid ports,
+///    and hosts outside the ASCII DNS-label / bracketed IPv6-literal policy.
+/// 6. Walk the address chain right-to-left, strip only trusted proxy
+///    addresses, select the first remaining address, and take host/proto/
+///    port from that same hop index.  Chain exhaustion discards the set.
+/// 7. Any parse, count, alignment, or validation failure discards the
+///    complete forwarded set and returns direct peer/direct request
+///    metadata.
 pub fn decide_base_url(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecision {
-    // 1. Trust not configured → ignore forwarded headers.
+    // Step 1: trust not configured → ignore forwarded headers.
     if !input.trusted_configured {
         return host_fallback(
             input.host,
@@ -503,7 +464,8 @@ pub fn decide_base_url(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecisio
         );
     }
 
-    // 2. Untrusted source (including Unix socket) → ignore forwarded headers.
+    // Step 2: untrusted source (including Unix socket) → ignore forwarded
+    // headers and use the direct peer.
     if input.is_unix_socket || !is_trusted_source(input.source_ip, trusted) {
         return host_fallback(
             input.host,
@@ -512,13 +474,358 @@ pub fn decide_base_url(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecisio
         );
     }
 
-    // 3. Trusted source: still strictly validate the forwarded data.
-    //    Forwarded (RFC 7239) takes precedence over X-Forwarded-*.
-    if let Some(decision) = decide_from_forwarded(input) {
-        return decision;
+    // Step 3: Forwarded is a complete source; malformed Forwarded discards
+    // the whole set and never falls back to X-Forwarded-*.
+    if input.forwarded.is_some() {
+        return decide_from_forwarded(input, trusted);
     }
 
-    // 4. No usable forwarded data → fall back to Host / default.
+    // Steps 4-6: X-Forwarded-* path (mandatory X-Forwarded-For).
+    decide_from_xforwarded(input, trusted)
+}
+
+/// One parsed RFC 7239 `Forwarded` element (single hop).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ForwardedElement {
+    /// `for=` parameter value (quotes stripped), if present.
+    for_addr: Option<String>,
+    /// `proto=` parameter value (quotes stripped, lowercased), if present.
+    proto: Option<String>,
+    /// `host=` parameter value (quotes stripped), if present.
+    host: Option<String>,
+}
+
+/// Parse all RFC 7239 `Forwarded` elements in received order.
+///
+/// Elements are comma-separated; commas inside quoted strings do not split.
+/// Within one element, `;`-separated `key=value` pairs are parsed; duplicate
+/// parameters in one element are invalid.  Returns `None` on malformed
+/// grammar (empty element, missing `=`, unbalanced quotes, duplicate
+/// parameters).
+fn parse_forwarded_elements(s: &str) -> Option<Vec<ForwardedElement>> {
+    let elements = split_quoted(s, b',')
+        .into_iter()
+        .map(|raw| {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                None
+            } else {
+                parse_forwarded_element(raw)
+            }
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (!elements.is_empty()).then_some(elements)
+}
+
+fn parse_forwarded_element(raw: &str) -> Option<ForwardedElement> {
+    let mut element = ForwardedElement::default();
+    let mut seen: Vec<String> = Vec::new();
+    for pair in split_quoted(raw, b';') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            return None;
+        }
+        parse_forwarded_pair(pair, &mut element, &mut seen)?;
+    }
+    Some(element)
+}
+
+fn parse_forwarded_pair(
+    pair: &str,
+    element: &mut ForwardedElement,
+    seen: &mut Vec<String>,
+) -> Option<()> {
+    let (key, value) = pair.split_once('=')?;
+    let key = key.trim().to_ascii_lowercase();
+    if key.is_empty() || seen.contains(&key) {
+        return None;
+    }
+    seen.push(key.clone());
+    let value = unquote(value.trim())?;
+    match key.as_str() {
+        "for" => element.for_addr = Some(value.to_string()),
+        "proto" => element.proto = Some(value.to_ascii_lowercase()),
+        "host" => element.host = Some(value.to_string()),
+        _ => {}
+    }
+    Some(())
+}
+
+/// Split a value on `sep`, honoring double-quoted strings.
+///
+/// Returns the unquoted member slices.  `None` is never returned: unbalanced
+/// quotes are surfaced by the caller through `unquote` returning `None`.
+fn split_quoted(s: &str, sep: u8) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_quote {
+            current.push(c);
+            if c == '\\' {
+                if let Some(esc) = chars.next() {
+                    current.push(esc);
+                }
+            } else if c == '"' {
+                in_quote = false;
+            }
+        } else if c == '"' {
+            in_quote = true;
+            current.push(c);
+        } else if c as u32 == sep as u32 {
+            parts.push(current.clone());
+            current.clear();
+        } else {
+            current.push(c);
+        }
+    }
+    parts.push(current);
+    parts
+}
+
+/// Strip a single layer of surrounding double quotes from a token.
+///
+/// Returns `None` when the token has unbalanced quotes (a `"` appears
+/// without a matching closer, or a closer appears without an opener).
+fn unquote(value: &str) -> Option<String> {
+    if !value.starts_with('"') {
+        if value.contains('"') {
+            return None;
+        }
+        return Some(value.to_string());
+    }
+
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    let _opening_quote = chars.next();
+    let mut closed = false;
+    while let Some(c) = chars.next() {
+        if closed {
+            if c != ' ' && c != '\t' {
+                return None;
+            }
+            continue;
+        }
+
+        match c {
+            '"' => closed = true,
+            '\\' => out.push(chars.next()?),
+            _ => out.push(c),
+        }
+    }
+    closed.then_some(out)
+}
+
+/// Validate a `for=` forwarded address: a literal IPv4 or bracketed IPv6.
+///
+/// Rejects `unknown`, obfuscated identifiers beginning with `_`, control
+/// characters, malformed IPv6, and zone IDs.  A trailing dot is removed only
+/// for comparison, never emitted as metadata (applies to host forms).
+fn validate_forwarded_addr(addr: &str) -> Option<String> {
+    if addr.is_empty() || has_invalid_forwarded_characters(addr) {
+        return None;
+    }
+    let lowered = addr.trim().to_ascii_lowercase();
+    if lowered == "unknown" {
+        return None;
+    }
+    if lowered.starts_with('_') {
+        return None;
+    }
+    /* Bare IPv4 or IPv6 literal. */
+    if lowered.parse::<IpAddr>().is_ok() {
+        return Some(lowered);
+    }
+    /* Bracketed IPv6. */
+    if let Some(rest) = lowered.strip_prefix('[')
+        && let Some(close) = rest.find(']')
+        && rest[close + 1..].is_empty()
+        && rest[..close].parse::<Ipv6Addr>().is_ok()
+    {
+        return Some(lowered);
+    }
+    None
+}
+
+/// Strict forwarded-host validator: ASCII DNS-label or bracketed
+/// IPv6-literal form, output lowercase.
+///
+/// A trailing dot is removed only for comparison.  An optional `:port`
+/// (1-65535) is accepted after the host form.  IDNA conversion is not
+/// performed.
+fn validate_forwarded_host(host: &str) -> Option<String> {
+    if host.is_empty() || has_invalid_forwarded_characters(host) {
+        return None;
+    }
+    let lowered = host.trim().to_ascii_lowercase();
+
+    if let Some(rest) = lowered.strip_prefix('[') {
+        return validate_bracketed_host(rest);
+    }
+
+    if lowered.contains('[') || lowered.contains(']') {
+        return None;
+    }
+
+    /* Optional :port after the host. */
+    let (name, port) = match lowered.split_once(':') {
+        Some((n, p)) => (n, Some(p)),
+        None => (lowered.as_str(), None),
+    };
+    if name.is_empty() {
+        return None;
+    }
+    if let Some(p) = port {
+        if p.contains(':') {
+            return None;
+        }
+        validate_port(p)?;
+    }
+
+    let trimmed = validate_dns_name(name)?;
+
+    match port {
+        Some(p) => Some(format!("{trimmed}:{p}")),
+        None => Some(trimmed.to_string()),
+    }
+}
+
+fn has_invalid_forwarded_characters(value: &str) -> bool {
+    value.bytes().any(|b| b < 0x20 || b == 0x7f)
+}
+
+fn validate_bracketed_host(rest: &str) -> Option<String> {
+    let close = rest.find(']')?;
+    let addr = &rest[..close];
+    let after = &rest[close + 1..];
+    addr.parse::<Ipv6Addr>().ok()?;
+    if after.is_empty() {
+        return Some(format!("[{addr}]"));
+    }
+    let port = after.strip_prefix(':')?;
+    validate_port(port)?;
+    Some(format!("[{addr}]:{port}"))
+}
+
+fn validate_dns_name(name: &str) -> Option<&str> {
+    let trimmed = name.strip_suffix('.').unwrap_or(name);
+    if trimmed.is_empty() {
+        return None;
+    }
+    for label in trimmed.split('.') {
+        if label.is_empty() || label.len() > 63 {
+            return None;
+        }
+        let bytes = label.as_bytes();
+        if bytes[0] == b'-' || bytes[bytes.len() - 1] == b'-' {
+            return None;
+        }
+        if !bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || *b == b'-')
+        {
+            return None;
+        }
+    }
+    (trimmed.len() <= 253).then_some(trimmed)
+}
+
+/// Validate a forwarded scheme/proto value: only `http` / `https` are valid.
+pub fn validate_proto(proto: &str) -> Option<String> {
+    let lower = proto.trim().to_ascii_lowercase();
+    if lower == "http" || lower == "https" {
+        Some(lower)
+    } else {
+        None
+    }
+}
+
+/// Validate a TCP port string in the range 1-65535.
+fn validate_port(port: &str) -> Option<()> {
+    if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let value: u32 = port.parse().ok()?;
+    if (1..=65535).contains(&value) {
+        Some(())
+    } else {
+        None
+    }
+}
+
+/// Decide from the RFC 7239 `Forwarded` source (a complete unit).
+///
+/// Any malformed grammar, duplicate parameter, or invalid value discards the
+/// entire forwarded set; `X-Forwarded-*` is never retried.
+fn decide_from_forwarded(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecision {
+    let raw = input.forwarded.unwrap_or_default();
+    let Some(mut elements) = parse_forwarded_elements(raw) else {
+        return discard_forwarded_set(input, BaseUrlReason::ForwardedMalformed);
+    };
+
+    /* Validate every element's values; any failure discards the set. */
+    for element in &mut elements {
+        if let Some(for_addr) = &element.for_addr {
+            let Some(normalized) = validate_forwarded_addr(for_addr) else {
+                return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
+            };
+            element.for_addr = Some(normalized);
+        }
+        if let Some(proto) = &element.proto
+            && validate_proto(proto).is_none()
+        {
+            return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
+        }
+        if let Some(host) = &element.host
+            && validate_forwarded_host(host).is_none()
+        {
+            return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
+        }
+    }
+
+    /* Walk right-to-left, stripping elements whose for= is a trusted proxy
+     * address; select the first remaining element as a unit. */
+    for element in elements.iter().rev() {
+        let trusted_hop = match &element.for_addr {
+            Some(addr) => is_trusted_source(addr, trusted),
+            None => false,
+        };
+        if !trusted_hop {
+            return build_forwarded_decision(element, input);
+        }
+    }
+
+    /* Every element was a trusted proxy: chain exhausted. */
+    discard_forwarded_set(input, BaseUrlReason::ChainExhausted)
+}
+
+/// Build a base URL from the selected forwarded element.
+///
+/// The client address comes from the same hop element as the host/proto
+/// (never combined across elements).  When the element carries no host, the
+/// direct request Host is used; when it carries no proto, `https` is used
+/// for elements that declare a host (matching the existing spec 47 default).
+fn build_forwarded_decision(element: &ForwardedElement, input: &BaseUrlInput) -> BaseUrlDecision {
+    /* Revalidate the selected host as defense-in-depth for future callers. */
+    let host = element
+        .host
+        .as_ref()
+        .and_then(|h| validate_forwarded_host(h));
+
+    if let Some(h) = host {
+        let scheme = match &element.proto {
+            Some(p) => validate_proto(p).unwrap_or_else(|| "https".to_string()),
+            None => "https".to_string(),
+        };
+        return BaseUrlDecision {
+            base_url: format!("{scheme}://{h}"),
+            reason: BaseUrlReason::ForwardedHeaderTrusted,
+            source: BaseUrlSource::Forwarded,
+        };
+    }
+
+    /* Element has no host: fall back to direct request metadata. */
     host_fallback(
         input.host,
         input.direct_scheme,
@@ -526,88 +833,172 @@ pub fn decide_base_url(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecisio
     )
 }
 
-/// Try to build a base URL from the trusted forwarded data.
-///
-/// Returns `Some(decision)` when a terminal decision is reached (valid
-/// forwarded URL, or an explicit invalid-host/proto fallback).  Returns
-/// `None` when no forwarded host/proto candidate was present at all, so the
-/// caller should fall through to the `Host` header.
-fn decide_from_forwarded(input: &BaseUrlInput) -> Option<BaseUrlDecision> {
-    // Resolve the candidate host/proto, preferring the Forwarded header.
-    let (raw_host, raw_proto, source) = resolve_forwarded_candidate(input)?;
+/// Split a comma-separated forwarded list into trimmed members.
+fn split_forwarded_list(value: &str) -> Vec<String> {
+    split_quoted(value, b',')
+        .into_iter()
+        .map(|m| m.trim().to_string())
+        .collect()
+}
 
-    // Validate host first (strongest reason to reject).
-    let Some(valid_host) = raw_host.as_deref().and_then(validate_host) else {
-        // A proto-only forwarded element with no host is not actionable;
-        // treat a present-but-invalid host as invalid_host, and a missing
-        // host as "fall through to Host header".
-        if raw_host.is_some() {
-            return Some(host_fallback(
-                input.host,
-                input.direct_scheme,
-                BaseUrlReason::ForwardedInvalidHost,
-            ));
-        }
-        return Some(host_fallback(
+/// Decide from the X-Forwarded-* source family.
+///
+/// `X-Forwarded-For` is mandatory and contains only addresses.  The optional
+/// proto/host/port lists are valid only when all three are absent or all
+/// three are present with the same length as the address chain.  Partial or
+/// mismatched metadata discards the complete forwarded set.
+fn decide_from_xforwarded(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecision {
+    let Some(xff) = input.x_forwarded_for else {
+        /* No Forwarded and no X-Forwarded-For: no forwarded metadata at all;
+         * use direct request metadata. */
+        return host_fallback(
             input.host,
             input.direct_scheme,
             BaseUrlReason::FallbackToHost,
-        ));
+        );
     };
 
-    // Validate proto when provided; default to https when absent.
-    let scheme = match raw_proto.as_deref() {
-        Some(p) => match validate_proto(p) {
-            Some(s) => s,
-            None => {
-                return Some(host_fallback(
-                    input.host,
-                    input.direct_scheme,
-                    BaseUrlReason::ForwardedInvalidProto,
-                ));
-            }
-        },
-        None => "https".to_string(),
+    let addrs = split_forwarded_list(xff);
+
+    let protos = input.x_forwarded_proto.map(split_forwarded_list);
+    let hosts = input.x_forwarded_host.map(split_forwarded_list);
+    let ports = input.x_forwarded_port.map(split_forwarded_list);
+
+    /* All-or-none metadata with matching length (Requirement 13.7); validate
+     * every address and metadata value. */
+    let metadata_present = protos.is_some() || hosts.is_some() || ports.is_some();
+    let validated = match validate_xff_values(&addrs, &protos, &hosts, &ports, metadata_present) {
+        Ok(v) => v,
+        Err(reason) => return discard_forwarded_set(input, reason),
+    };
+
+    /* Walk right-to-left, stripping trusted proxy addresses; select the
+     * first remaining address. */
+    let mut selected_idx: Option<usize> = None;
+    for (idx, addr) in validated.iter().enumerate().rev() {
+        if !is_trusted_source(addr, trusted) {
+            selected_idx = Some(idx);
+            break;
+        }
+    }
+
+    let Some(idx) = selected_idx else {
+        /* Every address was a trusted proxy: chain exhausted. */
+        return discard_forwarded_set(input, BaseUrlReason::ChainExhausted);
+    };
+
+    if metadata_present {
+        return build_xff_decision(idx, &protos, &hosts, &ports)
+            .unwrap_or_else(|| discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue));
+    }
+
+    /* No metadata lists: use direct request metadata for scheme/host/port. */
+    host_fallback(
+        input.host,
+        input.direct_scheme,
+        BaseUrlReason::ForwardedHeaderTrusted,
+    )
+}
+
+/// Validate every X-Forwarded-* value and the all-or-none list contract.
+///
+/// Returns the validated address chain, or the discard reason when any
+/// address, metadata value, or list alignment is invalid.
+fn validate_xff_values(
+    addrs: &[String],
+    protos: &Option<Vec<String>>,
+    hosts: &Option<Vec<String>>,
+    ports: &Option<Vec<String>>,
+    metadata_present: bool,
+) -> Result<Vec<String>, BaseUrlReason> {
+    let metadata =
+        validate_xff_metadata_layout(addrs.len(), protos, hosts, ports, metadata_present)?;
+    let validated = addrs
+        .iter()
+        .map(|addr| validate_forwarded_addr(addr))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(BaseUrlReason::ForwardedInvalidValue)?;
+
+    if let Some((protos, hosts, ports)) = metadata
+        && !validate_xff_metadata_values(protos, hosts, ports)
+    {
+        return Err(BaseUrlReason::ForwardedInvalidValue);
+    }
+
+    Ok(validated)
+}
+
+type ValidatedXffMetadata<'a> = (&'a [String], &'a [String], &'a [String]);
+
+fn validate_xff_metadata_layout<'a>(
+    addr_count: usize,
+    protos: &'a Option<Vec<String>>,
+    hosts: &'a Option<Vec<String>>,
+    ports: &'a Option<Vec<String>>,
+    metadata_present: bool,
+) -> Result<Option<ValidatedXffMetadata<'a>>, BaseUrlReason> {
+    if !metadata_present {
+        return Ok(None);
+    }
+    let (Some(protos), Some(hosts), Some(ports)) =
+        (protos.as_deref(), hosts.as_deref(), ports.as_deref())
+    else {
+        return Err(BaseUrlReason::XForwardedMismatch);
+    };
+    if protos.len() != addr_count || hosts.len() != addr_count || ports.len() != addr_count {
+        return Err(BaseUrlReason::XForwardedMismatch);
+    }
+    Ok(Some((protos, hosts, ports)))
+}
+
+fn validate_xff_metadata_values(protos: &[String], hosts: &[String], ports: &[String]) -> bool {
+    protos.iter().all(|proto| validate_proto(proto).is_some())
+        && hosts
+            .iter()
+            .all(|host| validate_forwarded_host(host).is_some())
+        && ports.iter().all(|port| validate_port(port).is_some())
+}
+
+/// Build the base URL from the selected hop index, taking host/proto/port
+/// from that same index (never combined across indices).
+fn build_xff_decision(
+    idx: usize,
+    protos: &Option<Vec<String>>,
+    hosts: &Option<Vec<String>>,
+    ports: &Option<Vec<String>>,
+) -> Option<BaseUrlDecision> {
+    let proto = protos.as_ref()?.get(idx)?;
+    let host_value = hosts.as_ref()?.get(idx)?;
+    let port = ports.as_ref()?.get(idx)?;
+    let scheme = validate_proto(proto)?;
+    let host = validate_forwarded_host(host_value)?;
+    validate_port(port)?;
+
+    /* Host already carries a port (host:port form): X-Forwarded-Port is
+     * redundant and must not be appended. */
+    let host_with_port = if host.starts_with('[') {
+        if host.ends_with(']') {
+            format!("{host}:{port}")
+        } else {
+            host
+        }
+    } else if host.contains(':') {
+        host
+    } else {
+        format!("{host}:{port}")
     };
 
     Some(BaseUrlDecision {
-        base_url: format!("{scheme}://{valid_host}"),
+        base_url: format!("{scheme}://{host_with_port}"),
         reason: BaseUrlReason::ForwardedHeaderTrusted,
-        source,
+        source: BaseUrlSource::XForwarded,
     })
 }
 
-/// Resolve the candidate (host, proto, source) from forwarded inputs.
-///
-/// Prefers the RFC 7239 `Forwarded` header (right-most element, which is the
-/// value set by the trusted proxy — see [`parse_forwarded_header`] for the
-/// security rationale); falls back to `X-Forwarded-Host` /
-/// `X-Forwarded-Proto`.  Returns `None` when neither is present.
-fn resolve_forwarded_candidate(
-    input: &BaseUrlInput,
-) -> Option<(Option<String>, Option<String>, BaseUrlSource)> {
-    if let Some(raw) = input.forwarded
-        && let Some(parsed) = parse_forwarded_header(raw)
-    {
-        return Some((parsed.host, parsed.proto, BaseUrlSource::Forwarded));
-    }
-
-    let xfh = input
-        .x_forwarded_host
-        .and_then(rightmost_nonempty_list_value);
-    let xfp = input
-        .x_forwarded_proto
-        .and_then(rightmost_nonempty_list_value);
-
-    if xfh.is_none() && xfp.is_none() {
-        return None;
-    }
-
-    Some((
-        xfh.map(str::to_string),
-        xfp.map(str::to_string),
-        BaseUrlSource::XForwarded,
-    ))
+/// Discard the complete forwarded set and use direct peer/direct request
+/// metadata.
+fn discard_forwarded_set(input: &BaseUrlInput, reason: BaseUrlReason) -> BaseUrlDecision {
+    host_fallback(input.host, input.direct_scheme, reason)
 }
 
 /// Build a decision from the `Host` header, or the safe default when the
@@ -746,6 +1137,44 @@ mod tests {
     }
 
     #[test]
+    fn bracketed_ipv6_trusted_hop_matches() {
+        /* validate_forwarded_addr returns bracketed IPv6 literals as-is;
+         * is_trusted_source must strip the brackets before parsing so
+         * bracketed trusted hops are recognized in the trust chain. */
+        let t = cidrs(&["2001:db8::/32", "::1/128"]);
+        assert!(is_trusted_source("[2001:db8::1]", &t));
+        assert!(is_trusted_source("[::1]", &t));
+        assert!(!is_trusted_source("[2001:dead::1]", &t));
+        assert!(!is_trusted_source("[fe80::1]", &t));
+    }
+
+    #[test]
+    fn mismatched_brackets_not_trusted() {
+        let t = cidrs(&["0.0.0.0/0", "::/0"]);
+        assert!(!is_trusted_source("[2001:db8::1", &t));
+        assert!(!is_trusted_source("2001:db8::1]", &t));
+        assert!(!is_trusted_source("[]", &t));
+    }
+
+    #[test]
+    fn bracketed_ipv4_not_trusted() {
+        /* A bracketed IPv4 literal is not a valid forwarded address form;
+         * it must not be trusted even against 0.0.0.0/0. */
+        let t = cidrs(&["0.0.0.0/0"]);
+        assert!(!is_trusted_source("[1.2.3.4]", &t));
+    }
+
+    #[test]
+    fn bracketed_ipv4_mapped_ipv6_trusted() {
+        /* [::ffff:10.0.0.1] is a valid bracketed IPv6 literal (IPv4-mapped);
+         * it should match the IPv4 CIDR, consistent with the unbracketed
+         * ipv4_mapped_ipv6_matches_ipv4_cidr test. */
+        let t = cidrs(&["10.0.0.0/8"]);
+        assert!(is_trusted_source("[::ffff:10.0.0.1]", &t));
+        assert!(!is_trusted_source("[::ffff:11.0.0.1]", &t));
+    }
+
+    #[test]
     fn ipv4_mapped_ipv6_matches_ipv4_cidr() {
         let t = cidrs(&["10.0.0.0/8"]);
         // ::ffff:10.0.0.1 is an IPv4-mapped address.
@@ -768,53 +1197,141 @@ mod tests {
         assert!(is_trusted_source("1.2.3.4", &t));
     }
 
-    /* ---- Forwarded header parsing ---- */
+    /* ---- Forwarded element parsing ---- */
 
     #[test]
-    fn forwarded_basic() {
-        let p = parse_forwarded_header("for=1.2.3.4;host=example.com;proto=https").unwrap();
-        assert_eq!(p.host.as_deref(), Some("example.com"));
-        assert_eq!(p.proto.as_deref(), Some("https"));
+    fn forwarded_elements_basic() {
+        let els = parse_forwarded_elements("for=1.2.3.4;host=example.com;proto=https").unwrap();
+        assert_eq!(els.len(), 1);
+        assert_eq!(els[0].for_addr.as_deref(), Some("1.2.3.4"));
+        assert_eq!(els[0].host.as_deref(), Some("example.com"));
+        assert_eq!(els[0].proto.as_deref(), Some("https"));
     }
 
     #[test]
-    fn forwarded_quoted_host() {
-        let p = parse_forwarded_header("host=\"example.com:8080\";proto=\"https\"").unwrap();
-        assert_eq!(p.host.as_deref(), Some("example.com:8080"));
-        assert_eq!(p.proto.as_deref(), Some("https"));
+    fn forwarded_elements_quoted_values() {
+        let els = parse_forwarded_elements(
+            "for=\"[2001:db8::7]\";host=\"example.com:8080\";proto=\"https\"",
+        )
+        .unwrap();
+        assert_eq!(els[0].for_addr.as_deref(), Some("[2001:db8::7]"));
+        assert_eq!(els[0].host.as_deref(), Some("example.com:8080"));
+        assert_eq!(els[0].proto.as_deref(), Some("https"));
     }
 
     #[test]
-    fn forwarded_multi_hop_takes_rightmost() {
-        // Trusted proxies append on the right; the right-most element is
-        // the one set by the trusted proxy.  The left-most is client-
-        // controlled and must not be used.
-        let p = parse_forwarded_header("host=client.evil.com, host=proxy.internal").unwrap();
-        assert_eq!(p.host.as_deref(), Some("proxy.internal"));
+    fn forwarded_elements_multi_hop_preserves_order() {
+        let els =
+            parse_forwarded_elements("for=198.51.100.7;proto=https;host=example.com, for=192.0.2.10;proto=https;host=edge.example.com")
+                .unwrap();
+        assert_eq!(els.len(), 2);
+        assert_eq!(els[0].for_addr.as_deref(), Some("198.51.100.7"));
+        assert_eq!(els[1].for_addr.as_deref(), Some("192.0.2.10"));
+        assert_eq!(els[1].host.as_deref(), Some("edge.example.com"));
     }
 
     #[test]
-    fn forwarded_repeated_field_lines_take_rightmost_nonempty() {
-        let p =
-            parse_forwarded_header("host=client.example, host=edge.example;proto=https").unwrap();
-        assert_eq!(p.host.as_deref(), Some("edge.example"));
-        assert_eq!(p.proto.as_deref(), Some("https"));
+    fn forwarded_elements_proto_lowercased() {
+        let els = parse_forwarded_elements("proto=HTTPS").unwrap();
+        assert_eq!(els[0].proto.as_deref(), Some("https"));
     }
 
     #[test]
-    fn forwarded_proto_lowercased() {
-        let p = parse_forwarded_header("proto=HTTPS").unwrap();
-        assert_eq!(p.proto.as_deref(), Some("https"));
+    fn forwarded_elements_comma_inside_quotes_does_not_split() {
+        let els = parse_forwarded_elements("for=\"[2001:db8::7], 10.0.0.1\";proto=https").unwrap();
+        assert_eq!(els.len(), 1);
+        assert_eq!(els[0].for_addr.as_deref(), Some("[2001:db8::7], 10.0.0.1"));
     }
 
     #[test]
-    fn forwarded_empty_or_no_known_params() {
-        assert!(parse_forwarded_header("").is_none());
-        assert!(parse_forwarded_header("   ").is_none());
-        assert!(parse_forwarded_header("for=1.2.3.4").is_none());
+    fn forwarded_elements_unknown_params_ignored() {
+        let els = parse_forwarded_elements("for=1.2.3.4;by=192.0.2.1;host=example.com").unwrap();
+        assert_eq!(els[0].for_addr.as_deref(), Some("1.2.3.4"));
+        assert_eq!(els[0].host.as_deref(), Some("example.com"));
     }
 
-    /* ---- Host validation ---- */
+    #[test]
+    fn forwarded_elements_reject_duplicate_params() {
+        assert!(parse_forwarded_elements("host=a.com;host=b.com").is_none());
+        assert!(parse_forwarded_elements("for=1.2.3.4;for=5.6.7.8").is_none());
+    }
+
+    #[test]
+    fn forwarded_elements_reject_malformed() {
+        assert!(parse_forwarded_elements("").is_none());
+        assert!(parse_forwarded_elements("   ").is_none());
+        assert!(parse_forwarded_elements("host").is_none());
+        assert!(parse_forwarded_elements("host=a.com;").is_none());
+        assert!(parse_forwarded_elements("host=\"unterminated").is_none());
+        assert!(parse_forwarded_elements("host=\"evil.example\"garbage").is_none());
+        assert!(parse_forwarded_elements("for=1.2.3.4,").is_none());
+        assert!(parse_forwarded_elements(",for=1.2.3.4").is_none());
+    }
+
+    /* ---- Forwarded address/host validation ---- */
+
+    #[test]
+    fn forwarded_addr_validation() {
+        assert_eq!(
+            validate_forwarded_addr("192.0.2.10").as_deref(),
+            Some("192.0.2.10")
+        );
+        assert_eq!(
+            validate_forwarded_addr("[2001:db8::7]").as_deref(),
+            Some("[2001:db8::7]")
+        );
+        assert_eq!(
+            validate_forwarded_addr("2001:db8::7").as_deref(),
+            Some("2001:db8::7")
+        );
+        assert_eq!(validate_forwarded_addr("unknown"), None);
+        assert_eq!(validate_forwarded_addr("_obfuscated"), None);
+        assert_eq!(validate_forwarded_addr("user@host"), None);
+        assert_eq!(validate_forwarded_addr("192.0.2.1\r\n"), None);
+        assert_eq!(validate_forwarded_addr("2001:db8::7%eth0"), None);
+        assert_eq!(validate_forwarded_addr("[2001:db8::7"), None);
+        assert_eq!(validate_forwarded_addr("example.com"), None);
+    }
+
+    #[test]
+    fn forwarded_host_validation_strict() {
+        assert_eq!(
+            validate_forwarded_host("EXAMPLE.com").as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            validate_forwarded_host("example.com:8080").as_deref(),
+            Some("example.com:8080")
+        );
+        assert_eq!(
+            validate_forwarded_host("xn--80ak6aa92e.com").as_deref(),
+            Some("xn--80ak6aa92e.com")
+        );
+        assert_eq!(
+            validate_forwarded_host("[2001:db8::1]:443").as_deref(),
+            Some("[2001:db8::1]:443")
+        );
+        assert_eq!(
+            validate_forwarded_host("example.com.").as_deref(),
+            Some("example.com")
+        );
+        /* Invalid forms. */
+        assert_eq!(validate_forwarded_host(""), None);
+        assert_eq!(validate_forwarded_host("a..b"), None);
+        assert_eq!(validate_forwarded_host("-a.com"), None);
+        assert_eq!(validate_forwarded_host("a-.com"), None);
+        assert_eq!(validate_forwarded_host("a b.com"), None);
+        assert_eq!(validate_forwarded_host("user@evil.com"), None);
+        assert_eq!(validate_forwarded_host("evil.com/path"), None);
+        assert_eq!(validate_forwarded_host("evil.com\r\nx"), None);
+        assert_eq!(validate_forwarded_host("example.com:0"), None);
+        assert_eq!(validate_forwarded_host("example.com:70000"), None);
+        assert_eq!(validate_forwarded_host("[notv6]"), None);
+        assert_eq!(validate_forwarded_host("2001:db8::1"), None);
+        assert_eq!(validate_forwarded_host("foo%eth0.com"), None);
+    }
+
+    /* ---- Host validation (direct Host header fallback) ---- */
 
     #[test]
     fn host_valid_plain_and_port() {
@@ -883,7 +1400,7 @@ mod tests {
         assert_eq!(validate_proto(""), None);
     }
 
-    /* ---- decide_base_url ---- */
+    /* ---- decide_base_url (multi-hop algorithm) ---- */
 
     fn trusted_input<'a>(source_ip: &'a str) -> BaseUrlInput<'a> {
         BaseUrlInput {
@@ -891,8 +1408,10 @@ mod tests {
             is_unix_socket: false,
             trusted_configured: true,
             forwarded: None,
+            x_forwarded_for: None,
             x_forwarded_proto: None,
             x_forwarded_host: None,
+            x_forwarded_port: None,
             host: Some("origin.example.com"),
             direct_scheme: None,
         }
@@ -903,6 +1422,7 @@ mod tests {
         let mut input = trusted_input("10.0.0.1");
         input.trusted_configured = false;
         input.x_forwarded_host = Some("spoof.example.com");
+        input.x_forwarded_for = Some("1.2.3.4");
         let d = decide_base_url(&input, &[]);
         assert_eq!(d.reason, BaseUrlReason::TrustedProxiesNotConfigured);
         assert_eq!(d.source, BaseUrlSource::Host);
@@ -915,122 +1435,359 @@ mod tests {
         let mut input = trusted_input("203.0.113.7");
         input.x_forwarded_host = Some("spoof.example.com");
         input.x_forwarded_proto = Some("https");
+        input.x_forwarded_for = Some("1.2.3.4");
         let d = decide_base_url(&input, &t);
         assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderUntrusted);
         assert_eq!(d.source, BaseUrlSource::Host);
         assert_eq!(d.base_url, "http://origin.example.com");
     }
 
+    /* Positive 2: single-hop XFF with direct metadata. */
     #[test]
     fn decide_trusted_uses_x_forwarded() {
         let t = cidrs(&["10.0.0.0/8"]);
         let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9");
         input.x_forwarded_host = Some("api.example.com");
         input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("443");
         let d = decide_base_url(&input, &t);
         assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
         assert_eq!(d.source, BaseUrlSource::XForwarded);
-        assert_eq!(d.base_url, "https://api.example.com");
+        assert_eq!(d.base_url, "https://api.example.com:443");
     }
 
     #[test]
-    fn decide_repeated_x_forwarded_fields_use_rightmost_values() {
+    fn xff_ipv6_host_without_port_gets_forwarded_port() {
         let t = cidrs(&["10.0.0.0/8"]);
         let mut input = trusted_input("10.1.2.3");
-        input.x_forwarded_host = Some("client.example, edge.example");
-        input.x_forwarded_proto = Some("http, https");
-
-        let d = decide_base_url(&input, &t);
-
-        assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
-        assert_eq!(d.source, BaseUrlSource::XForwarded);
-        assert_eq!(d.base_url, "https://edge.example");
-    }
-
-    #[test]
-    fn decide_invalid_rightmost_x_forwarded_host_does_not_use_earlier_value() {
-        let t = cidrs(&["10.0.0.0/8"]);
-        let mut input = trusted_input("10.1.2.3");
-        input.x_forwarded_host = Some("earlier.example, invalid/path");
+        input.x_forwarded_for = Some("203.0.113.9");
+        input.x_forwarded_host = Some("[2001:db8::1]");
         input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("443");
 
         let d = decide_base_url(&input, &t);
 
-        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidHost);
+        assert_eq!(d.base_url, "https://[2001:db8::1]:443");
+    }
+
+    #[test]
+    fn xff_ipv6_host_with_port_does_not_duplicate_port() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9");
+        input.x_forwarded_host = Some("[2001:db8::1]:8443");
+        input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("443");
+
+        let d = decide_base_url(&input, &t);
+
+        assert_eq!(d.base_url, "https://[2001:db8::1]:8443");
+    }
+
+    #[test]
+    fn xff_builder_revalidates_selected_port() {
+        let protos = Some(vec!["https".to_string()]);
+        let hosts = Some(vec!["example.com".to_string()]);
+        let ports = Some(vec!["0".to_string()]);
+
+        assert!(build_xff_decision(0, &protos, &hosts, &ports).is_none());
+    }
+
+    #[test]
+    fn forwarded_builder_rejects_invalid_host_without_empty_url() {
+        let input = trusted_input("10.1.2.3");
+        let element = ForwardedElement {
+            host: Some("invalid host".to_string()),
+            proto: Some("https".to_string()),
+            ..ForwardedElement::default()
+        };
+
+        let decision = build_forwarded_decision(&element, &input);
+
+        assert_eq!(decision.base_url, "http://origin.example.com");
+        assert!(!decision.base_url.contains("https://"));
+    }
+
+    /* Positive 2: metadata lists absent → direct request metadata. */
+    #[test]
+    fn decide_xff_without_metadata_uses_direct_metadata() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
         assert_eq!(d.source, BaseUrlSource::Host);
         assert_eq!(d.base_url, "http://origin.example.com");
     }
 
+    /* Positive 1: aligned multi-hop XFF chain with trusted-hop stripping. */
+    #[test]
+    fn decide_aligned_xff_multi_hop_strips_trusted() {
+        let t = cidrs(&["10.0.0.0/8", "192.0.2.0/24"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("198.51.100.7, 192.0.2.10");
+        input.x_forwarded_proto = Some("https, https");
+        input.x_forwarded_host = Some("example.com, edge.example.com");
+        input.x_forwarded_port = Some("443, 443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
+        assert_eq!(d.source, BaseUrlSource::XForwarded);
+        /* 192.0.2.10 is trusted and stripped; select client at index 0 with
+         * its same-index metadata. */
+        assert_eq!(d.base_url, "https://example.com:443");
+    }
+
+    /* Positive 6: right-to-left three-hop strip. */
+    #[test]
+    fn decide_three_hop_strip_selects_client_index() {
+        let t = cidrs(&["10.0.0.0/8", "192.0.2.0/24", "198.51.100.0/24"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.5, 198.51.100.1, 192.0.2.1");
+        input.x_forwarded_proto = Some("https, https, https");
+        input.x_forwarded_host =
+            Some("client.example.com, proxy-a.example.com, proxy-b.example.com");
+        input.x_forwarded_port = Some("443, 443, 443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.base_url, "https://client.example.com:443");
+    }
+
+    /* Negative 3: partial/mismatched metadata discards the set. */
+    #[test]
+    fn decide_partial_metadata_discards_set() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9, 192.0.2.1");
+        input.x_forwarded_host = Some("api.example.com");
+        input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::XForwardedMismatch);
+        assert_eq!(d.source, BaseUrlSource::Host);
+        assert_eq!(d.base_url, "http://origin.example.com");
+    }
+
+    /* Negative 3: mismatched list lengths discard the set. */
+    #[test]
+    fn decide_mismatched_lengths_discard_set() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9");
+        input.x_forwarded_host = Some("api.example.com, extra.example.com");
+        input.x_forwarded_proto = Some("https, https");
+        input.x_forwarded_port = Some("443, 443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::XForwardedMismatch);
+        assert_eq!(d.source, BaseUrlSource::Host);
+    }
+
+    /* Negative 13: trusted chain exhausted → direct peer/direct metadata. */
+    #[test]
+    fn decide_chain_exhausted_discards_set() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("10.9.9.9, 10.8.8.8");
+        input.x_forwarded_host = Some("a.example.com, b.example.com");
+        input.x_forwarded_proto = Some("https, https");
+        input.x_forwarded_port = Some("443, 443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ChainExhausted);
+        assert_eq!(d.source, BaseUrlSource::Host);
+        assert_eq!(d.base_url, "http://origin.example.com");
+    }
+
+    /* Negative 4/5: unknown / obfuscated addresses discard the set. */
+    #[test]
+    fn decide_unknown_address_discards_set() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("unknown");
+        input.x_forwarded_host = Some("api.example.com");
+        input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+        assert_eq!(d.source, BaseUrlSource::Host);
+    }
+
+    #[test]
+    fn decide_empty_xff_discards_as_invalid_value() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+        assert_eq!(d.source, BaseUrlSource::Host);
+    }
+
+    #[test]
+    fn decide_obfuscated_address_discards_set() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("_hidden, 10.0.0.2");
+        input.x_forwarded_host = Some("a.example.com, b.example.com");
+        input.x_forwarded_proto = Some("https, https");
+        input.x_forwarded_port = Some("443, 443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+    }
+
+    /* Negative 10/11: invalid scheme / port discard the set. */
+    #[test]
+    fn decide_invalid_scheme_discards_set() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9");
+        input.x_forwarded_host = Some("api.example.com");
+        input.x_forwarded_proto = Some("ftp");
+        input.x_forwarded_port = Some("443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+    }
+
+    #[test]
+    fn decide_invalid_port_discards_set() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9");
+        input.x_forwarded_host = Some("api.example.com");
+        input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("0");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+    }
+
+    /* Negative 6: userinfo in host discards the set. */
+    #[test]
+    fn decide_userinfo_host_discards_set() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9");
+        input.x_forwarded_host = Some("user:pass@api.example.com");
+        input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+    }
+
+    /* Negative 8: malformed IPv6 discards the set. */
+    #[test]
+    fn decide_malformed_ipv6_discards_set() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("[2001:db8::7");
+        input.x_forwarded_host = Some("api.example.com");
+        input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+    }
+
+    /* Negative 7: control characters discard the set. */
+    #[test]
+    fn decide_control_chars_discard_set() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9");
+        input.x_forwarded_host = Some("api.example.com\r\nInjected: x");
+        input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+    }
+
+    /* Positive 3: Forwarded precedence over X-Forwarded-*. */
     #[test]
     fn decide_forwarded_precedence_over_x_forwarded() {
         let t = cidrs(&["10.0.0.0/8"]);
         let mut input = trusted_input("10.1.2.3");
-        input.forwarded = Some("host=fwd.example.com;proto=https");
+        input.forwarded = Some("for=198.51.100.7;proto=https;host=fwd.example.com");
         input.x_forwarded_host = Some("xfwd.example.com");
         input.x_forwarded_proto = Some("http");
+        input.x_forwarded_for = Some("1.2.3.4");
         let d = decide_base_url(&input, &t);
         assert_eq!(d.source, BaseUrlSource::Forwarded);
         assert_eq!(d.base_url, "https://fwd.example.com");
     }
 
+    /* Positive 4: Forwarded multi-hop stripping. */
     #[test]
-    fn decide_forwarded_multi_hop_rightmost() {
-        let t = cidrs(&["10.0.0.0/8"]);
+    fn decide_forwarded_multi_hop_strips_trusted() {
+        let t = cidrs(&["10.0.0.0/8", "192.0.2.0/24"]);
         let mut input = trusted_input("10.1.2.3");
-        input.forwarded = Some("host=client.evil.com, host=proxy.internal");
+        input.forwarded = Some(
+            "for=198.51.100.7;proto=https;host=example.com, for=192.0.2.10;proto=https;host=edge.example.com",
+        );
         let d = decide_base_url(&input, &t);
-        assert_eq!(d.source, BaseUrlSource::Forwarded);
-        // proto absent → defaults to https
-        assert_eq!(d.base_url, "https://proxy.internal");
-    }
-
-    #[test]
-    fn decide_forwarded_client_prepend_rejected() {
-        // A client pre-builds a Forwarded header with a malicious host,
-        // then the trusted proxy appends its own element on the right.
-        // The module must use the right-most (proxy) element, not the
-        // client-prepended left-most one.
-        let t = cidrs(&["10.0.0.0/8"]);
-        let mut input = trusted_input("10.1.2.3");
-        input.forwarded = Some("host=evil.com;proto=http, host=api.example.com;proto=https");
-        let d = decide_base_url(&input, &t);
-        assert_eq!(d.source, BaseUrlSource::Forwarded);
         assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
-        assert_eq!(d.base_url, "https://api.example.com");
+        assert_eq!(d.source, BaseUrlSource::Forwarded);
+        assert_eq!(d.base_url, "https://example.com");
     }
 
+    /* Positive 5: bracketed IPv6. */
     #[test]
-    fn decide_invalid_forwarded_host_falls_back() {
+    fn decide_forwarded_bracketed_ipv6() {
         let t = cidrs(&["10.0.0.0/8"]);
         let mut input = trusted_input("10.1.2.3");
-        input.x_forwarded_host = Some("evil.com\r\ninjection");
+        input.forwarded = Some("for=\"[2001:db8::7]\";proto=https;host=[2001:db8::1]:443");
         let d = decide_base_url(&input, &t);
-        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidHost);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
+        assert_eq!(d.base_url, "https://[2001:db8::1]:443");
+    }
+
+    /* Negative 2: malformed Forwarded never falls back to X-Forwarded-*. */
+    #[test]
+    fn decide_malformed_forwarded_never_falls_back_to_xff() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.forwarded = Some("host=a.com;host=b.com");
+        input.x_forwarded_host = Some("xfwd.example.com");
+        input.x_forwarded_proto = Some("https");
+        input.x_forwarded_for = Some("1.2.3.4");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedMalformed);
         assert_eq!(d.source, BaseUrlSource::Host);
         assert_eq!(d.base_url, "http://origin.example.com");
     }
 
+    /* Negative 4: unknown forwarded address discards the set. */
     #[test]
-    fn decide_invalid_proto_falls_back() {
+    fn decide_forwarded_unknown_address_discards() {
         let t = cidrs(&["10.0.0.0/8"]);
         let mut input = trusted_input("10.1.2.3");
-        input.x_forwarded_host = Some("api.example.com");
-        input.x_forwarded_proto = Some("javascript");
+        input.forwarded = Some("for=unknown;proto=https;host=evil.example.com");
         let d = decide_base_url(&input, &t);
-        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidProto);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
         assert_eq!(d.source, BaseUrlSource::Host);
     }
 
+    /* Forwarded chain exhaustion. */
     #[test]
-    fn decide_unix_socket_is_untrusted() {
-        let t = cidrs(&["127.0.0.0/8"]);
-        let mut input = trusted_input("127.0.0.1");
-        input.is_unix_socket = true;
-        input.x_forwarded_host = Some("spoof.example.com");
+    fn decide_forwarded_chain_exhausted_discards() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.forwarded = Some(
+            "for=10.0.0.5;proto=https;host=a.example.com, for=10.0.0.6;proto=https;host=b.example.com",
+        );
         let d = decide_base_url(&input, &t);
-        assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderUntrusted);
+        assert_eq!(d.reason, BaseUrlReason::ChainExhausted);
+        assert_eq!(d.source, BaseUrlSource::Host);
     }
 
+    /* Forwarded element without for= is never stripped. */
+    #[test]
+    fn decide_forwarded_element_without_for_is_client() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.forwarded = Some(
+            "proto=https;host=client.example.com, for=10.0.0.5;proto=https;host=edge.example.com",
+        );
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
+        assert_eq!(d.base_url, "https://client.example.com");
+    }
+
+    /* XFF with no Forwarded and no X-Forwarded-For → direct metadata. */
     #[test]
     fn decide_no_forwarded_falls_back_to_host() {
         let t = cidrs(&["10.0.0.0/8"]);
@@ -1055,8 +1812,10 @@ mod tests {
     fn decide_is_idempotent() {
         let t = cidrs(&["10.0.0.0/8"]);
         let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9");
         input.x_forwarded_host = Some("api.example.com");
         input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("443");
         assert_eq!(decide_base_url(&input, &t), decide_base_url(&input, &t));
     }
 

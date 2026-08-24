@@ -1,4 +1,4 @@
-"""Integration tests for the module-level benchmark harness (Spec 59, task 1.3).
+"""Integration tests for the module-level benchmark harness.
 
 Tests:
   1. Validates the ``module_benchmark`` schema in ``perf/metrics-schema.json``
@@ -37,11 +37,16 @@ import pytest
 from tools.perf.report_schema import validate_module_benchmark
 from tools.perf.upstream_mock import MockUpstreamHandler
 from tools.perf.benchmark_validation import (
+    ScenarioResultInput,
     attach_response_probe,
+    build_scenario_result,
     compare_streaming_probe_bodies,
     parse_ab_result,
     parse_curl_header_artifact,
     parse_hey_result,
+    merge_diagnostics_metrics,
+    parse_prometheus_metrics,
+    _decompression_path_metrics,
     validate_response_probe,
 )
 
@@ -68,6 +73,158 @@ VALID_HEY_OUTPUT = """response-time,DNS+dialup,DNS,Request-write,Response-delay,
 0.010,0,0,0,0,0,200,0,
 0.020,0,0,0,0,0,200,0,
 """
+
+
+def test_parse_prometheus_v1_metrics_for_benchmark_adapter():
+    metrics = parse_prometheus_metrics(
+        """# TYPE nginx_markdown_conversion_attempts_total counter
+nginx_markdown_conversion_attempts_total{engine="streaming"} 3
+nginx_markdown_conversion_attempts_total{engine="full_buffer"} 2
+nginx_markdown_conversion_deliveries_total{engine="streaming"} 3
+nginx_markdown_streaming_events_total{transition="fallback",reason="precommit_html_error"} 1
+nginx_markdown_decompression_events_total{encoding="brotli",outcome="success",reason="ok"} 4
+nginx_markdown_decompression_events_total{encoding="brotli",outcome="failure",reason="budget_exceeded"} 1
+"""
+    )
+
+    assert metrics["streaming_path_hits"] == 3
+    assert metrics["fullbuffer_path_hits"] == 2
+    assert metrics["streaming"]["fallback_total"] == 1
+    assert metrics["perf"]["decompression_events_total"] == 5
+    assert metrics["perf"]["decompression_budget_exceeded_total"] == 1
+    assert "zero_copy_output_total" not in metrics["perf"]
+
+
+def test_nonfinite_prometheus_samples_are_ignored():
+    metrics = parse_prometheus_metrics(
+        "nginx_markdown_conversion_attempts_total{engine=\"streaming\"} NaN\n"
+        "nginx_markdown_conversion_attempts_total{engine=\"full_buffer\"} +Inf\n"
+    )
+
+    assert metrics["streaming_path_hits"] == 0
+    assert metrics["fullbuffer_path_hits"] == 0
+
+
+def test_aggregate_decompression_events_are_not_misattributed():
+    assert _decompression_path_metrics(
+        "gzip", {"decompression_events_total": 7}, 1, 1
+    ) == (None, None)
+
+
+def test_merge_diagnostics_metrics_preserves_exact_counter_sources():
+    metrics = parse_prometheus_metrics(
+        'nginx_markdown_conversion_attempts_total{engine="streaming"} 3\n'
+    )
+    merged = merge_diagnostics_metrics(
+        metrics,
+        {
+            "runtime": {
+                "module_metrics": {
+                    "streaming_requests_total": 3,
+                    "precommit_failopen_total": 0,
+                    "copied_output_total": 1,
+                }
+            }
+        },
+    )
+    assert merged["streaming"]["requests_total"] == 3
+    assert merged["streaming"]["precommit_failopen_total"] == 0
+    assert "zero_copy_output_total" not in merged["perf"]
+    assert merged["perf"]["copied_output_total"] == 1
+
+
+def test_parse_prometheus_metrics_does_not_infer_output_ownership():
+    metrics = parse_prometheus_metrics(
+        'nginx_markdown_conversion_deliveries_total{engine="streaming"} 4\n'
+        'nginx_markdown_conversion_deliveries_total{engine="full_buffer"} 2\n'
+    )
+    assert "zero_copy_output_total" not in metrics["perf"]
+    assert "copied_output_total" not in metrics["perf"]
+
+
+def test_missing_diagnostics_counters_fail_closed_in_scenario_metrics():
+    result = build_scenario_result(
+        ScenarioResultInput(
+            raw_content=VALID_AB_OUTPUT,
+            name="streaming-first",
+            profile="streaming_first",
+            compression="none",
+            transfer_encoding="chunked",
+            concurrency=1,
+            worker_rss_kb=1,
+            load_generator="ab",
+            ttfb={"ttfb_p50_ms": 1.0, "ttfb_p95_ms": 2.0},
+            nginx_metrics=parse_prometheus_metrics(
+                'nginx_markdown_conversion_attempts_total{engine="streaming"} 3\n'
+            ),
+            input_bytes=1,
+            baseline_rss_kb=1,
+            peak_rss_kb=1,
+            iterations=10,
+            load_exit_code=0,
+        )
+    )
+    assert result["scenario_config"] == "explicit-streaming"
+    assert result["metrics"]["fallback_rate"] is None
+    assert "precommit_failopen_total" not in result["metrics"]
+    assert result["metrics"]["throughput_mbytes_per_sec"] == pytest.approx(0.0001)
+
+
+def test_zero_streaming_requests_report_zero_fallback_rate():
+    """A full-buffer-only scenario has zero fallback rate, not missing data."""
+    result = build_scenario_result(
+        ScenarioResultInput(
+            raw_content=VALID_AB_OUTPUT,
+            name="large-body",
+            profile="balanced",
+            compression="none",
+            transfer_encoding="identity",
+            concurrency=1,
+            worker_rss_kb=1,
+            load_generator="ab",
+            ttfb={"ttfb_p50_ms": 1.0, "ttfb_p95_ms": 2.0},
+            nginx_metrics={
+                "streaming": {
+                    "requests_total": 0,
+                    "precommit_failopen_total": 0,
+                },
+                "streaming_path_hits": 0,
+                "fullbuffer_path_hits": 10,
+            },
+            input_bytes=1,
+            baseline_rss_kb=1,
+            peak_rss_kb=1,
+            iterations=10,
+            load_exit_code=0,
+        )
+    )
+    assert result["metrics"]["fallback_rate"] == 0.0
+
+
+def test_endpoint_fetch_failure_fails_scenario_closed():
+    result = build_scenario_result(
+        ScenarioResultInput(
+            raw_content=VALID_AB_OUTPUT,
+            name="streaming-first",
+            profile="streaming_first",
+            compression="none",
+            transfer_encoding="chunked",
+            concurrency=1,
+            worker_rss_kb=1,
+            load_generator="ab",
+            ttfb={"ttfb_p50_ms": 1.0, "ttfb_p95_ms": 2.0},
+            nginx_metrics={},
+            input_bytes=1,
+            baseline_rss_kb=1,
+            peak_rss_kb=1,
+            iterations=10,
+            load_exit_code=0,
+            metrics_exit_code=7,
+        )
+    )
+    assert result["status"] == "failed"
+    assert result["endpoint_integrity"]["verdict"] == "fail"
+    assert "metrics_curl_exit: 7" in result["reason"]
 
 
 def test_ab_requires_all_requests_and_zero_failures():
@@ -271,10 +428,12 @@ def test_production_example_gate_loads_dynamic_module_when_provided():
 
     assert "test-production-examples-nginx-t: SHELL := /bin/bash" in makefile
     assert 'module_so="$${MODULE_SO:-}"' in target
-    assert '-g "load_module $$module_so;"' in target
-    assert 'runtime_prefix="$${RUNNER_TEMP:-$${TMPDIR:-/tmp}}/' in target
-    assert 'mkdir -p "$$runtime_prefix/logs"' in target
-    assert '-p "$$runtime_prefix/"' in target
+    assert 'MODULE_SO="$$module_so"' in target
+    assert "bash tools/e2e/verify_examples_nginx_t.sh" in target
+    verifier = (
+        REPO_ROOT / "tools" / "e2e" / "verify_examples_nginx_t.sh"
+    ).read_text(encoding="utf-8")
+    assert '-g "load_module ${MODULE_SO};"' in verifier
 
 
 def test_production_example_gate_rewrites_privileged_listeners(tmp_path):
@@ -297,6 +456,10 @@ if grep -Eq '^[[:space:]]*listen[[:space:]]+80[[:space:]]*;' "$config"; then
     echo "privileged listener remained in $config" >&2
     exit 42
 fi
+if grep -Eq '^[[:space:]]*markdown_(profile|metrics_format|metrics_per_path|metrics_per_path_cardinality|diagnostics_allow|buffer_chunked|streaming_shadow|streaming_zero_copy|llm_provider|chars_per_token|stream_types|stream_threshold|stream_precommit_buffer|stream_flush_min|parse_timeout|parser_budget|decompress_max_size|otel|otel_endpoint)[[:space:]]' "$config"; then
+    echo 'unknown directive' >&2
+    exit 1
+fi
 """,
         encoding="utf-8",
     )
@@ -317,8 +480,8 @@ fi
 def test_module_benchmark_records_actual_fixture_bytes():
     """Every scenario must report the actual fixture size for memory slope."""
     source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
-    assert 'fixture_bytes="$(wc -c < "$CORPUS_DIR/$SC_FIXTURE")"' in source
-    assert "input_bytes=int(sys.argv[11])" in source
+    assert 'fixture_bytes="$("$RESOLVED_WC" -c < "$CORPUS_DIR/$SC_FIXTURE")"' in source
+    assert "input_bytes=int(sys.argv[12])" in source
 
 
 def test_module_benchmark_requires_load_and_response_correctness():
@@ -330,7 +493,8 @@ def test_module_benchmark_requires_load_and_response_correctness():
     ).read_text(encoding="utf-8")
     assert "parse_ab_result" in validation_source
     assert "parse_hey_result" in validation_source
-    assert "ScenarioResultInput, build_scenario_result" in source
+    assert "ScenarioResultInput" in source
+    assert "build_scenario_result" in source
     assert '"$ITERATIONS" "$load_gen_exit"' in source
     assert "validate_response_probe" in source
     assert "response_correctness_failed" in source
@@ -343,10 +507,10 @@ def test_canonical_workflow_retains_probe_artifacts():
         REPO_ROOT / ".github" / "workflows" / "nightly-perf.yml"
     ).read_text(encoding="utf-8")
 
-    module_job = workflow[workflow.index("\n  module-baseline-091:"):]
-    assert "--output perf/baselines/module-baseline-091-raw.json" in module_job
-    assert "perf/baselines/module-baseline-091-raw-probes/" in module_job
-    assert "perf/baselines/module-baseline-091-probes/" not in module_job
+    module_job = workflow[workflow.index("\n  module-baseline-092:"):]
+    assert "--output perf/baselines/module-baseline-092-raw.json" in module_job
+    assert "perf/baselines/module-baseline-092-raw-probes/" in module_job
+    assert "perf/baselines/module-baseline-092-probes/" not in module_job
 
 
 def test_module_benchmark_materializes_output_derived_probe_directory():
@@ -354,8 +518,8 @@ def test_module_benchmark_materializes_output_derived_probe_directory():
     source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
 
     assert 'PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"' in source
-    assert 'mkdir -p "$PROBE_OUTPUT_DIR"' in source
-    assert 'cp -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
+    assert '"$RESOLVED_MKDIR" -p "$PROBE_OUTPUT_DIR"' in source
+    assert '"$RESOLVED_CP" -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
 
 
 def test_module_benchmark_materializes_all_eight_scenario_probe_triplets():
@@ -390,8 +554,8 @@ def test_module_benchmark_cleanup_removes_temp_only_after_probe_materialization(
     cleanup_end = source.index("\n}\n", cleanup_start) + 3
     cleanup = source[cleanup_start:cleanup_end]
 
-    assert 'cp -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
-    assert 'rm -rf "$NGINX_WORKDIR"' in cleanup
+    assert '"$RESOLVED_CP" -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
+    assert '"$RESOLVED_RM" -rf "$NGINX_WORKDIR"' in cleanup
     assert "PROBE_OUTPUT_DIR" not in cleanup
 
 
@@ -630,20 +794,20 @@ def _build_valid_mock_report():
         "module_benchmark": {
             "version": "1.0.0",
             "timestamp": "2026-07-01T12:00:00Z",
-            "git_commit": "abc1234",
+            "git_commit": "0123456789abcdef0123456789abcdef01234567",
             "platform": "darwin-arm64",
             "load_generator": "hey",
             "scenarios": [
                 {
                     "name": "plain-small",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "identity",
                     "concurrency": 10,
                     "status": "completed",
                     "metrics": {
                         "rps": 1500.0,
-                        "throughput_mbps": 12.5,
+                        "throughput_mbytes_per_sec": 12.5,
                         "latency_p50_ms": 2.1,
                         "latency_p95_ms": 5.3,
                         "latency_p99_ms": 8.7,
@@ -658,14 +822,14 @@ def _build_valid_mock_report():
                 },
                 {
                     "name": "chunked-medium",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "chunked",
                     "concurrency": 10,
                     "status": "completed",
                     "metrics": {
                         "rps": 1200.0,
-                        "throughput_mbps": 10.0,
+                        "throughput_mbytes_per_sec": 10.0,
                         "latency_p50_ms": 3.0,
                         "latency_p95_ms": 7.1,
                         "latency_p99_ms": 12.0,
@@ -680,14 +844,14 @@ def _build_valid_mock_report():
                 },
                 {
                     "name": "gzip-large",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "gzip",
                     "transfer_encoding": "identity",
                     "concurrency": 10,
                     "status": "completed",
                     "metrics": {
                         "rps": 800.0,
-                        "throughput_mbps": 6.0,
+                        "throughput_mbytes_per_sec": 6.0,
                         "latency_p50_ms": 5.5,
                         "latency_p95_ms": 12.0,
                         "latency_p99_ms": 20.0,
@@ -702,14 +866,14 @@ def _build_valid_mock_report():
                 },
                 {
                     "name": "large-body",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "identity",
                     "concurrency": 5,
                     "status": "completed",
                     "metrics": {
                         "rps": 200.0,
-                        "throughput_mbps": 50.0,
+                        "throughput_mbytes_per_sec": 50.0,
                         "latency_p50_ms": 25.0,
                         "latency_p95_ms": 40.0,
                         "latency_p99_ms": 55.0,
@@ -724,14 +888,14 @@ def _build_valid_mock_report():
                 },
                 {
                     "name": "streaming-first",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "none",
                     "transfer_encoding": "chunked",
                     "concurrency": 20,
                     "status": "completed",
                     "metrics": {
                         "rps": 900.0,
-                        "throughput_mbps": 8.0,
+                        "throughput_mbytes_per_sec": 8.0,
                         "latency_p50_ms": 4.0,
                         "latency_p95_ms": 9.0,
                         "latency_p99_ms": 15.0,
@@ -851,7 +1015,7 @@ class TestSchemaWellFormedness:
         assert metrics.get("type") == "object"
         props = metrics.get("properties", {})
         expected_metrics = [
-            "rps", "throughput_mbps", "latency_p50_ms", "latency_p95_ms",
+            "rps", "throughput_mbytes_per_sec", "latency_p50_ms", "latency_p95_ms",
             "latency_p99_ms", "ttfb_p50_ms", "ttlb_p50_ms", "worker_rss_mb",
             "streaming_ratio", "fullbuffer_ratio", "fallback_rate",
         ]
@@ -1050,16 +1214,19 @@ class TestReportSchemaConformance:
         report = _build_valid_mock_report()
         assert report["module_benchmark"]["load_generator"] in valid_generators
 
-    def test_profile_enum_values(self):
-        """profile field enum covers all valid profiles."""
+    def test_scenario_config_enum_values(self):
+        """scenario_config carries benchmark-only configuration identity."""
         self._assert_schema_enum_values(
-            "profile", "balanced", "streaming_first", "strict_cache"
+            "scenario_config",
+            "explicit-defaults",
+            "explicit-streaming",
+            "explicit-strict-cache",
         )
 
     def test_compression_enum_values(self):
         """compression field enum covers all valid types."""
         self._assert_schema_enum_values(
-            "compression", "none", "gzip", "deflate"
+            "compression", "none", "gzip", "deflate", "brotli"
         )
 
     def _assert_schema_enum_values(self, prop_name, *expected_values):
@@ -1310,6 +1477,17 @@ class TestPortCleanupOnSignals:
         env = os.environ.copy()
         env["NGINX_BIN"] = str(stub)
         env.pop("MODULE_SO", None)
+        # The harness resolves every helper against its trusted-root allowlist
+        # and fails closed when PATH resolves python3 (or another helper) to a
+        # user-writable location such as a conda Caskroom bin directory.  A
+        # developer shell can order such directories ahead of the system roots,
+        # which would make these lifecycle tests depend on ambient PATH luck.
+        # The behaviour under test here is trap-driven cleanup, not host PATH
+        # auditing, so pin the standard system directories ahead of the
+        # inherited PATH — the same resolution CI gets on its clean runners.
+        env["PATH"] = os.pathsep.join(
+            ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env.get("PATH", "")]
+        )
         return subprocess.Popen(
             [
                 BASH_BIN,
@@ -1328,6 +1506,20 @@ class TestPortCleanupOnSignals:
 
 class TestNginxConfigGeneration:
     """Validate NGINX configurations generated by run_module_benchmark.sh."""
+
+    def test_preflight_allows_missing_rss_for_lifecycle_tests(self):
+        """Missing RSS support must not block benchmark lifecycle cleanup."""
+        script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+
+        assert "required_commands=(" in script_content
+        assert 'command -v "$name"' in script_content
+        assert "resolve_tool" in script_content
+        assert "/opt/hostedtoolcache" in script_content
+        assert "RESOLVED_PS" in script_content
+        assert "RSS_SUPPORTED=1" in script_content
+        assert "RSS_SUPPORTED=0" in script_content
+        assert "memory evidence will fail closed" in script_content
+        assert '"$RESOLVED_PS" -o rss= -p "$$"' in script_content
 
     def test_preflight_requires_pinned_python_brotli(self):
         """The blocking chunked Brotli scenario must fail before serving requests."""
@@ -1353,8 +1545,11 @@ class TestNginxConfigGeneration:
         # 2. Verification of local mime.types removal and static types block addition
         assert "include       mime.types;" not in script_content, "Relative 'include mime.types;' should not be used in benchmark config"
         assert "types {" in script_content, "Explicit 'types' definition block is missing from benchmark config"
-        assert "markdown_streaming_zero_copy on;" in script_content, (
-            "streaming_first benchmark config should enable zero-copy"
+        assert "markdown_streaming force;" in script_content, (
+            "streaming_first benchmark config should explicitly enable streaming"
+        )
+        assert "markdown_streaming_zero_copy" not in script_content, (
+            "zero-copy must remain an internal implementation choice"
         )
         assert '"$NGINX_BIN" -t -c "$conf_path" -p "$NGINX_WORKDIR"' in script_content, (
             "generated benchmark nginx.conf should be validated with nginx -t"
@@ -1400,6 +1595,6 @@ class TestNginxConfigGeneration:
         validation = (
             REPO_ROOT / "tools" / "perf" / "benchmark_validation.py"
         ).read_text(encoding="utf-8")
-        assert 'streaming.get("precommit_failopen_total", 0)' in validation
+        assert 'streaming.get("precommit_failopen_total")' in validation
         assert "failopen_total / requests_total" in validation
         assert '"streaming_fallback_total": streaming.get' in validation

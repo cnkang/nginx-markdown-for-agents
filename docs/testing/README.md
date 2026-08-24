@@ -2,7 +2,7 @@
 
 This directory maps the project's validation strategy and test-reference documents.
 
-Use it to answer three practical questions: what is covered already, which tests need a real NGINX runtime, and which command is the right starting point for the change you just made.
+Use it to answer three practical questions. The answers cover the test surface, runtime needs, and starting commands for your change.
 
 ## Start Here
 
@@ -16,7 +16,7 @@ make test-nginx-integration
 make harness-check
 ```
 
-Use the documents in this directory when you need to understand what is covered, what requires a real `nginx` runtime, and where performance expectations are documented.
+Use the documents in this directory to understand what the tests cover and what requires a real `nginx` runtime. They also show where performance expectations appear.
 
 ## Test Reference Index
 
@@ -74,8 +74,8 @@ make test-rust-fuzz-smoke
 - **Minimum**: 80% aggregate line coverage for both the C module and the Rust converter
 - **Target**: 90% aggregate line coverage
 - **Critical paths** (auth, error handling, FFI boundary, conditional requests): 90% line coverage for new code
-- Coverage is collected via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`)
-- Advisory per-file thresholds are logged by the coverage script but are not CI-blocking gates
+- The project collects coverage via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`)
+- The coverage script logs advisory per-file thresholds but they are not CI-blocking gates
 - The lcov report is always produced regardless of coverage level, ensuring SonarCloud trends remain visible
 
 ## Terminology
@@ -83,11 +83,11 @@ make test-rust-fuzz-smoke
 - Standalone or mock tests do not require a system `nginx` binary.
 - Integration and E2E tests usually require a real `nginx` runtime and more environment setup.
 - The inline integration runner and the canonical `tools/e2e/` suite accept `NGINX_BIN=/absolute/path/to/nginx` when the desired test binary is not on `PATH`.
-- The delegated native scripts in `tools/ci/` and `tools/e2e/` also accept `NGINX_BIN=/absolute/path/to/nginx`; when that path points to a reusable runtime install (for example `.../sbin/nginx` beside `.../conf/mime.types`), they reuse it instead of downloading and rebuilding NGINX.
+- The delegated native scripts in `tools/ci/` and `tools/e2e/` also accept `NGINX_BIN=/absolute/path/to/nginx`. When that path points to a reusable runtime install (for example `.../sbin/nginx` beside `.../conf/mime.types`), they reuse it. They skip downloading and rebuilding NGINX.
 - Performance references are guidance for regression detection, not hard SLAs.
-- The CI workflow records non-blocking performance artifacts for `perf_baseline`, including a front-matter-enabled medium sample, and runs a runtime-regression job that self-builds a module-enabled NGINX runtime for delegated `If-Modified-Since`, then reuses that retained binary for the chunked native smoke and large-response checks.
+- The CI workflow records non-blocking performance artifacts for `perf_baseline`, including a front-matter-enabled medium sample. It also runs a runtime-regression job that self-builds a module-enabled NGINX runtime for delegated `If-Modified-Since`. The job reuses that retained binary for the chunked native smoke and large-response checks.
 - Nightly fuzzing runs parser, FFI, and security-validator targets from `components/rust-converter/fuzz/`.
-- The native NGINX verification scripts share `tools/lib/nginx_markdown_native_build.sh`, which centralizes Rust target detection, header sync, macOS deployment-target alignment, HTTP readiness polling, CLI flag validation, and HTTP status/header assertion helpers for E2E scripts.
+- The native NGINX verification scripts share `tools/lib/nginx_markdown_native_build.sh`. It centralizes Rust target detection, header sync, and macOS deployment-target alignment. It also centralizes HTTP readiness polling, CLI flag validation, and HTTP assertion helpers for E2E scripts.
 - A separate non-blocking Darwin/macOS smoke workflow exercises native Rust build, real-nginx IMS validation, and chunked native smoke on GitHub-hosted macOS runners.
 
 As a working rule:

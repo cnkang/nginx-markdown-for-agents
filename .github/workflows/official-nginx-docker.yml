@@ -2,7 +2,28 @@ name: Official NGINX Docker Validation
 
 on:
   workflow_dispatch:
-  pull_request:
+  workflow_call:
+    inputs:
+      module_repo:
+        description: Repository URL for the exact release candidate source.
+        required: false
+        type: string
+        default: ""
+      module_ref:
+        description: Ref used only to resolve the candidate source checkout.
+        required: false
+        type: string
+        default: ""
+      module_sha:
+        description: Immutable candidate SHA consumed by the Docker build.
+        required: false
+        type: string
+        default: ""
+  # Tag releases: docker-image matrix entries are release_blocking=true, so
+  # the validation must run on the tag SHA before publication (F-03 fix).
+  push:
+    tags:
+      - 'v*'
     branches: [main, master]
     paths:
       - "Makefile"
@@ -14,7 +35,7 @@ on:
       - "packaging/scripts/verify-checksum.sh"
       - "tools/ci/verify_official_nginx_docker.sh"
       - ".github/workflows/official-nginx-docker.yml"
-  push:
+  pull_request:
     branches: [main, master]
     paths:
       - "Makefile"
@@ -44,35 +65,49 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # nginx_image_digest pins each base image to a byte-identical
+          # artifact: the release_blocking gate must test what will actually
+          # ship, and a floating tag can move between gate and publish.
+          # Digests resolved from registry-1.docker.io (multi-arch index) at the
+          # 0.9.2 freeze (2026-08-22); refresh them when intentionally
+          # tracking a new upstream base.
           - nginx_tag: mainline
+            nginx_image_digest: sha256:8f029c543423e3eac6b08254718bc31eb75633b1e448026b6616927baa7d4bfe
             arch: amd64
             runner: ubuntu-latest
             port: 18080
           - nginx_tag: mainline
+            nginx_image_digest: sha256:8f029c543423e3eac6b08254718bc31eb75633b1e448026b6616927baa7d4bfe
             arch: arm64
             runner: ubuntu-24.04-arm
             port: 18080
           - nginx_tag: mainline-alpine
+            nginx_image_digest: sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913
             arch: amd64
             runner: ubuntu-latest
             port: 18081
           - nginx_tag: mainline-alpine
+            nginx_image_digest: sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913
             arch: arm64
             runner: ubuntu-24.04-arm
             port: 18081
           - nginx_tag: stable
+            nginx_image_digest: sha256:46ccc48fbb1f5a43167f2ee2c279c122b96eec5d976e7f4e1e0780f59a51b4d6
             arch: amd64
             runner: ubuntu-latest
             port: 18082
           - nginx_tag: stable
+            nginx_image_digest: sha256:46ccc48fbb1f5a43167f2ee2c279c122b96eec5d976e7f4e1e0780f59a51b4d6
             arch: arm64
             runner: ubuntu-24.04-arm
             port: 18082
           - nginx_tag: stable-alpine
+            nginx_image_digest: sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
             arch: amd64
             runner: ubuntu-latest
             port: 18083
           - nginx_tag: stable-alpine
+            nginx_image_digest: sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
             arch: arm64
             runner: ubuntu-24.04-arm
             port: 18083
@@ -94,8 +129,21 @@ jobs:
           DEFAULT_REPO: ${{ github.server_url }}/${{ github.repository }}.git
           DEFAULT_REF: ${{ github.ref_name }}
           DEFAULT_SHA: ${{ github.sha }}
+          CALLER_MODULE_REPO: ${{ inputs.module_repo || '' }}
+          CALLER_MODULE_REF: ${{ inputs.module_ref || '' }}
+          CALLER_MODULE_SHA: ${{ inputs.module_sha || '' }}
         run: |
-          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+          if [[ -n "${CALLER_MODULE_SHA}" ]]; then
+            if [[ -z "${CALLER_MODULE_REPO}" || -z "${CALLER_MODULE_REF}" ]]; then
+              echo "ERROR: workflow_call must provide module_repo, module_ref, and module_sha together." >&2
+              exit 1
+            fi
+            {
+              printf 'repo=%s\n' "${CALLER_MODULE_REPO}"
+              printf 'ref=%s\n' "${CALLER_MODULE_REF}"
+              printf 'sha=%s\n' "${CALLER_MODULE_SHA}"
+            } >> "$GITHUB_OUTPUT"
+          elif [[ "${EVENT_NAME}" == "pull_request" ]]; then
             {
               printf 'repo=%s\n' "${PR_REPO}"
               printf 'ref=%s\n' "${PR_REF}"
@@ -117,7 +165,7 @@ jobs:
           load: true
           tags: nginx-markdown-official-check:${{ matrix.nginx_tag }}-${{ matrix.arch }}
           build-args: |
-            NGINX_IMAGE=nginx:${{ matrix.nginx_tag }}
+            NGINX_IMAGE=nginx@${{ matrix.nginx_image_digest }}
             MODULE_REPO=${{ steps.source.outputs.repo }}
             MODULE_REF=${{ steps.source.outputs.ref }}
             MODULE_SHA=${{ steps.source.outputs.sha }}

@@ -110,7 +110,7 @@ pub struct EligibilityInput<'a> {
     /// Configured `markdown_content_types` allowlist; empty means the
     /// built-in default of `text/html` only.
     pub content_types: &'a [&'a [u8]],
-    /// Configured `markdown_stream_types` unbounded-streaming exclusions.
+    /// Configured `markdown_stream_excluded_types` unbounded-streaming exclusions.
     pub stream_types: &'a [&'a [u8]],
     /// Response `Content-Length`; negative means absent/unknown.
     pub content_length: i64,

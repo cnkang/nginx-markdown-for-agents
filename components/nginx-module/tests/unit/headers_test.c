@@ -40,6 +40,7 @@ struct ngx_list_part_s {
 
 typedef struct {
     ngx_list_part_t part;
+    ngx_list_part_t *last;
     size_t size;
     ngx_uint_t nalloc;
     void *pool;
@@ -52,6 +53,9 @@ struct pool_alloc_s {
     pool_alloc_t *next;
 };
 
+static ngx_uint_t g_fail_list_push_after_expand;
+static ngx_uint_t g_list_was_expanded;
+
 typedef struct {
     pool_alloc_t *allocs;
 } ngx_pool_t;
@@ -62,11 +66,16 @@ typedef struct {
     ngx_str_t content_type;
     ngx_str_t charset;
     size_t content_type_len;
+    u_char *content_type_lowcase;
+    ngx_uint_t content_type_hash;
     off_t content_length_n;
+    time_t last_modified_time;
     ngx_table_elt_t *etag;
+    ngx_table_elt_t *last_modified;
     ngx_table_elt_t *content_encoding;
     ngx_table_elt_t *accept_ranges;
     ngx_list_t headers;
+    ngx_list_t trailers;
 } ngx_http_headers_out_t;
 
 typedef struct {
@@ -92,7 +101,6 @@ typedef struct {
         ngx_flag_t generate_etag;
         ngx_uint_t conditional_requests;
     } policy;
-    ngx_flag_t buffer_chunked;
     void *stream_types;
 } ngx_http_markdown_conf_t;
 
@@ -111,6 +119,8 @@ typedef struct {
 ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                            const MarkdownResult *result,
                                            const ngx_http_markdown_conf_t *conf);
+ngx_int_t ngx_http_markdown_head_representation_headers(ngx_http_request_t *r);
+void ngx_http_markdown_clear_trailers(ngx_http_request_t *r);
 
 /* Mocks required by ngx_http_markdown_headers_standalone.c */
 void *
@@ -143,15 +153,43 @@ ngx_pnalloc(ngx_pool_t *pool, size_t size)
 ngx_table_elt_t *
 ngx_list_push(ngx_list_t *list)
 {
+    ngx_list_part_t *last;
+    ngx_list_part_t *part;
     ngx_table_elt_t *elts;
-    if (list->part.elts == NULL) {
+
+    if (list == NULL || list->part.elts == NULL) {
         return NULL;
     }
-    if (list->part.nelts >= list->nalloc) {
-        return NULL;
+
+    last = (list->last != NULL) ? list->last : &list->part;
+    if (last->nelts >= list->nalloc) {
+        if (g_fail_list_push_after_expand && g_list_was_expanded) {
+            return NULL;
+        }
+
+        part = (ngx_list_part_t *) ngx_pnalloc(
+            (ngx_pool_t *) list->pool, sizeof(*part));
+        if (part == NULL) {
+            return NULL;
+        }
+        part->elts = ngx_pnalloc((ngx_pool_t *) list->pool,
+                                 list->nalloc * list->size);
+        if (part->elts == NULL) {
+            return NULL;
+        }
+        part->nelts = 0;
+        part->next = NULL;
+        last->next = part;
+        list->last = part;
+        last = part;
+        g_list_was_expanded = 1;
     }
-    elts = (ngx_table_elt_t *) list->part.elts;
-    return &elts[list->part.nelts++];
+
+    elts = (ngx_table_elt_t *) last->elts;
+    if (list->last == NULL) {
+        list->last = last;
+    }
+    return &elts[last->nelts++];
 }
 
 void
@@ -208,14 +246,15 @@ ngx_http_markdown_sprintf_token(u_char *buf, ngx_uint_t token_count)
 }
 
 static void
-init_headers_list(ngx_list_t *list, ngx_uint_t capacity)
+init_headers_list(ngx_list_t *list, ngx_uint_t capacity, ngx_pool_t *pool)
 {
     list->size = sizeof(ngx_table_elt_t);
     list->nalloc = capacity;
-    list->pool = NULL;
+    list->pool = pool;
     list->part.elts = calloc(capacity, sizeof(ngx_table_elt_t));
     list->part.nelts = 0;
     list->part.next = NULL;
+    list->last = &list->part;
 }
 
 static void
@@ -339,7 +378,11 @@ new_request(void)
     memset(&r, 0, sizeof(r));
     r.pool = pool;
     r.connection = conn;
-    init_headers_list(&r.headers_out.headers, 32);
+    init_headers_list(&r.headers_out.headers, 32, pool);
+    init_headers_list(&r.headers_out.trailers, 4, pool);
+    /* The returned request is copied, so never retain a stack address. */
+    r.headers_out.headers.last = NULL;
+    r.headers_out.trailers.last = NULL;
     return r;
 }
 
@@ -353,6 +396,10 @@ free_request(ngx_http_request_t *r)
     free(r->headers_out.headers.part.elts);
     r->headers_out.headers.part.elts = NULL;
     r->headers_out.headers.part.nelts = 0;
+
+    free(r->headers_out.trailers.part.elts);
+    r->headers_out.trailers.part.elts = NULL;
+    r->headers_out.trailers.part.nelts = 0;
 
     free(r->connection);
     r->connection = NULL;
@@ -536,6 +583,43 @@ test_update_headers_etag_existing_vary_accept(void)
 }
 
 static void
+test_update_headers_etag_existing_vary_accept_trailing_ows(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    static uint8_t etag_value[] = "\"abc123\"";
+    ngx_table_elt_t *vary;
+
+    TEST_SUBSECTION("Update headers with trailing OWS in Vary: Accept");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+    conf.token_estimate = 0;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = etag_value;
+    result.etag_len = sizeof(etag_value) - 1;
+
+    push_header(&r, "Vary", "User-Agent, Accept\t");
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers should accept trailing HTAB in Vary");
+
+    TEST_ASSERT(count_active_headers(&r, "Vary") == 1,
+                "Vary with trailing HTAB should not be duplicated");
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "Vary header should still exist");
+    TEST_ASSERT(vary->value.len == sizeof("User-Agent, Accept\t") - 1
+                && memcmp(vary->value.data, "User-Agent, Accept\t",
+                          vary->value.len) == 0,
+                "Vary header value should remain unchanged");
+
+    free_request(&r);
+    TEST_PASS("Trailing HTAB in Vary is handled");
+}
+
+static void
 test_update_headers_token_zero(void)
 {
     ngx_http_request_t r = new_request();
@@ -706,6 +790,366 @@ test_update_headers_skips_invalidated_accept_ranges(void)
     TEST_PASS("Invalidated Accept-Ranges entries are skipped");
 }
 
+static void
+test_update_headers_prepare_failure_rolls_back(void)
+{
+    ngx_http_request_t       r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult           result;
+    ngx_table_elt_t           *content_encoding;
+    ngx_table_elt_t           *etag;
+    ngx_table_elt_t            before[2];
+    ngx_uint_t                 original_nelts;
+
+    TEST_SUBSECTION("Header prepare failure restores the original response");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = (uint8_t *) "\"new-etag\"";
+    result.etag_len = sizeof("\"new-etag\"") - 1;
+
+    content_encoding = push_header(&r, "Content-Encoding", "gzip");
+    etag = push_header(&r, "ETag", "\"upstream\"");
+    r.headers_out.content_encoding = content_encoding;
+    r.headers_out.etag = etag;
+    r.allow_ranges = 1;
+    original_nelts = r.headers_out.headers.part.nelts;
+    before[0] = *(ngx_table_elt_t *) r.headers_out.headers.part.elts;
+    before[1] = ((ngx_table_elt_t *) r.headers_out.headers.part.elts)[1];
+
+    /* Force the P2 ETag list push to fail after P1 has applied its plan. */
+    r.headers_out.headers.nalloc = original_nelts;
+    g_fail_list_push_after_expand = 1;
+    g_list_was_expanded = 1;
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf)
+                    == NGX_ERROR,
+                "ETag prepare failure should abort header update");
+    TEST_ASSERT(r.headers_out.headers.part.nelts == original_nelts,
+                "failed prepare must restore header-list cardinality");
+    TEST_ASSERT(memcmp(r.headers_out.headers.part.elts, before,
+                       sizeof(before)) == 0,
+                "failed prepare must restore existing header entries");
+    TEST_ASSERT(r.headers_out.content_encoding == content_encoding,
+                "failed prepare must restore Content-Encoding pointer");
+    TEST_ASSERT(r.headers_out.etag == etag,
+                "failed prepare must restore ETag pointer");
+    TEST_ASSERT(r.allow_ranges == 1,
+                "failed prepare must restore allow_ranges");
+
+    g_fail_list_push_after_expand = 0;
+    g_list_was_expanded = 0;
+    free_request(&r);
+    TEST_PASS("Header prepare failure is atomic");
+}
+
+static void
+test_update_headers_multipart_failure_restores_chain(void)
+{
+    ngx_http_request_t       r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult           result;
+    ngx_table_elt_t           *content_encoding;
+    ngx_table_elt_t           before[2];
+    ngx_list_part_t          *original_last;
+    ngx_list_part_t          *original_next;
+    ngx_uint_t                 total;
+
+    TEST_SUBSECTION("Multipart header rollback restores list links");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+    conf.token_estimate = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = (uint8_t *) "\"new-etag\"";
+    result.etag_len = sizeof("\"new-etag\"") - 1;
+    result.token_estimate = 1;
+
+    content_encoding = push_header(&r, "Content-Encoding", "gzip");
+    push_header(&r, "Content-Length", "10");
+    r.headers_out.content_encoding = content_encoding;
+
+    /* Model a full production list part before the snapshot is taken. */
+    r.headers_out.headers.nalloc = 2;
+    original_last = r.headers_out.headers.last;
+    original_next = original_last->next;
+    before[0] = ((ngx_table_elt_t *) original_last->elts)[0];
+    before[1] = ((ngx_table_elt_t *) original_last->elts)[1];
+
+    /* P2 expands to a new part; P4 then fails on its next push. */
+    g_fail_list_push_after_expand = 1;
+    g_list_was_expanded = 0;
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf)
+                    == NGX_ERROR,
+                "multipart prepare failure should abort header update");
+    TEST_ASSERT(r.headers_out.headers.last == original_last,
+                "rollback must restore the original last list part");
+    TEST_ASSERT(original_last->next == original_next,
+                "rollback must restore the original last part next pointer");
+    TEST_ASSERT(original_last->nelts == 2,
+                "rollback must restore the original last part cardinality");
+
+    total = 0;
+    for (ngx_list_part_t *part = &r.headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        total += part->nelts;
+    }
+    TEST_ASSERT(total == 2,
+                "rollback must detach every newly allocated list part");
+    TEST_ASSERT(memcmp(original_last->elts, before, sizeof(before)) == 0,
+                "rollback must preserve all original multipart entries");
+    TEST_ASSERT(r.headers_out.content_encoding == content_encoding,
+                "multipart rollback must restore typed header pointers");
+
+    g_fail_list_push_after_expand = 0;
+    g_list_was_expanded = 0;
+    free_request(&r);
+    TEST_PASS("Multipart header rollback restores list links");
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ * HEAD representation headers
+ * ══════════════════════════════════════════════════════════════════ */
+
+static void
+push_trailer(ngx_http_request_t *r, const char *name, const char *value);
+
+static void
+test_head_representation_headers_strips_html_metadata(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_table_elt_t   *vary;
+    ngx_table_elt_t   *trailer;
+
+    TEST_SUBSECTION("HEAD representation headers describe Markdown");
+
+    /* Upstream HTML representation metadata the HEAD must strip. */
+    push_header(&r, "Content-Type", "text/html");
+    push_header(&r, "Content-Encoding", "gzip");
+    push_header(&r, "Content-Length", "2048");
+    push_header(&r, "ETag", "\"html-etag\"");
+    push_header(&r, "Last-Modified", "Wed, 01 Jan 2025 00:00:00 GMT");
+    push_header(&r, "Accept-Ranges", "bytes");
+    push_header(&r, "Content-MD5", "abc123");
+    push_header(&r, "Digest", "sha-256=:abc123:");
+    push_header(&r, "Content-Digest", "sha-256=:abc123:");
+    push_header(&r, "Repr-Digest", "sha-256=:abc123:");
+    push_header(&r, "X-Markdown-Tokens", "42");
+    push_header(&r, "Trailer", "Content-Digest");
+    push_trailer(&r, "Content-Digest", "sha-256=:abc123:");
+    r.headers_out.content_type.data = (u_char *) "text/html";
+    r.headers_out.content_type.len = sizeof("text/html") - 1;
+    r.headers_out.content_type_len = sizeof("text/html") - 1;
+    r.headers_out.content_length_n = 2048;
+    r.headers_out.last_modified_time = 1234567890;
+    r.headers_out.etag = push_header(&r, "ETag", "\"html-etag\"");
+    r.headers_out.accept_ranges = (ngx_table_elt_t *) 1;
+
+    TEST_ASSERT(ngx_http_markdown_head_representation_headers(&r) == NGX_OK,
+                "HEAD representation headers should succeed");
+
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
+                        "text/markdown; charset=utf-8"),
+                "HEAD Content-Type should be Markdown");
+    TEST_ASSERT(r.headers_out.content_encoding == NULL,
+                "HEAD Content-Encoding should be cleared");
+    TEST_ASSERT(r.headers_out.content_length_n == -1,
+                "HEAD Content-Length should be removed (not fabricated)");
+    TEST_ASSERT(r.headers_out.etag == NULL,
+                "HEAD ETag should be removed (not fabricated)");
+    TEST_ASSERT(r.headers_out.last_modified_time == (time_t) -1,
+                "HEAD Last-Modified should be removed");
+    TEST_ASSERT(r.headers_out.accept_ranges == NULL,
+                "HEAD Accept-Ranges should be cleared");
+
+    TEST_ASSERT(find_header(&r, "Content-MD5") == NULL,
+                "HEAD strips Content-MD5");
+    TEST_ASSERT(find_header(&r, "Digest") == NULL,
+                "HEAD strips Digest");
+    TEST_ASSERT(find_header(&r, "Content-Digest") == NULL,
+                "HEAD strips Content-Digest");
+    TEST_ASSERT(find_header(&r, "Repr-Digest") == NULL,
+                "HEAD strips Repr-Digest");
+    TEST_ASSERT(find_header(&r, "X-Markdown-Tokens") == NULL,
+                "HEAD strips X-Markdown-Tokens");
+    TEST_ASSERT(find_header(&r, "Trailer") == NULL,
+                "HEAD strips Trailer declaration");
+    TEST_ASSERT(find_header(&r, "ETag") == NULL,
+                "HEAD strips ETag entries");
+    TEST_ASSERT(find_header(&r, "Content-Length") == NULL,
+                "HEAD strips Content-Length entries");
+    TEST_ASSERT(find_header(&r, "Last-Modified") == NULL,
+                "HEAD strips Last-Modified entries");
+    trailer = (ngx_table_elt_t *) r.headers_out.trailers.part.elts;
+    TEST_ASSERT(trailer != NULL && trailer[0].hash == 0,
+                "HEAD suppresses actual trailer entries");
+
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "HEAD has Vary");
+    TEST_ASSERT(find_substr(vary->value.data, vary->value.len, "Accept", 6),
+                "HEAD Vary includes Accept");
+
+    free_request(&r);
+    TEST_PASS("HEAD representation headers verified");
+}
+
+static void
+test_head_representation_headers_null(void)
+{
+    TEST_SUBSECTION("HEAD representation headers NULL request");
+
+    TEST_ASSERT(ngx_http_markdown_head_representation_headers(NULL)
+                    == NGX_ERROR,
+                "NULL request should fail");
+
+    TEST_PASS("NULL request validation works");
+}
+
+/*
+ * Adversarial duplicate-header regression: upstream may carry
+ * Content-Type / Content-Encoding / Last-Modified both as dedicated
+ * fields and as multiple header-list entries (including charset
+ * variants and multi-part lists).  After the HEAD representation
+ * rewrite there must be exactly one effective Content-Type (the
+ * Markdown media type), zero Content-Encoding entries, and zero
+ * Last-Modified entries — with the typed pointer and time mirror
+ * cleared together.
+ */
+static void
+test_head_representation_headers_duplicate_entries(void)
+{
+    ngx_http_request_t r = new_request();
+
+    TEST_SUBSECTION("HEAD representation headers purge duplicates");
+
+    push_header(&r, "Content-Type", "text/html");
+    push_header(&r, "Content-Type", "text/html; charset=iso-8859-1");
+    push_header(&r, "Content-Encoding", "gzip");
+    push_header(&r, "Content-Encoding", "br");
+    push_header(&r, "Last-Modified", "Wed, 01 Jan 2025 00:00:00 GMT");
+    push_header(&r, "Last-Modified", "Wed, 01 Jan 2025 01:00:00 GMT");
+    r.headers_out.content_type.data = (u_char *) "text/html";
+    r.headers_out.content_type.len = sizeof("text/html") - 1;
+    r.headers_out.content_type_len = sizeof("text/html") - 1;
+    r.headers_out.content_encoding = NULL;
+    r.headers_out.last_modified_time = 1234567890;
+    r.headers_out.last_modified =
+        push_header(&r, "Last-Modified", "Wed, 01 Jan 2025 02:00:00 GMT");
+
+    TEST_ASSERT(ngx_http_markdown_head_representation_headers(&r) == NGX_OK,
+                "HEAD representation rewrite should succeed");
+
+    TEST_ASSERT(count_active_headers(&r, "Content-Type") == 0,
+                "all stale Content-Type list entries must be invalidated "
+                "(a survivor would emit a second Content-Type)");
+    TEST_ASSERT(count_active_headers(&r, "Content-Encoding") == 0,
+                "all stale Content-Encoding list entries must be invalidated");
+    TEST_ASSERT(count_active_headers(&r, "Last-Modified") == 0,
+                "duplicate Last-Modified entries must all be invalidated "
+                "(stop_after_first would leave later entries alive)");
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
+                        "text/markdown; charset=utf-8"),
+                "dedicated Content-Type must be the Markdown media type");
+    TEST_ASSERT(r.headers_out.content_encoding == NULL,
+                "dedicated Content-Encoding pointer must be cleared");
+    TEST_ASSERT(r.headers_out.last_modified_time == (time_t) -1,
+                "Last-Modified time mirror must be reset");
+    TEST_ASSERT(r.headers_out.last_modified == NULL,
+                "Last-Modified typed pointer must be cleared together with "
+                "the time mirror");
+
+    free_request(&r);
+    TEST_PASS("HEAD duplicate representation headers purged");
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ * Response trailers clearing
+ * ══════════════════════════════════════════════════════════════════ */
+
+static void
+push_trailer(ngx_http_request_t *r, const char *name, const char *value)
+{
+    ngx_table_elt_t *h = ngx_list_push(&r->headers_out.trailers);
+    TEST_ASSERT(h != NULL, "trailer push should succeed");
+    h->hash = 1;
+    h->key.data = (u_char *) name;
+    h->key.len = strlen(name);
+    h->value.data = (u_char *) value;
+    h->value.len = strlen(value);
+}
+
+static void
+test_clear_trailers_suppresses_all_entries(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_table_elt_t *elts;
+    ngx_uint_t i;
+
+    TEST_SUBSECTION("clear_trailers suppresses upstream representation trailers");
+
+    push_trailer(&r, "Content-Digest", "sha-256=:abc123:");
+    push_trailer(&r, "Repr-Digest", "sha-256=:abc123:");
+    push_trailer(&r, "Digest", "sha-256=:abc123:");
+    push_trailer(&r, "X-Markdown-Tokens", "42");
+
+    ngx_http_markdown_clear_trailers(&r);
+
+    elts = (ngx_table_elt_t *) r.headers_out.trailers.part.elts;
+    for (i = 0; i < r.headers_out.trailers.part.nelts; i++) {
+        TEST_ASSERT(elts[i].hash == 0,
+                    "every trailer entry must be invalidated (hash=0)");
+    }
+    TEST_ASSERT(r.headers_out.trailers.part.nelts == 4,
+                "trailer entries remain in the list but are suppressed");
+
+    free_request(&r);
+    TEST_PASS("clear_trailers suppresses all trailer entries");
+}
+
+static void
+test_clear_trailers_empty_list(void)
+{
+    ngx_http_request_t r = new_request();
+
+    TEST_SUBSECTION("clear_trailers handles an empty trailer list");
+
+    ngx_http_markdown_clear_trailers(&r);
+
+    TEST_ASSERT(r.headers_out.trailers.part.nelts == 0,
+                "empty trailer list stays empty");
+
+    free_request(&r);
+    TEST_PASS("clear_trailers handles empty list");
+}
+
+static void
+test_clear_trailers_null_elts_with_entries(void)
+{
+    ngx_http_request_t r = new_request();
+
+    TEST_SUBSECTION("clear_trailers handles a malformed list part");
+
+    free(r.headers_out.trailers.part.elts);
+    r.headers_out.trailers.part.elts = NULL;
+    r.headers_out.trailers.part.nelts = 1;
+
+    ngx_http_markdown_clear_trailers(&r);
+
+    TEST_ASSERT(r.headers_out.trailers.part.nelts == 1,
+                "malformed trailer part remains untouched after guard");
+
+    free_request(&r);
+    TEST_PASS("clear_trailers guards NULL elts with entries");
+}
+
 int
 main(void)
 {
@@ -718,11 +1162,20 @@ main(void)
     test_update_headers_null_args();
     test_update_headers_etag_no_existing();
     test_update_headers_etag_existing_vary_accept();
+    test_update_headers_etag_existing_vary_accept_trailing_ows();
     test_update_headers_token_zero();
     test_update_headers_ignores_invalidated_vary();
     test_update_headers_creates_vary_after_invalidated_only();
     test_update_headers_removes_duplicate_content_encoding();
     test_update_headers_skips_invalidated_accept_ranges();
+    test_update_headers_prepare_failure_rolls_back();
+    test_update_headers_multipart_failure_restores_chain();
+    test_head_representation_headers_strips_html_metadata();
+    test_head_representation_headers_null();
+    test_head_representation_headers_duplicate_entries();
+    test_clear_trailers_suppresses_all_entries();
+    test_clear_trailers_empty_list();
+    test_clear_trailers_null_elts_with_entries();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

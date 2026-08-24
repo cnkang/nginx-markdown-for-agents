@@ -28,6 +28,12 @@ from _packaging_constants import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "release" / "matrix"))
+from normalize_matrix import (  # noqa: E402
+    MatrixNormalizationError,
+    normalize_compatibility_document,
+)
+
 README = ROOT / "README.md"
 INSTALL_GUIDE = ROOT / "docs" / "guides" / "INSTALLATION.md"
 RELEASE_MATRIX = ROOT / "tools" / "release-matrix.json"
@@ -40,6 +46,14 @@ REFERENCE_CONFIG = ROOT / "examples" / "nginx-configs" / "01-minimal-reverse-pro
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def _target_arch(target: str) -> str:
+    """Return the package architecture represented by a matrix target."""
+    aliases = {"amd64": "x86_64", "arm64": "aarch64"}
+    if target in aliases:
+        return aliases[target]
+    return target.split("-", 1)[0]
 
 
 def _extract_quick_start(text: str) -> str:
@@ -295,9 +309,18 @@ def check_matrix_consistency() -> list[str]:
     row in the installation guide compatibility matrix table."""
     errors: list[str] = []
     try:
-        matrix_data = json.loads(_read(RELEASE_MATRIX))
-    except json.JSONDecodeError:
-        return [f"{RELEASE_MATRIX.relative_to(ROOT)} is invalid JSON"]
+        matrix_raw = json.loads(_read(RELEASE_MATRIX))
+    except json.JSONDecodeError as exc:
+        return [
+            f"{RELEASE_MATRIX.relative_to(ROOT)} is invalid JSON: {exc}"
+        ]
+    try:
+        matrix_data = normalize_compatibility_document(matrix_raw)
+    except MatrixNormalizationError as exc:
+        return [
+            f"{RELEASE_MATRIX.relative_to(ROOT)} has invalid matrix schema: "
+            f"{exc}"
+        ]
     install_text = _read(INSTALL_GUIDE)
 
     m = re.search(
@@ -310,10 +333,18 @@ def check_matrix_consistency() -> list[str]:
 
     table_rows = _parse_matrix_table(m[1])
 
-    for entry in matrix_data.get("matrix", []):
-        if entry.get("support_tier", "").lower() != "full":
+    matched = 0
+    for entry in matrix_data.get("entries", []):
+        if (
+            entry.get("artifact_type") != "dynamic-module"
+            or entry.get("support_tier") != "supported"
+            or entry.get("libc") not in {"glibc", "musl"}
+        ):
             continue
-        nginx, os_type, arch = entry["nginx"], entry["os_type"], entry["arch"]
+        matched += 1
+        nginx = entry["nginx_version"]
+        os_type = entry["libc"]
+        arch = _target_arch(entry["target"])
         matching = [
             r for r in table_rows
             if r[0] == nginx and r[1] == os_type and r[2] == arch
@@ -329,6 +360,11 @@ def check_matrix_consistency() -> list[str]:
                 f"nginx={nginx} os_type={os_type} arch={arch} "
                 f"expected 'Full' but found '{matching[0][3]}'"
             )
+    if matched == 0:
+        errors.append(
+            "Release matrix contains no dynamic-module/supported entries to "
+            "cross-check against the installation guide compatibility table"
+        )
     return errors
 
 

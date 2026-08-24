@@ -1,6 +1,6 @@
 ---
 domain: observability-metrics
-rules: [7, 8, 8b, 8c, 23]
+rules: [7, 8, 8b, 8c, 23, 67]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/**"
@@ -17,8 +17,8 @@ Required:
 - Keep reason-code behavior and tests aligned when eligibility logic changes.
 - For protocol edge statuses (for example 206), map to the intended reason consistently even in malformed upstream scenarios.
 - When adding a new reason code string definition and accessor function, the
-  corresponding `ngx_http_markdown_log_decision()` callsite(s) must be added in
-  the same changeset.  A reason code that is defined but never emitted at
+  developer must add corresponding `ngx_http_markdown_log_decision()` callsite(s) in
+  the same changeset.  A reason code that appears but never gets emitted at
   runtime is a contract violation — operators and docs will reference a code
   that never appears in logs.
 - When adding a new family of reason codes (for example a `STREAMING_*`
@@ -32,10 +32,21 @@ Required:
   enumeration or a registry-based approach over open-ended prefix matching
   when the set of classifiable values grows across subsystem boundaries.
 - Degradation reason codes (for example fallback/retry/deferred paths that
-  indicate the preferred engine/path could not complete) must be classified as
+  indicate the preferred engine/path could not complete) must classify as
   operationally visible outcomes in severity gating (typically failure/warn).
   Do not classify degradation-only outcomes as informational by default when
   that would hide rollout risk at `warn` verbosity.
+- Keep the public-surface inventory contract synchronized with source, not just
+  by symbol name. Directive entries include classification, handler, context,
+  argument contract, defaults, syntax, migration target, and removal
+  classification,
+  metric entries include type, labels, order, and bounded-cardinality policy,
+  reason entries include discriminant, variant string, metric family, C
+  accessor, and registry count. Duplicate, malformed, or symlink-escaped
+  inventory/source inputs must fail closed.  The gate is
+  `make public-surface-drift-check` (`tools/harness/detect_public_surface_drift.py`,
+  blocking step of `release-gates-check-092` and the CI
+  `release-092-contract-gates` job).
 
 ---
 
@@ -61,7 +72,7 @@ Required:
   exist yet, defer the metric to a future release instead of shipping a dead
   field.
 - Metric names and HELP text must accurately describe what is actually
-  measured.  If a metric is named `ttfb_seconds` (time-to-first-byte), the
+  measured.  If a metric carries the name `ttfb_seconds` (time-to-first-byte), the
   write site must fire at the first-byte event, not at finalize or request
   completion.  Semantic mismatch between name and measurement is a bug, not a
   documentation issue.
@@ -77,13 +88,14 @@ Required:
   actually measure that quantity.  Do not alias one metric to another with a
   misleading name (for example assigning `cpu_time_ms = ttlb_ms` and calling
   it CPU time).  If the true measurement is unavailable, either (a) use a
-  name that accurately describes what is measured (for example `wall_time_ms`),
+  name that accurately describes what the metric measures (for example `wall_time_ms`),
   (b) add a comment explicitly documenting the approximation and its
   limitations, or (c) defer the metric to a future release when the proper
   data source is available.
-- **Counter metrics that track delivery outcomes (for example `results.failopen_count`)
-  must be incremented only after the delivery operation succeeds (downstream filter
-  returns `NGX_OK`), not at the decision point that initiates the delivery.**
+- **The module must increment counter metrics that track delivery outcomes (for
+  example `results.failopen_count`) only after the downstream delivery succeeds
+  (the downstream filter returns `NGX_OK` or `NGX_DONE`), not at the decision
+  point that initiates the delivery.**
   Separate "decision" counters (for example `streaming.precommit_failopen_total`)
   from "delivery" counters (for example `results.failopen_count`) to prevent
   inflating the delivery count when the downstream send later fails (header
@@ -94,8 +106,8 @@ Required:
 
 ### 8b. Configuration–code alignment for tooling
 Historical issues: evidence targets nested under `targets` key but code read
-top-level keys; `no_regression_small_medium` in JSON but `no_regression` in
-code; `html_bytes` in Rust output but `input_bytes` in Python readers.
+top-level keys, `no_regression_small_medium` in JSON but `no_regression` in
+code, `html_bytes` in Rust output but `input_bytes` in Python readers.
 
 Required:
 - When a configuration file (JSON, TOML, YAML) defines a nested schema (for
@@ -116,7 +128,7 @@ Required:
   chain (for example `tier_data.get("html_bytes") or tier_data.get("input_bytes")`).
   This is the consumer's responsibility — the producer's key name is the
   source of truth.
-- **When combined reports are used** (for example `--engine both` produces a
+- **When the harness uses combined reports** (for example `--engine both` produces a
   single JSON with both full-buffer `tiers` and streaming `streaming_metrics`),
   every evidence evaluation function that reads streaming data must check
   **both** `streaming_metrics` (primary) and `tiers` (fallback), because the
@@ -126,7 +138,7 @@ Required:
 
 ### 8c. Benchmark averaging consistency
 Historical issues: warmup and fallback iterations included in latency/throughput
-averages but not in durations; markdown/token averages divided by `total_iters`
+averages but not in durations, markdown/token averages divided by `total_iters`
 while p50/p95 computed only from measured iterations.
 
 Required:
@@ -158,13 +170,13 @@ Required:
 - Every new metric field must have a complete lifecycle in the same changeset:
   struct field → snapshot copy → output renderer(s) → runtime write site.
   If any link is missing (especially the runtime write site), the metric is
-  dead and must not be shipped.  Verify by grep: every field added to
+  dead and must not ship.  Verify by grep: every field added to
   `ngx_http_markdown_metrics_t` must appear in at least one
   `NGX_HTTP_MARKDOWN_METRIC_INC` / `METRIC_ADD` or direct assignment outside
   of snapshot collection.
 - Every new reason code must have a complete lifecycle in the same changeset:
   static string definition → accessor function → `ngx_http_markdown_log_decision()`
-  callsite at the corresponding runtime branch.  A reason code that is defined
+  callsite at the corresponding runtime branch.  A reason code that appears
   and documented but never emitted is a contract violation.
 - Gauge metrics that claim to measure a specific event (for example
   "time-to-first-byte") must write their value at that event, not at a
@@ -175,8 +187,8 @@ Required:
   field, Rust stats, external API response, upstream header, submodule
   state), verify the complete producer→consumer chain exists in the same
   change set.** Apply this checklist:
-  1. **Producer side**: the source struct/type has the field, and it is
-     populated at the correct lifecycle point (for example Rust
+  1. **Producer side**: the source struct/type has the field, and the code
+     populates it at the correct lifecycle point (for example Rust
      `StreamingStats.peak_memory_estimate` updated during conversion,
      FFI return struct includes the field).
   2. **Boundary crossing**: the FFI/interface layer exposes the field
@@ -200,21 +212,21 @@ Required:
   - Documentation and spec files that describe the interface contract
   
   Before merging, grep for all references to the modified type across
-  the language boundary and confirm each one compiles and is
-  semantically consistent. Do not assume "the other side will be
+  the language boundary and confirm each one compiles and stays
+  semantically consistent. Do not assume "the other side will get
   updated later" — boundary drift causes silent ABI mismatches that
   are expensive to debug.
-- Operator-facing docs that reference metrics must be validated against the
+- Operator-facing docs that reference metrics must validate against the
   actual output of each format (JSON key paths, Prometheus series names).
   Do not invent metric names that do not appear in any renderer.  For
   derived rates, always include the formula using real metric names.
 - Observability side-effects (counter increments, reason code logging, gauge
-  writes) must be recorded **after** the event they describe succeeds, not
-  before the attempt.  If both "attempt" and "completion" semantics are
+  writes) must record **after** the event they describe succeeds, not
+  before the attempt.  If both "attempt" and "completion" semantics become
   needed, use separate counters with unambiguous names.
 - **Delivery counters must be distinct from decision counters.** A decision
   counter (for example `precommit_failopen_total`) records the control-flow
-  choice; a delivery counter (for example `results.failopen_count`) records
+  choice, a delivery counter (for example `results.failopen_count`) records
   successful downstream transmission.  Incrementing the delivery counter at
   the decision point inflates the count when the downstream send fails.  See
   Rule 8 for the concrete `failopen_count` contract and Rule 38 for the
@@ -233,7 +245,7 @@ Required:
   path requires `rc == OK`, the resume path must also require `rc == OK`, not
   merely `rc != ERROR`.
 - In NGINX filter context specifically, `NGX_AGAIN` means "suspended /
-  backpressure — bytes not yet delivered" and must not be treated as a
+  backpressure — bytes not yet delivered" and must not count as a
   successful send for observability.  Only `NGX_OK` and `NGX_DONE` confirm
   downstream acceptance.  When `NGX_AGAIN` occurs, defer the gauge write to
   the resume path where the pending chain drains with a confirmed success code.
@@ -245,24 +257,24 @@ Required:
   defer, everything else → failure), then apply the matching side-effects
   on every path.  Asymmetric metric treatment causes "observed success but
   actual failure" drift that is expensive to debug in production.
-- **When a deferred-state latch (flag, buffer, or pending marker) is used
+- **When the code uses a deferred-state latch (flag, buffer, or pending marker)
   to bridge `NGX_AGAIN` across calls, every function that can encounter
   `NGX_AGAIN` for the same logical operation must set that latch.** Do not
   assume "only the first caller can hit backpressure" — any function that
   performs downstream send can receive `NGX_AGAIN` and must participate in
   the deferral protocol.  Grep for all call sites that perform the same
   send/output operation and confirm each one sets the latch on `NGX_AGAIN`.
-- **Deferred-state latches must be cleared on both success AND failure
+- **Deferred-state latches must clear on both success AND failure
   resume paths.** Leaving a latch set after a failure can cause stale
   state on re-entry (for example double-counting success on a subsequent
   unrelated drain). The cleanup should be the first action in the failure
   branch, before recording failure metrics.
-- **Gauge metrics should be updated unconditionally on every successful
+- **Gauge metrics should update unconditionally on every successful
   sample**, not guarded by value-range conditions (for example `> 0`).
   A gauge represents "the most recent sample" — skipping the update
   because the value is zero or empty causes the gauge to retain a stale
   value from a previous request, which misleads operators and dashboards.
-  If distinguishing "no sample" from "sample is zero" is required, add
+  If distinguishing "no sample" from "sample is zero" becomes necessary, add
   a separate validity flag or sentinel metric rather than skipping the
   write.
 - When a bug fix extends a classification branch to cover additional values
@@ -273,7 +285,7 @@ Required:
 - **Format string argument matching**: when adding new metric fields to text
   or JSON renderers that use `ngx_snprintf` or `ngx_slprintf`, manually verify
   that the number and types of format specifiers (`%V`, `%uA`, `%uz`, `%O`,
-  `%i`, `%T`, etc.) exactly match the argument list.  `ngx_snprintf` does not
+  `%i`, `%T`, and so on) exactly match the argument list.  `ngx_snprintf` does not
   perform compile-time type checking — a mismatch silently produces corrupted
   output or reads garbage from the stack.  After adding fields, count
   specifiers and arguments side-by-side.  Prefer extracting per-metric
@@ -286,5 +298,66 @@ Required:
   the number of format arguments passed after the format string.  A
   mismatch (for example `ngx_log_debug2` with only one `%`-substitution
   argument) silently reads garbage from the stack or corrupts the log
-  output.  This applies equally to `ngx_log_debugN` and the error-level
-  `ngx_log_errorN` family.
+  output. NGINX provides `ngx_log_error` for error logging. Validate the
+  suffix argument count only for `ngx_log_debug0` through `ngx_log_debug8`;
+  error logging has no numbered suffix to validate.
+
+---
+
+### Rule 67 — v1 terminal-outcome conservation in the metrics renderer
+
+Historical issues: terminal-outcome conservation regressed repeatedly —
+mutually-exclusive terminal outcomes, conservation across backpressure
+resume, and latency-bucket population all drifted at different times
+because the renderer arithmetic had no standing guard.
+
+Required:
+- `ngx_http_markdown_metrics_to_v1` must partition the conversion-failure
+  space without double counting:
+  `conversions_failed = failed_open + failed_closed + aborted`.
+- `v1->requests.failed_open` reads `results.failopen_count`; the derived
+  `failed_closed` must deduct `failopen_count` and (streaming build)
+  `terminal_aborted_total` from `conversions_failed`; `v1->requests.aborted`
+  must read `terminal_aborted_total`, never the per-path counter
+  `streaming_failure_postcommit_abort` (that counter classifies the failure
+  path, it is not a terminal outcome).
+- Multi-statement derivations (subtract each outcome independently) must
+  deduct every classified outcome before the saturating floor; a missing
+  deduction silently re-classifies failures as `failed_closed`.
+- `v1->requests.aborted = 0` is correct only in the non-streaming build.
+
+Verification:
+- `PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py`
+  — blocking harness-tooling CI check via `make harness-security-checks`
+  for selected `harness_tooling` paths, and a local full-gate check.
+- `PYTHONPATH=tools/harness python3 -m pytest
+  tools/harness/tests/test_detect_metrics_event_conservation.py -q --tb=short`
+  — detector regression tests (clean renderer, stale aborted source,
+  missing failopen deduction, missing renderer).
+
+---
+
+### Streaming Reason Code Naming Convention
+
+Streaming C-only reason codes (defined in
+`components/nginx-module/src/ngx_http_markdown_reason.c` under
+`#ifdef MARKDOWN_STREAMING_ENABLED`) use UPPERCASE format (for example
+`STREAMING_CONVERT`, `STREAMING_FAIL_POSTCOMMIT`,
+`ELIGIBLE_STREAMING_AUTO`). This differs from the lowercase snake_case
+convention used by the Rust `ReasonCode` enum (for example
+`converted`, `decompression_error`, `bypass_no_transform`).
+
+This inconsistency is **known and documented**. It does not affect
+production behavior because these UPPERCASE codes are internal to the C
+streaming engine and are not emitted through the Rust FFI reason-code
+accessor path. They appear only in C-side `ngx_log_decision()` calls
+and metrics classification within the streaming filter path.
+
+**Migration plan**: If a future release promotes any of these internal
+streaming labels to operator-visible reason codes, add the lowercase
+`snake_case` entries to `components/rust-converter/reason_registry.toml`
+and regenerate the Rust/C projections. Do not add a parallel C mapping
+table. The registry generator already owns compatibility aliases for
+canonical legacy keys. Those aliases are distinct from the C-only streaming
+labels described here. Announce any newly public reason in the changelog
+and migration guide with a mapping table.

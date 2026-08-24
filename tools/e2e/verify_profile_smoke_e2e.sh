@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Profile system E2E smoke (spec 50).
+# Explicit configuration E2E smoke (0.9.2 public-surface contract).
 #
-# Validates that profile-specific diagnostics locations load in a real NGINX
-# instance and expose the expected effective configuration. When NGINX_BIN is
+# Validates that explicit replacement settings load in a real NGINX instance
+# and expose the frozen effective configuration. When NGINX_BIN is
 # not set, exits 2 so release gates can explicitly treat the native dependency
 # as deferred instead of silently passing.
 set -euo pipefail
@@ -156,18 +156,28 @@ http {
         server_name localhost;
 
         location = /strict/diagnostics {
-            markdown_profile strict_cache;
             markdown_diagnostics on;
+            markdown_cache_validation full;
+            markdown_streaming off;
+            markdown_limits conversion_memory=128m conversion_timeout=10s
+                parser_timeout=10s max_inflight=32;
         }
 
         location = /balanced/diagnostics {
-            markdown_profile balanced;
             markdown_diagnostics on;
+            markdown_cache_validation ims_only;
+            markdown_streaming auto;
+            markdown_limits conversion_memory=64m conversion_timeout=30s
+                parser_timeout=10s max_inflight=64;
         }
 
         location = /streaming/diagnostics {
-            markdown_profile streaming_first;
             markdown_diagnostics on;
+            markdown_accept wildcard;
+            markdown_cache_validation off;
+            markdown_streaming force;
+            markdown_limits conversion_memory=256m conversion_timeout=30s
+                parser_timeout=10s streaming_buffer=16m max_inflight=128;
         }
     }
 }
@@ -189,9 +199,11 @@ http {
         server_name localhost;
 
         location = /invalid {
-            markdown_profile strict_cache;
+            markdown_cache_validation full;
             markdown_streaming force;
             markdown_diagnostics on;
+            markdown_limits conversion_memory=128m conversion_timeout=10s
+                parser_timeout=10s max_inflight=32;
         }
     }
 }
@@ -231,14 +243,14 @@ assert_diag_field() {
     return 1
 }
 
-echo "=== Profile E2E Smoke (spec 50) ===" >&2
+echo "=== Explicit Configuration E2E Smoke ===" >&2
 echo "NGINX_BIN=${NGINX_BIN}" >&2
 echo "PORT=${PORT}" >&2
 
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf -t
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
 
-# ponytail: poll for pid file — nginx master writes it asynchronously,
+# poll for pid file — nginx master writes it asynchronously,
 # so an immediate -s check races on slow/busy hosts.
 for _i in $(seq 1 50); do
     [[ -s "${RUNTIME}/logs/nginx.pid" ]] && break
@@ -258,26 +270,81 @@ fi
 markdown_wait_for_http "$(e2e_base_url)/balanced/diagnostics" \
     "profile diagnostics on ${PORT}" || exit 1
 
-assert_diag_field /strict/diagnostics profile strict_cache
-assert_diag_field /strict/diagnostics effective_config.streaming off
-assert_diag_field /strict/diagnostics effective_config.cache_validation full
+for path in /strict/diagnostics /balanced/diagnostics /streaming/diagnostics; do
+    if e2e_curl_get "$(e2e_base_url)${path}" --max-time 5 \
+        | python3 -c '
+import json
+import sys
 
-assert_diag_field /balanced/diagnostics profile balanced
-assert_diag_field /balanced/diagnostics effective_config.streaming auto
-assert_diag_field /balanced/diagnostics effective_config.cache_validation ims_only
+data = json.load(sys.stdin)
+assert data["schema_version"] == 2
+assert "profile" not in data
+assert "streaming_config" not in data
+assert "metrics_snapshot" not in data
+assert "effective" in data["configuration"]
+assert "effective_sources" in data["configuration"]
+'; then
+        pass "${path} exposes the frozen diagnostics schema"
+    else
+        fail "${path} diagnostics schema validation"
+    fi
+done
 
-assert_diag_field /streaming/diagnostics profile streaming_first
-assert_diag_field /streaming/diagnostics effective_config.streaming force
-assert_diag_field /streaming/diagnostics effective_config.cache_validation off
+assert_diag_field /strict/diagnostics configuration.effective.streaming_buffer 2097152
+assert_diag_field /balanced/diagnostics configuration.effective.streaming_buffer 2097152
+assert_diag_field /streaming/diagnostics configuration.effective.streaming_buffer 16777216
+
+for path in /strict/diagnostics /balanced/diagnostics /streaming/diagnostics; do
+    assert_diag_field "${path}" configuration.effective.filter off
+    assert_diag_field "${path}" configuration.effective.prune_noise on
+    assert_diag_field "${path}" configuration.effective.log_verbosity info
+    assert_diag_field "${path}" configuration.effective.error_policy pass
+done
+
+# Static (non-dynconf) settings are represented by the location-specific
+# static digest. The effective object intentionally contains only the five
+# dynconf-mutable fields asserted above.
+assert_static_digest() {
+    local path="$1" actual
+    if actual="$(extract_diag_field "${path}" configuration.static_digest)"; then
+        if [[ "${actual}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            pass "${path} configuration.static_digest has sha256 shape"
+            STATIC_DIGEST="${actual}"
+            return 0
+        fi
+    else
+        fail "${path} configuration.static_digest: diagnostics parse failed"
+        return 1
+    fi
+
+    fail "${path} configuration.static_digest: invalid digest ${actual}"
+    return 1
+}
+
+STATIC_DIGEST=""
+assert_static_digest /strict/diagnostics
+strict_static_digest="${STATIC_DIGEST}"
+assert_static_digest /balanced/diagnostics
+balanced_static_digest="${STATIC_DIGEST}"
+assert_static_digest /streaming/diagnostics
+streaming_static_digest="${STATIC_DIGEST}"
+
+if [[ "${strict_static_digest}" != "${balanced_static_digest}" &&
+    "${strict_static_digest}" != "${streaming_static_digest}" &&
+    "${balanced_static_digest}" != "${streaming_static_digest}" ]]; then
+    pass "static configuration digest distinguishes explicit locations"
+else
+    fail "static configuration digest does not distinguish explicit locations"
+fi
 
 if "${NGINX_EXECUTABLE}" -p "${RUNTIME}" \
     -c conf/invalid-strict-streaming.conf -t >/dev/null 2>&1; then
-    fail "strict_cache rejects explicit streaming=force"
+    fail "full cache validation accepted explicit streaming=force"
 else
-    pass "strict_cache rejects explicit streaming=force"
+    pass "full cache validation rejects explicit streaming=force"
 fi
 
-echo "Profile E2E smoke: ${PASS_COUNT} passed, ${FAIL_COUNT} failed" >&2
+echo "Explicit configuration E2E smoke: ${PASS_COUNT} passed, ${FAIL_COUNT} failed" >&2
 if [[ "${FAIL_COUNT}" -ne 0 ]]; then
     exit 1
 fi

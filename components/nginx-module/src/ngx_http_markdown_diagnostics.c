@@ -8,8 +8,9 @@
  *   - Metrics snapshot (current counter values)
  *   - Dynamic configuration state (mtime, version, LKG)
  *
- * The endpoint is gated by the markdown_diagnostics directive (on/off)
- * and access control (default deny, explicit allow needed).
+ * The endpoint is gated by the markdown_diagnostics directive (on/off),
+ * loopback-only peer validation, and native NGINX access-phase directives
+ * (allow/deny).
  *
  * Requirement: REQ-0700-OPERABILITY-001
  * Risk Pack: dynamic-config-hot-reload
@@ -18,10 +19,18 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+#include <string.h>
+#include <time.h>
 
 #include "ngx_http_markdown_diagnostics.h"
+#include "markdown_reason_meta.h"
 #include "ngx_http_markdown_dynconf_snapshot.h"
 #include "ngx_http_markdown_filter_module.h"
+
+/* Unit-test translation units may include system headers before this file. */
+#if !defined(_WIN32)
+extern struct tm *gmtime_r(const time_t *, struct tm *);
+#endif
 
 /*
  * Forward-declare the FFI wrapper for reason code string lookup.
@@ -62,16 +71,24 @@ static ngx_flag_t  ngx_http_markdown_g_diag_recording_requested = 0;
 /*
  * Forward declarations for static helper functions.
  */
-static ngx_int_t ngx_http_markdown_diagnostics_check_cidr(
-    const struct sockaddr *sa, const ngx_array_t *allow_list);
-static ngx_int_t ngx_http_markdown_diagnostics_check_loopback(
-    const struct sockaddr *sa);
 static ngx_int_t ngx_http_markdown_diagnostics_check_access(
     ngx_http_request_t *r);
 static ngx_int_t ngx_http_markdown_diagnostics_build_json(
     ngx_http_request_t *r, ngx_buf_t *b);
 static size_t ngx_http_markdown_diagnostics_json_size(
     const ngx_http_markdown_diag_state_t *state);
+static ngx_int_t ngx_http_markdown_diag_json_string(
+    u_char **pos, const u_char *last, const u_char *value, size_t len);
+static ngx_int_t ngx_http_markdown_diag_json_control(
+    u_char **pos, const u_char *last, u_char value);
+static ngx_int_t ngx_http_markdown_diag_masked_keys(
+    u_char **pos, const u_char *last, ngx_uint_t mask);
+static ngx_int_t ngx_http_markdown_diag_render_dynconf(
+    u_char **pos, u_char *last,
+    const ngx_http_markdown_diag_dynconf_t *dynconf);
+static const char *ngx_http_markdown_diag_outcome(ngx_int_t code);
+static const char *ngx_http_markdown_diag_decision_stage(ngx_int_t code);
+static const char *ngx_http_markdown_diag_error_origin(ngx_int_t code);
 
 
 /*
@@ -198,6 +215,79 @@ void
 ngx_http_markdown_diagnostics_record(ngx_http_markdown_diag_state_t *state,
     ngx_int_t reason_code, ngx_msec_t duration_ms)
 {
+    const char *outcome;
+    const char *error_origin;
+
+    outcome = ngx_http_markdown_diag_outcome(reason_code);
+    error_origin = (outcome[0] == 'f' || outcome[0] == 'a')
+        ? ngx_http_markdown_diag_error_origin(reason_code) : NULL;
+    ngx_http_markdown_diagnostics_record_classified(
+        state, outcome, ngx_http_markdown_diag_decision_stage(reason_code),
+        reason_code, error_origin, duration_ms);
+}
+
+
+void
+ngx_http_markdown_diagnostics_record_reason(
+    ngx_http_markdown_diag_state_t *state,
+    const u_char *reason,
+    size_t reason_len,
+    const char *error_category,
+    ngx_msec_t duration_ms)
+{
+    ngx_http_markdown_diagnostics_record_reason_at_stage(
+        state, reason, reason_len, NULL, error_category, duration_ms);
+}
+
+
+void
+ngx_http_markdown_diagnostics_record_reason_at_stage(
+    ngx_http_markdown_diag_state_t *state,
+    const u_char *reason,
+    size_t reason_len,
+    const char *stage,
+    const char *error_category,
+    ngx_msec_t duration_ms)
+{
+    ngx_int_t    reason_code;
+    const char  *outcome;
+    const char  *error_origin;
+
+    if (reason == NULL && reason_len != 0) {
+        return;
+    }
+
+    reason_code = ngx_http_markdown_diagnostics_reason_to_code(
+        reason, reason_len);
+    outcome = ngx_http_markdown_diag_outcome(reason_code);
+    /*
+     * ErrorOrigin is canonical registry metadata, not a caller-selected
+     * coarse category. Keep the legacy parameter for the frozen API while
+     * deriving the emitted value from the resolved reason code.
+     */
+    (void) error_category;
+    error_origin = (outcome[0] == 'f' || outcome[0] == 'a')
+        ? ngx_http_markdown_diag_error_origin(reason_code) : NULL;
+    ngx_http_markdown_diagnostics_record_classified(
+        state,
+        outcome,
+        stage != NULL ? stage
+                      : ngx_http_markdown_diag_decision_stage(reason_code),
+        reason_code,
+        error_origin,
+        duration_ms);
+}
+
+
+void
+ngx_http_markdown_diagnostics_record_classified(
+    ngx_http_markdown_diag_state_t *state,
+    const char *outcome,
+    const char *stage,
+    ngx_int_t reason_code,
+    const char *error_origin,
+    ngx_msec_t duration_ms)
+{
     ngx_http_markdown_diag_decision_t  *entry;
 
     if (state == NULL || state->ring.entries == NULL || !state->enabled) {
@@ -205,8 +295,12 @@ ngx_http_markdown_diagnostics_record(ngx_http_markdown_diag_state_t *state,
     }
 
     entry = &state->ring.entries[state->ring.head];
-    entry->timestamp = ngx_current_msec;
+    /* Store wall-clock seconds so the v1 endpoint can emit RFC 3339 time. */
+    entry->timestamp = (ngx_msec_t) ngx_time();
+    entry->outcome = outcome != NULL ? outcome : "failed_closed";
+    entry->stage = stage != NULL ? stage : "delivery";
     entry->reason_code = reason_code;
+    entry->error_origin = error_origin;
     entry->duration_ms = duration_ms;
 
     state->ring.head = (state->ring.head + 1) % state->ring.capacity;
@@ -310,101 +404,83 @@ ngx_http_markdown_diagnostics_recording_active(void)
 }
 
 
-/*
- * Map a decision-path reason code string to its canonical numeric
- * ReasonCode discriminant (decision/reason_code.rs is the source of truth).
- *
- * The decision path carries pre-formatted reason strings; the ring stores a
- * compact numeric code.  Unknown/legacy strings map to -1 so the consumer
- * can render them distinctly without guessing.
- *
- * Parameters:
- *   reason - NUL-terminated reason code string (may be NULL)
- *
- * Returns:
- *   Canonical discriminant (0..24), or -1 when the string is NULL or not a
- *   canonical reason code.
- */
-ngx_int_t
-ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
+/* Send the diagnostics endpoint's 405 response and Allow header. */
+static ngx_int_t
+ngx_http_markdown_diagnostics_method_not_allowed(ngx_http_request_t *r)
 {
-    static const struct {
-        const char  *name;
-        ngx_int_t    code;
-    } map[] = {
-        /* New lowercase snake_case names (schema v1) */
-        { "converted",                     0 },
-        { "skipped_accept",                1 },
-        { "skipped_no_accept",             2 },
-        { "skipped_conditional",           3 },
-        { "decompression_error",           4 },
-        { "decompression_budget_exceeded", 5 },
-        { "decompression_format_error",    6 },
-        { "decompression_truncated_input", 7 },
-        { "decompression_io_error",        8 },
-        { "timeout",                       9 },
-        { "budget_exceeded",              10 },
-        { "replay_error",                 11 },
-        { "skipped_accept_reject",        12 },
-        { "ffi_panic",                    13 },
-        { "not_eligible",                 14 },
-        { "disabled",                     15 },
-        { "failed_open",                  16 },
-        { "failed_closed",                17 },
-        { "conversion_error",             18 },
-        { "memory_budget_exceeded",       19 },
-        /* Production reason codes (indices 20-24) */
-        { "overload",                     20 },
-        { "invalid_dynconf",              21 },
-        { "degraded_snapshot",            22 },
-        { "header_plan_apply_error",      23 },
-        { "streaming_mid_flight_error",   24 },
-        /* Legacy uppercase names (backward compatibility) */
-        { "CONVERTED",                     0 },
-        { "ELIGIBLE_CONVERTED",            0 },
-        { "SKIPPED_ACCEPT",                1 },
-        { "SKIP_ACCEPT",                   1 },
-        { "SKIPPED_NO_ACCEPT",             2 },
-        { "SKIPPED_CONDITIONAL",           3 },
-        { "FAILED_DECOMPRESSION",          4 },
-        { "DECOMPRESSION_BUDGET_EXCEEDED", 5 },
-        { "DECOMPRESSION_FORMAT_ERROR",    6 },
-        { "DECOMPRESSION_TRUNCATED_INPUT", 7 },
-        { "DECOMPRESSION_IO_ERROR",        8 },
-        { "PARSE_TIMEOUT",                 9 },
-        { "PARSE_BUDGET_EXCEEDED",        10 },
-        { "REPLAY_BUFFER_ERROR",          11 },
-        { "SKIPPED_ACCEPT_REJECT",        12 },
-        { "FFI_CALL_ERROR",               13 },
-        { "NOT_ELIGIBLE",                 14 },
-        { "DISABLED",                     15 },
-        { "FAILED_OPEN",                  16 },
-        { "ELIGIBLE_FAILED_OPEN",         16 },
-        { "FAILED_CLOSED",                17 },
-        { "ELIGIBLE_FAILED_CLOSED",       17 },
-        { "FAIL_CONVERSION",              18 },
-        { "FAIL_RESOURCE_LIMIT",          19 },
-        { "FAIL_SYSTEM",                  13 },
-    };
-    if (reason == NULL) {
-        return -1;
+    static u_char body[] =
+        "Method Not Allowed. Use GET or HEAD; rollback is available through "
+        "the dynamic-config file watcher.\n";
+    ngx_table_elt_t  *allow_hdr;
+    ngx_buf_t    *b;
+    ngx_chain_t   out;
+    ngx_int_t     rc;
+
+    /*
+     * Discard any request body before sending the 405 response so a
+     * non-GET/HEAD client body is not left unread.
+     */
+    rc = ngx_http_discard_request_body(r);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
-    for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
-        if (ngx_strcmp(reason, map[i].name) == 0) {
-            return map[i].code;
-        }
+    /*
+     * Add Allow: GET, HEAD header per RFC 9110 Section 15.5.6.
+     * NGINX does not automatically add the Allow header for 405
+     * responses from content handlers, so we set it explicitly.
+     *
+     * The header and the response body are constructed transactionally:
+     * allocate the body buffer FIRST — a body-allocation failure aborts
+     * with 500 before any header mutation, while a header-allocation
+     * failure aborts before the 405 is sent.  (Allocating the Allow
+     * entry before the body could leave a live Allow header on a 500,
+     * contradicting the Allow contract this function exists to uphold.)
+     */
+    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    if (b == NULL) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    return -1;
+    allow_hdr = ngx_list_push(&r->headers_out.headers);
+    if (allow_hdr == NULL) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+    allow_hdr->hash = 1;
+    ngx_str_set(&allow_hdr->key, "Allow");
+    ngx_str_set(&allow_hdr->value, "GET, HEAD");
+
+    b->pos = body;
+    b->last = body + sizeof(body) - 1;
+    b->memory = 1;
+    b->last_in_chain = 1;
+    b->last_buf = (r == r->main) ? 1 : 0;
+
+    r->headers_out.status = NGX_HTTP_NOT_ALLOWED;
+    r->headers_out.content_type_len = sizeof("text/plain") - 1;
+    ngx_str_set(&r->headers_out.content_type, "text/plain");
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
+    r->headers_out.content_length_n = b->last - b->pos;
+
+    rc = ngx_http_send_header(r);
+    if (rc == NGX_ERROR || rc > NGX_OK) {
+        return rc;
+    }
+
+    out.buf = b;
+    out.next = NULL;
+    return ngx_http_output_filter(r, &out);
 }
-
 
 /*
  * HTTP content handler for the diagnostics endpoint.
  *
- * Validates access control, builds the JSON response, and sends
- * it to the client.  Only responds to GET and HEAD methods.
+ * Enforces access control before method handling, then:
+ *   - GET/HEAD: builds and sends the full diagnostics JSON response
+ *   - Other methods: returns 405 Not Allowed; the endpoint has no mutation
+ *     operation.  Keeping access control first prevents unauthorized callers
+ *     from learning handler behavior through the method-rejection branch.
  *
  * The response Content-Type is application/json.
  *
@@ -413,7 +489,8 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
  *
  * Returns:
  *   NGX_OK on success, NGX_HTTP_FORBIDDEN on access denial,
- *   NGX_HTTP_INTERNAL_SERVER_ERROR on build failure
+ *   NGX_HTTP_INTERNAL_SERVER_ERROR on build failure.  Method errors return
+ *   NGX_OK after sending a short 405 response body.
  */
 ngx_int_t
 ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
@@ -422,15 +499,25 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     ngx_buf_t    *b;
     ngx_chain_t   out;
 
-    /* Only allow GET and HEAD */
-    if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
-        return NGX_HTTP_NOT_ALLOWED;
-    }
-
-    /* Access control check (default deny) */
+    /*
+     * Check access before method handling so denied requests do not disclose
+     * the endpoint's 405 behavior or receive an Allow header.
+     */
     rc = ngx_http_markdown_diagnostics_check_access(r);
     if (rc != NGX_OK) {
+        r->headers_out.status = (ngx_uint_t) rc;
         return rc;
+    }
+
+    /* Only allow read-only GET and HEAD requests. */
+    if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
+        /*
+         * The 405 response (including the mandatory Allow: GET, HEAD
+         * header per RFC 9110 Section 15.5.6) is constructed
+         * transactionally inside method_not_allowed: any allocation
+         * failure yields 500 instead of an incomplete 405.
+         */
+        return ngx_http_markdown_diagnostics_method_not_allowed(r);
     }
 
     /* Discard request body */
@@ -460,6 +547,7 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     r->headers_out.content_type_len = sizeof("application/json") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/json");
     r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
     r->headers_out.content_length_n = b->last - b->pos;
 
     /* HEAD request: send headers only */
@@ -536,216 +624,112 @@ ngx_http_markdown_diagnostics_get_state(void)
 /*
  * Access control for the diagnostics endpoint.
  *
- * Default-deny policy with CIDR allowlist support:
+ * Diagnostics are loopback-only by default. Native NGINX access-phase
+ * directives (allow/deny/auth_basic/satisfy) may add restrictions but cannot
+ * broaden the peer boundary. The content handler runs after that phase.
  *
- *   1. The endpoint only activates when "markdown_diagnostics on" is
- *      explicitly configured in a location block.  Without this directive
- *      the handler is never registered, so no external access is possible.
+ * Operators should use standard NGINX access directives:
  *
- *   2. If markdown_diagnostics_allow directives are configured, the
- *      client IP is checked against the CIDR allow list.  Only matching
- *      addresses are permitted.
+ *   location /nginx-markdown/diagnostics {
+ *       markdown_diagnostics on;
+ *       allow 127.0.0.1;
+ *       allow ::1;
+ *       deny all;
+ *   }
  *
- *   3. If no markdown_diagnostics_allow directives are configured
- *      (allow list is empty/NULL), falls back to the built-in
- *      loopback-only restriction: only 127.0.0.1 and ::1 are allowed.
- *
- *   4. For additional access control, operators can also use NGINX's
- *      native allow/deny directives in the same location block.
+ * Unknown address families and missing peer addresses are denied.
  *
  * Parameters:
  *   r - HTTP request
  *
  * Returns:
  *   NGX_OK             - access permitted
- *   NGX_HTTP_FORBIDDEN - access denied
+ *   NGX_HTTP_FORBIDDEN - access denied (no sockaddr)
  */
-#if (NGX_HAVE_INET6)
-static ngx_int_t
-ngx_http_markdown_diagnostics_match_ipv6_cidr(
-    const struct sockaddr_in6 *sin6, const ngx_cidr_t *cidr)
-{
-    for (ngx_uint_t j = 0; j < 16; j++) {
-        if ((sin6->sin6_addr.s6_addr[j]
-             & cidr->u.in6.mask.s6_addr[j])
-            != cidr->u.in6.addr.s6_addr[j])
-        {
-            return NGX_DECLINED;
-        }
-    }
-
-    return NGX_OK;
-}
-#endif
-
-
-static ngx_int_t
-ngx_http_markdown_diagnostics_check_cidr(const struct sockaddr *sa,
-    const ngx_array_t *allow_list)
-{
-    const ngx_cidr_t           *cidrs;
-    const struct sockaddr_in   *sin;
-#if (NGX_HAVE_INET6)
-    const struct sockaddr_in6  *sin6;
-#endif
-
-    cidrs = allow_list->elts;
-
-    for (ngx_uint_t i = 0; i < allow_list->nelts; i++) {
-
-        switch (sa->sa_family) {
-
-        case AF_INET:
-            if (cidrs[i].family != AF_INET) {
-                continue;
-            }
-
-            sin = (const struct sockaddr_in *) sa;
-            if ((sin->sin_addr.s_addr & cidrs[i].u.in.mask)
-                == cidrs[i].u.in.addr)
-            {
-                return NGX_OK;
-            }
-            break;
-
-#if (NGX_HAVE_INET6)
-        case AF_INET6:
-            if (cidrs[i].family != AF_INET6) {
-                continue;
-            }
-
-            sin6 = (const struct sockaddr_in6 *) sa;
-            if (ngx_http_markdown_diagnostics_match_ipv6_cidr(
-                    sin6, &cidrs[i]) == NGX_OK)
-            {
-                return NGX_OK;
-            }
-            break;
-#endif
-
-        default:
-            break;
-        }
-    }
-
-    return NGX_DECLINED;
-}
-
-
-static ngx_int_t
-ngx_http_markdown_diagnostics_check_loopback(const struct sockaddr *sa)
-{
-    const struct sockaddr_in   *sin;
-#if (NGX_HAVE_INET6)
-    const struct sockaddr_in6  *sin6;
-    static const uint8_t  ipv6_loopback[16] = {
-        0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 1
-    };
-#endif
-
-    switch (sa->sa_family) {
-
-    case AF_INET:
-        sin = (const struct sockaddr_in *) sa;
-
-        if (sin->sin_addr.s_addr == htonl(INADDR_LOOPBACK)) {
-            return NGX_OK;
-        }
-
-        break;
-
-#if (NGX_HAVE_INET6)
-    case AF_INET6:
-        sin6 = (const struct sockaddr_in6 *) sa;
-
-        if (ngx_memcmp(sin6->sin6_addr.s6_addr,
-                       ipv6_loopback, 16) == 0)
-        {
-            return NGX_OK;
-        }
-
-        break;
-#endif
-
-    default:
-        break;
-    }
-
-    return NGX_DECLINED;
-}
-
-
 static ngx_int_t
 ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 {
-    const struct sockaddr        *sa;
-    const ngx_http_markdown_conf_t    *conf;
-    const ngx_array_t                 *allow_list;
+    if (r == NULL || r->connection == NULL) {
+        return NGX_HTTP_FORBIDDEN;
+    }
 
-    sa = r->connection->sockaddr;
-
-    if (sa == NULL) {
+    if (r->connection->sockaddr == NULL) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
             "markdown: no client address, "
-            "denying access");
+            "denying diagnostics access");
         return NGX_HTTP_FORBIDDEN;
     }
 
-    /* Retrieve the location configuration for the allow list. */
-    conf = ngx_http_get_module_loc_conf(r,
-        ngx_http_markdown_filter_module);
-
-    allow_list = (conf != NULL) ? conf->ops.diagnostics_allow : NULL;
-
-    /*
-     * If a CIDR allow list is configured, check the client IP
-     * against it.  Only matching addresses are permitted.
-     */
-    if (allow_list != NULL && allow_list->nelts > 0) {
-        if (ngx_http_markdown_diagnostics_check_cidr(sa, allow_list)
-            == NGX_OK)
-        {
-            return NGX_OK;
-        }
-
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-            "markdown: client address not in "
-            "diagnostics_allow list, denying access");
-        return NGX_HTTP_FORBIDDEN;
-    }
-
-    /*
-     * No allow list configured: fall back to loopback-only.
-     */
-    if (ngx_http_markdown_diagnostics_check_loopback(sa) == NGX_OK) {
+#if (NGX_HAVE_UNIX_DOMAIN)
+    if (r->connection->sockaddr->sa_family == AF_UNIX) {
+        /* UNIX-domain peers connect through a local socket path and
+         * cannot originate from a remote host, so the loopback-only
+         * boundary is inherently satisfied. */
         return NGX_OK;
     }
+#endif
 
-    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-        "markdown: access denied for "
-        "non-loopback client; configure "
-        "markdown_diagnostics_allow for granular control");
+    if (r->connection->sockaddr->sa_family == AF_INET) {
+        const struct sockaddr_in *sin =
+            (const struct sockaddr_in *) r->connection->sockaddr;
 
-    return NGX_HTTP_FORBIDDEN;
+        /* Accept any address in 127.0.0.0/8, not only INADDR_LOOPBACK. */
+        if ((ntohl(sin->sin_addr.s_addr) & 0xFF000000U) != 0x7F000000U) {
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                "markdown: access denied from non-loopback IPv4 address");
+            return NGX_HTTP_FORBIDDEN;
+        }
+    }
+#if (NGX_HAVE_INET6)
+    else if (r->connection->sockaddr->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *sin6 =
+            (const struct sockaddr_in6 *) r->connection->sockaddr;
+
+        /* Accept native IPv6 loopback (::1) and IPv4-mapped loopback
+         * (::ffff:127.0.0.0/8), matching the IPv4 127.0.0.0/8 acceptance
+         * above.  Deny all other IPv6 addresses. */
+        if (!IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
+            uint32_t  mapped;
+
+            if (!IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
+                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                    "markdown: access denied from non-localhost IPv6 address");
+                return NGX_HTTP_FORBIDDEN;
+            }
+
+            mapped = ((uint32_t) sin6->sin6_addr.s6_addr[12] << 24)
+                   | ((uint32_t) sin6->sin6_addr.s6_addr[13] << 16)
+                   | ((uint32_t) sin6->sin6_addr.s6_addr[14] << 8)
+                   | sin6->sin6_addr.s6_addr[15];
+            if ((mapped & 0xFF000000U) != 0x7F000000U) {
+                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                    "markdown: access denied from non-localhost IPv6 address");
+                return NGX_HTTP_FORBIDDEN;
+            }
+        }
+    }
+#endif
+    else {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+            "markdown: access denied from unknown address family");
+        return NGX_HTTP_FORBIDDEN;
+    }
+
+    return NGX_OK;
 }
 
 
 /*
  * Build the JSON diagnostics response.
  *
- * Constructs a JSON document with eleven top-level fields:
+ * Constructs a JSON document with seven top-level fields:
  *   - schema_version
- *   - config_snapshot
+ *   - product_version
+ *   - worker
+ *   - build
+ *   - configuration
+ *   - runtime
  *   - recent_decisions
- *   - metrics_snapshot
- *   - streaming_metrics (when streaming support is compiled in)
- *   - dynconf_state
- *   - streaming_config
- *   - profile
- *   - overridden_fields
- *   - forced_fields
- *   - effective_config
  *
  * Allocates the output buffer from the request pool.
  *
@@ -757,473 +741,476 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
  *   NGX_OK on success, NGX_ERROR on failure
  */
 /*
- * Map profile enum to its canonical string name for JSON output.
+ * Diagnostics v2 is deliberately rendered in one bounded pass.  The
+ * endpoint is a strict machine-readable contract: no compatibility fields
+ * are emitted and every string is either a closed enum or copied through the
+ * bounded dynconf error buffer.
  */
-static const char *
-ngx_http_markdown_diagnostics_profile_name(ngx_uint_t profile)
-{
-    switch (profile) {
-    case NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE:
-        return "strict_cache";
-    case NGX_HTTP_MARKDOWN_PROFILE_BALANCED:
-        return "balanced";
-    case NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST:
-        return "streaming_first";
-    default:
-        return "none";
-    }
-}
-
-
-/*
- * Map accept_policy enum to its Config V2 string for effective_config.
- */
-static const char *
-ngx_http_markdown_diagnostics_accept_str(ngx_uint_t val)
-{
-    switch (val) {
-    case NGX_HTTP_MARKDOWN_ACCEPT_STRICT:
-        return "strict";
-    case NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD:
-        return "wildcard";
-    case NGX_HTTP_MARKDOWN_ACCEPT_FORCE:
-        return "force";
-    default:
-        return "unknown";
-    }
-}
-
-
-/*
- * Map conditional_requests enum to cache_validation string.
- */
-static const char *
-ngx_http_markdown_diagnostics_cache_validation_str(ngx_uint_t val)
-{
-    switch (val) {
-    case NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED:
-        return "off";
-    case NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE:
-        return "ims_only";
-    case NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT:
-        return "full";
-    default:
-        return "unknown";
-    }
-}
-
-
-/*
- * Map streaming policy enum to string.
- */
-static const char *
-ngx_http_markdown_diagnostics_streaming_str(ngx_uint_t val)
-{
-    switch (val) {
-    case NGX_HTTP_MARKDOWN_STREAMING_OFF:
-        return "off";
-    case NGX_HTTP_MARKDOWN_STREAMING_AUTO:
-        return "auto";
-    case NGX_HTTP_MARKDOWN_STREAMING_FORCE:
-        return "force";
-    default:
-        return "unknown";
-    }
-}
-
-
-/*
- * Map error_policy enum to string.
- *
- * The C model uses on_error=REJECT for both fail_closed and status modes.
- * Preserve the complete directive semantics by distinguishing the default
- * 502 fail-closed response from each allowed explicit status code.  Invalid
- * enum/status combinations are reported as unknown rather than being
- * presented as a valid policy.
- */
-static const char *
-ngx_http_markdown_diagnostics_error_policy_str(ngx_uint_t val,
-    ngx_uint_t error_status)
-{
-    switch (val) {
-    case NGX_HTTP_MARKDOWN_ON_ERROR_PASS:
-        return "pass";
-    case NGX_HTTP_MARKDOWN_ON_ERROR_REJECT:
-        switch (error_status) {
-        case NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT:
-            return "fail_closed";
-        case 429:
-            return "status 429";
-        case 503:
-            return "status 503";
-        default:
-            return "unknown";
-        }
-    default:
-        return "unknown";
-    }
-}
-
-
-/*
- * Format the "profile" JSON section.
- *
- * Outputs profile name, overridden_fields array (fields where the user
- * explicitly set a value that differs from the profile default), and
- * forced_fields array (fields that the profile forces unconditionally).
- */
-static u_char *
-ngx_http_markdown_diagnostics_fmt_profile(
-    u_char *p, u_char *last, const ngx_http_markdown_conf_t *conf)
-{
-    ngx_uint_t   profile_name;
-    ngx_flag_t   first = 1;
-
-    if (conf == NULL) {
-        profile_name = NGX_HTTP_MARKDOWN_PROFILE_NONE;
-    } else {
-        profile_name = conf->profile.name;
-    }
-
-    /* --- profile section --- */
-    p = ngx_slprintf(p, last,
-        "  \"profile\": \"%s\",\n",
-        ngx_http_markdown_diagnostics_profile_name(profile_name));
-
-    /* --- overridden_fields --- */
-    p = ngx_slprintf(p, last, "  \"overridden_fields\": [");
-
-    if (conf != NULL
-        && profile_name != NGX_HTTP_MARKDOWN_PROFILE_NONE)
-    {
-        /* Check streaming policy explicit */
-        if (conf->stream.policy_explicit) {
-            if (!first) {
-                p = ngx_slprintf(p, last, ", ");
-            }
-            p = ngx_slprintf(p, last, "\"streaming\"");
-            first = 0;
-        }
-
-        /* Check cache_validation explicit */
-        if (conf->profile.cache_validation_explicit) {
-            if (!first) {
-                p = ngx_slprintf(p, last, ", ");
-            }
-            p = ngx_slprintf(p, last, "\"cache_validation\"");
-        }
-    }
-
-    p = ngx_slprintf(p, last, "],\n");
-
-    /* --- forced_fields --- */
-    p = ngx_slprintf(p, last, "  \"forced_fields\": [");
-
-    switch (profile_name) {
-
-    case NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE:
-        p = ngx_slprintf(p, last, "\"streaming\"");
-        break;
-
-    case NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST:
-        p = ngx_slprintf(p, last,
-            "\"cache_validation\", \"streaming\"");
-        break;
-
-    default:
-        /* balanced and none: no forced fields */
-        break;
-    }
-
-    p = ngx_slprintf(p, last, "],\n");
-
-    return p;
-}
-
-
-/*
- * Format the "effective_config" JSON section.
- *
- * Outputs the key resolved configuration values after merge
- * (explicit > profile > builtin).
- */
-static u_char *
-ngx_http_markdown_diagnostics_fmt_effective_config(
-    u_char *p, u_char *last, const ngx_http_markdown_conf_t *conf)
-{
-    const char  *accept_str;
-    const char  *cache_str;
-    const char  *streaming_str;
-    const char  *error_str;
-    size_t       limits_memory;
-    ngx_msec_t   limits_timeout;
-    size_t       limits_streaming_buffer;
-    ngx_uint_t   limits_max_inflight;
-
-    if (conf == NULL) {
-        p = ngx_slprintf(p, last,
-            "  \"effective_config\": null\n");
-        return p;
-    }
-
-    accept_str = ngx_http_markdown_diagnostics_accept_str(
-        conf->accept_policy);
-
-        {
-            ngx_uint_t  effective_streaming = conf->stream.policy;
-            ngx_uint_t  effective_conditional = conf->policy.conditional_requests;
-
-        if (conf->profile.name == NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE) {
-            /* strict_cache forces streaming off and defaults cache_validation to full */
-            effective_streaming = NGX_HTTP_MARKDOWN_STREAMING_OFF;
-            if (!conf->profile.cache_validation_explicit) {
-                effective_conditional = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
-            }
-        } else if (conf->profile.name == NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST) {
-            /* streaming_first forces streaming on and cache_validation off */
-            effective_streaming = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
-            effective_conditional = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
-        }
-
-        streaming_str = ngx_http_markdown_diagnostics_streaming_str(
-            effective_streaming);
-        cache_str = ngx_http_markdown_diagnostics_cache_validation_str(
-            effective_conditional);
-    }
-
-    error_str = ngx_http_markdown_diagnostics_error_policy_str(
-        conf->on_error, conf->error_status);
-    limits_memory = conf->max_size;
-    limits_timeout = conf->timeout;
-    limits_streaming_buffer = conf->stream.budget;
-    limits_max_inflight = conf->routing.max_inflight;
-
-    p = ngx_slprintf(p, last,
-        "  \"effective_config\": {\n"
-        "    \"accept\": \"%s\",\n"
-        "    \"cache_validation\": \"%s\",\n"
-        "    \"streaming\": \"%s\",\n"
-        "    \"limits_memory_bytes\": %uz,\n"
-        "    \"limits_timeout_ms\": %M,\n"
-        "    \"limits_streaming_buffer_bytes\": %uz,\n"
-        "    \"limits_max_inflight\": %ui,\n"
-        "    \"error_policy\": \"%s\"\n"
-        "  }\n",
-        accept_str,
-        cache_str,
-        streaming_str,
-        limits_memory,
-        limits_timeout,
-        limits_streaming_buffer,
-        limits_max_inflight,
-        error_str);
-
-    return p;
-}
-
-
-static u_char *
-ngx_http_markdown_diagnostics_fmt_streaming_config(
-    u_char *p, u_char *last, const ngx_http_markdown_conf_t *conf)
-{
-#ifdef MARKDOWN_STREAMING_ENABLED
-    const char  *policy_str;
-    const char  *policy_source_str;
-    const char  *on_error_str;
-    size_t       threshold;
-    size_t       precommit_buffer;
-    size_t       flush_min;
-    ngx_flag_t   threshold_explicit;
-    u_char       threshold_explicit_str[sizeof("false")];
-
-    if (conf != NULL) {
-        if (conf->stream.policy_explicit) {
-            policy_source_str = "configured";
-        } else if (conf->profile.name != NGX_HTTP_MARKDOWN_PROFILE_NONE)
-        {
-            policy_source_str = "profile";
-        } else {
-            policy_source_str = "default";
-        }
-
-        if (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF) {
-            policy_str = "off";
-        } else if (conf->stream.policy
-                   == NGX_HTTP_MARKDOWN_STREAMING_FORCE)
-        {
-            policy_str = "force";
-        } else if (conf->stream.policy
-                   == NGX_HTTP_MARKDOWN_STREAMING_AUTO)
-        {
-            policy_str = "auto";
-        } else {
-            policy_str = "unknown";
-        }
-    } else {
-        policy_source_str = "default";
-        policy_str = "auto";
-    }
-
-    on_error_str = (conf != NULL)
-        ? ngx_http_markdown_diagnostics_error_policy_str(
-            conf->on_error, conf->error_status)
-        : "unknown";
-    threshold = (conf != NULL)
-        ? conf->stream.threshold : 0;
-    precommit_buffer = (conf != NULL)
-        ? conf->stream.precommit_buffer : 0;
-    flush_min = (conf != NULL)
-        ? conf->stream.flush_min : 0;
-    threshold_explicit = (conf != NULL
-        && conf->stream.threshold_explicit) ? 1 : 0;
-    if (threshold_explicit) {
-        ngx_memcpy(threshold_explicit_str, "true", sizeof("true"));
-    } else {
-        ngx_memcpy(threshold_explicit_str, "false",
-                   sizeof("false"));
-    }
-
-    p = ngx_slprintf(p, last,
-        "  \"streaming_config\": {\n"
-        "    \"policy\": \"%s\",\n"
-        "    \"policy_source\": \"%s\",\n"
-        "    \"on_error\": \"%s\",\n"
-        "    \"threshold\": %uz,\n"
-        "    \"precommit_buffer\": %uz,\n"
-        "    \"flush_min\": %uz,\n"
-        "    \"threshold_explicit\": %s\n"
-        "  },\n",
-        policy_str, policy_source_str, on_error_str, threshold,
-        precommit_buffer, flush_min,
-        threshold_explicit_str);
-#else
-    p = ngx_slprintf(p, last,
-        "  \"streaming_config\": null,\n");
+#ifndef NGX_HTTP_MARKDOWN_SOURCE_SHA
+#define NGX_HTTP_MARKDOWN_SOURCE_SHA \
+    "0000000000000000000000000000000000000000"
 #endif
 
-    return p;
+#ifndef NGX_HTTP_MARKDOWN_RUST_VERSION
+#define NGX_HTTP_MARKDOWN_RUST_VERSION "unknown"
+#endif
+
+static const char *
+ngx_http_markdown_diag_dynconf_state_name(ngx_uint_t state)
+{
+    switch (state) {
+    case NGX_HTTP_MARKDOWN_DIAG_DYNCONF_NO_FILE:
+        return "no_file";
+    case NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG:
+        return "invalid_without_lkg";
+    case NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE:
+        return "active";
+    case NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED:
+        return "lkg_preserved";
+    default:
+        return "disabled";
+    }
 }
+
+
+static const char *
+ngx_http_markdown_diag_bool(ngx_flag_t value)
+{
+    return value ? "on" : "off";
+}
+
+
+static const char *
+ngx_http_markdown_diag_log_name(ngx_uint_t value)
+{
+    switch (value) {
+    case NGX_HTTP_MARKDOWN_LOG_ERROR:
+        return "error";
+    case NGX_HTTP_MARKDOWN_LOG_WARN:
+        return "warn";
+    case NGX_HTTP_MARKDOWN_LOG_DEBUG:
+        return "debug";
+    default:
+        return "info";
+    }
+}
+
+
+static const char *
+ngx_http_markdown_diag_error_name(ngx_uint_t policy, ngx_uint_t status)
+{
+    if (policy == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
+        return "pass";
+    }
+    if (status == 429) {
+        return "status 429";
+    }
+    if (status == 503) {
+        return "status 503";
+    }
+    return "fail_closed";
+}
+
+
+static const char *
+ngx_http_markdown_diag_source_name(ngx_uint_t source)
+{
+    switch (source) {
+    case NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF:
+        return "dynconf";
+    case NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE:
+        return "request_variable";
+    default:
+        return "static";
+    }
+}
+
+
+static u_char *
+ngx_http_markdown_diag_time(u_char *p, u_char *last, ngx_msec_t stamp)
+{
+    time_t       value;
+    struct tm    tm_value;
+
+    value = (time_t) stamp;
+    if (gmtime_r(&value, &tm_value) == NULL) {
+        time_t epoch;
+
+        epoch = 0;
+        if (gmtime_r(&epoch, &tm_value) == NULL) {
+            /* Preserve a valid RFC 3339 epoch even if libc is unavailable. */
+            ngx_memzero(&tm_value, sizeof(tm_value));
+            tm_value.tm_year = 70;
+            tm_value.tm_mday = 1;
+        }
+    }
+
+    return ngx_slprintf(p, last,
+        "%04d-%02d-%02dT%02d:%02d:%02dZ",
+        tm_value.tm_year + 1900, tm_value.tm_mon + 1, tm_value.tm_mday,
+        tm_value.tm_hour, tm_value.tm_min, tm_value.tm_sec);
+}
+
 
 static ngx_int_t
-ngx_http_markdown_diagnostics_fmt_metrics_snapshot(u_char **pos,
-    u_char *last)
+ngx_http_markdown_diag_json_put_byte(
+    u_char **pos, const u_char *last, u_char value)
 {
-    ngx_http_markdown_diag_metrics_t  metrics;
+    u_char  *current;
 
-    ngx_http_markdown_diagnostics_collect_metrics(&metrics);
+    if (pos == NULL || last == NULL) {
+        return NGX_ERROR;
+    }
 
-    *pos = ngx_slprintf(*pos, last,
-        "  \"metrics_snapshot\": {\n"
-        "    \"conversions_total\": %uA,\n"
-        "    \"delivery_total\": %uA,\n"
-        "    \"requests_total\": %uA,\n"
-        "    \"failopen_total\": %uA,\n"
-        "    \"overload_total\": %uA,\n"
-        "    \"backpressure_total\": %uA\n"
-        "  },\n",
-        metrics.conversions_total,
-        metrics.delivery_total,
-        metrics.requests_total,
-        metrics.failopen_total,
-        metrics.overload_total,
-        metrics.backpressure_total);
+    current = *pos;
+    if (current == NULL || current >= last) {
+        return NGX_ERROR;
+    }
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-    *pos = ngx_slprintf(*pos, last,
-        "  \"streaming_metrics\": {\n"
-        "    \"requests_total\": %uA,\n"
-        "    \"succeeded_total\": %uA,\n"
-        "    \"failed_total\": %uA,\n"
-        "    \"fallback_total\": %uA,\n"
-        "    \"candidate_total\": %uA,\n"
-        "    \"output_bytes_total\": %uA,\n"
-        "    \"engine_choice_streaming\": %uA,\n"
-        "    \"engine_choice_full_buffer\": %uA\n"
-        "  },\n",
-        metrics.streaming_requests_total,
-        metrics.streaming_succeeded_total,
-        metrics.streaming_failed_total,
-        metrics.streaming_fallback_total,
-        metrics.streaming_candidate_total,
-        metrics.streaming_output_bytes_total,
-        metrics.engine_choice_streaming,
-        metrics.engine_choice_full_buffer);
-#endif
+    *current = value;
+    *pos = current + 1;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_diag_json_control(
+    u_char **pos, const u_char *last, u_char value)
+{
+    static const u_char  hex[] = "0123456789abcdef";
+    u_char               escaped[6];
+
+    escaped[0] = '\\';
+    escaped[1] = 'u';
+    escaped[2] = '0';
+    escaped[3] = '0';
+    escaped[4] = hex[value >> 4];
+    escaped[5] = hex[value & 0x0f];
+
+    for (size_t i = 0; i < sizeof(escaped); i++) {
+        if (ngx_http_markdown_diag_json_put_byte(
+                pos, last, escaped[i]) != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+    }
+
+    return NGX_OK;
+}
+
+
+/* Append one length-bounded JSON string, escaping syntax and controls. */
+static ngx_int_t
+ngx_http_markdown_diag_json_string(
+    u_char **pos, const u_char *last, const u_char *value, size_t len)
+{
+    u_char               ch;
+
+    if (pos == NULL || *pos == NULL || last == NULL || value == NULL
+        || *pos > last)
+    {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_diag_json_put_byte(pos, last, '"') != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        ch = value[i];
+
+        if (ch == '"' || ch == '\\') {
+            if (ngx_http_markdown_diag_json_put_byte(
+                    pos, last, '\\') != NGX_OK
+                || ngx_http_markdown_diag_json_put_byte(
+                    pos, last, ch) != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+        } else if (ch < 0x20) {
+            if (ngx_http_markdown_diag_json_control(pos, last, ch)
+                != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+        } else {
+            if (ngx_http_markdown_diag_json_put_byte(
+                    pos, last, ch) != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+        }
+    }
+
+    if (ngx_http_markdown_diag_json_put_byte(pos, last, '"') != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_diag_masked_keys(
+    u_char **pos, const u_char *last, ngx_uint_t mask)
+{
+    static const struct {
+        ngx_uint_t bit;
+        const char *name;
+    } fields[] = {
+        { NGX_HTTP_MARKDOWN_DIAG_MASK_FILTER, "filter" },
+        { NGX_HTTP_MARKDOWN_DIAG_MASK_PRUNE_NOISE, "prune_noise" },
+        { NGX_HTTP_MARKDOWN_DIAG_MASK_LOG_VERBOSITY, "log_verbosity" },
+        { NGX_HTTP_MARKDOWN_DIAG_MASK_ERROR_POLICY, "error_policy" },
+        { NGX_HTTP_MARKDOWN_DIAG_MASK_STREAMING_BUFFER, "streaming_buffer" }
+    };
+    ngx_flag_t emitted;
+
+    if (pos == NULL || *pos == NULL || last == NULL || *pos > last) {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_diag_json_put_byte(pos, last, '[') != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    emitted = 0;
+    for (ngx_uint_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+        if ((mask & fields[i].bit) == 0) {
+            continue;
+        }
+        if (emitted
+            && ngx_http_markdown_diag_json_put_byte(
+                   pos, last, ',') != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+        if (ngx_http_markdown_diag_json_string(
+                pos, last, (const u_char *) fields[i].name,
+                strlen(fields[i].name)) != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+        emitted = 1;
+    }
+
+    return ngx_http_markdown_diag_json_put_byte(pos, last, ']');
+}
+
+
+/*
+ * Reason metadata is now generated from reason_registry.toml by
+ * tools/reason-codegen/generate.py into markdown_reason_meta.h.
+ * The generated table includes an unknown sentinel at index
+ * MARKDOWN_REASON_META_COUNT with safe defaults (failed_closed /
+ * delivery / internal) — never the "converted" outcome that the
+ * former hand-written table returned for invalid codes.
+ */
+
+static const markdown_reason_meta_t *
+ngx_http_markdown_diag_reason_meta_for(ngx_int_t code)
+{
+    if (code < 0 || code >= MARKDOWN_REASON_META_COUNT) {
+        return &markdown_reason_meta[MARKDOWN_REASON_META_COUNT];
+    }
+    return &markdown_reason_meta[code];
+}
+
+static const char *
+ngx_http_markdown_diag_outcome(ngx_int_t code)
+{
+    return ngx_http_markdown_diag_reason_meta_for(code)->outcome;
+}
+
+static const char *
+ngx_http_markdown_diag_decision_stage(ngx_int_t code)
+{
+    return ngx_http_markdown_diag_reason_meta_for(code)->stage;
+}
+
+static const char *
+ngx_http_markdown_diag_error_origin(ngx_int_t code)
+{
+    return ngx_http_markdown_diag_reason_meta_for(code)->error_origin;
+}
+static ngx_int_t
+ngx_http_markdown_diagnostics_fmt_decisions(
+    u_char **pos, u_char *last,
+    const ngx_http_markdown_diag_state_t *state)
+{
+    ngx_uint_t  count;
+
+    if (pos == NULL || *pos == NULL || last == NULL || *pos > last) {
+        return NGX_ERROR;
+    }
+
+    count = ngx_http_markdown_diag_ring_valid_count(state, NULL);
+    for (ngx_uint_t i = 0; i < count; i++) {
+        ngx_uint_t  idx;
+        ngx_int_t   code;
+        ngx_str_t   reason;
+        const char *outcome;
+        const char *stage;
+        const char *error_origin;
+
+        /* Reserve one complete entry before writing any of its fields. */
+        if ((size_t) (last - *pos)
+            < NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE)
+        {
+            return NGX_ERROR;
+        }
+
+        if (state->ring.head >= i + 1) {
+            idx = state->ring.head - (i + 1);
+        } else {
+            idx = state->ring.capacity - ((i + 1) - state->ring.head);
+        }
+
+        code = state->ring.entries[idx].reason_code;
+        if (ngx_http_markdown_get_reason_code_str((uint32_t) code, &reason)
+            != NGX_OK || reason.data == NULL || reason.len == 0)
+        {
+            ngx_str_set(&reason, "internal");
+        }
+
+        outcome = state->ring.entries[idx].outcome != NULL
+            ? state->ring.entries[idx].outcome : "failed_closed";
+        stage = state->ring.entries[idx].stage != NULL
+            ? state->ring.entries[idx].stage : "delivery";
+        error_origin = state->ring.entries[idx].error_origin;
+
+        if (i != 0) {
+            *pos = ngx_slprintf(*pos, last, ",");
+        }
+        *pos = ngx_slprintf(*pos, last, "{"
+            "\"timestamp\":\"");
+        *pos = ngx_http_markdown_diag_time(
+            *pos, last, state->ring.entries[idx].timestamp);
+        *pos = ngx_slprintf(*pos, last,
+            "\",\"outcome\":\"%s\",\"stage\":\"%s\","
+            "\"reason\":",
+            outcome, stage);
+        if (ngx_http_markdown_diag_json_string(
+                pos, last, reason.data, reason.len) != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+        *pos = ngx_slprintf(*pos, last, ",\"error_origin\":");
+        if (error_origin == NULL) {
+            *pos = ngx_slprintf(*pos, last, "null");
+        } else {
+            *pos = ngx_slprintf(*pos, last, "\"%s\"", error_origin);
+        }
+        *pos = ngx_slprintf(*pos, last,
+            ",\"duration_ms\":%M}", state->ring.entries[idx].duration_ms);
+    }
 
     return (*pos < last) ? NGX_OK : NGX_ERROR;
 }
 
 
-static u_char *
-ngx_http_markdown_diagnostics_fmt_recent_decisions(
-    u_char *p,
-    u_char *last,
-    const ngx_http_markdown_diag_state_t *state)
+/*
+ * Render the dynconf JSON fragment (everything after "state" through the
+ * trailing fields) into the output buffer.  Extracted from build_json to
+ * keep the caller's Cognitive Complexity under the S3776 threshold.
+ *
+ * Layout per dynconf.state:
+ *   ACTIVE | LKG_PRESERVED   generation, source/active/lkg digests,
+ *                            last_success, last_error (LKG_PRESERVED only)
+ *   INVALID_NO_LKG (error)   null fields + last_error when present
+ *   other                    null fields, null last_error
+ *
+ * Returns NGX_OK on success, NGX_ERROR on a truncated/invalid write.
+ */
+static ngx_int_t
+ngx_http_markdown_diag_render_dynconf(
+    u_char **pos, u_char *last,
+    const ngx_http_markdown_diag_dynconf_t *dynconf)
 {
-    ngx_uint_t  count;
-
-    count = ngx_http_markdown_diag_ring_valid_count(state, NULL);
-    for (ngx_uint_t i = 0; i < count; i++) {
-        ngx_uint_t  idx;
-        const ngx_http_markdown_diag_decision_t  *entry;
-        ngx_str_t   reason_str;
-
-        if (state->ring.head >= (i + 1)) {
-            idx = state->ring.head - (i + 1);
-        } else {
-            idx = state->ring.capacity - ((i + 1) - state->ring.head);
-        }
-        entry = &state->ring.entries[idx];
-
-        if (i == 0) {
-            p = ngx_slprintf(p, last, "\n");
-        }
-        if (ngx_http_markdown_get_reason_code_str(
-                (uint32_t) entry->reason_code, &reason_str) == NGX_OK)
-        {
-            p = ngx_slprintf(p, last,
-                "    {\"timestamp\": %M, \"reason_code\": %i, "
-                "\"reason_code_str\": \"%*s\", "
-                "\"duration_ms\": %M}",
-                entry->timestamp, entry->reason_code,
-                reason_str.len, reason_str.data, entry->duration_ms);
-        } else {
-            p = ngx_slprintf(p, last,
-                "    {\"timestamp\": %M, \"reason_code\": %i, "
-                "\"reason_code_str\": null, \"duration_ms\": %M}",
-                entry->timestamp, entry->reason_code, entry->duration_ms);
-        }
-        p = ngx_slprintf(p, last, i + 1 < count ? ",\n" : "\n  ");
+    if (pos == NULL || *pos == NULL || last == NULL || dynconf == NULL
+        || *pos > last)
+    {
+        return NGX_ERROR;
     }
-    return p;
+
+    if (dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE
+        || dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED)
+    {
+        *pos = ngx_slprintf(*pos, last,
+            "\"generation\":%ui,\"source_digest\":\"%s\","
+            "\"active_digest\":\"%s\",\"lkg_digest\":",
+            dynconf->generation, dynconf->source_digest,
+            dynconf->active_digest);
+        if (dynconf->lkg_valid && dynconf->lkg_digest[0] != '\0') {
+            *pos = ngx_slprintf(*pos, last, "\"%s\"", dynconf->lkg_digest);
+        } else {
+            *pos = ngx_slprintf(*pos, last, "null");
+        }
+        *pos = ngx_slprintf(*pos, last, ",\"last_success\":");
+        if (dynconf->has_last_success) {
+            *pos = ngx_slprintf(*pos, last, "\"");
+            *pos = ngx_http_markdown_diag_time(*pos, last,
+                (ngx_msec_t) dynconf->last_success);
+            *pos = ngx_slprintf(*pos, last, "\"");
+        } else {
+            *pos = ngx_slprintf(*pos, last, "null");
+        }
+        *pos = ngx_slprintf(*pos, last, ",\"last_error\":");
+        if (dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED
+            && dynconf->last_error_len > 0)
+        {
+            if (ngx_http_markdown_diag_json_string(
+                    pos, last, dynconf->last_error,
+                    dynconf->last_error_len) != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+        } else {
+            *pos = ngx_slprintf(*pos, last, "null");
+        }
+        return NGX_OK;
+    }
+
+    if (dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG
+        && dynconf->last_error_len > 0)
+    {
+        *pos = ngx_slprintf(*pos, last,
+            "\"generation\":null,\"source_digest\":null,"
+            "\"active_digest\":null,\"lkg_digest\":null,"
+            "\"last_success\":null,\"last_error\":");
+        return ngx_http_markdown_diag_json_string(
+            pos, last, dynconf->last_error, dynconf->last_error_len);
+    }
+
+    *pos = ngx_slprintf(*pos, last,
+        "\"generation\":null,\"source_digest\":null,"
+        "\"active_digest\":null,\"lkg_digest\":null,"
+        "\"last_success\":null,\"last_error\":null");
+    return NGX_OK;
 }
+
 
 static ngx_int_t
 ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     ngx_buf_t *b)
 {
-    u_char                              *buf;
-    u_char                              *p;
-    u_char                              *last;
-    size_t                               buf_size;
     const ngx_http_markdown_conf_t  *conf;
-    u_char                              *snap_buf;
-    size_t                               snap_len;
-    ngx_int_t                            rc;
-    const ngx_http_markdown_diag_state_t      *state;
-    ngx_http_markdown_diag_dynconf_t     dynconf;
+    const ngx_http_markdown_diag_state_t  *state;
+    ngx_http_markdown_diag_dynconf_t dynconf;
+    ngx_http_markdown_diag_effective_t effective;
+    ngx_http_markdown_diag_metrics_t metrics;
+    u_char *buf;
+    u_char *p;
+    u_char *last;
+    size_t buf_size;
+    size_t streaming_buffer;
+    u_char static_digest[72];
+    const char *dynconf_state;
 
     state = ngx_http_markdown_diagnostics_get_state();
-
-    /*
-     * Pre-allocate a buffer sized from the actual ring contents.  The
-     * diagnostics capacity is configurable, so a fixed default-size buffer
-     * can turn a valid large ring into a 500 response.
-     */
     buf_size = ngx_http_markdown_diagnostics_json_size(state);
     if (buf_size == 0) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown: diagnostics state has invalid ring capacity/count");
         return NGX_ERROR;
     }
 
@@ -1231,99 +1218,91 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     if (buf == NULL) {
         return NGX_ERROR;
     }
-
     p = buf;
     last = buf + buf_size;
-
-    /* Retrieve the location configuration */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-
-    /* Opening brace */
-    p = ngx_slprintf(p, last, "{\n");
-
-    /* --- schema_version (spec 53) --- */
-    p = ngx_slprintf(p, last, "  \"schema_version\": 1,\n");
-
-    /* --- config_snapshot section --- */
-    p = ngx_slprintf(p, last, "  \"config_snapshot\": {\n");
-
-    if (conf != NULL) {
-        rc = ngx_http_markdown_dynconf_snapshot_to_json(r->pool, conf,
-                                                         &snap_buf,
-                                                         &snap_len);
-        if (rc == NGX_OK && snap_buf != NULL && snap_len > 0) {
-            /*
-             * Treat a non-fitting snapshot as a hard truncation error
-             * rather than silently emitting an empty config_snapshot.
-             * This keeps the guard symmetric with the final p >= last
-             * truncation check and avoids serving misleading JSON when
-             * the snapshot outgrows the pre-sized buffer.
-             */
-            if (last <= p || (size_t) (last - p) <= snap_len) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                    "markdown: diagnostics config_snapshot (%uz bytes) "
-                    "does not fit in response buffer; increase "
-                    "NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE",
-                    snap_len);
-                return NGX_ERROR;
-            }
-
-            ngx_memcpy(p, snap_buf, snap_len);
-            p += snap_len;
-        }
+    ngx_http_markdown_diagnostics_get_dynconf_state(&dynconf);
+    ngx_http_markdown_diagnostics_get_effective(conf, &effective);
+    ngx_http_markdown_diagnostics_collect_metrics(&metrics);
+    if (ngx_http_markdown_diagnostics_get_static_digest(
+            r, r->pool, static_digest, sizeof(static_digest)) != NGX_OK)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: failed to compute static configuration digest");
+        return NGX_ERROR;
     }
 
-    p = ngx_slprintf(p, last, "  },\n");
+    streaming_buffer = effective.streaming_buffer;
 
-    /* --- recent_decisions section --- */
-    p = ngx_slprintf(p, last, "  \"recent_decisions\": [");
+    dynconf_state = ngx_http_markdown_diag_dynconf_state_name(dynconf.state);
+    p = ngx_slprintf(p, last,
+        "{\"schema_version\":2,\"product_version\":\"%s\","
+        "\"worker\":{\"pid\":%P,\"scope\":\"worker-local\"},"
+        "\"build\":{\"source_sha\":\"%s\","
+        "\"nginx_version\":\"%s\",\"rust_version\":\"%s\","
+        "\"features\":[",
+        NGX_HTTP_MARKDOWN_PRODUCT_VERSION,
+        ngx_pid, NGX_HTTP_MARKDOWN_SOURCE_SHA, NGINX_VERSION,
+        NGX_HTTP_MARKDOWN_RUST_VERSION);
+#ifdef MARKDOWN_STREAMING_ENABLED
+    p = ngx_slprintf(p, last, "\"dynconf\",\"streaming\"");
+#else
+    p = ngx_slprintf(p, last, "\"dynconf\"");
+#endif
+    p = ngx_slprintf(p, last,
+        "]},\"configuration\":{\"static_digest\":\"%s\","
+        "\"dynconf\":{\"state\":\"%s\",",
+        static_digest, dynconf_state);
 
-    p = ngx_http_markdown_diagnostics_fmt_recent_decisions(
-        p, last, state);
-
-    p = ngx_slprintf(p, last, "],\n");
-
-    if (ngx_http_markdown_diagnostics_fmt_metrics_snapshot(&p, last)
+    if (ngx_http_markdown_diag_render_dynconf(&p, last, &dynconf)
         != NGX_OK)
     {
         return NGX_ERROR;
     }
 
-    /* --- dynconf_state section --- */
-    ngx_http_markdown_diagnostics_get_dynconf_state(&dynconf);
+    p = ngx_slprintf(p, last, ",\"masked_keys\":");
+    if (ngx_http_markdown_diag_masked_keys(
+            &p, last, dynconf.masked_fields) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
     p = ngx_slprintf(p, last,
-        "  \"dynconf_state\": {\n"
-        "    \"active_mtime\": \"%T\",\n"
-        "    \"config_version\": %ui,\n"
-        "    \"last_known_good_mtime\": \"%T\",\n"
-        "    \"lkg_valid\": %s\n"
-        "  },\n",
-        dynconf.active_mtime,
-        dynconf.config_version,
-        dynconf.last_known_good_mtime,
-        dynconf.lkg_valid ? "true" : "false");
+        "},\"effective\":{\"filter\":\"%s\","
+        "\"prune_noise\":\"%s\",\"log_verbosity\":\"%s\","
+        "\"error_policy\":\"%s\",\"streaming_buffer\":%uz},"
+        "\"effective_sources\":{\"filter\":\"%s\","
+        "\"prune_noise\":\"%s\",\"log_verbosity\":\"%s\","
+        "\"error_policy\":\"%s\",\"streaming_buffer\":\"%s\"}},"
+        "\"runtime\":{\"inflight\":%uA,\"pending_output\":%uA,"
+        "\"module_metrics\":{\"streaming_requests_total\":%uA,"
+        "\"precommit_failopen_total\":%uA,"
+        "\"copied_output_total\":%uA}},"
+        "\"recent_decisions\":[",
+        ngx_http_markdown_diag_bool(effective.filter),
+        ngx_http_markdown_diag_bool(effective.prune_noise),
+        ngx_http_markdown_diag_log_name(effective.log_verbosity),
+        ngx_http_markdown_diag_error_name(effective.error_policy,
+                                           effective.error_status),
+        streaming_buffer,
+        ngx_http_markdown_diag_source_name(effective.filter_source),
+        ngx_http_markdown_diag_source_name(effective.prune_noise_source),
+        ngx_http_markdown_diag_source_name(effective.log_verbosity_source),
+        ngx_http_markdown_diag_source_name(effective.error_policy_source),
+        ngx_http_markdown_diag_source_name(effective.streaming_buffer_source),
+        metrics.inflight, metrics.pending_output,
+        metrics.streaming_requests_total, metrics.precommit_failopen_total,
+        metrics.copied_output_total);
+    if (ngx_http_markdown_diagnostics_fmt_decisions(&p, last, state)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
-    p = ngx_http_markdown_diagnostics_fmt_streaming_config(
-            p, last, conf);
-
-    /* --- profile section (spec 50) --- */
-    p = ngx_http_markdown_diagnostics_fmt_profile(p, last, conf);
-
-    /* --- effective_config section (spec 50) --- */
-    p = ngx_http_markdown_diagnostics_fmt_effective_config(
-            p, last, conf);
-
-    /* Closing brace */
-    p = ngx_slprintf(p, last, "}\n");
-
-    /* Detect silent truncation: if we hit the buffer boundary, the JSON
-     * is incomplete and must not be served as valid output. */
+    p = ngx_slprintf(p, last, "]}\n");
     if (p >= last) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown: diagnostics JSON truncated, "
-            "buffer size %uz insufficient",
-            buf_size);
+            "markdown: diagnostics v2 JSON truncated");
         return NGX_ERROR;
     }
 
@@ -1331,7 +1310,6 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     b->last = p;
     b->start = buf;
     b->end = buf + buf_size;
-
     return NGX_OK;
 }
 
@@ -1348,8 +1326,9 @@ ngx_http_markdown_diagnostics_json_size(
      *
      * Sizing contract:
      *   NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE covers the fixed JSON
-     *   envelope (config_snapshot, metrics_snapshot, dynconf_state,
-     *   streaming_config sections, braces, keys, and whitespace).
+     *   envelope (schema_version, product_version, worker, build,
+     *   configuration, runtime, recent_decisions, braces, keys, and
+     *   whitespace).
      *   NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE covers one compact
      *   recent_decisions entry including separators and indentation.
      *   The total must be >= the actual rendered output; truncation
@@ -1362,6 +1341,8 @@ ngx_http_markdown_diagnostics_json_size(
     }
 
     return NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE
+           + (6 * (sizeof(((ngx_http_markdown_diag_dynconf_t *) 0)
+                       ->last_error) - 1))
            + ((size_t) decision_count
               * NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE);
 }
@@ -1474,9 +1455,13 @@ ngx_http_markdown_log_decision_path(ngx_http_request_t *r,
      * not just the ones that were logged.
      */
     if (ngx_http_markdown_diagnostics_recording_active()) {
-        ngx_http_markdown_diagnostics_record(
+        ngx_http_markdown_diagnostics_record_reason_at_stage(
             ngx_http_markdown_diagnostics_get_state(),
-            ngx_http_markdown_diagnostics_reason_to_code(path->reason_code),
+            (const u_char *) path->reason_code,
+            path->reason_code != NULL
+                ? strlen(path->reason_code) : 0,
+            path->stage,
+            path->error_category,
             path->duration_ms);
     }
 
@@ -1531,11 +1516,12 @@ ngx_http_markdown_log_decision_path(ngx_http_request_t *r,
         "accept_result=%s "
         "conditional_result=%s "
         "conversion_status=%s "
-        "reason_code=%s "
+        "reason_code=%s error_category=%s "
         "duration_ms=%M",
         accept_str,
         cond_str,
         conv_str,
         reason_str,
+        path->error_category != NULL ? path->error_category : "-",
         path->duration_ms);
 }

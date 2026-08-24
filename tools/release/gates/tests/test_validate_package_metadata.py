@@ -383,21 +383,35 @@ class TestContainsMakeBuildCommand:
 class TestReleaseGateSnippetExpectations:
     """Validate regression guard snippets for release/package review findings."""
 
-    def test_nfpm_dependency_uses_non_exact_floor(self) -> None:
-        """Ensure NFPM dependency uses non-exact floor version and correct module path."""
-        assert 'nginx (>= ${NGINX_VERSION_FLOOR})' in validator.NFPM_REQUIRED_SNIPPETS
-        assert 'nginx (<< ${NGINX_VERSION_CEIL})' in validator.NFPM_REQUIRED_SNIPPETS
-        assert 'nginx (= ${NGINX_VERSION})' not in validator.NFPM_REQUIRED_SNIPPETS
+    def test_nfpm_dependency_uses_exact_nginx_version(self) -> None:
+        """Ensure NFPM dependency pins the EXACT NGINX version and correct module path.
+
+        NGINX dynamic modules require an exact version match; the core
+        loader rejects any difference (including patch) before signature
+        checks.  The DEB/RPM dependency metadata must therefore pin the
+        exact target version rather than a branch-scoped floor/ceiling.
+        """
+        assert 'nginx (= ${NGINX_VERSION})' in validator.NFPM_REQUIRED_SNIPPETS
+        assert "nginx = 1:${NGINX_VERSION}" in validator.NFPM_REQUIRED_SNIPPETS
+        assert 'nginx (>= ${NGINX_VERSION_FLOOR})' not in validator.NFPM_REQUIRED_SNIPPETS
+        assert 'nginx (<< ${NGINX_VERSION_CEIL})' not in validator.NFPM_REQUIRED_SNIPPETS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.NFPM_REQUIRED_SNIPPETS
         assert "packager: deb" in validator.NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN
 
-    def test_rpm_spec_dependency_uses_non_exact_floor(self) -> None:
-        """Ensure RPM spec uses non-exact floor dependency and correct module path."""
-        assert "Requires:       nginx >= 1:%{nginx_version_floor}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+    def test_rpm_spec_dependency_uses_exact_nginx_version(self) -> None:
+        """Ensure RPM spec pins the EXACT NGINX version (epoch-aware) and correct module path.
+
+        NGINX dynamic modules require an exact version match; the core
+        loader rejects any difference (including patch) before signature
+        checks.  The RPM spec must pin the exact version with the
+        nginx.org epoch prefix (1:), never a branch-scoped floor, and
+        never a naked exact dep without the epoch.
+        """
+        assert "Requires:       nginx = 1:%{nginx_version}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
         assert "Requires:       nginx = %{nginx_version}" in validator.FORBIDDEN_NAKED_EXACT_NGINX_DEPS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.STANDALONE_RPM_SPEC_SNIPPETS
 
-    def test_standalone_workflows_validate_input_version(self) -> None:
+    def test_standalone_rpm_workflow_validate_input_version(self) -> None:
         """Ensure workflow expressions are isolated from shell evaluation."""
         env_binding = "INPUT_VERSION: ${{ inputs.version }}"
         validator_cmd = './packaging/scripts/validate-version.sh "$INPUT_VERSION"'
@@ -405,24 +419,27 @@ class TestReleaseGateSnippetExpectations:
             './packaging/scripts/validate-version.sh "${{ inputs.version }}"'
         )
 
-        for snippets in (validator.STANDALONE_DEB_SNIPPETS, validator.STANDALONE_RPM_WORKFLOW_SNIPPETS):
-            assert env_binding in snippets
-            assert validator_cmd in snippets
-            assert direct_interpolation not in snippets
+        snippets = validator.STANDALONE_RPM_WORKFLOW_SNIPPETS
+        assert env_binding in snippets
+        assert validator_cmd in snippets
+        assert direct_interpolation not in snippets
         assert direct_interpolation in validator.STANDALONE_VERSION_FORBIDDEN_SNIPPETS
 
-    def test_standalone_workflow_rejects_direct_expression_in_shell(
+    def test_standalone_rpm_workflow_rejects_direct_expression_in_shell(
         self, monkeypatch
     ) -> None:
         """Fail when a workflow expression is interpolated into shell source."""
         direct_interpolation = (
             './packaging/scripts/validate-version.sh "${{ inputs.version }}"'
         )
-        content = "\n".join([*validator.STANDALONE_DEB_SNIPPETS, direct_interpolation])
+        content = "\n".join([
+            *validator.STANDALONE_RPM_WORKFLOW_SNIPPETS,
+            direct_interpolation,
+        ])
         monkeypatch.setattr(validator, "read_safe", lambda _path: content)
         result = validator.ValidationResult()
 
-        validator._validate_standalone_deb(result)
+        validator._validate_standalone_rpm_workflow(result)
 
         assert any(
             status == "FAIL" and ":forbid:" in check_id
