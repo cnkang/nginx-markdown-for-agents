@@ -590,6 +590,21 @@ while IFS= read -r script_file; do
         errors=$((errors + 1))
         negation_hits=$((negation_hits + 1))
     done < <(awk '
+        function close_one_block() {
+            if (depth > 0) {
+                delete block_type[depth]
+                delete block_neg[depth]
+                delete block_active[depth]
+                depth--
+            }
+        }
+        function close_same_line_terminators(text, token, pattern) {
+            pattern = "(^|[;[:space:]])" token "([;[:space:]]|$)"
+            while (match(text, pattern)) {
+                close_one_block()
+                text = substr(text, RSTART + RLENGTH)
+            }
+        }
         BEGIN { depth = 0 }
         {
             line = $0
@@ -623,11 +638,15 @@ while IFS= read -r script_file; do
             }
 
             if (is_fi || is_done || is_esac) {
-                if (depth > 0) {
-                    delete block_type[depth]
-                    delete block_neg[depth]
-                    delete block_active[depth]
-                    depth--
+                if (is_fi) {
+                    close_one_block()
+                    close_same_line_terminators(substr(trimmed, 3), "fi")
+                } else if (is_done) {
+                    close_one_block()
+                    close_same_line_terminators(substr(trimmed, 5), "done")
+                } else {
+                    close_one_block()
+                    close_same_line_terminators(substr(trimmed, 5), "esac")
                 }
                 next
             }
@@ -649,6 +668,7 @@ while IFS= read -r script_file; do
                 block_type[depth] = "if"
                 block_neg[depth] = is_negopen
                 block_active[depth] = has_then
+                close_same_line_terminators(line, "fi")
                 next
             }
             if (is_loop) {
@@ -656,6 +676,7 @@ while IFS= read -r script_file; do
                 block_type[depth] = "loop"
                 block_neg[depth] = is_negopen
                 block_active[depth] = has_do
+                close_same_line_terminators(line, "done")
                 next
             }
             if (is_case) {
@@ -663,6 +684,7 @@ while IFS= read -r script_file; do
                 block_type[depth] = "case"
                 block_neg[depth] = 0
                 block_active[depth] = 0
+                close_same_line_terminators(line, "esac")
                 next
             }
             if (has_then && depth > 0 && block_type[depth] == "if") {
@@ -671,6 +693,9 @@ while IFS= read -r script_file; do
             if (has_do && depth > 0 && block_type[depth] == "loop") {
                 block_active[depth] = 1
             }
+            close_same_line_terminators(line, "fi")
+            close_same_line_terminators(line, "done")
+            close_same_line_terminators(line, "esac")
         }
     ' "$script_file" 2>/dev/null || true)
 done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)

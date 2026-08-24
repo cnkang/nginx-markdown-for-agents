@@ -28,15 +28,28 @@ _RUSTUP_DIR_NAME = ".rustup"
 
 
 def _trusted_roots() -> tuple[Path, ...]:
-    """Return the fixed system directories allowed for tool executables."""
-    return tuple(root.resolve() for root in _APPROVED_EXECUTABLE_DIRS)
+    """Return configured roots plus their resolved filesystem aliases.
+
+    Keep both forms because a discovered executable is checked first at its
+    literal PATH location and then at its resolved target.  On macOS `/bin`
+    can resolve to `/private/bin`; dropping the configured spelling would
+    reject a legitimate literal `/bin/git` entry.
+    """
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for configured_root in _APPROVED_EXECUTABLE_DIRS:
+        for root in (configured_root, configured_root.resolve()):
+            if root not in seen:
+                roots.append(root)
+                seen.add(root)
+    return tuple(roots)
 
 
 def _is_under(path: Path, roots: tuple[Path, ...]) -> bool:
     """Return whether an (unresolved) path is below one of the trusted roots.
 
-    Containment compares the candidate path against the resolved trusted
-    roots WITHOUT resolving the candidate itself.  Resolving the candidate
+    Containment compares the candidate path against configured and resolved
+    trusted roots WITHOUT resolving the candidate itself.  Resolving the candidate
     here would make a user-writable symlink that points into a trusted root
     (for example `~/bin/foo -> /usr/bin/foo`) pass as trusted: the caller
     checks the discovered PATH entry with this helper and validates the

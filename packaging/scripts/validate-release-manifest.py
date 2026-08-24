@@ -322,7 +322,7 @@ def validate_manifest(
                     f"nginx-markdown-for-agents-installer-{tag}.sh",
                     "nginx-markdown-for-agents-release.asc",
                 }
-            else:
+            elif require_bootstrap_assets:
                 errors.append(
                     "git.tag must be a semantic release tag to validate bootstrap assets"
                 )

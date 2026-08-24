@@ -135,12 +135,13 @@ function_contains_line() {
 comment_free_line() {
     local file="$1" target_line="$2"
     awk -v target="${target_line}" '
-        function strip_comments(text, start, stop, line_comment) {
+        function strip_comments(text, start, stop, line_comment, result) {
+            result = ""
             while (1) {
                 if (in_block) {
                     stop = index(text, "*/")
                     if (!stop) {
-                        return ""
+                        return result
                     }
                     text = substr(text, stop + 2)
                     in_block = 0
@@ -153,10 +154,10 @@ comment_free_line() {
                     return substr(text, 1, line_comment - 1)
                 }
                 if (!start) {
-                    return text
+                    return result text
                 }
-                text = substr(text, 1, start - 1) \
-                    substr(text, start + 2)
+                result = result substr(text, 1, start - 1)
+                text = substr(text, start + 2)
                 in_block = 1
             }
         }

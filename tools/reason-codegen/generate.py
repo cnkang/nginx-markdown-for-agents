@@ -618,6 +618,7 @@ def generate_rust_impl_continued(reasons) -> str:
     timeout_disc = next(
         (r["discriminant"] for r in reasons if r["key"] == "timeout"), 9
     )
+    invalid_disc = max((r["discriminant"] for r in reasons), default=-1) + 1
     lines.append(
         f"    /// assert_eq!(ReasonCode::Converted.discriminant(), {converted_disc});"
     )
@@ -640,8 +641,13 @@ def generate_rust_impl_continued(reasons) -> str:
     lines.append(RUST_DOC_CODE_FENCE)
     lines.append(RUST_DOC_REASON_USE)
     lines.append(RUST_DOC_LINE)
-    lines.append("    /// assert_eq!(ReasonCode::from_discriminant(0), Some(ReasonCode::Converted));")
-    lines.append("    /// assert_eq!(ReasonCode::from_discriminant(255), None);")
+    lines.append(
+        f"    /// assert_eq!(ReasonCode::from_discriminant({converted_disc}), "
+        "Some(ReasonCode::Converted));"
+    )
+    lines.append(
+        f"    /// assert_eq!(ReasonCode::from_discriminant({invalid_disc}), None);"
+    )
     lines.append(RUST_DOC_CODE_FENCE)
     lines.append("    pub fn from_discriminant(value: u32) -> Option<Self> {")
     lines.append("        match value {")

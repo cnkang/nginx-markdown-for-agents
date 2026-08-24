@@ -1742,7 +1742,8 @@ fi
 if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]]; then
   if [[ -n "$DOWNLOAD_SHA256" ]]; then
     ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"
-    if [[ "$ACTUAL_SHA256" != "$DOWNLOAD_SHA256" ]]; then
+    EXPECTED_SHA256="$(printf '%s' "$DOWNLOAD_SHA256" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
       die_with_error "checksum" \
         "Checksum verification failed for ${ASSET_NAME}. Expected: ${DOWNLOAD_SHA256}, Actual: ${ACTUAL_SHA256}." \
         "Re-download the file and try again." \

@@ -13,10 +13,11 @@ unauthorized callers and was fixed three separate times in review.
 Detection model (conservative, per handler function):
 1. A handler is a function whose body references `r->method` and either
    `NGX_HTTP_NOT_ALLOWED` or a `method_not_allowed` helper call.
-2. The function must call an access-control function (`check_access`,
-   `ngx_http_core_module` access phase helpers) BEFORE the method-rejection
-   branch.  "Before" means the access call appears earlier in source order
-   than any `NGX_HTTP_NOT_ALLOWED` assignment or `*_method_not_allowed(` call.
+2. The function must execute an access-control function (`check_access`,
+   `ngx_http_core_module` access phase helpers) unconditionally BEFORE the
+   method-rejection branch.  A call inside an earlier conditional block does
+   not satisfy the contract: the denied request could still reach 405 without
+   an access decision.
 3. Handlers that never reject methods (no 405 path) are exempt.
 
 Advisory (REVIEW) by default; --strict promotes findings to exit 1.
@@ -206,6 +207,41 @@ def _strip_literals_and_comments(text: str) -> str:
     return _TOKEN_RE.sub(lambda m: " " * len(m.group(0)), text)
 
 
+def _unconditional_access_positions(body: str) -> list[int]:
+    """Return access-call offsets executed unconditionally at body level.
+
+    The audit intentionally uses a small structural model instead of a C
+    parser.  Braces are retained by ``_blank_literals_and_comments`` so calls
+    nested in an ``if``/loop block are rejected.  A call in a top-level guard
+    condition such as ``if (check_access(r) != NGX_OK)`` is allowed because
+    evaluating that condition is itself unconditional.  A brace-less
+    ``if (allowed) check_access(r)`` is not allowed: its prefix has already
+    closed the condition before the call.
+    """
+    structural = _blank_literals_and_comments(body)
+    positions: list[int] = []
+    for match in ACCESS_CALL_RE.finditer(structural):
+        depth = 0
+        for char in structural[:match.start()]:
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth = max(0, depth - 1)
+        if depth != 1:
+            continue
+
+        statement_start = max(
+            structural.rfind(";", 0, match.start()),
+            structural.rfind("{", 0, match.start()),
+            structural.rfind("}", 0, match.start()),
+        )
+        prefix = structural[statement_start + 1 : match.start()]
+        if re.search(r"\b(if|for|while|switch)\s*\([^)]*\)\s*$", prefix):
+            continue
+        positions.append(match.start())
+    return positions
+
+
 def audit_file(path: Path) -> tuple[list[str], list[str]]:
     """Return (violations, reviews) for one file."""
     violations: list[str] = []
@@ -219,16 +255,24 @@ def audit_file(path: Path) -> tuple[list[str], list[str]]:
         has_method_reject = bool(METHOD_REJECT_RE.search(code))
         if not has_method_reject:
             continue  # no 405 path — ordering contract not applicable
-        access_pos = ACCESS_CALL_RE.search(code)
+        access_positions = _unconditional_access_positions(body)
         reject_pos = METHOD_REJECT_RE.search(code)
         assert reject_pos is not None  # guarded by has_method_reject above
-        if access_pos is None:
+        if not access_positions:
+            conditional_access = ACCESS_CALL_RE.search(code)
+            if conditional_access is not None:
+                violations.append(
+                    f"{path.name}:{name}: access control appears only inside "
+                    "a conditional path before 405; it must execute "
+                    "unconditionally before method rejection"
+                )
+                continue
             reviews.append(
                 f"{path.name}:{name}: handler rejects methods but never "
                 "calls an access-control function before the 405 branch; "
                 "denied requests may disclose handler behavior"
             )
-        elif reject_pos.start() < access_pos.start():
+        elif reject_pos.start() < min(access_positions):
             violations.append(
                 f"{path.name}:{name}: method rejection (405) appears BEFORE "
                 "access control; access must be evaluated first so denied "

@@ -107,11 +107,18 @@ if [[ -z "$PR_BASE_REF" ]]; then
 fi
 MERGE_BASE=""
 if ! MERGE_BASE=$(git merge-base HEAD "$PR_BASE_REF" 2>/dev/null); then
-    MERGE_BASE=$(git rev-parse HEAD)
+    echo "FAIL: unable to resolve a verified merge base for $PR_BASE_REF" >&2
+    echo "  Refusing to compare HEAD with itself; provide a fetched PR base." >&2
+    FAIL=1
 fi
-GIT_DIFF=$(git diff "$MERGE_BASE" -- "components/nginx-module/src/ngx_http_markdown_stream_commit.c" "components/nginx-module/src/ngx_http_markdown_stream_postcommit.c" 2>/dev/null || true)
+GIT_DIFF=""
+if [[ -n "$MERGE_BASE" ]]; then
+    GIT_DIFF=$(git diff "$MERGE_BASE" -- "components/nginx-module/src/ngx_http_markdown_stream_commit.c" "components/nginx-module/src/ngx_http_markdown_stream_postcommit.c" 2>/dev/null || true)
+fi
 
-if [[ -z "$GIT_DIFF" ]]; then
+if [[ -z "$MERGE_BASE" ]]; then
+    :
+elif [[ -z "$GIT_DIFF" ]]; then
     echo "PASS: No uncommitted changes in $SRCDIR (baseline state)"
     echo "  (After fix is applied, re-run to verify only prefix strings changed)"
 else

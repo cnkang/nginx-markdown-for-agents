@@ -140,6 +140,19 @@ assert_detector_flags "${TMPDIR_TEST}/case2" "single-line dead branch"
 assert_detector_clean "${TMPDIR_TEST}/case3" "capture idiom"
 assert_detector_clean "${TMPDIR_TEST}/case4" "plain status usage"
 
+# Fixture 4b: a terminator after a command on the same line must close the
+# negated branch; otherwise the following clean status would inherit stale
+# branch state.
+mkdir -p "${TMPDIR_TEST}/case4b"
+cat > "${TMPDIR_TEST}/case4b/same_line_terminator.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+if ! probe; then
+    echo "handled"; fi
+echo "status"
+EOF
+assert_detector_clean "${TMPDIR_TEST}/case4b" "same-line fi terminator"
+
 # Fixture 5: nested control flow must retain the outer negated branch.
 mkdir -p "${TMPDIR_TEST}/case5"
 cat > "${TMPDIR_TEST}/case5/nested_branch.sh" << 'EOF'

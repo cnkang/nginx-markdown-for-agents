@@ -63,6 +63,32 @@ if [[ "${comment_exit_code}" -ne 0 ]]; then
     exit 1
 fi
 
+split_comment_dir="${fixture_dir}/split-comment"
+mkdir -p "${split_comment_dir}"
+cat >"${split_comment_dir}/split_comment.c" <<'SOURCE'
+static int clean(const ngx_http_markdown_conf_t *conf)
+{
+    (void) conf->enabled /* comment begins after a live read
+    and ends on the next source line */
+    ;
+    return 0;
+}
+SOURCE
+
+if split_output="$(bash "${DETECTOR}" "${split_comment_dir}" 2>&1)"; then
+    split_exit_code=0
+else
+    split_exit_code=$?
+fi
+if [[ "${split_exit_code}" -eq 1 ]] \
+    && [[ "${split_output}" == *"request-path reads live conf->"* ]]; then
+    printf 'PASS: text before a multiline block comment remains executable\n'
+else
+    printf 'FAIL: text before a multiline block comment was discarded\n' >&2
+    printf '%s\n' "${split_output}" >&2
+    exit 1
+fi
+
 if [[ "${exit_code}" -eq 1 ]] \
     && [[ "${output}" == *"request-path reads live conf->"* ]] \
     && [[ "${output}" == *"fixture.c"* ]]; then

@@ -966,19 +966,19 @@ class TestSchemaWellFormedness:
             assert field in required_in_schema, f"Missing required field '{field}'"
 
     def test_report_schema_module_benchmark_properties(self):
-        """module_benchmark properties in schema include version, timestamp, scenarios, memory_slope."""
+        """module_benchmark properties include identity and evidence fields."""
         props = _load_schema()["module_benchmark"]["report_schema"]["properties"]["module_benchmark"]
         self._assert_object_has_required_fields(
-            props, "version", "timestamp", "scenarios", "memory_slope"
+            props, "version", "timestamp", "git_commit", "scenarios", "memory_slope"
         )
 
     def test_scenarios_schema_structure(self):
-        """scenarios is array of objects with required name and status fields."""
+        """scenarios require the emitted configuration identity."""
         mb_props = _load_schema()["module_benchmark"]["report_schema"]["properties"]["module_benchmark"]
         scenarios = mb_props["properties"]["scenarios"]
         assert scenarios.get("type") == "array"
         items = scenarios.get("items", {})
-        self._assert_object_has_required_fields(items, "name", "status")
+        self._assert_object_has_required_fields(items, "name", "scenario_config", "status")
 
     def test_scenario_name_enum_values(self):
         """Scenario schema freezes all eight required scenario names."""
@@ -1075,6 +1075,15 @@ class TestGracefulExit:
 
 class TestReportSchemaConformance:
     """Validate mock reports against the module_benchmark schema structure."""
+
+    def test_module_validation_requires_emitted_scenario_config(self):
+        """The runtime validator must reject the removed profile-only shape."""
+        report = _build_valid_mock_report()
+        del report["module_benchmark"]["scenarios"][0]["scenario_config"]
+
+        errors = validate_module_benchmark(report)
+
+        assert any("scenario_config" in error for error in errors)
 
     def _get_schema_props(self):
         """Return the module_benchmark properties from the schema."""
@@ -1485,9 +1494,19 @@ class TestPortCleanupOnSignals:
         # The behaviour under test here is trap-driven cleanup, not host PATH
         # auditing, so pin the standard system directories ahead of the
         # inherited PATH — the same resolution CI gets on its clean runners.
-        env["PATH"] = os.pathsep.join(
-            ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env.get("PATH", "")]
-        )
+        trusted_paths = [
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ]
+        inherited_path = env.get("PATH", "")
+        if inherited_path:
+            trusted_paths.extend(
+                entry for entry in inherited_path.split(os.pathsep) if entry
+            )
+        env["PATH"] = os.pathsep.join(trusted_paths)
         return subprocess.Popen(
             [
                 BASH_BIN,

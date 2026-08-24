@@ -317,6 +317,34 @@ else
 fi
 rm -f "${wf_dir}/bracket-benign.yml"
 
+# Test 11: a benign output followed by a command-bearing output on the same
+# run line must report the second interpolation too.
+cat >"${wf_dir}/multiple-outputs.yml" <<'Y'
+name: multiple-outputs
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - id: meta
+        run: echo 'version=1.2.3' >> "$GITHUB_OUTPUT"
+      - id: resolve
+        run: echo 'command=make test' >> "$GITHUB_OUTPUT"
+      - name: Run
+        run: echo "${{ steps.meta.outputs.version }}" && ${{ steps.resolve.outputs.command }}
+Y
+
+${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] \
+    && grep -q 'multiple-outputs.yml' "${output_file}"; then
+    pass "all step-output interpolations on one line are audited"
+else
+    fail "all step-output interpolations on one line are audited" \
+        "expected exit 1, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/multiple-outputs.yml"
+
 # Test 11: Dot-form benign step output must also pass (regression guard).
 cat >"${wf_dir}/dot-benign.yml" <<'Y'
 name: dot-benign
