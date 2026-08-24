@@ -457,7 +457,7 @@ make -C components/nginx-module/tests unit
 
 ## Brotli Streaming Backpressure Coverage Analysis
 
-**Status:** Covered by existing codec-agnostic tests (no Brotli-specific E2E needed)
+**Status:** Covered by codec-agnostic tests plus a Brotli-specific streaming E2E scenario (`verify_brotli_streaming_e2e.sh`)
 
 The downstream backpressure mechanism (NGX_AGAIN handling, pending output save,
 resume drain) is **codec-agnostic** — it operates on the outgoing Markdown chain
@@ -542,6 +542,7 @@ When modifying the decompression implementation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Brotli backpressure status line aligned with its evidence table: codec-agnostic tests plus the Brotli-specific streaming E2E scenario |
 | 0.9.1 | 2026-07-18 | Kiro | Added Brotli streaming decompression test sections: streaming_decomp_brotli unit tests, property tests (trailing, budget, error propagation, no-progress, streaming equivalence), E2E verify_brotli_streaming_e2e.sh, backpressure coverage analysis |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

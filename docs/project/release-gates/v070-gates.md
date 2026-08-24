@@ -30,7 +30,12 @@ Gate 6: Fuzz & Packaging Infrastructure (depends on Gate 1; validates specs 29-3
 **Release-blocking scope**: Gates 1 through 6 are blocking for 0.7.0 GA as
 defined in this document. The tag package workflow satisfies Gate 3 via its
 build, install-layout, checksum, package-signature, and smoke-test chain, but
-the release record must also attach independent upgrade/rollback evidence.
+the release record must also attach upgrade/rollback evidence that is
+INDEPENDENT of the Gate 3.5 version-switch test: it must come from a separate
+environment, runner, or actor — or carry distinct artifact provenance — and
+the release record must state which of these establishes the independence.
+Reusing the same environment run for both tests without a recorded
+distinction is an incomplete release record.
 Gate 4 passes via chart lint/render validation, promoted cluster smoke, and F5
 assessment evidence. Final Go requires the package-signature and
 upgrade/rollback records in addition to the Gate 4 records. Missing records
@@ -76,7 +81,7 @@ remain blocking even when the workflow itself is green.
 
 | # | Check Item | Verification Command | Pass Criteria |
 |---|-----------|---------------------|---------------|
-| 3.1 | DEB build (full matrix) | CI workflow `release-deb.yml` | All matrix entries build successfully |
+| 3.1 | nFPM DEB build (full matrix) | CI workflow `release-packages.yml` | All matrix entries build successfully |
 | 3.2 | RPM build (full matrix) | CI workflow `release-rpm.yml` | All matrix entries build successfully |
 | 3.3 | Package signature verification | `gpg --verify` / `rpm -K` | Valid signatures |
 | 3.4 | Install smoke tests | `dpkg -i` + `rpm -i` + `nginx -V` + `curl` | Module loads and converts |
@@ -128,12 +133,12 @@ remain blocking even when the workflow itself is green.
 | `markdown_parser_budget` config | config validator | `validate_config_directives.py` | Gate 5 |
 | `markdown_diagnostics` config | config validator | `validate_config_directives.py` | Gate 5 |
 | `markdown_dynconf_dry_run` config | config validator | `validate_config_directives.py` | Gate 5 |
-| `decompression_*_total` metrics | metric validator | `validate_metrics.py` | Gate 5 |
-| `parse_*_total` metrics | metric validator | `validate_metrics.py` | Gate 5 |
-| `replay_buffer_errors_total` metric | metric validator | `validate_metrics.py` | Gate 5 |
-| `DECOMP_*` reason codes | reason-code validator | `validate_reason_codes.py` | Gate 5 |
-| `PARSE_*` reason codes | reason-code validator | `validate_reason_codes.py` | Gate 5 |
-| `REPLAY_BUFFER_ERROR` reason code | reason-code validator | `validate_reason_codes.py` | Gate 5 |
+| `decompression_*_total` metrics (0.7.0-era names; retired by the 0.9.2 twelve-family freeze) | metric validator | `validate_metrics.py` | Gate 5 |
+| `parse_*_total` metrics (0.7.0-era name; retired by the 0.9.2 freeze) | metric validator | `validate_metrics.py` | Gate 5 |
+| `replay_buffer_errors_total` metric (0.7.0-era name; retired by the 0.9.2 freeze) | metric validator | `validate_metrics.py` | Gate 5 |
+| `DECOMP_*` reason codes (0.7.0-era uppercase; superseded by lowercase snake_case) | reason-code validator | `validate_reason_codes.py` | Gate 5 |
+| `PARSE_*` reason codes (0.7.0-era uppercase; superseded by lowercase snake_case) | reason-code validator | `validate_reason_codes.py` | Gate 5 |
+| `REPLAY_BUFFER_ERROR` reason code (0.7.0-era uppercase; superseded by lowercase snake_case) | reason-code validator | `validate_reason_codes.py` | Gate 5 |
 | DEB package metadata | package validator | `validate_package_metadata.py` | Gate 3/6 |
 | RPM package metadata | package validator | `validate_package_metadata.py` | Gate 3/6 |
 | Helm chart values | helm lint + values schema | `validate_k8s_manifests.py` | Gate 4 |
@@ -202,6 +207,7 @@ make release-gates-check-070
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-15 | Hermes | Helm chart render gate uses validate_k8s_manifests.py and defines the required rendered fields |
+| 0.9.2 | 2026-08-24 | Kang | Gate 3.6 upgrade/rollback evidence independence defined (separate environment, runner, actor, or provenance); validator matrix rows annotated as 0.7.0-era names retired by the twelve-family freeze |
+| 0.9.2 | 2026-08-15 | Kang | Helm chart render gate uses validate_k8s_manifests.py and defines the required rendered fields |
 | 0.7.0-int | 2026-05-20 | Kang | Add Gate 6 (Fuzz & Packaging Infrastructure) with validate_fuzz_packaging.py checks |
 | 0.7.0-draft | 2026-05-17 | spec-agent | Initial v0.7.0 gate definitions from design.md §14.0 |

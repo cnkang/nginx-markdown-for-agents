@@ -76,13 +76,19 @@ ARCH=amd64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
 PKG="nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 
-curl -fSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
-curl -fSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
-curl -fSLO "${BASE_URL}/${PKG}"
+curl -fsSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fsSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+curl -fsSLo "${PKG}" "${BASE_URL}/${PKG}"
 # Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
 : "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
-VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+# Import the checked-in project public key into an isolated keyring first,
+# so gpg verifies the signature against the project key only.
+GNUPGDIR="$(mktemp -d)"
+trap 'rm -rf "${GNUPGDIR}"' EXIT
+gpg --batch --homedir "${GNUPGDIR}" --import packaging/nginx-markdown-for-agents-release.asc
+VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
+    --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
@@ -103,13 +109,19 @@ ARCH=x86_64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
 PKG="nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 
-curl -fSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
-curl -fSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
-curl -fSLO "${BASE_URL}/${PKG}"
+curl -fsSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fsSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+curl -fsSLo "${PKG}" "${BASE_URL}/${PKG}"
 # Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
 : "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
-VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+# Import the checked-in project public key into an isolated keyring first,
+# so gpg verifies the signature against the project key only.
+GNUPGDIR="$(mktemp -d)"
+trap 'rm -rf "${GNUPGDIR}"' EXIT
+gpg --batch --homedir "${GNUPGDIR}" --import packaging/nginx-markdown-for-agents-release.asc
+VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
+    --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1

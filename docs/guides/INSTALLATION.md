@@ -100,7 +100,7 @@ Use the authenticated release-bound sequence in [Shortest Success Path](#2-short
 Optional safety switch for NGINX-upgrade scenarios with stale module snippets:
 
 ```bash
-AUTO_DISABLE_STALE_MODULE=1 sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
+sudo env AUTO_DISABLE_STALE_MODULE=1 VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 ```
 
 Run the optional command only after the release-bound download, signature, and
@@ -211,9 +211,9 @@ VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=amd64
 
-curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
-curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
-curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
+curl -fsSLo SHA256SUMS "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fsSLo SHA256SUMS.asc "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
+curl -fsSLo "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb" "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 # Import the release signing key through an independently authenticated channel before GPG verification.
 # Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
 # Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
@@ -239,9 +239,9 @@ VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 
-curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
-curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
-curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
+curl -fsSLo SHA256SUMS "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fsSLo SHA256SUMS.asc "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
+curl -fsSLo "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm" "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 # Import the release signing key through an independently authenticated channel before GPG verification.
 # Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
 # Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
@@ -765,7 +765,6 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.3 | glibc | x86_64 | Full |
 | 1.31.3 | musl | aarch64 | Full |
 | 1.31.3 | musl | x86_64 | Full |
-| 1.26.3 | unlisted | unlisted | Source Only |
 
 <!-- END AUTO-GENERATED MATRIX -->
 
@@ -1708,6 +1707,7 @@ If you encounter issues not covered in this guide:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | DEB/RPM download commands now save responses to their intended artifact file names with curl -o options; AUTO_DISABLE_STALE_MODULE is passed through sudo env alongside VERSION |
 | 0.9.1 | 2026-07-28 | Codex | Clarified that Linux package commands require published tag assets and checksums; release-candidate matrix entries are not downloadable packages. |
 | 0.9.1 | 2026-07-17 | Codex | Verified installation guides, curl command patterns, and dynamic package naming for the upcoming v0.9.1 release. |
 | 0.8.3 | 2026-06-26 | Kang | 0.8.x release-line closeout: updated DEB/RPM and SOP manual-download examples to VERSION=0.8.3; refreshed release-line version references to current patch |

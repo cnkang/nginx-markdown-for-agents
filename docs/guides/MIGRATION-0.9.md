@@ -270,11 +270,11 @@ sed -i 's/markdown_parse_timeouts_total/markdown_failures_total{reason="timeout"
 #### Key Changes for Alert Authors
 
 1. **Label values are lowercase**: `SKIP_ACCEPT` → `skipped_accept`
-2. **Metrics consolidated**: individual error counters → `markdown_errors_total{reason="..."}`
-3. **Wildcard matching**: use `markdown_errors_total` without a `reason` filter
+2. **Metrics consolidated**: individual error counters → `nginx_markdown_failures_total{reason="..."}`
+3. **Wildcard matching**: use `nginx_markdown_failures_total` without a `reason` filter
    to catch all errors regardless of type
-4. **New errors**: 8 new reason codes may trigger on `markdown_errors_total`
-   that didn't exist in 0.8.x
+4. **New errors**: 8 new reason codes may trigger on
+   `nginx_markdown_failures_total` that did not exist in 0.8.x
 
 ### Reference
 
@@ -473,7 +473,7 @@ accidental conflicts.
 
 **Cause:** Old metric names no longer exist. For example,
 `markdown_parse_timeouts_total` is now
-`markdown_errors_total{reason="timeout"}`.
+`nginx_markdown_failures_total{reason="timeout"}`.
 
 **Fix:** Apply the metric family consolidation table (see the Observability
 section above) to all dashboard queries and alert rules.

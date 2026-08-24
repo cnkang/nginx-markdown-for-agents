@@ -16,7 +16,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Conditional requests (304) | ✅ | ⚠️ | Only If-None-Match/ETag validation requires full buffering; `ims_only` remains streaming-compatible via upstream Last-Modified and NGINX If-Modified-Since handling. Streaming mode is therefore not blanket-incompatible with conditional requests — it cannot validate via ETag, but IMS validation still works |
 | Fail-open (pre-commit) | ✅ | ✅ | Streaming: configurable via `markdown_error_policy` |
 | Fail-open (post-commit) | N/A | ❌ | Post-commit errors produce truncated output |
-| `parser_memory` budget | N/A | ✅ | Rust parser allocation bound; streaming path only |
+| `parser_memory` budget | ✅ | ✅ | Rust parser allocation bound (`parser_memory_budget`): enforced by the conservative pre-parse estimate on the full-buffer path and checked continuously on the streaming path |
 | `conversion_memory` budget | ✅ | ✅ | Cumulative input-size cap shared by buffered and streaming paths |
 | Prometheus metrics | ✅ | ✅ | Additional streaming-specific counters |
 | Token estimation header | ✅ | ❌ | Requires full output; not available in streaming |
@@ -108,6 +108,7 @@ Use **auto** (default since 0.8.0) to let the module choose based on response si
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Corrected the parser_memory budget row: the bound covers both paths (full-buffer pre-parse estimate plus streaming enforcement), not streaming only |
 | 0.9.2 | 2026-08-19 | Hermes | Document the accepted no-ETag-for-streaming constraint (full-buffer vs streaming path divergence, user-confirmed) |
 | 0.9.2 | 2026-08-15 | Hermes | Deflate streaming misclassification reports a format error instead of failing closed |
 | 0.9.1 | 2026-07-18 | Kang | Added streaming decompression rows (gzip, deflate, Brotli) to compatibility matrix |

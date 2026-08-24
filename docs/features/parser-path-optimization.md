@@ -112,7 +112,7 @@ path.
 | Corpus diff: per-fixture before/after | Closed | 33/33 fixtures identical via blake3 hash comparison; artifact at `docs/evidence/` |
 | Peak memory: before/after RSS | Closed | 31.3 → 31.1 MiB (−0.5 %); no regression |
 | Output equivalence: property tests | Closed | 40 property tests, 11 regression tests, both default and feature modes |
-| Security baseline: no bypass | Closed | All security tests pass in both modes |
+| Security baseline: allowlisted bypass only | Closed | All security tests pass in both modes |
 
 ### Remaining caveats
 
@@ -418,10 +418,10 @@ standard `normalize_output` two-pass approach.
 
 ## Security Baseline
 
-The optimization is security-sensitive. Early pruning intentionally bypasses
-`SecurityValidator::check_element` for elements classified as prunable, so the
-prunable-element allowlist and its safety tests are part of the security
-contract. The approved bypass contract allows only the following elements to
+The optimization is security-sensitive. Early pruning skips
+`SecurityValidator::check_element` for allowlisted prunable elements only.
+There is no unapproved bypass. The prunable-element allowlist and its safety
+tests are part of the security contract. Exactly the following elements may
 skip `SecurityValidator::check_element`: `<script>`, `<style>`, `<noscript>`
 (active by default), plus `<nav>`, `<footer>`, `<aside>` (behind the
 `prune_noise_regions` feature flag). All other elements pass through the normal
@@ -487,6 +487,7 @@ The following items are explicitly out of scope for 0.4.0:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Security baseline wording now says allowlisted bypass only; status row aligned |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

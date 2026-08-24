@@ -104,16 +104,21 @@ Required:
   `\(...\)` — on **any** line that feeds a regex-capable command or a
   regex variable assignment, not only literal `grep`/`sed`/`awk` lines:
   ```bash
-  # 1) PCRE classes \s, \d, \w on regex-command or pattern-assignment lines
-  if grep -REn '\\s|\\d|\\w' tools/harness/detect_*.sh \
-      | grep -E 'grep|sed|awk|egrep|perl|pattern=|regex=' >/dev/null 2>&1; then
+  # 1) PCRE classes \s, \d, \w on regex-command or pattern-assignment lines.
+  #    Hold the needle in a runtime variable so this gate never matches its
+  #    own source line inside a detect_*.sh script (self-scan exclusion).
+  _pcre_needle='\s|\d|\w'
+  if grep -REn "${_pcre_needle}" tools/harness/detect_*.sh \
+      | grep -E 'grep|sed|awk|egrep|perl|pattern=|regex=' \
+      | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then
       echo "FAIL: prohibited PCRE regex classes found" >&2
       exit 1
   fi
   # 2) BRE-only grouping \(...\) on regex-capable command lines and shell
   #    pattern assignments (embedded Python heredocs are exempt: they use
   #    Python re semantics)
-  if grep -REn '\\\(' tools/harness/detect_*.sh \
+  _bre_needle='\('   # constructed at runtime; see self-scan note above
+  if grep -REn "${_bre_needle}" tools/harness/detect_*.sh \
       | grep -E 'grep|sed|awk|egrep|pattern=|regex=' \
       | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then
       echo "FAIL: BRE-only grouping syntax found" >&2

@@ -8,7 +8,7 @@ paths:
   - "tools/**"
 ---
 
-# Build Safety Rules (56–59)
+# Build Safety Rules (56–59, 70)
 
 ## Rule 56: Orphan Comment Closers
 

@@ -153,7 +153,7 @@ pub fn is_dangerous_url(&self, url: &str) -> bool {
 
 **Applied to**:
 - `<a href="...">` - Links
-- `<img src="...">` - Images (when the module blocks the URL, `alt` text stays as plain text. The `title` attribute appears in Markdown image syntax)
+- `<img src="...">` - Images. A safe URL renders as Markdown image syntax and may keep the `title` attribute: `![alt](src "title")`. A blocked or missing URL never reaches the output: only escaped `alt` text stays as plain text — no URL and no title
 - Embedded/media URL attributes including `<iframe src>`, `<object data>`, `<embed src>`, `<video src/poster>`, `<audio src>`, `<source src>`, `<track src>`, and `<area href>`
 
 ### Layer 5: Markdown Output Escaping
@@ -413,5 +413,6 @@ The implementation details in this document feed into a few operator-facing conc
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Image URL behavior now distinguishes safe URLs (Markdown image syntax may keep title) from blocked or missing URLs (escaped alt text only, no URL, no title) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

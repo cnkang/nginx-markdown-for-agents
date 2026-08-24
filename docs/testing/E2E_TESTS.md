@@ -25,11 +25,11 @@ Use this page to answer three questions:
 tools/e2e/run_e2e_suite.sh
 ```
 
-Ownership: `tools/e2e/` owns the suite **entrypoints** (the runner and the
-shell-based scenario drivers), while `tools/e2e-harness/` owns the **migrated
-Rust scenario implementations** invoked from those entrypoints. A scenario
-lives in exactly one of the two layers, but a migrated scenario may span both
-layers: its entrypoint lives in `tools/e2e/` and its implementation lives in
+Ownership: each scenario has one logical owner. `tools/e2e/` owns the suite
+**entrypoints** (the runner and the shell-based scenario drivers), while
+`tools/e2e-harness/` owns the **migrated Rust scenario implementations**
+invoked from those entrypoints. A migrated scenario may span both surfaces:
+its entrypoint lives in `tools/e2e/` and its implementation lives in
 `tools/e2e-harness/`. See the scenario tables below.
 
 That suite currently runs focused checks across all E2E scenarios.
@@ -96,7 +96,7 @@ The canonical E2E suite focuses intentionally on runtime paths that benefit from
 
 ### Coverage E2E Scenarios
 
-The coverage script (`tools/sonar/collect_nginx_coverage.sh`) runs expanded E2E scenarios against an instrumented NGINX instance to collect gcov/lcov data. The scenarios organize by subsystem:
+The coverage script (`tools/sonar/collect_nginx_coverage.sh`) runs expanded E2E scenarios against an instrumented NGINX instance to collect gcov/lcov data. The suite organizes the coverage scenarios by subsystem:
 
 | Category | Scenarios |
 |----------|-----------|
@@ -241,7 +241,8 @@ That helper owns:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-15 | Hermes | Split E2E ownership: tools/e2e/ owns suite entrypoints, tools/e2e-harness/ owns migrated Rust scenarios |
+| 0.9.2 | 2026-08-24 | Kang | Fixed grammar in the coverage scenarios intro; ownership paragraph states one logical owner per scenario across both surfaces without the single-layer contradiction |
+| 0.9.2 | 2026-08-15 | Kang | Split E2E ownership: tools/e2e/ owns suite entrypoints, tools/e2e-harness/ owns migrated Rust scenarios |
 | 0.6.3 | 2026-05-12 | Kang | Added Rust e2e-harness migrated scenarios section, make test-e2e-rust, separated migrated vs non-migrated scenarios |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.0 | 2026-05-02 | v060-prod | Added new E2E scripts (metrics, conditional requests, config merge, auth/cache, status codes); listed shared helpers |

@@ -104,9 +104,12 @@ has no interruption mechanism, limiting input size bounds the worst-case parse t
     estimate, not an exact process-RSS measurement. html5ever does not expose
     allocator accounting. Exceeding it returns
     `ConversionError::ParseBudgetExceeded`.
+  - **Key mapping**: `markdown_limits parser_memory=<size>` binds to the FFI
+    field `parser_memory_budget`.
   - **Full-buffer path**: Enforced before parsing with a conservative estimate
     derived from input bytes, tag openers, transcoding, parser scratch, and
-    DOM amplification. This path cannot observe html5ever's internal
+    DOM amplification. The check runs before the code path
+    invokes `parse_html_with_charset`. This path cannot observe html5ever's internal
     allocations during `parse_document`, so it fails closed before parsing
     when the estimate exceeds the configured budget.
 - **Error code**: `ERROR_PARSE_BUDGET_EXCEEDED` (11)
@@ -376,5 +379,6 @@ For full directive syntax and examples, see `docs/guides/CONFIGURATION.md`.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Named the parser_memory to parser_memory_budget FFI key mapping and located the full-buffer pre-parse check before parse_html_with_charset |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.7.0 | 2026-05-17 | Kang | Initial parser budget documentation (TASK-A06.3) |

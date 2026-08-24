@@ -8,7 +8,8 @@ paths:
   - "tools/e2e-harness/Cargo.toml"
   - "tools/corpus/test-corpus-conversion/Cargo.toml"
   - ".github/workflows/**"
-  - "packaging/debian/control"
+  - "packaging/nfpm/nfpm.yaml"
+  - "packaging/rpm/SPECS/nginx-module-markdown.spec"
   - "charts/nginx-markdown/Chart.yaml"
   - "AGENTS.md"
   - "CONTRIBUTING.md"
@@ -46,8 +47,7 @@ The Rust build contract is a second, independently synchronized baseline:
   the only intentionally nightly lane.
 - Release Dockerfiles consume `rust-toolchain.toml` instead of embedding an
   independent compiler version.
-- Source-build packaging and current build documentation declare the same
-  MSRV.
+- Release workflows and current build documentation declare the same MSRV.
 
 ## Rationale
 Version inconsistencies have been a recurring issue in past releases:
@@ -75,7 +75,7 @@ The harness detector `tools/harness/detect_version_consistency.sh` performs the 
    - all four first-party manifest MSRVs,
    - classified blocking, release, and nightly workflows,
    - release Dockerfile consumption of the canonical toolchain,
-   - Debian source-build compiler floor, and
+   - release workflow compiler identity, and
    - current contributor, install, compatibility, and operations docs.
 
 An unclassified workflow that installs Rust is a failure so a new workflow

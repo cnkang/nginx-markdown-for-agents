@@ -21,7 +21,7 @@ flowchart TD
     A["New proposal"] --> B{"On the non-goals list?"}
     B -->|Yes| C["Reject — record as 0.6.x+ candidate"]
     B -->|No| D{"Covered by existing sub-spec?"}
-    D -->|Yes| E["Evaluate within sub-spec scope"]
+    D -->|Yes| E["Evaluate within sub-spec scope — record affected streaming path, streaming test, and rollback boundary before approval"]
     D -->|No| F{"Clearly in scope?"}
     F -->|Yes| G["Accept — record affected streaming path, streaming test, and rollback boundary; update affected sub-spec docs"]
     F -->|No| H["Evaluate using Boundary Description template"]
@@ -69,5 +69,6 @@ The following topics are explicitly out of scope for 0.5.0 (referenced from `doc
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Existing-sub-spec evaluation branch now records affected streaming path, test, and rollback boundary before approval |
 | 0.9.2 | 2026-08-15 | Kang | Three streaming evidence fields required before approval |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
