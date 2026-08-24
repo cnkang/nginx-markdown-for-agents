@@ -49,6 +49,7 @@
 
 ## Final verification set
 
+- `make release-gates-check-092`
 - `make docs-check`
 - `make harness-check`
 - `make release-matrix-check`

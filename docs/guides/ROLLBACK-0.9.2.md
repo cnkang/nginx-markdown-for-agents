@@ -51,21 +51,12 @@ Publication and artifact availability are separate release gates.
    ```bash
    MODULES_DIR="$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')"
    if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
-     # Fall back to the distro-specific module directories, selecting the
-     # first that actually exists.
-     # - /usr/lib/nginx/modules      Debian/Ubuntu packages
-     # - /usr/lib64/nginx/modules    RHEL-family packages
-     # - /usr/local/nginx/modules    source builds with default prefix
-     for candidate in \
-         /usr/lib/nginx/modules \
-         /usr/lib64/nginx/modules \
-         /usr/local/nginx/modules
-     do
-       if [[ -d "$candidate" ]]; then
-         MODULES_DIR="$candidate"
-         break
-       fi
-     done
+     # No modules-path in the running binary: do NOT guess a directory.
+     # Set MODULES_DIR explicitly to the directory that holds the currently
+     # loaded module .so (confirm it with: nginx -T 2>/dev/null | grep load_module).
+     echo "ERROR: nginx reports no --modules-path; set MODULES_DIR explicitly" >&2
+     echo "       to the directory holding the active module binary." >&2
+     exit 1
    fi
    if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
      echo "ERROR: cannot locate the NGINX modules directory" >&2
@@ -118,11 +109,22 @@ Publication and artifact availability are separate release gates.
 2. **Restore the matching 0.9.1 configuration, install, validate, and start:**
 
    ```bash
+   # Reuse the guarded shutdown logic from the prebuilt procedure above:
+   # detect whether systemd owns NGINX before invoking systemctl.
    sudo nginx -s quit
-   timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-   if sudo systemctl is-active --quiet nginx; then
-     echo "NGINX did not stop within 30s — investigate before continuing" >&2
-     exit 1
+   if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
+     timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
+     if sudo systemctl is-active --quiet nginx; then
+       echo "NGINX did not stop within 30s — investigate before continuing" >&2
+       exit 1
+     fi
+   else
+     # systemctl unavailable or does not manage NGINX: verify that the
+     # manually managed master process has stopped before continuing.
+     if pgrep -f "nginx: master process" >/dev/null 2>&1; then
+       echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
+       exit 1
+     fi
    fi
    # Restore the versioned 0.9.1 nginx.conf and dynamic-configuration file here.
    # Locate the module directory explicitly: derive it from the active nginx
@@ -185,11 +187,22 @@ Key reversions:
 ### Step 3: Install 0.9.0 binary and validate
 
 ```bash
+# Reuse the guarded shutdown logic from the prebuilt procedure:
+# detect whether systemd owns NGINX before invoking systemctl.
 sudo nginx -s quit
-timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-if sudo systemctl is-active --quiet nginx; then
-  echo "NGINX did not stop within 30s — investigate before continuing" >&2
-  exit 1
+if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
+  timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
+  if sudo systemctl is-active --quiet nginx; then
+    echo "NGINX did not stop within 30s — investigate before continuing" >&2
+    exit 1
+  fi
+else
+  # systemctl unavailable or does not manage NGINX: verify that the
+  # manually managed master process has stopped before continuing.
+  if pgrep -f "nginx: master process" >/dev/null 2>&1; then
+    echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
+    exit 1
+  fi
 fi
 # Restore the versioned 0.9.0 nginx.conf and dynamic-configuration file before
 # installing the 0.9.0 binary. The 0.9.1 configuration is not compatible.
@@ -297,6 +310,7 @@ subsequent start resets shared-memory counters. A graceful reload preserves them
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Both shutdown blocks reuse the guarded systemd-detection logic with manual-master verification; MODULES_DIR fallback no longer guesses the first existing directory and requires explicit configuration |
 | 0.9.2 | 2026-08-15 | Kang | Modules path derived from nginx -V; bounded shutdown loop; metric-family difference table |
 | 0.9.2 | 2026-08-08 | Kang | Clarified that OTel directives exist in no 0.9.2 configuration (OTel removed) |
 | 0.9.2 | 2026-07-30 | Kang | Initial rollback guide for 0.9.2 |

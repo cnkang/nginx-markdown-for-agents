@@ -91,10 +91,10 @@ Available targets include:
 CI generates release and performance evidence under `artifacts/`. Git ignores
 this directory except for the six frozen 0.9.2 contract artifacts that release
 gates require checked in (`artifacts/release/0.9.2/{reason-registry-report,generated-reason-artifacts,official-build-feature-manifest,metrics-registry,diagnostics-field-contract,dynconf-precedence-report}.json` —
-see the `artifacts/*` whitelist in `.gitignore`). All other generated evidence
-never enters the repository. CI
-validates generated evidence against checked-in source and schema before
-upload. Do not commit local copies of those files. The canonical module
+see the `artifacts/*` whitelist in `.gitignore`). Commit only these six files.
+All other generated evidence and any local copies must never enter the
+repository. CI validates generated evidence against checked-in source and
+schema before upload. The canonical module
 benchmark environment stays tracked as source configuration in
 `release/performance/canonical-environment.json`.
 
@@ -337,6 +337,7 @@ After building successfully:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Clarified that only the six frozen contract artifacts may be committed under artifacts/release/0.9.2 |
 | 0.9.2 | 2026-08-15 | Hermes | State explicitly that Git ignores generated evidence under artifacts/ |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

@@ -24,8 +24,11 @@ Required:
   run block must define each `$VAR` it references in scope — the same
   step's `env:`, the job's `env:`, the workflow's `env:`, an earlier
   `GITHUB_ENV` export in the same job, or a shell assignment inside the
-  run block itself.  A step-local `env:` entry is invisible to later
-  steps; `MATRIX_ARCH` was read as empty by the glibc tarball step and
+  run block itself.  Shell assignments and `GITHUB_ENV` exports must
+  appear BEFORE the variable's first reference within the same run block.
+  The detector rejects a use-before-assignment case such as reading
+  `MATRIX_ARCH` above the line that assigns it.  A step-local `env:` entry is invisible
+  to later steps; `MATRIX_ARCH` was read as empty by the glibc tarball step and
   always took the unsupported-architecture branch.  Empty collections
   that drive matrix expansion must fail the prepare step explicitly
   (`deb19efd`) rather than silently producing zero jobs.

@@ -11,7 +11,9 @@ or review action.
 - [ ] All 7 sub-specs have requirements documents — Verify: `make release-gates-check-strict` or `tools/release/gates/validate_release_gates.py --mode strict --check docs-exist`
 - [ ] All 7 sub-specs have design documents — Verify: `make release-gates-check-strict` or `tools/release/gates/validate_release_gates.py --mode strict --check docs-exist`
 - [ ] All new operator-facing surfaces appear in docs — Verify: manual review + `make docs-check`
+  - A signed review record is mandatory for this item. The record must name the reviewer, the review date, the reviewed scope, and the evidence artifact.
 - [ ] Documentation is accurate and complete, including defaults, behavior, failure modes, and migration guidance — Verify: manual review against current docs plus `make docs-check`
+  - A signed review record is mandatory for this item. The record must name the reviewer, the review date, the reviewed scope, and the evidence artifact.
 - [ ] Streaming configuration guide is complete — Verify: document existence check in `docs/guides/`
 - [ ] Rollout cookbook is complete (streaming enable, shadow mode, gradual expansion) — Verify: document existence check
 - [ ] Compatibility matrix documentation is complete — Verify: `docs/project/compatibility-matrix-0-5-0.md` exists with all capabilities classified
@@ -69,4 +71,5 @@ When a checklist item cannot pass:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Operator-facing surfaces and documentation accuracy items now require a signed review record with reviewer, date, scope, and evidence artifact |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

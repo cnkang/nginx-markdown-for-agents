@@ -189,7 +189,7 @@ grep "conversion time" /var/log/nginx/error.log | awk '{print $NF}' | sort -n | 
 | Pattern | Severity | Meaning |
 |---------|----------|---------|
 | `markdown filter: conversion failed, category=conversion_error` | WARN | HTML parsing or Markdown generation failed |
-| `markdown filter: conversion failed, category=memory_budget_exceeded` | WARN | Memory limit or timeout exceeded |
+| `markdown filter: conversion failed, category=memory_budget_exceeded` | WARN | Memory limit reached |
 | `markdown filter: conversion failed, category=timeout` | WARN | Parser execution exceeded `parser_timeout` |
 | `markdown filter: conversion failed, category=ffi_panic` | ERROR | Internal/system error (Rust↔C panic) |
 | `markdown filter: conversion succeeded, time=XXXms` | INFO | Successful conversion with timing |
@@ -1310,6 +1310,7 @@ plain-text metric fields are part of the 0.9.2 contract.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Hermes | memory_budget_exceeded log pattern description now refers only to memory-limit failures |
 | 0.9.2 | 2026-08-15 | Hermes | Update failure categories to conversion_error, memory_budget_exceeded, timeout, and ffi_panic |
 | 0.9.2 | 2026-08-08 | Kang | Added missing nginx_markdown_streaming_peak_memory_bytes metric row |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

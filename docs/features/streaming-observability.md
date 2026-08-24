@@ -48,7 +48,7 @@ one `transition`/`reason` pair:
 | `safe_finish_start` | `converted` | `streaming_failure_postcommit_safe_finish` | Counts entry into safe-finish handling (a start transition), not converted deliveries. |
 | `abort_start` | `streaming_mid_flight_error` | `streaming_failure_postcommit_abort` | Counts protocol-safe abort attempts (a start transition). |
 | `resume_success` | `converted` | `perf.backpressure_resume_total` | Counts successful downstream resumes after backpressure. |
-| `resume_failure` | `streaming_mid_flight_error` | `streaming.failed_total` | Independent from `abort_start`; it is not an abort counter. |
+| `resume_failure` | `streaming_mid_flight_error` | `perf.backpressure_resume_failure_total` | Independent from `abort_start`; it is not an abort counter. |
 
 Transition semantics: `commit` is the completion transition.
 `safe_finish_start` and `abort_start` are start transitions.

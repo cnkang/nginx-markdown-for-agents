@@ -67,8 +67,9 @@ pending until the blocking gates pass.
   - Full-buffer pending chain on NGX_AGAIN with resume (Rule 1).
   - `failopen_completed` flag prevents duplicate finalize (Rule 38).
   - Safe output ordering: alloc→copy→chain→headers→body filter.
-  - `markdown_limits` directive: unified decompression budget
-    budget decoupled from `max_size`.
+  - `markdown_decompress_max_size` directive: decompression budget
+    decoupled from the legacy `max_size` field (consolidated into
+    `markdown_limits` in 0.9.0).
   - `markdown_parse_timeout` directive (default: 30s).
   - `markdown_parser_budget` directive (default: 64m).
   - Rust error codes: `DecompressionBudgetExceeded` (9), `ParseTimeout` (10),
@@ -804,7 +805,8 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-15 | Hermes | Split E2E coverage ownership between tools/e2e/ entrypoints and tools/e2e-harness/ migrated scenarios |
+| 0.9.2 | 2026-08-24 | Kang | The Release 0.7.0 historical bullet now names markdown_decompress_max_size as the directive of that era and keeps markdown_limits in its 0.9.0 context |
+| 0.9.2 | 2026-08-15 | Kang | Split E2E coverage ownership between tools/e2e/ entrypoints and tools/e2e-harness/ migrated scenarios |
 | 0.9.2 | 2026-08-08 | Kang | Fixed summary release line to 0.9.2; removed OTel and per-path metrics from current capabilities |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.8.3 | 2026-06-26 | Kang | 0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |

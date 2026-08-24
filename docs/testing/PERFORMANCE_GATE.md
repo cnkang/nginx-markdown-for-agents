@@ -162,9 +162,12 @@ consistency only when supplied.
 
 The canonical workflow retains response probes at
 `perf/baselines/module-baseline-092-raw-probes/`, derived from the raw report
-path. It validates every scenario's non-empty `.headers`, `.body`, and `.json`
-files, requires a passing probe with `curl_exit_code == 0`, verifies the body
-SHA-256, validates the complete response-correctness schema, parses the final
+path. It validates that every scenario's `.headers`, `.body`, and `.json` files
+exist and that `.headers` and `.json` are non-empty. A zero-byte `.body`
+remains valid for bodyless responses (for example 304 or HEAD probes), and
+the gate checks its SHA-256 against the standard empty-input digest. The gate requires a
+passing probe with `curl_exit_code == 0`, verifies each body SHA-256,
+validates the complete response-correctness schema, parses the final
 HTTP response block from each `.headers` file, and requires its status,
 normalized headers, Markdown content type, and empty content encoding to match
 the probe JSON. It then requires exact finalized/probe
@@ -224,6 +227,7 @@ above to bootstrap.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Canonical workflow now accepts zero-byte .body files for bodyless probes (304/HEAD) with empty-input SHA-256 validation |
 | 0.9.1 | 2026-07-28 | Codex | Documented exact baseline provenance validation and the zero-entry complexity release gate. |
 | 0.9.1 | 2026-07-08 | Agent | Updated performance gate evidence and tool references for 0.9.1 release |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

@@ -106,7 +106,7 @@
 ## Verification method (post-fix)
 
 - `make test-nginx-unit` (C compile + unit tests)
-- `grep -rnE "10MB|5000ms|parser_budget|large_body_threshold" components/nginx-module/src/ngx_http_markdown_filter_module.h` → no stale matches
+- `grep -rnE "10MB|5000ms|parser_budget|parser_memory|max_size|large_body_threshold" components/nginx-module/src/ngx_http_markdown_filter_module.h` → only documented legacy-compat matches remain (the struct field comment at `max_size; /* legacy compat */`)
 - `make check-headers` (FFI header in sync after Rust doc fix)
 - `make complexity-check` (comment edits must not alter complexity)
 

@@ -275,7 +275,7 @@
         "rpm -qip dist/nginx-markdown-module.rpm",
         "helm lint charts/nginx-markdown"
       ],
-      "notes": "commands validate existing artifacts; build steps are in CI workflows release-deb.yml, release-rpm.yml, and release-packages.yml"
+      "notes": "commands validate existing artifacts; build steps are in CI workflows release-rpm.yml and release-packages.yml"
     },
     "release-candidate-evidence": {
       "phase": "focused-semantic",
@@ -743,12 +743,10 @@
         "release-governance"
       ],
       "paths": [
-        ".github/workflows/release-deb.yml",
         ".github/workflows/release-rpm.yml",
         ".github/workflows/release-packages.yml",
         ".github/workflows/homebrew-*.yml",
         "charts/nginx-markdown/**",
-        "packaging/debian/**",
         "packaging/homebrew/**",
         "packaging/rpm/**",
         "docs/guides/HOMEBREW_TAP_RELEASE.md",

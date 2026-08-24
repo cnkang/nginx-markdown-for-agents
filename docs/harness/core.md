@@ -177,11 +177,11 @@ Repo-owned docs keep durable truth. The state carrier keeps execution memory.
 
 ## Coverage Standards
 
-- **Minimum**: 80% aggregate line coverage for both the C module and the Rust converter
-- **Target**: 90% aggregate line coverage
-- **Critical paths** (auth, error handling, FFI boundary, conditional requests): 90% line coverage for new code
+- **Minimum**: 80% aggregate line coverage for both the C module and the Rust converter. The coverage gate (`coverage_gate.py`) enforces this bound and blocks below it
+- **Target**: 90% aggregate line coverage. This target is aspirational and not enforced
+- **Critical paths** (auth, error handling, FFI boundary, conditional requests): 90% line coverage for new code. This threshold is advisory — the gate logs it at runtime but does not block on it
 - The project collects coverage via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`)
-- The coverage script logs advisory per-file thresholds but they are not CI-blocking gates
+- Per-file thresholds stay advisory: the programmatic gate enforces only the aggregate minimum above
 - The lcov report is always produced regardless of coverage level, ensuring SonarCloud trends remain visible
 
 ## Spec Template Convention
@@ -219,6 +219,7 @@ pre-output checklist.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Coverage standards now state enforcement explicitly: 80 percent aggregate blocks via coverage_gate.py; 90 percent target and critical-path thresholds are advisory |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.8.2 | 2026-06-23 | Kang | Added checkable-outcome guidance for risk cards and verification closeout |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

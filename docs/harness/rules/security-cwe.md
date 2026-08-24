@@ -74,11 +74,12 @@ Required:
   `if (a > (size_t)-1 - b) { /* saturate or error */ }`.
 - Casting the result of pointer subtraction to `(size_t)` (for example
   `(size_t)(last - pos)`) is forbidden unless:
-  a. The subtraction appears in a comparison context (`>=`, `<=`, `==`) that
-     self-guards, or
-  b. A bounds check on the pointers (for example `if (pos <= last)`) precedes the
+  a. A bounds check on the pointers (for example `if (pos <= last)`) precedes the
      cast, or
-  c. The code uses the safe wrapper `ngx_http_markdown_buf_len_safe(buf)` instead.
+  b. The code uses the safe wrapper `ngx_http_markdown_buf_len_safe(buf)` instead.
+  A comparison context alone does NOT excuse the cast: comparison operators
+  evaluate the subtracted value, so an underflowed (wrapped) difference can
+  still steer control flow wrong before any explicit bounds check runs.
   The `detect_cwe190_casts.sh` Pattern (d) flags all other cases.
 
 Verification:

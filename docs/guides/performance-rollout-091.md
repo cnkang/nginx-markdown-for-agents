@@ -134,13 +134,14 @@ curl -s http://localhost/markdown-metrics | \
 # copied_output_total should be incrementing
 ```
 
-> **0.9.2 note:** the 0.9.2 release removed `zero_copy_output_total` with the
-> `markdown_streaming_zero_copy` directive. The 0.9.2 metrics table carries
-> only `copied_output_total` (see [prometheus-metrics.md](prometheus-metrics.md)
-> for the frozen 12-family list). Operators should monitor
-> `nginx_markdown_streaming_events_total` and conversion counters instead.
-> The 0.9.1 steps above stay for rollback verification on the 0.9.1 release
-> line only.
+> **0.9.2 note:** the 0.9.2 release removed both `zero_copy_output_total`
+> and the `markdown_streaming_zero_copy` directive. The frozen v1 metrics
+> registry has no per-path output counter at all (see
+> [prometheus-metrics.md](prometheus-metrics.md) for the frozen 12-family
+> list). Monitor `nginx_markdown_requests_total{outcome="converted"}`
+> and `nginx_markdown_conversion_deliveries_total{engine="streaming"}`
+> instead. The 0.9.1 steps above stay for rollback verification on the
+> 0.9.1 release line only.
 
 **How it works:**
 
@@ -402,4 +403,5 @@ when decompression routes through the standard full-buffer path.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | The 0.9.2 note no longer claims a copied_output_total metric; operators are directed to requests_total and conversion_deliveries_total |
 | 0.9.1 | 2026-07-05 | Kiro | Initial 0.9.1 performance rollback documentation |

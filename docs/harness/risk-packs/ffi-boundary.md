@@ -24,6 +24,10 @@ plumbing, or error-code classification change.
   consuming handles, so panic/error paths cannot expose stale values
 - fat-pointer safety when transferring slice/Vec ownership to C (Rule 53):
   use `as_mut_ptr` + `mem::forget`, never `Box::into_raw` for slices.
+  The free path must receive the ORIGINAL allocation: pass pointer, length,
+  AND the original capacity back together and reconstruct with
+  `Vec::from_raw_parts`. Do NOT `shrink_to_fit` before transfer — a
+  reallocation invalidates the pointer and leaks the original block.
 - Empty results return NULL instead of zero-length allocations (Rule 53).
 
 ## Minimum Verification
@@ -45,6 +49,7 @@ make test-nginx-unit
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Ownership guidance now requires passing the original Vec capacity back through the free path with `Vec::from_raw_parts`; shrink_to_fit before transfer is prohibited |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

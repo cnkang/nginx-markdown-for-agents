@@ -101,8 +101,10 @@ Continue when:
 Pause and investigate when:
 
 - `failed_closed`, `abort_start`, or `resume_failure` grows unexpectedly,
-- compressed responses show repeated `truncated_input`, `format_error`, or
-  `io_error` outcomes,
+- compressed responses show repeated decompression failures with
+  `reason="truncated_input"`, `reason="format_error"`, or
+  `reason="io_error"` on `nginx_markdown_decompression_events_total`
+  (treat `outcome` as success or failure only),
 - conversion attempts exceed the request population,
 - full-buffer and streaming delivery conservation no longer holds,
 - a reload changes a request's effective configuration mid-request.

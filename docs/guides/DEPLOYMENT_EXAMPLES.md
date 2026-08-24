@@ -269,8 +269,9 @@ Verification:
 curl -sD - -o /dev/null -A "ClaudeBot/1.0" http://localhost:8080/
 # Expected: Content-Type: text/markdown; charset=utf-8
 
-# Normal browser request — should return HTML
-curl -sD - -o /dev/null -H "Accept: text/html" http://localhost:8080/
+# Normal browser request (no bot User-Agent) — filter stays off, so the
+# upstream response passes through with its original Content-Type
+curl -sD - -o /dev/null -A "Mozilla/5.0" http://localhost:8080/
 # Expected: Content-Type: text/html
 ```
 
@@ -578,6 +579,7 @@ Complete troubleshooting guide: [OPERATIONS.md](OPERATIONS.md#troubleshooting)
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Bot-targeted verification block now sends an explicit non-bot User-Agent and explains why HTML passes through |
 | 0.9.2 | 2026-08-18 | Hermes | Split long sentence in bot-list management guidance |
 | 0.9.0 | 2026-06-28 | Kang | Added profile-based deployment examples (balanced, strict_cache, streaming_first, mixed profiles per location) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

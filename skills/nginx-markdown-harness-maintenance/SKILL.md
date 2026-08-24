@@ -65,8 +65,10 @@ verification families: 3
 ## Definition of Done
 
 - `resolve_spec.py` returns `PASS` for every checked spec or returns an explicitly documented `WARN_*` code with a recorded reason
-- matched verification families have been run and their outcomes are recorded in the evidence directory — the concrete paths are `perf/reports/evidence-<version>.json` (perf evidence gate output; see `make perf-evidence-check`) and `docs/project/recent-git-harness-steering-analysis-*.md` (steering-analysis closeout reports)
-- repeated drift has either converged on the spec or escalated with concrete evidence attached to the escalation record — escalation records live in the user-local state carrier per `docs/harness/core.md` step 7 (reflection/promotion evidence), using the `harness-remediation` risk pack for closeout artifacts with stable finding IDs, final status, changed files, and verification evidence
+- matched verification families have been run. Their outcomes are recorded in the evidence directory: `perf/reports/evidence-<version>.json` for perf evidence gate output (see `make perf-evidence-check`) and `docs/project/recent-git-harness-steering-analysis-*.md` for steering-analysis closeout reports
+- repeated drift has either converged on the spec or escalated with concrete evidence attached to the escalation record
+- escalation records live in the user-local state carrier per `docs/harness/core.md` step 7 (reflection/promotion evidence)
+- closeout artifacts use the `harness-remediation` risk pack with stable finding IDs, final status, changed files, and verification evidence
 - the repo truth surfaces (`AGENTS.md`, `docs/harness/`, `tools/harness/`, `Makefile`, CI workflow) are updated in the same change set when harness behavior changes
 
 ## References
@@ -80,6 +82,7 @@ verification families: 3
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Hermes | Split long Definition of Done bullets into concise statements while keeping all evidence paths and requirements |
 | 0.9.2 | 2026-08-08 | Kang | STE-inspired writing-style cleanup (long instruction, passive voice) |
-| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

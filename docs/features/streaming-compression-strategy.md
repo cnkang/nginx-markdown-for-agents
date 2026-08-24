@@ -112,12 +112,14 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
   state is in-flight.
 
 - Deflate uses the zlib-wrapped RFC 1950 framing and also accepts raw RFC 1951
-  framing as a compatibility fallback for legacy servers. The two paths apply
-  the same zlib-header sniffing decision, but differ after that: the
-  **full-buffer path** tries RFC 1950 first and retries in raw RFC 1951 mode
-  only after a format error with zero output, while the **streaming path**
-  selects RFC 1951 directly when no zlib header is present and cannot retry
-  after the path has consumed chunks.
+  framing as a compatibility fallback for legacy servers. The paths decide
+  differently: the **full-buffer path** tries RFC 1950 first and retries the
+  same input in raw RFC 1951 mode when RFC 1950 decoding fails with a format
+  error before producing any output. The **streaming path** defers decoder
+  initialization until the first two bytes arrive, sniffs the zlib header,
+  and initializes as zlib-wrapped or raw accordingly. It cannot replay
+  consumed chunks, so a stream misclassified by the sniff fails closed with
+  a format error instead of retrying.
 - Gzip uses zlib's gzip wrapper plus member-aware reset, cumulative budget,
   truncation, backpressure, and terminal-once validation.
 - Brotli uses the official `BrotliDecoderDecompressStream` C API with
@@ -173,6 +175,7 @@ route to bounded full-buffer decompression regardless of streaming preference.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Deflate framing section now states the two decision paths precisely: full-buffer retries after a zero-output RFC 1950 format error; streaming sniffs the first two bytes and fails closed on misclassification |
 | 0.9.2 | 2026-08-12 | Codex | Align the public deflate contract with RFC 1950 zlib-wrapped decoding and mark raw framing as historical compatibility behavior |
 | 0.9.1 | 2026-07-18 | Kang | Promoted Brotli from bounded full-buffer to streaming decompression path; updated routing table, flowchart, rationale, and operator guidance; replaced Deferred Work with Build Compatibility section |
 | 0.9.1 | 2026-07-17 | Kang | Document deflate trailing-data integrity: complete input consumption required, trailing bytes after Z_STREAM_END rejected as FORMAT_ERROR, gzip concatenated members remain supported |

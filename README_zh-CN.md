@@ -54,6 +54,9 @@ AI 爬虫（按 User-Agent 匹配）          -> Markdown（通过 NGINX 配置�
 ### 1. 安装模块
 
 ```bash
+# 下面的 RELEASE_TAG 以 v0.9.2 为示例。请在该版本正式发布后再执行这些命令；
+# 在此之前请替换为最新已发布的 release 标签
+# （见 https://github.com/cnkang/nginx-markdown-for-agents/releases）。
 RELEASE_TAG=v0.9.2
 RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
 INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"
@@ -460,6 +463,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | 快速上手安装命令补充说明：示例标签对应的版本发布后方可执行，此前应替换为最新已发布版本 |
 | 0.9.2 | 2026-08-15 | Hermes | 移除流程图与 bot 定向段落中陈旧的 Accept 头改写说法；协商仅由 markdown_accept 完成 |
 | 0.9.2 | 2026-08-08 | Hermes | 非母语读者友好改写：拆分长句、移除正文分号、主动语态，遵循 WRITING_GUIDE 的 STE 风格 |
 | 0.9.2 | 2026-08-07 | Kang | 新增 v0.9.2 新特性段、生产显式配置段、0.9.2/0.9.1 迁移指南链接，并同步文档更新记录 |

@@ -457,7 +457,7 @@ Verification:
   regression tests (folded-error, immediate-return, clean branch, definition
   skip).
 
-### 69. Header-chain NGX_AGAIN publishes commit latches (canonical model)
+### 71. Header-chain NGX_AGAIN publishes commit latches (canonical model)
 
 Rule 64 states the semantics; this rule locks the latch contract.  A
 header-chain `NGX_AGAIN` from `ngx_http_next_header_filter` means the write
@@ -520,6 +520,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Renumbered the header-chain NGX_AGAIN latch rule to 71; the previous local number 69 collided with Rule 69 in the global harness rule index |
 | 0.6.1 | 2026-05-06 | Kang | Rules 27–31: Markdown escaping/injection prevention, full ngx_list_part_t iteration, flag clearing ordering, NUL-termination/EOF boundary, merge residual integrity; output-safety risk pack |
 | 0.6.0 | 2026-05-02 | Kang | Comment/doc audit: Rust module docs, C function comments, Python docstrings, shell script headers; version 0.6.0 consistency fixes |
 | 0.5.5 | 2026-04-24 | Codex | Added recent Git analysis remediation closeout rule |

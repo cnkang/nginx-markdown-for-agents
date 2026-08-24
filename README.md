@@ -57,6 +57,10 @@ Three steps are enough for a first trial:
 # Download the versioned release installer; do not pipe a mutable branch file
 # into a privileged shell.  The Installation Guide contains the signature and
 # installer-self-check commands required before the final sudo step.
+#
+# RELEASE_TAG below uses v0.9.2 as the example tag.  Run these commands only
+# after that release is published; until then substitute the latest published
+# release tag (see https://github.com/cnkang/nginx-markdown-for-agents/releases).
 RELEASE_TAG=v0.9.2
 RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
 INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"
@@ -481,6 +485,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Quick Start installer commands now state that the example tag applies only after that release is published |
 | 0.9.2 | 2026-08-15 | Hermes | Removed stale Accept-header rewrite claims from the flow diagram and bot-targeting paragraph; negotiation is markdown_accept only |
 | 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: split long sentences, removed prose semicolons, active voice, STE-inspired style per WRITING_GUIDE |
 | 0.9.2 | 2026-08-07 | Kang | Added What's New v0.9.2 section, explicit production settings section, 0.9.2/0.9.1 migration guide links, and document history sync |

@@ -102,8 +102,13 @@ Required:
 
 Verification:
 - `grep -rn 'windowBits\|Z_RAW\|inflateInit\|inflateReset\|zlib_header' components/nginx-module/src/ components/rust-converter/src/`
-- Verify streaming decompression selects `MAX_WBITS` for the frozen
-  zlib-wrapped deflate contract.
+- Verify streaming decompression sniffs the zlib header on the first two
+  input bytes and selects `MAX_WBITS` for zlib-wrapped streams and
+  `-MAX_WBITS` for raw RFC 1951 streams.
+- Verify raw RFC 1951 coverage exists for BOTH decoders: the Rust decoder
+  retries a zero-output RFC 1950 format error as raw RFC 1951 (full-buffer),
+  and the C fallback covers raw deflate when the zlib probe fails. Keep the
+  existing zlib-wrapped streaming checks unchanged.
 - Verify gzip concatenated-member tests cover one feed, a boundary between
   feeds, a boundary inside a feed, a truncated later member, and cumulative
   response budget enforcement.  Full-buffer tests must cover both the default

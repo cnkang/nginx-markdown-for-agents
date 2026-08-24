@@ -52,8 +52,7 @@ or packaging documentation.
 - `tools/install.sh` must stay consistent with new package formats
 - `tools/release-matrix.json` must include all supported platforms
 - `tools/release/matrix/` tooling must stay consistent with matrix schema
-- `.github/workflows/release-packages.yml`,
-  `.github/workflows/release-deb.yml`, `.github/workflows/release-rpm.yml`,
+- `.github/workflows/release-packages.yml`, `.github/workflows/release-rpm.yml`,
   and `.github/workflows/sign-and-publish.yml` must agree on package artifact
   names, supported NGINX versions, and architecture-specific runner labels.
 - `packaging/checksums.sha256` must cover every NGINX source version requested

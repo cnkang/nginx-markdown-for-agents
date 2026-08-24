@@ -64,6 +64,13 @@ the structure above and rejects cross-key violations before mutation:
 - `parser_memory <= conversion_memory`
 - `streaming_buffer <= conversion_memory`
 
+Zero handling: `conversion_timeout=0` disables only the overall conversion
+deadline. A nonzero `parser_timeout` stays valid beside it and keeps its
+parser-phase deadline. When both keys are explicitly configured and
+`parser_timeout` exceeds `conversion_timeout`, `nginx -t` fails. When only
+one side is explicit, the merge step clamps the parser value down to the
+conversion bound instead.
+
 `streaming_buffer` is the total per-request streaming working-set and
 pre-commit replay budget. It is not merely a transport chunk size. A value
 that is too small for the converter's resident state can produce a
@@ -110,4 +117,5 @@ documentation synchronized.
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-08-24 | Documented zero-deadline handling for conversion_timeout=0 beside an explicit parser_timeout, with the explicitness-aware clamp/fail cross-key behavior. |
 | 0.9.2 | 2026-08-04 | Align implementation reference with the frozen 25-directive command table and eight-key `markdown_limits` contract. |
