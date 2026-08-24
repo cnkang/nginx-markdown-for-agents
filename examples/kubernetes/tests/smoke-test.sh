@@ -59,7 +59,6 @@ set -e
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-SCRIPT_NAME="$(basename "$0")"
 # The Helm chart's selector is app.kubernetes.io/name=<chart name> +
 # app.kubernetes.io/instance=<release> (see _helpers.tpl selectorLabels);
 # the legacy app=nginx-markdown label matches nothing the chart deploys.
@@ -233,7 +232,7 @@ test_markdown_conversion() {
             local body
             body="$(printf '%s' "$response" | sed -n '/^\r*$/,$p' | tail -n +2)" || true
             case "$body" in
-                *"# "*|*"## "*|*"- "*|*"* "*)
+                *"# "*|*"- "*|*"* "*)
                     log_pass "Markdown conversion: response body contains markdown syntax"
                     ;;
                 *)

@@ -27,6 +27,7 @@ trap 'cleanup_test_files; exit $((128 + 1))' HUP
 trap 'cleanup_test_files; exit $((128 + 2))' INT
 trap 'cleanup_test_files; exit $((128 + 15))' TERM
 
+# shellcheck source=tests/e2e/dynconf_reload_rollback.sh
 DYNCONF_RELOAD_ROLLBACK_LIBRARY=1 source "$SCRIPT"
 
 assert_rc() {

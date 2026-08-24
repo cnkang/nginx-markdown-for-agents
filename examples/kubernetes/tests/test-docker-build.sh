@@ -59,7 +59,6 @@ set -e
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DOCKERFILE="${SCRIPT_DIR}/../Dockerfile.ingress"
 IMAGE_TAG="nginx-markdown-test:latest"

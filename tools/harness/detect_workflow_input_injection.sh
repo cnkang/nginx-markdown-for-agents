@@ -61,7 +61,6 @@ findings=0
 while IFS= read -r -d '' file; do
     rel_path="${file#${REPO_ROOT}/}"
     in_run_block=0
-    in_env_block=0
     inline_run_command=0
     line_num=0
 
@@ -79,7 +78,6 @@ while IFS= read -r -d '' file; do
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]*$ ]] || \
            [[ "$line" =~ $block_scalar_re ]]; then
             in_run_block=1
-            in_env_block=0
             continue
         fi
 
@@ -92,13 +90,11 @@ while IFS= read -r -d '' file; do
         if [[ "$line" =~ $inline_run_re ]] || \
            [[ "$line" =~ $inline_run_dash_re ]]; then
             inline_run_command=1
-            in_env_block=0
         fi
 
         # Detect env: blocks (which are safe for input interpolation)
         if [[ "$line" =~ ^[[:space:]]*env:[[:space:]]*$ ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*env:[[:space:]]*$ ]]; then
-            in_env_block=1
             in_run_block=0
             continue
         fi
@@ -110,7 +106,6 @@ while IFS= read -r -d '' file; do
            [[ "$line" =~ ^[[:space:]]*steps: ]] || \
            [[ "$line" =~ ^[[:space:]]*jobs: ]]; then
             in_run_block=0
-            in_env_block=0
             continue
         fi
 
@@ -121,7 +116,6 @@ while IFS= read -r -d '' file; do
         # report safe module_ref/module_sha wiring as shell interpolation.
         if [[ "$line" =~ ^[[:space:]]*uses:[[:space:]]+ ]]; then
             in_run_block=0
-            in_env_block=0
             continue
         fi
 

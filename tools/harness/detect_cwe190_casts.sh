@@ -24,7 +24,6 @@
 set -euo pipefail
 
 readonly SRC_DIR="${1:-components/nginx-module/src}"
-readonly SCRIPT_NAME="$(basename "$0")"
 readonly NONE_FOUND_MSG="  (none found)"
 
 # Files where (size_t) NGX_ERROR is allowed (config handlers return
@@ -53,15 +52,10 @@ echo "" >&2
 #   - Range check: NGX_OK return from validation helper
 #   - Explicit allowlist annotations: /* CWE-190:guarded */
 
-readonly PATTERN_SSIZE_TO_SIZE='\(size_t\)[[:space:]]*(parsed|raw|rc|len|n)[^a-zA-Z]'
-
 # ── Pattern (b): narrowing casts to smaller integer types ──
 #
 # (uint32_t), (uint8_t), (uInt), (int) applied to size_t or
 # ngx_uint_t values without an upper-bound comparison.
-
-readonly NARROW_TYPES='uint32_t|uint8_t|uInt|int'
-readonly WIDE_TYPES='size_t|ngx_uint_t|off_t|ngx_int_t'
 
 # ── Known guarded cast patterns (file:pattern → guard description) ──
 #

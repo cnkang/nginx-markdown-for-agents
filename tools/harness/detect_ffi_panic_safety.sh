@@ -145,17 +145,20 @@ trap 'rm -f "$map_file" >/dev/null 2>&1' EXIT
 
 : >"$map_file"
 
-# Collect the list of rs files first so we can pass them all to a
-# single awk invocation that builds the global map in one pass.
-rs_files=$(find "$SRC_DIR" -type f -name '*.rs' 2>/dev/null | sort)
-if [[ -z "$rs_files" ]]; then
+# Collect the list of Rust files first so we can pass them all to a
+# single awk invocation without re-splitting paths through the shell.
+rs_files=()
+while IFS= read -r -d '' rs_file; do
+    rs_files+=("$rs_file")
+done < <(find "$SRC_DIR" -type f -name '*.rs' -print0 2>/dev/null)
+if [[ ${#rs_files[@]} -eq 0 ]]; then
     echo "PASS: no Rust source files found in ${SRC_DIR}" >&2
     exit 0
 fi
 
 # Build a global function map across all files: name → has_catch (0/1)
 # We only track #[no_mangle]/#[unsafe(no_mangle)] exports.
-printf '%s\n' "$rs_files" | awk '
+awk '
     BEGIN {
         depth = 0
         func_start = 0
@@ -228,14 +231,13 @@ printf '%s\n' "$rs_files" | awk '
             print func_name "\t" has_catch
         }
     }
-' $(printf '%s\n' "$rs_files" | tr '\n' ' ') >"$map_file" 2>/dev/null || true
+' "${rs_files[@]}" >"$map_file" 2>/dev/null || true
 
 # ── Stage 2: per-function classification ──
 # For delegated_catch we re-open the global map and look up the callee
 # name.  We pass the map file into awk via a preload.
 
-while IFS= read -r rs_file; do
-    [[ -z "$rs_file" ]] && continue
+for rs_file in "${rs_files[@]}"; do
     if ! grep -qI '' "$rs_file" 2>/dev/null; then
         continue
     fi
@@ -448,7 +450,7 @@ while IFS= read -r rs_file; do
 
     done < <(grep -nE '#\[unsafe\(no_mangle\)\]|#\[no_mangle\]' "$rs_file" 2>/dev/null || true)
 
-done < <(printf '%s\n' "$rs_files")
+done
 
 echo "" >&2
 echo "=== Summary ===" >&2

@@ -30,7 +30,7 @@ set -uo pipefail
 # Navigate to repo root
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 
 SRCDIR="components/nginx-module/src"
 FAIL=0

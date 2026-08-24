@@ -35,7 +35,6 @@ readonly SRC_DIR="${1:-components/nginx-module/src}"
 # Dynconf-mutable fields that must be read through effective_conf
 # in request-path code.
 readonly MUTABLE_FIELDS="enabled|enabled_source|prune_noise|log_verbosity|error_policy|error_status|streaming_buffer"
-readonly MUTABLE_FIELDS_EXACT="^(enabled|enabled_source|prune_noise|log_verbosity|error_policy|error_status|streaming_buffer)$"
 
 # Files where direct conf-> reads of mutable fields are allowed
 # (configuration/initialization/snapshot code).
@@ -175,9 +174,6 @@ echo "=== Effective-Config Live Conf Read Detection ===" >&2
 echo "Scanning: ${SRC_DIR}" >&2
 echo "Mutable fields: ${MUTABLE_FIELDS}" >&2
 echo "" >&2
-
-# Build allowlist basename pattern for grep exclusion
-readonly ALLOW_PATTERN="$(IFS='|'; echo "${ALLOWED_FILES[*]}")"
 
 # ── Find all conf-><mutable_field> reads ──
 echo "--- Direct conf-><mutable_field> reads ---" >&2

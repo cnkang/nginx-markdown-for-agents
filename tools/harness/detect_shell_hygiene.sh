@@ -50,7 +50,6 @@
 set -euo pipefail
 
 readonly SCAN_DIR="${1:-tools}"
-readonly SCRIPT_NAME="$(basename "$0")"
 readonly MSG_NONE_FOUND="  (none found)"
 
 errors=0
@@ -444,7 +443,6 @@ while IFS= read -r match; do
     # Skip lines inside heredocs (embedded POSIX sh scripts use [ ] legitimately)
     # Check if this line falls between a <<'EOF' and EOF marker
     local_line="$line"
-    in_heredoc=0
     heredoc_start=$(awk -v target="$local_line" '
         /<<-?[[:space:]]*'\''?EOF'\''?/ || /<<-?[[:space:]]*'\''?SCRIPT'\''?/ {
             hd_start = NR

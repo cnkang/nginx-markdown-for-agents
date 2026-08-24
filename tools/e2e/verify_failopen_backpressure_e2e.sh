@@ -27,7 +27,6 @@ export MARKDOWN_MAX_SIZE
 
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NATIVE_BUILD_HELPER="${WORKSPACE_ROOT}/tools/lib/nginx_markdown_native_build.sh"
-BUILDROOT=""
 RUNTIME=""
 NGINX_EXECUTABLE=""
 LOAD_MODULE_LINE=""

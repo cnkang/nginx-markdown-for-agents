@@ -61,7 +61,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
 
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         install \
-        test test-rust rust-fmt-check test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
+        test test-rust rust-fmt-check rust-clippy-check test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-canonical test-e2e-rust test-e2e-contract-scripts test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
@@ -138,6 +138,12 @@ rust-fmt-check:
 	cd $(RUST_DIR) && cargo fmt --all -- --check
 	cargo fmt --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all -- --check
 	@echo "  Rust Formatting Check: PASSED"
+
+rust-clippy-check:
+	@echo "=== Rust Clippy Check ==="
+	cargo clippy --manifest-path $(RUST_DIR)/Cargo.toml --all-targets --all-features -- -D warnings
+	cargo clippy --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all-targets -- -D warnings
+	@echo "  Rust Clippy Check: PASSED"
 
 test-rust: rust-fmt-check
 	cd $(RUST_DIR) && cargo build --locked --release --example perf_baseline
@@ -1426,6 +1432,7 @@ help:
 	@echo "  build                    - Build Rust library + sync header"
 	@echo "  test                     - Fast smoke tests"
 	@echo "  rust-fmt-check           - Check Rust and corpus-tool formatting"
+	@echo "  rust-clippy-check        - Run Clippy for Rust and corpus-tool crates"
 	@echo "  test-rust                - Run Rust test suite (unit + doctests)"
 	@echo "  test-rust-streaming      - Run Rust streaming feature tests"
 	@echo "  test-rust-doc            - Run Rust doctests only (all features)"

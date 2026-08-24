@@ -26,6 +26,7 @@ set -e  # Exit on error
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 NATIVE_BUILD_HELPER="${REPO_ROOT}/tools/lib/nginx_markdown_native_build.sh"
+# shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${NATIVE_BUILD_HELPER}"
 
 # Configuration
@@ -68,7 +69,7 @@ cleanup() {
     echo ""
     echo "Cleaning up..."
     local pid
-    
+
     # Stop NGINX if running
     if [[ -f "$NGINX_PID" ]]; then
         pid=$(cat "$NGINX_PID")
@@ -78,7 +79,7 @@ cleanup() {
             sleep 1
         fi
     fi
-    
+
     # Remove test files
     rm -f "$NGINX_CONF" "$NGINX_PID" "$NGINX_ERROR_LOG" "$NGINX_ACCESS_LOG"
     rm -rf "$STATIC_ROOT"
@@ -213,12 +214,12 @@ start_nginx() {
     local nginx_rc=0
 
     mkdir -p /tmp/logs
-    
+
     # Write configuration
     cat > "$NGINX_CONF" << EOF
 $config
 EOF
-    
+
     # Start NGINX
     echo "Starting NGINX..."
     set +e
@@ -230,22 +231,22 @@ EOF
         cat /tmp/nginx-start.log >&2
         return 1
     fi
-    
+
     # Wait for NGINX to start
     sleep 2
-    
+
     # Verify NGINX is running
     if [[ ! -f "$NGINX_PID" ]]; then
         echo "NGINX PID file not found" >&2
         return 1
     fi
-    
+
     pid=$(cat "$NGINX_PID")
     if ! kill -0 "$pid" 2>/dev/null; then
         echo "NGINX process not running" >&2
         return 1
     fi
-    
+
     echo "NGINX started (PID: $pid)"
     return 0
 }
@@ -270,7 +271,7 @@ make_request() {
     local path="$2"
     local accept="$3"
     shift 3
-    
+
     curl -s -i -X "$method" \
         -H "Accept: $accept" \
         "$@" \
@@ -282,7 +283,7 @@ make_request() {
 get_header() {
     local response="$1"
     local header_name="$2"
-    
+
     echo "$response" | grep -i "^$header_name:" | head -1 | cut -d' ' -f2- | tr -d '\r\n'
     return 0
 }
@@ -309,7 +310,7 @@ test_basic_conversion() {
 
     write_static_html "${STATIC_ROOT}/basic.html" \
         '<html><body><h1>Test Heading</h1><p>Test paragraph.</p></body></html>'
-    
+
     local config='
 worker_processes 1;
 '"$CONFIG_ERROR_LOG_LINE"'
@@ -327,43 +328,43 @@ http {
     }
 }
 '
-    
+
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
-    
+
     # Make request
-    local response
+    local response status content_type vary body
     response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN")
-    local status=$(get_status "$response")
-    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
-    local vary=$(get_header "$response" "Vary")
-    local body=$(get_body "$response")
-    
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    vary=$(get_header "$response" "Vary")
+    body=$(get_body "$response")
+
     # Verify results
     if [[ "$status" == "200" ]]; then
         log_pass "$STATUS_CODE_OK_MESSAGE"
     else
         log_fail "Status code: Expected 200, got $status"
     fi
-    
+
     if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
         log_pass "Content-Type: ${MEDIA_TYPE_MARKDOWN}"
     else
         log_fail "Content-Type: Expected text/markdown, got $content_type"
     fi
-    
+
     if echo "$vary" | grep -q "Accept"; then
         log_pass "Vary: Accept header present"
     else
         log_fail "Vary: Accept header missing"
     fi
-    
+
     if echo "$body" | grep -q "# Test Heading"; then
         log_pass "Body contains Markdown heading"
     else
         log_fail "Body does not contain expected Markdown"
         log_info "Body: $body"
     fi
-    
+
     stop_nginx
     TESTS_PASSED=$((TESTS_PASSED + 1))
     return 0
@@ -377,7 +378,7 @@ test_passthrough() {
 
     write_static_html "${STATIC_ROOT}/passthrough.html" \
         '<html><body><h1>Test</h1></body></html>'
-    
+
     local config='
 worker_processes 1;
 '"$CONFIG_ERROR_LOG_LINE"'
@@ -395,34 +396,35 @@ http {
     }
 }
 '
-    
+
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
-    
+
     # Make request
-    local response=$(make_request "GET" "/test" "$MEDIA_TYPE_HTML")
-    local status=$(get_status "$response")
-    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
-    local body=$(get_body "$response")
-    
+    local response status content_type body
+    response=$(make_request "GET" "/test" "$MEDIA_TYPE_HTML")
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    body=$(get_body "$response")
+
     # Verify results
     if [[ "$status" == "200" ]]; then
         log_pass "$STATUS_CODE_OK_MESSAGE"
     else
         log_fail "Status code: Expected 200, got $status"
     fi
-    
+
     if echo "$content_type" | grep -q "$MEDIA_TYPE_HTML"; then
         log_pass "Content-Type: ${MEDIA_TYPE_HTML} (unchanged)"
     else
         log_fail "Content-Type: Expected ${MEDIA_TYPE_HTML}, got $content_type"
     fi
-    
+
     if echo "$body" | grep -q "<html>"; then
         log_pass "Body is HTML (not converted)"
     else
         log_fail "Body was converted (should be passthrough)"
     fi
-    
+
     stop_nginx
     TESTS_PASSED=$((TESTS_PASSED + 1))
     return 0
@@ -438,7 +440,7 @@ test_configuration_inheritance() {
         '<html><body><h1>Enabled</h1></body></html>'
     write_static_html "${STATIC_ROOT}/disabled.html" \
         '<html><body><h1>Disabled</h1></body></html>'
-    
+
     local config='
 worker_processes 1;
 '"$CONFIG_ERROR_LOG_LINE"'
@@ -448,15 +450,15 @@ http {
     access_log '"$NGINX_ACCESS_LOG"';
     markdown_filter on;
     markdown_limits conversion_memory=10m conversion_timeout=120s;
-    
+
     server {
         listen '"$TEST_PORT"';
-        
+
         location = /enabled {
             alias '"${STATIC_ROOT}"'/enabled.html;
             default_type '"${MEDIA_TYPE_HTML}"';
         }
-        
+
         location = /disabled {
             markdown_filter off;
             alias '"${STATIC_ROOT}"'/disabled.html;
@@ -465,29 +467,30 @@ http {
     }
 }
 '
-    
+
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
-    
+
     # Test /enabled - should convert
-    local response=$(make_request "GET" "/enabled" "$MEDIA_TYPE_MARKDOWN")
-    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
-    
+    local response content_type
+    response=$(make_request "GET" "/enabled" "$MEDIA_TYPE_MARKDOWN")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+
     if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
         log_pass "/enabled: Conversion occurs (inherits http-level setting)"
     else
         log_fail "/enabled: Expected conversion, got $content_type"
     fi
-    
+
     # Test /disabled - should NOT convert
     response=$(make_request "GET" "/disabled" "$MEDIA_TYPE_MARKDOWN")
     content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
-    
+
     if echo "$content_type" | grep -q "$MEDIA_TYPE_HTML"; then
         log_pass "/disabled: No conversion (location override)"
     else
         log_fail "/disabled: Expected no conversion, got $content_type"
     fi
-    
+
     stop_nginx
     TESTS_PASSED=$((TESTS_PASSED + 1))
     return 0
@@ -522,34 +525,35 @@ http {
 }
 EOF
 )"
-    
+
     start_nginx "$config" || { log_fail "$NGINX_START_FAILURE_MSG"; return 1; }
-    
+
     # Make request with Authorization header
-    local response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN" -H "Authorization: Bearer token123")
-    local status=$(get_status "$response")
-    local content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
-    local cache_control=$(get_header "$response" "Cache-Control")
-    
+    local response status content_type cache_control
+    response=$(make_request "GET" "/test" "$MEDIA_TYPE_MARKDOWN" -H "Authorization: Bearer token123")
+    status=$(get_status "$response")
+    content_type=$(get_header "$response" "$HEADER_CONTENT_TYPE")
+    cache_control=$(get_header "$response" "Cache-Control")
+
     # Verify results
     if [[ "$status" == "200" ]]; then
         log_pass "$STATUS_CODE_OK_MESSAGE"
     else
         log_fail "Status code: Expected 200, got $status"
     fi
-    
+
     if echo "$content_type" | grep -q "$MEDIA_TYPE_MARKDOWN"; then
         log_pass "Content-Type: ${MEDIA_TYPE_MARKDOWN} (conversion occurs)"
     else
         log_fail "Content-Type: Expected text/markdown, got $content_type"
     fi
-    
+
     if echo "$cache_control" | grep -q "private"; then
         log_pass "Cache-Control: private header present"
     else
         log_fail "Cache-Control: Expected private, got $cache_control"
     fi
-    
+
     stop_nginx
     TESTS_PASSED=$((TESTS_PASSED + 1))
     return 0
@@ -1108,10 +1112,10 @@ main() {
     echo "NGINX Markdown Filter - Integration Tests"
     echo "$SEPARATOR_LINE"
     echo ""
-    
+
     # Check prerequisites
     log_info "Checking prerequisites..."
-    
+
     if ! resolve_nginx_bin; then
         return 1
     fi
@@ -1122,14 +1126,14 @@ main() {
     log_info "NGINX version: $nginx_version"
 
     resolve_delegated_nginx_bin
-    
+
     if ! command -v curl &> /dev/null; then
         echo "ERROR: curl not found in PATH" >&2
         return 1
     fi
-    
+
     log_pass "Prerequisites OK"
-    
+
     # Run tests
     test_basic_conversion
     test_passthrough
@@ -1152,7 +1156,7 @@ main() {
         "${REPO_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh"; then
         :
     fi
-    
+
     # Summary
     echo ""
     echo "$SEPARATOR_LINE"
@@ -1162,7 +1166,7 @@ main() {
     echo "Tests passed: $TESTS_PASSED"
     echo "Tests failed: $TESTS_FAILED"
     echo ""
-    
+
     if [[ $TESTS_FAILED -eq 0 ]]; then
         echo -e "${GREEN}All tests passed!${NC}"
         return 0
