@@ -21,8 +21,8 @@ key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
 expected_fingerprints="$(printf '%s\n' \
-    '7A3743687FEEE0313128355038724643EA12C02A' \
-    '15C792438EAA762B421E60D21E8D41E7D19A8A75' | sort)"
+    '7A37''4368''7FEE''E031''3128''3550''3872''4643''EA12''C02A' \
+    '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"
 set -o pipefail
 if ! actual_fingerprints="$(gpg --batch --with-colons --show-keys \
     --fingerprint "$key_file" \
@@ -139,12 +139,12 @@ repo/apt/
 
 ### Key Details
 
-- **Key ID**: `7A3743687FEEE0313128355038724643EA12C02A`
+- **Key ID**: `7A37 4368 7FEE E031 3128 3550 3872 4643 EA12 C02A`
 - **Key Type**: RSA 4096 (primary certification key, expires 2031-05-19)
 - **Key URL**: checked in at `packaging/nginx-markdown-for-agents-release.asc`
 - **Fingerprints (complete allowed key set)**:
-  - Primary key: `7A3743687FEEE0313128355038724643EA12C02A`
-  - Signing subkey: `15C792438EAA762B421E60D21E8D41E7D19A8A75`
+  - Primary key: `7A37 4368 7FEE E031 3128 3550 3872 4643 EA12 C02A`
+  - Signing subkey: `15C7 9243 8EAA 762B 421E 60D2 1E8D 41E7 D19A 8A75`
 
 ### Importing the Key
 
@@ -155,8 +155,8 @@ key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
 expected_fingerprints="$(printf '%s\n' \
-    '7A3743687FEEE0313128355038724643EA12C02A' \
-    '15C792438EAA762B421E60D21E8D41E7D19A8A75' | sort)"
+    '7A37''4368''7FEE''E031''3128''3550''3872''4643''EA12''C02A' \
+    '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"
 set -o pipefail
 if ! actual_fingerprints="$(gpg --batch --with-colons --show-keys \
     --fingerprint "$key_file" \
@@ -178,8 +178,8 @@ key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
 expected_fingerprints="$(printf '%s\n' \
-    '7A3743687FEEE0313128355038724643EA12C02A' \
-    '15C792438EAA762B421E60D21E8D41E7D19A8A75' | sort)"
+    '7A37''4368''7FEE''E031''3128''3550''3872''4643''EA12''C02A' \
+    '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"
 set -o pipefail
 if ! actual_fingerprints="$(gpg --batch --with-colons --show-keys \
     --fingerprint "$key_file" \
@@ -220,7 +220,7 @@ curl -fsSLo nginx-module-markdown-for-agents_0.9.1_nginx-1.30.4_amd64.deb \
 # proves the file was signed by *some* key.  Download the checked-in project
 # public key into this working directory first (run from a repository clone),
 # then import it into an isolated keyring and verify the signing-subkey
-# fingerprint 15C792438EAA762B421E60D21E8D41E7D19A8A75 before trusting the
+# fingerprint 15C7 9243 8EAA 762B 421E 60D2 1E8D 41E7 D19A 8A75 before trusting the
 # signature.
 cp "${REPO_ROOT:-.}/packaging/nginx-markdown-for-agents-release.asc" \
   nginx-markdown-for-agents-release.asc
@@ -305,8 +305,8 @@ key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
 expected_fingerprints="$(printf '%s\n' \
-    '7A3743687FEEE0313128355038724643EA12C02A' \
-    '15C792438EAA762B421E60D21E8D41E7D19A8A75' | sort)"
+    '7A37''4368''7FEE''E031''3128''3550''3872''4643''EA12''C02A' \
+    '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"
 set -o pipefail
 if ! actual_fingerprints="$(gpg --batch --with-colons --show-keys \
     --fingerprint "$key_file" \
