@@ -277,7 +277,7 @@ test_markdown_http() {
         --entrypoint sh "$IMAGE_TAG" -c '
 mkdir -p /tmp/markdown-html
 printf "%s\n" "<html><body><h1>Kubernetes module test</h1><p>active module</p></body></html>" > /tmp/markdown-html/index.html
-cat > /tmp/markdown-http.conf <<EOF
+cat > /tmp/markdown-http.conf <<"EOF"
 load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;
 daemon off;
 worker_processes 1;
