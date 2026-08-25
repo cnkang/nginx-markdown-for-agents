@@ -18,6 +18,8 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 DOCKER_WORKFLOW = ".github/workflows/official-nginx-docker.yml"
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+SUPPORTED_DOCKER_OSES = {"alpine3.20", "debian12"}
+SUPPORTED_DOCKER_ARCHES = {"amd64", "arm64"}
 
 
 def _canonical_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -66,8 +68,12 @@ def _resolve_docker_entry(entry: dict[str, Any]) -> dict[str, str]:
         )
     if VERSION_RE.fullmatch(version) is None:
         raise ValueError(f"invalid Docker NGINX version: {version}")
+    if operating_system not in SUPPORTED_DOCKER_OSES:
+        raise ValueError(f"unsupported Docker operating system: {operating_system}")
     if libc not in {"glibc", "musl"}:
         raise ValueError(f"unsupported Docker libc: {libc}")
+    if arch not in SUPPORTED_DOCKER_ARCHES:
+        raise ValueError(f"unsupported Docker architecture: {arch}")
     if SHA256_RE.fullmatch(image_digest) is None:
         raise ValueError(f"invalid Docker image digest: {image_digest}")
 
