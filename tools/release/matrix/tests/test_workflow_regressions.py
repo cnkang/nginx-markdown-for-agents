@@ -61,14 +61,15 @@ def test_release_binaries_resolves_current_schema_without_mutating_matrix() -> N
 
 
 def test_release_binaries_workflow_dispatch_can_publish_tag_assets() -> None:
-    """Manual recovery runs publish only after prepare resolves a stable tag."""
+    """Manual recovery runs package-artifacts only after integrity checks pass."""
     workflow = _workflow_data("release-binaries.yml")
     assert "workflow_dispatch" in workflow["on"]
-    publish = workflow["jobs"]["publish-release"]
-    upload = _step_by_name(publish["steps"], "Upload Assets")
+    package = workflow["jobs"]["package-artifacts"]
+    upload = _step_by_name(package["steps"], "Upload workflow artifacts")
 
-    assert "needs.prepare.outputs.publication_tag != ''" in publish["if"]
-    assert upload["with"]["tag_name"] == "${{ needs.prepare.outputs.publication_tag }}"
+    assert "needs.completeness-check.result == 'success'" in package["if"]
+    assert "needs.integrity-checksums.result == 'success'" in package["if"]
+    assert upload["with"]["if-no-files-found"] == "error"
 
 
 def test_release_binaries_publishes_signed_checksum_chain() -> None:
@@ -77,7 +78,7 @@ def test_release_binaries_publishes_signed_checksum_chain() -> None:
     jobs = workflow["jobs"]
     checksum_job = jobs["integrity-checksums"]
     signing_job = jobs["integrity-signing"]
-    publish = jobs["publish-release"]
+    publish = jobs["package-artifacts"]
     workflow_text = _workflow_text("release-binaries.yml")
 
     assert set(checksum_job["needs"]) == {"prepare", "completeness-check"}

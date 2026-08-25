@@ -391,8 +391,8 @@ class TestReleaseGateSnippetExpectations:
         checks.  The DEB/RPM dependency metadata must therefore pin the
         exact target version rather than a branch-scoped floor/ceiling.
         """
-        assert 'nginx (= ${NGINX_VERSION})' in validator.NFPM_REQUIRED_SNIPPETS
-        assert "nginx = 1:${NGINX_VERSION}" in validator.NFPM_REQUIRED_SNIPPETS
+        assert 'nginx (= ${DEB_NGINX_VERSION})' in validator.NFPM_REQUIRED_SNIPPETS
+        assert "nginx = ${RPM_NGINX_EVR}" in validator.NFPM_REQUIRED_SNIPPETS
         assert 'nginx (>= ${NGINX_VERSION_FLOOR})' not in validator.NFPM_REQUIRED_SNIPPETS
         assert 'nginx (<< ${NGINX_VERSION_CEIL})' not in validator.NFPM_REQUIRED_SNIPPETS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.NFPM_REQUIRED_SNIPPETS

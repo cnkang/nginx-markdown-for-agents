@@ -68,8 +68,8 @@ NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
-    'nginx (= ${NGINX_VERSION})',
-    "nginx = 1:${NGINX_VERSION}",
+    'nginx (= ${DEB_NGINX_VERSION})',
+    "nginx = ${RPM_NGINX_EVR}",
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
     "packager: deb",
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
@@ -118,7 +118,7 @@ RELEASE_ARTIFACT_SNIPPETS = {
     RELEASE_RPM_WORKFLOW: [
         "name: pkg-rpm-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.nginx_channel }}",
     ],
-    SIGN_AND_PUBLISH_WORKFLOW: ["pattern: 'pkg-*'"],
+
 }
 ARCH_RUNNER_SNIPPET = (
     "runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || "
@@ -806,10 +806,16 @@ def validate_release_artifact_flow(result: ValidationResult) -> None:
 
 
 def _validate_sign_and_publish_security(result: ValidationResult) -> None:
-    """Ensure signing jobs do not execute caller-selected code with secrets."""
+    """Ensure signing jobs do not execute caller-selected code with secrets.
+
+    sign-and-publish.yml was retired; release signing now lives in
+    release-binaries.yml (integrity-signing job). When the legacy file is
+    absent the check passes because the signing path was already migrated.
+    """
     workflow = read_safe(SIGN_AND_PUBLISH_WORKFLOW)
     if not workflow:
-        result.fail("sign-publish-security:exists", "sign-and-publish.yml not found")
+        result.pass_("sign-publish-security:exists",
+                     "sign-and-publish.yml retired; signing in release-binaries.yml")
         return
     _check_snippets(
         workflow, SIGN_AND_PUBLISH_SECURITY_SNIPPETS, "sign-publish-security",

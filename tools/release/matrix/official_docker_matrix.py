@@ -72,6 +72,7 @@ def _resolve_docker_entry(entry: dict[str, Any]) -> dict[str, str]:
 
     return {
         "matrix_row_id": f"{version}/{operating_system}/{libc}/{arch}",
+        "docker_tag": f"{version}-{operating_system}-{libc}-{arch}",
         "nginx_version": version,
         "os": operating_system,
         "libc": libc,

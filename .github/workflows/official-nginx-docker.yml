@@ -47,6 +47,8 @@ on:
       - "packaging/checksums.sha256"
       - "packaging/scripts/install-verified-rustup.sh"
       - "packaging/scripts/verify-checksum.sh"
+      - "tools/release-matrix.json"
+      - "tools/release/matrix/official_docker_matrix.py"
       - "tools/ci/verify_official_nginx_docker.sh"
       - ".github/workflows/official-nginx-docker.yml"
 
@@ -159,18 +161,18 @@ jobs:
           context: .
           file: ./examples/docker/Dockerfile.official-nginx-source-build
           load: true
-          tags: nginx-markdown-official-check:${{ matrix.matrix_row_id }}
+          tags: nginx-markdown-official-check:${{ matrix.docker_tag }}
           build-args: |
             NGINX_IMAGE=${{ matrix.image_ref }}@${{ matrix.image_digest }}
             MODULE_REPO=${{ steps.source.outputs.repo }}
             MODULE_REF=${{ steps.source.outputs.ref }}
             MODULE_SHA=${{ steps.source.outputs.sha }}
-          cache-from: type=gha,scope=official-nginx-docker-${{ matrix.matrix_row_id }}
-          cache-to: type=gha,mode=max,scope=official-nginx-docker-${{ matrix.matrix_row_id }}
+          cache-from: type=gha,scope=official-nginx-docker-${{ matrix.docker_tag }}
+          cache-to: type=gha,mode=max,scope=official-nginx-docker-${{ matrix.docker_tag }}
 
       - name: Verify runtime behavior
         env:
-          IMAGE_NAME: nginx-markdown-official-check:${{ matrix.matrix_row_id }}
+          IMAGE_NAME: nginx-markdown-official-check:${{ matrix.docker_tag }}
           JOB_NGINX_TAG: ${{ matrix.image_ref }}
           EXPECTED_NGINX_VERSION: ${{ matrix.nginx_version }}
           IMAGE_REFERENCE: ${{ matrix.image_ref }}
