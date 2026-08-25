@@ -1190,7 +1190,20 @@ ngx_http_markdown_diag_render_dynconf(
     return NGX_OK;
 }
 
-
+/*
+ * Build a v2 diagnostics JSON document for the current worker.
+ *
+ * The JSON structure:
+ *   - schema_version, product_version, worker identity
+ *   - build info (SHA, NGINX version, Rust version, compile-time features)
+ *   - configuration: static_digest + dynconf state, keys, masked_keys
+ *   - effective: resolved directive values + per-field source provenance
+ *   - runtime: inflight/pending_output counters, module_metrics
+ *   - recent_decisions: ring buffer of per-request verdict records
+ *
+ * Layout is single-pass with pre-computed buf_size; truncation at any
+ * rendering step returns NGX_ERROR and logs an error.
+ */
 static ngx_int_t
 ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     ngx_buf_t *b)
@@ -1200,14 +1213,16 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     ngx_http_markdown_diag_dynconf_t dynconf;
     ngx_http_markdown_diag_effective_t effective;
     ngx_http_markdown_diag_metrics_t metrics;
-    u_char *buf;
-    u_char *p;
-    u_char *last;
-    size_t buf_size;
-    size_t streaming_buffer;
-    u_char static_digest[72];
-    const char *dynconf_state;
+    u_char                         *buf;
+    u_char                         *p;
+    u_char                         *last;
+    size_t                          buf_size;
+    size_t                          streaming_buffer;
+    u_char                          static_digest[72];
+    const char                     *dynconf_state;
 
+    /* Allocate a pre-sized pool buffer for the entire response body.
+     * Pre-computation via json_size() guarantees no reallocation. */
     state = ngx_http_markdown_diagnostics_get_state();
     buf_size = ngx_http_markdown_diagnostics_json_size(state);
     if (buf_size == 0) {
@@ -1220,6 +1235,10 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     }
     p = buf;
     last = buf + buf_size;
+
+    /* Snapshot all configuration surfaces. dynconf is global-process,
+     * effective is per-location with source attribution, and static_digest
+     * fingerprints the compiled-in defaults + dynconf file fingerprint. */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     ngx_http_markdown_diagnostics_get_dynconf_state(&dynconf);
     ngx_http_markdown_diagnostics_get_effective(conf, &effective);
@@ -1234,6 +1253,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
 
     streaming_buffer = effective.streaming_buffer;
 
+    /* Header: schema, version, worker identity, build info, features */
     dynconf_state = ngx_http_markdown_diag_dynconf_state_name(dynconf.state);
     p = ngx_slprintf(p, last,
         "{\"schema_version\":2,\"product_version\":\"%s\","
@@ -1249,6 +1269,8 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
 #else
     p = ngx_slprintf(p, last, "\"dynconf\"");
 #endif
+
+    /* Configuration block: static digest + dynconf state, keys, masked */
     p = ngx_slprintf(p, last,
         "]},\"configuration\":{\"static_digest\":\"%s\","
         "\"dynconf\":{\"state\":\"%s\",",
@@ -1267,6 +1289,9 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    /* Effective section: resolved values + per-field source provenance.
+     * Each effective value is paired with its source so operators can
+     * trace which config layer (default, dynconf, location) won. */
     p = ngx_slprintf(p, last,
         "},\"effective\":{\"filter\":\"%s\","
         "\"prune_noise\":\"%s\",\"log_verbosity\":\"%s\","
@@ -1293,12 +1318,15 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         metrics.inflight, metrics.pending_output,
         metrics.streaming_requests_total, metrics.precommit_failopen_total,
         metrics.copied_output_total);
+
+    /* Append per-request decision ring buffer entries */
     if (ngx_http_markdown_diagnostics_fmt_decisions(&p, last, state)
         != NGX_OK)
     {
         return NGX_ERROR;
     }
 
+    /* Finalize and guard against overflow */
     p = ngx_slprintf(p, last, "]}\n");
     if (p >= last) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
