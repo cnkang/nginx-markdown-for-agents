@@ -30,6 +30,7 @@ trap 'cleanup_test_files; exit $((128 + 15))' TERM
 # shellcheck source=tests/e2e/dynconf_reload_rollback.sh
 DYNCONF_RELOAD_ROLLBACK_LIBRARY=1 source "$SCRIPT"
 
+# assert_rc compares an actual exit status with the expected status and reports whether they match.
 assert_rc() {
     local expected="$1"
     local actual="$2"

@@ -95,7 +95,20 @@ impl MarkdownConverter {
         words.join(" ")
     }
 
-    /// Normalize final output for deterministic Markdown generation.
+    /// Normalizes Markdown output for deterministic generation while preserving fenced-code content.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let converter = MarkdownConverter::default();
+    /// let normalized = converter.normalize_output("Title  \r\n\r\n\r\nBody".into());
+    ///
+    /// assert_eq!(normalized, "Title\n\nBody\n");
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// The normalized Markdown text with consistent line endings, whitespace, blank lines, and one trailing newline.
     pub(super) fn normalize_output(&self, output: String) -> String {
         let output = output.replace("\r\n", "\n");
 
@@ -167,6 +180,17 @@ fn leading_indent_columns(line: &str) -> usize {
     columns
 }
 
+/// Measures the opening backtick run of a Markdown fence when its indentation is valid.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(measure_fence_len("```rust"), 3);
+/// assert_eq!(measure_fence_len("   ````"), 4);
+/// assert_eq!(measure_fence_len("    ```"), 0);
+/// ```
+///
+/// Returns zero when the line is not a validly indented fence.
 pub(crate) fn measure_fence_len(line: &str) -> usize {
     // CommonMark: a fence must be indented at most 3 spaces.  A line
     // indented 4+ columns is an indented code block, not a fence, so
@@ -182,6 +206,14 @@ pub(crate) fn measure_fence_len(line: &str) -> usize {
         .count()
 }
 
+/// Ensures a string ends with exactly one newline.
+///
+/// # Examples
+///
+/// ```
+/// let result = fix_trailing_newlines("text\n\n".to_owned());
+/// assert_eq!(result, "text\n");
+/// ```
 fn fix_trailing_newlines(mut result: String) -> String {
     if !result.ends_with('\n') {
         result.push('\n');

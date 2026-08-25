@@ -454,25 +454,20 @@ fn scenario_response(
     plain_response(method, 404, "text/plain", "not found")
 }
 
-/// Conditional/cache-aware response for `/md/html`.
+/// Builds the cache-aware response for the `/md/html` route.
 ///
-/// ETag / If-None-Match logic:
-/// - INM `*` matches any entity (returns 304).
-/// - Strong ETag match (exact string) returns 304.
-/// - Weak ETag match (`W/"<etag>"`) returns 304.
+/// Conditional requests matching the configured ETag or containing a modification
+/// date with `2030` receive a `304 Not Modified` response with cache metadata.
+/// Other authenticated requests use private caching and vary by `Cookie`; other
+/// requests use public caching and vary by `Accept`. `HEAD` requests return the
+/// source HTML without a body.
 ///
-/// If-Modified-Since: a sentinel date containing "2030" triggers 304.
+/// # Examples
 ///
-/// 304 early return: sends headers (ETag, Vary) but no body,
-/// preserving cache metadata for downstream.
-///
-/// Auth-based cache policy:
-/// - Authenticated (Cookie contains `session_user=`): Cache-Control `private, max-age=0`, Vary `Cookie`.
-/// - Unauthenticated: Cache-Control `public, max-age=60`, Vary `Accept`.
-///
-/// Conversion happens before cache metadata is applied: the
-/// `html_or_markdown_by_accept` call produces the response body,
-/// then `into_response_with_cache` appends Cache-Control/ETag/Vary.
+/// ```ignore
+/// let response = md_html_response(state, Method::GET, headers);
+/// assert_eq!(response.status(), StatusCode::OK);
+/// ```
 fn md_html_response(
     state: Arc<FixtureState>,
     method: Method,

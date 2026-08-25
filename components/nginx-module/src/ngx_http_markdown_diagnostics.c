@@ -1110,18 +1110,14 @@ ngx_http_markdown_diagnostics_fmt_decisions(
 }
 
 
-/*
- * Render the dynconf JSON fragment (everything after "state" through the
- * trailing fields) into the output buffer.  Extracted from build_json to
- * keep the caller's Cognitive Complexity under the S3776 threshold.
+/**
+ * Renders dynamic-configuration state fields as a JSON fragment.
  *
- * Layout per dynconf.state:
- *   ACTIVE | LKG_PRESERVED   generation, source/active/lkg digests,
- *                            last_success, last_error (LKG_PRESERVED only)
- *   INVALID_NO_LKG (error)   null fields + last_error when present
- *   other                    null fields, null last_error
- *
- * Returns NGX_OK on success, NGX_ERROR on a truncated/invalid write.
+ * @param pos     Current output position, updated after rendering.
+ * @param last    End of the output buffer.
+ * @param dynconf Dynamic-configuration state and metadata to render.
+ * @return NGX_OK on success, or NGX_ERROR for invalid output arguments or
+ *         failed string rendering.
  */
 static ngx_int_t
 ngx_http_markdown_diag_render_dynconf(
@@ -1190,19 +1186,13 @@ ngx_http_markdown_diag_render_dynconf(
     return NGX_OK;
 }
 
-/*
- * Build a v2 diagnostics JSON document for the current worker.
+/**
+ * Builds the version 2 diagnostics JSON document for the current worker.
  *
- * The JSON structure:
- *   - schema_version, product_version, worker identity
- *   - build info (SHA, NGINX version, Rust version, compile-time features)
- *   - configuration: static_digest + dynconf state, keys, masked_keys
- *   - effective: resolved directive values + per-field source provenance
- *   - runtime: inflight/pending_output counters, module_metrics
- *   - recent_decisions: ring buffer of per-request verdict records
- *
- * Layout is single-pass with pre-computed buf_size; truncation at any
- * rendering step returns NGX_ERROR and logs an error.
+ * @param r Request whose pool and connection are used to build and log the
+ *          diagnostics response.
+ * @param b Buffer that receives the generated JSON document.
+ * @return NGX_OK on success, or NGX_ERROR if the document cannot be built.
  */
 static ngx_int_t
 ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,

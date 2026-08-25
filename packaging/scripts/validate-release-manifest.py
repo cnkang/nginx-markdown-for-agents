@@ -93,6 +93,19 @@ def validate_manifest(
     expected_version: str | None,
     require_bootstrap_assets: bool = False,
 ) -> list[str]:
+    """
+    Validate a release manifest and its associated artifacts.
+    
+    Parameters:
+    	manifest_path (Path): Path to the release manifest.
+    	artifact_dir (Path): Directory containing the release artifacts.
+    	sha256sums_path (Path | None): Optional path to the SHA256SUMS file.
+    	expected_version (str | None): Optional version that the manifest must declare.
+    	require_bootstrap_assets (bool): Whether semantic-version tag releases must include bootstrap assets.
+    
+    Returns:
+    	list[str]: Validation error messages; an empty list indicates a valid manifest.
+    """
     errors: list[str] = []
 
     # Load manifest

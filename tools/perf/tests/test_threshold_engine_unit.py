@@ -68,20 +68,15 @@ def _write_tmp_json(data, suffix=".json"):
 
 def _make_baseline(tiers=None):
     """
-    Create a baseline metrics payload for tests, using provided tiers or a default "small" tier.
-
+    Create a baseline metrics payload for performance comparison tests.
+    
     Parameters:
-        tiers (dict | None): Optional mapping of tier names to metric values; if omitted, a default
-            "small" tier with predefined metrics is used.
-
+        tiers (dict | None): Optional mapping of tier names to metric values. A default
+            "small" tier is used when this value is omitted or empty.
+    
     Returns:
-        dict: A baseline dictionary containing keys:
-            - "schema_version": schema version string
-            - "timestamp": ISO 8601 timestamp string
-            - "git_commit": commit identifier string
-            - "platform": platform identifier string
-            - "tiers": mapping of tier names to metric dictionaries (each metric includes
-              p50_ms, p95_ms, p99_ms, peak_memory_bytes, req_per_s, input_mb_per_s)
+        dict: A baseline payload containing schema metadata, platform information, and
+            tiered performance metrics.
     """
     return {
         "schema_version": "1.0.0",
@@ -103,19 +98,13 @@ def _make_baseline(tiers=None):
 
 def _make_current(tiers=None):
     """
-    Create a current measurement report dictionary for use in tests.
-
+    Create a current measurement report for use in tests.
+    
     Parameters:
-        tiers (dict, optional): Mapping of tier names to their metric values to override the default tier. If omitted, a default "small" tier is used with p50_ms, p95_ms, p99_ms, peak_memory_bytes, req_per_s, and input_mb_per_s set to representative values.
-
+        tiers (dict, optional): Tier metrics to include in the report. Defaults to representative metrics for the ``small`` tier; an empty mapping also uses these defaults.
+    
     Returns:
-        dict: A measurement report containing keys:
-            - schema_version: API schema version string.
-            - report_type: fixed value "measurement".
-            - timestamp: ISO 8601 timestamp string.
-            - git_commit: commit identifier string.
-            - platform: platform name string.
-            - tiers: the provided or default tiers mapping of metric names to numeric values.
+        dict: A measurement report containing schema metadata, a timestamp, commit identifier, platform, and tier metrics.
     """
     return {
         "schema_version": "1.0.0",

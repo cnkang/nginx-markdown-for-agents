@@ -136,7 +136,14 @@ def validate_report(report: dict) -> list[str]:
 
 
 def validate_module_benchmark(report: dict) -> list[str]:
-    """Validate a 0.9.1 module benchmark report against the schema."""
+    """Validate a 0.9.1 module benchmark report against the required schema.
+    
+    Parameters:
+        report (dict): Module benchmark report to validate.
+    
+    Returns:
+        list[str]: Validation errors found in the report, or an empty list when it is valid.
+    """
     errors = []
     if "module_benchmark" not in report:
         return ["missing top-level key: 'module_benchmark'"]
@@ -165,6 +172,12 @@ def validate_module_benchmark(report: dict) -> list[str]:
 
 
 def _validate_module_scenarios(scenarios: list, errors: list[str]) -> None:
+    """Validate required fields and metrics for module benchmark scenarios.
+    
+    Parameters:
+    	scenarios (list): Scenario entries to validate.
+    	errors (list[str]): Collection to which validation errors are appended.
+    """
     required_sc = {
         "name",
         "scenario_config",

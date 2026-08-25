@@ -102,6 +102,7 @@ log_error() {
     printf '[ERROR] %s\n' "$1" >&2
 }
 
+# cleanup stops the background port-forward process when one is active.
 cleanup() {
     if [ -n "$PORT_FORWARD_PID" ]; then
         kill "$PORT_FORWARD_PID" 2>/dev/null || true
@@ -110,6 +111,7 @@ cleanup() {
     fi
 }
 
+# check_prerequisites validates the metrics path and required commands for the selected connection mode.
 check_prerequisites() {
     if [[ "$METRICS_PATH" != /* ]]; then
         log_error "Metrics path must begin with '/': $METRICS_PATH"
@@ -197,6 +199,7 @@ test_health_check() {
     return 1
 }
 
+# test_markdown_conversion verifies that the `/test` endpoint returns Markdown content when requested with the `text/markdown` Accept header.
 test_markdown_conversion() {
     log_info "Test: Markdown conversion (Accept: text/markdown)"
 

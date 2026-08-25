@@ -233,6 +233,7 @@ validate_helm_lint() {
     return 1
 }
 
+# validate_helm_template renders the Helm chart and verifies required image values, security settings, port configuration, and emptyDir volumes, returning success only when all checks pass.
 validate_helm_template() {
     info "Running helm template (dry-run render)..."
 

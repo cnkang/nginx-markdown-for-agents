@@ -462,24 +462,11 @@ ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
     return classification;
 }
 
-/*
- * Detect compression type from Content-Encoding header
+/**
+ * Determines the compression type declared by the response's Content-Encoding header.
  *
- * This function examines the Content-Encoding response header and returns
- * the appropriate compression type enum value. The detection is case-insensitive
- * and handles empty/null values gracefully.
- *
- * Parameters:
- *   r - nginx request structure
- *
- * Returns:
- *   NGX_HTTP_MARKDOWN_COMPRESSION_NONE     - No Content-Encoding header or empty value
- *   NGX_HTTP_MARKDOWN_COMPRESSION_GZIP     - gzip compression detected
- *   NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE  - deflate compression detected
- *   NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI   - brotli compression detected
- *   NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN  - Unknown/unsupported compression format
- *
- * Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6
+ * @param r Request whose response headers are inspected.
+ * @returns The detected compression type, or none when the header is absent or empty.
  */
 ngx_http_markdown_compression_type_e
 ngx_http_markdown_detect_compression(ngx_http_request_t *r)
@@ -545,16 +532,11 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
     return NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
 }
 
-/*
- * Helper function: Calculate total size of chain buffers
+/**
+ * Calculates the total size of data in a buffer chain.
  *
- * Iterates through a chain of buffers and sums their sizes.
- *
- * Parameters:
- *   in - Input chain
- *
- * Returns:
- *   Total size in bytes
+ * @param in Input buffer chain.
+ * @return Total size in bytes, or SIZE_MAX if the total overflows size_t.
  */
 static size_t
 ngx_http_markdown_chain_size(const ngx_chain_t *in)
@@ -577,18 +559,13 @@ ngx_http_markdown_chain_size(const ngx_chain_t *in)
     return size;
 }
 
-/*
- * Helper function: Copy chain data to a single buffer
+/**
+ * Copies the data in a buffer chain into a contiguous destination buffer.
  *
- * Collects all data from a chain of buffers into a single contiguous buffer.
- *
- * Parameters:
- *   in     - Input chain
- *   dest   - Destination buffer (must be pre-allocated)
- *   size   - Size of destination buffer
- *
- * Returns:
- *   NGX_OK on success, NGX_ERROR on failure
+ * @param in   Input buffer chain.
+ * @param dest Pre-allocated destination buffer.
+ * @param size Size of the destination buffer.
+ * @return NGX_OK on success, or NGX_ERROR if the destination is too small.
  */
 static ngx_int_t
 ngx_http_markdown_chain_to_buffer(const ngx_chain_t *in, u_char *dest,
@@ -1559,6 +1536,16 @@ ngx_http_markdown_deflate_raw_retry(ngx_http_request_t *r,
 }
 
 
+/**
+ * Decompresses gzip or deflate input and builds an NGINX output chain.
+ *
+ * @param r Request associated with the decompression operation.
+ * @param type Compression format of the input.
+ * @param in Input buffer chain containing compressed data.
+ * @param out Receives the decompressed output buffer chain.
+ * @return NGX_OK on success; an error code when decompression, allocation,
+ *         validation, or the configured decompression budget prevents success.
+ */
 ngx_int_t
 ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                    ngx_http_markdown_compression_type_e type,
@@ -1728,41 +1715,15 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-/*
- * Decompress brotli compressed data using brotli library
+/**
+ * Decompresses Brotli-encoded response data.
  *
- * This function implements automatic decompression of brotli compressed
- * content using the brotli library (if available at compile time).
- * It provides a fully automatic "technical fallback" solution when
- * upstream servers force brotli compression.
- *
- * The function:
- * 1. Checks if brotli support is compiled in (#ifdef NGX_HTTP_BROTLI)
- * 2. If not compiled, logs warning and returns NGX_DECLINED
- * 3. If compiled:
- *    - Collects all input data from the chain into a single buffer
- *    - Creates brotli decoder instance
- *    - Estimates output size (typically input_size * 10)
- *    - Allocates transferable output using ngx_alloc
- *    - Performs decompression
- *    - Checks for errors and size limits
- *    - Creates output chain with decompressed data
- *    - Destroys decoder instance
- *
- * Parameters:
- *   r   - nginx request structure
- *   in  - input chain with compressed data
- *   out - output chain with decompressed data (output parameter)
- *
- * Returns:
- *   NGX_OK                           - Decompression succeeded
- *   NGX_ERROR                        - Allocation failure
- *   NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR - Brotli decompression failed (invalid data)
- *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED - Decompressed size exceeds budget
- *   NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT - Truncated input stream detected
- *   NGX_DECLINED                     - Brotli support not compiled in (triggers fallback)
- *
- * Requirements: 3.1, 3.2, 3.3, 14.1
+ * @param r Request associated with the decompression operation.
+ * @param in Chain containing the compressed input.
+ * @param out Receives the decompressed output chain.
+ * @returns NGX_OK on success; NGX_DECLINED when Brotli support is unavailable;
+ *          otherwise, an error classification such as allocation failure,
+ *          invalid format, truncated input, or exceeded decompression budget.
  */
 ngx_int_t
 ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
@@ -1883,29 +1844,13 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
 #endif
 }
 
-/*
- * Unified decompression entry function
+/**
+ * Decompresses response data according to the specified compression type.
  *
- * This function serves as the main entry point for decompression operations.
- * It routes to the appropriate decompression function based on the compression
- * type and handles special cases like NGX_DECLINED from brotli (when brotli
- * support is not available).
- *
- * The function acts as a dispatcher and should be simple and straightforward.
- * It's called from the body filter after compression type detection.
- *
- * Parameters:
- *   r    - nginx request structure
- *   type - detected compression type (from ngx_http_markdown_detect_compression)
- *   in   - input chain with compressed data
- *   out  - output chain with decompressed data (output parameter)
- *
- * Returns:
- *   NGX_OK       - Decompression succeeded
- *   NGX_ERROR    - Decompression failed (invalid data, size limit, etc.)
- *   NGX_DECLINED - Unsupported format or brotli not available (triggers fallback)
- *
- * Requirements: 2.3, 3.4, 14.1
+ * @param in  Compressed input chain.
+ * @param out Output chain for the decompressed data.
+ * @returns The decompression status, including NGX_OK on success,
+ *          NGX_DECLINED for unsupported compression, or an error status.
  */
 ngx_int_t
 ngx_http_markdown_decompress(ngx_http_request_t *r,

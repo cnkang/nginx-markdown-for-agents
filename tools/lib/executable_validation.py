@@ -28,12 +28,11 @@ _RUSTUP_DIR_NAME = ".rustup"
 
 
 def _trusted_roots() -> tuple[Path, ...]:
-    """Return configured roots plus their resolved filesystem aliases.
-
-    Keep both forms because a discovered executable is checked first at its
-    literal PATH location and then at its resolved target.  On macOS `/bin`
-    can resolve to `/private/bin`; dropping the configured spelling would
-    reject a legitimate literal `/bin/git` entry.
+    """
+    Provide configured executable roots and their resolved filesystem aliases, without duplicates.
+    
+    Returns:
+    	tuple[Path, ...]: The unique configured and resolved executable roots.
     """
     roots: list[Path] = []
     seen: set[Path] = set()
@@ -46,16 +45,14 @@ def _trusted_roots() -> tuple[Path, ...]:
 
 
 def _is_under(path: Path, roots: tuple[Path, ...]) -> bool:
-    """Return whether an (unresolved) path is below one of the trusted roots.
-
-    Containment compares the candidate path against configured and resolved
-    trusted roots WITHOUT resolving the candidate itself.  Resolving the candidate
-    here would make a user-writable symlink that points into a trusted root
-    (for example `~/bin/foo -> /usr/bin/foo`) pass as trusted: the caller
-    checks the discovered PATH entry with this helper and validates the
-    resolved target separately via ``resolved_is_trusted``, so a symlink
-    whose literal location is outside the trusted roots stays rejected even
-    when its target is trusted.
+    """Check whether a path is located at or beneath any trusted root.
+    
+    Parameters:
+        path (Path): Path to check without resolving it.
+        roots (tuple[Path, ...]): Trusted root directories.
+    
+    Returns:
+        bool: True if the path is equal to or beneath a trusted root, false otherwise.
     """
     return any(path == root or root in path.parents for root in roots)
 

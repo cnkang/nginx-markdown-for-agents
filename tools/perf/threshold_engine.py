@@ -150,14 +150,14 @@ def judge_metric(deviation_pct, direction, warning_pct, blocking_pct):
 
 def build_skipped_verdict(reason, platform):
     """
-    Emit a "skipped" verdict report and its reason.
-
+    Create and emit a verdict report indicating that performance checks were skipped.
+    
     Parameters:
-        reason (str): Human-readable explanation for skipping; written to stderr.
-        platform (str): Platform name to include in the report.
-
+        reason (str): Explanation for why the checks were skipped.
+        platform (str): Platform name included in the report.
+    
     Returns:
-        dict: The verdict report object emitted to stdout.
+        dict: The emitted skipped-verdict report.
     """
     report = {
         "schema_version": "1.0.0",
@@ -179,27 +179,19 @@ def build_skipped_verdict(reason, platform):
 
 def _metric_comparison(cur_tier, base_tier, metric, direction_map, thresholds_cfg, platform, tier_name):
     """
-    Compare a single metric between a current and baseline tier and produce a verdict payload.
-
+    Compare a metric between current and baseline tier measurements.
+    
     Parameters:
-        cur_tier (dict): Measurement values for the current tier.
-        base_tier (dict): Measurement values for the baseline tier.
-        metric (str): Metric name to compare.
-        direction_map (dict): Mapping of metric names to direction strings (e.g., "lower_is_better", "higher_is_better", "informational").
-        thresholds_cfg (dict): Thresholds configuration used to look up warning and blocking percentages.
-        platform (str): Platform name for threshold lookup.
-        tier_name (str): Tier identifier used for threshold lookup.
-
+    	cur_tier (dict): Current tier measurement values.
+    	base_tier (dict): Baseline tier measurement values.
+    	metric (str): Metric name to evaluate.
+    	direction_map (dict): Mapping of metric names to comparison directions.
+    	thresholds_cfg (dict): Threshold configuration for the metric.
+    	platform (str): Platform used for threshold lookup.
+    	tier_name (str): Tier used for threshold lookup.
+    
     Returns:
-        dict or None: A dict with keys:
-            - "name" (str): the metric name.
-            - "payload" (dict): containing:
-                - "baseline": baseline value.
-                - "current": current value.
-                - "deviation_pct": deviation percentage rounded to four decimals.
-                - "verdict": metric verdict string.
-            - "verdict" (str): the metric verdict.
-        Returns None if the metric is informational or if either value is missing.
+    	dict or None: A metric comparison payload with baseline and current values, percentage deviation, and verdict; `None` for informational or missing metrics.
     """
     direction = direction_map.get(metric, "lower_is_better")
     if direction == "informational":
@@ -283,13 +275,14 @@ def build_verdict_report(
     baseline, current, thresholds_cfg, direction_map, platform,
 ):
     """
-    Builds a verdict report comparing current measurements to a baseline.
-
-    Writes report JSON to stdout and a human-readable summary to stderr.
-
+    Build a verdict report comparing current measurements with a baseline.
+    
+    The report is emitted as JSON to standard output, and a human-readable
+    summary is written to standard error.
+    
     Returns:
-        tuple: (report, has_failure) where `report` is the verdict report dictionary and
-        `has_failure` is True if any metric exceeded a blocking threshold, False otherwise.
+        tuple: The report dictionary and a boolean indicating whether any metric
+            exceeded a blocking threshold.
     """
     comparison_tiers = {}
     has_failure = False

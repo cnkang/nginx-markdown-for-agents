@@ -7,6 +7,15 @@
 use nginx_markdown_converter::converter::{ConversionOptions, MarkdownConverter};
 use nginx_markdown_converter::parser::parse_html;
 
+/// Demonstrates converting HTML content to Markdown with optional YAML front matter.
+///
+/// # Examples
+///
+/// Run the example to print the converted Markdown with and without front matter:
+///
+/// ```text
+/// cargo run --example <example-name>
+/// ```
 fn main() {
     // Sample HTML with rich metadata
     let html = br#"

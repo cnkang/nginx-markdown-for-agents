@@ -41,7 +41,7 @@ def policy_matrix() -> dict:
 
 
 def test_build_projection_records_source_and_converts_targets() -> None:
-    """The projection records the source digest and target conversion."""
+    """Verify that the projection records source metadata, converts targets, and preserves Docker image metadata."""
     source = policy_matrix()
     result = projection.build_projection(source)
 

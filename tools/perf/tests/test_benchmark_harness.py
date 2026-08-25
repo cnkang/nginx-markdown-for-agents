@@ -1481,6 +1481,15 @@ class TestPortCleanupOnSignals:
         )
 
     def _spawn_benchmark_process(self, tmpdir):
+        """
+        Start a benchmark subprocess configured to run the plain-small scenario with a temporary stub server.
+        
+        Parameters:
+        	tmpdir (str or os.PathLike): Directory used for temporary benchmark files.
+        
+        Returns:
+        	subprocess.Popen: The running benchmark process with captured standard output and error streams.
+        """
         tmpdir_path = Path(tmpdir)
         stub = self._create_stub_nginx(tmpdir_path)
         env = os.environ.copy()

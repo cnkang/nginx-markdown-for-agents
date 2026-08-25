@@ -15,6 +15,11 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def _inputs() -> tuple[dict, dict[Path, str]]:
+    """Load the metric registry and decompression feature documents used by the regression tests.
+    
+    Returns:
+    	tuple[dict, dict[Path, str]]: The parsed metric registry and a mapping of document paths to their contents.
+    """
     registry = json.loads(
         (ROOT / "schemas/metrics-v1.registry.json").read_text(encoding="utf-8")
     )

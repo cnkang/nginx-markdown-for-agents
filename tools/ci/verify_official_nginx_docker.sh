@@ -22,6 +22,7 @@ CONTAINER_NAME=""
 TMP_DIR=""
 ACTUAL_NGINX_VERSION=""
 
+# usage displays command syntax, examples, and supported environment variables.
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--nginx-tag REF] --expected-nginx-version VERSION [--image-reference REF] --image-digest DIGEST [--module-repo URL] [--module-ref REF] [--module-sha SHA] [--image-name NAME] [--artifact-dir DIR] [--port PORT] [--skip-build] [--keep-image]
@@ -180,7 +181,7 @@ need_cmd() {
 #   Docker build progress to stderr.
 #
 # Returns:
-#   0 on success; non-zero if the build fails.
+# build_image builds and tags the NGINX Docker image using the pinned image reference and Markdown module revision.
 build_image() {
   local -a build_cmd
 
@@ -215,7 +216,7 @@ build_image() {
 #   Writes the sanitized tag to stdout.
 #
 # Returns:
-#   0 always.
+# sanitize_tag replaces characters outside letters, numbers, periods, underscores, and hyphens with hyphens.
 sanitize_tag() {
   local raw_tag="$1"
   # Force C collation and keep "-" last so tag normalization is locale-stable.
@@ -246,7 +247,7 @@ sanitize_tag() {
 #   Appends Markdown to GITHUB_STEP_SUMMARY if set.
 #
 # Returns:
-#   0 always.
+# append_step_summary appends validation results to the GitHub Actions step summary when configured.
 append_step_summary() {
   local status="$1"
   [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
@@ -288,7 +289,7 @@ append_step_summary() {
 }
 
 # Record the immutable matrix binding before the functional requests run.
-# This file is uploaded on failure and remains useful in successful step logs.
+# write_release_evidence records release-matrix metadata in an artifact file when an artifact directory is configured.
 write_release_evidence() {
   [[ -n "${ARTIFACT_DIR}" ]] || return 0
 
@@ -356,7 +357,7 @@ capture_failure_artifacts() {
 #   Removes TMP_DIR.
 #
 # Returns:
-#   0 always.
+# cleanup captures failure artifacts, removes the test container and image when configured, deletes temporary files, and always succeeds.
 cleanup() {
   local rc=$?
 

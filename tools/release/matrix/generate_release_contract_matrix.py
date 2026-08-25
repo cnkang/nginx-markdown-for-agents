@@ -160,7 +160,18 @@ def project_entry(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_projection(source: dict[str, Any]) -> dict[str, Any]:
-    """Build a deterministic release-contract projection."""
+    """
+    Build a deterministic release-contract projection from a policy matrix.
+    
+    Parameters:
+    	source (dict[str, Any]): Policy matrix containing a non-empty ``entries`` array.
+    
+    Returns:
+    	dict[str, Any]: Projection with schema metadata, source digest, and sorted release-contract entries.
+    
+    Raises:
+    	ValueError: If the source has no non-empty ``entries`` array or projects to duplicate release-contract rows.
+    """
     entries = source.get("entries")
     if not isinstance(entries, list) or not entries:
         raise ValueError("policy matrix must contain a non-empty entries array")

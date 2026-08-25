@@ -310,13 +310,16 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
 }
 
 
-/*
- * Handle failure while combining repeated Content-Encoding fields.
+/**
+ * Handles failure to collect repeated Content-Encoding fields according to the
+ * configured error policy.
  *
- * The combined value is request-pool allocated.  Treating an allocation
- * failure as a missing header would leave the request on the normal decode
- * path with incomplete encoding metadata, so it must use the same explicit
- * system-error policy as other header-phase failures.
+ * @param r Request being processed.
+ * @param ctx Request-specific Markdown filter context.
+ * @param conf Static Markdown filter configuration.
+ * @param eff Effective configuration for the request.
+ * @returns The configured rejection status for fail-closed handling, or the
+ *          downstream header-filter result for fail-open handling.
  */
 static ngx_int_t
 ngx_http_markdown_handle_encoding_collection_failure(
@@ -676,20 +679,17 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
 }
 
 
-/*
- * Per-worker inflight guard (spec 52).
+/**
+ * Reserves worker capacity for request conversion.
  *
- * After eligibility passes and before Rust conversion begins,
- * try to increment the inflight counter.  If the worker is at
- * capacity (current >= max_inflight), apply the configured
- * error policy (pass/status/fail_closed from spec 51).
+ * Applies the configured error policy when capacity is unavailable or
+ * reservation setup fails.
  *
- * The cleanup handler registered by try_increment guarantees
- * decrement on every exit path (normal, abort, timeout, error)
- * via r->pool destruction.
- *
- * Returns NGX_OK on success, or a non-OK value that the caller
- * should return directly from the header filter.
+ * @param r Request being processed.
+ * @param ctx Request-specific Markdown processing state.
+ * @param conf Markdown filter configuration.
+ * @return NGX_OK when capacity is reserved; otherwise, the response status
+ *         or filter result to return from the header filter.
  */
 static ngx_int_t
 ngx_http_markdown_check_inflight(ngx_http_request_t *r,
@@ -927,22 +927,14 @@ ngx_http_markdown_update_deferred_body_path(
 }
 #endif
 
-/*
- * Handle a malformed Content-Encoding chain during outer precommit routing.
+/**
+ * Handles a malformed Content-Encoding chain according to the configured error policy.
  *
- * Emits the canonical ENCODING_HEADER_INVALID reason (stage=decompression,
- * error_origin=format), starts no decoder, and mutates no response header.
- * The reconstructed PASS outcome returns the original encoded response
- * unchanged; a non-PASS policy uses its resolved reject status.
- *
- * Parameters:
- *   r    - NGINX request structure
- *   ctx  - per-request module context
- *   conf - module location configuration
- *
- * Returns:
- *   effective error status on fail-closed
- *   Result of ngx_http_next_header_filter on fail-open
+ * @param r Request being processed.
+ * @param ctx Per-request module context.
+ * @param conf Module location configuration.
+ * @param reason Decision reason to log, or the canonical encoding-header-invalid reason when NULL.
+ * @returns The configured rejection status for fail-closed handling; otherwise, the downstream header-filter result.
  */
 static ngx_int_t
 ngx_http_markdown_handle_encoding_header_invalid(
@@ -1003,16 +995,16 @@ ngx_http_markdown_handle_encoding_header_invalid(
     return rc;
 }
 
-/*
- * Handle Content-Encoding before path selection.  Returns non-zero when the
- * caller must return *rc to the next header filter or an unsupported-format
- * policy result; known formats remain on the normal path with decompression
- * marked as required.
+/**
+ * Processes the response's Content-Encoding chain before selecting a conversion path.
  *
- * The chain grammar is parsed via the Rust FFI chain parser.  Malformed
- * grammar routes through the configured error policy with no decoder; valid
- * chains proceed to streaming (single layer) or bounded full-buffer
- * (multi-layer) decoding.
+ * Valid chains with supported compression layers enable decompression; identity-only
+ * chains continue without decompression. Malformed or unsupported chains, collection
+ * failures, and disabled automatic decompression follow the configured policy.
+ *
+ * @param rc Receives the header-filter result when processing terminates.
+ * @return Nonzero when the caller must stop processing and return `*rc`; zero when
+ *         normal path selection may continue.
  */
 static ngx_flag_t
 ngx_http_markdown_handle_header_compression(

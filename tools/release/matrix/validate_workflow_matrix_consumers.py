@@ -84,7 +84,16 @@ EXCLUDE_CONTEXT_PATTERNS = [
 
 
 def _canonical_entries(data: object) -> tuple[list[dict], str | None]:
-    """Return the canonical entries list or a fail-closed validation error."""
+    """
+    Validate and return the matrix document's canonical entries.
+    
+    Parameters:
+    	data (object): Matrix data to validate.
+    
+    Returns:
+    	tuple[list[dict], str | None]: The non-empty canonical entries list and
+    	`None` when valid; otherwise, an empty list and a validation error message.
+    """
     if not isinstance(data, dict):
         return [], "Matrix document root must be an object"
     aliases = [key for key in ("matrix", "additional_artifacts") if key in data]
@@ -290,7 +299,15 @@ def validate_other_workflows(
 
 
 def validate_owner_workflow_refs(matrix_path: Path) -> list[str]:
-    """Verify that owner_workflow references in the matrix point to existing files."""
+    """
+    Verify that matrix `owner_workflow` references point to existing files.
+    
+    Parameters:
+    	matrix_path (Path): Path to the release matrix file.
+    
+    Returns:
+    	list[str]: Validation errors for missing referenced workflows.
+    """
     errors: list[str] = []
 
     validated = validate_read_path(matrix_path, purpose="owner workflow check")
@@ -317,6 +334,14 @@ def validate_owner_workflow_refs(matrix_path: Path) -> list[str]:
 
 
 def _release_blocking_docker_owners(entries: list[dict]) -> set[str]:
+    """Return the owner workflows for release-blocking Docker image entries.
+    
+    Parameters:
+    	entries (list[dict]): Matrix entries to inspect.
+    
+    Returns:
+    	set[str]: Owner workflow paths referenced by release-blocking Docker image entries.
+    """
     return {
         entry.get("owner_workflow", "")
         for entry in entries
@@ -329,6 +354,16 @@ def _release_blocking_docker_owners(entries: list[dict]) -> set[str]:
 def _validate_official_docker_gate(
     canonical_content: str, publish_needs: set[str]
 ) -> list[str]:
+    """
+    Validate the release package workflow's official Docker release gate and publish dependency.
+    
+    Parameters:
+    	canonical_content (str): Contents of the canonical release package workflow.
+    	publish_needs (set[str]): Job identifiers that the publish job depends on.
+    
+    Returns:
+    	list[str]: Validation error messages.
+    """
     errors: list[str] = []
     official_job = _workflow_job_block(
         canonical_content, "official-docker-release-gate"
@@ -353,6 +388,15 @@ def _validate_official_docker_gate(
 
 
 def _validate_docker_owner_workflows(owners: set[str]) -> list[str]:
+    """
+    Validate that referenced Docker owner workflows expose a top-level workflow_call trigger.
+    
+    Parameters:
+    	owners (set[str]): Repository-relative paths to Docker owner workflow files.
+    
+    Returns:
+    	list[str]: Error messages for existing owner workflows that do not expose workflow_call.
+    """
     errors: list[str] = []
     for owner in sorted(owners):
         owner_path = REPO_ROOT / owner
@@ -368,7 +412,15 @@ def _validate_docker_owner_workflows(owners: set[str]) -> list[str]:
 
 
 def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
-    """Ensure release-blocking Docker artifacts gate canonical publication."""
+    """
+    Validate that release-blocking Docker artifacts are gated before canonical publication.
+    
+    Parameters:
+        matrix_path (Path): Path to the release matrix file.
+    
+    Returns:
+        list[str]: Validation errors, or an empty list when the publication DAG is valid.
+    """
     validated = validate_read_path(
         matrix_path, purpose="release-blocking publish DAG check"
     )
@@ -562,7 +614,14 @@ def _validate_prepare_job(jobs: dict[str, object]) -> list[str]:
 
 
 def _validate_build_step(build: dict[str, object]) -> list[str]:
-    """Validate the matrix-bound Docker build step."""
+    """Validate that the official Docker build step uses matrix-bound tags and required build arguments.
+    
+    Parameters:
+    	build (dict[str, object]): The parsed `build-and-verify` job definition.
+    
+    Returns:
+    	list[str]: Validation error messages, or an empty list when the build step is valid.
+    """
     build_step = _workflow_step(
         build, name="Build from source on official nginx base"
     )
@@ -617,7 +676,15 @@ def _validate_verify_step(build: dict[str, object]) -> list[str]:
 
 
 def _validate_build_job(jobs: dict[str, object]) -> list[str]:
-    """Validate the matrix, build, and verification nodes."""
+    """
+    Validate the official Docker workflow's build and verification job configuration.
+    
+    Parameters:
+    	jobs (dict[str, object]): Parsed workflow jobs keyed by job name.
+    
+    Returns:
+    	list[str]: Validation errors found in the build-and-verify job.
+    """
     errors: list[str] = []
     build = jobs.get("build-and-verify")
     if not isinstance(build, dict):
@@ -634,7 +701,14 @@ def _validate_build_job(jobs: dict[str, object]) -> list[str]:
 
 
 def _validate_official_docker_workflow(document: dict[str, object]) -> list[str]:
-    """Validate executable prepare, matrix, build, and verification nodes."""
+    """Validate the official Docker workflow's required jobs and their matrix, build, and verification configuration.
+    
+    Parameters:
+    	document (dict[str, object]): Parsed official Docker workflow document.
+    
+    Returns:
+    	list[str]: Validation error messages, or an empty list when the workflow is valid.
+    """
     jobs = document.get("jobs")
     if not isinstance(jobs, dict):
         return ["official Docker workflow must define a jobs mapping"]
@@ -644,7 +718,15 @@ def _validate_official_docker_workflow(document: dict[str, object]) -> list[str]
 
 
 def validate_official_docker_matrix_coverage(matrix_path: Path) -> list[str]:
-    """Ensure the official workflow executes the complete Docker row contract."""
+    """
+    Ensure the official Docker workflow covers all configured release-blocking Docker matrix rows.
+    
+    Parameters:
+        matrix_path (Path): Path to the Docker release matrix.
+    
+    Returns:
+        list[str]: Validation errors, or an empty list when the matrix and workflow are valid.
+    """
     errors: list[str] = []
     try:
         entries = load_official_docker_entries(matrix_path)

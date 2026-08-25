@@ -45,20 +45,18 @@ EXPECTED_ASSET_TEMPLATE = (
 
 def load_matrix(path: Path) -> list[dict]:
     """
-    Load and validate the canonical release matrix JSON and return the
-    dynamic-module entries in the install.sh naming vocabulary.
-
-    Validates that the top-level JSON value is an object containing an
-    ``entries`` list. Only supported dynamic-module entries for glibc or musl
-    are projected into the legacy artifact-name fields used by install.sh.
-
+    Load and validate the release matrix, returning install-script-compatible entries.
+    
+    Only supported dynamic-module entries for detectable libc and architecture values
+    are included. Architecture aliases are canonicalized before projection.
+    
     Returns:
-        list[dict]: Projected install.sh-compatible rows with ``nginx``,
-            ``os_type``, ``arch``, and ``support_tier`` fields.
-
+        list[dict]: Entries containing ``nginx``, ``os_type``, ``arch``, and
+            ``support_tier`` fields.
+    
     Raises:
-        ValueError: If the parsed JSON is not an object, the ``entries`` key is
-        missing, the ``entries`` value is not a list, or any item is not a dict.
+        ValueError: If the matrix cannot be read, parsed, normalized, or does not
+            contain a valid ``entries`` list of dictionaries.
     """
     validated = validate_read_path(path, purpose="install matrix")
     try:

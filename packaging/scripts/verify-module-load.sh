@@ -4,7 +4,7 @@
 # The caller supplies the NGINX executable and module path.  The positive
 # configuration must load the module and parse its directive; the negative
 # configuration must omit load_module and fail on that directive.  A plain
-# `nginx -V` or a default `nginx -t` cannot prove either property.
+# verify_module_load confirms that an NGINX module loads successfully and is required for parsing its directive.
 
 verify_module_load() {
     local nginx_bin="${1:-}"

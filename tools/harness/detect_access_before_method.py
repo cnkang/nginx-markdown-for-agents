@@ -197,12 +197,14 @@ def audit_dir(directory: Path) -> tuple[list[str], list[str]]:
 
 
 def _strip_literals_and_comments(text: str) -> str:
-    """Blank out comments, string literals, and char literals in-place.
-
-    Keeps every character position (replaced with spaces) so regex match
-    offsets stay aligned with the original text.  Audit patterns must not
-    fire on comments or literals that merely mention access-control or
-    method-rejection identifiers.
+    """
+    Replace comments and string or character literals with spaces while preserving text length and character positions.
+    
+    Parameters:
+        text (str): Source text to sanitize.
+    
+    Returns:
+        str: Text with comments and literals blanked out.
     """
     return _TOKEN_RE.sub(lambda m: " " * len(m.group(0)), text)
 
@@ -242,7 +244,15 @@ def _control_condition_is_closed(prefix: str, control_prefix: re.Match[str]) -> 
 
 
 def _access_prefix_is_conditional(prefix: str) -> bool:
-    """Return whether a control prefix can skip the access call."""
+    """
+    Determine whether the code prefix places an access call on a conditional path.
+    
+    Parameters:
+    	prefix (str): Source text preceding the access call.
+    
+    Returns:
+    	bool: `True` if control flow can skip the access call, `False` otherwise.
+    """
     control_prefixes = list(
         re.finditer(r"\b(if|for|while|switch)\s*\(", prefix)
     )
@@ -265,15 +275,11 @@ def _access_prefix_is_conditional(prefix: str) -> bool:
 
 
 def _unconditional_access_positions(body: str) -> list[int]:
-    """Return access-call offsets executed unconditionally at body level.
-
-    The audit intentionally uses a small structural model instead of a C
-    parser.  Braces are retained by ``_blank_literals_and_comments`` so calls
-    nested in an ``if``/loop block are rejected.  A call in a top-level guard
-    condition such as ``if (check_access(r) != NGX_OK)`` is allowed because
-    evaluating that condition is itself unconditional.  A brace-less
-    ``if (allowed) check_access(r)`` is not allowed: its prefix has already
-    closed the condition before the call.
+    """
+    Identify access-control calls that execute unconditionally at the handler body level.
+    
+    Returns:
+        list[int]: Source offsets of unconditional access-control calls.
     """
     structural = _blank_literals_and_comments(body)
     positions: list[int] = []
@@ -288,7 +294,15 @@ def _unconditional_access_positions(body: str) -> list[int]:
 
 
 def audit_file(path: Path) -> tuple[list[str], list[str]]:
-    """Return (violations, reviews) for one file."""
+    """
+    Audit a source file for access-control ordering issues in HTTP handlers.
+    
+    Parameters:
+    	path (Path): Path to the C/C++ source file to audit.
+    
+    Returns:
+    	tuple[list[str], list[str]]: Violations and advisory reviews identified in the file.
+    """
     violations: list[str] = []
     reviews: list[str] = []
     resolved = validate_read_path(path, purpose="source file")

@@ -868,13 +868,8 @@ def check_test_matrix(result: ValidationResult) -> None:
 
 
 def check_non_goals(result: ValidationResult) -> None:
-    """Verify non-goals list exists in release gates document.
-
-    This function validates that the release gates document includes
-    references to all key non-goals for the 0.5.0 release.
-
-    Args:
-        result: ValidationResult object to record results
+    """
+    Verify that the release-gates document mentions all required non-goals for the 0.5.0 release.
     """
     gates_path = PROJECT_ROOT / "docs" / "project" / "release-gates-0-5-0.md"
     content = _read_file_safe(gates_path)

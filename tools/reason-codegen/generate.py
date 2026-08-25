@@ -572,7 +572,15 @@ def generate_rust_impl(reasons) -> str:
 
 
 def generate_rust_impl_continued(reasons) -> str:
-    """Generate log_callsite, discriminant, from_discriminant methods."""
+    """
+    Generate Rust implementations for log-callsite descriptions, discriminant conversion, and reverse discriminant lookup.
+    
+    Parameters:
+        reasons: Registry entries used to generate the reason-code mappings and examples.
+    
+    Returns:
+        The generated Rust implementation as a string.
+    """
     lines = []
 
     # log_callsite

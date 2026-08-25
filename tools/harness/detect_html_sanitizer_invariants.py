@@ -40,7 +40,16 @@ from lib.path_validation import validate_read_path
 
 
 def check_url_safety(codebase_content: str, src_dir: Path) -> List[str]:
-    """Check that dangerous URL schemes are blocked somewhere in the codebase."""
+    """
+    Check whether the codebase includes URL safety validation for referenced links.
+    
+    Parameters:
+        codebase_content (str): Aggregated Rust source content to inspect.
+        src_dir (Path): Source directory included in the issue description.
+    
+    Returns:
+        List[str]: Detected URL safety issues.
+    """
     issues = []
 
     # Check if there's any URL validation for dangerous schemes
@@ -130,6 +139,13 @@ def _print_read_errors(read_errors: List[str]) -> None:
 
 
 def main():
+    """
+    Validate the Rust source tree against HTML sanitizer security invariants.
+    
+    Exits with status 1 when the source directory is missing, source files cannot
+    be read, no Rust files are found, or invariant issues are detected; otherwise
+    exits with status 0.
+    """
     src_dir = _resolve_source_dir()
 
     if not src_dir.exists():

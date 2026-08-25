@@ -215,7 +215,7 @@ def test_official_docker_runtime_installs_module_runtime_libraries() -> None:
 
 
 def test_macos_smoke_retries_once_and_blocks_a_second_failure() -> None:
-    """Darwin transport retries must not make repeated E2E failures advisory."""
+    """Ensure macOS native smoke validation retries once and fails after a second unsuccessful attempt."""
     workflow = _workflow_data("macos-smoke.yml")
     job = workflow["jobs"]["darwin-native-smoke"]
     step = _step_by_name(

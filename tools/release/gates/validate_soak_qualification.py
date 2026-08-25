@@ -1220,6 +1220,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """
+    Run the qualification gate in fixture or real mode.
+    
+    Parameters:
+        argv: Optional command-line arguments. Uses process arguments when omitted.
+    
+    Returns:
+        0 on success, 1 for operational or qualification errors, or 2 when fixture
+        mode is missing its required record input.
+    """
     args = build_parser().parse_args(argv)
     try:
         if args.mode == "fixture":

@@ -275,12 +275,17 @@ impl MarkdownConverter {
         total
     }
 
-    /// Return a constant-time upper bound for a partially rendered item.
+    /// Estimates the maximum rendered length of a list item before its content is fully formatted.
     ///
-    /// The exact formatter has to inspect every line.  During child traversal
-    /// that would make the budget check quadratic, so use the content length
-    /// and a worst-case per-line prefix instead.  The exact length is checked
-    /// once after traversal, before the output buffer is mutated.
+    /// The estimate accounts for the item's depth, marker style, rendered line count, and
+    /// per-line formatting overhead. Returns a memory-limit error if the estimate overflows.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let upper_bound = format_list_item_upper_bound(5, 1, 1, false).unwrap();
+    /// assert_eq!(upper_bound, 25);
+    /// ```
     fn format_list_item_upper_bound(
         content_len: usize,
         newline_count: usize,
@@ -372,7 +377,24 @@ impl MarkdownConverter {
         Ok(())
     }
 
-    /// Handle list item elements (li) with optional timeout context.
+    /// Renders a list item using an unordered-list marker and the specified nesting depth.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// converter.handle_list_item_with_context(&node, &mut output, 0, None)?;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ConversionError`] if rendering the list item fails.
+    pub(super) fn handle_list_item_with_context(
+    &self,
+    node: &Handle,
+    output: &mut String,
+    depth: usize,
+    ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError>
     pub(super) fn handle_list_item_with_context(
         &self,
         node: &Handle,
@@ -383,6 +405,22 @@ impl MarkdownConverter {
         self.handle_list_item_with_marker(node, output, depth, false, ctx)
     }
 
+    /// Renders a list item's child content, including nested ordered and unordered lists.
+    ///
+    /// Nested lists are rendered at the next indentation depth, while other children
+    /// are traversed at that depth.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// let mut output = String::new();
+    /// let mut context = None;
+    ///
+    /// converter
+    ///     .render_list_item_child(&child, &mut output, depth, &mut context)
+    ///     .unwrap();
+    /// assert!(!output.is_empty());
+    /// ```
     fn render_list_item_child(
         &self,
         child: &Handle,
@@ -415,7 +453,16 @@ impl MarkdownConverter {
         Ok(())
     }
 
-    /// Handle list item elements with specific marker type.
+    /// Renders a list item using an ordered or unordered Markdown marker.
+    ///
+    /// Nested list content is rendered at the specified depth, and the conversion
+    /// context is used to enforce output limits when provided.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// converter.handle_list_item_with_marker(&node, &mut output, 0, false, None)?;
+    /// ```
     pub(super) fn handle_list_item_with_marker(
         &self,
         node: &Handle,

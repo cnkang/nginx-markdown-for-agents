@@ -67,7 +67,7 @@ SCRIPT
 }
 
 # link_trusted_command — Link a host utility into the temporary trusted PATH.
-# Arguments: $1 = command name
+# link_trusted_command links an available executable into the sandbox trusted command directory.
 link_trusted_command() {
     local command_name="$1"
     local command_path=""
@@ -159,7 +159,7 @@ run_sandboxed_script() {
 
 # assert_no_markers — Assert that no marker files were created.
 # Arguments: $1 = test label
-# Returns: 0; failures are tracked through FAIL_COUNT.
+# assert_no_markers verifies that no fake binaries executed and records the result without changing the test's control flow.
 assert_no_markers() {
     local label="$1"
     local any_found=0
@@ -182,7 +182,7 @@ assert_no_markers() {
 
 # assert_path_present — Assert that a package cleanup path remains because the
 # package does not own operator-managed module configuration.
-# Arguments: $1 = label, $2 = path
+# assert_path_present verifies that a sandbox path exists or is a symbolic link and records the result under the provided label.
 assert_path_present() {
     local label="$1"
     local path="$2"

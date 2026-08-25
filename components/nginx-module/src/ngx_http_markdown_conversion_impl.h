@@ -1829,12 +1829,15 @@ ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-/* Update response headers and emit the converted Markdown downstream.
+/**
+ * Updates the response headers and delivers the converted Markdown downstream.
  *
- * Rule: alloc-before-send.  All output resources (body buffer, pool copy,
- * chain link) are allocated BEFORE header forwarding.  If any allocation
- * fails, headers have NOT been sent, so the downstream connection does not
- * receive a partial headers-sent-but-no-body response.
+ * @param r Request receiving the converted response.
+ * @param ctx Markdown request context.
+ * @param conf Effective Markdown configuration.
+ * @param result Converted Markdown and response metadata.
+ * @param elapsed_ms Conversion elapsed time in milliseconds.
+ * @return The downstream header or body filter status.
  */
 static ngx_int_t
 ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
@@ -2006,22 +2009,13 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     return rc;
 }
 
-/*
- * Resume a full-buffer response after downstream backpressure.
+/**
+ * Resumes delivery of a buffered full-buffer response after downstream backpressure.
  *
- * The NGINX copy filter retains the unsent portion after returning NGX_AGAIN.
- * Passing the original chain again would append a duplicate copy of that
- * tail.  A NULL input asks the downstream filter chain to drain its existing
- * buffered state.  The request-owned chain pointer remains only as a lifetime
- * anchor and pending-state marker until the downstream chain finishes.
- *
- * Parameters:
- *   r   - current request
- *   ctx - request context with a pending full-buffer response
- *
- * Returns:
- *   NGX_AGAIN while downstream remains blocked; otherwise the downstream
- *   return code after clearing the module's pending state.
+ * @param r Current request.
+ * @param ctx Request context containing the pending response.
+ * @return NGX_AGAIN if downstream remains blocked; otherwise the downstream
+ *         return code after the pending state is cleared.
  */
 static ngx_int_t
 ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,

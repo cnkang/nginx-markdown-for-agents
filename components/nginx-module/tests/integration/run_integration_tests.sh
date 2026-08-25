@@ -64,7 +64,7 @@ VAR_TOGGLE_HTML="<html><body><h1>Var Toggle</h1></body></html>"
 AUTH_PRIVATE_HTML="<html><body><h1>Private</h1></body></html>"
 METRICS_ENDPOINT="/markdown-metrics"
 
-# Cleanup function
+# cleanup stops NGINX if it is running and removes temporary test files and logs.
 cleanup() {
     echo ""
     echo "Cleaning up..."
@@ -207,7 +207,7 @@ extract_prometheus_sum() {
     return $?
 }
 
-# Start NGINX with given configuration
+# start_nginx writes the provided configuration, starts NGINX, and verifies that its process is running.
 start_nginx() {
     local config="$1"
     local pid
@@ -265,7 +265,7 @@ stop_nginx() {
     return 0
 }
 
-# Make HTTP request and return response
+# make_request sends an HTTP request to the test server and outputs the complete response.
 make_request() {
     local method="$1"
     local path="$2"
@@ -279,7 +279,7 @@ make_request() {
     return 0
 }
 
-# Extract header value from response
+#get_header extracts the first case-insensitive response header value matching the specified header name.
 get_header() {
     local response="$1"
     local header_name="$2"
@@ -304,7 +304,7 @@ get_body() {
 
 #
 # Test 1: Basic Conversion with Accept: text/markdown
-#
+# test_basic_conversion verifies Markdown conversion for a basic HTML request with an Accept: text/markdown header.
 test_basic_conversion() {
     log_test 1 "Basic Conversion with Accept: text/markdown"
 
@@ -372,7 +372,7 @@ http {
 
 #
 # Test 2: Passthrough with Accept: text/html
-#
+# test_passthrough verifies that HTML responses remain unchanged when requested with an HTML Accept header.
 test_passthrough() {
     log_test 2 "Passthrough with Accept: text/html"
 
@@ -432,7 +432,7 @@ http {
 
 #
 # Test 3: Configuration Inheritance
-#
+# test_configuration_inheritance verifies HTTP-level filter inheritance and location-level disabling of Markdown conversion.
 test_configuration_inheritance() {
     log_test 3 "Configuration Inheritance"
 
@@ -498,7 +498,7 @@ http {
 
 #
 # Test 4: Authenticated Content Handling
-#
+# test_authenticated_content verifies Markdown conversion for an authorized request and confirms private caching headers.
 test_authenticated_content() {
     log_test 4 "Authenticated Content Handling"
     local config
@@ -1106,7 +1106,7 @@ EOF
 
 #
 # Main test execution
-#
+# main runs the NGINX Markdown filter integration tests, reports their results, and returns a failure status when prerequisites are unavailable or any test fails.
 main() {
     echo "$SEPARATOR_LINE"
     echo "NGINX Markdown Filter - Integration Tests"

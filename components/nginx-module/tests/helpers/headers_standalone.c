@@ -104,13 +104,12 @@ markdown_header_plan_free(struct FFIHeaderPlan *plan)
     plan->count = 0;
 }
 
-/*
- * Stub for ngx_http_markdown_apply_header_plan.
+/**
+ * Applies a header plan to an HTTP response.
  *
- * In the standalone test harness, this delegates to the best-effort
- * loop in the impl header (which calls the stub plan builder above).
- * For unit tests, we simulate atomic success by applying each entry
- * via the same logic the production code uses.
+ * @param r Request whose response headers are updated.
+ * @param plan Header operations to apply; the plan is released before returning.
+ * @return NGX_OK on success, or NGX_ERROR if the request or plan contains an invalid operation or an allocation fails.
  */
 ngx_int_t
 ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
@@ -262,6 +261,11 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
 
 #include "../../src/ngx_http_markdown_headers_impl.h"
 
+/**
+ * Restores header snapshot status using a zero-initialized test request and snapshot.
+ *
+ * @return The status returned by the header snapshot restoration operation.
+ */
 ngx_int_t
 ngx_http_markdown_test_header_snapshot_restore_status(void)
 {

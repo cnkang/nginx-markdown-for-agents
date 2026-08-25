@@ -131,6 +131,7 @@ function_contains_line() {
     return $?
 }
 
+# comment_free_line prints the specified source line with C and C++ comments removed.
 comment_free_line() {
     local file="$1" target_line="$2"
     awk -v target="${target_line}" '

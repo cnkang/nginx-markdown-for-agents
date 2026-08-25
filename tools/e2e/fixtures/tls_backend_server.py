@@ -30,6 +30,14 @@ def status_line(status: int) -> bytes:
 class TLSBackendHandler(socketserver.StreamRequestHandler):
     """Simple HTTP request handler for TLS backend E2E tests."""
     def handle(self) -> None:
+        """
+        Handle one HTTP request and send the corresponding response.
+        
+        The handler supports `GET` and `HEAD` requests for health, static HTML,
+        chunked-trailer, and error endpoints. Query strings are excluded from path
+        routing, and unsupported methods or malformed request lines receive error
+        responses.
+        """
         request_line = self.rfile.readline(65537)
         if not request_line:
             return
@@ -90,6 +98,14 @@ class TLSBackendHandler(socketserver.StreamRequestHandler):
             self.wfile.write(payload)
 
     def _send_html(self, status: int, body: str, method: str) -> None:
+        """
+        Send an HTML response with caching metadata and omit the body for HEAD requests.
+        
+        Parameters:
+        	status (int): HTTP response status code.
+        	body (str): HTML content to encode as UTF-8.
+        	method (str): HTTP request method controlling whether the response body is sent.
+        """
         payload = body.encode("utf-8")
         headers = {
             "Content-Type": "text/html; charset=utf-8",
@@ -105,11 +121,12 @@ class TLSBackendHandler(socketserver.StreamRequestHandler):
     def _send_chunked_with_trailer(
         self, status: int, body: str, method: str
     ) -> None:
-        """Send a chunked response whose trailer carries a representation digest.
-
-        The trailer list is emitted after the final chunk, mirroring an
-        upstream that attaches Content-Digest to the HTML representation.
-        A converting proxy must not propagate this trailer to the client.
+        """Send an HTML response using chunked transfer encoding with a content digest trailer.
+        
+        Parameters:
+            status (int): HTTP response status code.
+            body (str): HTML response content.
+            method (str): HTTP request method; `HEAD` requests omit the response body.
         """
         payload = body.encode("utf-8")
         headers = {

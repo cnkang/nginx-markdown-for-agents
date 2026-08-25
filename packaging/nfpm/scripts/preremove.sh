@@ -47,7 +47,7 @@ info() {
 
 ##############################################################################
 # Main
-##############################################################################
+# main prepares package removal while preserving any existing nginx module configuration.
 
 main() {
     info "Preparing to remove nginx-module-markdown-for-agents"

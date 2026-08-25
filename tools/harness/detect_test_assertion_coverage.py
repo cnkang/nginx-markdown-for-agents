@@ -126,7 +126,14 @@ def _find_test_function_end(content: str, brace_start: int) -> int | None:
 
 
 def extract_test_functions(content: str) -> List[Tuple[str, int, str, bool, bool]]:
-    """Extract test functions with their line numbers and bodies."""
+    """Extract test functions and their source locations, bodies, and test classifications.
+    
+    Parameters:
+        content (str): Rust source code containing test functions.
+    
+    Returns:
+        List[Tuple[str, int, str, bool, bool]]: Test records containing the function name, one-based line number, function body, whether the test allows a panic, and whether it uses property-testing indicators.
+    """
     tests = []
 
     for match in TEST_FUNCTION_PATTERN.finditer(content):
@@ -155,7 +162,19 @@ def extract_test_functions(content: str) -> List[Tuple[str, int, str, bool, bool
 
 def check_test_assertions(func_name: str, line_num: int, func_body: str,
                          has_should_panic: bool, is_property_test: bool) -> List[str]:
-    """Check if a test function has meaningful assertions."""
+    """
+                         Check whether a Rust test contains a recognized verification pattern.
+                         
+                         Parameters:
+                             func_name (str): Name of the test function.
+                             line_num (int): Source line number of the test function.
+                             func_body (str): Source code of the test body.
+                             has_should_panic (bool): Whether the test is expected to panic.
+                             is_property_test (bool): Whether the test uses property-based testing.
+                         
+                         Returns:
+                             List[str]: An issue message when the test lacks recognized assertions; otherwise, an empty list.
+                         """
     issues = []
 
     # Skip tests that are expected to panic
@@ -255,6 +274,7 @@ def _scan_test_dir(test_dir: Path) -> tuple[List[str], List[str]]:
 
 
 def main():
+    """Scan the Rust test directory for tests lacking recognized assertions and exit with the resulting status."""
     test_dir = _resolve_test_dir()
 
     if not test_dir.exists():

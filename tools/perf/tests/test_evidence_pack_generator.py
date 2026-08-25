@@ -66,13 +66,13 @@ def _write_tmp_json(data: dict, suffix: str = ".json") -> str:
 
 def _make_fullbuffer_report(tiers: dict | None = None) -> dict:
     """
-    Create a minimal full-buffer measurement report, optionally overriding the default tiers.
-
+    Create a full-buffer measurement report with default or supplied tier metrics.
+    
     Parameters:
-    	tiers (dict | None): Optional mapping of tier names to metric dicts; when provided, this value is used as the report's `tiers` field. If `None`, a default set of small/medium/large tiers with example latency and input sizes is returned.
-
+    	tiers (dict | None): Tier metrics to include in the report. If `None` or empty, default small, medium, and large tiers are used.
+    
     Returns:
-    	report (dict): A report containing `schema_version`, `timestamp`, `git_commit`, `platform`, and `tiers`.
+    	dict: A report containing schema metadata and tier metrics.
     """
     return {
         "schema_version": "1.0.0",

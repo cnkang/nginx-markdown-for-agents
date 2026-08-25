@@ -317,15 +317,12 @@ def _cmd_detect_platform(_args: argparse.Namespace) -> int:
 def _cmd_extract_baseline(args: argparse.Namespace) -> int:
     """
     Create a baseline report from a measurement report and write it to the specified output path.
-
+    
     Parameters:
-        args (argparse.Namespace): Must have attributes:
-            - measurement (str | Path): Path to the input measurement JSON file.
-            - platform (str | None): Optional platform override for the baseline; if None, the baseline's platform is unchanged.
-            - output (str | Path): Path where the baseline JSON will be written.
-
+        args (argparse.Namespace): Contains the input measurement path, optional platform override, and output path.
+    
     Returns:
-        int: Exit code `0` on success.
+        int: `0` after the baseline is written successfully.
     """
     measurement_report = load_json(args.measurement)
     baseline = build_baseline_report(measurement_report, args.platform)

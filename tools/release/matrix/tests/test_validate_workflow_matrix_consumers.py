@@ -153,6 +153,15 @@ class TestLoadMatrixVersions:
     def _write_matrix_file_and_load_versions(
         self, tmp_path: Path, matrix: dict
     ) -> set[str]:
+        """Write a release matrix to a temporary file and load its versions.
+        
+        Parameters:
+            tmp_path (Path): Directory for the temporary matrix file.
+            matrix (dict): Release matrix data to serialize.
+        
+        Returns:
+            set[str]: Versions extracted from the release matrix.
+        """
         matrix_file = tmp_path / "release-matrix.json"
         matrix_file.write_text(json.dumps(matrix))
         return load_matrix_versions(matrix_file)
@@ -341,6 +350,15 @@ class TestValidateOwnerWorkflowRefs:
     def _write_matrix_with_owner_workflow(
         self, owner_workflow: str, tmp_path: Path
     ) -> list[str]:
+        """Validate an owner workflow reference against a temporary release matrix.
+        
+        Parameters:
+        	owner_workflow (str): Workflow reference to include in the matrix.
+        	tmp_path (Path): Temporary repository root used for the matrix file.
+        
+        Returns:
+        	list[str]: Validation messages produced for the owner workflow reference.
+        """
         matrix = {
             "entries": [
                 {"nginx": "1.26.3", "owner_workflow": owner_workflow},
@@ -445,6 +463,16 @@ class TestValidateReleaseBlockingPublishDag:
     def _make_fixture(
         self, tmp_path: Path, release_workflow_body: str
     ) -> tuple[Path, Path]:
+        """
+        Create temporary workflow and release-matrix fixtures for workflow validation tests.
+        
+        Parameters:
+            tmp_path (Path): Root directory for the temporary fixture files.
+            release_workflow_body (str): Workflow content appended to the release workflow trigger.
+        
+        Returns:
+            tuple[Path, Path]: Paths to the release matrix file and workflows directory.
+        """
         wf_dir = tmp_path / ".github" / "workflows"
         wf_dir.mkdir(parents=True)
         (wf_dir / "official-nginx-docker.yml").write_text(

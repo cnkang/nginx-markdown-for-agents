@@ -60,15 +60,14 @@ def _require_entry_keys(entry: dict, *, context: str) -> None:
 
 def load_matrix(matrix_path: str) -> List[dict]:
     """
-    Load release-binary entries from a release matrix JSON file.
-
+    Load qualifying release-binary entries from a release matrix JSON file.
+    
     Parameters:
-        matrix_path (str): Filesystem path to release-matrix.json. The current
-            schema uses top-level "entries"; the legacy schema used "matrix".
-
+        matrix_path (str): Filesystem path to the release matrix JSON file.
+    
     Returns:
-        List[dict]: Normalized entries with "nginx", "os_type", and "arch"
-        keys matching release binary artifact filenames.
+        List[dict]: Qualifying entries from the current or legacy matrix schema,
+        or an empty list when the file has no supported matrix structure.
     """
     resolved = validate_read_path(matrix_path, purpose="release matrix")
     data = json.loads(resolved.read_text(encoding="utf-8"))
@@ -197,15 +196,13 @@ def format_missing(missing: List[Tuple[dict, str]]) -> str:
 
 def main(argv: List[str] | None = None) -> int:
     """
-    Run the completeness check using the provided command-line arguments and return a process-style exit code.
-
-    Parses --matrix and --artifacts from argv, loads the matrix entries with support_tier "full", compares expected artifact filenames against the actual artifacts found, and returns an exit code reflecting the result.
-
+    Check whether all expected release artifacts are present for qualifying matrix entries.
+    
     Parameters:
-        argv (List[str] | None): Command-line arguments to parse; if None, sys.argv[1:] is used.
-
+        argv (List[str] | None): Command-line arguments to parse; uses sys.argv[1:] when None.
+    
     Returns:
-        int: 0 if all expected artifacts are present, 1 if any artifacts are missing or if no qualifying matrix entries are found.
+        int: 0 when all expected artifacts are present; 1 when no qualifying entries exist or artifacts are missing.
     """
     parser = argparse.ArgumentParser(
         description="Check release artifact completeness against the matrix."

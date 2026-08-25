@@ -685,6 +685,13 @@ typedef struct {
 } ngx_http_markdown_header_snapshot_t;
 
 
+/**
+ * Captures the response-header state needed to roll back a header update.
+ *
+ * @param r Request whose response headers are captured.
+ * @param snapshot Destination for the captured header state.
+ * @returns NGX_OK on success, or NGX_ERROR if the header list exceeds the snapshot limit, allocation fails, or a nonempty part has no element storage.
+ */
 static ngx_int_t
 ngx_http_markdown_header_snapshot_prepare(
     ngx_http_request_t *r,
@@ -747,6 +754,13 @@ ngx_http_markdown_header_snapshot_prepare(
 }
 
 
+/**
+ * Restores response headers and range settings from a saved snapshot.
+ *
+ * @param r Request whose response state is restored.
+ * @param snapshot Snapshot containing the saved response state.
+ * @return NGX_OK on success, or NGX_ERROR if the arguments or live header list are invalid.
+ */
 static ngx_int_t
 ngx_http_markdown_header_snapshot_restore(
     ngx_http_request_t *r,
@@ -812,6 +826,13 @@ ngx_http_markdown_header_snapshot_restore(
 }
 
 
+/**
+ * Restores a saved response-header snapshot and reports restoration failure.
+ *
+ * @param r Request whose response headers are restored.
+ * @param snapshot Saved response-header state to restore.
+ * @return NGX_OK on success; NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED if restoration fails.
+ */
 static ngx_int_t
 ngx_http_markdown_header_snapshot_restore_status(
     ngx_http_request_t *r,
@@ -1150,6 +1171,17 @@ ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
 }
 
 
+/**
+ * Updates response headers for the Markdown representation.
+ *
+ * Restores the original headers when a preparation step fails.
+ *
+ * @param r      Request whose response headers are updated.
+ * @param result Markdown conversion result containing representation metadata.
+ * @param conf   Module configuration controlling header generation.
+ * @return NGX_OK on success, NGX_ERROR on preparation failure, or
+ *         NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED if rollback fails.
+ */
 ngx_int_t
 ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                  const struct MarkdownResult *result,
@@ -1294,29 +1326,14 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-/*
- * Rewrite response headers for a HEAD request so they describe the
- * Markdown representation that a GET with the same Accept header would
- * select (HTTP semantics: HEAD carries the same headers as GET, no body).
+/**
+ * Rewrites HEAD response headers to describe the negotiated Markdown representation.
  *
- * The upstream HEAD response carries no body, so no body-derived field
- * (Content-Length, ETag) can be computed.  Those fields are removed
- * rather than fabricated: a fabricated Content-Length or empty-input
- * ETag would contradict the GET representation of the same URL.  The
- * header set still describes the Markdown representation (Content-Type,
- * Vary: Accept) and strips all source-HTML representation metadata.
+ * Removes source representation metadata and body-derived fields, sets the
+ * Markdown content type, and adds `Vary: Accept`.
  *
- * Replaces the former Decision E fail-open behavior (superseded
- * 2026-08-19): the body filter previously forwarded the upstream HTML
- * headers unchanged for header-only HEAD requests, which contradicted
- * the Rust-side HTTP representation contract (scenario_07_head_fullbuffer,
- * scenario_08_head_streaming).
- *
- * r - current HTTP request
- *
- * Returns:
- *   NGX_OK    on success
- *   NGX_ERROR on allocation failure (Vary append)
+ * @param r Current HTTP request.
+ * @return NGX_OK on success; NGX_ERROR if header preparation or allocation fails.
  */
 ngx_int_t
 ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)

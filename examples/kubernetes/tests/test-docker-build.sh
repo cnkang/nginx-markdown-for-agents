@@ -92,10 +92,12 @@ log_fail() {
     printf '[FAIL]  %s\n' "$1" >&2
 }
 
+# log_error prints an error message to standard error.
 log_error() {
     printf '[ERROR] %s\n' "$1" >&2
 }
 
+# cleanup removes the test container and, when enabled, the built Docker image.
 cleanup() {
     if [[ -n "$RUNTIME_CONTAINER" ]]; then
         docker rm -f "$RUNTIME_CONTAINER" >/dev/null 2>&1 || true
@@ -106,6 +108,7 @@ cleanup() {
     fi
 }
 
+# check_prerequisites verifies that Docker, the Docker daemon, the configured Dockerfile, and curl are available.
 check_prerequisites() {
     if ! command -v docker >/dev/null 2>&1; then
         log_error "docker is required but not found in PATH"
@@ -170,7 +173,7 @@ detect_repo_root() {
 
 # ---------------------------------------------------------------------------
 # Test functions
-# ---------------------------------------------------------------------------
+# test_docker_build builds the Docker image using the configured Dockerfile, build context, image tag, and module commit SHA, reporting the build result.
 
 test_docker_build() {
     log_info "Test: Docker image builds successfully"
@@ -198,6 +201,7 @@ test_docker_build() {
     return 0
 }
 
+# test_active_module_configuration verifies the active module load directive and confirms module-specific configuration succeeds only when the module is loaded.
 test_active_module_configuration() {
     log_info "Test: active load_module, directive parsing, and negative control"
 
@@ -264,6 +268,7 @@ nginx -t -c /tmp/markdown-negative.conf
     return 0
 }
 
+# test_markdown_http verifies that requesting HTML with an Accept: text/markdown header returns Markdown content through the active NGINX module.
 test_markdown_http() {
     log_info "Test: HTTP Accept: text/markdown conversion"
 
@@ -454,7 +459,7 @@ parse_args() {
 
 # ---------------------------------------------------------------------------
 # Main
-# ---------------------------------------------------------------------------
+# main parses arguments, validates prerequisites, builds the NGINX image, runs its checks, and reports the overall result.
 
 main() {
     parse_args "$@" || exit $?
