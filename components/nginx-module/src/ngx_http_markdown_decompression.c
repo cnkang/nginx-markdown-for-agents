@@ -463,10 +463,17 @@ ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
 }
 
 /**
- * Determines the compression type declared by the response's Content-Encoding header.
+ * Determines the compression type declared by the response's Content-Encoding
+ * header.
  *
  * @param r Request whose response headers are inspected.
- * @returns The detected compression type, or none when the header is absent or empty.
+ * @return NGX_HTTP_MARKDOWN_COMPRESSION_NONE when the header is absent or
+ *         empty; NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+ *         NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, or
+ *         NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI for a recognized single
+ *         coding; NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN for an unsupported
+ *         single coding or a comma-separated chain that must be classified by
+ *         the chain parser.
  */
 ngx_http_markdown_compression_type_e
 ngx_http_markdown_detect_compression(ngx_http_request_t *r)

@@ -318,6 +318,9 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
  * @param ctx Request-specific Markdown filter context.
  * @param conf Static Markdown filter configuration.
  * @param eff Effective configuration for the request.
+ * @note The combined value is request-pool allocated. Allocation failure must
+ *       not be treated as an absent field, because that could continue with
+ *       incomplete Content-Encoding metadata.
  * @returns The configured rejection status for fail-closed handling, or the
  *          downstream header-filter result for fail-open handling.
  */
