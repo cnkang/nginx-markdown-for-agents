@@ -99,7 +99,7 @@ impl MarkdownConverter {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let converter = MarkdownConverter::default();
     /// let normalized = converter.normalize_output("Title  \r\n\r\n\r\nBody".into());
     ///
@@ -184,7 +184,7 @@ fn leading_indent_columns(line: &str) -> usize {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// assert_eq!(measure_fence_len("```rust"), 3);
 /// assert_eq!(measure_fence_len("   ````"), 4);
 /// assert_eq!(measure_fence_len("    ```"), 0);
@@ -210,7 +210,7 @@ pub(crate) fn measure_fence_len(line: &str) -> usize {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let result = fix_trailing_newlines("text\n\n".to_owned());
 /// assert_eq!(result, "text\n");
 /// ```

@@ -1847,8 +1847,10 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
 /**
  * Decompresses response data according to the specified compression type.
  *
- * @param in  Compressed input chain.
- * @param out Output chain for the decompressed data.
+ * @param r    Nginx request used for request context and logging.
+ * @param type Compression type used to select the decompression method.
+ * @param in   Compressed input chain.
+ * @param out  Output chain for the decompressed data.
  * @returns The decompression status, including NGX_OK on success,
  *          NGX_DECLINED for unsupported compression, or an error status.
  */

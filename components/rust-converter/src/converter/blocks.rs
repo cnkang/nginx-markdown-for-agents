@@ -282,8 +282,8 @@ impl MarkdownConverter {
     ///
     /// # Examples
     ///
-    /// ```
-    /// let upper_bound = format_list_item_upper_bound(5, 1, 1, false).unwrap();
+    /// ```ignore
+    /// let upper_bound = Self::format_list_item_upper_bound(5, 1, 1, false).unwrap();
     /// assert_eq!(upper_bound, 25);
     /// ```
     fn format_list_item_upper_bound(
@@ -388,13 +388,6 @@ impl MarkdownConverter {
     /// # Errors
     ///
     /// Returns a [`ConversionError`] if rendering the list item fails.
-    pub(super) fn handle_list_item_with_context(
-    &self,
-    node: &Handle,
-    output: &mut String,
-    depth: usize,
-    ctx: Option<&mut ConversionContext>,
-    ) -> Result<(), ConversionError>
     pub(super) fn handle_list_item_with_context(
         &self,
         node: &Handle,

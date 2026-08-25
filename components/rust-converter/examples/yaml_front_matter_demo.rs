@@ -14,7 +14,7 @@ use nginx_markdown_converter::parser::parse_html;
 /// Run the example to print the converted Markdown with and without front matter:
 ///
 /// ```text
-/// cargo run --example <example-name>
+/// cargo run --example yaml_front_matter_demo
 /// ```
 fn main() {
     // Sample HTML with rich metadata
