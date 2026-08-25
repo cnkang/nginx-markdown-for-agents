@@ -14,6 +14,12 @@
 
 #include "../../src/ngx_http_markdown_filter_module.h"
 
+/* The conversion-output tests exercise the production finalizer call. */
+struct ngx_module_s {
+    int unused;
+};
+ngx_module_t ngx_http_markdown_filter_module;
+
 /*
  * Stub effective-conf helpers required by conversion_impl.h.
  * These return the live conf value (eff is NULL in these tests).

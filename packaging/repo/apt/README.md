@@ -20,7 +20,15 @@ clients.
 key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
-gpg --show-keys --fingerprint "$key_file"
+expected_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
+if ! gpg --batch --with-colons --show-keys --fingerprint "$key_file" \
+    | awk -F: -v expected="$expected_fingerprint" \
+        '$1 == "fpr" && toupper($10) == toupper(expected) { found=1 }
+         END { exit(found ? 0 : 1) }'; then
+    echo "unexpected signing-key fingerprint" >&2
+    rm -f "$key_file"
+    exit 1
+fi
 sudo gpg --dearmor --yes --output \
     /usr/share/keyrings/nginx-markdown-archive-keyring.gpg "$key_file"
 rm -f "$key_file"
@@ -141,7 +149,15 @@ Modern APT (Debian 12+, Ubuntu 22.04+):
 key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
-gpg --show-keys --fingerprint "$key_file"
+expected_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
+if ! gpg --batch --with-colons --show-keys --fingerprint "$key_file" \
+    | awk -F: -v expected="$expected_fingerprint" \
+        '$1 == "fpr" && toupper($10) == toupper(expected) { found=1 }
+         END { exit(found ? 0 : 1) }'; then
+    echo "unexpected signing-key fingerprint" >&2
+    rm -f "$key_file"
+    exit 1
+fi
 sudo gpg --dearmor --yes --output \
     /usr/share/keyrings/nginx-markdown-archive-keyring.gpg "$key_file"
 rm -f "$key_file"
@@ -153,7 +169,15 @@ Legacy APT (older systems):
 key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
-gpg --show-keys --fingerprint "$key_file"
+expected_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
+if ! gpg --batch --with-colons --show-keys --fingerprint "$key_file" \
+    | awk -F: -v expected="$expected_fingerprint" \
+        '$1 == "fpr" && toupper($10) == toupper(expected) { found=1 }
+         END { exit(found ? 0 : 1) }'; then
+    echo "unexpected signing-key fingerprint" >&2
+    rm -f "$key_file"
+    exit 1
+fi
 sudo apt-key add "$key_file"
 rm -f "$key_file"
 ```
@@ -269,7 +293,15 @@ If you encounter dependency errors:
 key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
-gpg --show-keys --fingerprint "$key_file"
+expected_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
+if ! gpg --batch --with-colons --show-keys --fingerprint "$key_file" \
+    | awk -F: -v expected="$expected_fingerprint" \
+        '$1 == "fpr" && toupper($10) == toupper(expected) { found=1 }
+         END { exit(found ? 0 : 1) }'; then
+    echo "unexpected signing-key fingerprint" >&2
+    rm -f "$key_file"
+    exit 1
+fi
 sudo gpg --dearmor --yes --output \
     /usr/share/keyrings/nginx-markdown-archive-keyring.gpg "$key_file"
 rm -f "$key_file"

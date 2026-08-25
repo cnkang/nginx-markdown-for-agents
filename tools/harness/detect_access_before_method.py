@@ -236,6 +236,13 @@ def _unconditional_access_positions(body: str) -> list[int]:
             structural.rfind("}", 0, match.start()),
         )
         prefix = structural[statement_start + 1 : match.start()]
+        control_prefixes = list(
+            re.finditer(r"\b(if|for|while|switch)\s*\(", prefix)
+        )
+        if len(control_prefixes) > 1:
+            # A brace-less control body can contain another control statement;
+            # the access call is conditional even though brace depth is flat.
+            continue
         if re.search(r"\b(if|for|while|switch)\s*\([^)]*\)\s*$", prefix):
             continue
         positions.append(match.start())

@@ -66,6 +66,7 @@ The Go/No-Go decision must rest on the following verifiable artifacts:
 | Performance benchmark (TTFB) | PASS/FAIL | [link] |
 | Failure-path test coverage | PASS/FAIL | [link] |
 | Rollback verification record | PASS/FAIL | [link] |
+| Signed gate-review artifact | PASS/FAIL | reviewer=[name]; review_date=[YYYY-MM-DD]; scope=[reviewed scope]; candidate=[full SHA]; evidence=[link] |
 
 ### Release Gate Summary
 

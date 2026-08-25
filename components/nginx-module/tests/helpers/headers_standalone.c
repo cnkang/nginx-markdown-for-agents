@@ -261,3 +261,17 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
 }
 
 #include "../../src/ngx_http_markdown_headers_impl.h"
+
+ngx_int_t
+ngx_http_markdown_test_header_snapshot_restore_status(void)
+{
+    ngx_http_markdown_header_snapshot_t snapshot;
+    ngx_http_request_t                  request;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(&request, 0, sizeof(request));
+    snapshot.entry_count = 1;
+
+    return ngx_http_markdown_header_snapshot_restore_status(
+        &request, &snapshot);
+}

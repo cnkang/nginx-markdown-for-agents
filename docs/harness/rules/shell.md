@@ -108,7 +108,7 @@ Required:
   #    the backslash at runtime so the gate can scan its own source without
   #    matching the detector's example as a prohibited literal.
   _backslash='\'
-  _pcre_needle="${_backslash}s|${_backslash}d|${_backslash}w"
+  _pcre_needle="${_backslash}${_backslash}s|${_backslash}${_backslash}d|${_backslash}${_backslash}w"
   if grep -REn "${_pcre_needle}" tools/harness/detect_*.sh \
       | grep -E 'grep|sed|awk|egrep|perl|pattern=|regex=' \
       | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then
@@ -118,7 +118,7 @@ Required:
   # 2) BRE-only grouping on regex-capable command lines and shell pattern
   #    assignments. Embedded Python heredocs are exempt: they use Python re
   #    semantics.
-  _bre_needle="${_backslash}("   # constructed at runtime
+  _bre_needle="${_backslash}${_backslash}[()]"   # constructed at runtime
   if grep -REn "${_bre_needle}" tools/harness/detect_*.sh \
       | grep -E 'grep|sed|awk|egrep|pattern=|regex=' \
       | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then

@@ -75,8 +75,11 @@ pub(crate) struct DecodedOptions<'a> {
     #[allow(dead_code)]
     pub(crate) prune_protection_selectors: Option<&'a str>,
     /// Unified memory budget (bytes). The full-buffer path applies it to
-    /// generated Markdown output, and streaming/incremental paths apply it
-    /// to their working-set budgets.
+    /// generated Markdown output, and the true streaming path combines it
+    /// with `streaming_budget` as the lower non-zero working-set cap. The
+    /// incremental path intentionally does not consume this field; its
+    /// parser working-set contract is `parser_memory_budget` plus the fixed
+    /// maximum buffered-input cap.
     pub(crate) memory_budget: u64,
     /// Raw chars-per-token from FFI options (before normalization).
     /// Retained for diagnostics/logging; all estimation paths use

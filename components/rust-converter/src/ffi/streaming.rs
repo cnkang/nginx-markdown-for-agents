@@ -153,12 +153,15 @@ pub struct StreamingOptions {
     /// returns `ERROR_TIMEOUT`. A value of `0` disables the timeout.
     pub timeout_ms: u32,
 
-    /// Total streaming memory budget in bytes (0 = use compiled-in default).
+    /// Total streaming memory budget in bytes (0 = use the effective default).
     ///
     /// Controls the peak memory ceiling for the streaming path. The
     /// converter distributes this budget across its internal subsystems
     /// (token buffer, nesting stack, pending output, charset sniff).
-    /// Exceeding this budget causes `feed` to return `ERROR_BUDGET_EXCEEDED`.
+    /// When `MarkdownOptions::memory_budget` is also non-zero, the lower
+    /// non-zero value is used. If both values are zero, the compiled-in
+    /// 2 MiB default applies. Exceeding this budget causes `feed` to return
+    /// `ERROR_BUDGET_EXCEEDED`.
     ///
     /// Populated from `markdown_limits streaming_buffer=<size>` (Config V2).
     pub streaming_budget: u64,
@@ -1180,23 +1183,23 @@ mod tests {
     }
 
     #[test]
-    fn test_budget_from_streaming_total_scales_down() {
-        // With no unified memory budget set, the streaming budget alone
-        // drives the working-set caps.
-        let budget = budget_from_streaming_total(64 * 1024, 0);
-        let sum =
-            budget.state_stack + budget.output_buffer + budget.charset_sniff + budget.lookahead;
+    fn test_budget_from_streaming_total_precedence_all_combinations() {
+        let cases = [
+            (0, 0, 2 * 1024 * 1024),
+            (64 * 1024, 0, 64 * 1024),
+            (0, 16 * 1024 * 1024, 16 * 1024 * 1024),
+            (64 * 1024 * 1024, 16 * 1024 * 1024, 16 * 1024 * 1024),
+            (16 * 1024 * 1024, 64 * 1024 * 1024, 16 * 1024 * 1024),
+        ];
 
-        assert_eq!(budget.total, 64 * 1024);
-        assert_eq!(sum, budget.total);
-    }
-
-    #[test]
-    fn test_unified_memory_budget_caps_streaming() {
-        // The unified conversion_memory budget must cap the streaming
-        // working set even when streaming_buffer is configured larger.
-        let budget = budget_from_streaming_total(64 * 1024 * 1024, 16 * 1024 * 1024);
-        assert_eq!(budget.total, 16 * 1024 * 1024);
+        for (streaming_budget, memory_budget, expected_total) in cases {
+            let budget = budget_from_streaming_total(streaming_budget, memory_budget);
+            assert_eq!(
+                budget.total, expected_total,
+                "unexpected effective budget for streaming={}, memory={}",
+                streaming_budget, memory_budget
+            );
+        }
     }
 
     // ================================================================

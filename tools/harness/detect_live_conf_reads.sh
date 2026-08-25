@@ -150,7 +150,7 @@ comment_free_line() {
                 line_comment = index(text, "//")
                 if (line_comment > 0 \
                     && (start == 0 || line_comment < start)) {
-                    return substr(text, 1, line_comment - 1)
+                    return result substr(text, 1, line_comment - 1)
                 }
                 if (!start) {
                     return result text

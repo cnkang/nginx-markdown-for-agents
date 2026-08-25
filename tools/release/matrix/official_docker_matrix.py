@@ -17,7 +17,7 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 
 DOCKER_WORKFLOW = ".github/workflows/official-nginx-docker.yml"
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 def _canonical_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -34,12 +34,21 @@ def _canonical_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _is_release_blocking_docker(entry: dict[str, Any]) -> bool:
-    return (
+    is_owned_release_blocking_docker = (
         entry.get("artifact_type") == "docker-image"
-        and entry.get("support_tier") == "supported"
         and entry.get("release_blocking") is True
         and entry.get("owner_workflow") == DOCKER_WORKFLOW
     )
+    if not is_owned_release_blocking_docker:
+        return False
+    if entry.get("support_tier") != "supported":
+        raise ValueError(
+            "release-blocking official Docker rows must use "
+            "support_tier='supported': "
+            f"{entry.get('nginx_version')}/{entry.get('os')}/"
+            f"{entry.get('libc')}/{entry.get('arch')}"
+        )
+    return True
 
 
 def _resolve_docker_entry(entry: dict[str, Any]) -> dict[str, str]:

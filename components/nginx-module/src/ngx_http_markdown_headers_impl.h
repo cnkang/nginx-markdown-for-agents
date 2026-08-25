@@ -7,6 +7,10 @@
 #ifndef NGX_HTTP_MARKDOWN_HEADERS_IMPL_H
 #define NGX_HTTP_MARKDOWN_HEADERS_IMPL_H
 
+#ifndef NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED
+#define NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED  -107
+#endif
+
 #ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
 #define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
 #endif
@@ -808,6 +812,19 @@ ngx_http_markdown_header_snapshot_restore(
 }
 
 
+static ngx_int_t
+ngx_http_markdown_header_snapshot_restore_status(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_header_snapshot_t *snapshot)
+{
+    if (ngx_http_markdown_header_snapshot_restore(r, snapshot) != NGX_OK) {
+        return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
+    }
+
+    return NGX_OK;
+}
+
+
 /*
  * Prepared state for the full-coverage commit phase.
  * All memory referenced here is allocated from r->pool during prepare.
@@ -1181,11 +1198,12 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "FFI plan prepare aborted");
-        if (ngx_http_markdown_header_snapshot_restore(r, &snapshot)
+        if (ngx_http_markdown_header_snapshot_restore_status(r, &snapshot)
             != NGX_OK)
         {
             ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                 "markdown: header snapshot restore failed");
+            return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
         }
         return NGX_ERROR;
     }
@@ -1196,11 +1214,12 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "ETag prepare failed");
-        if (ngx_http_markdown_header_snapshot_restore(r, &snapshot)
+        if (ngx_http_markdown_header_snapshot_restore_status(r, &snapshot)
             != NGX_OK)
         {
             ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                 "markdown: header snapshot restore failed");
+            return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
         }
         return NGX_ERROR;
     }
@@ -1211,11 +1230,12 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "Vary prepare failed");
-        if (ngx_http_markdown_header_snapshot_restore(r, &snapshot)
+        if (ngx_http_markdown_header_snapshot_restore_status(r, &snapshot)
             != NGX_OK)
         {
             ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                 "markdown: header snapshot restore failed");
+            return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
         }
         return NGX_ERROR;
     }
@@ -1226,11 +1246,12 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "token header prepare failed");
-        if (ngx_http_markdown_header_snapshot_restore(r, &snapshot)
+        if (ngx_http_markdown_header_snapshot_restore_status(r, &snapshot)
             != NGX_OK)
         {
             ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                 "markdown: header snapshot restore failed");
+            return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
         }
         return NGX_ERROR;
     }
@@ -1247,11 +1268,12 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "Cache-Control auth modification failed");
-        if (ngx_http_markdown_header_snapshot_restore(r, &snapshot)
+        if (ngx_http_markdown_header_snapshot_restore_status(r, &snapshot)
             != NGX_OK)
         {
             ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                 "markdown: header snapshot restore failed");
+            return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
         }
         return NGX_ERROR;
     }

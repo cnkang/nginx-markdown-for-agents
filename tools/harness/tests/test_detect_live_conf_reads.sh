@@ -89,6 +89,32 @@ else
     exit 1
 fi
 
+same_line_comment_dir="${fixture_dir}/block-then-line-comment"
+mkdir -p "${same_line_comment_dir}"
+cat >"${same_line_comment_dir}/same_line_comment.c" <<'SOURCE'
+static int clean(const ngx_http_markdown_conf_t *conf)
+{
+    (void) conf->enabled /* block comment */ (void) conf->streaming_buffer // line comment
+    ;
+    return 0;
+}
+SOURCE
+
+if same_line_output="$(bash "${DETECTOR}" "${same_line_comment_dir}" 2>&1)"; then
+    same_line_exit_code=0
+else
+    same_line_exit_code=$?
+fi
+if [[ "${same_line_exit_code}" -eq 1 ]] \
+    && [[ "${same_line_output}" == *"conf->enabled"* ]] \
+    && [[ "${same_line_output}" == *"conf->streaming_buffer"* ]]; then
+    printf 'PASS: code before a line comment retains its accumulated prefix\n'
+else
+    printf 'FAIL: code before a line comment was discarded\n' >&2
+    printf '%s\n' "${same_line_output}" >&2
+    exit 1
+fi
+
 if [[ "${exit_code}" -eq 1 ]] \
     && [[ "${output}" == *"request-path reads live conf->"* ]] \
     && [[ "${output}" == *"fixture.c"* ]]; then

@@ -426,7 +426,7 @@ def validate_official_docker_matrix_coverage(matrix_path: Path) -> list[str]:
     errors: list[str] = []
     try:
         entries = load_official_docker_entries(matrix_path)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         return [f"official Docker matrix cannot be resolved: {exc}"]
 
     workflow_path = WORKFLOWS_DIR / Path(OFFICIAL_DOCKER_WORKFLOW).name
@@ -583,7 +583,7 @@ def main() -> int:
 
     try:
         matrix_versions = load_matrix_versions(MATRIX_PATH)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"ERROR: Invalid release-matrix.json: {exc}", file=sys.stderr)
         return 1
     if not matrix_versions:

@@ -153,6 +153,22 @@ echo "status"
 EOF
 assert_detector_clean "${TMPDIR_TEST}/case4b" "same-line fi terminator"
 
+# Fixture 4c: an operand named `fi` must not close the current block before
+# the actual terminator.  The nested clean branch remains under the outer
+# negated branch and therefore its status read must still be flagged.
+mkdir -p "${TMPDIR_TEST}/case4c"
+cat > "${TMPDIR_TEST}/case4c/terminator_operand.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+if ! [ "$mode" = fi ]; then
+    if true; then
+        rc=$?
+    fi
+fi
+EOF
+assert_detector_flags "${TMPDIR_TEST}/case4c" \
+    "terminator operand is not a block close"
+
 # Fixture 5: nested control flow must retain the outer negated branch.
 mkdir -p "${TMPDIR_TEST}/case5"
 cat > "${TMPDIR_TEST}/case5/nested_branch.sh" << 'EOF'

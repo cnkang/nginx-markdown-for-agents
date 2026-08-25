@@ -487,6 +487,7 @@ class TestOfficialDockerMatrix:
         assert rows == [
             {
                 "matrix_row_id": "1.31.4/debian12/glibc/amd64",
+                "docker_tag": "1.31.4-debian12-glibc-amd64",
                 "nginx_version": "1.31.4",
                 "os": "debian12",
                 "libc": "glibc",
@@ -500,4 +501,10 @@ class TestOfficialDockerMatrix:
         entry = self._entry()
         entry["image_ref"] = "nginx:1.31.3"
         with pytest.raises(ValueError, match="does not match"):
+            resolve_official_docker_entries({"entries": [entry]})
+
+    def test_rejects_owned_release_blocking_unsupported_tier(self) -> None:
+        entry = self._entry()
+        entry["support_tier"] = "experimental"
+        with pytest.raises(ValueError, match="support_tier"):
             resolve_official_docker_entries({"entries": [entry]})

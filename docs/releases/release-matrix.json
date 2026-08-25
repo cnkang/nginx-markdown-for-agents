@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_from": {
     "path": "tools/release-matrix.json",
-    "sha256": "sha256:261c1b4b551dad83f7eae103213e1060d12b47b0542d62d2b2ac3deb45ef1797"
+    "sha256": "sha256:36d98170f8dd7efe0ad6c2800e91c54026127c08f3f8c104868a8412799b790b"
   },
   "entries": [
     {
@@ -104,7 +104,7 @@
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2,
       "image_ref": "nginx:1.26.3",
-      "image_digest": "sha256:46ccc48fbb1f5a43167f2ee2c279c122b96eec5d976e7f4e1e0780f59a51b4d6"
+      "image_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860"
     },
     {
       "nginx_version": "1.26.3",
@@ -133,7 +133,7 @@
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2,
       "image_ref": "nginx:1.26.3-alpine",
-      "image_digest": "sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46"
+      "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d"
     },
     {
       "nginx_version": "1.26.3",
@@ -171,7 +171,7 @@
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2,
       "image_ref": "nginx:1.26.3",
-      "image_digest": "sha256:46ccc48fbb1f5a43167f2ee2c279c122b96eec5d976e7f4e1e0780f59a51b4d6"
+      "image_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860"
     },
     {
       "nginx_version": "1.26.3",
@@ -200,7 +200,7 @@
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2,
       "image_ref": "nginx:1.26.3-alpine",
-      "image_digest": "sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46"
+      "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d"
     },
     {
       "nginx_version": "1.26.3",

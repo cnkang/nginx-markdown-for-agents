@@ -153,7 +153,7 @@
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
       "image_ref": "nginx:1.26.3",
-      "image_digest": "sha256:46ccc48fbb1f5a43167f2ee2c279c122b96eec5d976e7f4e1e0780f59a51b4d6",
+      "image_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
     },
@@ -169,7 +169,7 @@
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
       "image_ref": "nginx:1.26.3-alpine",
-      "image_digest": "sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46",
+      "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
     },
@@ -185,7 +185,7 @@
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
       "image_ref": "nginx:1.26.3",
-      "image_digest": "sha256:46ccc48fbb1f5a43167f2ee2c279c122b96eec5d976e7f4e1e0780f59a51b4d6",
+      "image_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
     },
@@ -201,7 +201,7 @@
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
       "image_ref": "nginx:1.26.3-alpine",
-      "image_digest": "sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46",
+      "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
     },

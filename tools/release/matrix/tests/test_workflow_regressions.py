@@ -178,6 +178,20 @@ def test_release_packages_publish_waits_for_official_docker_gate() -> None:
     assert "CALLER_MODULE_SHA" in _workflow_text("official-nginx-docker.yml")
 
 
+def test_official_docker_failure_artifacts_use_safe_matrix_tags() -> None:
+    """Failure artifact names must not contain slash-delimited row IDs."""
+    workflow_text = _workflow_text("official-nginx-docker.yml")
+
+    assert (
+        "name: official-nginx-docker-${{ matrix.docker_tag }}-failure"
+        in workflow_text
+    )
+    assert (
+        "name: official-nginx-docker-${{ matrix.matrix_row_id }}-failure"
+        not in workflow_text
+    )
+
+
 def test_macos_smoke_retries_once_and_blocks_a_second_failure() -> None:
     """Darwin transport retries must not make repeated E2E failures advisory."""
     workflow = _workflow_data("macos-smoke.yml")

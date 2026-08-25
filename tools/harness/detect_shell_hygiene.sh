@@ -596,11 +596,72 @@ while IFS= read -r script_file; do
                 depth--
             }
         }
-        function close_same_line_terminators(text, token, pattern) {
+        function mask_shell_literals(text,    i, ch, quote, escaped,
+                                     previous, j, masked) {
+            masked = ""
+            quote = ""
+            escaped = 0
+            for (i = 1; i <= length(text); i++) {
+                ch = substr(text, i, 1)
+                if (quote != "") {
+                    if (escaped) {
+                        masked = masked " "
+                        escaped = 0
+                        continue
+                    }
+                    if (quote == "\"" && ch == "\\") {
+                        masked = masked " "
+                        escaped = 1
+                        continue
+                    }
+                    if (ch == quote) {
+                        quote = ""
+                    }
+                    masked = masked " "
+                    continue
+                }
+                if (ch == "\"" || ch == sprintf("%c", 39)) {
+                    quote = ch
+                    masked = masked " "
+                    continue
+                }
+                previous = (i > 1) ? substr(text, i - 1, 1) : ""
+                if (ch == "#" \
+                    && (i == 1 || previous ~ /[[:space:];|&()]/)) {
+                    for (j = i; j <= length(text); j++) {
+                        masked = masked " "
+                    }
+                    break
+                }
+                masked = masked ch
+            }
+            return masked
+        }
+        function close_same_line_terminators(text, token, pattern,
+                                              masked, expected_type, opener,
+                                              opener_match) {
+            expected_type = (token == "fi" ? "if" : \
+                             token == "done" ? "loop" : \
+                             token == "esac" ? "case" : "")
+            if (depth == 0 || block_type[depth] != expected_type) {
+                return
+            }
+            masked = mask_shell_literals(text)
+            opener = (token == "fi" ? "then" : \
+                      token == "done" ? "do" : \
+                      token == "esac" ? "in" : "")
+            if (opener != "") {
+                opener_match = match(masked, "(^|[;[:space:]])" opener "([;[:space:]]|$)")
+                if (opener_match) {
+                    masked = substr(masked, opener_match + RLENGTH)
+                }
+            }
             pattern = "(^|[;[:space:]])" token "([;[:space:]]|$)"
-            while (match(text, pattern)) {
-                close_one_block()
-                text = substr(text, RSTART + RLENGTH)
+            while (match(masked, pattern)) {
+                if (depth > 0 && block_type[depth] == expected_type) {
+                    close_one_block()
+                }
+                masked = substr(masked, RSTART + RLENGTH)
             }
         }
         BEGIN { depth = 0 }

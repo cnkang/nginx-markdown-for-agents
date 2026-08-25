@@ -61,6 +61,9 @@ use super::options::decode_options;
 /// * `parser_memory_budget` — The per-handle parser memory budget in bytes
 ///   (0 means use the compiled-in default).  Enforced during
 ///   `markdown_incremental_feed` against accumulated parsing state.
+/// * `memory_budget` — Intentionally not consumed by this path.  Incremental
+///   conversion uses `parser_memory_budget` and the fixed maximum buffered
+///   input cap instead of the true streaming working-set budget model.
 /// * `buffered_input_bytes` — Bytes of input currently buffered inside the
 ///   handle before being fed to the parser.  Bounded by the parser budget
 ///   and `MAX_BUFFER_SIZE`.

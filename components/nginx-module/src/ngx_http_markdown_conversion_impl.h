@@ -1907,6 +1907,23 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
      */
     rc = ngx_http_markdown_update_headers(r, result, conf);
     if (rc != NGX_OK) {
+        if (rc == NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED) {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                         "markdown: header snapshot rollback failed; "
+                         "fail-open disabled, category=system");
+            ngx_http_markdown_record_system_failure(ctx);
+            ngx_http_markdown_log_decision_with_category(
+                r, conf, ctx->effective_conf,
+                ngx_http_markdown_reason_header_plan_apply_err(),
+                ngx_http_markdown_reason_from_error_category(
+                    NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+            markdown_result_free(result);
+            return ngx_http_filter_finalize_request(
+                r, &ngx_http_markdown_filter_module,
+                (ngx_int_t) ngx_http_markdown_effective_error_status(
+                    ctx->effective_conf, conf));
+        }
+
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                      "markdown: failed to update response headers, "
                      "reason=header_plan_apply_error, category=system");

@@ -20,6 +20,7 @@ typedef struct ngx_list_part_s ngx_list_part_t;
 
 #define NGX_OK 0
 #define NGX_ERROR -1
+#define NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED -107
 
 typedef struct {
     u_char *data;
@@ -121,6 +122,7 @@ ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                            const ngx_http_markdown_conf_t *conf);
 ngx_int_t ngx_http_markdown_head_representation_headers(ngx_http_request_t *r);
 void ngx_http_markdown_clear_trailers(ngx_http_request_t *r);
+ngx_int_t ngx_http_markdown_test_header_snapshot_restore_status(void);
 
 /* Mocks required by ngx_http_markdown_headers_standalone.c */
 void *
@@ -915,6 +917,19 @@ test_update_headers_multipart_failure_restores_chain(void)
     TEST_PASS("Multipart header rollback restores list links");
 }
 
+static void
+test_header_snapshot_restore_failure_is_terminal(void)
+{
+    TEST_SUBSECTION("Header rollback failure is a distinct terminal result");
+
+    TEST_ASSERT(
+        ngx_http_markdown_test_header_snapshot_restore_status()
+            == NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED,
+        "failed header snapshot restore must not collapse into NGX_ERROR");
+
+    TEST_PASS("Header rollback failure is terminal");
+}
+
 /* ══════════════════════════════════════════════════════════════════
  * HEAD representation headers
  * ══════════════════════════════════════════════════════════════════ */
@@ -1170,6 +1185,7 @@ main(void)
     test_update_headers_skips_invalidated_accept_ranges();
     test_update_headers_prepare_failure_rolls_back();
     test_update_headers_multipart_failure_restores_chain();
+    test_header_snapshot_restore_failure_is_terminal();
     test_head_representation_headers_strips_html_metadata();
     test_head_representation_headers_null();
     test_head_representation_headers_duplicate_entries();

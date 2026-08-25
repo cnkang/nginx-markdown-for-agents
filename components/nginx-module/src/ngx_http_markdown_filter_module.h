@@ -2137,6 +2137,13 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
 #define NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT     -106
 
 /*
+ * Internal terminal result for a failed full-buffer header rollback.
+ * Callers must not route this result through the configured fail-open policy:
+ * the response representation is no longer known to be restorable.
+ */
+#define NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED  -107
+
+/*
  * Safe buffer length helper.
  *
  * Computes the number of bytes between buf->pos and buf->last

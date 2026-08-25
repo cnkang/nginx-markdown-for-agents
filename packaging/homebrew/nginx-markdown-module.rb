@@ -99,7 +99,7 @@ class NginxMarkdownModule < Formula
     assert_match "libbrotlidec", shell_output("otool -L #{module_path}")
     nginx_version = Formula["nginx"].version.to_s
     assert_match(/\A\d+\.\d+\.\d+\z/, nginx_version)
-    assert_match "nginx/#{nginx_version}", shell_output("#{formula_opt_bin(\"nginx\")}/nginx -v 2>&1")
+    assert_match "nginx/#{nginx_version}", shell_output("#{formula_opt_bin("nginx")}/nginx -v 2>&1")
 
     (testpath/"nginx.conf").write <<~EOS
       load_module #{module_path};
