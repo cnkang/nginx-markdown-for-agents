@@ -532,6 +532,12 @@ class TestOfficialDockerMatrix:
         with pytest.raises(ValueError, match="operating system"):
             resolve_official_docker_entries({"entries": [entry]})
 
+    def test_rejects_unsupported_os_libc_pair(self) -> None:
+        entry = self._entry()
+        entry["libc"] = "musl"
+        with pytest.raises(ValueError, match="libc"):
+            resolve_official_docker_entries({"entries": [entry]})
+
 
 class TestOfficialDockerWorkflowCoverage:
     """Tests for structural official Docker workflow validation."""
@@ -565,9 +571,12 @@ class TestOfficialDockerWorkflowCoverage:
         (workflow_dir / "official-nginx-docker.yml").write_text(
             "jobs:\n"
             "  prepare:\n"
+            "    runs-on: ubuntu-latest\n"
             "    # official_docker_matrix.py\n"
             "    # load_official_docker_entries\n"
             "  build-and-verify:\n"
+            "    needs: prepare\n"
+            "    runs-on: ubuntu-latest\n"
             "    # fromJson(needs.prepare.outputs.matrix)\n"
             "    # matrix.image_ref matrix.image_digest\n"
         )

@@ -228,6 +228,19 @@ def _statement_prefix(text: str, offset: int) -> str:
     return text[statement_start + 1 : offset]
 
 
+def _control_condition_is_closed(prefix: str, control_prefix: re.Match[str]) -> bool:
+    """Return whether a control statement's balanced condition has ended."""
+    depth = 1
+    for char in prefix[control_prefix.end() :]:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return True
+    return False
+
+
 def _access_prefix_is_conditional(prefix: str) -> bool:
     """Return whether a control prefix can skip the access call."""
     control_prefixes = list(
@@ -238,12 +251,17 @@ def _access_prefix_is_conditional(prefix: str) -> bool:
         # the access call is conditional even though brace depth is flat.
         return True
     if control_prefixes:
-        condition_prefix = prefix[control_prefixes[-1].end() :]
+        control_prefix = control_prefixes[-1]
+        condition_prefix = prefix[control_prefix.end() :]
         if re.search(r"&&|\|\||\?|:", condition_prefix):
             # A short-circuit or conditional operator before the access call
             # can skip it, so this is not an unconditional guard.
             return True
-    return bool(re.search(r"\b(if|for|while|switch)\s*\([^)]*\)\s*$", prefix))
+        if _control_condition_is_closed(prefix, control_prefix):
+            # A balanced condition followed by the call means the call is in
+            # the brace-less control body, not in the unconditional guard.
+            return True
+    return False
 
 
 def _unconditional_access_positions(body: str) -> list[int]:
