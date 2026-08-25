@@ -20,12 +20,15 @@ clients.
 key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
-expected_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
-if ! gpg --batch --with-colons --show-keys --fingerprint "$key_file" \
-    | awk -F: -v expected="$expected_fingerprint" \
-        '$1 == "fpr" && toupper($10) == toupper(expected) { found=1 }
-         END { exit(found ? 0 : 1) }'; then
-    echo "unexpected signing-key fingerprint" >&2
+expected_fingerprints="$(printf '%s\n' \
+    '7A3743687FEEE0313128355038724643EA12C02A' \
+    '15C792438EAA762B421E60D21E8D41E7D19A8A75' | sort)"
+set -o pipefail
+if ! actual_fingerprints="$(gpg --batch --with-colons --show-keys \
+    --fingerprint "$key_file" \
+    | awk -F: '$1 == "fpr" { print toupper($10) }' | sort)" \
+    || [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]]; then
+    echo "unexpected signing-key fingerprint set" >&2
     rm -f "$key_file"
     exit 1
 fi
@@ -139,7 +142,9 @@ repo/apt/
 - **Key ID**: `7A3743687FEEE0313128355038724643EA12C02A`
 - **Key Type**: RSA 4096 (primary certification key, expires 2031-05-19)
 - **Key URL**: checked in at `packaging/nginx-markdown-for-agents-release.asc`
-- **Fingerprint (signing subkey)**: `15C792438EAA762B421E60D21E8D41E7D19A8A75` — verify this value with `gpg --fingerprint` after importing
+- **Fingerprints (complete allowed key set)**:
+  - Primary key: `7A3743687FEEE0313128355038724643EA12C02A`
+  - Signing subkey: `15C792438EAA762B421E60D21E8D41E7D19A8A75`
 
 ### Importing the Key
 
@@ -149,12 +154,15 @@ Modern APT (Debian 12+, Ubuntu 22.04+):
 key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
-expected_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
-if ! gpg --batch --with-colons --show-keys --fingerprint "$key_file" \
-    | awk -F: -v expected="$expected_fingerprint" \
-        '$1 == "fpr" && toupper($10) == toupper(expected) { found=1 }
-         END { exit(found ? 0 : 1) }'; then
-    echo "unexpected signing-key fingerprint" >&2
+expected_fingerprints="$(printf '%s\n' \
+    '7A3743687FEEE0313128355038724643EA12C02A' \
+    '15C792438EAA762B421E60D21E8D41E7D19A8A75' | sort)"
+set -o pipefail
+if ! actual_fingerprints="$(gpg --batch --with-colons --show-keys \
+    --fingerprint "$key_file" \
+    | awk -F: '$1 == "fpr" { print toupper($10) }' | sort)" \
+    || [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]]; then
+    echo "unexpected signing-key fingerprint set" >&2
     rm -f "$key_file"
     exit 1
 fi
@@ -169,12 +177,15 @@ Legacy APT (older systems):
 key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
-expected_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
-if ! gpg --batch --with-colons --show-keys --fingerprint "$key_file" \
-    | awk -F: -v expected="$expected_fingerprint" \
-        '$1 == "fpr" && toupper($10) == toupper(expected) { found=1 }
-         END { exit(found ? 0 : 1) }'; then
-    echo "unexpected signing-key fingerprint" >&2
+expected_fingerprints="$(printf '%s\n' \
+    '7A3743687FEEE0313128355038724643EA12C02A' \
+    '15C792438EAA762B421E60D21E8D41E7D19A8A75' | sort)"
+set -o pipefail
+if ! actual_fingerprints="$(gpg --batch --with-colons --show-keys \
+    --fingerprint "$key_file" \
+    | awk -F: '$1 == "fpr" { print toupper($10) }' | sort)" \
+    || [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]]; then
+    echo "unexpected signing-key fingerprint set" >&2
     rm -f "$key_file"
     exit 1
 fi
@@ -293,12 +304,15 @@ If you encounter dependency errors:
 key_file="$(mktemp)"
 curl -fsSL -o "$key_file" \
     https://pkg.example.com/nginx-markdown/gpg.key
-expected_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
-if ! gpg --batch --with-colons --show-keys --fingerprint "$key_file" \
-    | awk -F: -v expected="$expected_fingerprint" \
-        '$1 == "fpr" && toupper($10) == toupper(expected) { found=1 }
-         END { exit(found ? 0 : 1) }'; then
-    echo "unexpected signing-key fingerprint" >&2
+expected_fingerprints="$(printf '%s\n' \
+    '7A3743687FEEE0313128355038724643EA12C02A' \
+    '15C792438EAA762B421E60D21E8D41E7D19A8A75' | sort)"
+set -o pipefail
+if ! actual_fingerprints="$(gpg --batch --with-colons --show-keys \
+    --fingerprint "$key_file" \
+    | awk -F: '$1 == "fpr" { print toupper($10) }' | sort)" \
+    || [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]]; then
+    echo "unexpected signing-key fingerprint set" >&2
     rm -f "$key_file"
     exit 1
 fi

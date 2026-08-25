@@ -207,6 +207,45 @@ def _strip_literals_and_comments(text: str) -> str:
     return _TOKEN_RE.sub(lambda m: " " * len(m.group(0)), text)
 
 
+def _brace_depth_before(text: str, offset: int) -> int:
+    """Return the brace depth immediately before ``offset``."""
+    depth = 0
+    for char in text[:offset]:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth = max(0, depth - 1)
+    return depth
+
+
+def _statement_prefix(text: str, offset: int) -> str:
+    """Return the current statement prefix before an access call."""
+    statement_start = max(
+        text.rfind(";", 0, offset),
+        text.rfind("{", 0, offset),
+        text.rfind("}", 0, offset),
+    )
+    return text[statement_start + 1 : offset]
+
+
+def _access_prefix_is_conditional(prefix: str) -> bool:
+    """Return whether a control prefix can skip the access call."""
+    control_prefixes = list(
+        re.finditer(r"\b(if|for|while|switch)\s*\(", prefix)
+    )
+    if len(control_prefixes) > 1:
+        # A brace-less control body can contain another control statement;
+        # the access call is conditional even though brace depth is flat.
+        return True
+    if control_prefixes:
+        condition_prefix = prefix[control_prefixes[-1].end() :]
+        if re.search(r"&&|\|\||\?|:", condition_prefix):
+            # A short-circuit or conditional operator before the access call
+            # can skip it, so this is not an unconditional guard.
+            return True
+    return bool(re.search(r"\b(if|for|while|switch)\s*\([^)]*\)\s*$", prefix))
+
+
 def _unconditional_access_positions(body: str) -> list[int]:
     """Return access-call offsets executed unconditionally at body level.
 
@@ -221,29 +260,10 @@ def _unconditional_access_positions(body: str) -> list[int]:
     structural = _blank_literals_and_comments(body)
     positions: list[int] = []
     for match in ACCESS_CALL_RE.finditer(structural):
-        depth = 0
-        for char in structural[:match.start()]:
-            if char == "{":
-                depth += 1
-            elif char == "}":
-                depth = max(0, depth - 1)
-        if depth != 1:
+        if _brace_depth_before(structural, match.start()) != 1:
             continue
-
-        statement_start = max(
-            structural.rfind(";", 0, match.start()),
-            structural.rfind("{", 0, match.start()),
-            structural.rfind("}", 0, match.start()),
-        )
-        prefix = structural[statement_start + 1 : match.start()]
-        control_prefixes = list(
-            re.finditer(r"\b(if|for|while|switch)\s*\(", prefix)
-        )
-        if len(control_prefixes) > 1:
-            # A brace-less control body can contain another control statement;
-            # the access call is conditional even though brace depth is flat.
-            continue
-        if re.search(r"\b(if|for|while|switch)\s*\([^)]*\)\s*$", prefix):
+        prefix = _statement_prefix(structural, match.start())
+        if _access_prefix_is_conditional(prefix):
             continue
         positions.append(match.start())
     return positions

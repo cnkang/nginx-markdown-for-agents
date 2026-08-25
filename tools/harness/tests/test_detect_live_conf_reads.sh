@@ -108,7 +108,7 @@ fi
 if [[ "${same_line_exit_code}" -eq 1 ]] \
     && [[ "${same_line_output}" == *"conf->enabled"* ]] \
     && [[ "${same_line_output}" == *"conf->streaming_buffer"* ]]; then
-    printf 'PASS: code before a line comment retains its accumulated prefix\n'
+    printf 'PASS: code before a line comment retains its accumulated prefix\n' >&2
 else
     printf 'FAIL: code before a line comment was discarded\n' >&2
     printf '%s\n' "${same_line_output}" >&2

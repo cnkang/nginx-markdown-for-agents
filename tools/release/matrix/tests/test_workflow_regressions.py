@@ -192,6 +192,28 @@ def test_official_docker_failure_artifacts_use_safe_matrix_tags() -> None:
     )
 
 
+def test_official_docker_verifier_sanitizes_container_names() -> None:
+    """Container names must not inherit the colon from an image reference."""
+    repo_root = Path(__file__).resolve().parents[4]
+    verifier = (repo_root / "tools" / "ci" / "verify_official_nginx_docker.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "tr -c '[:alnum:]._-' '-'" in verifier
+    assert "tr -c '[:alnum:].:_-' '-'" not in verifier
+
+
+def test_official_docker_runtime_installs_module_runtime_libraries() -> None:
+    """The runtime image must carry libraries needed by the built module."""
+    repo_root = Path(__file__).resolve().parents[4]
+    dockerfile = (
+        repo_root / "examples" / "docker" / "Dockerfile.official-nginx-source-build"
+    ).read_text(encoding="utf-8")
+
+    assert "libgcc-s1" in dockerfile
+    assert "apk add --no-cache libgcc" in dockerfile
+
+
 def test_macos_smoke_retries_once_and_blocks_a_second_failure() -> None:
     """Darwin transport retries must not make repeated E2E failures advisory."""
     workflow = _workflow_data("macos-smoke.yml")

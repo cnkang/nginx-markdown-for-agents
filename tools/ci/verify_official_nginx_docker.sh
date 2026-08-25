@@ -204,7 +204,8 @@ build_image() {
 
 # Sanitize a Docker tag string for safe use as an image name component.
 #
-# Replaces all non-alphanumeric characters (except . : _ -) with hyphens
+# Replaces all non-alphanumeric characters (except . _ -) with hyphens.
+# Colons are intentionally replaced so the result is safe as a container name.
 # using C locale for deterministic behaviour across platforms.
 #
 # Arguments:
@@ -218,7 +219,7 @@ build_image() {
 sanitize_tag() {
   local raw_tag="$1"
   # Force C collation and keep "-" last so tag normalization is locale-stable.
-  printf '%s' "${raw_tag}" | LC_ALL=C tr -c '[:alnum:].:_-' '-'
+  printf '%s' "${raw_tag}" | LC_ALL=C tr -c '[:alnum:]._-' '-'
 
   return 0
 }
