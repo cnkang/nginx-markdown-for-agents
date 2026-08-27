@@ -2333,6 +2333,51 @@ mod tests {
         assert!(result.contains("- Item 2"));
     }
 
+    /// A list item whose first child is a nested list must keep the nested
+    /// content attached to the item marker.  The pre-fix renderer dropped the
+    /// first line of already-indented content, so the item rendered as a bare
+    /// marker ("-") and the whole nested subtree vanished.
+    #[test]
+    fn test_first_child_nested_list_content_is_kept() {
+        let dom = parse_html(b"<ul><li><ul><li>sub</li></ul></li></ul>").expect("Parse failed");
+        let result = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("Conversion failed");
+        assert!(result.contains("sub"), "nested payload lost: {result:?}");
+    }
+
+    #[test]
+    fn test_first_child_nested_list_three_levels_keeps_all_levels() {
+        let html = b"<ul><li><ul><li>lvl2<ul><li>lvl3</li></ul></li></ul></li></ul>";
+        let dom = parse_html(html).expect("Parse failed");
+        let result = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("Conversion failed");
+        assert!(result.contains("lvl2"), "second level lost: {result:?}");
+        assert!(result.contains("lvl3"), "third level lost: {result:?}");
+    }
+
+    #[test]
+    fn test_first_child_nested_ordered_list_content_is_kept() {
+        let dom = parse_html(b"<ol><li><ol><li>deep</li></ol></li></ol>").expect("Parse failed");
+        let result = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("Conversion failed");
+        assert!(result.contains("deep"), "nested payload lost: {result:?}");
+    }
+
+    #[test]
+    fn test_first_child_nested_list_with_sibling_item() {
+        let html = b"<ul><li><ul><li>n1</li><li>n2</li></ul></li><li>Item 2</li></ul>";
+        let dom = parse_html(html).expect("Parse failed");
+        let result = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("Conversion failed");
+        assert!(result.contains("n1"), "nested item 1 lost: {result:?}");
+        assert!(result.contains("n2"), "nested item 2 lost: {result:?}");
+        assert!(result.contains("Item 2"), "sibling item lost: {result:?}");
+    }
+
     #[test]
     fn test_nested_ordered_list() {
         let html = b"<ol><li>First<ol><li>Sub 1</li><li>Sub 2</li></ol></li><li>Second</li></ol>";
