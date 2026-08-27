@@ -54,6 +54,7 @@ Three steps are enough for a first trial:
 ### 1. Install the module
 
 ```bash
+set -euo pipefail
 # Download the versioned release installer; do not pipe a mutable branch file
 # into a privileged shell.  The Installation Guide contains the signature and
 # installer-self-check commands required before the final sudo step.
@@ -77,7 +78,15 @@ VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 \
   --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
   | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1
-grep -E "  ${INSTALLER}$" SHA256SUMS | sha256sum -c -
+CHECKSUM_LINE="$(awk -v file="${INSTALLER}" \
+  '$2 == file { count++; line = $0 } END { if (count == 1) print line }' \
+  SHA256SUMS)"
+[[ -n "$CHECKSUM_LINE" ]] || { echo "missing unique checksum entry" >&2; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then
+  printf '%s\n' "$CHECKSUM_LINE" | sha256sum -c -
+else
+  printf '%s\n' "$CHECKSUM_LINE" | shasum -a 256 -c -
+fi
 sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 sudo nginx -t && sudo nginx -s reload
 ```
@@ -248,8 +257,8 @@ For a complete template with more bot patterns, see [examples/nginx-configs/06-b
 | 1.31.4 | mainline | debian12 | glibc | arm64 | docker-image | supported | Yes |
 | 1.31.4 | mainline | debian12 | glibc | amd64 | deb-package | supported | Yes |
 | 1.31.4 | mainline | debian12 | glibc | amd64 | docker-image | supported | Yes |
-| 1.31.4 | mainline | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
-| 1.31.4 | mainline | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
+| 1.31.4 | mainline | alpine3.24 | musl | arm64 | docker-image | supported | Yes |
+| 1.31.4 | mainline | alpine3.24 | musl | amd64 | docker-image | supported | Yes |
 | 1.31.4 | mainline | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
 | 1.31.4 | mainline | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
@@ -461,7 +470,7 @@ v0.9.1 is the **final pre-v1.0 baseline consolidation and compatibility reset**.
 - **Streaming decompression routing (gzip + deflate + Brotli)**: set `markdown_streaming force`, `markdown_auto_decompress on`, and `markdown_cache_validation` not `full`. The streaming engine then decompresses gzip, zlib-wrapped RFC 1950 deflate, and Brotli responses incrementally. The module accepts both zlib-wrapped RFC 1950 deflate and raw RFC 1951 deflate (the raw framing is a compatibility fallback for legacy servers). It does not force full-buffer accumulation. The engine validates gzip member boundaries and trailers across chunks. Brotli streaming requires `libbrotlidec` at build time. `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` controls this. Official artifacts enable it by default.
 - **Full-buffer copy reduction**: an internal optimization (default on, no configuration surface) eliminates redundant memcpy in the full-buffer compressed path. It passes contiguous buffers directly to the decompressor and swaps output via pointer assignment.
 - **`markdown_auto_decompress` directive**: now officially registered as a configurable directive (default on). Previously an internal field not settable via `nginx.conf`.
-- **Performance evidence gate**: a module-level benchmark harness (`tools/perf/run_module_benchmark.sh`) produces the evidence. An automated release gate (`make release-gates-check-091`) enforces latency, TTFB, memory slope, and fallback rate thresholds before release promotion.
+- **Performance evidence gate**: a module-level benchmark harness (`tools/perf/run_module_benchmark.sh`) produces the evidence. The consolidated 0.9.2 release gate enforces latency, TTFB, memory slope, and fallback rate thresholds before release promotion.
 - **Doctor advice tool**: `python3 tools/perf/doctor_advice.py` analyzes runtime metrics and produces actionable tuning recommendations for operators.
 - **New ADRs**: [0020](docs/architecture/ADR/0020-hybrid-zero-copy-pool-cleanup.md), [0021](docs/architecture/ADR/0021-gzip-deflate-streaming-decompression-routing.md), [0022](docs/architecture/ADR/0022-performance-evidence-release-gate.md), [0023](docs/architecture/ADR/0023-single-streaming-policy.md), and [0024](docs/architecture/ADR/0024-brotli-streaming-decompression.md).
 

@@ -1,4 +1,8 @@
-# Scope Evaluation Process
+# Historical Scope Evaluation Process — 0.4.0
+
+> **Historical:** this process applies only to the 0.4.0 release line. The
+> current release checklist and executable release-gate validators maintain the
+> active release contract.
 
 Requirements references: 13.1, 13.2, 13.3, 13.4
 
@@ -14,7 +18,9 @@ This document defines the process for evaluating new proposals that arise during
    matching non-goal proposal must never be short-circuited into an existing
    sub-spec.
 
-3. **Check if covered by an existing sub-spec.** If the proposal falls within an existing 0.4.0 sub-spec, evaluate it there. No further steps needed.
+3. **Check if covered by an existing sub-spec.** If the proposal falls within
+   an existing 0.4.0 sub-spec, evaluate it there. Then continue through the
+   target-capability boundary and non-goals checks before accepting it.
 
 4. **Determine if clearly in-scope.** If the proposal is clearly within the 0.4.0 target capability boundary, accept it. Update the affected sub-spec documents.
 
@@ -26,7 +32,9 @@ This document defines the process for evaluating new proposals that arise during
 
 ## Rules
 
-- The evaluator must check any proposal not covered by an existing sub-spec against the target capability boundary and non-goals list. The boundary and non-goals drive the evaluation.
+- The evaluator must check every proposal against the target capability
+  boundary and non-goals list, whether or not an existing sub-spec covers it.
+  The boundary and non-goals drive the evaluation.
 - The process rejects proposals matching non-goals and records them as 0.5.x candidates.
 - Ambiguous proposals require a Boundary Description and review before acceptance.
 - The process records accepted scope expansions with rationale and reflects them in affected sub-spec documents.

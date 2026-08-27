@@ -1,4 +1,8 @@
-# Cross-Spec Test Matrix
+# Historical Cross-Spec Test Matrix — 0.4.0
+
+> **Historical:** this matrix records the 0.4.0 dimensions and is not the
+> active release matrix. The active release-gate documents and validators
+> govern current matrix coverage.
 
 Requirements references: 8.1, 8.2, 8.3, 8.4
 

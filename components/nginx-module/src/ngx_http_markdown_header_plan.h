@@ -2,14 +2,14 @@
  * NGINX Markdown Filter Module - Header Plan Atomic Application
  *
  * Provides atomic application of Rust-built header plans to NGINX
- * response headers using a two-phase prepare/commit model (spec 48):
+ * response headers using a two-phase prepare/commit model (two-phase):
  * the prepare phase performs every fallible step (allocation,
  * validation, lookup) without mutating any pre-existing header, and the
  * commit phase performs assignment-only mutations that cannot fail.
  * Either all header changes are applied (commit) or none are (prepare
  * aborted) -- there is no partial application.
  *
- * REQ-0700-RUST-004: Header plan atomicity.
+ * Header plan atomicity.
  */
 
 #ifndef NGX_HTTP_MARKDOWN_HEADER_PLAN_H
@@ -24,7 +24,7 @@ struct FFIHeaderPlan;
 /*
  * Apply a header plan atomically to the response headers.
  *
- * Two-phase (spec 48):
+ * Two-phase:
  *   prepare - allocate, copy strings, look up existing headers, and
  *             validate every operation.  No pre-existing r->headers_out
  *             field is mutated.  On any failure the plan is aborted with

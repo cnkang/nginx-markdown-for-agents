@@ -118,45 +118,60 @@ impl KnownDifferences {
         fixture_name: &str,
         output: &OutputDifference<'_>,
     ) -> Option<&'a KnownDifference> {
-        self.entries.iter().find(|entry| {
-            if !entry.acceptable {
-                return false;
-            }
+        self.entries
+            .iter()
+            .find(|entry| entry.accepts(fixture_name, output))
+    }
+}
 
-            if let Some(needle) = entry.fixture_contains.as_deref()
-                && !fixture_name.contains(needle)
-            {
-                return false;
-            }
+impl KnownDifference {
+    /// Whether every constraint of this entry accepts the fixture/output pair.
+    ///
+    /// Only acceptable entries participate, and each optional snippet
+    /// constraint must pass for its respective engine-output view.
+    fn accepts(&self, fixture_name: &str, output: &OutputDifference<'_>) -> bool {
+        self.acceptable
+            && self.allows_fixture(fixture_name)
+            && self.allows_trigger(output)
+            && self.allows_full_buffer_snippet(output)
+            && self.allows_streaming_snippet(output)
+            && self.allows_diff_snippet(output)
+    }
 
-            if !entry.trigger.is_empty()
-                && !output.diff.contains(&entry.trigger)
-                && !output.full_buffer.contains(&entry.trigger)
-                && !output.streaming.contains(&entry.trigger)
-            {
-                return false;
-            }
+    /// Optional fixture-name substring constraint.
+    fn allows_fixture(&self, fixture_name: &str) -> bool {
+        self.fixture_contains
+            .as_deref()
+            .is_none_or(|needle| fixture_name.contains(needle))
+    }
 
-            if let Some(needle) = entry.full_buffer_snippet.as_deref()
-                && !output.full_buffer.contains(needle)
-            {
-                return false;
-            }
+    /// Trigger-snippet constraint checked against all engine-output views.
+    fn allows_trigger(&self, output: &OutputDifference<'_>) -> bool {
+        self.trigger.is_empty()
+            || output.diff.contains(&self.trigger)
+            || output.full_buffer.contains(&self.trigger)
+            || output.streaming.contains(&self.trigger)
+    }
 
-            if let Some(needle) = entry.streaming_snippet.as_deref()
-                && !output.streaming.contains(needle)
-            {
-                return false;
-            }
+    /// Optional full-buffer snippet constraint.
+    fn allows_full_buffer_snippet(&self, output: &OutputDifference<'_>) -> bool {
+        self.full_buffer_snippet
+            .as_deref()
+            .is_none_or(|needle| output.full_buffer.contains(needle))
+    }
 
-            if let Some(needle) = entry.diff_contains.as_deref()
-                && !output.diff.contains(needle)
-            {
-                return false;
-            }
+    /// Optional streaming snippet constraint.
+    fn allows_streaming_snippet(&self, output: &OutputDifference<'_>) -> bool {
+        self.streaming_snippet
+            .as_deref()
+            .is_none_or(|needle| output.streaming.contains(needle))
+    }
 
-            true
-        })
+    /// Optional diff snippet constraint.
+    fn allows_diff_snippet(&self, output: &OutputDifference<'_>) -> bool {
+        self.diff_contains
+            .as_deref()
+            .is_none_or(|needle| output.diff.contains(needle))
     }
 }
 

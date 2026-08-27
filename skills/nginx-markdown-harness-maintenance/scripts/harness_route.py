@@ -200,13 +200,13 @@ def _git_status_files() -> list[str]:
     Returns:
         Sorted list of file paths relative to repo root.
     """
-    cmd = ["git", "status", "--porcelain"]
+    cmd = ["git", "status", "--porcelain=v1", "-z"]
     try:
         out = subprocess.check_output(
             cmd,
             cwd=REPO_ROOT,
             stderr=subprocess.STDOUT,
-            text=True,
+            text=False,
         )
     except subprocess.CalledProcessError as exc:
         raise SystemExit(
@@ -258,19 +258,56 @@ def _normalize_files(raw: list[str]) -> list[str]:
     return sorted(set(files))
 
 
-def _parse_status_output(output: str) -> list[str]:
+def _parse_status_output(output: str | bytes) -> list[str]:
     """Parse git status --porcelain output into file paths.
 
-    Handles renamed files (old -> new), deleted files (skipped),
-    and directory entries.
+    The preferred ``--porcelain=v1 -z`` representation is parsed as NUL
+    records, so spaces, newlines, and a literal `` -> `` in a filename are
+    preserved.  The newline-delimited representation remains supported for
+    unit tests and callers that provide legacy output.
 
     Args:
-        output: Raw output from git status --porcelain.
+        output: Raw output from git status --porcelain, as text or bytes.
 
     Returns:
         List of file paths extracted from the status output.
     """
+    if isinstance(output, bytes):
+        output = output.decode("utf-8", errors="surrogateescape")
+
     parsed: list[str] = []
+
+    if "\0" in output:
+        records = output.split("\0")
+        record_index = 0
+        while record_index < len(records):
+            record = records[record_index]
+            record_index += 1
+            if len(record) < 4:
+                continue
+            index_status = record[0]
+            worktree_status = record[1]
+            if index_status == "D" or worktree_status == "D":
+                if index_status in "RC" and record_index < len(records):
+                    record_index += 1
+                continue
+            entry = record[3:]
+            if not entry:
+                continue
+            if "R" in (index_status, worktree_status) or "C" in (
+                index_status,
+                worktree_status,
+            ):
+                if record_index < len(records):
+                    old_path = records[record_index]
+                    record_index += 1
+                    if old_path:
+                        parsed.append(old_path)
+                parsed.append(entry)
+                continue
+            parsed.append(entry)
+        return parsed
+
     for line in output.splitlines():
         if len(line) < 4:
             continue

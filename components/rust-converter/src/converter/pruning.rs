@@ -154,7 +154,7 @@ pub enum PruneDecision {
 
 /// Determine the pruning decision for an HTML element by tag name.
 ///
-/// Uses the compile-time feature flag for backward compatibility.
+/// Uses the compile-time feature flag when runtime configuration is absent.
 /// For runtime-configurable pruning, use [`should_prune_with_config`].
 #[allow(dead_code)]
 pub(crate) fn should_prune(tag_name: &str) -> PruneDecision {

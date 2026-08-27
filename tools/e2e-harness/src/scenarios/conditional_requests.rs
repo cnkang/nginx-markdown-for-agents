@@ -201,8 +201,8 @@ fn append_absent_header_case(
     assertion_name: &str,
     expected: &str,
 ) {
+    let passed = !headers.contains_key(header_name);
     let value = common::header_value(headers, header_name);
-    let passed = value.is_empty();
     assertions.push(AssertionResult {
         name: assertion_name.to_string(),
         passed,

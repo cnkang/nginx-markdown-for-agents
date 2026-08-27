@@ -200,16 +200,15 @@ for arch in $ARCHITECTURES; do
 
     # dpkg-scanpackages scans the pool relative to the repo root
     # Filter packages by architecture (including 'all' which applies to every arch)
+    scan_rc=0
     (
         cd "$REPO_ROOT"
-        dpkg-scanpackages --arch "$arch" pool/main /dev/null 2>/dev/null || \
-            dpkg-scanpackages pool/main /dev/null 2>/dev/null
-    ) | while IFS= read -r line; do
-        printf '%s\n' "$line"
-    done > "$PACKAGES_FILE"
+        dpkg-scanpackages --arch "$arch" pool/main /dev/null 2>/dev/null
+    ) > "$PACKAGES_FILE" || scan_rc=$?
 
-    # If dpkg-scanpackages does not support --arch, filter manually
-    if [[ ! -s "$PACKAGES_FILE" ]]; then
+    # If dpkg-scanpackages does not support --arch, or produced no index,
+    # scan all packages and filter by the requested architecture explicitly.
+    if [[ "$scan_rc" -ne 0 || ! -s "$PACKAGES_FILE" ]]; then
         info "  Fallback: scanning all packages for arch=$arch"
         (
             cd "$REPO_ROOT"

@@ -39,11 +39,12 @@ ABI or configuration stability across 0.9.1 and 0.9.2.
   file atomically and rely on LKG protection for invalid reloads.
 - Release-gates-check-092 target with public-surface drift, version
   consistency, and reason-code registry completeness gates.
+- Retired generic 0.5.0 and 0.9.0/0.9.1 release-chain validators. Focused
+  0.7.0/0.8.0 checks remain only as compatibility regressions.
 - VERSION_PLANNING / PROJECT_STATUS 0.9.2 sections.
 - README consistency verification (English ↔ Chinese).
-- Streaming reason code normalization documentation (UPPERCASE C-only
-  codes documented as known inconsistency, migration to lowercase
-  snake_case deferred to 1.x Rust enum migration).
+- One shared lowercase reason-code registry serves Rust, C, logs, metrics, and
+  diagnostics. The project removed the former C-only uppercase mirror.
 
 ### Release Evidence
 

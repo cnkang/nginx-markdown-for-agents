@@ -99,7 +99,7 @@ def _step_name(lines: list[str], token_index: int) -> str | None:
 
 
 def check_sonar_token_steps(text: str) -> list[Finding]:
-    """Require SONAR_TOKEN only in the presence check and pinned scanner."""
+    """Require SONAR_TOKEN only in the presence check and pinned scanners."""
     path = ".github/workflows/sonarcloud.yml"
     lines = text.splitlines()
     secret_occurrences = sum(
@@ -111,16 +111,17 @@ def check_sonar_token_steps(text: str) -> list[Finding]:
     findings: list[Finding] = []
     names = [_step_name(lines, index) for index in occurrences]
 
-    if (
-        secret_occurrences != 2
-        or names != ["Check Sonar token", "SonarCloud Scan"]
-    ):
+    if secret_occurrences != 3 or names != [
+        "Check Sonar token",
+        "SonarCloud Scan",
+        "SonarCloud Branch Scan",
+    ]:
         findings.append(
             Finding(
                 path,
                 1,
                 "SONAR_TOKEN must appear only in the presence-check and "
-                "SonarCloud Scan step env maps",
+                "SonarCloud scan step env maps",
             )
         )
     if occurrences and occurrences[0] > next(

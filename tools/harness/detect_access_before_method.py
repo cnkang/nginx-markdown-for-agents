@@ -13,10 +13,11 @@ unauthorized callers and was fixed three separate times in review.
 Detection model (conservative, per handler function):
 1. A handler is a function whose body references `r->method` and either
    `NGX_HTTP_NOT_ALLOWED` or a `method_not_allowed` helper call.
-2. The function must call an access-control function (`check_access`,
-   `ngx_http_core_module` access phase helpers) BEFORE the method-rejection
-   branch.  "Before" means the access call appears earlier in source order
-   than any `NGX_HTTP_NOT_ALLOWED` assignment or `*_method_not_allowed(` call.
+2. The function must execute an access-control function (`check_access`,
+   `ngx_http_core_module` access phase helpers) unconditionally BEFORE the
+   method-rejection branch.  A call inside an earlier conditional block does
+   not satisfy the contract: the denied request could still reach 405 without
+   an access decision.
 3. Handlers that never reject methods (no 405 path) are exempt.
 
 Advisory (REVIEW) by default; --strict promotes findings to exit 1.
@@ -196,18 +197,112 @@ def audit_dir(directory: Path) -> tuple[list[str], list[str]]:
 
 
 def _strip_literals_and_comments(text: str) -> str:
-    """Blank out comments, string literals, and char literals in-place.
-
-    Keeps every character position (replaced with spaces) so regex match
-    offsets stay aligned with the original text.  Audit patterns must not
-    fire on comments or literals that merely mention access-control or
-    method-rejection identifiers.
+    """
+    Replace comments and string or character literals with spaces while preserving text length and character positions.
+    
+    Parameters:
+        text (str): Source text to sanitize.
+    
+    Returns:
+        str: Text with comments and literals blanked out.
     """
     return _TOKEN_RE.sub(lambda m: " " * len(m.group(0)), text)
 
 
+def _brace_depth_before(text: str, offset: int) -> int:
+    """Return the brace depth immediately before ``offset``."""
+    depth = 0
+    for char in text[:offset]:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth = max(0, depth - 1)
+    return depth
+
+
+def _statement_prefix(text: str, offset: int) -> str:
+    """Return the current statement prefix before an access call."""
+    statement_start = max(
+        text.rfind(";", 0, offset),
+        text.rfind("{", 0, offset),
+        text.rfind("}", 0, offset),
+    )
+    return text[statement_start + 1 : offset]
+
+
+def _control_condition_is_closed(prefix: str, control_prefix: re.Match[str]) -> bool:
+    """Return whether a control statement's balanced condition has ended."""
+    depth = 1
+    for char in prefix[control_prefix.end() :]:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return True
+    return False
+
+
+def _access_prefix_is_conditional(prefix: str) -> bool:
+    """
+    Determine whether the code prefix places an access call on a conditional path.
+    
+    Parameters:
+    	prefix (str): Source text preceding the access call.
+    
+    Returns:
+    	bool: `True` if control flow can skip the access call, `False` otherwise.
+    """
+    control_prefixes = list(
+        re.finditer(r"\b(if|for|while|switch)\s*\(", prefix)
+    )
+    if len(control_prefixes) > 1:
+        # A brace-less control body can contain another control statement;
+        # the access call is conditional even though brace depth is flat.
+        return True
+    if control_prefixes:
+        control_prefix = control_prefixes[-1]
+        condition_prefix = prefix[control_prefix.end() :]
+        if re.search(r"&&|\|\||\?|:", condition_prefix):
+            # A short-circuit or conditional operator before the access call
+            # can skip it, so this is not an unconditional guard.
+            return True
+        if _control_condition_is_closed(prefix, control_prefix):
+            # A balanced condition followed by the call means the call is in
+            # the brace-less control body, not in the unconditional guard.
+            return True
+    return False
+
+
+def _unconditional_access_positions(body: str) -> list[int]:
+    """
+    Identify access-control calls that execute unconditionally at the handler body level.
+    
+    Returns:
+        list[int]: Source offsets of unconditional access-control calls.
+    """
+    structural = _blank_literals_and_comments(body)
+    positions: list[int] = []
+    for match in ACCESS_CALL_RE.finditer(structural):
+        if _brace_depth_before(structural, match.start()) != 1:
+            continue
+        prefix = _statement_prefix(structural, match.start())
+        if _access_prefix_is_conditional(prefix):
+            continue
+        positions.append(match.start())
+    return positions
+
+
 def audit_file(path: Path) -> tuple[list[str], list[str]]:
-    """Return (violations, reviews) for one file."""
+    """
+    Audit a source file for access-control ordering issues in HTTP handlers.
+    
+    Parameters:
+    	path (Path): Path to the C/C++ source file to audit.
+    
+    Returns:
+    	tuple[list[str], list[str]]: Violations and advisory reviews identified in the file.
+    """
     violations: list[str] = []
     reviews: list[str] = []
     resolved = validate_read_path(path, purpose="source file")
@@ -219,16 +314,24 @@ def audit_file(path: Path) -> tuple[list[str], list[str]]:
         has_method_reject = bool(METHOD_REJECT_RE.search(code))
         if not has_method_reject:
             continue  # no 405 path — ordering contract not applicable
-        access_pos = ACCESS_CALL_RE.search(code)
+        access_positions = _unconditional_access_positions(body)
         reject_pos = METHOD_REJECT_RE.search(code)
         assert reject_pos is not None  # guarded by has_method_reject above
-        if access_pos is None:
+        if not access_positions:
+            conditional_access = ACCESS_CALL_RE.search(code)
+            if conditional_access is not None:
+                violations.append(
+                    f"{path.name}:{name}: access control appears only inside "
+                    "a conditional path before 405; it must execute "
+                    "unconditionally before method rejection"
+                )
+                continue
             reviews.append(
                 f"{path.name}:{name}: handler rejects methods but never "
                 "calls an access-control function before the 405 branch; "
                 "denied requests may disclose handler behavior"
             )
-        elif reject_pos.start() < access_pos.start():
+        elif reject_pos.start() < min(access_positions):
             violations.append(
                 f"{path.name}:{name}: method rejection (405) appears BEFORE "
                 "access control; access must be evaluated first so denied "

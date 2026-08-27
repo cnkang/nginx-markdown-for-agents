@@ -337,14 +337,14 @@ test_exceed_max_entries(void)
 {
     FFIHeaderPlan plan;
     FFIHeaderPlanHandle handle;
-    FFIHeaderEntry entry = { 0, (const uint8_t *)"X", 1,
-        (const uint8_t *)"v", 1 };
+    FFIHeaderEntry entries[NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES + 1];
 
     TEST_SUBSECTION("exceed max entries");
 
     setup_request();
+    memset(entries, 0, sizeof(entries));
     plan.handle = &handle;
-    plan.entries = &entry;
+    plan.entries = entries;
     plan.count = NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES + 1;
 
     TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,

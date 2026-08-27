@@ -143,9 +143,13 @@ if [[ -n "$RPM_FILE" ]]; then
         echo "  SKIP: rpm not available on this system" >&2
         pass "rpm -K check skipped (tool not available)"
     else
-        RPM_SIG=$(rpm -K "$RPM_FILE" 2>&1) || RPM_SIG=""
+        RPM_SIG=""
+        RPM_RC=0
+        RPM_SIG=$(rpm -K "$RPM_FILE" 2>&1) || RPM_RC=$?
 
-        if echo "$RPM_SIG" | grep -qi "pgp\|gpg.*OK\|digests signatures OK"; then
+        if [[ "$RPM_RC" -eq 0 ]] \
+            && ! echo "$RPM_SIG" | grep -qi "NOT OK" \
+            && echo "$RPM_SIG" | grep -qi "pgp\|gpg.*OK\|digests signatures OK"; then
             pass "RPM package signature valid: $(basename "$RPM_FILE")"
         else
             fail "RPM package signature check: $(basename "$RPM_FILE")"

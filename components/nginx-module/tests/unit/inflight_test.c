@@ -1,7 +1,7 @@
 /*
  * Test: inflight
  *
- * Validates the per-worker inflight counter (spec 52):
+ * Validates the per-worker inflight counter :
  *   - Counter starts at 0
  *   - Increment succeeds when below limit
  *   - Increment rejects when at limit (returns NGX_DECLINED)
@@ -575,7 +575,7 @@ test_active_release_noop_without_increment(void)
 int
 main(void)
 {
-    TEST_SECTION("Per-worker Inflight Counter (spec 52)");
+    TEST_SECTION("Per-worker Inflight Counter ");
 
     test_counter_starts_at_zero();
     test_increment_below_limit();

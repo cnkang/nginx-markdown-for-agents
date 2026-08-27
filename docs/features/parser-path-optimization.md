@@ -70,9 +70,12 @@ configuration. The comparison checked out the baseline source,
 built it, converted all fixtures, computed blake3 hashes of each Markdown
 output, then repeated with the current source and compared the hash sets.
 
-Method: `git checkout <commit> -- components/rust-converter/src/` → `cargo
-build` → convert each fixture via `MarkdownConverter::new().convert()` →
-`blake3::hash(output)` → compare. The full artifact lives at
+Method: build each revision in an isolated worktree (or restore every relevant
+build input before each build), including the Rust source, `Cargo.toml`,
+`Cargo.lock`, build scripts, feature definitions, and fixtures. Then run
+`cargo build`, convert each fixture via
+`MarkdownConverter::new().convert()`, compute `blake3::hash(output)`, and
+compare the hash sets. The full artifact lives at
 `docs/evidence/10-parser-path-optimization-corpus-diff.tsv`.
 
 | Category | Fixtures | Diffs | Status |
@@ -320,19 +323,18 @@ Depth counts from the document root node (depth 0). A text node inside
 
 ### What it does
 
-When the traversal output exceeds a size threshold, this optimization replaces
+When the traversal output exceeds an internal size threshold, this optimization replaces
 the two-pass normalize-then-copy pattern with a single-pass fused normalizer.
 This removes one O(n) allocation and copy for the normalization result.
 
 The optimization targets the normalization phase (after traversal), not the
 traversal itself. The default initial traversal buffer uses a 1 KB
-pre-allocation, but when the caller provides an input size hint exceeding
-`LARGE_BODY_THRESHOLD`, the buffer pre-allocates proportionally to the
-input HTML size via `estimate_output_capacity`. The FFI and incremental entry
-points set this hint automatically. For small documents or callers that do not
-set the hint, the default 1 KB pre-allocation applies. The `RcDom` does not
-expose the original byte count without an additional tree walk. That is why
-the caller must provide the hint externally.
+pre-allocation, but when the full-buffer FFI caller provides an input size hint
+exceeding the internal `LARGE_BODY_THRESHOLD`, the buffer pre-allocates
+proportionally to the input HTML size via `estimate_output_capacity`. For small
+documents or callers that do not set the hint, the default 1 KB pre-allocation
+applies. The `RcDom` does not expose the original byte count without an
+additional tree walk. That is why the caller must provide the hint externally.
 
 ### Buffer estimation for the fused normalizer
 
@@ -344,7 +346,7 @@ already-converted Markdown size rather than an estimate of it:
 
 | Stage | Capacity source |
 |-------|-----------------|
-| Initial traversal | `estimate_output_capacity(input_size_hint)` when the hint exceeds `LARGE_BODY_THRESHOLD`. Otherwise the default 1 KB |
+| Initial traversal | `estimate_output_capacity(input_size_hint)` when the full-buffer input hint exceeds `LARGE_BODY_THRESHOLD`. Otherwise the default 1 KB |
 | Fused normalizer | Actual traversal output length (`output.len()`) |
 
 The traversal code clamps its estimate to 4 KB–4 MB. The fused normalizer's
@@ -373,12 +375,11 @@ Markdown) exceeds `LARGE_BODY_THRESHOLD` (256 KB, a hardcoded constant in
 `converter.rs`). This threshold gets checked against the traversal output length
 after `traverse_node_with_context` completes — not against the input HTML size.
 
-The 256 KB value is chosen to match the order of magnitude of the
-`markdown_large_body_threshold` NGINX directive default (retired in 0.9.0,
-historically controlled input HTML size). The two values
-measure different things: the directive controlled input HTML size, while the constant
-controls intermediate output size. Documents below the threshold use the
-standard `normalize_output` two-pass approach.
+The 256 KB value is chosen to match the order of magnitude of the fixed internal
+1 MiB streaming selection threshold. The two constants measure different things:
+this constant controls intermediate Markdown output size, while the streaming
+threshold controls response-shape selection. Documents below this threshold use
+the standard `normalize_output` two-pass approach.
 
 ### Known limitations
 
@@ -391,8 +392,8 @@ standard `normalize_output` two-pass approach.
   two-pass `normalize_output` path.
 - For large documents, the initial traversal buffer pre-allocates
   proportionally to the input HTML size (via `estimate_output_capacity`) when
-  the caller provides an input size hint exceeding `LARGE_BODY_THRESHOLD`.
-  The FFI and incremental entry points set this hint automatically. For small
+  the full-buffer FFI caller provides an input size hint exceeding
+  `LARGE_BODY_THRESHOLD`. For small
   documents or callers that do not set the hint, the default 1 KB
   pre-allocation applies. When the fused normalizer activates (after
   traversal), it receives the actual traversal output length as its capacity,
@@ -402,10 +403,9 @@ standard `normalize_output` two-pass approach.
   from the input size hint. The fused normalizer receives the actual traversal
   output length, so it does not inherit an input/output compression-ratio
   estimate. The traversal estimate remains bounded to 4 KB–4 MB.
-- The threshold is a hardcoded constant, not configurable via NGINX directives.
-  It differs from `markdown_large_body_threshold` (retired in 0.9.0,
-  historically controlled input HTML size limits), though both use 256 KB
-  as a default.
+- The threshold is a hardcoded internal constant, not configurable via NGINX
+  directives. It is independent of the removed
+  `markdown_large_body_threshold` directive.
 - `ConversionContext` timeout checks remain active throughout the large-response
   path. The fused normalizer does not bypass timeout enforcement.
 

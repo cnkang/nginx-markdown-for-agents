@@ -91,23 +91,17 @@ case "$MODE" in
         ;;
 
     spec)
-        # --- rpmbuild --specfile validation ---
-        # Use rpmbuild to parse the spec file (dry-run style)
-        if command -v rpmbuild >/dev/null 2>&1; then
-            if SPEC_OUTPUT=$(rpmbuild --nobuild --specfile "$TARGET_FILE" 2>&1); then
-                pass "rpmbuild --specfile parsed successfully"
+        # --- rpmspec validation ---
+        if command -v rpmspec >/dev/null 2>&1; then
+            if SPEC_OUTPUT=$(rpmspec -q --rpms "$TARGET_FILE" 2>&1); then
+                pass "rpmspec -q --rpms parsed successfully"
             else
-                # rpmbuild may fail due to missing sources; check if it at least parsed
-                if echo "$SPEC_OUTPUT" | grep -qi "error.*spec"; then
-                    fail "rpmbuild --specfile has spec errors"
-                    echo "$SPEC_OUTPUT" >&2
-                else
-                    pass "rpmbuild --specfile parsed (build deps not satisfied, expected in CI)"
-                fi
+                fail "rpmspec -q --rpms rejected package spec"
+                echo "$SPEC_OUTPUT" >&2
             fi
         else
-            echo "SKIP: rpmbuild not available on this system" >&2
-            pass "rpmbuild not available (skipped)"
+            echo "SKIP: rpmspec not available on this system" >&2
+            pass "rpmspec not available (skipped)"
         fi
         ;;
 

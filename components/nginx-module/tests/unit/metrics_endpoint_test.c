@@ -167,7 +167,7 @@ test_output_formats(void)
 
     r = handle_metrics_request("GET", "::1", "application/json", &m);
     TEST_ASSERT(STR_EQ(r.content_type, "text/plain; version=0.0.4; charset=utf-8"),
-                "JSON Accept must not select a legacy representation");
+                "JSON Accept must not select a removed representation");
     TEST_ASSERT(strstr(r.body, "nginx_markdown_build_info") != NULL,
                 "All Accept values should receive the frozen Prometheus surface");
     TEST_PASS("Prometheus output contract works");

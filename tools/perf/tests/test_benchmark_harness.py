@@ -45,6 +45,7 @@ from tools.perf.benchmark_validation import (
     parse_curl_header_artifact,
     parse_hey_result,
     merge_diagnostics_metrics,
+    _parse_prometheus_labels,
     parse_prometheus_metrics,
     _decompression_path_metrics,
     validate_response_probe,
@@ -93,6 +94,31 @@ nginx_markdown_decompression_events_total{encoding="brotli",outcome="failure",re
     assert metrics["perf"]["decompression_events_total"] == 5
     assert metrics["perf"]["decompression_budget_exceeded_total"] == 1
     assert "zero_copy_output_total" not in metrics["perf"]
+
+
+def test_prometheus_labels_honor_escaping_and_embedded_delimiters():
+    labels = _parse_prometheus_labels(
+        r'path="a,b}",quote="a\"b",slash="a\\b",line="a\nb"'
+    )
+    assert labels == {
+        "path": "a,b}",
+        "quote": 'a"b',
+        "slash": r"a\b",
+        "line": "a\nb",
+    }
+
+
+@pytest.mark.parametrize(
+    "label_text",
+    [
+        'engine="streaming",engine="full_buffer"',
+        'engine="streaming",',
+        'engine="bad\\q"',
+        'engine="unterminated',
+    ],
+)
+def test_prometheus_labels_reject_duplicate_or_malformed_sets(label_text):
+    assert _parse_prometheus_labels(label_text) is None
 
 
 def test_nonfinite_prometheus_samples_are_ignored():
@@ -471,6 +497,7 @@ fi
         env={**os.environ, "NGINX_BIN": str(fake_nginx)},
         capture_output=True,
         text=True,
+        timeout=10,
         check=False,
     )
 
@@ -482,6 +509,21 @@ def test_module_benchmark_records_actual_fixture_bytes():
     source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
     assert 'fixture_bytes="$("$RESOLVED_WC" -c < "$CORPUS_DIR/$SC_FIXTURE")"' in source
     assert "input_bytes=int(sys.argv[12])" in source
+
+
+def test_module_benchmark_uses_stable_critical_fixtures():
+    """Critical inputs stay aligned with the checked-in 0.9.1 baseline."""
+    source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+    assert '"chunked-medium|benchmark/tables.html|' in source
+    assert '"gzip-large|benchmark/blog-post.html|' in source
+
+    expected_sizes = {
+        "benchmark/tables.html": 2164,
+        "benchmark/blog-post.html": 6613,
+    }
+    for fixture, expected_size in expected_sizes.items():
+        actual_size = (REPO_ROOT / "tests" / "corpus" / fixture).stat().st_size
+        assert actual_size == expected_size
 
 
 def test_module_benchmark_requires_load_and_response_correctness():
@@ -966,19 +1008,19 @@ class TestSchemaWellFormedness:
             assert field in required_in_schema, f"Missing required field '{field}'"
 
     def test_report_schema_module_benchmark_properties(self):
-        """module_benchmark properties in schema include version, timestamp, scenarios, memory_slope."""
+        """module_benchmark properties include identity and evidence fields."""
         props = _load_schema()["module_benchmark"]["report_schema"]["properties"]["module_benchmark"]
         self._assert_object_has_required_fields(
-            props, "version", "timestamp", "scenarios", "memory_slope"
+            props, "version", "timestamp", "git_commit", "scenarios", "memory_slope"
         )
 
     def test_scenarios_schema_structure(self):
-        """scenarios is array of objects with required name and status fields."""
+        """scenarios require the emitted configuration identity."""
         mb_props = _load_schema()["module_benchmark"]["report_schema"]["properties"]["module_benchmark"]
         scenarios = mb_props["properties"]["scenarios"]
         assert scenarios.get("type") == "array"
         items = scenarios.get("items", {})
-        self._assert_object_has_required_fields(items, "name", "status")
+        self._assert_object_has_required_fields(items, "name", "scenario_config", "status")
 
     def test_scenario_name_enum_values(self):
         """Scenario schema freezes all eight required scenario names."""
@@ -1075,6 +1117,15 @@ class TestGracefulExit:
 
 class TestReportSchemaConformance:
     """Validate mock reports against the module_benchmark schema structure."""
+
+    def test_module_validation_requires_emitted_scenario_config(self):
+        """The runtime validator must reject the removed profile-only shape."""
+        report = _build_valid_mock_report()
+        del report["module_benchmark"]["scenarios"][0]["scenario_config"]
+
+        errors = validate_module_benchmark(report)
+
+        assert any("scenario_config" in error for error in errors)
 
     def _get_schema_props(self):
         """Return the module_benchmark properties from the schema."""
@@ -1472,6 +1523,15 @@ class TestPortCleanupOnSignals:
         )
 
     def _spawn_benchmark_process(self, tmpdir):
+        """
+        Start a benchmark subprocess configured to run the plain-small scenario with a temporary stub server.
+        
+        Parameters:
+        	tmpdir (str or os.PathLike): Directory used for temporary benchmark files.
+        
+        Returns:
+        	subprocess.Popen: The running benchmark process with captured standard output and error streams.
+        """
         tmpdir_path = Path(tmpdir)
         stub = self._create_stub_nginx(tmpdir_path)
         env = os.environ.copy()
@@ -1485,9 +1545,19 @@ class TestPortCleanupOnSignals:
         # The behaviour under test here is trap-driven cleanup, not host PATH
         # auditing, so pin the standard system directories ahead of the
         # inherited PATH — the same resolution CI gets on its clean runners.
-        env["PATH"] = os.pathsep.join(
-            ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env.get("PATH", "")]
-        )
+        trusted_paths = [
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ]
+        inherited_path = env.get("PATH", "")
+        if inherited_path:
+            trusted_paths.extend(
+                entry for entry in inherited_path.split(os.pathsep) if entry
+            )
+        env["PATH"] = os.pathsep.join(trusted_paths)
         return subprocess.Popen(
             [
                 BASH_BIN,

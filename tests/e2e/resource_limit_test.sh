@@ -72,7 +72,7 @@ check_prerequisites
 
 echo "Step 1: Testing normal request within limits..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     -H "Accept: text/markdown" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
 
@@ -95,7 +95,7 @@ esac
 
 echo "Step 2: Testing large content (decompression budget)..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     -H "Accept: text/markdown" \
     "${NGINX_URL}${TEST_PATH}?size=large" 2>/dev/null) || HTTP_CODE="000"
 
@@ -118,7 +118,7 @@ esac
 
 echo "Step 3: Testing compressed content exceeding decompression budget..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     -H "Accept: text/markdown" \
     -H "Accept-Encoding: gzip" \
     "${NGINX_URL}${TEST_PATH}?size=bomb" 2>/dev/null) || HTTP_CODE="000"
@@ -142,7 +142,7 @@ esac
 
 echo "Step 4: Testing content exceeding parser budget..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     -H "Accept: text/markdown" \
     "${NGINX_URL}${TEST_PATH}?size=huge" 2>/dev/null) || HTTP_CODE="000"
 
@@ -209,7 +209,7 @@ if [[ -n "$DIAG" ]]; then
     pass "diagnostics endpoint accessible"
 
     # Check for resource limit config keys
-    for key in "decompress_max_size" "parse_timeout" "parser_budget"; do
+    for key in "decompressed_size" "parser_timeout" "parser_memory"; do
         if echo "$DIAG" | grep -q "\"$key\""; then
             pass "diagnostics key present: $key"
         else

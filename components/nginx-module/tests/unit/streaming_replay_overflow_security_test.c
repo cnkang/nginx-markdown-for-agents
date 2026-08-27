@@ -99,9 +99,6 @@ struct ngx_http_request_s {
 /* Include the replay buffer header */
 #include "../../src/ngx_http_markdown_stream_replay.h"
 
-/* Include the state machine header */
-#include "../../src/ngx_http_markdown_stream_state.h"
-
 /*
  * Mock pool infrastructure for replay buffer tests.
  */
@@ -188,7 +185,6 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
 
 /* Include implementation sources after mocks */
 #include "../../src/ngx_http_markdown_stream_replay.c"
-#include "../../src/ngx_http_markdown_stream_state.c"
 
 
 /* ================================================================
@@ -249,17 +245,15 @@ test_overflow_fires_on_exceed_capacity(void)
     TEST_ASSERT(ctx.stream_sm.replay_buf.size == 32,
                 "buffer unchanged after overflow");
 
-    /*
-     * After NGX_DECLINED, the replay buffer itself still reports
-     * available (size <= capacity). The body filter layer is
-     * responsible for detecting NGX_DECLINED and raising
-     * EVENT_REPLAY_OVERFLOW to the decision engine. Verify
-     * the buffer state is consistent for that handoff.
-     */
+    /* NGX_DECLINED latches overflow so callers cannot reuse the partial
+     * replay as if it represented the complete response. The body filter
+     * raises EVENT_REPLAY_OVERFLOW to the decision engine. */
     TEST_ASSERT(
-        ngx_http_markdown_stream_replay_available(&ctx) == 1,
-        "replay_available still true (buffer not corrupted, "
-        "caller must raise overflow event)");
+        ctx.stream_sm.replay_overflowed == 1,
+        "overflow state is latched for the decision handoff");
+    TEST_ASSERT(
+        ngx_http_markdown_stream_replay_available(&ctx) == 0,
+        "replay is unavailable after overflow");
 
     free(ctx.stream_sm.replay_buf.data);
     TEST_PASS("Overflow correctly fires NGX_DECLINED signal");
@@ -307,248 +301,7 @@ test_overflow_single_large_chunk(void)
 
 
 /* ================================================================
- * Security Test: Decision engine transitions on REPLAY_OVERFLOW
- *
- * Scenario: After replay buffer overflow is detected, the body
- *           filter raises EVENT_REPLAY_OVERFLOW to the decision
- *           engine. Verify the state machine transitions correctly
- *           to PRE_COMMIT_REPLAY_UNAVAILABLE semantics.
- *
- * Case A: within_resource_limits=1 -> FULL_BUFFER_FALLBACK
- * Case B: within_resource_limits=0, on_error=pass -> PASSTHROUGH
- * Case C: within_resource_limits=0, on_error=reject -> REJECT_STATUS
- *
- * Validates: fail-open/fail-closed policy preservation, oversized body / replay overflow handling
- * ================================================================ */
-
-static void
-test_decision_engine_overflow_within_limits(void)
-{
-    ngx_http_markdown_stream_ctx_t  dctx;
-    ngx_http_markdown_decision_t    decision;
-
-    TEST_SUBSECTION(
-        "Decision engine: overflow + within limits "
-        "-> FULL_BUFFER_FALLBACK");
-
-    memset(&dctx, 0, sizeof(dctx));
-    dctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
-    dctx.replay_available = 0;   /* overflow: replay NOT available */
-    dctx.headers_committed = 0;
-    dctx.within_resource_limits = 1;
-    dctx.on_error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-
-    decision = ngx_http_markdown_stream_decide(
-        &dctx, NGX_HTTP_MD_EVENT_REPLAY_OVERFLOW);
-
-    TEST_ASSERT(
-        decision.new_state == NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK,
-        "transitions to FULL_BUFFER_FALLBACK");
-    TEST_ASSERT(
-        decision.action == NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
-        "action is SWITCH_FULL_BUFFER");
-    TEST_ASSERT(
-        decision.reason == NGX_HTTP_MD_REASON_REPLAY_OVERFLOW,
-        "reason is REPLAY_OVERFLOW");
-
-    TEST_PASS(
-        "Overflow + within limits = FULL_BUFFER_FALLBACK");
-}
-
-
-static void
-test_decision_engine_overflow_exceeded_limits_pass(void)
-{
-    ngx_http_markdown_stream_ctx_t  dctx;
-    ngx_http_markdown_decision_t    decision;
-
-    TEST_SUBSECTION(
-        "Decision engine: overflow + exceeded limits + "
-        "on_error=pass -> PASSTHROUGH");
-
-    memset(&dctx, 0, sizeof(dctx));
-    dctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
-    dctx.replay_available = 0;   /* overflow */
-    dctx.headers_committed = 0;
-    dctx.within_resource_limits = 0;  /* limits exceeded */
-    dctx.on_error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-
-    decision = ngx_http_markdown_stream_decide(
-        &dctx, NGX_HTTP_MD_EVENT_REPLAY_OVERFLOW);
-
-    TEST_ASSERT(
-        decision.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
-        "transitions to PASSTHROUGH");
-    TEST_ASSERT(
-        decision.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
-        "action is REJECT_STATUS (fail-open cannot replay)");
-    TEST_ASSERT(
-        decision.reason
-            == NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED,
-        "reason is RESOURCE_LIMIT_EXCEEDED");
-
-    TEST_PASS(
-        "Overflow + exceeded limits + pass = "
-        "PASSTHROUGH/REJECT_STATUS");
-}
-
-
-static void
-test_decision_engine_overflow_exceeded_limits_reject(void)
-{
-    ngx_http_markdown_stream_ctx_t  dctx;
-    ngx_http_markdown_decision_t    decision;
-
-    TEST_SUBSECTION(
-        "Decision engine: overflow + exceeded limits + "
-        "on_error=reject -> REJECT_STATUS");
-
-    memset(&dctx, 0, sizeof(dctx));
-    dctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
-    dctx.replay_available = 0;   /* overflow */
-    dctx.headers_committed = 0;
-    dctx.within_resource_limits = 0;  /* limits exceeded */
-    dctx.on_error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-
-    decision = ngx_http_markdown_stream_decide(
-        &dctx, NGX_HTTP_MD_EVENT_REPLAY_OVERFLOW);
-
-    TEST_ASSERT(
-        decision.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
-        "transitions to PASSTHROUGH");
-    TEST_ASSERT(
-        decision.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
-        "action is REJECT_STATUS");
-    TEST_ASSERT(
-        decision.reason
-            == NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED,
-        "reason is RESOURCE_LIMIT_EXCEEDED");
-
-    TEST_PASS(
-        "Overflow + exceeded limits + reject = REJECT_STATUS");
-}
-
-
-/* ================================================================
- * Security Test: PRE_COMMIT_REPLAY_UNAVAILABLE state handles commit
- *
- * Scenario: After overflow, the module may still commit headers and
- *           proceed with streaming (without replay capability).
- *           Verify that COMMIT event transitions to COMMITTED state.
- *
- * Validates: fail-open/fail-closed policy preservation (fail-open preservation)
- * ================================================================ */
-
-static void
-test_replay_unavailable_can_still_commit(void)
-{
-    ngx_http_markdown_stream_ctx_t  dctx;
-    ngx_http_markdown_decision_t    decision;
-
-    TEST_SUBSECTION(
-        "PRE_COMMIT_REPLAY_UNAVAILABLE: commit still allowed");
-
-    memset(&dctx, 0, sizeof(dctx));
-    dctx.current_state =
-        NGX_HTTP_MD_STATE_PRE_COMMIT_REPLAY_UNAVAILABLE;
-    dctx.replay_available = 0;
-    dctx.headers_committed = 0;
-    dctx.within_resource_limits = 1;
-    dctx.on_error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-
-    decision = ngx_http_markdown_stream_decide(
-        &dctx, NGX_HTTP_MD_EVENT_COMMIT);
-
-    TEST_ASSERT(
-        decision.new_state == NGX_HTTP_MD_STATE_COMMITTED,
-        "transitions to COMMITTED");
-    TEST_ASSERT(
-        decision.action == NGX_HTTP_MD_ACTION_COMMIT_HEADERS,
-        "action is COMMIT_HEADERS");
-    TEST_ASSERT(
-        decision.reason == NGX_HTTP_MD_REASON_COMMIT_SUCCESS,
-        "reason is COMMIT_SUCCESS");
-
-    TEST_PASS(
-        "Replay-unavailable state allows commit to proceed");
-}
-
-
-/* ================================================================
- * Security Test: End-to-end overflow -> decision flow
- *
- * Scenario: Exercises the full flow from replay buffer append
- *           overflow through decision engine invocation. Simulates
- *           what the body filter does when replay_append returns
- *           NGX_DECLINED.
- *
- * Validates: oversized body / replay overflow handling, Rule 38
- * ================================================================ */
-
-static void
-test_e2e_overflow_to_decision(void)
-{
-    ngx_http_markdown_ctx_t          ctx;
-    ngx_http_markdown_stream_ctx_t   dctx;
-    ngx_http_markdown_decision_t     decision;
-    ngx_int_t                        rc;
-    u_char                           data[128];
-
-    TEST_SUBSECTION(
-        "E2E: replay overflow -> decision engine fallback");
-
-    test_setup();
-    memset(&ctx, 0, sizeof(ctx));
-    memset(data, 'Z', sizeof(data));
-
-    /* Step 1: Init replay buffer with small capacity */
-    rc = ngx_http_markdown_stream_replay_init(&ctx, &test_pool, 32);
-    TEST_ASSERT(rc == NGX_OK, "replay init succeeds");
-
-    /* Step 2: Fill buffer to capacity */
-    rc = ngx_http_markdown_stream_replay_append(&ctx, data, 32);
-    TEST_ASSERT(rc == NGX_OK, "fill to capacity succeeds");
-    TEST_ASSERT(
-        ngx_http_markdown_stream_replay_available(&ctx) == 1,
-        "replay still available at capacity");
-
-    /* Step 3: One more byte overflows */
-    rc = ngx_http_markdown_stream_replay_append(&ctx, data, 1);
-    TEST_ASSERT(rc == NGX_DECLINED,
-                "overflow returns NGX_DECLINED");
-
-    /*
-     * Step 4: Body filter would now set replay_available=0
-     * and raise EVENT_REPLAY_OVERFLOW to the decision engine.
-     * Simulate this sequence:
-     */
-    memset(&dctx, 0, sizeof(dctx));
-    dctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
-    dctx.replay_available = 0;   /* overflow detected */
-    dctx.headers_committed = 0;
-    dctx.within_resource_limits = 1;
-    dctx.on_error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-
-    decision = ngx_http_markdown_stream_decide(
-        &dctx, NGX_HTTP_MD_EVENT_REPLAY_OVERFLOW);
-
-    TEST_ASSERT(
-        decision.new_state == NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK,
-        "E2E: transitions to FULL_BUFFER_FALLBACK");
-    TEST_ASSERT(
-        decision.action == NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
-        "E2E: action is SWITCH_FULL_BUFFER");
-    TEST_ASSERT(
-        decision.reason == NGX_HTTP_MD_REASON_REPLAY_OVERFLOW,
-        "E2E: reason is REPLAY_OVERFLOW");
-
-    free(ctx.stream_sm.replay_buf.data);
-    TEST_PASS("E2E: overflow -> decision engine fallback correct");
-}
-
-
-/* ================================================================
- * Security Test: Incremental overflow detection
+ * Security Test: Replay-buffer overflow detection
  *
  * Scenario: Multiple small appends gradually fill the buffer.
  *           The overflow is detected precisely at the boundary.
@@ -558,7 +311,7 @@ test_e2e_overflow_to_decision(void)
  * ================================================================ */
 
 static void
-test_incremental_overflow_boundary(void)
+test_replay_overflow_boundary(void)
 {
     ngx_http_markdown_ctx_t  ctx;
     ngx_int_t                rc;
@@ -566,7 +319,7 @@ test_incremental_overflow_boundary(void)
     size_t                   i;
 
     TEST_SUBSECTION(
-        "Incremental overflow: precise boundary detection");
+        "Replay-buffer overflow: precise boundary detection");
 
     test_setup();
     memset(&ctx, 0, sizeof(ctx));
@@ -603,47 +356,7 @@ test_incremental_overflow_boundary(void)
     }
 
     free(ctx.stream_sm.replay_buf.data);
-    TEST_PASS("Incremental overflow boundary handling correct");
-}
-
-
-/* ================================================================
- * Security Test: Overflow with on_error=reject (fail-closed)
- *
- * Scenario: When resource limits are exceeded AND on_error=reject,
- *           the decision engine should still produce REJECT_STATUS.
- *           This verifies fail-closed semantics per fail-open/fail-closed policy preservation.
- *
- * Validates: reject policy produces REJECT_STATUS (fail-closed)
- * ================================================================ */
-
-static void
-test_overflow_reject_policy_produces_reject_status(void)
-{
-    ngx_http_markdown_stream_ctx_t  dctx;
-    ngx_http_markdown_decision_t    decision;
-
-    TEST_SUBSECTION(
-        "Overflow + reject policy -> REJECT_STATUS (fail-closed)");
-
-    memset(&dctx, 0, sizeof(dctx));
-    dctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
-    dctx.replay_available = 0;
-    dctx.headers_committed = 0;
-    dctx.within_resource_limits = 0;
-    dctx.on_error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-
-    decision = ngx_http_markdown_stream_decide(
-        &dctx, NGX_HTTP_MD_EVENT_REPLAY_OVERFLOW);
-
-    TEST_ASSERT(
-        decision.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
-        "reject policy: transitions to PASSTHROUGH");
-    TEST_ASSERT(
-        decision.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
-        "reject policy: action is REJECT_STATUS");
-
-    TEST_PASS("Overflow + reject policy = REJECT_STATUS (fail-closed)");
+    TEST_PASS("Replay-buffer overflow boundary handling correct");
 }
 
 
@@ -661,19 +374,7 @@ main(void)
     /* Replay buffer overflow detection */
     test_overflow_fires_on_exceed_capacity();
     test_overflow_single_large_chunk();
-    test_incremental_overflow_boundary();
-
-    /* Decision engine transitions */
-    test_decision_engine_overflow_within_limits();
-    test_decision_engine_overflow_exceeded_limits_pass();
-    test_decision_engine_overflow_exceeded_limits_reject();
-    test_overflow_reject_policy_produces_reject_status();
-
-    /* State handling after overflow */
-    test_replay_unavailable_can_still_commit();
-
-    /* End-to-end flow */
-    test_e2e_overflow_to_decision();
+    test_replay_overflow_boundary();
 
     printf("\n  All streaming replay overflow security "
            "tests passed\n\n");

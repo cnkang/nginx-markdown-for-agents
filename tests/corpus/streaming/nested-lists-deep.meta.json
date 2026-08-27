@@ -2,7 +2,7 @@
   "fixture-id": "streaming/nested-lists-deep",
   "page-type": "complex-common",
   "expected-conversion-result": "converted",
-  "input-size-bytes": 1127,
+  "input-size-bytes": 1507,
   "source-description": "Three-level mixed ordered and unordered nested list structures",
   "failure-corpus": false,
   "streaming_notes": {

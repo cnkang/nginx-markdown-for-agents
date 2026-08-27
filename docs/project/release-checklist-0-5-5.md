@@ -57,18 +57,16 @@ These gates provide broad validation across the entire release surface.
 | UB-06 | scope-drift | Manual review | No scope creep | No unresolved tripwires |
 | UB-07 | version-framing | Manual review | Consistent 0.5.5 references | CHANGELOG, tooling, docs aligned |
 | UB-08 | planning-note-isolation | Manual review | No planning note dependencies | No references to advisory notes |
-| UB-09 | evidence-artifact | `tests/streaming/evidence/summary.json` | Exists, schema_version=1, pass=true | File exists and validates |
+| UB-09 | evidence-artifact | `make release-evidence-manifest-check` | Candidate-bound evidence is valid | Gate exits 0 |
 
-## Streaming Evidence Artifact Gate (UB-09)
+## Candidate-Bound Evidence Gate (UB-09)
 
-The streaming parity evidence artifact must satisfy all of the following:
+The current release evidence gate binds the evidence manifest to the delivered
+candidate and validates the required artifact metadata. The project moved these
+invariants into the candidate-bound manifest checks and retired the former
+standalone streaming evidence validator.
 
-1. File exists at `tests/streaming/evidence/summary.json`
-2. Validates against `schema_version=1` with all required fields present
-3. Required fields have correct types per the frozen schema
-4. `pass` field is `true` (no unknown differences or error-parity mismatches)
-
-Missing or schema-invalid evidence blocks release with the same weight as a
+Missing, stale, or mismatched evidence blocks release with the same weight as a
 failing verification command.
 
 ## Go/No-Go Criteria

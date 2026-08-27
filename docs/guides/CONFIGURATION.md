@@ -97,6 +97,11 @@ markdown_limits conversion_timeout=10s parser_timeout=5s
     decompressed_size=10m decompression_ratio=100 max_inflight=64;
 ```
 
+`parser_timeout` is a cooperative parser-work allowance, not a preemptive
+wall-clock interrupt. The converter checks it at parser and traversal
+checkpoints and at finalization. An uninterruptible parser operation may
+overshoot the configured value. Upstream stalls do not consume this allowance.
+
 The bounds are cumulative where the decoder has multiple gzip members. The
 decoder rejects a truncated final member. A decompression failure follows
 `markdown_error_policy` before commit and cannot replay the original body

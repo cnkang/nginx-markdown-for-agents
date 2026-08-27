@@ -1,0 +1,8 @@
+{
+  "fixture-id": "benchmark/blog-post",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 6613,
+  "source-description": "Stable blog fixture for module benchmark comparisons",
+  "failure-corpus": false
+}

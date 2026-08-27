@@ -296,14 +296,17 @@ def _run_module_benchmark(output_path: Path) -> tuple[int, str]:
     if not resolved_bash:
         return 1, "Benchmark requires a trusted bash executable"
 
-    result = subprocess.run(
-        [resolved_bash, str(script), "--output", str(output_path)],
-        capture_output=True,
-        text=True,
-        timeout=600,
-        check=False,
-        cwd=str(REPO_ROOT),
-    )
+    try:
+        result = subprocess.run(
+            [resolved_bash, str(script), "--output", str(output_path)],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+            cwd=str(REPO_ROOT),
+        )
+    except subprocess.TimeoutExpired as exc:
+        return 124, f"Benchmark harness timed out after {exc.timeout} seconds"
     return result.returncode, result.stderr
 
 
@@ -725,6 +728,26 @@ def _report_skipped_benchmark(message, skip_reason, args, exit_code):
     return exit_code
 
 
+def _read_benchmark_report(
+    report_path: Path,
+    args: argparse.Namespace,
+    blocking: bool,
+    heading: str,
+) -> tuple[dict | None, int | None]:
+    """Read a benchmark report and turn malformed JSON into gate evidence."""
+    try:
+        return json.loads(report_path.read_text(encoding="utf-8")), None
+    except json.JSONDecodeError as exc:
+        return None, _report_integrity_failure(
+            None,
+            args,
+            [("benchmark_report", f"invalid JSON: {exc}")],
+            heading,
+            "  Regenerate the report with the benchmark harness.",
+            exit_code=1 if blocking else 0,
+        )
+
+
 def _obtain_benchmark_report(
     args: argparse.Namespace, blocking: bool,
 ) -> tuple[dict | None, int | None]:
@@ -738,8 +761,12 @@ def _obtain_benchmark_report(
         report_path = validate_read_path(
             args.benchmark_report, purpose="benchmark report"
         )
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-        return report, None
+        return _read_benchmark_report(
+            report_path,
+            args,
+            blocking,
+            "MISSING_EVIDENCE: Benchmark report is malformed:",
+        )
 
     version = _module_baseline_version()
     output_path = Path(
@@ -765,13 +792,16 @@ def _obtain_benchmark_report(
             return None, 0
         return None, 1
 
-    if output_path.exists():
-        report = json.loads(output_path.read_text(encoding="utf-8"))
-    else:
+    if not output_path.exists():
         _stderr("WARNING: Benchmark completed but no output file found.")
-        report = {}
+        return {}, None
 
-    return report, None
+    return _read_benchmark_report(
+        output_path,
+        args,
+        blocking,
+        "MISSING_EVIDENCE: Benchmark output is malformed:",
+    )
 
 
 # Scenarios that must complete (not be skipped) in blocking mode.
@@ -2728,7 +2758,7 @@ def _resolve_ineligible_baseline(
         )
         _print_evidence_summary(evidence_pack)
         _write_output(evidence_pack, args.output)
-        return {}, False, EXIT_FAILURE
+        return {}, False, 1
 
     _stderr(
         "INFO: Checked-in module baseline is excluded from release-gate "
@@ -2803,7 +2833,23 @@ def _resolve_baseline(
     if not baseline_path.exists():
         return _resolve_missing_baseline(report, args, blocking)
 
-    baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
+    try:
+        baseline_report = json.loads(
+            baseline_path.read_text(encoding="utf-8")
+        )
+    except json.JSONDecodeError as exc:
+        return {}, False, _report_integrity_failure(
+            report,
+            args,
+            [("baseline_report", f"invalid JSON: {exc}")],
+            (
+                "FAIL: Checked-in baseline is malformed:"
+                if blocking else
+                "MISSING_EVIDENCE: Checked-in baseline is malformed:"
+            ),
+            "  Regenerate the baseline from a valid benchmark report.",
+            exit_code=1 if blocking else 0,
+        )
 
     head_result = _resolve_baseline_head_binding(
         report, args, blocking, baseline_report

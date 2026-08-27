@@ -66,11 +66,11 @@
         },
         "artifact_type": {
           "type": "string",
-          "description": "Build artifact type (e.g. \"deb\", \"rpm\", \"docker\", \"binary\", \"source\")."
+          "description": "Build artifact type (e.g. \"deb-package\", \"rpm-package\", \"docker-image\", \"dynamic-module\", \"source\")."
         },
         "test_level": {
           "type": "string",
-          "description": "Verification level applied to this combination (e.g. \"full\", \"smoke\", \"none\")."
+          "description": "Verification level applied to this combination (e.g. \"smoke-test\", \"functional-check\", \"docker-validation\")."
         },
         "support_tier": {
           "type": "string",
@@ -94,6 +94,15 @@
           "type": "integer",
           "minimum": 1,
           "description": "Frozen ABI version this row's artifacts are bound to (canonical release matrix contract)."
+        },
+        "image_ref": {
+          "type": "string",
+          "description": "Container image reference for a Docker artifact row."
+        },
+        "image_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Content digest bound to the image_ref for a Docker artifact row."
         }
       }
     }

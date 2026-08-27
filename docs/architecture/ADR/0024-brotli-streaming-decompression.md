@@ -199,13 +199,20 @@ implementation adds no runtime configuration key or default:
 
 ### Go/No-Go Freeze Criteria
 
-1. All `make` targets pass (`test-nginx-unit`, `test-rust`, `coverage-c`,
-   `harness-check`, `docs-check`, `release-gates-check-091`)
-2. ASan/UBSan clean (no new findings)
+1. All applicable `make` targets pass (`test-nginx-unit`, `test-rust`,
+   `coverage-c`, `harness-check`, `docs-check`, `release-gates-check-091`).
+   An approved skip is acceptable only when the skipped dependency or artifact
+   the evidence records the skipped dependency or artifact capability,
+   consistent with ADR-0019. An unrecorded skip does not satisfy this
+   criterion.
+2. ASan/UBSan clean (no new findings). An approved, evidence-backed skip is
+   likewise required to satisfy this criterion when the sanitizer is unavailable.
 3. No new public ABI surface (confirmed by symbol table diff)
-4. Performance evidence shows streaming TTFB improvement over full-buffer
-   on representative large responses
-5. Build matrix passes (with and without `NGX_HTTP_BROTLI`)
+4. Performance evidence shows streaming TTFB improvement over full-buffer on
+   representative large responses. A skip must carry the ADR-0019-approved
+   environment and evidence record.
+5. Build matrix passes with and without `NGX_HTTP_BROTLI`. The no-Brotli leg
+   must record its expected-unavailable Brotli result.
 6. No typed decompression error folded to generic `NGX_ERROR`
 
 ## Consequences

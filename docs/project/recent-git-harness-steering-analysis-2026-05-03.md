@@ -90,10 +90,10 @@ Commands run during this session:
 | `python3 tools/harness/resolve_spec.py --hint "review last two weeks all branch commits for harness rule updates"` | SKIP_NOT_PRESENT; documented as cross-cutting harness maintenance |
 | `git log --all --since='2026-04-19 00:00:00' --no-merges ...` | PASS; 162 unique commits classified |
 | `git show --stat ...` for representative dynconf, release-matrix, protocol, OTel, metrics, and packaging commits | PASS; high-risk diffs inspected before edits |
-| `python3 /Users/liukang/.codex/skills/nginx-markdown-harness-maintenance/scripts/harness_route.py --from-git --hint "two-week branch scan dynconf install-verify protocol otel packaging harness remediation"` | PASS; matched harness-remediation, docs-tooling-drift, release-governance, dynamic-config-hot-reload, observability-metrics, and otel-integration |
+| `python3 skills/nginx-markdown-harness-maintenance/scripts/harness_route.py --from-git --hint "two-week branch scan dynconf install-verify protocol otel packaging harness remediation"` | PASS; matched harness-remediation, docs-tooling-drift, release-governance, dynamic-config-hot-reload, observability-metrics, and otel-integration |
 | `python3 -m json.tool docs/harness/routing-manifest.json >/dev/null` | PASS |
 | `make harness-check` | PASS; recent-analysis-report closeout check passed |
 | `make docs-check` | PASS |
 | `git diff --check` | PASS |
 | `make harness-check-full` | PASS; docs, harness, release-gate, and naming checks passed |
-| `python3 /Users/liukang/.codex/skills/nginx-markdown-harness-maintenance/scripts/harness_route.py --from-git --base main --hint "v0.6.0 dynamic config hot reload install-verify release matrix auth cache control otel homebrew packaging"` | PASS; branch-vs-main diff now routes dynamic-config-hot-reload, packaging-distribution, nginx-protocol-safety, release-governance, otel-integration, and existing supporting packs |
+| `python3 skills/nginx-markdown-harness-maintenance/scripts/harness_route.py --from-git --base main --hint "v0.6.0 dynamic config hot reload install-verify release matrix auth cache control otel homebrew packaging"` | PASS; branch-vs-main diff now routes dynamic-config-hot-reload, packaging-distribution, nginx-protocol-safety, release-governance, otel-integration, and existing supporting packs |

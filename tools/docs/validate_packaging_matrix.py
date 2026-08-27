@@ -122,11 +122,8 @@ def validate() -> list[str]:
     release_versions = get_release_matrix_versions(release_data)
     packaging_versions = set(packaging_data.get("nginx_versions", []))
 
-    if not packaging_versions:
-        # No nginx_versions key or empty list — nothing to validate
-        return errors
-
-    errors.extend(_validate_version_subset(packaging_versions, release_versions))
+    if packaging_versions:
+        errors.extend(_validate_version_subset(packaging_versions, release_versions))
 
     # --- Check 2: No tier escalation ---
     errors.extend(_validate_tier_overrides(

@@ -1,7 +1,7 @@
 /*
  * Test: decision_path
  *
- * Validates: REQ-0700-OPERABILITY-001 (structured decision path logging)
+ * Validates: (structured decision path logging)
  *
  * Tests the decision path struct constants, failure detection logic,
  * and verbosity gating for the structured decision path log.

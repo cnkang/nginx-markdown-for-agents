@@ -101,8 +101,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_error_policy pass|fail_closed|status <code>   (Config V2, 0.9.0)
      *
-     * Unified pre-commit error policy. Consolidates the removed legacy
-     * on-error and streaming-on-error directives.
+     * Unified pre-commit error policy.
      *   pass        - return original content on pre-commit error (fail-open)
      *   fail_closed - return 502 on pre-commit error
      *   status <c>  - return status code c (429 or 503)
@@ -255,8 +254,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_cache_validation off|ims_only|full   (Config V2, 0.9.0)
      *
-     * Cache-validation policy. Consolidates the removed legacy etag and
-     * conditional-request directives.
+     * Cache-validation policy.
      *   off      - no ETag, no conditional request handling
      *   ims_only - no ETag, If-Modified-Since only (default)
      *   full     - transformed ETag + If-None-Match + If-Modified-Since
@@ -285,7 +283,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   force - always stream (subject to runtime hard blocks)
      * Public default: auto
      *
-     * Conflict (spec 49): markdown_cache_validation full + force => error;
+     * Conflict (config conflict): markdown_cache_validation full + force => error;
      * full + auto => warning (runtime blocks streaming, falls back to
      * full-buffer).  Enforced in merge_conf.
      *
@@ -335,7 +333,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * "text/html" and "text/html; charset=utf-8" but not "text/htmlx".
      *
      * Public default: text/html
-     * Default: text/html (backward compatible)
+     * Default: text/html
      * Context: http, server, location
      *
      * Example:
@@ -351,7 +349,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_trusted_proxies <CIDR>... | off   (Config V2, 0.9.0, spec 47)
+     * markdown_trusted_proxies <CIDR>... | off   (Config V2, 0.9.0)
      *
      * CIDR-based trusted-proxy list controlling whether forwarded headers
      * (Forwarded / X-Forwarded-Proto / X-Forwarded-Host) are honored when
@@ -404,7 +402,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * markdown_metrics
      *
      * Enables the Prometheus text 0.0.4 metrics endpoint at this location.
-     * Accept negotiation cannot select a removed JSON or legacy text format.
+     * Accept negotiation does not select another metrics representation.
      * Access is restricted to localhost (127.0.0.1, ::1) by default for security.
      * Default: off
      * Context: location only

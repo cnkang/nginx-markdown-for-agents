@@ -1,4 +1,4 @@
-//! Public FFI export functions callable from C.
+//! Exported bundled/internal C ABI functions callable by the NGINX module.
 //!
 //! This module contains the `#[unsafe(no_mangle)] extern "C"` functions that
 //! form the public C API of the conversion library.
@@ -31,9 +31,9 @@
 //! (`markdown_decompress_bounded`, `markdown_decompress_free`,
 //! `markdown_decomp_result_init`), conflict detection/release
 //! option/result init helpers (`markdown_options_init`), and
-//! error classification (`markdown_classify_error_code`).  Incremental
-//! and streaming FFI exports live in `ffi/incremental.rs` and
-//! `ffi/streaming.rs`.  The table below lists the primary entry points;
+//! error classification (`markdown_classify_error_code`).  Streaming FFI
+//! exports live in `ffi/streaming.rs`.  The table below lists the primary
+//! entry points;
 //! see the per-function documentation for the complete list.
 //!
 //! | Function | Purpose |
@@ -228,7 +228,7 @@ pub unsafe extern "C" fn markdown_convert(
 ///
 /// The caller must ensure that `result` either is NULL or points to a valid
 /// `MarkdownResult` previously initialized by `markdown_convert()`,
-/// `markdown_incremental_finalize()`, or `markdown_streaming_finalize()`.
+/// or `markdown_streaming_finalize()`.
 /// Passing the same result twice is allowed because the function resets
 /// pointers to NULL.
 #[unsafe(no_mangle)]
@@ -419,7 +419,7 @@ pub unsafe extern "C" fn markdown_decide_eligibility(input: *const FFIEligibilit
     outcome.unwrap_or_else(|_| Eligibility::IneligibleConfig.ffi_code())
 }
 
-/// Decide the conditional-request outcome (spec 49): cache-validation mode,
+/// Decide the conditional-request outcome: cache-validation mode,
 /// `If-None-Match` over `If-Modified-Since` precedence, and `Range` /
 /// `no-transform` bypass.
 ///
@@ -640,7 +640,7 @@ fn reset_header_plan_to_empty(plan: &mut FFIHeaderPlan) {
     plan.count = 0;
 }
 
-/// Allocate a new, empty trusted-proxy CIDR set (spec 47).
+/// Allocate a new, empty trusted-proxy CIDR set.
 ///
 /// The handle accumulates config-time-validated CIDRs via
 /// `markdown_trusted_proxies_push` and is consumed at request time by
@@ -716,7 +716,7 @@ pub unsafe extern "C" fn markdown_trusted_proxies_free(handle: *mut MarkdownTrus
     }));
 }
 
-/// Decide the trusted base URL for a request (spec 47 small API).
+/// Decide the trusted base URL for a request (small API).
 ///
 /// Marshals the borrowed request/config fields into the pure
 /// [`decide_base_url`] decision, writes the chosen base URL into the
@@ -1548,7 +1548,7 @@ pub unsafe extern "C" fn markdown_chain_decode_free(result: *mut FFIChainDecodeR
     }));
 }
 
-// ─── Error Classification FFI (spec 51) ──────────────────────────────────────
+// ─── Error Classification FFI ──────────────────────────────────────
 
 use crate::error::classification::classify_error_code;
 
@@ -1724,7 +1724,7 @@ mod tests {
         unsafe { markdown_header_plan_free(&mut plan) };
     }
 
-    /* ---- spec 47: trusted proxies + decide_base_url FFI ---- */
+    /* ---- trusted proxies + decide_base_url FFI ---- */
 
     fn push_cidr(handle: *mut MarkdownTrustedProxies, cidr: &str) -> u8 {
         unsafe { markdown_trusted_proxies_push(handle, cidr.as_ptr(), cidr.len()) }
@@ -2447,7 +2447,7 @@ mod tests {
         assert_eq!(rc, 8, "disabled filter should be IneligibleConfig");
     }
 
-    /* ---- markdown_decide_conditional (spec 49) ---- */
+    /* ---- markdown_decide_conditional  ---- */
 
     fn empty_conditional_input() -> FFIConditionalInput {
         FFIConditionalInput {

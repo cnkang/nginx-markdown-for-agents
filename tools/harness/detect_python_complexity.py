@@ -132,7 +132,7 @@ class _CognitiveComplexityCalculator:
     def _visit_loop(
         self, statement: ast.For | ast.AsyncFor | ast.While, nesting: int,
     ) -> None:
-        test = statement.test if isinstance(statement, ast.While) else statement
+        test = statement.test if isinstance(statement, ast.While) else statement.iter
         self._add_decision(test, nesting)
         self._visit_statements(statement.body, nesting + 1)
         self._visit_statements(statement.orelse, nesting + 1)

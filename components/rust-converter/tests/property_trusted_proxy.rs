@@ -26,7 +26,7 @@ fn cidrs(list: &[&str]) -> Vec<Cidr> {
     list.iter().map(|s| parse_cidr(s).unwrap()).collect()
 }
 
-fn trusted_input<'a>(source_ip: &'a str) -> BaseUrlInput<'a> {
+fn trusted_input(source_ip: &str) -> BaseUrlInput<'_> {
     BaseUrlInput {
         source_ip,
         is_unix_socket: false,
@@ -66,7 +66,7 @@ fn addr_strategy() -> impl Strategy<Value = String> {
  * address from the right, and metadata comes from that same index. */
 proptest! {
     #[test]
-    fn p24_xff_chain_strip_selects_same_index_metadata(
+    fn xff_chain_strip_selects_same_index_metadata(
         client in prop_oneof![
             Just("198.51.100.7".to_string()),
             Just("203.0.113.9".to_string()),
@@ -97,9 +97,13 @@ proptest! {
 proptest! {
     /// Property: mismatched list lengths always discard the forwarded set.
     #[test]
-    fn p24_mismatched_lengths_always_discard(
+    fn mismatched_xff_lengths_always_discard(
         client in addr_strategy(),
-        trusted_hop in addr_strategy(),
+        trusted_hop in prop_oneof![
+            Just("198.51.100.8".to_string()),
+            Just("203.0.113.10".to_string()),
+            Just("2001:db8::8".to_string()),
+        ],
         host in hostname_strategy(),
     ) {
         let t = cidrs(&["10.0.0.0/8"]);
@@ -120,7 +124,7 @@ proptest! {
 proptest! {
     /// Property: without X-Forwarded-For, no X-Forwarded metadata is used.
     #[test]
-    fn p24_no_xff_ignores_xforwarded_metadata(host in hostname_strategy()) {
+    fn no_xff_ignores_forwarded_metadata(host in hostname_strategy()) {
         let t = cidrs(&["10.0.0.0/8"]);
         let source_ip = "10.1.2.3".to_string();
         let mut input = trusted_input(&source_ip);

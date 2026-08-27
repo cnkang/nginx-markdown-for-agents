@@ -114,6 +114,16 @@
           "type": "string",
           "enum": ["full", "supported", "experimental", "best-effort", "source_only", "deprecated", "archived"],
           "description": "Support tier consumed by completeness_check and normalize_matrix (for example \"full\" rows must have complete artifact sets). Optional: not every row carries it."
+        },
+        "image_ref": {
+          "type": "string",
+          "pattern": "^[^@\\s]+@?[^\\s]*$",
+          "description": "Immutable or tag-qualified container image reference. Blocking Docker rows must resolve it with image_digest."
+        },
+        "image_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Content digest bound to the image_ref for release-blocking Docker validation."
         }
       }
     },
@@ -196,6 +206,15 @@
           "type": "string",
           "enum": ["full", "supported", "experimental", "best-effort", "source_only", "deprecated", "archived"],
           "description": "Support tier, matching the entry definition. Optional: legacy rows may carry it so normalization preserves it."
+        },
+        "image_ref": {
+          "type": "string",
+          "description": "Container image reference preserved during legacy normalization."
+        },
+        "image_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Container image digest preserved during legacy normalization."
         }
       }
     }

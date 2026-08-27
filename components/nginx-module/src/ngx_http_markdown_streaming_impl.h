@@ -32,7 +32,6 @@ static ngx_int_t
 ngx_http_markdown_next_header_filter_with_auth(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
 {
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     ngx_flag_t  auth_cache_control_required;
     ngx_int_t   rc;
 
@@ -49,10 +48,6 @@ ngx_http_markdown_next_header_filter_with_auth(
             return rc;
         }
     }
-#else
-    (void) conf;
-#endif
-
     return ngx_http_next_header_filter(r);
 }
 
@@ -731,8 +726,8 @@ ngx_http_markdown_select_processing_path(
                (u_char *) "text/event-stream", /* NOSONAR: ngx_strncasecmp API takes non-const u_char* */
                17) == 0)
     {
-        ngx_http_markdown_log_decision(r, conf, eff,
-            ngx_http_markdown_reason_streaming_skip_unsupported());
+        ngx_http_markdown_log_event(
+            r, conf, eff, "eligibility", "streaming_skip_unsupported");
         return ngx_http_markdown_path_selection(
             NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
             NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE);
@@ -745,8 +740,8 @@ ngx_http_markdown_select_processing_path(
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.selection.excluded_content_type_total);
-        ngx_http_markdown_log_decision(r, conf, eff,
-            ngx_http_markdown_reason_streaming_skip_unsupported());
+        ngx_http_markdown_log_event(
+            r, conf, eff, "eligibility", "streaming_skip_unsupported");
         return ngx_http_markdown_path_selection(
             NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
             NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE);
@@ -766,16 +761,16 @@ ngx_http_markdown_select_processing_path(
            < NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT)
     {
         /* CL < 1 MiB fixed threshold: use full-buffer */
-        ngx_http_markdown_log_decision(r, conf, eff,
-            ngx_http_markdown_reason_eligible_fullbuffer_auto());
+        ngx_http_markdown_log_event(
+            r, conf, eff, "eligibility", "streaming_auto_fullbuffer");
         return ngx_http_markdown_path_selection(
             NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
             NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD);
     }
 
     /* auto + CL >= NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT or chunked (no CL) */
-    ngx_http_markdown_log_decision(r, conf, eff,
-        ngx_http_markdown_reason_eligible_streaming_auto());
+    ngx_http_markdown_log_event(
+        r, conf, eff, "eligibility", "streaming_auto_streaming");
     return ngx_http_markdown_path_selection(
         NGX_HTTP_MARKDOWN_PATH_STREAMING,
         NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE);
@@ -1069,7 +1064,7 @@ ngx_http_markdown_streaming_check_pending_budget(
  * classifying every failure as ERROR_BUDGET_EXCEEDED.  Current values:
  *   ERROR_BUDGET_EXCEEDED — cumulative input exceeds the configured
  *                          body buffer limit, or preflight detected a
- *                          size_t/ngx_uint_t overflow (P2).
+ *                          size_t/ngx_uint_t overflow.
  *   ERROR_MEMORY_LIMIT    — pool allocation failure (ngx_alloc_chain_link).
  */
 static ngx_int_t
@@ -1529,13 +1524,12 @@ ngx_http_markdown_streaming_record_postcommit_outcome(
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-        "markdown: streaming post-commit failure: "
-        "engine=streaming phase=postcommit "
-        "committed=1 fallback_available=0 "
-        "reason=%s content_type=%V "
-        "content_length_known=%d chunked=%d "
+        "markdown: outcome=%s stage=postcommit "
+        "reason=%V event=streaming_postcommit_failure "
+        "engine=streaming committed=1 fallback_available=0 "
+        "content_type=%V content_length_known=%d chunked=%d "
         "error_policy=%s",
-        ngx_http_markdown_stream_reason_str(ctx->streaming.reason),
+        conversion_status, decision_reason,
         &r->headers_out.content_type,
         (r->headers_out.content_length_n >= 0) ? 1 : 0,
         (r->headers_out.content_length_n < 0) ? 1 : 0,
@@ -1583,7 +1577,7 @@ ngx_http_markdown_streaming_record_postcommit_aborted(
     const ngx_http_markdown_conf_t *conf)
 {
     ngx_http_markdown_streaming_record_postcommit_outcome(
-        r, ctx, conf, ngx_http_markdown_reason_streaming_fail_postcommit(),
+        r, ctx, conf, ngx_http_markdown_reason_streaming_mid_flight_err(),
         "aborted", "streaming_mid_flight_error");
 }
 
@@ -1603,12 +1597,12 @@ ngx_http_markdown_streaming_record_postcommit_success(
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
     NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
 
-    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-        ngx_http_markdown_reason_streaming_convert());
+    ngx_http_markdown_log_decision_event(
+        r, conf, ctx->effective_conf,
+        ngx_http_markdown_reason_converted(), "streaming_convert");
     ngx_http_markdown_log_streaming_terminal_decision(
         r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_SUCCESS,
         "converted", "postcommit");
-    ngx_http_markdown_record_per_path_metrics(r, conf, 0);
     ctx->error.terminal_decision_recorded = 1;
 }
 
@@ -2044,16 +2038,15 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
     NGX_HTTP_MARKDOWN_METRIC_INC(
         streaming.streaming_fallback_precommit_pass);
 
-    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-        ngx_http_markdown_reason_streaming_fallback());
+    ngx_http_markdown_log_event(
+        r, conf, ctx->effective_conf, "precommit",
+        "streaming_fallback_prebuffer");
 
     ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
-        "markdown: streaming fallback: "
-        "engine=full_buffer phase=precommit "
-        "committed=0 fallback_available=1 "
-        "reason=precommit_html_error "
-        "content_type=%V "
-        "content_length_known=%d "
+        "markdown: outcome=- stage=precommit reason=conversion_error "
+        "event=streaming_fallback_prebuffer "
+        "engine=full_buffer committed=0 fallback_available=1 "
+        "content_type=%V content_length_known=%d "
         "error_policy=pass",
         &r->headers_out.content_type,
         (r->headers_out.content_length_n >= 0) ? 1 : 0);
@@ -2226,8 +2219,11 @@ ngx_http_markdown_streaming_record_postcommit_category_metrics(
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
-        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_streaming_budget_exceeded());
+        ngx_http_markdown_log_decision_event(
+            r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_from_error_category(
+                NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL),
+            "streaming_budget_exceeded");
     } else if (!ctx->streaming.completion.failure_recorded
                && error_code == ERROR_INTERNAL)
     {
@@ -2305,6 +2301,31 @@ ngx_http_markdown_streaming_precommit_reason(
     return NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR;
 }
 
+static const ngx_str_t *
+ngx_http_markdown_streaming_error_reason(uint32_t error_code)
+{
+    if (error_code == ERROR_PARSE_TIMEOUT) {
+        return ngx_http_markdown_reason_timeout();
+    }
+
+    if (error_code == ERROR_MEMORY_LIMIT
+        || error_code == ERROR_BUDGET_EXCEEDED
+        || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+        || error_code == ERROR_PARSE_BUDGET_EXCEEDED)
+    {
+        return ngx_http_markdown_reason_from_error_category(
+            NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL);
+    }
+
+    if (error_code == ERROR_INTERNAL) {
+        return ngx_http_markdown_reason_from_error_category(
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
+    }
+
+    return ngx_http_markdown_reason_from_error_category(
+        NGX_HTTP_MARKDOWN_ERROR_CONVERSION, NULL);
+}
+
 /*
  * Pre-Commit error handler: apply error_policy for streaming.
  *
@@ -2339,6 +2360,7 @@ ngx_http_markdown_streaming_precommit_error(
     uint32_t error_code)
 {
     ngx_http_markdown_stream_reason_e  mapped_reason;
+    const ngx_str_t                   *canonical_reason;
 
     if (ctx->streaming.handle != NULL) {
         markdown_streaming_abort(ctx->streaming.handle);
@@ -2356,6 +2378,8 @@ ngx_http_markdown_streaming_precommit_error(
 
     mapped_reason = ngx_http_markdown_streaming_precommit_reason(
         ctx, error_code);
+    canonical_reason = ngx_http_markdown_streaming_error_reason(
+        error_code);
 
     if (error_code == ERROR_MEMORY_LIMIT
         || error_code == ERROR_BUDGET_EXCEEDED
@@ -2377,7 +2401,7 @@ ngx_http_markdown_streaming_precommit_error(
      * Covers both Rust FFI budget exceeded (ERROR_BUDGET_EXCEEDED = 6,
      * from markdown_streaming_feed/finalize) and C-side size-limit
      * overflow (ERROR_MEMORY_LIMIT = 4, from cumulative input checks),
-     * as well as v0.7.0 resource-limit codes:
+     * as well as the decompression and parser resource-limit codes:
      *   ERROR_DECOMPRESSION_BUDGET_EXCEEDED (9),
      *   ERROR_PARSE_TIMEOUT (10),
      *   ERROR_PARSE_BUDGET_EXCEEDED (11).
@@ -2392,8 +2416,11 @@ ngx_http_markdown_streaming_precommit_error(
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.budget_exceeded_total);
-        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_streaming_budget_exceeded());
+        ngx_http_markdown_log_decision_event(
+            r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_from_error_category(
+                NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL),
+            "streaming_budget_exceeded");
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
             "markdown: budget exceeded "
@@ -2442,20 +2469,19 @@ ngx_http_markdown_streaming_precommit_error(
             streaming.precommit_reject_total);
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.streaming_fallback_precommit_reject);
-        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_streaming_precommit_reject());
+        ngx_http_markdown_log_decision_event(
+            r, conf, ctx->effective_conf, canonical_reason,
+            "streaming_precommit_reject");
         ngx_http_markdown_log_streaming_terminal_decision(
             r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_FAILED,
             "failed_closed", "precommit");
         ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
-            "markdown: streaming fallback: "
-            "engine=rejected phase=precommit "
-            "committed=0 fallback_available=0 "
-            "reason=%s content_type=%V "
-            "content_length_known=%d "
+            "markdown: outcome=failed_closed stage=precommit "
+            "reason=%V event=streaming_precommit_reject "
+            "engine=rejected committed=0 fallback_available=0 "
+            "content_type=%V content_length_known=%d "
             "error_policy=fail_closed",
-            ngx_http_markdown_stream_reason_str(
-                ctx->streaming.reason),
+            canonical_reason,
             &r->headers_out.content_type,
             (r->headers_out.content_length_n >= 0) ? 1 : 0);
         /*
@@ -2488,20 +2514,20 @@ ngx_http_markdown_streaming_precommit_error(
         streaming.precommit_failopen_total);
     NGX_HTTP_MARKDOWN_METRIC_INC(
         streaming.streaming_fallback_precommit_pass);
-    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-        ngx_http_markdown_reason_streaming_precommit_failopen());
+    ngx_http_markdown_log_decision_event(
+        r, conf, ctx->effective_conf,
+        ngx_http_markdown_reason_failed_open(),
+        "streaming_precommit_failopen");
     ngx_http_markdown_log_streaming_terminal_decision(
         r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_FAILED,
         "failed_open", "precommit");
     ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
-        "markdown: streaming fallback: "
-        "engine=passthrough phase=precommit "
-        "committed=0 fallback_available=1 "
-        "reason=%s content_type=%V "
-        "content_length_known=%d "
+        "markdown: outcome=failed_open stage=precommit "
+        "reason=%V event=streaming_precommit_failopen "
+        "engine=passthrough committed=0 fallback_available=1 "
+        "content_type=%V content_length_known=%d "
         "error_policy=pass",
-        ngx_http_markdown_stream_reason_str(
-            ctx->streaming.reason),
+        canonical_reason,
         &r->headers_out.content_type,
         (r->headers_out.content_length_n >= 0) ? 1 : 0);
     return NGX_DECLINED;
@@ -2543,7 +2569,11 @@ ngx_http_markdown_streaming_commit(
             r, ctx, conf, ERROR_STREAMING_FALLBACK);
     }
 
-    rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
+    /* stream_commit_headers() already applied the authenticated-response
+     * Cache-Control policy as part of its transactional header update.
+     * Forward the committed representation through the downstream header
+     * chain without invoking that policy a second time. */
+    rc = ngx_http_next_header_filter(r);
     if (rc == NGX_AGAIN) {
         /*
          * Canonical NGINX model: header-chain NGX_AGAIN means the write
@@ -2700,8 +2730,11 @@ ngx_http_markdown_streaming_handle_output_loss(
             NGX_HTTP_MARKDOWN_METRIC_INC(
                 streaming.budget_exceeded_total);
             NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
-            ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-                ngx_http_markdown_reason_streaming_budget_exceeded());
+            ngx_http_markdown_log_decision_event(
+                r, conf, ctx->effective_conf,
+                ngx_http_markdown_reason_from_error_category(
+                    NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL),
+                "streaming_budget_exceeded");
             break;
 
         case NGX_HTTP_MD_SEND_ORIGIN_DOWNSTREAM:
@@ -4596,8 +4629,10 @@ ngx_http_markdown_streaming_abort_failopen_after_pending(
         "(error_code=%ui); aborting without a clean terminal",
         (ngx_uint_t) error_code);
     (void) error_code;
-    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-        ngx_http_markdown_reason_streaming_fail_postcommit());
+    ngx_http_markdown_log_decision_event(
+        r, conf, ctx->effective_conf,
+        ngx_http_markdown_reason_streaming_mid_flight_err(),
+        "streaming_fail_postcommit");
     ngx_http_markdown_log_streaming_terminal_decision(
         r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_FAILED,
         "streaming_mid_flight_error", "postcommit");
@@ -4779,7 +4814,7 @@ ngx_http_markdown_streaming_handle_null_input(
         return rc;
     }
     /*
-     * P2 fix: NGX_DONE means delivery succeeded.  Both NGX_OK and
+     * NGX_DONE means delivery succeeded.  Both NGX_OK and
      * NGX_DONE must continue to process pending_input and deferred
      * finalize.  The old code (if rc != NGX_OK return rc) trapped
      * NGX_DONE, skipping deferred finalize.
@@ -4853,7 +4888,7 @@ ngx_http_markdown_streaming_handle_null_input(
     }
 
     /*
-     * Step 5: Legacy finalize_after_pending path.
+     * Step 5: Deferred finalize-after-pending path.
      *
      * This is set by finalize_request itself (finalize_decomp
      * NGX_AGAIN), not by process_chain.  When the finalize

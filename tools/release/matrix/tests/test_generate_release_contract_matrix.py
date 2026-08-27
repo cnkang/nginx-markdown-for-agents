@@ -19,27 +19,29 @@ def policy_matrix() -> dict:
         ("macos", "darwin", "arm64", "homebrew-formula"),
         ("any", "n/a", "any", "source"),
     ):
-        rows.append(
-            {
-                "nginx_version": "1.26.3",
-                "nginx_channel": "stable",
-                "os": os_name,
-                "libc": libc,
-                "arch": arch,
-                "artifact_type": artifact_type,
-                "test_level": "smoke-test",
-                "support_tier": "supported",
-                "release_blocking": True,
-                "owner_workflow": ".github/workflows/release-packages.yml",
-                "feature_manifest_digest": "sha256:" + "a" * 64,
-                "abi_version": 2,
-            }
-        )
+        row = {
+            "nginx_version": "1.26.3",
+            "nginx_channel": "stable",
+            "os": os_name,
+            "libc": libc,
+            "arch": arch,
+            "artifact_type": artifact_type,
+            "test_level": "smoke-test",
+            "support_tier": "supported",
+            "release_blocking": True,
+            "owner_workflow": ".github/workflows/release-packages.yml",
+            "feature_manifest_digest": "sha256:" + "a" * 64,
+            "abi_version": 2,
+        }
+        if artifact_type == "docker-image":
+            row["image_ref"] = "nginx:1.26.3-alpine"
+            row["image_digest"] = "sha256:" + "b" * 64
+        rows.append(row)
     return {"schema_version": "1.0", "entries": rows}
 
 
 def test_build_projection_records_source_and_converts_targets() -> None:
-    """The projection records the source digest and target conversion."""
+    """Verify that the projection records source metadata, converts targets, and preserves Docker image metadata."""
     source = policy_matrix()
     result = projection.build_projection(source)
 
@@ -56,6 +58,11 @@ def test_build_projection_records_source_and_converts_targets() -> None:
     ]
     assert result["entries"][2]["os"] == "linux"
     assert result["entries"][2]["libc"] == "any"
+    docker_entry = next(
+        entry for entry in result["entries"] if entry["artifact_type"] == "docker-image"
+    )
+    assert docker_entry["image_ref"] == "nginx:1.26.3-alpine"
+    assert docker_entry["image_digest"] == "sha256:" + "b" * 64
 
 
 def test_write_then_check_uses_deterministic_projection(
@@ -76,6 +83,7 @@ def test_write_then_check_uses_deterministic_projection(
     monkeypatch.setattr(projection, "PROJECTION_PATH", output_path)
 
     assert projection.main(["--write"]) == 0
+    assert output_path.stat().st_mode & 0o777 == 0o644
     assert projection.main(["--check"]) == 0
 
 

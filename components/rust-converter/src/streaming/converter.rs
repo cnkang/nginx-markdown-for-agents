@@ -94,21 +94,9 @@ pub struct StreamingConverter {
     commit_state: CommitState,
     /// Cooperative timeout deadline.
     deadline: Option<Instant>,
-    /// Cooperative parser-phase deadline (html5ever tokenization).
+    /// Cooperative parser-phase work allowance for html5ever tokenization.
     ///
-    /// Distinct from `deadline` (the overall conversion timeout): the
-    /// parser deadline bounds only the tokenizer phase, matching the
-    /// full-buffer path where `parse_timeout` limits parsing while
-    /// `conversion_timeout` bounds the whole pipeline.
-    ///
-    /// The deadline is evaluated against ACCUMULATED TOKENIZER WORK, not
-    /// total wall-clock time: each bounded html5ever slice's measured
-    /// duration is added to `parser_work_elapsed`, and the deadline fires
-    /// when that accumulation crosses the configured parse_timeout.  This
-    /// keeps an upstream that trickles chunks over a long period from
-    /// consuming the parser budget while it sits idle between feeds.
-    parser_deadline: Option<Instant>,
-    /// Configured parser-phase allowance (the parse_timeout duration).
+    /// This is distinct from `deadline`, which bounds the overall conversion.
     parser_work_allowance: Duration,
     /// Accumulated html5ever tokenization work (measured per bounded
     /// slice).  Compared against the parse_timeout duration.
@@ -137,6 +125,10 @@ pub struct StreamingConverter {
     /// Matches full-buffer `find_link_href_recursive` which skips canonicals
     /// without `href` and returns the first one that has it.
     canonical_found: bool,
+    /// Sanitized canonical URL kept separate until final URL precedence is
+    /// resolved, so a later `og:url` can retain the full-buffer first-wins
+    /// behavior regardless of tag order.
+    canonical_url: Option<String>,
     /// Bytes of `<head>` region processed so far (for lookahead budget enforcement).
     /// When this exceeds `budget.lookahead`, front matter extraction triggers
     /// an explicit fallback on budget exhaustion.
@@ -255,7 +247,6 @@ impl StreamingConverter {
             chars_per_token: clamp_chars_per_token(chars_per_token),
             commit_state: CommitState::PreCommit,
             deadline: None,
-            parser_deadline: None,
             parser_work_allowance: Duration::ZERO,
             parser_work_elapsed: Duration::ZERO,
             stats: StreamingStats::default(),
@@ -266,6 +257,7 @@ impl StreamingConverter {
             social_title_set: false,
             html_title_set: false,
             canonical_found: false,
+            canonical_url: None,
             head_bytes_seen: 0,
             utf8_tail: Vec::new(),
             parser_budget: 0,
@@ -321,29 +313,20 @@ impl StreamingConverter {
         self.deadline = Instant::now().checked_add(timeout);
     }
 
-    /// Set a cooperative parser-phase deadline.
+    /// Set a cooperative parser-phase work allowance.
     ///
     /// Bounds only the html5ever tokenization phase with `parse_timeout`,
-    /// distinct from the overall conversion `deadline`.  The converter
-    /// checks this deadline at the start of each tokenizer slice in
-    /// `feed_chunk` and at `finalize`; if the deadline has passed those
-    /// calls return [`ConversionError::ParseTimeout`]. An overflow of
-    /// `Instant::now() + timeout` leaves the deadline unset (no limit),
-    /// matching `set_timeout`.
+    /// distinct from the overall conversion `deadline`. The converter
+    /// checks this allowance at the start of each tokenizer slice in
+    /// `feed_chunk` and at `finalize`; if the allowance is exhausted those
+    /// calls return [`ConversionError::ParseTimeout`]. Idle time between
+    /// chunks is not charged to this allowance.
     pub fn set_parser_timeout(&mut self, timeout: Duration) {
-        // `Duration::ZERO` disables the parse-phase sub-deadline, matching
-        // `set_timeout`'s zero-means-unconfigured convention.  Storing a
-        // deadline with a zero allowance would make the first
-        // check_parser_timeout call report ParseTimeout for work that has
-        // not happened yet.
-        self.parser_deadline = if timeout.is_zero() {
-            None
-        } else {
-            Instant::now().checked_add(timeout)
-        };
+        // `Duration::ZERO` disables the parse-phase allowance, matching
+        // `set_timeout`'s zero-means-unconfigured convention. Storing a
+        // zero allowance makes `check_parser_timeout` skip parser checks.
         self.parser_work_allowance = timeout;
-        // The deadline is interpreted against accumulated tokenizer work;
-        // a fresh configuration restarts the measurement window.
+        // A fresh configuration restarts the measured parser-work window.
         self.parser_work_elapsed = Duration::ZERO;
     }
 
@@ -643,16 +626,14 @@ impl StreamingConverter {
         // Update incremental stats with final markdown
         self.update_incremental_stats(&final_markdown);
 
-        // 6b. Finalize metadata URL: match MetadataExtractor::extract
-        // which unconditionally overwrites metadata.url after meta tag
-        // extraction — canonical if found, else base_url (which may be None).
-        // This means og:url is always overwritten in the final result.
+        // 6b. Finalize metadata URL: preserve metadata already extracted from
+        // the document, and use canonical/base_url only when it is absent.
         if self.options.extract_metadata {
-            self.metadata.url = Self::resolve_final_url(
-                self.canonical_found,
-                &self.metadata.url,
-                &self.options.base_url,
-            );
+            let final_url = {
+                let (canonical_found, current_url) = self.final_url_inputs();
+                Self::resolve_final_url(canonical_found, current_url, &self.options.base_url)
+            };
+            self.metadata.url = final_url;
         }
 
         // 7. Compute final ETag
@@ -746,8 +727,8 @@ impl StreamingConverter {
         let mut offset = 0usize;
         while offset < input.len() {
             // Charge the full conservative tokenizer envelope before the next
-            // bounded slice is handed to html5ever.  The parser deadline is
-            // evaluated against ACCUMULATED tokenizer work (measured below),
+            // bounded slice is handed to html5ever. The parser allowance is
+            // evaluated against accumulated tokenizer work (measured below),
             // not wall-clock since request start: upstream stalls between
             // chunks must not consume the parse budget.
             self.check_parser_timeout()?;
@@ -1102,7 +1083,7 @@ impl StreamingConverter {
         Ok(())
     }
 
-    /// Checks whether the converter's parser-phase deadline has expired.
+    /// Checks whether the converter's parser-phase work allowance is exhausted.
     ///
     /// Bounds only the html5ever tokenization phase (`parse_timeout`),
     /// distinct from the overall conversion `deadline`.  Called at the
@@ -1110,7 +1091,7 @@ impl StreamingConverter {
     /// [`ConversionError::ParseTimeout`] with post-commit wrapping when
     /// headers are already committed.
     fn check_parser_timeout(&self) -> Result<(), ConversionError> {
-        if self.parser_deadline.is_some() {
+        if !self.parser_work_allowance.is_zero() {
             // Bound html5ever TOKENIZER WORK, not wall-clock time: the
             // configured duration is the work allowance, measured as the
             // accumulated duration of bounded tokenizer slices.
@@ -1259,6 +1240,7 @@ impl StreamingConverter {
             .saturating_add(self.charset_state.resident_bytes())
             .saturating_add(self.charset_transcoded_bytes)
             .saturating_add(self.utf8_tail.capacity())
+            .saturating_add(self.canonical_url.as_ref().map_or(0, String::capacity))
             .saturating_add(
                 self.charset_preflight_error
                     .as_ref()
@@ -1301,7 +1283,7 @@ impl StreamingConverter {
         });
         if is_canonical && let Some((_, href)) = attrs.iter().find(|(key, _)| key == "href") {
             self.canonical_found = true;
-            self.metadata.url = self.resolve_and_sanitize_metadata_url(href);
+            self.canonical_url = self.resolve_and_sanitize_metadata_url(href);
         }
     }
 
@@ -1474,6 +1456,14 @@ impl StreamingConverter {
         Self::sanitize_metadata_url(&resolved)
     }
 
+    fn final_url_inputs(&self) -> (bool, &Option<String>) {
+        if self.metadata.url.is_some() {
+            (false, &self.metadata.url)
+        } else {
+            (self.canonical_found, &self.canonical_url)
+        }
+    }
+
     /// Resolve a possibly-relative URL against the converter's configured base URL.
     ///
     /// If relative resolution is disabled, the input is empty, the input is
@@ -1566,12 +1556,12 @@ impl StreamingConverter {
             && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '+' || ch == '-' || ch == '.')
     }
 
-    /// Selects the final metadata URL, preferring a discovered canonical over the base URL.
+    /// Selects the final metadata URL, preserving document metadata before
+    /// falling back to the configured base URL.
     ///
-    /// If `canonical_found` is `true`, returns the re-sanitized canonical URL,
-    /// or `None` if it fails validation. If `canonical_found` is `false`,
-    /// returns `base_url.clone()`, which may be `None` to clear any previously
-    /// observed `og:url`.
+    /// A canonical URL, or an `og:url`, is retained when present. A configured
+    /// base URL is used only when no document URL was extracted and no
+    /// canonical link was found.
     ///
     /// # Examples
     ///
@@ -1581,17 +1571,17 @@ impl StreamingConverter {
     /// assert_eq!(resolve_final_url(true, &canonical, &base), canonical);
     ///
     /// let og = Some("https://example.com/og".to_string());
-    /// assert_eq!(resolve_final_url(false, &og, &base), base);
+    /// assert_eq!(resolve_final_url(false, &og, &base), og);
     ///
-    /// // base_url `None` clears prior og:url when no canonical was found
-    /// assert_eq!(resolve_final_url(false, &og, &None), None);
+    /// // A base URL is used only when no document URL was found.
+    /// assert_eq!(resolve_final_url(false, &None, &base), base);
     /// ```
     fn resolve_final_url(
         canonical_found: bool,
         current_url: &Option<String>,
         base_url: &Option<String>,
     ) -> Option<String> {
-        if canonical_found {
+        if canonical_found || current_url.is_some() {
             current_url.as_deref().and_then(Self::sanitize_metadata_url)
         } else {
             base_url.as_deref().and_then(Self::sanitize_metadata_url)
@@ -1648,7 +1638,7 @@ impl StreamingConverter {
 
     /// Preview the final metadata URL that `finalize` would produce without consuming the converter.
     ///
-    /// If metadata extraction is disabled, returns `None`. Otherwise returns the resolved URL after applying canonical-vs-base_url convergence rules used by `finalize`.
+    /// If metadata extraction is disabled, returns `None`. Otherwise returns the resolved URL after applying the same document-first fallback rules used by `finalize`.
     ///
     /// # Examples
     ///
@@ -1662,11 +1652,8 @@ impl StreamingConverter {
         if !self.options.extract_metadata {
             return None;
         }
-        Self::resolve_final_url(
-            self.canonical_found,
-            &self.metadata.url,
-            &self.options.base_url,
-        )
+        let (canonical_found, current_url) = self.final_url_inputs();
+        Self::resolve_final_url(canonical_found, current_url, &self.options.base_url)
     }
 
     /// Evaluate whether the document qualifies for fast-path processing.
@@ -1922,7 +1909,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_final_url_no_canonical_uses_base() {
+    fn test_resolve_final_url_no_canonical_preserves_og_url() {
         let result = StreamingConverter::resolve_final_url(
             false,
             &Some("https://og.example.com".to_string()), // og:url still in current_url
@@ -1930,22 +1917,19 @@ mod tests {
         );
         assert_eq!(
             result.as_deref(),
-            Some("https://base.example.com"),
-            "base_url should overwrite og:url when no canonical found"
+            Some("https://og.example.com"),
+            "document metadata should win over base_url"
         );
     }
 
     #[test]
-    fn test_resolve_final_url_no_canonical_no_base_clears() {
+    fn test_resolve_final_url_no_canonical_no_base_preserves_og_url() {
         let result = StreamingConverter::resolve_final_url(
             false,
             &Some("https://og.example.com".to_string()),
             &None,
         );
-        assert_eq!(
-            result, None,
-            "no canonical + no base_url should clear og:url"
-        );
+        assert_eq!(result.as_deref(), Some("https://og.example.com"));
     }
 
     #[test]
@@ -1968,7 +1952,7 @@ mod tests {
     fn test_resolve_final_url_rejects_dangerous_base_url() {
         let result = StreamingConverter::resolve_final_url(
             false,
-            &Some("https://og.example.com".to_string()),
+            &None,
             &Some("javascript:alert(1)".to_string()),
         );
         assert_eq!(result, None);
@@ -2469,14 +2453,11 @@ mod tests {
     #[test]
     fn test_parser_timeout_precommit() {
         let mut conv = make_converter();
-        // A zero-duration parser deadline is already expired: the
-        // tokenizer slice must report ParseTimeout, distinct from the
-        // overall conversion Timeout.
-        conv.parser_deadline = Some(
-            Instant::now()
-                .checked_sub(Duration::from_secs(1))
-                .unwrap_or_else(Instant::now),
-        );
+        // A consumed parser allowance is already expired: the tokenizer
+        // slice must report ParseTimeout, distinct from the overall
+        // conversion Timeout.
+        conv.set_parser_timeout(Duration::from_secs(1));
+        conv.parser_work_elapsed = Duration::from_secs(1);
         let result = conv.feed_chunk(b"<p>test</p>");
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), 10); // ParseTimeout
@@ -2485,18 +2466,15 @@ mod tests {
     #[test]
     fn test_parser_timeout_postcommit() {
         let mut conv = make_converter();
-        // Transition to PostCommit with output, then expire the parser
-        // deadline: the error must surface as PostCommitError (8) with
+        // Transition to PostCommit with output, then exhaust the parser
+        // allowance: the error must surface as PostCommitError (8) with
         // the parse-timeout original code, not a bare ParseTimeout.
         let output = conv.feed_chunk(b"<h1>Title</h1>").unwrap();
         assert!(!output.markdown.is_empty() || matches!(conv.commit_state, CommitState::PreCommit));
         conv.commit_state = CommitState::PostCommit;
         conv.bytes_emitted = 10;
-        conv.parser_deadline = Some(
-            Instant::now()
-                .checked_sub(Duration::from_secs(1))
-                .unwrap_or_else(Instant::now),
-        );
+        conv.set_parser_timeout(Duration::from_secs(1));
+        conv.parser_work_elapsed = Duration::from_secs(1);
         let result = conv.feed_chunk(b"<p>more</p>");
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), 8); // PostCommitError wrapping ParseTimeout
@@ -2504,25 +2482,21 @@ mod tests {
 
     #[test]
     fn test_parser_timeout_zero_disabled() {
-        // No parser deadline set: feed succeeds normally.
+        // No parser allowance set: feed succeeds normally.
         let mut conv = make_converter();
         let result = conv.feed_chunk(b"<p>ok</p>");
-        assert!(result.is_ok(), "no parser deadline must not time out");
+        assert!(result.is_ok(), "no parser allowance must not time out");
     }
 
     #[test]
-    fn test_set_parser_timeout_zero_disables_deadline() {
+    fn test_set_parser_timeout_zero_disables_allowance() {
         // set_parser_timeout(ZERO) follows the zero-means-unconfigured
-        // convention: the deadline must be cleared so the very next
+        // convention: the allowance must be cleared so the very next
         // tokenizer slice does not report ParseTimeout for work that has
         // not happened yet.
         let mut conv = make_converter();
         conv.set_parser_timeout(Duration::ZERO);
-        assert!(
-            conv.parser_deadline.is_none(),
-            "zero parser timeout must disable the deadline, got {:?}",
-            conv.parser_deadline
-        );
+        assert!(conv.parser_work_allowance.is_zero());
         let result = conv.feed_chunk(b"<p>ok</p>");
         assert!(
             result.is_ok(),
@@ -2531,15 +2505,26 @@ mod tests {
     }
 
     #[test]
-    fn test_set_parser_timeout_nonzero_arms_deadline() {
-        // A non-zero configuration must arm the deadline (regression
+    fn test_set_parser_timeout_nonzero_enables_allowance() {
+        // A non-zero configuration must enable the allowance (regression
         // guard for the zero-disabling branch above).
         let mut conv = make_converter();
         conv.set_parser_timeout(Duration::from_secs(60));
-        assert!(conv.parser_deadline.is_some());
         assert_eq!(conv.parser_work_allowance, Duration::from_secs(60));
         let result = conv.feed_chunk(b"<p>ok</p>");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parser_timeout_enforced_at_allowance_boundary() {
+        let mut conv = make_converter();
+        conv.set_parser_timeout(Duration::from_secs(1));
+        conv.parser_work_elapsed = Duration::from_secs(1);
+
+        assert!(matches!(
+            conv.check_parser_timeout(),
+            Err(ConversionError::ParseTimeout)
+        ));
     }
 
     #[test]
@@ -2855,9 +2840,9 @@ mod tests {
         );
     }
 
-    // ── Regression tests for review round 5 ─────────────────────────
+    // ── Metadata extraction regression tests ────────────────────────
 
-    /// P1 regression: with extract_metadata disabled (default), a large
+    /// Regression: with extract_metadata disabled (default), a large
     /// <head> must NOT trigger FrontMatterOverflow fallback.
     #[test]
     fn test_large_head_no_fallback_when_metadata_disabled() {
@@ -2883,7 +2868,7 @@ mod tests {
         );
     }
 
-    /// P2 regression: og:title must override <title>, matching
+    /// Regression: og:title must override <title>, matching
     /// MetadataExtractor behaviour.
     #[test]
     fn test_og_title_overrides_html_title() {
@@ -2902,7 +2887,7 @@ mod tests {
         );
     }
 
-    /// P2 regression: twitter:description must override generic description.
+    /// Regression: twitter:description must override generic description.
     #[test]
     fn test_twitter_description_overrides_generic() {
         let mut conv = make_converter_with_metadata();
@@ -2920,7 +2905,7 @@ mod tests {
         );
     }
 
-    /// P3 regression: <link rel="canonical"> should be extracted as URL.
+    /// A canonical link is available through the final URL preview.
     #[test]
     fn test_canonical_link_extracted() {
         let mut conv = make_converter_with_metadata();
@@ -2931,7 +2916,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            conv.metadata().url.as_deref(),
+            conv.peek_final_url().as_deref(),
             Some("https://example.com/page"),
         );
     }
@@ -2990,7 +2975,7 @@ mod tests {
         conv.feed_chunk(html).unwrap();
 
         assert_eq!(
-            conv.metadata().url.as_deref(),
+            conv.peek_final_url().as_deref(),
             Some("https://example.com/token-canonical")
         );
     }
@@ -3012,7 +2997,7 @@ mod tests {
         assert_eq!(err.code(), 6);
     }
 
-    /// P3 regression: when no canonical/og:url, finalize should fall back
+    /// Regression: when no canonical/og:url, finalize should fall back
     /// to options.base_url.
     #[test]
     fn test_url_falls_back_to_base_url() {
@@ -3057,7 +3042,7 @@ mod tests {
         let _ = conv.finalize().unwrap();
     }
 
-    /// P4 regression: title text split across events must preserve spaces.
+    /// Regression: title text split across events must preserve spaces.
     /// `<title>Hello <!--x--> World</title>` should produce "Hello  World"
     /// (with the space preserved), not "HelloWorld".
     #[test]
@@ -3100,9 +3085,9 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // ── Regression tests for review round 6 ─────────────────────────
+    // ── Additional metadata extraction regression tests ──────────────
 
-    /// P1 regression: og:title appearing before <title> must not be
+    /// Regression: og:title appearing before <title> must not be
     /// polluted by subsequent <title> text.
     #[test]
     fn test_og_title_before_html_title_not_polluted() {
@@ -3121,7 +3106,7 @@ mod tests {
         );
     }
 
-    /// P1 regression: <title> before og:title — og:title should still win.
+    /// Regression: <title> before og:title — og:title should still win.
     #[test]
     fn test_html_title_then_og_title_social_wins() {
         let mut conv = make_converter_with_metadata();
@@ -3139,9 +3124,10 @@ mod tests {
         );
     }
 
-    /// P2 regression: canonical URL must override og:url.
+    /// `og:url` takes precedence over a canonical link, matching the
+    /// full-buffer extractor's first-wins behavior.
     #[test]
-    fn test_canonical_overrides_og_url() {
+    fn test_og_url_precedes_canonical() {
         let mut conv = make_converter_with_metadata();
         conv.feed_chunk(
             b"<html><head>\
@@ -3151,13 +3137,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            conv.metadata().url.as_deref(),
-            Some("https://canonical.example.com"),
-            "canonical should override og:url"
+            conv.peek_final_url().as_deref(),
+            Some("https://og.example.com"),
+            "og:url should take precedence over canonical"
         );
     }
 
-    /// P3 regression: when a <meta> has both `name` and `property`,
+    /// Regression: when a <meta> has both `name` and `property`,
     /// `property` must take precedence.
     #[test]
     fn test_property_takes_precedence_over_name() {
@@ -3183,9 +3169,9 @@ mod tests {
         );
     }
 
-    // ── Regression tests for review round 7 ─────────────────────────
+    // ── Canonical URL precedence tests ──────────────────────────────
 
-    /// P1 regression: first canonical wins when multiple are present.
+    /// The first canonical link with an href wins when multiple are present.
     #[test]
     fn test_first_canonical_wins() {
         let mut conv = make_converter_with_metadata();
@@ -3197,15 +3183,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            conv.metadata().url.as_deref(),
+            conv.peek_final_url().as_deref(),
             Some("https://first.example.com"),
             "first canonical should win, not last"
         );
     }
 
-    /// P1 regression: first canonical still overrides prior og:url.
+    /// A prior `og:url` still wins when canonical links follow it.
     #[test]
-    fn test_first_canonical_overrides_og_url_but_second_does_not() {
+    fn test_og_url_precedes_canonical_but_second_does_not() {
         let mut conv = make_converter_with_metadata();
         conv.feed_chunk(
             b"<html><head>\
@@ -3216,13 +3202,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            conv.metadata().url.as_deref(),
-            Some("https://first-canonical.example.com"),
-            "first canonical should override og:url; second canonical should not override first"
+            conv.peek_final_url().as_deref(),
+            Some("https://og.example.com"),
+            "og:url should win; later canonical links remain ignored"
         );
     }
 
-    /// P2 regression: first <title> wins when multiple are present.
+    /// Regression: first <title> wins when multiple are present.
     #[test]
     fn test_first_html_title_wins() {
         let mut conv = make_converter_with_metadata();
@@ -3240,7 +3226,7 @@ mod tests {
         );
     }
 
-    /// P2 regression: social title still overrides even with multiple <title>.
+    /// Regression: social title still overrides even with multiple <title>.
     #[test]
     fn test_social_title_wins_over_multiple_html_titles() {
         let mut conv = make_converter_with_metadata();
@@ -3259,13 +3245,11 @@ mod tests {
         );
     }
 
-    // ── Regression tests for review round 8 ─────────────────────────
+    // ── Metadata URL convergence tests ──────────────────────────────
 
-    /// P1 regression: base_url overwrites og:url when no canonical is
-    /// present, matching full-buffer MetadataExtractor::extract which
-    /// unconditionally sets url = canonical.or(base_url) after meta tags.
+    /// A configured base URL must not replace an `og:url` found in the document.
     #[test]
-    fn test_base_url_overwrites_og_url_when_no_canonical() {
+    fn test_base_url_does_not_overwrite_og_url_when_no_canonical() {
         let opts = ConversionOptions {
             extract_metadata: true,
             base_url: Some("https://base.example.com".to_string()),
@@ -3293,42 +3277,17 @@ mod tests {
             Some("https://og.example.com"),
         );
 
-        // After finalize, base_url should overwrite og:url (no canonical)
-        // We need a second converter to test post-finalize state since
-        // finalize consumes self. Verify via a fresh instance.
-        let alternate_opts = ConversionOptions {
-            extract_metadata: true,
-            base_url: Some("https://base.example.com".to_string()),
-            flavor: crate::converter::MarkdownFlavor::CommonMark,
-            include_front_matter: false,
-            simplify_navigation: true,
-            preserve_tables: true,
-            resolve_relative_urls: true,
-            prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
-        };
-        let mut conv2 = StreamingConverter::new(alternate_opts, MemoryBudget::default());
-        conv2.set_content_type(Some("text/html; charset=UTF-8".to_string()));
-        conv2
-            .feed_chunk(
-                b"<html><head>\
-                  <meta property=\"og:url\" content=\"https://og.example.com\">\
-                  <title>T</title>\
-                  </head><body><p>x</p></body></html>",
-            )
-            .unwrap();
-        // Inspect internal state after finalize logic runs:
-        // We can't call metadata() after finalize, but we can verify
-        // the finalize path by checking that canonical_found is false
-        // and the code path will overwrite with base_url.
-        assert!(!conv2.canonical_found);
-        let _ = conv2.finalize().unwrap();
+        assert_eq!(
+            conv.peek_final_url().as_deref(),
+            Some("https://og.example.com"),
+            "document metadata should win over base_url"
+        );
         let _ = conv.finalize().unwrap();
     }
 
-    /// P1 regression: when no canonical and no base_url, url becomes None
-    /// (og:url is overwritten with None), matching full-buffer behaviour.
+    /// An `og:url` remains available when no fallback URL is configured.
     #[test]
-    fn test_no_canonical_no_base_url_clears_og_url() {
+    fn test_no_canonical_no_base_url_preserves_og_url() {
         let opts = ConversionOptions {
             extract_metadata: true,
             base_url: None,
@@ -3355,12 +3314,14 @@ mod tests {
             conv.metadata().url.as_deref(),
             Some("https://og.example.com"),
         );
-        // After finalize: no canonical, no base_url → url should be None
         assert!(!conv.canonical_found);
-        // The finalize path will set metadata.url = base_url.clone() = None
+        assert_eq!(
+            conv.peek_final_url().as_deref(),
+            Some("https://og.example.com")
+        );
     }
 
-    /// P2 regression: empty first <title> blocks second <title>.
+    /// An empty first `<title>` blocks a later `<title>`.
     #[test]
     fn test_empty_first_title_blocks_second() {
         let mut conv = make_converter_with_metadata();
@@ -3381,7 +3342,7 @@ mod tests {
         );
     }
 
-    /// P2 regression: truly empty <title></title> also blocks.
+    /// A truly empty `<title></title>` also blocks a later `<title>`.
     #[test]
     fn test_truly_empty_title_blocks_second() {
         let mut conv = make_converter_with_metadata();
@@ -3399,7 +3360,7 @@ mod tests {
         );
     }
 
-    // ── Regression tests for review round 9 ─────────────────────────
+    // ── Canonical link handling tests ───────────────────────────────
 
     /// Verifies that a `<link rel="canonical">` without an `href` is ignored and a later canonical with an `href` is selected.
     ///
@@ -3429,7 +3390,7 @@ mod tests {
     ///                 <title>T</title>\
     ///                 </head><body><p>x</p></body></html>").unwrap();
     /// assert!(conv.canonical_found);
-    /// assert_eq!(conv.metadata().url.as_deref(), Some("https://second.example.com"));
+    /// assert_eq!(conv.peek_final_url().as_deref(), Some("https://second.example.com"));
     /// ```
     #[test]
     fn test_first_canonical_no_href_skipped_second_used() {
@@ -3459,15 +3420,15 @@ mod tests {
         // The second canonical has href → canonical_found = true.
         assert!(conv.canonical_found);
         assert_eq!(
-            conv.metadata().url.as_deref(),
+            conv.peek_final_url().as_deref(),
             Some("https://second.example.com"),
             "second canonical (with href) should be used when first has no href"
         );
     }
 
-    /// All canonicals have no href → canonical_found stays false → base_url.
+    /// All canonicals without `href` leave the document URL unchanged.
     #[test]
-    fn test_all_canonicals_no_href_falls_back_to_base() {
+    fn test_all_canonicals_no_href_preserves_metadata_url() {
         let opts = ConversionOptions {
             extract_metadata: true,
             base_url: Some("https://base.example.com".to_string()),
@@ -3498,12 +3459,10 @@ mod tests {
             Some("https://og.example.com"),
         );
 
-        // peek_final_url applies the convergence logic: no canonical found
-        // → base_url overwrites og:url.
         assert_eq!(
             conv.peek_final_url().as_deref(),
-            Some("https://base.example.com"),
-            "no canonical with href → base_url should win over og:url"
+            Some("https://og.example.com"),
+            "document metadata should win when canonical links have no href"
         );
     }
 

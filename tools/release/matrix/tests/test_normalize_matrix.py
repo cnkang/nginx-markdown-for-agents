@@ -54,6 +54,23 @@ class TestCanonicalDocument:
         assert normalized["support_tiers"] == doc["support_tiers"]
         assert normalized["tier_mapping"] == doc["tier_mapping"]
 
+    def test_optional_image_metadata_is_preserved(self):
+        image_digest = "sha256:" + "a" * 64
+        doc = {
+            "schema_version": 1,
+            "entries": [
+                canonical_entry(
+                    image_ref="nginx:1.31.4@" + image_digest,
+                    image_digest=image_digest,
+                )
+            ],
+        }
+
+        normalized = normalize_matrix.normalize_document(doc)
+        entry = normalized["entries"][0]
+        assert entry["image_ref"] == doc["entries"][0]["image_ref"]
+        assert entry["image_digest"] == image_digest
+
     def test_legacy_metadata_keys_dropped(self):
         doc = {"schema_version": 1, "entries": [canonical_entry(nginx_channel="stable")]}
         normalized = normalize_matrix.normalize_document(doc)
@@ -186,3 +203,24 @@ class TestCompatibilityDocument:
         }
         with pytest.raises(MatrixNormalizationError):
             normalize_matrix.normalize_compatibility_document(doc)
+
+    def test_compatibility_image_metadata_is_preserved(self):
+        image_digest = "sha256:" + "b" * 64
+        doc = {
+            "entries": [
+                {
+                    "nginx_version": "1.31.4",
+                    "libc": "glibc",
+                    "target": "amd64",
+                    "artifact_type": "docker-image",
+                    "support_tier": "supported",
+                    "image_ref": "nginx:1.31.4@" + image_digest,
+                    "image_digest": image_digest,
+                }
+            ]
+        }
+
+        normalized = normalize_matrix.normalize_compatibility_document(doc)
+        entry = normalized["entries"][0]
+        assert entry["image_ref"] == doc["entries"][0]["image_ref"]
+        assert entry["image_digest"] == image_digest

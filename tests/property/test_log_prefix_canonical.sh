@@ -38,8 +38,19 @@ echo ""
 # Pattern: "markdown <word>" where <word> is NOT followed by ":"
 # This catches "markdown filter:", "markdown streaming:", etc.
 echo "--- Check 1: Space-separated non-canonical prefixes ---"
-SPACE_PREFIXES=$(grep -rn '"markdown [a-z]' "$SRCDIR" | grep -v '"markdown:"' || true)
-SPACE_COUNT=$(echo "$SPACE_PREFIXES" | grep -c . || true)
+SPACE_PREFIXES=""
+SPACE_COUNT=0
+while IFS= read -r -d '' source_file; do
+    file_matches="$(grep -nH '"markdown [a-z]' "$source_file" || true)"
+    if [[ -n "$file_matches" ]]; then
+        if [[ -n "$SPACE_PREFIXES" ]]; then
+            SPACE_PREFIXES+=$'\n'
+        fi
+        SPACE_PREFIXES+="$file_matches"
+        file_count="$(grep -c '"markdown [a-z]' "$source_file" || true)"
+        SPACE_COUNT=$((SPACE_COUNT + file_count))
+    fi
+done < <(find "$SRCDIR" -type f -print0)
 
 if [[ "$SPACE_COUNT" -gt 0 ]]; then
     echo "FAIL: Found $SPACE_COUNT log sites with space-separated non-canonical prefixes"
@@ -61,11 +72,23 @@ echo ""
 #   "markdown_stream_types:", "markdown_content_types:", "markdown_auth_cookies:"
 # We search for these exact prefix patterns in log format strings.
 echo "--- Check 2: Underscore-separated log prefixes ---"
-UNDERSCORE_PREFIXES=$(grep -rn \
-    '"markdown_metrics:\|"markdown_dynamic_config_path:\|"markdown_stream_types:\|"markdown_content_types:\|"markdown_auth_cookies:' \
-    "$SRCDIR" || true)
-
-UNDERSCORE_COUNT=$(echo "$UNDERSCORE_PREFIXES" | grep -c . || true)
+UNDERSCORE_PREFIXES=""
+UNDERSCORE_COUNT=0
+while IFS= read -r -d '' source_file; do
+    file_matches="$(grep -nH \
+        '"markdown_metrics:\|"markdown_dynamic_config_path:\|"markdown_stream_types:\|"markdown_content_types:\|"markdown_auth_cookies:' \
+        "$source_file" || true)"
+    if [[ -n "$file_matches" ]]; then
+        if [[ -n "$UNDERSCORE_PREFIXES" ]]; then
+            UNDERSCORE_PREFIXES+=$'\n'
+        fi
+        UNDERSCORE_PREFIXES+="$file_matches"
+        file_count="$(grep -c \
+            '"markdown_metrics:\|"markdown_dynamic_config_path:\|"markdown_stream_types:\|"markdown_content_types:\|"markdown_auth_cookies:' \
+            "$source_file" || true)"
+        UNDERSCORE_COUNT=$((UNDERSCORE_COUNT + file_count))
+    fi
+done < <(find "$SRCDIR" -type f -print0)
 
 if [[ "$UNDERSCORE_COUNT" -gt 0 ]]; then
     echo "FAIL: Found $UNDERSCORE_COUNT log sites with underscore-separated prefixes"
@@ -93,8 +116,10 @@ if [[ "$FAIL" -eq 1 ]]; then
     echo ""
     echo "File distribution of non-canonical prefixes:"
     {
-        grep -rn '"markdown [a-z]' "$SRCDIR" | grep -v '"markdown:"' || true
-        grep -rn '"markdown_metrics:\|"markdown_dynamic_config_path:\|"markdown_stream_types:\|"markdown_content_types:\|"markdown_auth_cookies:' "$SRCDIR" || true
+        while IFS= read -r -d '' source_file; do
+            grep -nH '"markdown [a-z]' "$source_file" | grep -v '"markdown:"' || true
+            grep -nH '"markdown_metrics:\|"markdown_dynamic_config_path:\|"markdown_stream_types:\|"markdown_content_types:\|"markdown_auth_cookies:' "$source_file" || true
+        done < <(find "$SRCDIR" -type f -print0)
     } | cut -d: -f1 | sort | uniq -c | sort -rn
     exit 1
 else

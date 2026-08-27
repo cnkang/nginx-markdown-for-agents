@@ -9,7 +9,6 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use nginx_markdown_converter::converter::ConversionOptions;
 use nginx_markdown_converter::error::ConversionError;
@@ -22,16 +21,15 @@ struct AllocationProbe;
 
 thread_local! {
     static COUNT_LARGE_ALLOCATIONS: Cell<bool> = const { Cell::new(false) };
+    static LARGE_ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
 }
-
-static LARGE_ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
 
 unsafe impl GlobalAlloc for AllocationProbe {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         if layout.size() >= LARGE_UTF8_CHUNK {
             COUNT_LARGE_ALLOCATIONS.with(|enabled| {
                 if enabled.get() {
-                    LARGE_ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+                    LARGE_ALLOCATIONS.with(|count| count.set(count.get() + 1));
                 }
             });
         }
@@ -42,7 +40,7 @@ unsafe impl GlobalAlloc for AllocationProbe {
         if new_size >= LARGE_UTF8_CHUNK {
             COUNT_LARGE_ALLOCATIONS.with(|enabled| {
                 if enabled.get() {
-                    LARGE_ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+                    LARGE_ALLOCATIONS.with(|count| count.set(count.get() + 1));
                 }
             });
         }
@@ -325,7 +323,7 @@ fn resolved_utf8_large_feed_has_no_transient_input_sized_allocation() {
     assert!(matches!(first, std::borrow::Cow::Borrowed(_)));
 
     let input = vec![b'x'; LARGE_UTF8_CHUNK];
-    LARGE_ALLOCATIONS.store(0, Ordering::Relaxed);
+    LARGE_ALLOCATIONS.with(|count| count.set(0));
     COUNT_LARGE_ALLOCATIONS.with(|enabled| enabled.set(true));
     let result = state
         .feed(&input)
@@ -334,7 +332,7 @@ fn resolved_utf8_large_feed_has_no_transient_input_sized_allocation() {
 
     assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
     assert_eq!(
-        LARGE_ALLOCATIONS.load(Ordering::Relaxed),
+        LARGE_ALLOCATIONS.with(Cell::get),
         0,
         "resolved UTF-8 feed must not allocate an input-sized temporary buffer"
     );
@@ -357,7 +355,7 @@ fn first_explicit_utf8_feed_uses_zero_copy_budget_plan() {
     };
     let mut conv = make_converter_with_budget(budget, "UTF-8");
 
-    LARGE_ALLOCATIONS.store(0, Ordering::Relaxed);
+    LARGE_ALLOCATIONS.with(|count| count.set(0));
     COUNT_LARGE_ALLOCATIONS.with(|enabled| enabled.set(true));
     let result = conv.feed_chunk(&input);
     COUNT_LARGE_ALLOCATIONS.with(|enabled| enabled.set(false));
@@ -367,7 +365,7 @@ fn first_explicit_utf8_feed_uses_zero_copy_budget_plan() {
         "the first explicit UTF-8 feed must not reserve 4x input: {result:?}"
     );
     assert_eq!(
-        LARGE_ALLOCATIONS.load(Ordering::Relaxed),
+        LARGE_ALLOCATIONS.with(Cell::get),
         0,
         "the converter must not allocate an input-sized charset buffer"
     );
@@ -391,7 +389,7 @@ fn resolved_utf8_converter_feed_has_no_charset_allocation() {
     input.extend(std::iter::repeat_n(b'x', LARGE_UTF8_CHUNK));
     input.extend_from_slice(b"</script>");
 
-    LARGE_ALLOCATIONS.store(0, Ordering::Relaxed);
+    LARGE_ALLOCATIONS.with(|count| count.set(0));
     COUNT_LARGE_ALLOCATIONS.with(|enabled| enabled.set(true));
     let result = conv.feed_chunk(&input);
     COUNT_LARGE_ALLOCATIONS.with(|enabled| enabled.set(false));
@@ -401,7 +399,7 @@ fn resolved_utf8_converter_feed_has_no_charset_allocation() {
         "resolved UTF-8 feed must succeed: {result:?}"
     );
     assert_eq!(
-        LARGE_ALLOCATIONS.load(Ordering::Relaxed),
+        LARGE_ALLOCATIONS.with(Cell::get),
         0,
         "resolved converter feed must not allocate an input-sized charset buffer"
     );

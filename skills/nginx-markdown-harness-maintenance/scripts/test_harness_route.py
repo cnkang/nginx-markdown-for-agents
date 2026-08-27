@@ -253,6 +253,25 @@ def test_parse_status_output_skips_deleted_entries() -> None:
     ]
 
 
+def test_parse_status_output_nul_preserves_renames() -> None:
+    """Verify NUL-delimited status parsing preserves ordinary paths."""
+    output = (
+        b" M path.md\0"
+        b"R  renamed-file.md\0old-file.md\0"
+    )
+    assert _parse_status_output(output) == [
+        "path.md",
+        "old-file.md",
+        "renamed-file.md",
+    ]
+
+
+def test_parse_status_output_nul_preserves_special_path_text() -> None:
+    """Exercise a literal arrow without creating an unusual repository path."""
+    output = b" M fixture->name.md\0"
+    assert _parse_status_output(output) == ["fixture->name.md"]
+
+
 def test_git_diff_files_uses_delete_filter(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _git_diff_files passes --diff-filter=d to exclude deleted files."""
     captured: dict[str, list[str]] = {}

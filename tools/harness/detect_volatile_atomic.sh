@@ -6,7 +6,8 @@
 #          __atomic_* builtin usage that must be routed through reviewed
 #          scalar/pointer publication helpers instead of ad hoc call sites.
 #
-# Arguments: None (scans components/nginx-module/src/ relative to repo root)
+# Arguments: Optional source directory; defaults to components/nginx-module/src/
+#            relative to the repository root.
 #
 # Output: Findings to stderr; exit 0 if clean, exit 1 if violations found.
 #
@@ -16,7 +17,9 @@
 
 set -euo pipefail
 
-SRC_DIR="components/nginx-module/src"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
 
 if [[ ! -d "$SRC_DIR" ]]; then
     echo "  [volatile-atomic] Source directory not found: $SRC_DIR" >&2

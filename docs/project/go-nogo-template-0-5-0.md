@@ -18,14 +18,23 @@ The Go/No-Go decision must rest on the following verifiable artifacts:
 | Streaming path performance benchmark (TTFB improvement, throughput data) | Performance benchmark report |
 | Streaming path failure-path test coverage | Test report covers all failure paths |
 | Streaming path rollback verification record | Rollback verified in test environment |
+| Signed gate review record | Reviewer, review date, reviewed scope, candidate, and evidence artifact are recorded |
 
 ## Decision Rules
 
 - All P0 sub-spec DoDs pass **and** all Streaming Evidence sufficient → **Go**
 - Any P0 sub-spec DoD fails → **No-Go** (fix and re-evaluate)
 - Any Streaming Evidence insufficient → **No-Go** (design intent does not substitute for actual evidence)
+- Missing or unsigned gate-review evidence → **No-Go** until the review record
+  names the candidate and links the evidence artifacts
 - P1 status does not affect the Go/No-Go decision
-- Gate items that cannot pass must have explicit exceptions recorded. A recorded exception does not override a failed P0 gate. The exception documents the failure but does not authorize release. Overriding a failed P0 gate requires explicit, written authorization from the release owner. The authorization must name the gate, the candidate, and the scope of the override
+- Gate items that cannot pass must have explicit exceptions recorded. A
+  recorded exception does not override a failed P0 sub-spec DoD: that DoD
+  remains failed and the decision remains **No-Go** until the team fixes and
+  re-evaluates the DoD. A release-owner authorization may acknowledge a separately
+  documented non-P0 exception, but it cannot convert a failed P0 DoD into a
+  passing result. The authorization must name the gate, candidate, and scope
+  of the non-P0 exception.
 
 ## Decision Record Template
 
@@ -57,6 +66,7 @@ The Go/No-Go decision must rest on the following verifiable artifacts:
 | Performance benchmark (TTFB) | PASS/FAIL | [link] |
 | Failure-path test coverage | PASS/FAIL | [link] |
 | Rollback verification record | PASS/FAIL | [link] |
+| Signed gate-review artifact | PASS/FAIL | reviewer=[name]; review_date=[YYYY-MM-DD]; scope=[reviewed scope]; candidate=[full SHA]; evidence=[link] |
 
 ### Release Gate Summary
 
@@ -73,11 +83,12 @@ The Go/No-Go decision must rest on the following verifiable artifacts:
 | # | Gate Item | Exception Rationale | Risk Assessment | Mitigation Strategy |
 |---|----------|--------------------|-----------------|--------------------|
 
-### Release-Owner Authorization (for P0 overrides)
+### Release-Owner Authorization (does not override a failed P0 DoD)
 
-Any recorded exception that overrides a failed P0 gate requires explicit,
-written authorization from the release owner. Capture the authorization
-artifact and its required fields:
+Any recorded non-P0 exception requires explicit, written authorization from
+the release owner when the release process calls for it. Capture the
+authorization artifact and its required fields. Do not use this record to
+override a failed P0 sub-spec DoD:
 
 | Field | Value |
 |-------|-------|

@@ -32,8 +32,7 @@ static ngx_atomic_uint_t ngx_http_markdown_pending_output_requests;
  * changes (for example fields appended at the tail), this version suffix
  * prevents attaching an incompatible old allocation after hot reload.
  *
- * v8: unretained per-path conversion and time counters added to preserve
- *     aggregate accounting when a path cannot be stored in the slab.
+ * v8: current aggregate conversion, streaming, and decompression counters.
  */
 static ngx_str_t ngx_http_markdown_metrics_shm_name =
     ngx_string("nginx_markdown_metrics_v8");

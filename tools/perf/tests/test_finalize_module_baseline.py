@@ -225,10 +225,16 @@ def test_git_outside_allowlist_is_controlled_failure(
 ) -> None:
     """A git path rejected by the allowlist returns a controlled warning."""
     import finalize_module_baseline as mod
+    from lib import executable_validation
 
     monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    git_path = tmp_path / "git"
+    git_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    git_path.chmod(0o755)
     monkeypatch.setattr(
-        mod, "resolve_approved_executable", lambda _name: None,
+        executable_validation.shutil,
+        "which",
+        lambda _name: str(git_path),
     )
 
     assert _normalize_source_run("12345", repo_root=tmp_path) == "12345"

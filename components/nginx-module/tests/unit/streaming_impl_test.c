@@ -1191,7 +1191,7 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
 
 /*
  * Stub for ngx_http_markdown_stream_type_excluded.
- * The v0.8.0 excluded_types check is tested in
+ * The excluded_types check is tested in
  * hard_excluded_types_security_test and streaming_config_contract_test.
  * Here we return 0 (not excluded) to let the path selection proceed.
  */
@@ -1226,97 +1226,60 @@ ngx_http_markdown_stream_type_excluded(const ngx_str_t *content_type,
     return 0;
 }
 
-/*
- * Reason-code accessor stubs.  Each returns a static ngx_str_t containing
- * the corresponding decision-reason literal.  These mirror the production
- * accessors used by ngx_http_markdown_log_decision.
- */
+/* Canonical reason stubs used by the streaming harness. */
+static ngx_str_t g_reason_converted = ngx_string("converted");
+static ngx_str_t g_reason_failed_open = ngx_string("failed_open");
+static ngx_str_t g_reason_failed_closed = ngx_string("failed_closed");
+static ngx_str_t g_reason_conversion_error = ngx_string("conversion_error");
+static ngx_str_t g_reason_resource_limit = ngx_string(
+    "memory_budget_exceeded");
+static ngx_str_t g_reason_system_error = ngx_string("ffi_panic");
+static ngx_str_t g_reason_timeout = ngx_string("timeout");
+static ngx_str_t g_reason_streaming_mid_flight = ngx_string(
+    "streaming_mid_flight_error");
+
 const ngx_str_t *
-ngx_http_markdown_reason_streaming_convert(void)
+ngx_http_markdown_reason_converted(void)
 {
-    static ngx_str_t s = { sizeof("STREAMING_CONVERT") - 1,
-        (u_char *) "STREAMING_CONVERT" };
-    return &s;
+    return &g_reason_converted;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_failed_open(void)
+{
+    return &g_reason_failed_open;
 }
 
 const ngx_str_t *
 ngx_http_markdown_reason_failed_closed(void)
 {
-    static ngx_str_t s = { sizeof("failed_closed") - 1,
-        (u_char *) "failed_closed" };
-    return &s;
+    return &g_reason_failed_closed;
 }
 
 const ngx_str_t *
-ngx_http_markdown_reason_streaming_fail_postcommit(void)
+ngx_http_markdown_reason_from_error_category(
+    ngx_http_markdown_error_category_t category, ngx_log_t *log)
 {
-    static ngx_str_t s = { sizeof("STREAMING_FAIL_POSTCOMMIT") - 1,
-        (u_char *) "STREAMING_FAIL_POSTCOMMIT" };
-    return &s;
+    UNUSED(log);
+    if (category == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT) {
+        return &g_reason_resource_limit;
+    }
+    if (category == NGX_HTTP_MARKDOWN_ERROR_SYSTEM) {
+        return &g_reason_system_error;
+    }
+    return &g_reason_conversion_error;
 }
 
 const ngx_str_t *
-ngx_http_markdown_reason_streaming_fallback(void)
+ngx_http_markdown_reason_timeout(void)
 {
-    static ngx_str_t s = { sizeof("STREAMING_FALLBACK") - 1,
-        (u_char *) "STREAMING_FALLBACK" };
-    return &s;
+    return &g_reason_timeout;
 }
 
 const ngx_str_t *
-ngx_http_markdown_reason_streaming_skip_unsupported(void)
+ngx_http_markdown_reason_streaming_mid_flight_err(void)
 {
-    static ngx_str_t s = { sizeof("STREAMING_SKIP_UNSUPPORTED") - 1,
-        (u_char *) "STREAMING_SKIP_UNSUPPORTED" };
-    return &s;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_skip_compressed(void)
-{
-    static ngx_str_t s = { sizeof("STREAMING_SKIP_COMPRESSED") - 1,
-        (u_char *) "STREAMING_SKIP_COMPRESSED" };
-    return &s;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_budget_exceeded(void)
-{
-    static ngx_str_t s = { sizeof("STREAMING_BUDGET_EXCEEDED") - 1,
-        (u_char *) "STREAMING_BUDGET_EXCEEDED" };
-    return &s;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_precommit_failopen(void)
-{
-    static ngx_str_t s = { sizeof("STREAMING_PRECOMMIT_FAILOPEN") - 1,
-        (u_char *) "STREAMING_PRECOMMIT_FAILOPEN" };
-    return &s;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_precommit_reject(void)
-{
-    static ngx_str_t s = { sizeof("STREAMING_PRECOMMIT_REJECT") - 1,
-        (u_char *) "STREAMING_PRECOMMIT_REJECT" };
-    return &s;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_eligible_streaming_auto(void)
-{
-    static ngx_str_t s = { sizeof("ELIGIBLE_STREAMING_AUTO") - 1,
-        (u_char *) "ELIGIBLE_STREAMING_AUTO" };
-    return &s;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_eligible_fullbuffer_auto(void)
-{
-    static ngx_str_t s = { sizeof("ELIGIBLE_FULLBUFFER_AUTO") - 1,
-        (u_char *) "ELIGIBLE_FULLBUFFER_AUTO" };
-    return &s;
+    return &g_reason_streaming_mid_flight;
 }
 
 /*
@@ -1335,6 +1298,33 @@ ngx_http_markdown_log_decision(ngx_http_request_t *r,
     UNUSED(eff);
     UNUSED(reason_code);
     g_log_decision_calls++;
+}
+
+void
+ngx_http_markdown_log_decision_event(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code, const char *event)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(eff);
+    UNUSED(reason_code);
+    UNUSED(event);
+    g_log_decision_calls++;
+}
+
+void
+ngx_http_markdown_log_event(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const char *stage, const char *event)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(eff);
+    UNUSED(stage);
+    UNUSED(event);
 }
 
 /* Stub for the request-layer terminal diagnostics owner. */
@@ -1393,17 +1383,6 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
     ((*(lock) == (old)) ? (*(lock) = (set), 1) : 0)
 #endif
 
-static ngx_inline void
-ngx_http_markdown_record_per_path_metrics(
-    ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf,
-    ngx_msec_t elapsed_ms)
-{
-    (void) r;
-    (void) conf;
-    (void) elapsed_ms;
-}
-
 static ngx_int_t g_stream_commit_headers_rc = NGX_OK;
 static int g_stream_commit_headers_called;
 
@@ -1431,7 +1410,8 @@ ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
     }
     if (*slot == NULL && value != NULL) {
         g_pending_output_state++;
-    } else if (*slot != NULL && value == NULL) {
+    } else if (*slot != NULL && value == NULL
+               && g_pending_output_state > 0) {
         g_pending_output_state--;
     }
     *slot = value;
@@ -1679,7 +1659,7 @@ test_cleanup_paths(void)
 }
 
 /*
- * P1 memory-safety regression: streaming_cleanup() must NOT infer Rust
+ * Memory-safety regression: streaming_cleanup() must NOT infer Rust
  * allocator ownership from ngx_buf_t->temporary.
  *
  * Production reachable scenario: a fail-open cloned chain link
@@ -1782,7 +1762,6 @@ test_select_processing_path(void)
 
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
-    conf.routing.large_body_threshold = 1024;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     r.headers_out.content_length_n = 2048;
 
@@ -5112,7 +5091,7 @@ test_pending_input_production_lifecycle(void)
         TEST_ASSERT(rc == NGX_ERROR,
             "retained input beyond the effective body limit must fail");
         TEST_ASSERT(enqueue_error == ERROR_BUDGET_EXCEEDED,
-            "P2: budget rejection must classify as ERROR_BUDGET_EXCEEDED");
+            "Budget rejection must classify as ERROR_BUDGET_EXCEEDED");
     }
     TEST_ASSERT(ctx.streaming.pending_input.head == NULL
                 && ctx.streaming.pending_input.bytes == 3
@@ -5134,7 +5113,7 @@ test_pending_input_production_lifecycle(void)
         TEST_ASSERT(rc == NGX_ERROR,
             "a later chain-link allocation failure must reject the batch");
         TEST_ASSERT(enqueue_error == ERROR_MEMORY_LIMIT,
-            "P2: allocation failure must classify as ERROR_MEMORY_LIMIT, "
+            "Allocation failure must classify as ERROR_MEMORY_LIMIT, "
             "not ERROR_BUDGET_EXCEEDED");
     }
     TEST_ASSERT(ctx.streaming.pending_input.head == NULL

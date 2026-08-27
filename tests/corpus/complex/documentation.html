@@ -7,7 +7,7 @@
 </head>
 <body>
     <!-- Test Purpose: Technical documentation with code examples and API references -->
-    
+
     <header>
         <nav>
             <a href="#overview">Overview</a> |
@@ -15,14 +15,14 @@
             <a href="#examples">Examples</a>
         </nav>
     </header>
-    
+
     <main>
         <h1>Markdown Converter API Documentation</h1>
-        
+
         <section id="overview">
             <h2>Overview</h2>
             <p>The Markdown Converter library provides a simple API for converting HTML to Markdown format.</p>
-            
+
             <h3>Key Features</h3>
             <ul>
                 <li>Fast HTML parsing using html5ever</li>
@@ -31,20 +31,20 @@
                 <li>Memory-safe Rust implementation</li>
             </ul>
         </section>
-        
+
         <section id="api">
             <h2>API Reference</h2>
-            
+
             <h3>markdown_converter_new</h3>
             <p>Creates a new converter instance.</p>
-            
+
             <h4>Signature</h4>
             <pre><code class="language-c">markdown_converter_t* markdown_converter_new(void);
 </code></pre>
-            
+
             <h4>Returns</h4>
             <p>Pointer to a new converter instance, or <code>NULL</code> on failure.</p>
-            
+
             <h4>Example</h4>
             <pre><code class="language-c">markdown_converter_t *converter = markdown_converter_new();
 if (converter == NULL) {
@@ -52,10 +52,10 @@ if (converter == NULL) {
     return 1;
 }
 </code></pre>
-            
+
             <h3>markdown_convert</h3>
             <p>Converts HTML to Markdown.</p>
-            
+
             <h4>Signature</h4>
             <pre><code class="language-c">void markdown_convert(
     markdown_converter_t *converter,
@@ -65,7 +65,7 @@ if (converter == NULL) {
     markdown_result_t *result
 );
 </code></pre>
-            
+
             <h4>Parameters</h4>
             <table>
                 <thead>
@@ -103,7 +103,7 @@ if (converter == NULL) {
                     </tr>
                 </tbody>
             </table>
-            
+
             <h4>Example</h4>
             <pre><code class="language-c">const char *html = "&lt;h1&gt;Hello&lt;/h1&gt;&lt;p&gt;World&lt;/p&gt;";
 markdown_options_t options = {
@@ -126,10 +126,10 @@ if (result.error_code == 0) {
 }
 </code></pre>
         </section>
-        
+
         <section id="examples">
             <h2>Examples</h2>
-            
+
             <h3>Basic Conversion</h3>
             <pre><code class="language-rust">use markdown_converter::convert_html_to_markdown;
 
@@ -137,7 +137,7 @@ let html = "&lt;h1&gt;Title&lt;/h1&gt;&lt;p&gt;Content&lt;/p&gt;";
 let markdown = convert_html_to_markdown(html)?;
 println!("{}", markdown);
 </code></pre>
-            
+
             <h3>With Options</h3>
             <pre><code class="language-rust">use markdown_converter::{Converter, Options, Flavor};
 
@@ -154,7 +154,7 @@ let result = converter.convert(html, &amp;options)?;
 </code></pre>
         </section>
     </main>
-    
+
     <footer>
         <p>© 2026 Markdown Converter Project. Licensed under MIT.</p>
     </footer>

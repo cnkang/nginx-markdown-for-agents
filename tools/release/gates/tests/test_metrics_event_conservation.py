@@ -626,7 +626,7 @@ def test_event_counters_are_scenario_driven(requests):
     )
     assert snapshot.streaming_events_total == expected_streaming
     assert snapshot.decompression_events_total == expected_decomp
-    assert snapshot.dynconf_reloads_total >= 0
+    assert snapshot.dynconf_reloads_total == 0
 
 
 @settings(max_examples=200)

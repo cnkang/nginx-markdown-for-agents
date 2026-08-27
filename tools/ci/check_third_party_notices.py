@@ -169,7 +169,6 @@ def collect_workspace_lock_issues() -> list[str]:
                 "--format-version",
                 "1",
                 "--locked",
-                "--no-deps",
                 "--manifest-path",
                 str(cargo_toml),
             ],

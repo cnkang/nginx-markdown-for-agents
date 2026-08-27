@@ -21,8 +21,10 @@ This ADR freezes the resulting contract.
 
 ### Two-phase prepare/commit contract
 
-All in-place mutation of a converted **upstream** response goes through HeaderPlan
-in two strictly separated phases:
+All core wire-critical in-place mutation of a converted **upstream** response
+goes through HeaderPlan in two strictly separated phases. Other response
+metadata and explicitly documented post-plan operations remain outside this
+atomic scope:
 
 **Prepare** (may allocate, may fail, **MUST NOT** mutate `r->headers_out`):
 parse operations, allocate `ngx_table_elt_t` entries and copy string values from
@@ -40,7 +42,9 @@ succeeds.**
   `content_length` header entry (`hash = 0`, Rule 40).
 - Set `Content-Type`: update `content_type`, `content_type_len`,
   `content_type_lowcase` (NULL), and `charset` (clear) together.
-- `status`, `last_modified_time` handled in commit.
+- The C-side post-plan commit boundary handles `status` and
+  `last_modified_time`. These fields remain explicitly outside the HeaderPlan
+  atomic field set.
 - Multi-step modification is atomic: abort on first prepare failure, no partial
   apply (Rule 39).
 
@@ -49,9 +53,18 @@ handled in the HeaderPlan commit. They are C-side post-plan operations (see
 the atomic scope boundary below). This keeps them consistent with the
 rationale: ETag set/clear and Vary add execute in C after the plan commits.
 The HeaderPlan atomicity invariant therefore applies **only to the core
-wire-critical fields Content-Type, Content-Encoding, and Content-Length**;
-ETag, Vary, token, and authentication-header operations are explicitly
-exempt via the atomic-scope exception below.
+wire-critical fields Content-Type, Content-Encoding, and Content-Length**.
+Status and `last_modified_time`, along with ETag, Vary, token, and
+authentication-header operations, are explicitly exempt via the atomic-scope
+exception below.
+
+HeaderPlan is the sole authority for invalidating an upstream
+`Content-Length`: it removes the stale list entries and clears the scalar
+field together. The later C-side scalar assignment is a separate,
+infallible operation that records the length of the newly generated
+representation after the plan has committed. It is not a second invalidation
+path, and must run before `ngx_http_send_header()`. The C-side implementation
+omits it when the new representation length is not known.
 
 ### Streaming vs full-buffer header matrix
 
@@ -98,7 +111,7 @@ the core plan commits and fall within the atomic scope boundary below
 - `X-Markdown-Tokens` header
 - Auth `Cache-Control` modify
 
-Any **new** exception requires ADR justification and an entry here. No other code may mutate `headers_out` in place outside HeaderPlan **for core fields** (Content-Type, Content-Encoding, Content-Length). The post-plan operations listed above (ETag, Vary, X-Markdown-Tokens, Auth Cache-Control) are explicitly exempt from the HeaderPlan atomicity invariant. They execute after the plan commits under the pre-send best-effort boundary.
+Any **new** exception requires ADR justification and an entry here. No other code may mutate `headers_out` in place outside HeaderPlan **for core fields** (Content-Type, Content-Encoding, Content-Length). The post-plan operations listed above (status, `last_modified_time`, ETag, Vary, X-Markdown-Tokens, Auth Cache-Control) are explicitly exempt from the HeaderPlan atomicity invariant. They execute after the plan commits under the pre-send best-effort boundary.
 
 ### Post-commit error boundary
 
@@ -131,7 +144,7 @@ headers are sent).
 |---------------------|------------------|
 | ETag set/clear | `NGX_ERROR` — abort before send |
 | `Vary: Accept` add | `NGX_ERROR` — abort before send |
-| Content-Length set (new value) | Scalar assignment — cannot fail |
+| Generated Content-Length set (new value after plan commit) | Scalar assignment — cannot fail |
 | `X-Markdown-Tokens` header | `NGX_ERROR` — abort before send |
 | `Accept-Ranges` removal | Scalar assignment — cannot fail |
 | Auth `Cache-Control` modify | `NGX_ERROR` — abort before send |

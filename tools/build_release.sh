@@ -84,6 +84,11 @@ PY
             printf '%s\n' "$version"
             ;;
         *)
+            if [[ ! "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "Invalid NGINX version: ${requested}" >&2
+                echo "Expected MAJOR.MINOR.PATCH, stable, or mainline." >&2
+                exit 1
+            fi
             printf '%s\n' "$requested"
             ;;
     esac
@@ -116,6 +121,36 @@ esac
 
 NGINX_VERSION="$(resolve_nginx_version "$NGINX_VERSION")"
 
+SOURCE_SHA="$(git rev-parse HEAD)"
+if [[ ! "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Unable to resolve a full source commit SHA for the release build." >&2
+    exit 1
+fi
+
+RUST_VERSION="$(sed -n 's/^channel = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' rust-toolchain.toml)"
+if [[ -z "${RUST_VERSION}" ]]; then
+    echo "Unable to resolve the pinned Rust version from rust-toolchain.toml." >&2
+    exit 1
+fi
+
+FEATURE_MANIFEST_DIGEST="$(python3 - <<'PY'
+import hashlib
+import json
+from pathlib import Path
+
+path = Path("artifacts/release/0.9.2/official-build-feature-manifest.json")
+manifest = json.loads(path.read_text(encoding="utf-8"))
+expected = {
+    "prune_noise_regions": True,
+    "streaming": True,
+}
+if manifest != expected:
+    raise SystemExit("official feature manifest is not canonical")
+raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+print("sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest())
+PY
+)"
+
 DOCKERFILE="tools/build_release/Dockerfile.$OS_TYPE"
 OUT_DIR="dist/${NGINX_VERSION}-${OS_TYPE}-${ARCH}"
 
@@ -134,6 +169,10 @@ echo "Building NGINX Markdown Module v$NGINX_VERSION for $OS_TYPE on $ARCH (plat
 docker buildx build \
     --platform "$PLATFORM" \
     --build-arg NGINX_VERSION="$NGINX_VERSION" \
+    --build-arg NGX_MARKDOWN_BUILD_KIND=release \
+    --build-arg NGX_MARKDOWN_SOURCE_SHA="$SOURCE_SHA" \
+    --build-arg NGX_MARKDOWN_RUST_VERSION="$RUST_VERSION" \
+    --build-arg NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST="$FEATURE_MANIFEST_DIGEST" \
     -f "$DOCKERFILE" \
     -t nginx-markdown-builder \
     --load \

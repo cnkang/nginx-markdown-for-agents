@@ -30,9 +30,6 @@ use streaming_test_support::{
     fixture_relative_name, known_differences_path, read_fixture_meta,
 };
 
-#[cfg(feature = "incremental")]
-use nginx_markdown_converter::incremental::IncrementalConverter;
-
 struct ChunkedReader<'a> {
     data: &'a [u8],
     chunk_sizes: Vec<usize>,
@@ -472,16 +469,4 @@ fn streaming_chunk_boundary_preserves_line_prefix_escape() {
     .expect("chunked streaming conversion should succeed");
 
     assert_eq!(single.markdown, chunked.markdown);
-}
-
-#[cfg(feature = "incremental")]
-#[test]
-fn boundary_max_size_incremental_guard() {
-    let mut conv = IncrementalConverter::with_max_buffer_size(default_streaming_options(), 64);
-    let html = vec![b'a'; 128];
-    let err = conv.feed_chunk(&html).unwrap_err();
-    assert!(
-        matches!(err, ConversionError::MemoryLimit(_)),
-        "expected MemoryLimit from max_size guard, got {err:?}"
-    );
 }

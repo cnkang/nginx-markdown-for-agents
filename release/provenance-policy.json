@@ -163,7 +163,7 @@
         "validator": "Homebrew bottle provenance validator"
       },
       "verification_commands": [
-        "test \"$(shasum -a 256 \"${BOTTLE_PATH}\" | awk '{print $1}')\" = \"${RECORDED_BOTTLE_SHA256}\""
+        "calculated_bottle_sha256=\"$(shasum -a 256 \"${BOTTLE_PATH}\" | awk '{print $1}')\"; test -n \"${calculated_bottle_sha256}\" && test -n \"${RECORDED_BOTTLE_SHA256:-}\" && test \"${calculated_bottle_sha256}\" = \"${RECORDED_BOTTLE_SHA256}\""
       ]
     }
   },

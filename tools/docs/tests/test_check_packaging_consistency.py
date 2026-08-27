@@ -108,8 +108,8 @@ class TestExtractVerificationCurls:
         )
 
     def test_ignores_download_curl(self):
-        """Verify curl commands piping to shell (download scripts) are ignored."""
-        text = "curl -fsSLo installer.sh https://github.com/.../releases/download/v0.9.2/nginx-markdown-for-agents-installer-v0.9.2.sh\n"
+        """Verify release-download curl commands are ignored."""
+        text = "curl -fsSL -o installer.sh https://github.com/.../releases/download/v0.9.2/nginx-markdown-for-agents-installer-v0.9.2.sh\n"
         assert _extract_verification_curls(text) == []
 
     def test_ignores_metrics_curl(self):

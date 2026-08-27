@@ -8,17 +8,18 @@ or review action.
 
 ## Documentation Gates
 
-- [ ] All 7 sub-specs have requirements documents — Verify: `make release-gates-check-strict` or `tools/release/gates/validate_release_gates.py --mode strict --check docs-exist`
-- [ ] All 7 sub-specs have design documents — Verify: `make release-gates-check-strict` or `tools/release/gates/validate_release_gates.py --mode strict --check docs-exist`
+- [ ] All 7 sub-specs have requirements documents — Verify: `make release-gates-check-strict` (the project retired the former standalone document validator)
+- [ ] All 7 sub-specs have design documents — Verify: `make release-gates-check-strict` (the project retired the former standalone document validator)
 - [ ] All new operator-facing surfaces appear in docs — Verify: manual review + `make docs-check`
   - A signed review record is mandatory for this item. The record must name the reviewer, the review date, the reviewed scope, and the evidence artifact.
 - [ ] Documentation is accurate and complete, including defaults, behavior, failure modes, and migration guidance — Verify: manual review against current docs plus `make docs-check`
   - A signed review record is mandatory for this item. The record must name the reviewer, the review date, the reviewed scope, and the evidence artifact.
-- [ ] Streaming configuration guide is complete — Verify: document existence check in `docs/guides/`
-- [ ] Rollout cookbook is complete (streaming enable, shadow mode, gradual expansion) — Verify: document existence check
+- [ ] Streaming configuration guide is complete — Verify: `make docs-check` plus a signed accuracy review that checks defaults, enablement, shadow mode, rollback, and failure-mode guidance
+- [ ] Rollout cookbook is complete (streaming enable, shadow mode, gradual expansion) — Verify: `make docs-check` plus a signed accuracy review. The review checks
+  enablement, staged rollout, rollback, and failure-mode guidance.
 - [ ] Compatibility matrix documentation is complete — Verify: `docs/project/compatibility-matrix-0-5-0.md` exists with all capabilities classified
-- [ ] 0.5.0 non-goals are explicitly listed — Verify: `docs/project/release-gates-0-5-0.md` contains non-goals section
-- [ ] CHANGELOG.md updated with 0.5.0 entry — Verify: `grep '0.5.0' CHANGELOG.md`
+- [ ] 0.5.0 non-goals are explicitly listed — Verify: `docs/project/release-gates-0-5-0.md` contains the non-goals section
+- [ ] CHANGELOG.md updated with 0.5.0 entry — Verify: `grep -En '^## \\[?0\.5\.0\\]?([[:space:]]|$)' CHANGELOG.md` returns at least one release heading
 - [ ] `make docs-check` passes — Verify: `make docs-check` exit code 0
 
 ## Testing Gates
@@ -63,8 +64,10 @@ When a checklist item cannot pass:
 1. The team must escalate the item to the Go/No-Go review
 2. The team must record an explicit exception, including: rationale, risk assessment, mitigation plan
 3. Recording an exception does **not** by itself authorize release: any failed
-   P0-gate override additionally requires written release-owner authorization
-   identifying the gate, the release candidate, and the exact override scope
+   P0 sub-spec DoD cannot be overridden by an exception or release-owner
+   authorization. It remains a No-Go until the team fixes the DoD. A non-P0
+   exception may require written release-owner authorization identifying the
+   gate, release candidate, and exact exception scope
 4. Unresolved failures without exceptions block the release
 
 ## Document Updates

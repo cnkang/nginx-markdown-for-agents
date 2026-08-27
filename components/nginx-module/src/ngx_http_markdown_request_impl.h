@@ -164,7 +164,6 @@ const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
 const ngx_str_t *ngx_http_markdown_reason_from_error_category(
     ngx_http_markdown_error_category_t category, ngx_log_t *log);
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
-const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
 const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
 const ngx_str_t *ngx_http_markdown_reason_encoding_header_invalid(void);
 const ngx_str_t *ngx_http_markdown_reason_decompression_format_error(void);
@@ -246,7 +245,7 @@ ngx_http_markdown_bind_request_context_snapshot(
  *
  * Records metrics, emits decision log with the effective conf view
  * (or NULL if unavailable), and applies the configured error strategy
- * (fail-closed returns 500, fail-open passes through).
+ * (fail-closed returns the configured status, fail-open passes through).
  *
  * Parameters:
  *   r    - NGINX request structure
@@ -255,7 +254,7 @@ ngx_http_markdown_bind_request_context_snapshot(
  *          failed before early_eff was built)
  *
  * Returns:
- *   NGX_HTTP_INTERNAL_SERVER_ERROR on fail-closed
+ *   Result of ngx_http_filter_finalize_request on fail-closed
  *   Result of ngx_http_next_header_filter on fail-open
  */
 static ngx_int_t
@@ -280,13 +279,14 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
             r->connection->log, 0,
             "markdown: context allocation "
             "failed, rejecting (fail-closed)");
-            ngx_http_markdown_log_decision_with_category(
+        ngx_http_markdown_log_decision_with_category(
             r, conf, eff,
             ngx_http_markdown_reason_failed_closed(),
             ngx_http_markdown_reason_from_error_category(
                 NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
-        return (ngx_int_t) ngx_http_markdown_effective_error_status(
-            eff, conf);
+        return ngx_http_filter_finalize_request(
+            r, &ngx_http_markdown_filter_module,
+            (ngx_int_t) ngx_http_markdown_effective_error_status(eff, conf));
     }
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -310,13 +310,28 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
 }
 
 
-/*
- * Handle failure while combining repeated Content-Encoding fields.
+/* Mark a header-phase rejection before entering NGINX error handling. */
+static void
+ngx_http_markdown_mark_header_reject(ngx_http_markdown_ctx_t *ctx)
+{
+    ctx->eligible = 0;
+    ctx->error.header_reject = 1;
+}
+
+
+/**
+ * Handles failure to collect repeated Content-Encoding fields according to the
+ * configured error policy.
  *
- * The combined value is request-pool allocated.  Treating an allocation
- * failure as a missing header would leave the request on the normal decode
- * path with incomplete encoding metadata, so it must use the same explicit
- * system-error policy as other header-phase failures.
+ * @param r Request being processed.
+ * @param ctx Request-specific Markdown filter context.
+ * @param conf Static Markdown filter configuration.
+ * @param eff Effective configuration for the request.
+ * @note The combined value is request-pool allocated. Allocation failure must
+ *       not be treated as an absent field, because that could continue with
+ *       incomplete Content-Encoding metadata.
+ * @returns The filter-finalize result for fail-closed handling, or the
+ *          downstream header-filter result for fail-open handling.
  */
 static ngx_int_t
 ngx_http_markdown_handle_encoding_collection_failure(
@@ -347,6 +362,7 @@ ngx_http_markdown_handle_encoding_collection_failure(
 
     if (ngx_http_markdown_effective_error_policy(eff, conf)
         == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+        ngx_http_markdown_mark_header_reject(ctx);
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: Content-Encoding header collection failed, "
                       "rejecting (fail-closed)");
@@ -355,8 +371,9 @@ ngx_http_markdown_handle_encoding_collection_failure(
             ngx_http_markdown_reason_failed_closed(),
             ngx_http_markdown_reason_from_error_category(
                 NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
-        return (ngx_int_t) ngx_http_markdown_effective_error_status(
-            eff, conf);
+        return ngx_http_filter_finalize_request(
+            r, &ngx_http_markdown_filter_module,
+            (ngx_int_t) ngx_http_markdown_effective_error_status(eff, conf));
     }
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -378,6 +395,7 @@ ngx_http_markdown_handle_encoding_collection_failure(
      */
     if (rc == NGX_AGAIN) {
         ctx->headers_forwarded = 1;
+        ctx->fullbuffer.failopen_delivery_pending = 1;
         return rc;
     }
     if (rc == NGX_OK || rc == NGX_DONE) {
@@ -422,6 +440,7 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
     ctx->error.has_category = 0;
     ctx->error.terminal_decision_recorded = 0;
+    ctx->error.header_reject = 0;
 
     /*
      * Initialize decompression state.
@@ -571,10 +590,10 @@ ngx_http_markdown_log_streaming_terminal_decision(
     do {                                                                    \
         ngx_log_debug6(NGX_LOG_DEBUG_HTTP,                                  \
             (r)->connection->log, 0,                                        \
-            "markdown: streaming decision: "                                \
-            "engine=%s phase=header_filter "                               \
-            "committed=0 fallback_available=1 "                            \
-            "reason=%s content_type=%V "                                   \
+            "markdown: outcome=- stage=eligibility "                       \
+            "reason=- event=streaming_path_selection "                    \
+            "engine=%s committed=0 fallback_available=1 "                 \
+            "selection_reason=%s content_type=%V "                         \
             "content_length_known=%d chunked=%d "                          \
             "error_policy=%s",                                             \
             (engine),                                                       \
@@ -663,6 +682,15 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
     }
 
     if (!ngx_http_markdown_should_convert(r, conf, &accept_reason)) {
+        if (ngx_http_markdown_accept_result_varies(accept_reason)) {
+            ngx_int_t  vary_rc;
+
+            vary_rc = ngx_http_markdown_add_vary_accept(r);
+            if (vary_rc != NGX_OK) {
+                *rc = vary_rc;
+                return 1;
+            }
+        }
         NGX_HTTP_MARKDOWN_METRIC_INC(skips.accept);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_accept_skip(r, conf, early_eff,
@@ -675,20 +703,17 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
 }
 
 
-/*
- * Per-worker inflight guard (spec 52).
+/**
+ * Reserves worker capacity for request conversion.
  *
- * After eligibility passes and before Rust conversion begins,
- * try to increment the inflight counter.  If the worker is at
- * capacity (current >= max_inflight), apply the configured
- * error policy (pass/status/fail_closed from spec 51).
+ * Applies the configured error policy when capacity is unavailable or
+ * reservation setup fails.
  *
- * The cleanup handler registered by try_increment guarantees
- * decrement on every exit path (normal, abort, timeout, error)
- * via r->pool destruction.
- *
- * Returns NGX_OK on success, or a non-OK value that the caller
- * should return directly from the header filter.
+ * @param r Request being processed.
+ * @param ctx Request-specific Markdown processing state.
+ * @param conf Markdown filter configuration.
+ * @return NGX_OK when capacity is reserved; otherwise, the response status
+ *         or filter result to return from the header filter.
  */
 static ngx_int_t
 ngx_http_markdown_check_inflight(ngx_http_request_t *r,
@@ -709,6 +734,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
                 ctx->effective_conf, conf)
             == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         {
+            ngx_http_markdown_mark_header_reject(ctx);
             ngx_log_error(NGX_LOG_WARN,
                 r->connection->log, 0,
                 "markdown: inflight overload, "
@@ -716,8 +742,10 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
             ngx_http_markdown_log_decision(
                 r, conf, ctx->effective_conf,
                 ngx_http_markdown_reason_overload());
-            return ngx_http_markdown_effective_error_status(
-                ctx->effective_conf, conf);
+            return ngx_http_filter_finalize_request(
+                r, &ngx_http_markdown_filter_module,
+                (ngx_int_t) ngx_http_markdown_effective_error_status(
+                    ctx->effective_conf, conf));
         }
 
         /* fail-open: pass through original response */
@@ -742,6 +770,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
         if (rc == NGX_AGAIN) {
             ctx->headers_forwarded = 1;
+            ctx->fullbuffer.failopen_delivery_pending = 1;
             return rc;
         }
         if (rc == NGX_OK || rc == NGX_DONE) {
@@ -761,11 +790,14 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
                 ctx->effective_conf, conf)
             == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         {
+            ngx_http_markdown_mark_header_reject(ctx);
             ngx_http_markdown_log_decision(
                 r, conf, ctx->effective_conf,
                 ngx_http_markdown_reason_failed_closed());
-            return (ngx_int_t) ngx_http_markdown_effective_error_status(
-                ctx->effective_conf, conf);
+            return ngx_http_filter_finalize_request(
+                r, &ngx_http_markdown_filter_module,
+                (ngx_int_t) ngx_http_markdown_effective_error_status(
+                    ctx->effective_conf, conf));
         }
 
         ctx->eligible = 0;
@@ -783,6 +815,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
         if (rc == NGX_AGAIN) {
             ctx->headers_forwarded = 1;
+            ctx->fullbuffer.failopen_delivery_pending = 1;
             return rc;
         }
         if (rc == NGX_OK || rc == NGX_DONE) {
@@ -824,9 +857,9 @@ ngx_http_markdown_route_streaming_compression(
             "routed to full-buffer decode", ctx->decompression.layer_count);
         ngx_http_markdown_log_streaming_decision(
             r, conf, ctx, "full_buffer");
-        ngx_http_markdown_log_decision(
-            r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_streaming_skip_compressed());
+        ngx_http_markdown_log_event(
+            r, conf, ctx->effective_conf, "eligibility",
+            "compressed_passthrough");
 
         return 1;
     }
@@ -852,9 +885,9 @@ ngx_http_markdown_route_streaming_compression(
         "routing to full-buffer", ctx->decompression.type);
     ngx_http_markdown_log_streaming_decision(
         r, conf, ctx, "full_buffer");
-    ngx_http_markdown_log_decision(
-        r, conf, ctx->effective_conf,
-        ngx_http_markdown_reason_streaming_skip_compressed());
+    ngx_http_markdown_log_event(
+        r, conf, ctx->effective_conf, "eligibility",
+        "compressed_passthrough");
 
     return 1;
 }
@@ -897,49 +930,14 @@ ngx_http_markdown_log_buffered_decision_path(
         r, conf, ctx->effective_conf, ctx, &dp);
 }
 
-#ifdef MARKDOWN_INCREMENTAL_ENABLED
-/*
- * Promote an unknown-length response after buffering crosses the threshold.
- * Header-phase metrics initially count this request as full-buffer, so move
- * that hit before recording the incremental path.
- */
-static void
-ngx_http_markdown_update_deferred_body_path(
-    const ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
-    const ngx_http_markdown_conf_t *conf)
-{
-    if (conf->routing.large_body_threshold == 0
-        || ctx->processing_path != NGX_HTTP_MARKDOWN_PATH_FULLBUFFER
-        || r->method == NGX_HTTP_HEAD
-        || r->headers_out.status == NGX_HTTP_NOT_MODIFIED
-        || ctx->buffer.size < conf->routing.large_body_threshold)
-    {
-        return;
-    }
-
-    ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
-    NGX_HTTP_MARKDOWN_METRIC_SAFE_DEC(path_hits.fullbuffer);
-    NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.incremental);
-}
-#endif
-
-/*
- * Handle a malformed Content-Encoding chain during outer precommit routing.
+/**
+ * Handles a malformed Content-Encoding chain according to the configured error policy.
  *
- * Emits the canonical ENCODING_HEADER_INVALID reason (stage=decompression,
- * error_origin=format), starts no decoder, and mutates no response header.
- * The reconstructed PASS outcome returns the original encoded response
- * unchanged; a non-PASS policy uses its resolved reject status.
- *
- * Parameters:
- *   r    - NGINX request structure
- *   ctx  - per-request module context
- *   conf - module location configuration
- *
- * Returns:
- *   effective error status on fail-closed
- *   Result of ngx_http_next_header_filter on fail-open
+ * @param r Request being processed.
+ * @param ctx Per-request module context.
+ * @param conf Module location configuration.
+ * @param reason Decision reason to log, or the canonical encoding-header-invalid reason when NULL.
+ * @returns The filter-finalize result for fail-closed handling; otherwise, the downstream header-filter result.
  */
 static ngx_int_t
 ngx_http_markdown_handle_encoding_header_invalid(
@@ -966,13 +964,16 @@ ngx_http_markdown_handle_encoding_header_invalid(
     if (ngx_http_markdown_effective_error_policy(
             ctx->effective_conf, conf)
         == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+        ngx_http_markdown_mark_header_reject(ctx);
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                       "markdown: malformed Content-Encoding "
                       "chain, rejecting with status %ui",
                       ngx_http_markdown_effective_error_status(
                           ctx->effective_conf, conf));
-        return (ngx_int_t) ngx_http_markdown_effective_error_status(
-            ctx->effective_conf, conf);
+        return ngx_http_filter_finalize_request(
+            r, &ngx_http_markdown_filter_module,
+            (ngx_int_t) ngx_http_markdown_effective_error_status(
+                ctx->effective_conf, conf));
     }
 
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
@@ -989,6 +990,7 @@ ngx_http_markdown_handle_encoding_header_invalid(
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
     if (rc == NGX_AGAIN) {
         ctx->headers_forwarded = 1;
+        ctx->fullbuffer.failopen_delivery_pending = 1;
         return rc;
     }
     if (rc == NGX_OK || rc == NGX_DONE) {
@@ -999,16 +1001,16 @@ ngx_http_markdown_handle_encoding_header_invalid(
     return rc;
 }
 
-/*
- * Handle Content-Encoding before path selection.  Returns non-zero when the
- * caller must return *rc to the next header filter or an unsupported-format
- * policy result; known formats remain on the normal path with decompression
- * marked as required.
+/**
+ * Processes the response's Content-Encoding chain before selecting a conversion path.
  *
- * The chain grammar is parsed via the Rust FFI chain parser.  Malformed
- * grammar routes through the configured error policy with no decoder; valid
- * chains proceed to streaming (single layer) or bounded full-buffer
- * (multi-layer) decoding.
+ * Valid chains with supported compression layers enable decompression; identity-only
+ * chains continue without decompression. Malformed or unsupported chains, collection
+ * failures, and disabled automatic decompression follow the configured policy.
+ *
+ * @param rc Receives the header-filter result when processing terminates.
+ * @return Nonzero when the caller must stop processing and return `*rc`; zero when
+ *         normal path selection may continue.
  */
 static ngx_flag_t
 ngx_http_markdown_handle_header_compression(
@@ -1084,8 +1086,9 @@ encoding_policy:
                      ctx->decompression.type);
         ctx->eligible = 0;
         NGX_HTTP_MARKDOWN_METRIC_INC(skips.compression_passthrough);
-        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_streaming_skip_compressed());
+        ngx_http_markdown_log_event(
+            r, conf, ctx->effective_conf, "eligibility",
+            "compressed_passthrough");
         *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         /*
          * Canonical NGINX model: header-chain NGX_AGAIN means the write
@@ -1096,10 +1099,13 @@ encoding_policy:
          */
         if (*rc == NGX_AGAIN) {
             ctx->headers_forwarded = 1;
+            ctx->fullbuffer.failopen_delivery_pending = 1;
             return 1;
         }
         if (*rc == NGX_OK || *rc == NGX_DONE) {
             ctx->headers_forwarded = 1;
+            ngx_http_markdown_metric_inc_failopen(
+                ctx->effective_conf, conf);
         }
         return 1;
     }
@@ -1113,7 +1119,7 @@ encoding_policy:
     return 0;
 }
 
-/* Select streaming/incremental/full-buffer processing after compression. */
+/* Select streaming or full-buffer processing after compression. */
 static void
 ngx_http_markdown_select_header_path(
     ngx_http_request_t *r,
@@ -1141,31 +1147,15 @@ ngx_http_markdown_select_header_path(
             streaming.selection.true_streaming_selected_total);
         ngx_http_markdown_log_streaming_decision(
             r, conf, ctx, "streaming");
-        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_engine_streaming());
+        ngx_http_markdown_log_event(
+            r, conf, ctx->effective_conf, "eligibility",
+            "engine_streaming");
         goto path_selected;
     }
 
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.engine_choice.full_buffer);
     ngx_http_markdown_log_streaming_decision(
         r, conf, ctx, "full_buffer");
-#endif
-
-#ifdef MARKDOWN_INCREMENTAL_ENABLED
-    if (conf->routing.large_body_threshold > 0
-        && r->method != NGX_HTTP_HEAD
-        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED
-        && r->headers_out.content_length_n >= 0
-        && (size_t) r->headers_out.content_length_n
-           >= conf->routing.large_body_threshold)
-    {
-        ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
-    }
-#else
-#ifndef MARKDOWN_STREAMING_ENABLED
-    /* No threshold_explicit warning needed - threshold is now internalized */
-    (void) conf;
-#endif
 #endif
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -1203,11 +1193,7 @@ ngx_http_markdown_record_path_hit(const ngx_http_markdown_ctx_t *ctx)
         return;
     }
 #endif
-    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
-        NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.incremental);
-    } else {
-        NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.fullbuffer);
-    }
+    NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.fullbuffer);
 }
 
 /**
@@ -1217,7 +1203,7 @@ ngx_http_markdown_record_path_hit(const ngx_http_markdown_ctx_t *ctx)
  * When conversion is eligible this function allocates and installs a
  * ngx_http_markdown_ctx_t on the request, detects/initializes decompression
  * state (honoring the auto_decompress configuration), selects a processing
- * path (full-buffer or incremental) based on configuration and headers,
+ * path (full-buffer or streaming) based on configuration and headers,
  * records path-hit metrics for eligible requests, requests in-memory buffering
  * from upstream, and defers downstream header emission until the body phase.
  * If an unsupported compression format is detected the function marks the
@@ -1238,12 +1224,12 @@ ngx_http_markdown_record_path_hit(const ngx_http_markdown_ctx_t *ctx)
  *
  * Returns:
  *   NGX_OK           - re-entry with headers already forwarded (no-op)
- *   NGX_DECLINED     - first pass or re-entry before forwarding (caller
- *                      continues building the request context)
- *   otherwise        - the result of forwarding to the next filter
+ *   NGX_DECLINED     - first pass or re-entry before forwarding; the caller
+ *                      must preserve the existing context and decide whether
+ *                      header emission is ready
  */
 static ngx_int_t
-ngx_http_markdown_header_filter_handle_reentry(ngx_http_request_t *r)
+ngx_http_markdown_header_filter_handle_reentry(const ngx_http_request_t *r)
 {
     const ngx_http_markdown_ctx_t  *ctx;
 
@@ -1254,8 +1240,48 @@ ngx_http_markdown_header_filter_handle_reentry(ngx_http_request_t *r)
     if (ctx->headers_forwarded) {
         return NGX_OK;
     }
-    return ngx_http_markdown_next_header_filter_with_auth(
-        r, ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module));
+    return NGX_DECLINED;
+}
+
+
+/*
+ * Resume a deferred header-filter re-entry only after body processing has
+ * prepared the final representation.  A re-entry before conversion is ready
+ * is an invariant violation: forwarding there would expose upstream headers
+ * before the module has applied its representation changes.
+ */
+static ngx_int_t
+ngx_http_markdown_resume_header_filter_reentry(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t  rc;
+
+    if (ctx->error.header_reject) {
+        if (ctx->headers_forwarded) {
+            return NGX_OK;
+        }
+
+        rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
+        if (rc == NGX_AGAIN || rc == NGX_OK || rc == NGX_DONE) {
+            ctx->headers_forwarded = 1;
+        }
+        return rc;
+    }
+
+    if (!ctx->conversion.attempted) {
+        ngx_log_error(NGX_LOG_ALERT, r->connection->log, 0,
+                      "markdown: header-filter re-entry before "
+                      "conversion state was ready");
+        return NGX_ERROR;
+    }
+
+    rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
+    if (rc == NGX_AGAIN || rc == NGX_OK || rc == NGX_DONE) {
+        ctx->headers_forwarded = 1;
+    }
+
+    return rc;
 }
 
 
@@ -1298,11 +1324,14 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     /* Header-filter re-entry must reuse the request context created by the
      * first pass; allocating a second context would duplicate cleanup hooks
      * and reset the request's phase latches. */
+    ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
     precheck_rc = ngx_http_markdown_header_filter_handle_reentry(r);
     if (precheck_rc != NGX_DECLINED) {
         return precheck_rc;
     }
-
+    if (ctx != NULL) {
+        return ngx_http_markdown_resume_header_filter_reentry(r, ctx, conf);
+    }
     /*
      * Build a request-local effective configuration view early, before
      * the enabled check, so that is_enabled() and all subsequent
@@ -1343,7 +1372,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ngx_memzero(&early_eff, sizeof(early_eff));
     ngx_http_markdown_build_effective_conf(
         &early_eff,
-        conf->advanced.dynconf_enabled ? &snap_copy : NULL,
+        conf->advanced.dynconf_enabled == 1 ? &snap_copy : NULL,
         conf);
 
     /*
@@ -1454,18 +1483,6 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
     markdown_result_init(&result);
 
     /*
-     * Deferred path selection for chunked/unknown-length
-     * responses.  If Content-Length was absent in the
-     * header phase, the threshold decision was deferred
-     * until the full body is buffered.
-     *
-     * Covers: deferred path selection for chunked/unknown-length responses
-     */
-#ifdef MARKDOWN_INCREMENTAL_ENABLED
-    ngx_http_markdown_update_deferred_body_path(r, ctx, conf);
-#endif
-
-    /*
      * conversion_attempted and conversions_attempted metric are
      * already set by the body filter before decompression.
      */
@@ -1477,25 +1494,10 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
 
     rc = ngx_http_markdown_resolve_conditional_result(
         r, ctx, conf, &result, &elapsed_ms, &has_result);
-    if (rc == NGX_HTTP_NOT_MODIFIED) {
-        /* 304 Not Modified — skip conversion, client has current */
-        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_skip_conditional());
-
-        NGX_HTTP_MARKDOWN_METRIC_INC(skips.conditional);
-        ngx_http_markdown_log_buffered_decision_path(
-            r, ctx, conf,
-            &((const ngx_http_markdown_buffered_decision_t){
-                NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED,
-                NGX_HTTP_MARKDOWN_CONV_SKIPPED,
-                "skipped_conditional", "conversion"}),
-            elapsed_ms);
-
-        /* subrequest: no conversion ran for this response — release the
-         * inflight slot now instead of waiting for pool destruction. */
-        ngx_http_markdown_inflight_release(ctx);
-
-        return NGX_OK;
+    if (rc == NGX_DONE) {
+        /* send_304 emitted the terminal headers; do not continue the filter
+         * chain after the terminal return. */
+        return NGX_DONE;
     }
     if (rc != NGX_OK) {
         /* Conditional processing failed — log failure outcome */
@@ -1619,10 +1621,11 @@ ngx_http_markdown_body_filter_handle_head(ngx_http_request_t *r,
          * forwards the (rewritten) headers with an empty body. */
         ctx->eligible = 0;
         ctx->conversion.bypass_counted = 1;
-        /* The forward helper restores the source Last-Modified mtime
-         * from ctx->lifecycle.last_modified; the HEAD representation must not
-         * carry the HTML mtime, so forget the preserved source time. */
-        ctx->lifecycle.last_modified.has_last_modified_time = 0;
+        /* Validator restoration needs no caller-side surgery here:
+         * head_representation_headers() already reset BOTH outgoing
+         * Last-Modified mirrors (typed pointer plus numeric field), so
+         * the shared forwarding helper recognizes the rewritten state
+         * and skips restoring the preserved source mtime. */
     }
     return NGX_DECLINED;
 }
@@ -1769,6 +1772,11 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     if (ctx == NULL) {
         /* No context means header filter didn't set up conversion */
         /* Pass through unchanged */
+        return ngx_http_next_body_filter(r, in);
+    }
+
+    if (ctx->error.header_reject) {
+        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
         return ngx_http_next_body_filter(r, in);
     }
 

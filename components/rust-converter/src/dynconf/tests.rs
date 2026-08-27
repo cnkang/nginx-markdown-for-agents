@@ -271,7 +271,7 @@ fn test_static_only_keys_rejected() {
 }
 
 #[test]
-fn test_legacy_names_rejected() {
+fn test_removed_names_rejected() {
     // streaming_budget and memory_budget do not exist
     let input = br#"{"schema_version": 1, "streaming_budget": 2097152}"#;
     let err = parse_dynconf(input).unwrap_err();

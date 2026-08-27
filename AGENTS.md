@@ -146,6 +146,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 68 | security-cwe | Access control before method handling in HTTP handlers: handlers that reject unsupported methods (405 `NGX_HTTP_NOT_ALLOWED` or `*_method_not_allowed()` helper) must evaluate access control **before** the method-rejection branch; a denied request must not receive 405, an `Allow` header, or any handler-behavior signal; the access check must appear earlier in source order than any `NGX_HTTP_NOT_ALLOWED` assignment; handlers without a 405 path are exempt; `python3 tools/harness/detect_access_before_method.py` — advisory local gate (`--strict` promotes findings to violations; blocking harness-tooling CI check via `make harness-security-checks` for selected `harness_tooling` paths) |
 | 69 | nginx-idioms | Representation-change metadata-surface completeness: every representation-change path (fullcov commit, stream commit, 304, HEAD representation) must clear ALL upstream metadata surfaces in the same function — Trailer declaration implies `ngx_http_markdown_clear_trailers()`; mirror pairs (`last_modified_time`/`last_modified`, `content_type_lowcase`/`content_type_hash`) strip together or explicitly invalidate; reuse shared helpers; `python3 tools/harness/detect_representation_metadata_clearing.py` — blocking harness gate |
 | 70 | build-safety | Scratch/temporary file hygiene: one-off analysis scripts, PR drafts, editor/system junk must never enter commits; root-level `*.py`/`*.sh` forbidden except documented external contracts (`build.sh` ClusterFuzzLite entrypoint); test sources named `parse_*_test.*`/`test_*` exempt; `python3 tools/harness/detect_scratch_files.py` — blocking harness gate, `--staged` mode wired into `.pre-commit-config.yaml` |
+| 71 | dynconf-snapshot | Static explicit settings block dynamic overrides and propagate to child levels; block masks must follow the configuration tree so unset fields remain dynamic |
 | FUZZ-001..007 | fuzz-infrastructure | Fuzz target determinism, corpus/repo tracking, ClusterFuzzLite workflows, guided fuzz smoke, batch/prune pairing, and gitignore hygiene (see fuzz-infrastructure.md) |
 
 ## Required Agent Workflow
@@ -272,6 +273,10 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison [50]
 - Hardcoded HTTP status in reject paths: return conf->error_status instead of NGX_HTTP_BAD_GATEWAY; `bash tools/harness/detect_hardcoded_http_status.sh` — advisory [59]
 - Representation-change metadata completeness: Trailer declaration invalidation implies `ngx_http_markdown_clear_trailers()` in the same function; mirror pairs (`last_modified_time`/`last_modified`, `content_type_lowcase`/`content_type_hash`) strip together or explicitly invalidate via `ngx_http_markdown_invalidate_headers`; reuse shared helpers on every representation path (fullcov, stream commit, 304, HEAD); `python3 tools/harness/detect_representation_metadata_clearing.py` — blocking harness gate [69]
+
+**Dynamic Configuration & Snapshots** (C, T)
+
+- Explicit static fields set `dynconf_block_mask` and propagate to child levels; dynamic snapshots cannot override blocked fields, while unset fields remain dynamic [71]
 
 **HTML Sanitizer & Output Safety** (C, R, D)
 - Void elements self-closing; skip-mode name-aware [5]
@@ -491,9 +496,7 @@ Follow evidence-first verification (no completion claim without fresh command ou
   warning budget during full harness or release validation.
 - Release-gate tooling: `make release-gates-check`
 - Release gates 0.8.x: `make release-gates-check-08x` (canonical 0.8.x patch-line entry, `release-gates-check-080` is the compatible original name)
-- Release gates 0.9.0: `make release-gates-check-090` (additive on 0.8.0, production examples, gate validator, `RELEASE_GATE_ALLOW_SKIP_MODULE=1` skips `test-production-examples-nginx-t` when `NGINX_BIN` is unavailable, mirroring the 091 module-benchmark skip contract)
-- Release gates 0.9.1: `make release-gates-check-091` (additive on 0.9.0, blocking performance evidence gate for RC tags)
-- Release gates 0.9.2: `make release-gates-check-092` (additive on 0.9.1, current 0.9.2 blocking gate: public-surface drift, schema drift, reason-codegen, version consistency, release matrix, evidence manifest, `RELEASE_GATE_ALLOW_SKIP_MODULE=1` skip contract inherited from 090/091)
+- Release gates 0.9.2: `make release-gates-check-092` (consolidated 0.9.x regression/compatibility checks, blocking performance evidence for baselines 091 and 092, public-surface drift, schema drift, reason-codegen, version consistency, release matrix, and candidate-bound evidence)
 - Public-surface changes: `make public-surface-drift-check` (FFI/exported-symbol inventory drift vs checked-in public-surface-inventory.json)
 - Schema changes: `make schema-drift-check` (projects the canonical `schemas/metrics-v1.registry.json` and `schemas/dynconf-precedence-v1.json` contracts plus the diagnostics schema into versioned artifacts, then validates them against the renderer and dynconf implementations; override the artifact line with `SCHEMA_RELEASE_VERSION=MAJOR.MINOR.PATCH`, wired into release-gates-check-092 and CI release-092-contract-gates)
 - Reason-code changes: `make reason-codegen-check` (reason registry vs generated code, error classification coverage)

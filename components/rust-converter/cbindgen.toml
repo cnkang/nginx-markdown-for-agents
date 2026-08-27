@@ -45,9 +45,6 @@ allow_static_const = true
 "target_os = windows" = "WINDOWS"
 "target_os = linux" = "LINUX"
 "target_os = macos" = "MACOS"
-# Map the 'incremental' Cargo feature to the C preprocessor symbol used in
-# ngx_http_markdown_conversion_impl.h to guard the incremental FFI API.
-"feature = incremental" = "MARKDOWN_INCREMENTAL_ENABLED"
 # Map the 'streaming' Cargo feature to the C preprocessor symbol used to
 # guard the streaming FFI API.
 "feature = streaming" = "MARKDOWN_STREAMING_ENABLED"
@@ -64,4 +61,4 @@ extra_bindings = []
 crates = []
 all_features = false
 default_features = true
-features = ["incremental", "streaming"]
+features = ["streaming"]

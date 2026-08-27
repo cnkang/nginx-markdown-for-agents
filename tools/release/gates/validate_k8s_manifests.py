@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Kubernetes manifest and Helm chart validator for v0.7.0 release gates. 由 0.7.0 引入，被 0.8.0+ 门禁复用
+Kubernetes manifest and Helm chart validator for the release gates.
 
 Validates that K8s deployment artifacts exist and are well-formed:
 
@@ -21,16 +21,25 @@ No user-supplied patterns are compiled at runtime.
 from __future__ import annotations
 
 from collections.abc import Sequence
+import json
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from tools.release.gates.validate_config_directives import CURRENT_LIMIT_KEYS
+except ModuleNotFoundError as exc:
+    if exc.name != "tools":
+        raise
+    from validate_config_directives import CURRENT_LIMIT_KEYS
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 CHART_YAML = PROJECT_ROOT / "charts" / "nginx-markdown" / "Chart.yaml"
 VALUES_YAML = PROJECT_ROOT / "charts" / "nginx-markdown" / "values.yaml"
+VALUES_SCHEMA_JSON = PROJECT_ROOT / "charts" / "nginx-markdown" / "values.schema.json"
 DEPLOYMENT_TEMPLATE = (
     PROJECT_ROOT / "charts" / "nginx-markdown" / "templates" / "deployment.yaml"
 )
@@ -45,6 +54,7 @@ GATE4_LOCAL_SCRIPT = PROJECT_ROOT / "tools" / "release" / "gates" / (
 CHART_REQUIRED_FIELDS = ["apiVersion", "name", "version", "appVersion"]
 HELM_VALUES_REQUIRED_SNIPPETS = [
     'tag: ""',
+    'digest: ""',
     "runAsNonRoot: true",
     "readOnlyRootFilesystem: true",
     'drop: ["ALL"]',
@@ -53,6 +63,21 @@ HELM_VALUES_REQUIRED_SNIPPETS = [
     "enabled: false",
     'loadModule: ""',
 ]
+
+
+def _helm_limit_key(directive_key: str) -> str:
+    return re.sub(
+        r"_([a-z])", lambda match: match.group(1).upper(), directive_key
+    )
+
+
+HELM_CANONICAL_LIMIT_KEYS = {
+    _helm_limit_key(directive_key): directive_key
+    for directive_key in CURRENT_LIMIT_KEYS
+}
+HELM_LEGACY_VALUE_KEYS = frozenset(
+    {"maxSize", "timeout", "etag", "budget"}
+)
 HELM_CONFIG_REQUIRED_SNIPPETS = [
     "markdown.loadModule is required when markdown.enabled=true",
     "metrics.enabled=true requires markdown.enabled=true",
@@ -121,6 +146,7 @@ _CHECK_HELM_RENDER_METRICS_WITHOUT_MODULE = "helm:render-metrics-without-module"
 _CHECK_HELM_RENDER_MODULE_ENABLED = "helm:render-module-enabled"
 _CHECK_HELM_RENDER_MODULE_METRICS = "helm:render-module-metrics"
 _CHECK_HELM_TEMPLATE_EXPLICIT = "helm:template:explicit-image"
+_CHECK_HELM_TEMPLATE_DIGEST = "helm:template:digest-image"
 
 _EXPLICIT_IMAGE_ARGS = [
     "--set-string",
@@ -128,9 +154,23 @@ _EXPLICIT_IMAGE_ARGS = [
     "--set-string",
     "image.tag=1.26.3",
 ]
+_DIGEST_IMAGE_ARGS = [
+    "--set-string",
+    "image.repository=nginx",
+    "--set-string",
+    "image.tag=1.26.3",
+    "--set-string",
+    "image.digest=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+]
+_REPOSITORY_DIGEST_IMAGE_ARGS = [
+    "--set-string",
+    "image.repository=nginx@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+    "--set-string",
+    "image.tag=",
+]
 _IMAGE_REQUIRED_MESSAGES = (
     "image.repository must be set explicitly",
-    "image.tag must be set explicitly",
+    "image.tag or image.digest must be set explicitly",
 )
 
 
@@ -176,14 +216,7 @@ def try_parse_yaml(content: str) -> tuple[bool, str]:
         list(yaml.safe_load_all(content))
         return True, ""
     except ImportError:
-        return next(
-            (
-                (False, f"line {i}: tab indentation (YAML requires spaces)")
-                for i, line in enumerate(content.splitlines(), 1)
-                if line.startswith("\t")
-            ),
-            (True, ""),
-        )
+        return False, "PyYAML is required for Kubernetes manifest validation"
     # PyYAML is optional and exposes parser errors through backend-specific
     # exception classes, so this boundary intentionally normalizes them.
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -305,6 +338,133 @@ def _validate_helm_deployment(result: ValidationResult) -> None:
         )
 
 
+def _validate_helm_legacy_values(
+    result: ValidationResult,
+    values: str,
+    markdown_properties: dict[str, object],
+    configmap: str,
+) -> None:
+    for key in sorted(HELM_LEGACY_VALUE_KEYS):
+        yaml_key = re.compile(rf"(?m)^\s+{re.escape(key)}:")
+        schema_has_key = key in markdown_properties or key in {
+            "budget"
+        } and key in markdown_properties.get("streaming", {}).get(
+            "properties", {}
+        )
+        template_has_key = any(
+            reference in configmap
+            for reference in (
+                f".Values.markdown.{key}",
+                f".Values.markdown.streaming.{key}",
+            )
+        )
+        check_id = f"helm:public-surface:legacy:{key}"
+        if yaml_key.search(values) or schema_has_key or template_has_key:
+            result.fail(check_id, f"legacy Helm value {key!r} is still exposed")
+        else:
+            result.pass_(check_id, f"legacy Helm value {key!r} is absent")
+
+
+def _validate_helm_canonical_limits(
+    result: ValidationResult,
+    values: str,
+    limits_schema: dict[str, object],
+    configmap: str,
+) -> None:
+    for value_key, directive_key in HELM_CANONICAL_LIMIT_KEYS.items():
+        value_present = bool(
+            re.search(
+                rf"(?m)^\s*(?:#\s*)?{re.escape(value_key)}:", values
+            )
+        )
+        schema_present = value_key in limits_schema
+        template_reference = (
+            f".Values.markdown.limits.{value_key}"
+            in configmap
+        )
+        directive_reference = f"{directive_key}=" in configmap
+        check_id = f"helm:public-surface:limit:{value_key}"
+        if all((value_present, schema_present, template_reference, directive_reference)):
+            result.pass_(
+                check_id,
+                f"canonical {value_key} maps to markdown_limits {directive_key}",
+            )
+        else:
+            result.fail(
+                check_id,
+                f"canonical {value_key} must be present in values/schema and map to {directive_key}",
+            )
+
+
+def _validate_helm_image_digest(
+    result: ValidationResult,
+    schema: dict[str, object],
+) -> None:
+    image_properties = schema.get("properties", {}).get("image", {}).get(
+        "properties", {}
+    )
+    deployment = read_safe(DEPLOYMENT_TEMPLATE)
+    digest_contract = (
+        "digest" in image_properties
+        and 'contains "@" $imageRepo' in deployment
+        and 'image: "{{ $imageRepo }}@{{ $imageDigest }}"' in deployment
+    )
+    if digest_contract:
+        result.pass_(
+            "helm:public-surface:image-digest",
+            "main image supports digest, repository@digest, and tag resolution",
+        )
+    else:
+        result.fail(
+            "helm:public-surface:image-digest",
+            "main image digest precedence contract is incomplete",
+        )
+
+
+def validate_helm_public_surface(result: ValidationResult) -> None:
+    """Keep Helm values, schema, and rendered directives on one vocabulary."""
+    values = read_safe(VALUES_YAML)
+    schema_text = read_safe(VALUES_SCHEMA_JSON)
+    configmap = read_safe(CONFIGMAP_TEMPLATE)
+    if not values or not schema_text or not configmap:
+        result.fail(
+            "helm:public-surface:files",
+            "Helm values, schema, and configmap files are required",
+        )
+        return
+
+    try:
+        schema = json.loads(schema_text)
+        markdown_schema = schema["properties"]["markdown"]
+        markdown_properties = markdown_schema["properties"]
+        limits_schema = markdown_properties["limits"]["properties"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        result.fail(
+            "helm:public-surface:schema",
+            f"Helm values schema has an unexpected shape: {exc}",
+        )
+        return
+
+    _validate_helm_legacy_values(result, values, markdown_properties, configmap)
+    _validate_helm_canonical_limits(result, values, limits_schema, configmap)
+
+    conditional_reference = (
+        "markdown_cache_validation {{ .Values.markdown.conditionalRequests }};"
+    )
+    if conditional_reference in configmap:
+        result.pass_(
+            "helm:public-surface:conditional-requests",
+            "conditionalRequests maps directly to markdown_cache_validation",
+        )
+    else:
+        result.fail(
+            "helm:public-surface:conditional-requests",
+            "conditionalRequests must map directly to markdown_cache_validation",
+        )
+
+    _validate_helm_image_digest(result, schema)
+
+
 def validate_helm_secure_defaults(result: ValidationResult) -> None:
     """Validate Helm defaults can run under the default restricted pod context."""
     _check_file_snippets(
@@ -322,6 +482,7 @@ def validate_helm_secure_defaults(result: ValidationResult) -> None:
             result.fail(check_id, f"configmap template must not contain {snippet}")
         else:
             result.pass_(check_id, f"configmap template omits {snippet}")
+    validate_helm_public_surface(result)
     _validate_helm_deployment(result)
 
 
@@ -446,6 +607,47 @@ def _validate_default_helm_template(
     _validate_rendered_required_snippets(result, rendered.stdout)
     _validate_rendered_default_forbidden_snippets(result, rendered.stdout)
     return rendered.stdout
+
+
+def _validate_image_digest_render(
+    result: ValidationResult,
+    helm: str,
+    chart_dir: Path,
+) -> None:
+    """Verify digest fields take precedence over tags and support repo@digest."""
+    cases = (
+        (
+            "field",
+            _DIGEST_IMAGE_ARGS,
+            'image: "nginx@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"',
+        ),
+        (
+            "repository",
+            _REPOSITORY_DIGEST_IMAGE_ARGS,
+            'image: "nginx@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"',
+        ),
+    )
+    for case, args, expected in cases:
+        check_id = f"{_CHECK_HELM_TEMPLATE_DIGEST}:{case}"
+        rendered = _run_helm_template(result, check_id, helm, chart_dir, args)
+        if rendered is None:
+            continue
+        if rendered.returncode != 0:
+            result.fail(
+                check_id,
+                f"{case} digest Helm template failed: "
+                f"{_truncate_output(rendered.stdout.strip())}",
+            )
+        elif expected not in rendered.stdout:
+            result.fail(
+                check_id,
+                f"{case} digest Helm render did not use the expected immutable image",
+            )
+        else:
+            result.pass_(
+                check_id,
+                f"{case} digest Helm render uses the immutable image reference",
+            )
 
 
 def _validate_rendered_yaml(result: ValidationResult, rendered: str) -> None:
@@ -614,7 +816,17 @@ def _validate_module_metrics_render(
         _CHECK_HELM_RENDER_MODULE_METRICS,
         helm,
         chart_dir,
-        [*_module_enabled_args(), "--set", "metrics.enabled=true"],
+        [
+            *_module_enabled_args(),
+            "--set",
+            "metrics.enabled=true",
+            "--set",
+            "metrics.sidecar.enabled=true",
+            "--set-string",
+            "metrics.sidecar.image.repository=nginx",
+            "--set-string",
+            "metrics.sidecar.image.tag=1.26.3",
+        ],
     )
     if rendered is None:
         return
@@ -747,6 +959,7 @@ def validate_helm_render(result: ValidationResult) -> None:
         return
     if _validate_default_helm_template(result, helm, chart_dir) is None:
         return
+    _validate_image_digest_render(result, helm, chart_dir)
     _validate_missing_module_guard(result, helm, chart_dir)
     _validate_metrics_without_module_guard(result, helm, chart_dir)
     _validate_module_enabled_render(result, helm, chart_dir)
@@ -755,7 +968,7 @@ def validate_helm_render(result: ValidationResult) -> None:
 
 def print_report(result: ValidationResult) -> None:
     """Print a formatted validation report."""
-    print("v0.7.0 K8s Manifest & Helm Chart Validation Report")
+    print("K8s Manifest & Helm Chart Validation Report")
     print("=" * 60)
     for status, check_id, message in result.results:
         print(f"  {status:4s}  {check_id:40s}  {message}")

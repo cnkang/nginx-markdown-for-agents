@@ -23,7 +23,7 @@ from hypothesis import strategies as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from report_utils import median_value
-from threshold_engine import compute_deviation, judge_metric
+from threshold_engine import build_verdict_report, compute_deviation, judge_metric
 
 
 # ---------------------------------------------------------------------------
@@ -69,13 +69,13 @@ def test_property0_zero_baseline_special_case(current):
 def test_property1_lower_is_better_classification(baseline, current, warning_pct, blocking_pct_extra):
     """
     Property test that verifies classification logic for "lower_is_better" metrics.
-    
+
     Asserts that the computed deviation is classified as:
     - pass when deviation <= warning,
     - warn when warning < deviation <= blocking,
     - fail when deviation > blocking.
     The blocking threshold is computed as `warning_pct + blocking_pct_extra` to ensure blocking > warning.
-    
+
     Parameters:
         baseline (float): Baseline value for deviation calculation.
         current (float): Current value to compare against the baseline.
@@ -104,12 +104,12 @@ def test_property1_lower_is_better_classification(baseline, current, warning_pct
 def test_property1_higher_is_better_classification(baseline, current, warning_abs, blocking_extra):
     """
     Classifies a deviation for metrics where higher values are better using negative thresholds and asserts the expected verdict.
-    
+
     Constructs negative thresholds from `warning_abs` and `blocking_extra` (warning_pct = -warning_abs; blocking_pct = -(warning_abs + blocking_extra)) and checks that:
     - deviation < blocking_pct -> verdict is "fail"
     - blocking_pct <= deviation < warning_pct -> verdict is "warn"
     - deviation >= warning_pct -> verdict is "pass"
-    
+
     Parameters:
         baseline (float): Reference baseline value for deviation calculation.
         current (float): Current measured value to compare against the baseline.
@@ -152,14 +152,48 @@ def test_property1_informational_always_pass(baseline, current):
 )
 @settings(max_examples=300)
 def test_property1_fail_implies_nonzero_exit(baseline, current, warning_pct, blocking_pct_extra):
-    """When at least one metric is FAIL, the overall verdict must be fail."""
+    """A blocking metric breach reaches the production report verdict."""
     blocking_pct = warning_pct + blocking_pct_extra
     deviation = compute_deviation(current, baseline)
-    verdict = judge_metric(deviation, "lower_is_better", warning_pct, blocking_pct)
+    baseline_report = {
+        "timestamp": "2026-01-01T00:00:00Z",
+        "git_commit": "baseline",
+        "tiers": {"small": {"p50_ms": baseline}},
+    }
+    current_report = {
+        "git_commit": "current",
+        "tiers": {"small": {"p50_ms": current}},
+    }
+    thresholds_cfg = {
+        "platforms": {
+            "test": {
+                "small": {
+                    "p50_ms": {
+                        "warning_pct": warning_pct,
+                        "blocking_pct": blocking_pct,
+                    }
+                }
+            }
+        }
+    }
 
-    if verdict == "fail":
-        # In the engine, any single fail → overall fail → exit code 1
-        assert verdict == "fail"
+    report, has_failure = build_verdict_report(
+        baseline_report,
+        current_report,
+        thresholds_cfg,
+        {"p50_ms": "lower_is_better"},
+        "test",
+    )
+
+    expected_verdict = (
+        "fail"
+        if deviation > blocking_pct
+        else "warn"
+        if deviation > warning_pct
+        else "pass"
+    )
+    assert report["overall_verdict"] == expected_verdict
+    assert has_failure is (expected_verdict == "fail")
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +293,7 @@ def test_property11_median_within_range(values):
 def test_property11_median_of_identical_values(value, n):
     """
     Assert that the median of a list containing only identical elements equals that element.
-    
+
     Parameters:
         value (float): The value to repeat in the list.
         n (int): The number of times `value` is repeated (list length; expected to be a positive integer).

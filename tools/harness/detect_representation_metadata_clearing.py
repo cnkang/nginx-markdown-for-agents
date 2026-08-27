@@ -34,7 +34,7 @@ Checks per function body:
      - content_type_hash = 0 requires content_type_lowcase = NULL.
 
 Function discovery handles both NGINX definition styles: the single-line
-`ngx_int_t foo(args)` form and the multi-line form where the signature
+`ngx_int_t foo(args) {` form and the multi-line form where the signature
 spans lines and the brace opens on a later line.  The scan is fail-closed:
 with --strict (or --fail-on-unparsed), a file whose production target
 functions cannot be parsed reports an error instead of passing silently.
@@ -263,8 +263,10 @@ def _signature_completes(lines, start_index, max_scan=32):
     limit = min(len(lines), start_index + max_scan)
     for idx in range(start_index, limit):
         line = lines[idx]
-        if idx > start_index and line.strip() == "{":
-            return True, idx - 1, True  # body starts after this line
+        if "{" in line and (
+            idx == start_index or line.strip() == "{"
+        ):
+            return True, idx - 1, True  # collect the body from this line onward
         paren_depth += line.count("(") - line.count(")")
         # A semicolon outside parens ends a prototype/call, not a def.
         if ";" in re.sub(r"\([^()]*\)", "", line) and paren_depth <= 0:

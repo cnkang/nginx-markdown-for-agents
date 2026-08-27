@@ -195,8 +195,8 @@ jobs:
     assert not find_broad_env_secrets(narrow, "narrow.yml")
 
 
-def test_sonar_token_is_limited_to_two_named_steps() -> None:
-    """The presence check runs before checkout and the scanner is the consumer."""
+def test_sonar_token_is_limited_to_three_named_steps() -> None:
+    """The presence check and both scanner steps are the only consumers."""
     workflow = """
 jobs:
   sonar:
@@ -211,13 +211,17 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         uses: SonarSource/scan@0000000000000000000000000000000000000000
+      - name: SonarCloud Branch Scan
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        uses: SonarSource/scan@0000000000000000000000000000000000000000
 """
 
     assert not check_sonar_token_steps(workflow)
 
 
 def test_sonar_token_rejects_an_extra_expression() -> None:
-    """No third step may inherit or directly interpolate the scanner token."""
+    """No extra step may inherit or directly interpolate the scanner token."""
     workflow = """
 jobs:
   sonar:

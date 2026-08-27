@@ -72,15 +72,25 @@ def build_signature_needle(function_name: str, signature_prefix: str) -> str:
 
 
 def find_function_slice(src: str, function_name: str, needle: str) -> tuple[int, int] | None:
-    start = src.find(needle)
-    if start == -1:
-        print(f"failed to find function signature for {function_name}", file=sys.stderr)
-        return None
+    search_from = 0
+    while True:
+        start = src.find(needle, search_from)
+        if start == -1:
+            print(f"failed to find function signature for {function_name}", file=sys.stderr)
+            return None
 
-    brace_start = src.find("{", start)
-    if brace_start == -1:
-        print(f"failed to find function body start for {function_name}", file=sys.stderr)
-        return None
+        brace_start = src.find("{", start)
+        if brace_start == -1:
+            print(f"failed to find function body start for {function_name}", file=sys.stderr)
+            return None
+
+        # Prototypes and declarations can contain the same needle.  Advance
+        # to the next occurrence when a semicolon appears before the first
+        # opening brace, rather than extracting an unrelated later block.
+        if src.find(";", start, brace_start) != -1:
+            search_from = start + len(needle)
+            continue
+        break
 
     depth = 0
     for i, ch in enumerate(src[brace_start:], start=brace_start):

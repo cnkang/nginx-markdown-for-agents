@@ -35,10 +35,10 @@ build/unit build/integration build/generated:
 #                      for dead-code elimination of unused stubs; directly include
 #                      broad production implementation headers, suppressing only
 #                      the resulting unreferenced static-function warnings.
-#   dynconf_impl     - dynamic config hot-reload; needs nginx_stubs for
-#                      NGINX API redefinitions, streaming enabled, and
-#                      -ffunction-sections for dead-code elimination.
-build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.h | build/unit build/generated
+#   dynconf_production - dynamic config hot-reload through the Rust-backed
+#                        production parser; needs nginx_stubs, the generated
+#                        FFI header, and section GC for unused API stubs.
+build/unit/%: unit/%_test.c include/test_common.h | build/unit build/generated
 	@extra_srcs=""; \
 	extra_cflags=""; \
 	extra_ldflags=""; \
@@ -58,20 +58,16 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	  streaming_equiv_brotli_property) extra_cflags="$$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null || echo '-I/opt/homebrew/include -I/usr/local/include')"; extra_ldflags="$$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null || echo '-L/opt/homebrew/lib -L/usr/local/lib -lbrotlidec -lbrotlienc')" ;; \
 	  streaming_metrics_increment) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  streaming) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
-	  stream_state|stream_postcommit|stream_replay|stream_commit|streaming_replay_overflow_security) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
+	  stream_postcommit|stream_replay|stream_commit|streaming_replay_overflow_security) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  streaming_impl) extra_cflags="-I../src -Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \
 	  conversion_impl_base_url) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_handlers_impl|limits_parsing_property) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  streaming_config_contract|directive_context_default_inherit_property|context_negative_property) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  eligibility_impl|hard_excluded_params_case|hard_excluded_types_security|status_code_excluded_security) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_core_impl) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-	  v070_default_values) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-  dynconf_impl) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -DNGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-  dynconf_production) extra_cflags="-Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-	  dynconf_snapshot) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+	  config_default_values) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+	dynconf_production) extra_cflags="-Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  effective_conf) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-	  prometheus_renderer) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
-	  prometheus_per_path|metrics_bounded_rendering) extra_cflags="-DMARKDOWN_STREAMING_ENABLED -Wno-typedef-redefinition" ;; \
 	  accept_production|auth_production|auth_deny_security|conditional_production) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  inflight) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	esac; \

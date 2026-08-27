@@ -1,4 +1,4 @@
-//! Unified error classification and behavior decision (spec 51).
+//! Unified error classification and behavior decision (error policy).
 //!
 //! This module defines the error policy layer that determines how each
 //! error class is handled at runtime. It is the **single source of truth**
@@ -60,7 +60,7 @@ pub enum ErrorClass {
     /// `ConversionError`; this variant is a semantic placeholder retained for
     /// reason-code mapping.
     DecompressionError = 4,
-    /// Worker inflight limit exceeded (detected by spec 52).
+    /// Worker inflight limit exceeded (detected by the inflight guard).
     Overload = 5,
     /// Dynamic configuration is invalid.
     InvalidDynconf = 6,
@@ -249,7 +249,7 @@ impl ErrorBehavior {
 
 /// Decide the error handling behavior for a given error class and policy.
 ///
-/// This is the core decision function for the unified error policy (spec 51).
+/// This is the core decision function for the unified error policy.
 ///
 /// # Rules
 ///

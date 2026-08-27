@@ -199,6 +199,9 @@ Historical issues: `ec34a4ff`, `feebb9bf`.
 Required:
 - **Fat-pointer safety when transferring ownership**: When transferring ownership of a Rust slice or `Vec` to C via a raw pointer, do **not** use `Box::into_raw()` on the slice/Vec itself, as this relies on the internal fat-pointer layout (pointer + length) which is not stable or compatible with C's expectation of a simple pointer. Instead, use the pattern:
   ```rust
+  if slice.is_empty() {
+      return std::ptr::null_mut();
+  }
   let mut boxed = slice.to_vec().into_boxed_slice();
   let ptr = boxed.as_mut_ptr();
   std::mem::forget(boxed);

@@ -439,7 +439,7 @@ test_property5d_random_error_sequences(void)
 /* ----------------------------------------------------------------
  * Property 5e: Budget enforcement triggers at correct threshold
  *
- * Model incremental budget tracking:
+ * Model cumulative streaming budget tracking:
  *   1. Process chunks that accumulate decompressed bytes
  *   2. When cumulative exceeds max_size, error is BUDGET_EXCEEDED
  *   3. Verify the correct action for current commit state

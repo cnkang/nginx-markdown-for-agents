@@ -745,10 +745,10 @@ probe_expectations() {
     simple/basic.html)
       echo "Welcome to the Test Page|This is a second paragraph"
       ;;
-    simple/tables.html)
+    simple/tables.html|benchmark/tables.html)
       echo "Table Examples|Implemented"
       ;;
-    complex/blog-post.html)
+    complex/blog-post.html|benchmark/blog-post.html)
       echo "Building an NGINX Module for AI Agents|Share on Facebook"
       ;;
     large/large-1mb.html)
@@ -971,11 +971,13 @@ sample_rss_background() {
 ###############################################################################
 
 # Each scenario: name|fixture_path|profile|compression|transfer|concurrency
-# fixture_path is relative to corpus root (upstream mock document root)
+# fixture_path is relative to corpus root (upstream mock document root).
+# Keep critical comparison inputs under benchmark/ so general corpus cleanup
+# cannot silently change the baseline environment.
 SCENARIOS=(
   "plain-small|simple/basic.html|balanced|none|identity|10"
-  "chunked-medium|simple/tables.html|balanced|none|chunked|10"
-  "gzip-large|complex/blog-post.html|balanced|gzip|identity|10"
+  "chunked-medium|benchmark/tables.html|balanced|none|chunked|10"
+  "gzip-large|benchmark/blog-post.html|balanced|gzip|identity|10"
   "large-body|large/large-1mb.html|balanced|none|identity|5"
   "streaming-first|large/large-1mb.html|streaming_first|none|chunked|20"
   "gzip-streaming-first|large/large-1mb.html|streaming_first|gzip|chunked|10"

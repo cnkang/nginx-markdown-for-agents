@@ -72,7 +72,9 @@ Streaming introduces a commit boundary:
 
 Rules:
 
-1. **Pre-commit failures** may fail-open back to original HTML (if configured).
+1. **Pre-commit failures** may fail-open back to original HTML (if configured)
+   only when the replay buffer retains every upstream byte consumed so far.
+   If replay is incomplete, the module must fail closed.
 2. **Post-commit failures** cannot safely switch back to HTML on the same response.
 3. Post-commit failures must use explicit stream policy (default: fail-closed for that request).
 

@@ -6,12 +6,12 @@
  * of truth; the Rust enum and C metadata are generated projections. C code
  * should use these accessors rather than defining independent reason data.
  *
- * Migration note (v0.7.0):
- *   The existing ngx_http_markdown_reason.c file retains legacy C-only
- *   streaming labels for backward compatibility. New canonical reason data
- *   comes from the generated registry projections and these FFI accessors.
+ * Streaming transition details are emitted through the structured event field
+ * by the C runtime and are intentionally not exposed as reason codes here.
+ * Registry-backed reason data comes from the generated projections and these
+ * FFI accessors.
  *
- * Requirements: REQ-0700-RUST-006
+ * Requirements: reason-code FFI basis
  */
 
 #include <ngx_config.h>

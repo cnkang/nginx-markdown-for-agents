@@ -13,7 +13,7 @@ flowchart TD
     Accept -->|"application/json"| PassHTML
     Convert --> Response["Response with<br/>Content-Type: text/markdown"]
     PassHTML --> Response2["Response with<br/>Content-Type: text/html"]
-    
+
     style Convert fill:#009639,color:#fff
     style Wildcard fill:#f90,color:#000
 ```
@@ -271,6 +271,13 @@ With this configuration:
 - Requests from ClaudeBot, GPTBot, or Googlebot select the module and use `markdown_accept force`, which causes eligible `text/html` responses to convert to Markdown.
 - Requests from all other clients skip the module through the variable-driven filter. Their upstream Accept headers are not rewritten.
 The module's standard eligibility checks (status code, content type, size limits, and so on) still apply. Only responses that pass all checks get converted.
+
+Because the module derives the selection variable from `$http_user_agent`, a shared
+cache must keep bot and non-bot variants separate. Either emit
+`Vary: User-Agent` at the caching boundary or include the normalized bot
+selection (for example `$markdown_for_bot`) in the cache key. Do not let a
+Markdown response selected for a bot populate the cache entry served to an
+ordinary browser, or vice versa.
 
 ```nginx
 map $http_user_agent $is_ai_bot {

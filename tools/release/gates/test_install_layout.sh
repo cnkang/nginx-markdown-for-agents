@@ -144,7 +144,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
-TMPFILE="$(mktemp /tmp/test_layout_XXXXXX.tar.gz)"
+TMPFILE_BASE=""
+if ! TMPFILE_BASE="$(mktemp /tmp/test_layout_XXXXXX)"; then
+    fail "create temporary unsupported file"
+    exit 1
+fi
+TMPFILE="${TMPFILE_BASE}.tar.gz"
+if ! mv -- "$TMPFILE_BASE" "$TMPFILE"; then
+    rm -f -- "$TMPFILE_BASE"
+    fail "create temporary unsupported file" "unable to add unsupported suffix"
+    exit 1
+fi
+if [[ -z "$TMPFILE" || ! -f "$TMPFILE" ]]; then
+    fail "create temporary unsupported file" "mktemp returned an invalid path"
+    exit 1
+fi
 
 local_exit=0
 bash "$CHECK_SCRIPT" "$TMPFILE" >/dev/null 2>/dev/null || local_exit=$?

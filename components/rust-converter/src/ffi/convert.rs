@@ -3,9 +3,8 @@
 //! This module implements [`convert_inner`], the single internal function that
 //! executes a full HTML-to-Markdown conversion request. The full-buffer export
 //! `markdown_convert` delegates to this function after validating its inputs.
-//! Incremental and streaming FFI exports (`markdown_incremental_*`,
-//! `markdown_streaming_*`) do NOT delegate to `convert_inner`; they own their
-//! own incremental parse/convert state machines in `ffi/incremental.rs` and
+//! The streaming FFI exports (`markdown_streaming_*`) do NOT delegate to
+//! `convert_inner`; they own their streaming state machine in
 //! `ffi/streaming.rs`.
 //!
 //! # Conversion Pipeline
@@ -59,19 +58,6 @@ pub(crate) fn estimate_parser_working_set(input_len: usize, tag_openers: usize) 
         })
         .and_then(|bytes| bytes.checked_add(PARSER_FIXED_OVERHEAD))
         .unwrap_or(u64::MAX)
-}
-
-/// Return the largest raw input that can fit a parser budget before accounting
-/// for tag-specific DOM allocations. Incremental callers use this as an early
-/// buffer ceiling and apply the full estimate while chunks arrive.
-#[cfg(any(feature = "incremental", test))]
-pub(crate) fn max_input_for_parser_budget(parser_budget: u64) -> usize {
-    if parser_budget == 0 {
-        return 0;
-    }
-
-    let bytes = parser_budget.saturating_sub(PARSER_FIXED_OVERHEAD) / PARSER_BYTES_PER_INPUT_BYTE;
-    usize::try_from(bytes).unwrap_or(usize::MAX)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,13 +296,6 @@ mod tests {
             estimate_parser_working_set(usize::MAX, usize::MAX),
             u64::MAX
         );
-    }
-
-    #[test]
-    fn parser_budget_raw_ceiling_reserves_fixed_and_transcode_costs() {
-        let budget = PARSER_FIXED_OVERHEAD + (PARSER_BYTES_PER_INPUT_BYTE * 100);
-        assert_eq!(max_input_for_parser_budget(budget), 100);
-        assert_eq!(max_input_for_parser_budget(PARSER_FIXED_OVERHEAD - 1), 0);
     }
 
     #[test]

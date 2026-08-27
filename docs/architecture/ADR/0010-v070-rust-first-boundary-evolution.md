@@ -34,6 +34,11 @@ NGINX-coupled responsibilities.
 
 ### C Side Retains
 
+C performs NGINX inheritance and produces one merged configuration snapshot for
+each request or reload. It owns the resulting lifecycle and passes that
+snapshot across the boundary. It does not delegate NGINX merge semantics to
+Rust.
+
 - Module registration (`ngx_module_t` / `ngx_command_t`)
 - Directive entry (configuration parsing and merge)
 - Filter hooks (`header_filter` / `body_filter` registration)
@@ -47,13 +52,17 @@ NGINX-coupled responsibilities.
 
 ### Rust Side Owns
 
+Rust normalizes and semantically validates the already merged snapshot. It does
+not reapply NGINX defaults, inheritance, or merge logic.
+
 - HTML→Markdown conversion (streaming + full-buffer engine)
 - Accept negotiation (q-value comparison, MIME type matching)
 - Bounded decompression (gzip/deflate/br + budget enforcement)
 - Conditional request / ETag parsing (If-None-Match, If-Modified-Since, ETag
   generation)
 - URL/Host validation (control character rejection, X-Forwarded-* parsing)
-- Config normalization / validation (merge + syntax/semantic validation)
+- Config snapshot normalization / validation (syntax and semantic validation
+  after C-owned merge and inheritance)
 - Conversion decision pure logic (`make_decision(context) → decision +
   reason_code`)
 - Error category generation (Rust error enum → FFI error code)
@@ -99,7 +108,7 @@ NGINX-coupled responsibilities.
 - **Single source of truth**: At the time of this v0.7.0 decision, the Rust
   projection owned reason codes, error categories, and decision logic. The
   current canonical reason source is
-  `components/rust-converter/reason_registry.toml`; generated Rust and C
+  `components/rust-converter/reason_registry.toml`. Generated Rust and C
   projections prevent C/Rust semantic forks (see ADR-0018).
 - **CI enforcement**: Header drift checks and layout tests catch ABI
   incompatibilities before merge.

@@ -178,29 +178,34 @@ The `normalize_output()` function implements the normalization in
 fn normalize_output(&self, output: String) -> String {
     // 1. Normalize line endings (CRLF -> LF)
     let output = output.replace("\r\n", "\n");
-    
+
     // 2-6. Process line by line
     let mut result = String::with_capacity(output.len());
     let mut prev_blank = false;
     let mut active_fence_len: Option<usize> = None;
 
     for line in output.lines() {
-        let trimmed_start = line.trim_start();
-        // CommonMark: a fence must be indented at most 3 spaces.  A line
-        // indented 4+ columns is an indented code block, not a fence.
-        // Indentation counts Markdown columns, not bytes: a tab advances
-        // to the next four-column tab stop (e.g. `\t` reaches column 4),
-        // so a tab-indented fence is never recognized.  This matches the
-        // production FusedNormalizer::push_line behavior.
+        // Only an indentation-only prefix may precede a fence.  The
+        // production normalizer counts spaces and tabs in Markdown columns;
+        // a tab reaches column 4 and therefore cannot introduce a fence.
         let indent = leading_indent_columns(line);
+        let fence_line = line.trim_start_matches(|c| c == ' ' || c == '\t');
         let fence_len = if indent > 3 {
             0
         } else {
-            trimmed_start.bytes().take_while(|&b| b == b'`').count()
+            fence_line
+                .bytes()
+                .take_while(|&b| b == b'`' || b == b'~')
+                .count()
         };
-        let is_opening_fence = active_fence_len.is_none() && fence_len >= 3;
+        let fence_char = fence_line.as_bytes().first().copied();
+        let fence_info = fence_line.get(fence_len..).unwrap_or("");
+        let is_opening_fence = active_fence_len.is_none()
+            && fence_len >= 3
+            && fence_char.is_some()
+            && !fence_info.contains('`');
         let is_closing_fence = active_fence_len
-            .map(|len| fence_len >= len && trimmed_start[fence_len..].trim().is_empty())
+            .map(|len| fence_len >= len && fence_info.trim().is_empty())
             .unwrap_or(false);
         let is_fence = is_opening_fence || is_closing_fence;
 
@@ -210,7 +215,7 @@ fn normalize_output(&self, output: String) -> String {
             } else {
                 None
             };
-            // Fence lines retain their info string; only their line ending is normalized.
+            // Fence lines trim trailing whitespace and normalize the line ending.
             result.push_str(line.trim_end());
             result.push('\n');
             prev_blank = false;

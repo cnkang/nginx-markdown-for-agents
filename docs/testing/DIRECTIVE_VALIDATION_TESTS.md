@@ -338,10 +338,10 @@ markdown_stream_types text;     # Error: invalid format, must be "type/subtype"
 http {
     markdown_filter on;
     markdown_limits conversion_memory=5m;
-    
+
     server {
         # Inherits: markdown_filter on, markdown_limits conversion_memory=5m
-        
+
         location /api {
             markdown_filter off;  # Overrides parent
             # Inherits: markdown_limits conversion_memory=5m
@@ -360,11 +360,11 @@ http {
     markdown_filter on;
     markdown_limits conversion_timeout=10s;
     markdown_error_policy pass;
-    
+
     server {
         markdown_limits conversion_timeout=5s;  # Overrides http level
         # Inherits: markdown_filter on, markdown_error_policy pass
-        
+
         location /docs {
             markdown_error_policy fail_closed;  # Overrides server level
             # Inherits: markdown_filter on, markdown_limits conversion_timeout=5s
@@ -381,10 +381,10 @@ http {
 ```nginx
 http {
     markdown_auth_cookies session* auth*;
-    
+
     server {
         # Inherits: markdown_auth_cookies session* auth*
-        
+
         location /admin {
             markdown_auth_cookies admin_session*;  # Overrides parent completely
         }

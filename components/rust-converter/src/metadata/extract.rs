@@ -81,13 +81,15 @@ impl MetadataExtractor {
         metadata.title = self.find_title(dom, ctx)?;
         let canonical = self.extract_meta_tags_and_canonical(dom, &mut metadata, ctx)?;
 
-        if let Some(canonical) = canonical {
-            metadata.url = self.resolve_and_sanitize_url(&canonical);
-        } else {
-            metadata.url = self
-                .base_url
-                .as_deref()
-                .and_then(Self::sanitize_metadata_url);
+        if metadata.url.is_none() {
+            if let Some(canonical) = canonical {
+                metadata.url = self.resolve_and_sanitize_url(&canonical);
+            } else {
+                metadata.url = self
+                    .base_url
+                    .as_deref()
+                    .and_then(Self::sanitize_metadata_url);
+            }
         }
 
         ctx.check_timeout()?;

@@ -458,6 +458,11 @@ def _is_safe_attr_expr(
 
 _OPEN_CTOR_NAMES = {"open"}
 
+# ``urllib.request.build_opener().open()`` performs network I/O, not
+# filesystem I/O.  Keep the heuristic from treating the conventional
+# receiver name as a path sink.
+_NETWORK_OPENER_NAMES = {"opener", "http_opener", "url_opener"}
+
 # Path methods that read/write file content — same trust boundary as open().
 # write_text / read_text / write_bytes / read_bytes all accept a path as the
 # receiver and must be validated the same way.
@@ -465,8 +470,8 @@ _PATH_IO_METHODS = {"write_text", "read_text", "write_bytes", "read_bytes"}
 
 
 def _is_open_call(node: ast.Call) -> bool:
-    """Return True if *node* is a builtin ``open(...)`` or a
-    ``Path(...).open(...)`` / ``some_var.open(...)`` call.
+    """Return True if *node* is a builtin ``open`` or a
+    ``Path.open`` / object method named ``open`` call.
     """
     func = node.func
     if isinstance(func, ast.Name) and func.id in _OPEN_CTOR_NAMES:
@@ -560,6 +565,17 @@ def _resolve_path_arg(node: ast.Call) -> ast.expr | None:
     return None
 
 
+def _is_network_opener_call(node: ast.Call) -> bool:
+    """Return True for the conventional urllib opener method call."""
+    func = node.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "open"
+        and isinstance(func.value, ast.Name)
+        and func.value.id in _NETWORK_OPENER_NAMES
+    )
+
+
 def _check_single_call(
     node: ast.Call,
     validated_vars: dict[str, set[str]],
@@ -575,6 +591,9 @@ def _check_single_call(
         return None, None
 
     if is_open and _is_os_open_dir_fd(node.func, node):
+        return None, None
+
+    if is_open and _is_network_opener_call(node):
         return None, None
 
     path_arg = _resolve_path_arg(node)

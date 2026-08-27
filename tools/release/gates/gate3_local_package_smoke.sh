@@ -315,10 +315,15 @@ ENV PKG_VERSION=\${PKG_VERSION}
 ENV NGINX_VERSION=\${NGINX_VERSION}
 ENV NFPM_ARCH=\${NFPM_ARCH}
 
-RUN mkdir -p /dist \\
-    && nfpm package --config packaging/nfpm/nfpm.yaml --packager deb \\
+RUN packaging/nfpm/scripts/render-nfpm-config.sh \\
+       packaging/nfpm/scripts/preinstall.sh /tmp/preinstall.sh "\${NGINX_VERSION}" \\
+    && sed 's|"\./packaging/nfpm/scripts/preinstall\.sh"|"/tmp/preinstall.sh"|' \\
+       packaging/nfpm/nfpm.yaml > /tmp/nfpm.yaml \\
+    && grep -Fq 'preinstall: "/tmp/preinstall.sh"' /tmp/nfpm.yaml \\
+    && mkdir -p /dist \\
+    && nfpm package --config /tmp/nfpm.yaml --packager deb \\
        --target "/dist/nginx-module-markdown-for-agents_\${PKG_VERSION}_nginx-\${NGINX_VERSION}_\${NFPM_ARCH}.deb" \\
-    && nfpm package --config packaging/nfpm/nfpm.yaml --packager rpm \\
+    && nfpm package --config /tmp/nfpm.yaml --packager rpm \\
        --target "/dist/nginx-module-markdown-for-agents-\${PKG_VERSION}-nginx\${NGINX_VERSION}-1.\${RPM_ARCH}.rpm"
 DOCKERFILE
 

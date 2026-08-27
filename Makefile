@@ -42,7 +42,12 @@ ifndef RUST_TARGET
 endif
 
 RUST_DIR := components/rust-converter
-NGINX_MODULE_DIR := components/nginx-module
+NGINX_MODULE_DIR ?= components/nginx-module
+NGINX_MODULE_DIR_CANONICAL := $(abspath $(NGINX_MODULE_DIR))
+EXPECTED_NGINX_MODULE_DIR := $(abspath components/nginx-module)
+ifneq ($(NGINX_MODULE_DIR_CANONICAL),$(EXPECTED_NGINX_MODULE_DIR))
+$(error NGINX_MODULE_DIR must resolve to $(EXPECTED_NGINX_MODULE_DIR))
+endif
 NGINX_TEST_DIR := $(NGINX_MODULE_DIR)/tests
 CORPUS_DIR := tests/corpus
 RUST_LIB := $(RUST_DIR)/target/$(RUST_TARGET)/release/libnginx_markdown_converter.a
@@ -61,16 +66,16 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
 
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         install \
-        test test-rust rust-fmt-check test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
-        test-nginx-integration test-e2e test-e2e-rust test-e2e-contract-scripts test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
+        test test-rust rust-fmt-check rust-clippy-check test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
+        test-nginx-integration test-e2e test-e2e-canonical test-e2e-rust test-e2e-contract-scripts test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
         official-feature-manifest-generate \
-        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check schema-drift-check kb-contract-check \
+        harness-check harness-check-full harness-security-checks test-harness workflow-context-check regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check schema-drift-check kb-contract-check \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-	docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x         release-gates-check-090 release-gates-check-091 release-gates-check-092-canonical release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+        docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline decompression-metric-contract-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-092-canonical release-gates-check-092 release-gates-check-all release-gates-check-strict \
         release-matrix-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
         test-rust-fuzz-qualification test-e2e-rust-soak \
@@ -84,7 +89,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         verify-streaming-failure-cache-e2e-plan \
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
         verify-auth-cache-e2e verify-status-codes-e2e \
-        verify-diagnostics-access-phase-e2e \
+        verify-diagnostics-access-phase-e2e verify-dynconf-convergence-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
         clean help
@@ -95,7 +100,7 @@ build: rust-lib copy-headers
 	@echo "Build complete for $(RUST_TARGET)"
 	@echo "Rust library: $(RUST_LIB)"
 
-RUST_RELEASE_FEATURES ?= streaming,incremental
+RUST_RELEASE_FEATURES ?= streaming
 
 rust-lib:
 	@echo "Building Rust library for $(RUST_TARGET)..."
@@ -138,6 +143,12 @@ rust-fmt-check:
 	cd $(RUST_DIR) && cargo fmt --all -- --check
 	cargo fmt --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all -- --check
 	@echo "  Rust Formatting Check: PASSED"
+
+rust-clippy-check:
+	@echo "=== Rust Clippy Check ==="
+	cargo clippy --manifest-path $(RUST_DIR)/Cargo.toml --all-targets --all-features -- -D warnings
+	cargo clippy --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all-targets -- -D warnings
+	@echo "  Rust Clippy Check: PASSED"
 
 test-rust: rust-fmt-check
 	cd $(RUST_DIR) && cargo build --locked --release --example perf_baseline
@@ -192,7 +203,7 @@ test-c-unit-gcc:
 	@if $(MAKE) -C $(NGINX_TEST_DIR) clean; then \
 		echo "Clean OK"; \
 	else \
-		echo "WARNING: container artifact cleanup failed; root-owned Linux ELF binaries may remain in build/ (tools P3-2)" >&2; \
+		echo "WARNING: container artifact cleanup failed; root-owned Linux ELF binaries may remain in build/ (container artifact cleanup)" >&2; \
 		exit 1; \
 	fi
 	@echo "OK: C unit suite passed under Ubuntu GCC"
@@ -206,12 +217,29 @@ test-nginx-unit-clang-smoke:
 test-nginx-unit-sanitize-smoke:
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-sanitize-smoke
 
+# Package compatibility regression suites. Standalone entry point for the
+# release workflow's package-gate step; runs the three maintainer-script
+# and lifecycle suites that protect published DEB/RPM artifacts.
+.PHONY: test-package-compatibility
+test-package-compatibility:
+	@echo "=== Package Compatibility Suites ==="
+	@for t in test-preinstall-version-policy.sh test-package-removal-guard.sh test-maintainer-script-executable-trust.sh; do \
+	  echo "  [$$t]"; \
+	  bash packaging/tests/$$t || { echo "FAIL: $$t" >&2; exit 1; }; \
+	done
+	@echo "=== Package Compatibility Suites: ALL PASSED ==="
+
 test-nginx-integration:
 	$(MAKE) -C $(NGINX_TEST_DIR) integration-c
 	$(MAKE) -C $(NGINX_TEST_DIR) integration-nginx
 
 test-e2e:
 	$(MAKE) -C $(NGINX_TEST_DIR) e2e
+
+# Canonical shell qualification suite, including strict filter-ordering and
+# auth-subrequest checks when a running fixture is supplied.
+test-e2e-canonical:
+	bash tools/e2e/run_e2e_suite.sh
 
 E2E_HARNESS_DIR := tools/e2e-harness
 
@@ -302,6 +330,7 @@ docs-check-base:
 	python3 tools/docs/check_docs.py
 	python3 tools/docs/check_packaging_docs.py
 	python3 tools/docs/check_packaging_consistency.py
+	$(MAKE) decompression-metric-contract-check
 	python3 tools/docs/validate_packaging_matrix.py
 	python3 tools/release/matrix/generate_release_contract_matrix.py --check
 	python3 tools/render_release_matrix_docs.py --check
@@ -341,12 +370,14 @@ docs-style-check-baseline:
 kb-contract-check:
 	python3 tools/docs/check_kb_contract.py
 
+decompression-metric-contract-check:
+	python3 tools/docs/check_decompression_metric_labels.py
+
 release-notes:
 	python3 tools/render_release_matrix_docs.py --release-notes
 
 harness-check:
 	python3 tools/harness/check_harness_sync.py
-	python3 tools/harness/detect_metrics_per_path_stub_drift.py
 	python3 tools/harness/detect_public_surface_drift.py
 
 public-surface-drift-check:
@@ -412,6 +443,7 @@ official-feature-manifest-generate:
 	@echo "  Official Build Feature Manifest Generation: PASSED"
 
 harness-security-checks:
+	python3 tools/ci/validate_required_workflow_contexts.py
 	python3 tools/harness/check_removed_directive_registry.py
 	bash tools/harness/detect_cwe190_casts.sh
 	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/ --strict
@@ -478,6 +510,7 @@ complexity-check:
 
 test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
+	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_validate_required_workflow_contexts.py -q --tb=short
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
 	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	bash tools/harness/tests/test_detect_volatile_atomic.sh
@@ -500,9 +533,13 @@ test-harness:
 	bash tools/harness/tests/test_detect_live_conf_reads.sh
 	bash tools/harness/tests/test_detect_ngx_again_call_sites.sh
 	bash tools/harness/tests/test_detect_uninitialized_stack_struct.sh
+	bash tools/harness/tests/test_detect_decompression_budget.sh
 	bash tools/harness/tests/test_detect_shell_hygiene.sh
 	bash tools/harness/tests/test_check_postinst_safety.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
+
+workflow-context-check:
+	python3 tools/ci/validate_required_workflow_contexts.py
 
 license-check:
 	python3 tools/ci/check_c_licenses.py
@@ -588,13 +625,18 @@ supply-chain-sbom:
 	mkdir -p build/reports
 	syft dir:. -o spdx-json=build/reports/sbom.spdx.json
 
+# Current release-contract baseline.  Historical 0.5.0 document validators
+# were retired; current observability, naming, package, and checksum contracts
+# are validated through their feature-oriented gates.
 release-gates-check:
-	python3 tools/release/gates/validate_release_gates.py
 	python3 tools/release/gates/validate_naming.py
+	python3 tools/release/gates/validate_schema_drift.py --version "$(SCHEMA_RELEASE_VERSION)"
+	$(MAKE) reason-codegen-check
+	python3 tools/release/gates/validate_package_metadata.py
 	python3 packaging/scripts/test_generate_checksums.py
 
 # release-gates-check-070: comprehensive v0.7.0 release readiness gate.
-# (tools P3-5: the 070 gate packages the CURRENT 0.9.2 version by default —
+# (The 070 gate packages the CURRENT 0.9.2 version by default —
 # the gate name is the baseline lineage, not the packaged version; every
 # release-gates-check-0XX target intentionally packages the current version.
 # Override with PKG_VERSION= to validate a specific version line.)
@@ -633,8 +675,7 @@ release-gates-check-070:
 	$(MAKE) test-e2e-rust
 	python3 tools/release/gates/validate_release_gates_070.py --mode strict
 	python3 tools/release/gates/validate_config_directives.py
-	python3 tools/release/gates/validate_metrics.py
-	python3 tools/release/gates/validate_reason_codes.py
+	$(MAKE) reason-codegen-check
 	python3 tools/release/gates/validate_package_metadata.py
 	python3 tools/release/gates/validate_k8s_manifests.py
 	python3 tools/release/gates/validate_fuzz_packaging.py
@@ -678,12 +719,24 @@ release-gates-check-070:
 				esac; \
 				echo "  [install-layout] No packages found; building local $$nfpm_arch DEB/RPM with nFPM..."; \
 				mkdir -p dist; \
-				PKG_VERSION=$${PKG_VERSION:-0.9.2} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
-					nfpm package --config packaging/nfpm/nfpm.yaml --packager deb \
-					--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.9.2}_nginx-$${NGINX_VERSION:-1.26.3}_$${nfpm_arch}.deb; \
-				PKG_VERSION=$${PKG_VERSION:-0.9.2} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
-					nfpm package --config packaging/nfpm/nfpm.yaml --packager rpm \
-					--target dist/nginx-module-markdown-for-agents-$${PKG_VERSION:-0.9.2}-nginx$${NGINX_VERSION:-1.26.3}-1.$${rpm_arch}.rpm; \
+				pkg_version="$${PKG_VERSION:-0.9.2}"; \
+				nginx_version="$${NGINX_VERSION:-1.26.3}"; \
+				rpm_nginx_evr="$${RPM_NGINX_EVR:-1:$$nginx_version}"; \
+				nfpm_preinstall="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preinstall.XXXXXX")"; \
+				nfpm_config="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-nfpm.XXXXXX")"; \
+				trap 'rm -f "$$nfpm_preinstall" "$$nfpm_config"' EXIT; \
+				packaging/nfpm/scripts/render-nfpm-config.sh \
+					packaging/nfpm/scripts/preinstall.sh "$$nfpm_preinstall" "$$nginx_version"; \
+				sed "s|./packaging/nfpm/scripts/preinstall.sh|$$nfpm_preinstall|" \
+					packaging/nfpm/nfpm.yaml > "$$nfpm_config"; \
+				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
+					RPM_NGINX_EVR="$$rpm_nginx_evr" NFPM_ARCH="$$nfpm_arch" \
+					nfpm package --config "$$nfpm_config" --packager deb \
+					--target "dist/nginx-module-markdown-for-agents_$${pkg_version}_nginx-$${nginx_version}_$${nfpm_arch}.deb"; \
+				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
+					RPM_NGINX_EVR="$$rpm_nginx_evr" NFPM_ARCH="$$nfpm_arch" \
+					nfpm package --config "$$nfpm_config" --packager rpm \
+					--target "dist/nginx-module-markdown-for-agents-$${pkg_version}-nginx$${nginx_version}-1.$${rpm_arch}.rpm"; \
 			else \
 				echo "FAIL: no package files in dist/ and nfpm is unavailable." >&2; \
 				echo "  To fix, either:" >&2; \
@@ -716,6 +769,13 @@ release-gates-check-070:
 		{ echo "FAIL: preinstall exact-version policy test failed" >&2; exit 1; }; \
 	else \
 	echo "  SKIP: packaging/tests/test-preinstall-version-policy.sh not found"; \
+	fi
+	@echo "  [package-removal-guard] Validating fail-closed removal lifecycle..."
+	@if test -f packaging/tests/test-package-removal-guard.sh; then \
+	bash packaging/tests/test-package-removal-guard.sh || \
+		{ echo "FAIL: package removal guard test failed" >&2; exit 1; }; \
+	else \
+	echo "FAIL: packaging/tests/test-package-removal-guard.sh not found" >&2; exit 1; \
 	fi
 	@echo "  [executable-trust] Validating maintainer script executable trust..."
 	@if test -f packaging/tests/test-maintainer-script-executable-trust.sh; then \
@@ -784,7 +844,7 @@ release-gates-check-070:
 # Coverage policy source: AGENTS.md Rule 25
 #   - 80% aggregate line+function coverage (programmatic gate via coverage_gate.py)
 #   - 90% for critical paths: auth, error handling, FFI boundary, conditional
-#     requests (advisory — not programmatically enforced; logged at gate runtime)
+#     requests (blocking via tools/ci/coverage_gate.py)
 #
 # Clean-checkout boundary (Req 9):
 #   This gate runs from a clean git checkout without requiring:
@@ -819,7 +879,7 @@ release-gates-check-070:
 #   9. make docs-check                        — Documentation consistency (Req 3)
 #  10. matrix validate_workflow_matrix_consumers — Matrix schema + CI coverage (Req 5)
 #  11. make harness-check                     — Harness truth surface validation (Req 9)
-#  12. validate_release_gates.py              — Release gate framework
+#  12. current schema and contract validators — Release gate framework
 #  13. validate_naming.py                     — Artifact naming consistency
 #  14. v0.8.0 gate validators (0.8-specific: compat bridge removal, new directives)
 #  15. legacy/prior-version regression validators (0.7.0 gates remain active)
@@ -869,7 +929,7 @@ release-gates-check-080:
 	@echo "  [6/17] test-e2e-rust (Rust E2E harness — Req 1)"
 	$(MAKE) test-e2e-rust
 	@echo "  [7/17] coverage-c (C coverage gate — Req 4)"
-	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (advisory)"
+	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (blocking)"
 	@if command -v lcov >/dev/null 2>&1 && [ -d "$(NGINX_TEST_DIR)" ]; then \
 	$(MAKE) coverage-c; \
 	else \
@@ -880,7 +940,7 @@ release-gates-check-080:
 	fi; \
 	fi
 	@echo "  [8/17] coverage-rust (Rust coverage gate — Req 4)"
-	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (advisory)"
+	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (blocking)"
 	@if cargo llvm-cov --version >/dev/null 2>&1; then \
 	$(MAKE) coverage-rust; \
 	else \
@@ -892,16 +952,24 @@ release-gates-check-080:
 	fi
 	@echo "  [coverage-policy] Thresholds: C line=$(COVERAGE_C_MIN_LINE)% func=$(COVERAGE_C_MIN_FUNC)% | Rust line=$(COVERAGE_RUST_MIN_LINE)% func=$(COVERAGE_RUST_MIN_FUNC)%"
 	@echo "  [critical-path-coverage] 90% target for auth, error handling, FFI boundary, conditional requests"
-	@echo "  [critical-path-coverage] NOTE: 90% critical-path coverage is advisory per AGENTS.md Rule 25;"
-	@echo "  [critical-path-coverage]       80% aggregate is the programmatic enforcement gate."
+	@echo "  [critical-path-coverage] 90% critical-path coverage is enforced by coverage_gate.py."
+	python3 tools/ci/coverage_gate.py \
+	--c-lcov $(COVERAGE_DIR)/c-coverage.lcov \
+	--rust-lcov $(COVERAGE_DIR)/rust-coverage.lcov \
+	--rust-streaming-lcov $(COVERAGE_DIR)/rust-streaming-coverage.lcov \
+	--c-min-line $(COVERAGE_C_MIN_LINE) \
+	--c-min-func $(COVERAGE_C_MIN_FUNC) \
+	--rust-min-line $(COVERAGE_RUST_MIN_LINE) \
+	--rust-min-func $(COVERAGE_RUST_MIN_FUNC) \
+	--critical-path-min $(COVERAGE_CRITICAL_MIN)
 	@echo "  [9/17] docs-check (documentation consistency — Req 3)"
 	$(MAKE) docs-check
 	@echo "  [10/17] matrix validate_workflow_matrix_consumers (Req 5)"
 	python3 tools/release/matrix/validate_workflow_matrix_consumers.py
 	@echo "  [11/17] harness-check (harness truth surface — Req 9)"
 	$(MAKE) harness-check
-	@echo "  [12/17] validate_release_gates.py (release gate framework)"
-	python3 tools/release/gates/validate_release_gates.py
+	@echo "  [12/17] current schema and contract validators"
+	python3 tools/release/gates/validate_schema_drift.py --version "$(SCHEMA_RELEASE_VERSION)"
 	@echo "  [13/17] validate_naming.py (artifact naming)"
 	python3 tools/release/gates/validate_naming.py
 	@echo "  [14/17] v0.8.0 gate validators (0.8-specific: compat bridge removal, new directives)"
@@ -909,8 +977,7 @@ release-gates-check-080:
 	python3 tools/release/gates/validate_config_directives.py
 	@echo "  [15/17] legacy/prior-version regression validators (0.7.0 gates remain active)"
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_070.py --mode strict
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_metrics.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_reason_codes.py
+	$(MAKE) reason-codegen-check
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_package_metadata.py
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_k8s_manifests.py
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_fuzz_packaging.py
@@ -944,7 +1011,7 @@ release-gates-check-080-regression:
 	$(MAKE) docs-check
 	python3 tools/release/matrix/validate_workflow_matrix_consumers.py
 	$(MAKE) harness-check
-	python3 tools/release/gates/validate_release_gates.py
+	python3 tools/release/gates/validate_schema_drift.py --version 0.9.2
 	python3 tools/release/gates/validate_naming.py
 	python3 tools/release/gates/validate_config_directives.py
 	@test -f docs/harness/routing-manifest.json
@@ -952,22 +1019,6 @@ release-gates-check-080-regression:
 	@test -f docs/harness/core.md
 	@test -f docs/harness/README.md
 	@echo "=== v0.8.x Regression Subset: ALL PASSED ==="
-
-# 0.9.0 Release Gates (additive on top of 0.8.0 regression subset)
-# test-rust, test-nginx-unit, check-headers, docs-check already run by prereq
-#
-# Environment variables:
-#   NGINX_BIN                            - Path to module-enabled nginx binary
-#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Skip production-examples nginx -t
-#                                           (and 091 module benchmarks) when
-#                                           NGINX_BIN is unavailable
-release-gates-check-090: release-gates-check-080-regression
-	@echo "=== 0.9.0 Release Gates ==="
-	$(MAKE) test-production-examples-nginx-t
-	$(MAKE) test-production-examples-e2e-smoke
-	$(MAKE) complexity-check
-	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_090.py
-	@echo "=== 0.9.0 Release Gates: PASS ==="
 
 # perf-evidence-check: Non-blocking performance evidence gate (report-only).
 # Runs the module-level benchmark harness and evaluates against thresholds.
@@ -1026,51 +1077,18 @@ release-perf-evidence-blocking:
 		fi; \
 	fi
 
-# release-gates-check-091: Blocking 0.9.1 release gate.
-# Runs all prior regression gates (0.9.0 gate chain), then adds 0.9.1-specific
-# evidence gate in blocking mode.  Fails on NO_GO verdict for RC tags.
-# When NGINX_BIN is unavailable, requires --allow-skip-module to proceed.
-#
-# Environment variables:
-#   NGINX_BIN                            - Path to module-enabled nginx binary
-#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module
-#                                           benchmarks (also skips 0.9.0
-#                                           production-examples nginx -t)
-#   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - (inherited) skip fuzz smoke
-#   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 - (inherited) skip native E2E
-#   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
-#
-# Classification: BLOCKING (fails on NO_GO for release-candidate tags)
-release-gates-check-091: release-gates-check-090
-	@echo "=== 0.9.1 Release Gates (blocking) ==="
-	@echo "  [1/3] Module-level threshold engine validation"
-	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
-	@echo "  [2/3] Performance evidence gate (blocking mode, baseline 091)"
-	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=091
-	@echo "  [3/3] Python perf tooling tests"
-	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
-		if python3 -m pytest tools/perf/tests/ -q --tb=short; then \
-			echo "  perf tests: PASS"; \
-		else \
-			echo "FAIL: perf tests failed" >&2; \
-			exit 1; \
-		fi; \
-	else \
-		echo "FAIL: pytest/hypothesis dependencies are missing. Please install them using: pip install -r requirements-dev.txt" >&2; \
-		exit 1; \
-	fi
-	@echo "=== 0.9.1 Release Gates: PASS ==="
-
 # release-gates-check-092-canonical: Blocking 0.9.2 performance/contract gate.
-# This is the subset that a native canonical performance job can establish.
+# This is the current release entry point.  The former 0.9.0/0.9.1 target
+# chain is consolidated here so one gate owns the active release contract.
 # Package artifact registry, candidate-bound final evidence, fuzz qualification,
 # and soak qualification remain in release-gates-check-092 and the canonical
 # release-packages.yml workflow, where their required inputs are available.
 #
-# Additive on 091: adds public-surface/dynconf contract drift, version
-# consistency, reason-code registry completeness, and streaming lifecycle tests.
+# It retains the useful 0.9.x regression checks: production examples,
+# complexity, threshold/performance evidence, and the focused 0.7/0.8
+# compatibility validators.  The old release-chain wrappers are gone.
 #
-# Environment variables (inherited from 091 chain):
+# Environment variables:
 #   NGINX_BIN                            - Path to module-enabled nginx binary
 #   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module
 #                                           benchmarks
@@ -1085,28 +1103,43 @@ release-gates-check-091: release-gates-check-090
 #   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
 #
 # Classification: BLOCKING
-release-gates-check-092-canonical: release-gates-check-091
+release-gates-check-092-canonical: release-gates-check-080-regression
 	@echo "=== 0.9.2 Canonical Performance/Contract Gates (blocking) ==="
-	@echo "  [1/7] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
+	@echo "  [1/8] Consolidated 0.9.x regression and compatibility gates"
+	$(MAKE) release-matrix-check
+	$(MAKE) test-production-examples-nginx-t
+	$(MAKE) test-production-examples-e2e-smoke
+	$(MAKE) complexity-check
+	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
+	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=091
+	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
+		python3 -m pytest tools/perf/tests/ -q --tb=short; \
+	else \
+		echo "FAIL: pytest/hypothesis dependencies are missing. Please install them using: pip install -r requirements-dev.txt" >&2; \
+		exit 1; \
+	fi
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.2 python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	python3 tools/release/gates/validate_release_gates_080.py --active-version 0.9.2
+	@echo "  [2/8] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
 	@if [ -n "$(CANDIDATE_BENCHMARK_REPORT)" ]; then \
 		echo "  Reusing candidate-bound 092 benchmark report: $(CANDIDATE_BENCHMARK_REPORT)"; \
 	fi
 	EVIDENCE_GATE_BENCHMARK_REPORT="$(CANDIDATE_BENCHMARK_REPORT)" \
 		$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
-	@echo "  [2/7] Public surface and dynconf schema drift checks"
+	@echo "  [3/8] Public surface and dynconf schema drift checks"
 	$(MAKE) public-surface-drift-check
 	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=0.9.2
-	@echo "  [3/7] Version consistency (0.9.2)"
+	@echo "  [4/8] Version consistency (0.9.2)"
 	bash tools/harness/detect_version_consistency.sh
-	@echo "  [4/7] Reason code registry completeness"
+	@echo "  [5/8] Reason code registry completeness"
 	$(MAKE) reason-codegen-check
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	$(MAKE) reason-codegen-generate
 	$(MAKE) reason-codegen-check
 	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
-	@echo "  [5/7] Streaming lifecycle unit test"
+	@echo "  [6/8] Streaming lifecycle unit test"
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming_impl
-	@echo "  [6/7] Official build feature manifest"
+	@echo "  [7/8] Official build feature manifest"
 	$(MAKE) official-feature-manifest-generate
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	git diff --exit-code -- \
@@ -1114,7 +1147,7 @@ release-gates-check-092-canonical: release-gates-check-091
 		artifacts/release/0.9.2/reason-registry-report.json \
 		artifacts/release/0.9.2/generated-reason-artifacts.json \
 		artifacts/release/0.9.2/official-build-feature-manifest.json
-	@echo "  [7/7] Canonical release matrix"
+	@echo "  [8/8] Canonical release matrix"
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	@echo "=== 0.9.2 Canonical Performance/Contract Gates: PASS ==="
 
@@ -1191,7 +1224,7 @@ artifact-registry-check:
 # Validates release evidence manifest against the v1 schema and, in real
 # mode, requires the manifest candidate_sha to equal the repository HEAD
 # (--verify-head) so committed evidence cannot drift from the release
-# candidate (P1-1: evidence SHA == release candidate SHA).
+# candidate (candidate identity binding: evidence SHA == release candidate SHA).
 # FIXTURE mode: make release-evidence-manifest-check FIXTURE=path/to/fixture.json
 release-evidence-manifest-check:
 	@echo "=== Release Evidence Manifest Check ==="
@@ -1263,17 +1296,13 @@ test-production-examples-e2e-smoke:
 		esac; \
 	}
 
-release-gates-check-legacy:
-	python3 tools/release/legacy/validate_release_gates.py
-
 release-gates-check-070-docker:
 	@echo "=== Gate 3/4 Local Docker Validation ==="
 	@echo "  Running Gate 3 (Package Distribution) and Gate 4 (K8s) locally via Docker..."
 	RELEASE_GATE_LOCAL_DOCKER=1 python3 tools/release/gates/validate_release_gates_070.py --mode strict
 
 release-gates-check-strict:
-	python3 tools/release/gates/validate_release_gates.py --mode strict
-	python3 tools/release/gates/validate_naming.py
+	$(MAKE) release-gates-check
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_070.py --mode strict
 	python3 tools/release/gates/validate_fuzz_packaging.py
 	@echo "=== Strict: Release Workflow Gate ==="
@@ -1339,6 +1368,9 @@ verify-status-codes-e2e:
 verify-diagnostics-access-phase-e2e:
 	./tools/e2e/verify_diagnostics_access_phase_e2e.sh
 
+verify-dynconf-convergence-e2e:
+	./tools/e2e/verify_dynconf_convergence_e2e.sh
+
 # ── Coverage targets ────────────────────────────────────────────────
 # Generate lcov reports consumed by SonarCloud.  Output lands in
 # coverage/ at the repo root so sonar.coverageReportPaths can find it.
@@ -1389,6 +1421,7 @@ COVERAGE_C_MIN_LINE ?= 80
 COVERAGE_C_MIN_FUNC ?= 80
 COVERAGE_RUST_MIN_LINE ?= 80
 COVERAGE_RUST_MIN_FUNC ?= 80
+COVERAGE_CRITICAL_MIN ?= 90
 
 coverage-gate: coverage-c coverage-rust
 	python3 tools/ci/coverage_gate.py \
@@ -1398,12 +1431,13 @@ coverage-gate: coverage-c coverage-rust
 	--c-min-line $(COVERAGE_C_MIN_LINE) \
 	--c-min-func $(COVERAGE_C_MIN_FUNC) \
 	--rust-min-line $(COVERAGE_RUST_MIN_LINE) \
-	--rust-min-func $(COVERAGE_RUST_MIN_FUNC)
+	--rust-min-func $(COVERAGE_RUST_MIN_FUNC) \
+	--critical-path-min $(COVERAGE_CRITICAL_MIN)
 
 clean:
 	cd $(RUST_DIR) && cargo clean
 	$(MAKE) -C $(NGINX_TEST_DIR) clean || true
-	find $(NGINX_MODULE_DIR) -name '*.dSYM' -type d -prune -exec rm -rf {} +
+	find "$(NGINX_MODULE_DIR_CANONICAL)" -type d -name '*.dSYM' -prune -exec rm -rf {} +
 	rm -rf coverage
 
 help:
@@ -1413,6 +1447,7 @@ help:
 	@echo "  build                    - Build Rust library + sync header"
 	@echo "  test                     - Fast smoke tests"
 	@echo "  rust-fmt-check           - Check Rust and corpus-tool formatting"
+	@echo "  rust-clippy-check        - Run Clippy for Rust and corpus-tool crates"
 	@echo "  test-rust                - Run Rust test suite (unit + doctests)"
 	@echo "  test-rust-streaming      - Run Rust streaming feature tests"
 	@echo "  test-rust-doc            - Run Rust doctests only (all features)"
@@ -1432,6 +1467,7 @@ help:
 	@echo "  verify-auth-cache-e2e       - Run auth/cache interaction e2e tests"
 	@echo "  verify-status-codes-e2e     - Run upstream status-code passthrough e2e tests"
 	@echo "  verify-diagnostics-access-phase-e2e - Verify native NGINX access-phase restricts diagnostics/metrics handlers"
+	@echo "  verify-dynconf-convergence-e2e - Verify dynamic configuration convergence across workers"
 	@echo "  test-all                 - Run build + rust + unit tests"
 	@echo "  sonar-compile-db         - Generate compile_commands.json for SonarQube for VS Code C/C++ analysis"
 	@echo "  test-benchmark           - Run corpus benchmark and produce Unified Report"
@@ -1450,14 +1486,12 @@ help:
 	@echo "  sonar-encoding-check     - Validate UTF-8 source files and declared exceptions"
 	@echo "  docs-check               - Validate documentation links/style"
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
-	@echo "  release-gates-check      - Validate release gate framework (0.5.0)"
+	@echo "  release-gates-check      - Validate the current release contract baseline"
 	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
 	@echo "  release-gates-check-080  - Validate 0.8.x release gates (streaming, coverage, matrix, harness boundary)"
 	@echo "  release-gates-check-080-regression - 0.8.x version-independent regression subset (no Cargo version bind)"
 	@echo "  release-gates-check-08x  - Alias for release-gates-check-080 (0.8.x patch-line canonical entry)"
-	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
-	@echo "  release-gates-check-091  - Validate 0.9.1 release gates (blocking; module benchmark evidence gate)"
-	@echo "  release-gates-check-092-canonical - Validate 0.9.2 canonical performance/contract gates"
+	@echo "  release-gates-check-092-canonical - Validate consolidated 0.9.x/0.9.2 performance and contract gates"
 	@echo "  release-gates-check-092  - Validate complete 0.9.2 release gates (blocking; candidate evidence + artifacts + fuzz + soak)"
 	@echo "  release-matrix-check      - Validate canonical release matrix against the checked-in schema and ABI/feature bindings"
 	@echo "  release-candidate-evidence-check - Validate frozen release candidate SHA manifest (FIXTURE=... for regression fixtures)"
@@ -1468,7 +1502,6 @@ help:
 	@echo "  release-perf-evidence-blocking - Shared blocking evidence helper (requires BASELINE_VERSION)"
 	@echo "  perf-evidence-check      - Run performance evidence gate (non-blocking, report-only)"
 	@echo "  release-gates-check-all  - Run current baseline and 0.9.2 release gates"
-	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
 	@echo "  test-production-examples-nginx-t - Validate example configs and migration-guide examples pass nginx -t"
 	@echo "  test-production-examples-e2e-smoke - Production examples E2E smoke (deferred to CI)"

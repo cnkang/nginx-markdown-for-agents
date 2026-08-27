@@ -35,7 +35,7 @@
 //! this function reconstructs proper spacing to avoid accidental token
 //! concatenation in the Markdown output.
 
-use super::*;
+use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData};
 
 impl MarkdownConverter {
     /// Normalize and append a text node while preserving meaningful spacing.

@@ -148,10 +148,10 @@ python3 tools/reason-codegen/generate.py --check
 
 The Rust reason registry uses lowercase `snake_case` for operator-visible
 request reasons, including `encoding_header_invalid` for malformed
-`Content-Encoding` grammar. The C-only streaming transition labels
-`ENGINE_STREAMING` and `STREAMING_CONVERT` are canonical uppercase values in
-the streaming event/log surface. They are not Rust registry variants. Unknown
-numeric reason codes map to `internal_unknown` and get logged as errors.
+`Content-Encoding` grammar. Streaming transition details use bounded lowercase
+`event=` values in decision logs, such as `engine_streaming` and
+`streaming_convert`. They are not reason labels or Rust registry variants.
+Unknown numeric reason codes map to `internal_unknown` and get logged as errors.
 
 ## Migration from earlier metric surfaces
 

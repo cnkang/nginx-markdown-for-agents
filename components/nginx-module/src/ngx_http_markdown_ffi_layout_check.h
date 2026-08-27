@@ -419,7 +419,7 @@ _Static_assert(offsetof(FFIBaseUrlInput, direct_scheme_len) == 136,
     "FFIBaseUrlInput.direct_scheme_len offset must be 136");
 
 /* ----------------------------------------------------------------
- * FFIBaseUrlDecision layout (16 bytes on LP64) - spec 47.
+ * FFIBaseUrlDecision layout (16 bytes on LP64) FFI layout.
  *   base_url_len : usize  offset 0
  *   reason       : u8     offset 8
  *   source       : u8     offset 9
@@ -446,7 +446,7 @@ _Static_assert(offsetof(FFIStr, len) == 8,
     "FFIStr.len offset must be 8");
 
 /* ----------------------------------------------------------------
- * FFIEligibilityInput layout (72 bytes on LP64) - spec 49.
+ * FFIEligibilityInput layout (72 bytes on LP64) FFI layout.
  * ---------------------------------------------------------------- */
 _Static_assert(sizeof(FFIEligibilityInput) == 72,
     "FFIEligibilityInput size must match Rust (72 bytes on 64-bit)");
@@ -476,7 +476,7 @@ _Static_assert(offsetof(FFIEligibilityInput, body_limit) == 64,
     "FFIEligibilityInput.body_limit offset must be 64");
 
 /* ----------------------------------------------------------------
- * FFIConditionalInput layout (72 bytes on LP64) - spec 49.
+ * FFIConditionalInput layout (72 bytes on LP64) FFI layout.
  * ---------------------------------------------------------------- */
 _Static_assert(sizeof(FFIConditionalInput) == 72,
     "FFIConditionalInput size must match Rust (72 bytes on 64-bit)");
@@ -504,7 +504,7 @@ _Static_assert(offsetof(FFIConditionalInput, last_modified_len) == 64,
     "FFIConditionalInput.last_modified_len offset must be 64");
 
 /* ----------------------------------------------------------------
- * FFIConditionalDecision layout (3 bytes) - spec 49.
+ * FFIConditionalDecision layout (3 bytes) FFI layout.
  * ---------------------------------------------------------------- */
 _Static_assert(sizeof(FFIConditionalDecision) == 3,
     "FFIConditionalDecision size must match Rust (3 bytes)");

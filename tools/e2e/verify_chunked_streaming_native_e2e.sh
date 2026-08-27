@@ -832,83 +832,10 @@ echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
 markdown_wait_for_http "http://127.0.0.1:${PORT}/buffered/small-valid" "NGINX" || exit 1
 
-# Extract a numeric value from the Prometheus metrics endpoint.
-# Args: $1 = compatibility metric name used by the scenario assertions.
-get_metric_value() {
-  local metric_path="$1"
-  local metric_family=""
-  local metric_selector=""
-  local metrics_text
+parse_metric_value() {
+  local metric_family="$1"
+  local metric_selector="$2"
 
-  case "${metric_path}" in
-    decompression_truncated_input_total|perf.decompression_truncated_input_total)
-      metric_family="nginx_markdown_decompression_events_total"
-      metric_selector='reason="truncated_input"'
-      ;;
-    decompression_format_error_total|perf.decompression_format_error_total)
-      metric_family="nginx_markdown_decompression_events_total"
-      metric_selector='reason="format_error"'
-      ;;
-    decompression_io_error_total|perf.decompression_io_error_total)
-      metric_family="nginx_markdown_decompression_events_total"
-      metric_selector='reason="io_error"'
-      ;;
-    perf.decompression_streaming_total)
-      metric_family="nginx_markdown_decompression_events_total"
-      metric_selector='outcome="success"'
-      ;;
-    decompression_success_total)
-      metric_family="nginx_markdown_decompression_events_total"
-      metric_selector='outcome="success"'
-      ;;
-    perf.output_bytes_total|output_bytes_total)
-      metric_family="nginx_markdown_output_bytes_total"
-      ;;
-    perf.backpressure_total)
-      metric_family="nginx_markdown_streaming_events_total"
-      metric_selector='transition="resume_'
-      ;;
-    perf.backpressure_resume_total)
-      metric_family="nginx_markdown_streaming_events_total"
-      metric_selector='transition="resume_success"'
-      ;;
-    streaming.precommit_failopen_total)
-      metric_family="nginx_markdown_requests_total"
-      metric_selector='outcome="failed_open"'
-      ;;
-    streaming.budget_exceeded_total)
-      metric_family="nginx_markdown_decompression_events_total"
-      metric_selector='outcome="failure",reason="budget_exceeded"'
-      ;;
-    streaming.failed_closed_total)
-      # Compatibility alias for the request-level failed_closed outcome. A
-      # recoverable safe-finish must not classify the request this way.
-      metric_family="nginx_markdown_requests_total"
-      metric_selector='outcome="failed_closed"'
-      ;;
-    streaming.postcommit_error_total)
-      metric_family="nginx_markdown_streaming_events_total"
-      # The frozen v1 surface records the post-commit safe-finish transition;
-      # the legacy counter also covered this path before the request abort.
-      metric_selector='transition="safe_finish_start"'
-      ;;
-    streaming.succeeded_total)
-      metric_family="nginx_markdown_conversion_deliveries_total"
-      metric_selector='engine="streaming"'
-      ;;
-    delivery_count)
-      metric_family="nginx_markdown_conversion_deliveries_total"
-      ;;
-    *)
-      metric_family="${metric_path}"
-      ;;
-  esac
-
-  metrics_text="$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
-    "http://127.0.0.1:${PORT}/markdown-metrics")" || {
-    echo "ERROR: get_metric_value: metrics fetch failed for ${metric_path} (family ${metric_family})" >&2
-    return 1
-  }
   METRIC_FAMILY="${metric_family}" METRIC_SELECTOR="${metric_selector}" \
     python3 -c '
 import json
@@ -1014,7 +941,88 @@ if matched == 0:
     print(0)
     sys.exit(0)
 print(int(total) if total >= 0 else 0)
-' <<< "${metrics_text}" || {
+'
+  return $?
+}
+
+# Extract a numeric value from the Prometheus metrics endpoint.
+# Args: $1 = compatibility metric name used by the scenario assertions.
+get_metric_value() {
+  local metric_path="$1"
+  local metric_family=""
+  local metric_selector=""
+  local metrics_text
+
+  case "${metric_path}" in
+    decompression_truncated_input_total|perf.decompression_truncated_input_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='reason="truncated_input"'
+      ;;
+    decompression_format_error_total|perf.decompression_format_error_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='reason="format_error"'
+      ;;
+    decompression_io_error_total|perf.decompression_io_error_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='reason="io_error"'
+      ;;
+    perf.decompression_streaming_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='outcome="success"'
+      ;;
+    decompression_success_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='outcome="success"'
+      ;;
+    perf.output_bytes_total|output_bytes_total)
+      metric_family="nginx_markdown_output_bytes_total"
+      ;;
+    perf.backpressure_total)
+      metric_family="nginx_markdown_streaming_events_total"
+      metric_selector='transition="resume_'
+      ;;
+    perf.backpressure_resume_total)
+      metric_family="nginx_markdown_streaming_events_total"
+      metric_selector='transition="resume_success"'
+      ;;
+    streaming.precommit_failopen_total)
+      metric_family="nginx_markdown_requests_total"
+      metric_selector='outcome="failed_open"'
+      ;;
+    streaming.budget_exceeded_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='outcome="failure",reason="budget_exceeded"'
+      ;;
+    streaming.failed_closed_total)
+      # Compatibility alias for the request-level failed_closed outcome. A
+      # recoverable safe-finish must not classify the request this way.
+      metric_family="nginx_markdown_requests_total"
+      metric_selector='outcome="failed_closed"'
+      ;;
+    streaming.postcommit_error_total)
+      metric_family="nginx_markdown_streaming_events_total"
+      # The frozen v1 surface records the post-commit safe-finish transition;
+      # the legacy counter also covered this path before the request abort.
+      metric_selector='transition="safe_finish_start"'
+      ;;
+    streaming.succeeded_total)
+      metric_family="nginx_markdown_conversion_deliveries_total"
+      metric_selector='engine="streaming"'
+      ;;
+    delivery_count)
+      metric_family="nginx_markdown_conversion_deliveries_total"
+      ;;
+    *)
+      metric_family="${metric_path}"
+      ;;
+  esac
+
+  metrics_text="$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+    "http://127.0.0.1:${PORT}/markdown-metrics")" || {
+    echo "ERROR: get_metric_value: metrics fetch failed for ${metric_path} (family ${metric_family})" >&2
+    return 1
+  }
+  parse_metric_value "${metric_family}" "${metric_selector}" <<< "${metrics_text}" || {
     echo "ERROR: get_metric_value: metrics parse failed for ${metric_path} (family ${metric_family})" >&2
     return 1
   }
@@ -1169,7 +1177,7 @@ assert_streaming_markdown_response \
 
 echo "==> Case 4c-burst: 256 KiB continuous compressed bursts must fail open intact"
 burst_failopen_before="$(get_metric_value 'streaming.precommit_failopen_total')"
-burst_budget_before="$(grep -c 'reason=STREAMING_BUDGET_EXCEEDED' \
+burst_budget_before="$(grep -c 'event=streaming_budget_exceeded' \
   "${RUNTIME}/logs/error.log" || true)"
 burst_decompression_before="$(get_perf_metric 'decompression_streaming_total')"
 burst_output_before="$(get_perf_metric 'output_bytes_total')"
@@ -1223,7 +1231,7 @@ cmp -s "${RAW_DIR}/continuous_burst_gzip.decoded" \
   exit 1
 }
 burst_failopen_after="$(get_metric_value 'streaming.precommit_failopen_total')"
-burst_budget_after="$(grep -c 'reason=STREAMING_BUDGET_EXCEEDED' \
+burst_budget_after="$(grep -c 'event=streaming_budget_exceeded' \
   "${RUNTIME}/logs/error.log" || true)"
 burst_decompression_after="$(get_perf_metric 'decompression_streaming_total')"
 burst_output_after="$(get_perf_metric 'output_bytes_total')"
@@ -1238,7 +1246,7 @@ if [[ "${burst_output_after}" -ne "${burst_output_before}" ]]; then
   exit 1
 fi
 for burst_mode in gzip deflate; do
-  grep -q "reason=STREAMING_PRECOMMIT_FAILOPEN.*uri=/streaming-256k/continuous-burst-${burst_mode}" \
+  grep -q "event=streaming_precommit_failopen.*uri=/streaming-256k/continuous-burst-${burst_mode}" \
     "${RUNTIME}/logs/error.log" || {
     echo "continuous-burst-${burst_mode} missing fail-open reason log" >&2
     exit 1
@@ -1544,17 +1552,17 @@ zc_gzip_log_bytes=$((zc_gzip_log_size_after - zc_gzip_log_offset_before))
 tail -c "${zc_gzip_log_bytes}" "${RUNTIME}/logs/error.log" \
   > "${RAW_DIR}/zc_gzip_request.log"
 zc_gzip_engine_logs="$(grep -Ec \
-  'reason=ENGINE_STREAMING .*uri=/streaming-zero-copy/zero-copy-gzip([[:space:]]|$)' \
+  'event=engine_streaming .*uri=/streaming-zero-copy/zero-copy-gzip([[:space:]]|$)' \
   "${RAW_DIR}/zc_gzip_request.log" || true)"
 zc_gzip_convert_logs="$(grep -Ec \
-  'reason=STREAMING_CONVERT .*uri=/streaming-zero-copy/zero-copy-gzip([[:space:]]|$)' \
+  'reason=converted .*event=streaming_convert .*uri=/streaming-zero-copy/zero-copy-gzip([[:space:]]|$)' \
   "${RAW_DIR}/zc_gzip_request.log" || true)"
 if [[ "${zc_gzip_engine_logs}" != "1" || "${zc_gzip_convert_logs}" != "1" ]]; then
   echo "FAIL: large gzip must log one streaming selection and one terminal conversion" \
     "(engine=${zc_gzip_engine_logs}, convert=${zc_gzip_convert_logs})" >&2
   exit 1
 fi
-echo "  decision logs: ENGINE_STREAMING=1 STREAMING_CONVERT=1"
+echo "  decision logs: event=engine_streaming=1 reason=converted,event=streaming_convert=1"
 
 # Verify worker PID unchanged after slow downstream.
 zc_slow_pid_after="$(get_worker_pid)"
@@ -1764,7 +1772,7 @@ gzip_postcommit_log_bytes=$((gzip_postcommit_log_size - gzip_postcommit_log_offs
 tail -c "${gzip_postcommit_log_bytes}" "${RUNTIME}/logs/error.log" \
   > "${RAW_DIR}/gzip_postcommit_request.log"
 gzip_postcommit_reason_logs="$(grep -Ec \
-  'reason=STREAMING_CONVERT .*uri=/streaming/postcommit-gzip([[:space:]]|$)' \
+  'reason=converted .*event=streaming_convert .*uri=/streaming/postcommit-gzip([[:space:]]|$)' \
   "${RAW_DIR}/gzip_postcommit_request.log" || true)"
 if [[ "${gzip_postcommit_reason_logs}" != "1" ]]; then
   echo "FAIL: safe-finished gzip conversion reason must be logged exactly once" \
@@ -1851,8 +1859,8 @@ grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {
 # "finish inflate incomplete stream" or "finish inflate error".
 decompress_failed_count="$(grep -E -c 'markdown: (rust decompress failed|decompression failed|decomp_finish failed|finish inflate (incomplete stream|error))' "${RUNTIME}/logs/error.log" || true)"
 # Full-buffer decision uses "reason=failed_open category=conversion_error";
-# streaming precommit uses "reason=STREAMING_PRECOMMIT_FAILOPEN" (no category).
-conversion_failopen_count="$(grep -E -c '(reason=failed_open category=conversion_error|reason=STREAMING_PRECOMMIT_FAILOPEN)' "${RUNTIME}/logs/error.log" || true)"
+# streaming precommit uses the "streaming_precommit_failopen" event.
+conversion_failopen_count="$(grep -E -c '(reason=failed_open category=conversion_error|event=streaming_precommit_failopen)' "${RUNTIME}/logs/error.log" || true)"
 if [[ "${decompress_failed_count}" -lt 3 ]]; then
   echo "missing decompression failure logs for truncated gzip/deflate/zlib-deflate cases: ${decompress_failed_count}" >&2
   exit 1
@@ -1972,7 +1980,7 @@ printf '  zero_copy_slow_streaming_succeeded_total=%s->%s\n' \
   "${zc_gzip_succeeded_before:-0}" "${zc_gzip_succeeded_after:-0}"
 printf '  zero_copy_slow_delivery_count=%s->%s\n' \
   "${zc_gzip_delivery_before:-0}" "${zc_gzip_delivery_after:-0}"
-printf '  zero_copy_slow_decision_logs=ENGINE_STREAMING:%s STREAMING_CONVERT:%s\n' \
+printf '  zero_copy_slow_decision_logs=engine_streaming:%s converted_streaming_convert:%s\n' \
   "${zc_gzip_engine_logs:-0}" "${zc_gzip_convert_logs:-0}"
 printf '  zero_copy_slow_worker_pid=%s->%s\n' \
   "${zc_worker_pid_after:-unknown}" "${zc_slow_pid_after:-unknown}"

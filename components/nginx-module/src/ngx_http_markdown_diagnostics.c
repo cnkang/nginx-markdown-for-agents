@@ -3,16 +3,16 @@
  *
  * Implements the /nginx-markdown/diagnostics content handler that
  * exposes runtime state for operational introspection:
- *   - Configuration snapshot (current directive values)
- *   - Recent decisions ring buffer (last N conversion decisions)
- *   - Metrics snapshot (current counter values)
- *   - Dynamic configuration state (mtime, version, LKG)
+ *   - Worker-local configuration snapshot (current directive values)
+ *   - Worker-local recent decisions ring buffer (last N decisions)
+ *   - Shared-memory metrics snapshot (current aggregate counters)
+ *   - Worker-local dynamic configuration state (mtime, version, LKG)
  *
  * The endpoint is gated by the markdown_diagnostics directive (on/off),
  * loopback-only peer validation, and native NGINX access-phase directives
  * (allow/deny).
  *
- * Requirement: REQ-0700-OPERABILITY-001
+ * Requirement: structured decision path logging
  * Risk Pack: dynamic-config-hot-reload
  */
 
@@ -24,8 +24,23 @@
 
 #include "ngx_http_markdown_diagnostics.h"
 #include "markdown_reason_meta.h"
-#include "ngx_http_markdown_dynconf_snapshot.h"
 #include "ngx_http_markdown_filter_module.h"
+
+#ifndef NGX_HTTP_MARKDOWN_BUILD_KIND
+#define NGX_HTTP_MARKDOWN_BUILD_KIND "development"
+#endif
+
+#ifndef NGX_HTTP_MARKDOWN_SOURCE_SHA
+#define NGX_HTTP_MARKDOWN_SOURCE_SHA "development"
+#endif
+
+#ifndef NGX_HTTP_MARKDOWN_RUST_VERSION
+#define NGX_HTTP_MARKDOWN_RUST_VERSION "development"
+#endif
+
+#ifndef NGX_HTTP_MARKDOWN_FEATURE_MANIFEST_DIGEST
+#define NGX_HTTP_MARKDOWN_FEATURE_MANIFEST_DIGEST "development"
+#endif
 
 /* Unit-test translation units may include system headers before this file. */
 #if !defined(_WIN32)
@@ -46,8 +61,8 @@ ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
  * where each worker has its own address space.  This diagnostics state
  * is local to the worker that handles the diagnostics request.  If
  * multiple workers are configured, each worker reports only its own
- * decisions and metrics.  Operators should aggregate externally (e.g.
- * via Prometheus scraping all workers) for a global view.
+ * configuration, decisions, and dynamic-configuration state.  Metrics are
+ * read separately from the shared-memory counter zone.
  *
  * Initialized once during module postconfiguration (or worker init)
  * and shared across all requests in this worker.  The ring buffer
@@ -56,6 +71,8 @@ ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
  */
 static ngx_http_markdown_diag_state_t  ngx_http_markdown_g_diag_state;
 static ngx_flag_t  ngx_http_markdown_g_diag_initialized = 0;
+static ngx_uint_t  ngx_http_markdown_g_diag_recording_state =
+    NGX_HTTP_MARKDOWN_DIAG_RECORDING_DISABLED;
 
 /*
  * Process-global flag indicating that at least one location enabled the
@@ -86,9 +103,13 @@ static ngx_int_t ngx_http_markdown_diag_masked_keys(
 static ngx_int_t ngx_http_markdown_diag_render_dynconf(
     u_char **pos, u_char *last,
     const ngx_http_markdown_diag_dynconf_t *dynconf);
+static ngx_int_t ngx_http_markdown_diag_render_features(
+    u_char **pos, u_char *last);
 static const char *ngx_http_markdown_diag_outcome(ngx_int_t code);
 static const char *ngx_http_markdown_diag_decision_stage(ngx_int_t code);
 static const char *ngx_http_markdown_diag_error_origin(ngx_int_t code);
+static const char *ngx_http_markdown_diag_recording_state_name(
+    ngx_uint_t state);
 
 
 /*
@@ -262,8 +283,8 @@ ngx_http_markdown_diagnostics_record_reason_at_stage(
     outcome = ngx_http_markdown_diag_outcome(reason_code);
     /*
      * ErrorOrigin is canonical registry metadata, not a caller-selected
-     * coarse category. Keep the legacy parameter for the frozen API while
-     * deriving the emitted value from the resolved reason code.
+     * coarse category. The parameter is retained for the current API while
+     * the emitted value is derived from the resolved reason code.
      */
     (void) error_category;
     error_origin = (outcome[0] == 'f' || outcome[0] == 'a')
@@ -339,6 +360,8 @@ void
 ngx_http_markdown_diagnostics_reset_recording_request(void)
 {
     ngx_http_markdown_g_diag_recording_requested = 0;
+    ngx_http_markdown_g_diag_recording_state =
+        NGX_HTTP_MARKDOWN_DIAG_RECORDING_DISABLED;
 }
 
 
@@ -355,16 +378,23 @@ ngx_http_markdown_diagnostics_reset_recording_request(void)
  *
  * Returns:
  *   NGX_OK on success or when diagnostics is not requested (no-op);
- *   NGX_ERROR if ring allocation fails.
+ *   NGX_OK with a degraded state if ring allocation fails; NGX_ERROR when
+ *   the requested worker cycle is invalid.
  */
 ngx_int_t
 ngx_http_markdown_diagnostics_init_worker(struct ngx_cycle_s *cycle)
 {
     if (!ngx_http_markdown_g_diag_recording_requested) {
+        ngx_http_markdown_g_diag_initialized = 0;
+        ngx_http_markdown_g_diag_recording_state =
+            NGX_HTTP_MARKDOWN_DIAG_RECORDING_DISABLED;
         return NGX_OK;
     }
 
     if (cycle == NULL || cycle->pool == NULL) {
+        ngx_http_markdown_g_diag_initialized = 0;
+        ngx_http_markdown_g_diag_recording_state =
+            NGX_HTTP_MARKDOWN_DIAG_RECORDING_DEGRADED;
         return NGX_ERROR;
     }
 
@@ -374,10 +404,16 @@ ngx_http_markdown_diagnostics_init_worker(struct ngx_cycle_s *cycle)
     {
         ngx_log_error(NGX_LOG_ERR, cycle->log, 0,
             "markdown: failed to allocate diagnostics ring buffer");
-        return NGX_ERROR;
+        ngx_http_markdown_g_diag_initialized = 0;
+        ngx_http_markdown_g_diag_state.enabled = 0;
+        ngx_http_markdown_g_diag_recording_state =
+            NGX_HTTP_MARKDOWN_DIAG_RECORDING_DEGRADED;
+        return NGX_OK;
     }
 
     ngx_http_markdown_g_diag_state.enabled = 1;
+    ngx_http_markdown_g_diag_recording_state =
+        NGX_HTTP_MARKDOWN_DIAG_RECORDING_ACTIVE;
 
     ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
         "markdown: diagnostics recent-decisions ring initialized "
@@ -399,8 +435,32 @@ ngx_http_markdown_diagnostics_init_worker(struct ngx_cycle_s *cycle)
 ngx_int_t
 ngx_http_markdown_diagnostics_recording_active(void)
 {
-    return (ngx_http_markdown_g_diag_initialized
+    return (ngx_http_markdown_g_diag_recording_state
+            == NGX_HTTP_MARKDOWN_DIAG_RECORDING_ACTIVE
+            && ngx_http_markdown_g_diag_initialized
             && ngx_http_markdown_g_diag_state.enabled) ? 1 : 0;
+}
+
+
+ngx_uint_t
+ngx_http_markdown_diagnostics_recording_state(void)
+{
+    return ngx_http_markdown_g_diag_recording_state;
+}
+
+
+static const char *
+ngx_http_markdown_diag_recording_state_name(ngx_uint_t state)
+{
+    switch (state) {
+    case NGX_HTTP_MARKDOWN_DIAG_RECORDING_DISABLED:
+        return "disabled";
+    case NGX_HTTP_MARKDOWN_DIAG_RECORDING_ACTIVE:
+        return "active";
+    case NGX_HTTP_MARKDOWN_DIAG_RECORDING_DEGRADED:
+    default:
+        return "degraded_allocation_failure";
+    }
 }
 
 
@@ -746,14 +806,6 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
  * are emitted and every string is either a closed enum or copied through the
  * bounded dynconf error buffer.
  */
-#ifndef NGX_HTTP_MARKDOWN_SOURCE_SHA
-#define NGX_HTTP_MARKDOWN_SOURCE_SHA \
-    "0000000000000000000000000000000000000000"
-#endif
-
-#ifndef NGX_HTTP_MARKDOWN_RUST_VERSION
-#define NGX_HTTP_MARKDOWN_RUST_VERSION "unknown"
-#endif
 
 static const char *
 ngx_http_markdown_diag_dynconf_state_name(ngx_uint_t state)
@@ -1110,18 +1162,14 @@ ngx_http_markdown_diagnostics_fmt_decisions(
 }
 
 
-/*
- * Render the dynconf JSON fragment (everything after "state" through the
- * trailing fields) into the output buffer.  Extracted from build_json to
- * keep the caller's Cognitive Complexity under the S3776 threshold.
+/**
+ * Renders dynamic-configuration state fields as a JSON fragment.
  *
- * Layout per dynconf.state:
- *   ACTIVE | LKG_PRESERVED   generation, source/active/lkg digests,
- *                            last_success, last_error (LKG_PRESERVED only)
- *   INVALID_NO_LKG (error)   null fields + last_error when present
- *   other                    null fields, null last_error
- *
- * Returns NGX_OK on success, NGX_ERROR on a truncated/invalid write.
+ * @param pos     Current output position, updated after rendering.
+ * @param last    End of the output buffer.
+ * @param dynconf Dynamic-configuration state and metadata to render.
+ * @return NGX_OK on success, or NGX_ERROR for invalid output arguments or
+ *         failed string rendering.
  */
 static ngx_int_t
 ngx_http_markdown_diag_render_dynconf(
@@ -1192,6 +1240,52 @@ ngx_http_markdown_diag_render_dynconf(
 
 
 static ngx_int_t
+ngx_http_markdown_diag_render_features(u_char **pos, u_char *last)
+{
+#if defined(MARKDOWN_STREAMING_ENABLED) \
+    || defined(MARKDOWN_PRUNE_NOISE_ENABLED)
+    u_char      feature_separator[2];
+#endif
+    u_char     *p;
+
+    if (pos == NULL || *pos == NULL || last == NULL || *pos > last) {
+        return NGX_ERROR;
+    }
+
+    p = *pos;
+#if defined(MARKDOWN_STREAMING_ENABLED) \
+    || defined(MARKDOWN_PRUNE_NOISE_ENABLED)
+    feature_separator[0] = '\0';
+    feature_separator[1] = '\0';
+#endif
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    p = ngx_slprintf(p, last, "%s\"streaming\"",
+        feature_separator);
+    feature_separator[0] = ',';
+#endif
+#ifdef MARKDOWN_PRUNE_NOISE_ENABLED
+    p = ngx_slprintf(p, last, "%s\"prune_noise_regions\"",
+        feature_separator);
+#endif
+
+    if (p >= last) {
+        return NGX_ERROR;
+    }
+
+    *pos = p;
+    return NGX_OK;
+}
+
+/**
+ * Builds the version 2 diagnostics JSON document for the current worker.
+ *
+ * @param r Request whose pool and connection are used to build and log the
+ *          diagnostics response.
+ * @param b Buffer that receives the generated JSON document.
+ * @return NGX_OK on success, or NGX_ERROR if the document cannot be built.
+ */
+static ngx_int_t
 ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     ngx_buf_t *b)
 {
@@ -1200,14 +1294,18 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     ngx_http_markdown_diag_dynconf_t dynconf;
     ngx_http_markdown_diag_effective_t effective;
     ngx_http_markdown_diag_metrics_t metrics;
-    u_char *buf;
-    u_char *p;
-    u_char *last;
-    size_t buf_size;
-    size_t streaming_buffer;
-    u_char static_digest[72];
-    const char *dynconf_state;
+    u_char                         *buf;
+    u_char                         *p;
+    u_char                         *last;
+    size_t                          buf_size;
+    size_t                          streaming_buffer;
+    u_char                          static_digest[72];
+    const char                     *dynconf_state;
+    const char                     *recording_state_name;
+    ngx_uint_t                      recording_state;
 
+    /* Allocate a pre-sized pool buffer for the entire response body.
+     * Pre-computation via json_size() guarantees no reallocation. */
     state = ngx_http_markdown_diagnostics_get_state();
     buf_size = ngx_http_markdown_diagnostics_json_size(state);
     if (buf_size == 0) {
@@ -1220,6 +1318,10 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     }
     p = buf;
     last = buf + buf_size;
+
+    /* Snapshot all configuration surfaces. dynconf is global-process,
+     * effective is per-location with source attribution, and static_digest
+     * fingerprints the compiled-in defaults + dynconf file fingerprint. */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     ngx_http_markdown_diagnostics_get_dynconf_state(&dynconf);
     ngx_http_markdown_diagnostics_get_effective(conf, &effective);
@@ -1232,23 +1334,31 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    recording_state = ngx_http_markdown_diagnostics_recording_state();
+    recording_state_name =
+        ngx_http_markdown_diag_recording_state_name(recording_state);
+    metrics.diagnostics_recording_state = recording_state;
     streaming_buffer = effective.streaming_buffer;
 
+    /* Header: schema, version, worker identity, build info, features */
     dynconf_state = ngx_http_markdown_diag_dynconf_state_name(dynconf.state);
     p = ngx_slprintf(p, last,
         "{\"schema_version\":2,\"product_version\":\"%s\","
         "\"worker\":{\"pid\":%P,\"scope\":\"worker-local\"},"
-        "\"build\":{\"source_sha\":\"%s\","
+        "\"build\":{\"build_kind\":\"%s\","
+        "\"source_sha\":\"%s\","
         "\"nginx_version\":\"%s\",\"rust_version\":\"%s\","
+        "\"feature_manifest_digest\":\"%s\","
         "\"features\":[",
         NGX_HTTP_MARKDOWN_PRODUCT_VERSION,
-        ngx_pid, NGX_HTTP_MARKDOWN_SOURCE_SHA, NGINX_VERSION,
-        NGX_HTTP_MARKDOWN_RUST_VERSION);
-#ifdef MARKDOWN_STREAMING_ENABLED
-    p = ngx_slprintf(p, last, "\"dynconf\",\"streaming\"");
-#else
-    p = ngx_slprintf(p, last, "\"dynconf\"");
-#endif
+        ngx_pid, NGX_HTTP_MARKDOWN_BUILD_KIND, NGX_HTTP_MARKDOWN_SOURCE_SHA,
+        NGINX_VERSION, NGX_HTTP_MARKDOWN_RUST_VERSION,
+        NGX_HTTP_MARKDOWN_FEATURE_MANIFEST_DIGEST);
+    if (ngx_http_markdown_diag_render_features(&p, last) != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    /* Configuration block: static digest + dynconf state, keys, masked */
     p = ngx_slprintf(p, last,
         "]},\"configuration\":{\"static_digest\":\"%s\","
         "\"dynconf\":{\"state\":\"%s\",",
@@ -1267,6 +1377,9 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    /* Effective section: resolved values + per-field source provenance.
+     * Each effective value is paired with its source so operators can
+     * trace which config layer (default, dynconf, location) won. */
     p = ngx_slprintf(p, last,
         "},\"effective\":{\"filter\":\"%s\","
         "\"prune_noise\":\"%s\",\"log_verbosity\":\"%s\","
@@ -1274,10 +1387,12 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         "\"effective_sources\":{\"filter\":\"%s\","
         "\"prune_noise\":\"%s\",\"log_verbosity\":\"%s\","
         "\"error_policy\":\"%s\",\"streaming_buffer\":\"%s\"}},"
-        "\"runtime\":{\"inflight\":%uA,\"pending_output\":%uA,"
+        "\"runtime\":{\"diagnostics_recording\":\"%s\","
+        "\"inflight\":%uA,\"pending_output\":%uA,"
         "\"module_metrics\":{\"streaming_requests_total\":%uA,"
         "\"precommit_failopen_total\":%uA,"
-        "\"copied_output_total\":%uA}},"
+        "\"copied_output_total\":%uA,"
+        "\"diagnostics_recording_state\":%uA}},"
         "\"recent_decisions\":[",
         ngx_http_markdown_diag_bool(effective.filter),
         ngx_http_markdown_diag_bool(effective.prune_noise),
@@ -1290,15 +1405,18 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         ngx_http_markdown_diag_source_name(effective.log_verbosity_source),
         ngx_http_markdown_diag_source_name(effective.error_policy_source),
         ngx_http_markdown_diag_source_name(effective.streaming_buffer_source),
-        metrics.inflight, metrics.pending_output,
+        recording_state_name, metrics.inflight, metrics.pending_output,
         metrics.streaming_requests_total, metrics.precommit_failopen_total,
-        metrics.copied_output_total);
+        metrics.copied_output_total, metrics.diagnostics_recording_state);
+
+    /* Append per-request decision ring buffer entries */
     if (ngx_http_markdown_diagnostics_fmt_decisions(&p, last, state)
         != NGX_OK)
     {
         return NGX_ERROR;
     }
 
+    /* Finalize and guard against overflow */
     p = ngx_slprintf(p, last, "]}\n");
     if (p >= last) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -1384,9 +1502,8 @@ ngx_http_markdown_decision_path_is_failure(const char *status)
  *
  * Emits a single structured log line in key=value format:
  *
- *   markdown: accept_result=CONVERT
- *       conditional_result=PROCEED conversion_status=SUCCESS
- *       reason_code=CONVERTED duration_ms=12
+ *   markdown: outcome=converted stage=conversion reason=converted event=-
+ *       accept_result=CONVERT conditional_result=PROCEED duration_ms=12
  *
  * This function uses only stack-local variables and does NOT
  * allocate from the pool or heap.  It is safe to call from
@@ -1422,6 +1539,8 @@ ngx_http_markdown_log_decision_path(ngx_http_request_t *r,
     const char                                  *cond_str;
     const char                                  *conv_str;
     const char                                  *reason_str;
+    const char                                  *outcome_str;
+    const char                                  *stage_str;
 
     if (r == NULL || path == NULL) {
         return;
@@ -1496,8 +1615,28 @@ ngx_http_markdown_log_decision_path(ngx_http_request_t *r,
         ? path->conditional_result : "-";
     conv_str = (path->conversion_status != NULL)
         ? path->conversion_status : "-";
-    reason_str = (path->reason_code != NULL)
-        ? path->reason_code : "-";
+    reason_str = "-";
+    outcome_str = "-";
+    stage_str = path->stage != NULL ? path->stage : "-";
+    if (path->reason_code != NULL) {
+        ngx_int_t                     reason_code;
+        const markdown_reason_meta_t *reason_meta;
+
+        reason_code = ngx_http_markdown_diagnostics_reason_to_code(
+            (const u_char *) path->reason_code,
+            strlen(path->reason_code));
+        if (reason_code >= 0) {
+            reason_meta = ngx_http_markdown_diag_reason_meta_for(
+                reason_code);
+            reason_str = reason_meta->key;
+            outcome_str = reason_meta->outcome;
+            if (path->stage == NULL) {
+                stage_str = reason_meta->stage;
+            }
+        } else {
+            reason_str = "unknown";
+        }
+    }
 
     /*
      * Emit the structured decision path log line.
@@ -1513,15 +1652,18 @@ ngx_http_markdown_log_decision_path(ngx_http_request_t *r,
      */
     ngx_log_error(log_level, r->connection->log, 0,
         "markdown: "
+        "outcome=%s stage=%s reason=%s event=- "
         "accept_result=%s "
         "conditional_result=%s "
         "conversion_status=%s "
-        "reason_code=%s error_category=%s "
+        "error_category=%s "
         "duration_ms=%M",
+        outcome_str,
+        stage_str,
+        reason_str,
         accept_str,
         cond_str,
         conv_str,
-        reason_str,
         path->error_category != NULL ? path->error_category : "-",
         path->duration_ms);
 }

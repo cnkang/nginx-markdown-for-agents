@@ -94,7 +94,7 @@ if [[ ! -f "$CHECK_SCRIPT" ]]; then
     exit 1
 fi
 
-if [[ ! -x "$CHECK_SCRIPT" ]] && ! bash -n "$CHECK_SCRIPT" 2>/dev/null; then
+if ! bash -n "$CHECK_SCRIPT" 2>/dev/null; then
     printf '[ERROR] check_artifact_naming.sh has syntax errors\n' >&2
     exit 1
 fi

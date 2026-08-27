@@ -126,11 +126,13 @@ End
 
 ## Future Enhancements
 
-The current implementation focuses on the three core non-content elements. Future versions may consider:
+The current implementation focuses on the three core non-content elements.
+Inline event-handler removal is already complete. The list below records it
+only as a historical implementation note:
 
 1. **Navigation elements**: `<nav>`, `<header>`, `<footer>` (optional for v1, mentioned in design)
 2. **Other non-content elements**: `<svg>`, `<canvas>` (if needed)
-3. **Inline event handlers**: Removal of all `on*` attributes via prefix matching — **complete**, already covered by `security.rs` and `test_inline_script_removal`.
+3. **Inline event handlers**: Removal of all `on*` attributes via prefix matching — **complete**, already covered by `security.rs` and `test_inline_script_removal`. This is not a future item.
 
 ## Related: Form Element Content Preservation
 

@@ -25,6 +25,7 @@ The repository now follows a **single-source documentation policy**.
 - In-flight implementation plans: `docs/development/`
 - Machine-readable evidence artifacts: `docs/evidence/`
 - Deployment and operational reference: `docs/operations/`
+- Knowledge-base contracts and maintained context: `docs/knowledge-base/`
 - Repository structure: `docs/architecture/REPOSITORY_STRUCTURE.md`
 
 ## Validation Commands

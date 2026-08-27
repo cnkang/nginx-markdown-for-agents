@@ -2,7 +2,7 @@
   "fixture-id": "streaming-perf/malformed-large",
   "page-type": "complex-common",
   "expected-conversion-result": "converted",
-  "input-size-bytes": 631,
+  "input-size-bytes": 633,
   "source-description": "Malformed HTML streaming benchmark fixture for parser recovery behavior",
   "failure-corpus": true,
   "streaming_notes": {

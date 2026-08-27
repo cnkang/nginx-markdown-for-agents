@@ -20,6 +20,7 @@ typedef struct ngx_list_part_s ngx_list_part_t;
 
 #define NGX_OK 0
 #define NGX_ERROR -1
+#define NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED -107
 
 typedef struct {
     u_char *data;
@@ -94,14 +95,12 @@ typedef struct {
     ngx_uint_t flavor;
     ngx_flag_t token_estimate;
     ngx_flag_t front_matter;
-    ngx_flag_t on_wildcard;
     struct {
         ngx_uint_t auth_policy;
         void *auth_cookies;
         ngx_flag_t generate_etag;
         ngx_uint_t conditional_requests;
     } policy;
-    void *stream_types;
 } ngx_http_markdown_conf_t;
 
 typedef struct {
@@ -121,6 +120,7 @@ ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                            const ngx_http_markdown_conf_t *conf);
 ngx_int_t ngx_http_markdown_head_representation_headers(ngx_http_request_t *r);
 void ngx_http_markdown_clear_trailers(ngx_http_request_t *r);
+ngx_int_t ngx_http_markdown_test_header_snapshot_restore_status(void);
 
 /* Mocks required by ngx_http_markdown_headers_standalone.c */
 void *
@@ -438,8 +438,16 @@ test_update_headers_full_path(void)
     TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
                 "update_headers should succeed");
 
-    TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data, "text/markdown; charset=utf-8"),
-                "Content-Type should be markdown utf-8");
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
+                       "text/markdown"),
+                "Content-Type media type should be markdown");
+    TEST_ASSERT(r.headers_out.content_type_len
+                == sizeof("text/markdown") - 1,
+                "Content-Type length should exclude charset");
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.charset.data, "utf-8"),
+                "Content-Type charset should be utf-8");
+    TEST_ASSERT(r.headers_out.charset.len == sizeof("utf-8") - 1,
+                "Content-Type charset length should be correct");
     TEST_ASSERT(r.headers_out.content_length_n == 42, "Content-Length should match markdown length");
     TEST_ASSERT(r.headers_out.content_encoding == NULL, "Content-Encoding pointer should be cleared");
     TEST_ASSERT(r.headers_out.accept_ranges == NULL, "Accept-Ranges pointer should be cleared");
@@ -820,7 +828,7 @@ test_update_headers_prepare_failure_rolls_back(void)
     before[0] = *(ngx_table_elt_t *) r.headers_out.headers.part.elts;
     before[1] = ((ngx_table_elt_t *) r.headers_out.headers.part.elts)[1];
 
-    /* Force the P2 ETag list push to fail after P1 has applied its plan. */
+    /* Force the ETag list push to fail after the FFI plan is applied. */
     r.headers_out.headers.nalloc = original_nelts;
     g_fail_list_push_after_expand = 1;
     g_list_was_expanded = 1;
@@ -881,7 +889,7 @@ test_update_headers_multipart_failure_restores_chain(void)
     before[0] = ((ngx_table_elt_t *) original_last->elts)[0];
     before[1] = ((ngx_table_elt_t *) original_last->elts)[1];
 
-    /* P2 expands to a new part; P4 then fails on its next push. */
+    /* The ETag phase expands to a new part; the token phase then fails. */
     g_fail_list_push_after_expand = 1;
     g_list_was_expanded = 0;
 
@@ -913,6 +921,19 @@ test_update_headers_multipart_failure_restores_chain(void)
     g_list_was_expanded = 0;
     free_request(&r);
     TEST_PASS("Multipart header rollback restores list links");
+}
+
+static void
+test_header_snapshot_restore_failure_is_terminal(void)
+{
+    TEST_SUBSECTION("Header rollback failure is a distinct terminal result");
+
+    TEST_ASSERT(
+        ngx_http_markdown_test_header_snapshot_restore_status()
+            == NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED,
+        "failed header snapshot restore must not collapse into NGX_ERROR");
+
+    TEST_PASS("Header rollback failure is terminal");
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -951,14 +972,16 @@ test_head_representation_headers_strips_html_metadata(void)
     r.headers_out.content_length_n = 2048;
     r.headers_out.last_modified_time = 1234567890;
     r.headers_out.etag = push_header(&r, "ETag", "\"html-etag\"");
-    r.headers_out.accept_ranges = (ngx_table_elt_t *) 1;
+    r.headers_out.accept_ranges = find_header(&r, "Accept-Ranges");
 
     TEST_ASSERT(ngx_http_markdown_head_representation_headers(&r) == NGX_OK,
                 "HEAD representation headers should succeed");
 
     TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
-                        "text/markdown; charset=utf-8"),
-                "HEAD Content-Type should be Markdown");
+                        "text/markdown"),
+                "HEAD Content-Type media type should be Markdown");
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.charset.data, "utf-8"),
+                "HEAD Content-Type charset should be utf-8");
     TEST_ASSERT(r.headers_out.content_encoding == NULL,
                 "HEAD Content-Encoding should be cleared");
     TEST_ASSERT(r.headers_out.content_length_n == -1,
@@ -1056,8 +1079,10 @@ test_head_representation_headers_duplicate_entries(void)
                 "duplicate Last-Modified entries must all be invalidated "
                 "(stop_after_first would leave later entries alive)");
     TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
-                        "text/markdown; charset=utf-8"),
+                        "text/markdown"),
                 "dedicated Content-Type must be the Markdown media type");
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.charset.data, "utf-8"),
+                "dedicated Content-Type charset must be utf-8");
     TEST_ASSERT(r.headers_out.content_encoding == NULL,
                 "dedicated Content-Encoding pointer must be cleared");
     TEST_ASSERT(r.headers_out.last_modified_time == (time_t) -1,
@@ -1170,6 +1195,7 @@ main(void)
     test_update_headers_skips_invalidated_accept_ranges();
     test_update_headers_prepare_failure_rolls_back();
     test_update_headers_multipart_failure_restores_chain();
+    test_header_snapshot_restore_failure_is_terminal();
     test_head_representation_headers_strips_html_metadata();
     test_head_representation_headers_null();
     test_head_representation_headers_duplicate_entries();

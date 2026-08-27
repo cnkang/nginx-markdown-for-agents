@@ -18,9 +18,19 @@ import sys
 # Pre-compiled naming convention patterns (constants, not user-supplied)
 NGINX_DIRECTIVE_RE = re.compile(r"^markdown_(streaming_)?[a-z][a-z0-9_]*$")
 PROMETHEUS_METRIC_RE = re.compile(
-    r"^nginx_markdown_[a-z][a-z0-9_]*(_total|_bytes|_seconds|_info)?$"
+    r"^nginx_markdown_"
+    r"(?![a-z][a-z0-9_]*_(?:"
+    r"total_(?:total|bytes|seconds|info)|"
+    r"bytes_(?:bytes|seconds|info)|"
+    r"seconds_(?:bytes|seconds|info)|"
+    r"info_(?:total|bytes|seconds|info)"
+    r")$)"
+    r"(?![a-z][a-z0-9_]*_(?:total|bytes|seconds|info)_"
+    r"(?:bytes_total|seconds_total)$)"
+    r"[a-z][a-z0-9_]*_(?:bytes_total|seconds_total|"
+    r"total|bytes|seconds|info)$"
 )
-REASON_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+REASON_CODE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 C_MACRO_RE = re.compile(r"^NGX_HTTP_MARKDOWN_[A-Z][A-Z0-9_]*$")
 
 # High-cardinality labels that are forbidden in Prometheus metrics
@@ -40,7 +50,7 @@ def is_valid_nginx_directive(name: str) -> bool:
 
 
 def is_valid_prometheus_metric(name: str) -> bool:
-    """Return True if *name* matches the Prometheus metric naming convention."""
+    """Return True if *name* ends in one legal metric unit suffix."""
     return bool(PROMETHEUS_METRIC_RE.match(name))
 
 
@@ -111,13 +121,11 @@ def main() -> int:
         "nginx_markdown_streaming_ttfb_seconds",
     ]
     known_reason_codes = [
-        "STREAMING_CONVERT",
-        "STREAMING_FALLBACK_PREBUFFER",
-        "STREAMING_FAIL_POSTCOMMIT",
-        "STREAMING_SKIP_UNSUPPORTED",
-        "ENGINE_FULLBUFFER",
-        "ENGINE_STREAMING",
-        "STREAMING_BUDGET_EXCEEDED",
+        "converted",
+        "failed_open",
+        "failed_closed",
+        "memory_budget_exceeded",
+        "streaming_mid_flight_error",
     ]
 
     if errors := validate_names(

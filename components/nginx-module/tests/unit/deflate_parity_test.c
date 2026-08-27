@@ -4,7 +4,7 @@
  * Validates that Content-Encoding: deflate decompression produces
  * identical output in both buffered and streaming paths.  The public
  * 0.9.2 contract uses MAX_WBITS (zlib-wrapped deflate per RFC 1950).
- * Raw fallback cases below remain legacy C compatibility coverage only.
+ * Raw fallback cases below cover the supported RFC 1951 fallback.
  */
 
 #include "test_common.h"
@@ -159,7 +159,7 @@ decompress_streaming_path(const unsigned char *in, size_t in_len,
     /*
      * Streaming path: MAX_WBITS for zlib-wrapped deflate.
      * Previously used -MAX_WBITS (raw deflate); now unified with
-     * the buffered path per REQ-7.
+     * the buffered path per the buffered-path requirement.
      */
     rc = inflateInit2(&s, MAX_WBITS);
     if (rc != Z_OK) {
@@ -353,7 +353,7 @@ test_deflate_parity_mixed_content(void)
 
 /*
  * Compress using raw deflate (window_bits = -MAX_WBITS).
- * This simulates legacy servers (IIS 5/6) that send raw deflate
+ * This simulates older servers (IIS 5/6) that send raw deflate
  * under Content-Encoding: deflate.
  */
 static int
@@ -476,10 +476,10 @@ decompress_buffered_with_fallback(const unsigned char *in, size_t in_len,
 }
 
 /*
- * test_deflate_raw_fallback - Verify the legacy C compatibility path can
+ * test_deflate_raw_fallback - Verify the C raw-deflate fallback can
  * decompress raw deflate via the buffered path's fallback mechanism.
  *
- * This preserves the N-01 regression case: when a legacy server sends raw
+ * This preserves the N-01 regression case: when an older server sends raw
  * deflate (RFC 1951 without a zlib header), the buffered path retries with
  * -MAX_WBITS. This case does not define the frozen 0.9.2 public contract.
  */
@@ -493,7 +493,7 @@ test_deflate_raw_fallback(void)
     size_t          decompressed_len;
     int             rc;
 
-    text = "<h1>Raw Deflate Test</h1><p>Legacy server content.</p>";
+    text = "<h1>Raw Deflate Test</h1><p>Raw-deflate response content.</p>";
 
     rc = compress_deflate_raw((const unsigned char *) text,
                               strlen(text),

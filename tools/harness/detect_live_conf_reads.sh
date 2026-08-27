@@ -35,7 +35,6 @@ readonly SRC_DIR="${1:-components/nginx-module/src}"
 # Dynconf-mutable fields that must be read through effective_conf
 # in request-path code.
 readonly MUTABLE_FIELDS="enabled|enabled_source|prune_noise|log_verbosity|error_policy|error_status|streaming_buffer"
-readonly MUTABLE_FIELDS_EXACT="^(enabled|enabled_source|prune_noise|log_verbosity|error_policy|error_status|streaming_buffer)$"
 
 # Files where direct conf-> reads of mutable fields are allowed
 # (configuration/initialization/snapshot code).
@@ -44,8 +43,8 @@ readonly MUTABLE_FIELDS_EXACT="^(enabled|enabled_source|prune_noise|log_verbosit
 # contains configuration init (create_conf), merge (merge_conf and
 # sub-helpers), and diagnostic functions (log_merged_conf) that
 # legitimately read/write live conf.  The request-path function
-# is_enabled() is handled separately below via the P0 regression
-# guard (it now accepts an eff parameter and reads through effective
+# is_enabled() is handled separately below via the effective-conf
+# guard (it accepts an eff parameter and reads through the effective
 # view; any future regression to direct conf-> reads will be caught
 # by the is_enabled-specific check below).
 readonly ALLOWED_FILES=(
@@ -132,15 +131,17 @@ function_contains_line() {
     return $?
 }
 
+# comment_free_line prints the specified source line with C and C++ comments removed.
 comment_free_line() {
     local file="$1" target_line="$2"
     awk -v target="${target_line}" '
-        function strip_comments(text, start, stop, line_comment) {
+        function strip_comments(text, start, stop, line_comment, result) {
+            result = ""
             while (1) {
                 if (in_block) {
                     stop = index(text, "*/")
                     if (!stop) {
-                        return ""
+                        return result
                     }
                     text = substr(text, stop + 2)
                     in_block = 0
@@ -150,13 +151,13 @@ comment_free_line() {
                 line_comment = index(text, "//")
                 if (line_comment > 0 \
                     && (start == 0 || line_comment < start)) {
-                    return substr(text, 1, line_comment - 1)
+                    return result substr(text, 1, line_comment - 1)
                 }
                 if (!start) {
-                    return text
+                    return result text
                 }
-                text = substr(text, 1, start - 1) \
-                    substr(text, start + 2)
+                result = result substr(text, 1, start - 1)
+                text = substr(text, start + 2)
                 in_block = 1
             }
         }
@@ -174,9 +175,6 @@ echo "=== Effective-Config Live Conf Read Detection ===" >&2
 echo "Scanning: ${SRC_DIR}" >&2
 echo "Mutable fields: ${MUTABLE_FIELDS}" >&2
 echo "" >&2
-
-# Build allowlist basename pattern for grep exclusion
-readonly ALLOW_PATTERN="$(IFS='|'; echo "${ALLOWED_FILES[*]}")"
 
 # ── Find all conf-><mutable_field> reads ──
 echo "--- Direct conf-><mutable_field> reads ---" >&2
@@ -227,10 +225,9 @@ while IFS= read -r match; do
         continue
     fi
 
-    # Check for regressed P0 gap: ngx_http_markdown_is_enabled
-    # Regression guard: is_enabled() must read enabled/enabled_source
-    # through eff parameter (fixed in v0.6.2).  Any future regression
-    # to direct conf-> reads will be caught here.
+    # Check the ngx_http_markdown_is_enabled effective-conf invariant.
+    # is_enabled() must read enabled/enabled_source through the eff
+    # parameter. Any direct conf-> read is a violation.
     func_start=$((line - 50))
     if [[ "$func_start" -lt 1 ]]; then
         func_start=1
@@ -288,9 +285,8 @@ while IFS= read -r match; do
         continue
     fi
 
-    # Regression guard: log_decision_debug() must read enabled/enabled_source
-    # through eff parameter (fixed in v0.6.2).  Any future regression
-    # to direct conf-> reads is an error, not a warning.
+    # log_decision_debug() must read enabled/enabled_source through the eff
+    # parameter. Any direct conf-> read is an error, not a warning.
     if echo "$context_lines" | grep -q 'log_decision_debug'; then
         echo "  ERROR   ${file}:${line} — log_decision_debug() regression: reads live conf->: ${content}" >&2
         errors=$((errors + 1))
@@ -298,9 +294,10 @@ while IFS= read -r match; do
         continue
     fi
 
-    # Check if the line is inside build_effective_conf or snapshot functions
-    # These are legitimate conf-> reads to populate effective/snapshot
-    if sed -n "${func_start},${line}p" "$file" 2>/dev/null | grep -qE 'build_effective_conf|dynconf_snapshot_from_conf|dynconf_apply_snapshot|dynconf_snapshot_to_json'; then
+    # Check if the line is inside build_effective_conf or active snapshot
+    # functions. These are legitimate conf-> reads to populate the
+    # request-consistent effective/snapshot state.
+    if sed -n "${func_start},${line}p" "$file" 2>/dev/null | grep -qE 'build_effective_conf|dynconf_snapshot_from_conf|dynconf_apply_snapshot'; then
         echo "  OK      ${file}:${line} — inside snapshot/builder function: ${content}" >&2
         hits=$((hits + 1))
         continue
@@ -417,10 +414,9 @@ else
 fi
 echo "" >&2
 
-# ── Regression guard: handle_ctx_alloc_failure must receive eff parameter ──
-# After v0.6.2, handle_ctx_alloc_failure takes an eff parameter to avoid
-# falling back to live conf in log_decision_with_category.  A call passing
-# NULL (or omitting eff) is a regression.
+# ── Guard: handle_ctx_alloc_failure must receive eff parameter ──
+# handle_ctx_alloc_failure must receive the request's effective view so
+# log_decision_with_category cannot fall back to live configuration.
 echo "--- Regression guard: handle_ctx_alloc_failure must receive eff ---" >&2
 
 if [[ -f "$request_impl" ]]; then
@@ -470,12 +466,9 @@ else
 fi
 echo "" >&2
 
-# ── Regression guard: effective_conf must be copied from early_eff, not rebuilt ──
-# After v0.6.2, ctx->effective_conf is set by copying early_eff directly
-# (*ctx->effective_conf = early_eff) rather than calling build_effective_conf
-# again (which would re-read the global active_snapshot or the separately-bound
-# snapshot, both of which can drift).  A call to build_effective_conf inside
-# header_filter after the initial build is a regression.
+# ── Guard: effective_conf must be copied from early_eff, not rebuilt ──
+# ctx->effective_conf is copied from early_eff rather than rebuilt inside
+# header_filter. Rebuilding would re-read a snapshot that can drift.
 echo "--- Regression guard: no build_effective_conf re-invocation in header_filter ---" >&2
 
 if [[ -f "$request_impl" ]]; then

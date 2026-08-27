@@ -4,10 +4,11 @@ Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 
 This is the final checkpoint before the 0.4.0 release. The Go/No-Go review
 verifies that all P0 sub-specs have passed their DoD evaluation. It also
-verifies that all release gates pass. An unresolved release-gate failure is
-No-Go. An approved exception can permit Go only for a non-P0, non-safety gate
-when the release owner approves it. The record must include risk assessment
-and mitigation evidence. P0 or safety failures remain No-Go.
+verifies that all release gates pass or have an approved eligible exception.
+An unresolved release-gate failure is No-Go. An approved exception can permit
+Go only for a non-P0, non-safety gate when the release owner approves it. The
+record must include risk assessment and mitigation evidence. P0 or safety
+failures remain No-Go.
 
 ## Decision Record
 

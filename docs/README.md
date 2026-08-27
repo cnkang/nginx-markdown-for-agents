@@ -49,6 +49,16 @@ Feature-focused technical notes for behavior that is too detailed for the top-le
 
 Index: [features/README.md](features/README.md)
 
+### `knowledge-base/`
+
+Maintained contracts and project context used to keep configuration semantics
+and repository knowledge aligned:
+
+- configuration contract and compatibility notes
+- canonical knowledge-base maintenance guidance
+
+Index: [knowledge-base/README.md](knowledge-base/README.md)
+
 ### `architecture/`
 
 System structure, component boundaries, and decision rationale:

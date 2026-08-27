@@ -383,17 +383,10 @@ class TestContainsMakeBuildCommand:
 class TestReleaseGateSnippetExpectations:
     """Validate regression guard snippets for release/package review findings."""
 
-    def test_nfpm_dependency_uses_exact_nginx_version(self) -> None:
-        """Ensure NFPM dependency pins the EXACT NGINX version and correct module path.
-
-        NGINX dynamic modules require an exact version match; the core
-        loader rejects any difference (including patch) before signature
-        checks.  The DEB/RPM dependency metadata must therefore pin the
-        exact target version rather than a branch-scoped floor/ceiling.
-        """
-        assert 'nginx (= ${NGINX_VERSION})' in validator.NFPM_REQUIRED_SNIPPETS
-        assert "nginx = 1:${NGINX_VERSION}" in validator.NFPM_REQUIRED_SNIPPETS
-        assert 'nginx (>= ${NGINX_VERSION_FLOOR})' not in validator.NFPM_REQUIRED_SNIPPETS
+    def test_nfpm_dependency_uses_debian_compatible_floor(self) -> None:
+        """Use a portable Debian floor; preinstall enforces the exact version."""
+        assert 'nginx (>= ${NGINX_VERSION})' in validator.NFPM_REQUIRED_SNIPPETS
+        assert "nginx = ${RPM_NGINX_EVR}" in validator.NFPM_REQUIRED_SNIPPETS
         assert 'nginx (<< ${NGINX_VERSION_CEIL})' not in validator.NFPM_REQUIRED_SNIPPETS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.NFPM_REQUIRED_SNIPPETS
         assert "packager: deb" in validator.NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN
@@ -446,17 +439,41 @@ class TestReleaseGateSnippetExpectations:
             for status, check_id, _message in result.results
         )
 
-    def test_sign_and_publish_uses_trusted_checkout_before_secrets(self) -> None:
-        """Ensure signing workflow scripts come from the default branch."""
-        assert "ref: ${{ github.event.repository.default_branch }}" in (
-            validator.SIGN_AND_PUBLISH_SECURITY_SNIPPETS
-        )
-        assert "persist-credentials: false" in validator.SIGN_AND_PUBLISH_SECURITY_SNIPPETS
-        assert "Validate release tag input" in validator.SIGN_AND_PUBLISH_SECURITY_SNIPPETS
+    def test_binary_signing_uses_immutable_checkout_and_release_environment(self) -> None:
+        """Ensure the live signing job binds secrets to the prepared commit."""
+        snippets = validator.RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS
+        assert "integrity-signing:" in snippets
+        assert "environment: release-signing" in snippets
+        assert "ref: ${{ github.sha }}" in snippets
+        assert "persist-credentials: false" in snippets
+        assert "./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS" in snippets
 
-    def test_sign_and_publish_forbids_caller_selected_ref_checkout(self) -> None:
+    def test_binary_signing_forbids_caller_selected_ref_checkout(self) -> None:
         """Ensure signing workflow cannot reintroduce caller-selected checkout."""
-        assert "ref: ${{ inputs.version }}" in validator.SIGN_AND_PUBLISH_FORBIDDEN_SNIPPETS
+        assert "ref: ${{ inputs.version }}" in validator.RELEASE_BINARY_SIGNING_FORBIDDEN_SNIPPETS
+
+    def test_binary_signing_validator_fails_when_live_job_is_missing(
+        self, monkeypatch
+    ) -> None:
+        """Do not pass because a retired signing workflow is absent."""
+        monkeypatch.setattr(validator, "read_safe", lambda _path: "name: unrelated")
+        result = validator.ValidationResult()
+
+        validator._validate_release_binary_signing_security(result)
+
+        assert result.has_failures
+
+    def test_binary_signing_validator_checks_the_live_job(self, monkeypatch) -> None:
+        """Validate the actual release-binaries signing job contract."""
+        job = "\n  integrity-signing:\n" + "\n".join(
+            f"    {snippet}" for snippet in validator.RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS
+        ) + "\n  package-artifacts:\n"
+        monkeypatch.setattr(validator, "read_safe", lambda _path: job)
+        result = validator.ValidationResult()
+
+        validator._validate_release_binary_signing_security(result)
+
+        assert not result.has_failures, result.results
 
     def test_nfpm_postinstall_doc_path_matches_installed_layout(self) -> None:
         """Ensure postinstall doc path matches the installed package layout."""
@@ -493,10 +510,24 @@ class TestReleaseGateSnippetExpectations:
         validator.validate_smoke_test_rpm_install(result)
         assert not result.has_failures
 
+    def test_package_smoke_covers_real_removal_lifecycle(self) -> None:
+        """Ensure package smoke tests exercise block-then-remove behavior."""
+        result = validator.ValidationResult()
+        validator.validate_smoke_test_removal_lifecycle(result)
+        assert not result.has_failures, result.results
+
     def test_nfpm_postinstall_accepts_rpm_lifecycle_args(self) -> None:
         """Ensure postinstall script handles RPM lifecycle arguments."""
         assert "configure|1|2)" in validator.NFPM_POSTINSTALL_SNIPPETS
         assert "abort-upgrade|abort-remove|abort-deconfigure)" in validator.NFPM_POSTINSTALL_SNIPPETS
+
+    def test_package_removal_guard_is_fail_closed_for_deb_and_rpm(self) -> None:
+        """Ensure both package formats block removal while the module is loaded."""
+        result = validator.ValidationResult()
+        validator.validate_nfpm_preremove_lifecycle(result)
+        assert not result.has_failures, result.results
+        assert "remove|0)" in validator.NFPM_PREREMOVE_SNIPPETS
+        assert "%preun" in validator.RPM_PREUN_SNIPPETS
 
     def test_release_build_uses_rpm_glibc_baseline(self) -> None:
         """Ensure release build uses RPM-compatible glibc baseline container."""
@@ -514,9 +545,12 @@ class TestReleaseGateSnippetExpectations:
         assert "rustup toolchain install" in snippets
 
     def test_release_build_requires_only_current_ffi_constructors(self) -> None:
-        """Keep release symbol checks on the v0.9.1 FFI baseline."""
+        """Keep release symbol checks on the current FFI contract."""
         assert "markdown_streaming_new_with_code" in validator.RELEASE_RUST_BUILD_INVARIANTS
-        assert "markdown_incremental_new_with_code" in validator.RELEASE_RUST_BUILD_INVARIANTS
         assert "markdown_streaming_new" in validator.RETIRED_RELEASE_FFI_SYMBOLS
         assert "markdown_incremental_new" in validator.RETIRED_RELEASE_FFI_SYMBOLS
+        assert "markdown_incremental_new_with_code" in validator.RETIRED_RELEASE_FFI_SYMBOLS
+        assert "markdown_incremental_feed" in validator.RETIRED_RELEASE_FFI_SYMBOLS
+        assert "markdown_incremental_finalize" in validator.RETIRED_RELEASE_FFI_SYMBOLS
+        assert "markdown_incremental_free" in validator.RETIRED_RELEASE_FFI_SYMBOLS
         assert "markdown_streaming_free" in validator.RETIRED_RELEASE_FFI_SYMBOLS

@@ -17,8 +17,38 @@ clients.
 ### 1. Import the GPG signing key
 
 ```bash
-curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
-    sudo gpg --dearmor -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg
+key_file="$(mktemp)"
+curl -fsSL -o "$key_file" \
+    https://pkg.example.com/nginx-markdown/gpg.key
+expected_fingerprints="$(printf '%s\n' \
+    '7A37''4368''7FEE''E031''3128''3550''3872''4643''EA12''C02A' \
+    '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"
+expected_signing_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
+set -o pipefail
+actual_fingerprints=""
+actual_signing_fingerprint=""
+fingerprint_status=0
+signing_fingerprint_status=0
+actual_fingerprints="$(gpg --batch --with-colons --show-keys \
+    --fingerprint "$key_file" \
+    | awk -F: '$1 == "fpr" { print toupper($10) }' | sort)" || \
+    fingerprint_status=$?
+actual_signing_fingerprint="$(gpg --batch --with-colons --show-keys \
+    --fingerprint "$key_file" \
+    | awk -F: -v expected="$expected_signing_fingerprint" \
+        '$1 == "fpr" && toupper($10) == expected { print toupper($10) }')" || \
+    signing_fingerprint_status=$?
+if [[ "$fingerprint_status" -ne 0 \
+    || "$signing_fingerprint_status" -ne 0 \
+    || "${actual_fingerprints}" != "${expected_fingerprints}" \
+    || "${actual_signing_fingerprint}" != "${expected_signing_fingerprint}" ]]; then
+    echo "unexpected signing-key fingerprint set" >&2
+    rm -f "$key_file"
+    exit 1
+fi
+sudo gpg --dearmor --yes --output \
+    /usr/share/keyrings/nginx-markdown-archive-keyring.gpg "$key_file"
+rm -f "$key_file"
 ```
 
 ### 2. Add the repository
@@ -123,25 +153,68 @@ repo/apt/
 
 ### Key Details
 
-- **Key ID**: `7A3743687FEEE0313128355038724643EA12C02A`
+- **Key ID**: `7A37 4368 7FEE E031 3128 3550 3872 4643 EA12 C02A`
 - **Key Type**: RSA 4096 (primary certification key, expires 2031-05-19)
 - **Key URL**: checked in at `packaging/nginx-markdown-for-agents-release.asc`
-- **Fingerprint (signing subkey)**: `15C792438EAA762B421E60D21E8D41E7D19A8A75` — verify this value with `gpg --fingerprint` after importing
+- **Fingerprints (complete allowed key set)**:
+  - Primary key: `7A37 4368 7FEE E031 3128 3550 3872 4643 EA12 C02A`
+  - Signing subkey: `15C7 9243 8EAA 762B 421E 60D2 1E8D 41E7 D19A 8A75`
 
 ### Importing the Key
 
 Modern APT (Debian 12+, Ubuntu 22.04+):
 
 ```bash
-curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
-    sudo gpg --dearmor -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg
+key_file="$(mktemp)"
+curl -fsSL -o "$key_file" \
+    https://pkg.example.com/nginx-markdown/gpg.key
+expected_fingerprints="$(printf '%s\n' \
+    '7A37''4368''7FEE''E031''3128''3550''3872''4643''EA12''C02A' \
+    '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"
+expected_signing_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
+set -o pipefail
+if ! actual_fingerprints="$(gpg --batch --with-colons --show-keys \
+    --fingerprint "$key_file" \
+    | awk -F: '$1 == "fpr" { print toupper($10) }' | sort)" \
+    || actual_signing_fingerprint="$(gpg --batch --with-colons --show-keys \
+        --fingerprint "$key_file" \
+        | awk -F: -v expected="$expected_signing_fingerprint" \
+            '$1 == "fpr" && toupper($10) == expected { print toupper($10) }')" \
+    || [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]] \
+    || [[ "${actual_signing_fingerprint}" != "${expected_signing_fingerprint}" ]]; then
+    echo "unexpected signing-key fingerprint set" >&2
+    rm -f "$key_file"
+    exit 1
+fi
+sudo gpg --dearmor --yes --output \
+    /usr/share/keyrings/nginx-markdown-archive-keyring.gpg "$key_file"
+rm -f "$key_file"
 ```
 
 Legacy APT (older systems):
 
 ```bash
-curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
-    sudo apt-key add -
+key_file="$(mktemp)"
+curl -fsSL -o "$key_file" \
+    https://pkg.example.com/nginx-markdown/gpg.key
+expected_fingerprints="$(printf '%s\n' \
+    '7A37''4368''7FEE''E031''3128''3550''3872''4643''EA12''C02A' \
+    '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"
+set -o pipefail
+actual_fingerprints=""
+fingerprint_status=0
+actual_fingerprints="$(gpg --batch --with-colons --show-keys \
+    --fingerprint "$key_file" \
+    | awk -F: '$1 == "fpr" { print toupper($10) }' | sort)" || \
+    fingerprint_status=$?
+if [[ "$fingerprint_status" -ne 0 \
+    || "${actual_fingerprints}" != "${expected_fingerprints}" ]]; then
+    echo "unexpected signing-key fingerprint set" >&2
+    rm -f "$key_file"
+    exit 1
+fi
+sudo apt-key add "$key_file"
+rm -f "$key_file"
 ```
 
 ### Verifying Package Signatures
@@ -171,10 +244,10 @@ curl -fsSLo nginx-module-markdown-for-agents_0.9.1_nginx-1.30.4_amd64.deb \
 # proves the file was signed by *some* key.  Download the checked-in project
 # public key into this working directory first (run from a repository clone),
 # then import it into an isolated keyring and verify the signing-subkey
-# fingerprint 15C792438EAA762B421E60D21E8D41E7D19A8A75 before trusting the
+# fingerprint 15C7 9243 8EAA 762B 421E 60D2 1E8D 41E7 D19A 8A75 before trusting the
 # signature.
-curl -fsSLo nginx-markdown-for-agents-release.asc \
-  "${REPO_ROOT:-.}/packaging/nginx-markdown-for-agents-release.asc"
+cp "${REPO_ROOT:-.}/packaging/nginx-markdown-for-agents-release.asc" \
+  nginx-markdown-for-agents-release.asc
 KEYRING="$(mktemp -d)/keyring.gpg"
 gpg --no-default-keyring --keyring "$KEYRING" \
     --import nginx-markdown-for-agents-release.asc
@@ -252,8 +325,24 @@ If you encounter dependency errors:
 
 ```bash
 # Re-import the signing key
-curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
-    sudo gpg --dearmor -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg
+key_file="$(mktemp)"
+curl -fsSL -o "$key_file" \
+    https://pkg.example.com/nginx-markdown/gpg.key
+expected_fingerprints="$(printf '%s\n' \
+    '7A37''4368''7FEE''E031''3128''3550''3872''4643''EA12''C02A' \
+    '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"
+set -o pipefail
+if ! actual_fingerprints="$(gpg --batch --with-colons --show-keys \
+    --fingerprint "$key_file" \
+    | awk -F: '$1 == "fpr" { print toupper($10) }' | sort)" \
+    || [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]]; then
+    echo "unexpected signing-key fingerprint set" >&2
+    rm -f "$key_file"
+    exit 1
+fi
+sudo gpg --dearmor --yes --output \
+    /usr/share/keyrings/nginx-markdown-archive-keyring.gpg "$key_file"
+rm -f "$key_file"
 sudo apt-get update
 ```
 

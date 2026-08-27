@@ -49,6 +49,7 @@ bash tools/doctor/nginx-markdown-doctor.sh [OPTIONS]
 | `configure_args` | Checks `nginx -V` for `--with-compat` (required for dynamic modules) |
 | `module_signature` | Verifies the module exports `ngx_http_markdown_filter_module` symbol |
 | `rust_linkage` | Checks for Rust FFI exports (`markdown_convert`, etc.) |
+| `rust_toolchain` | Reports the Rust MSRV result and verifies the repository's pinned toolchain when a checkout is available |
 | `os_arch` | Detects OS, architecture, and libc (glibc/musl with version) |
 | `package_type` | Detects how nginx was installed (apt/yum/homebrew/docker/source) |
 
@@ -65,12 +66,13 @@ nginx-markdown-doctor v0.9.2
   ✓ [pass] configure_args: nginx built with --with-compat
   ✓ [pass] module_signature: ngx_http_markdown_filter_module symbol found
   ✓ [pass] rust_linkage: Rust FFI symbols found (4 exports)
+  ✓ [pass] rust_toolchain: rustc 1.97.1 meets MSRV; repository pins exact toolchain 1.97.1
   ✓ [pass] os_arch: linux/x86_64 (glibc 2.31)
   ✓ [pass] package_type: nginx installed via apt (1.28.0-1~jammy)
 
   Recommended artifact: ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz
 ─────────────────────────────────
-Summary: 8 passed, 0 failed, 0 warnings, 0 skipped (8 total)
+Summary: 9 passed, 0 failed, 0 warnings, 0 skipped (9 total)
 ```
 
 ### JSON (`--json`)
@@ -117,6 +119,12 @@ Summary: 8 passed, 0 failed, 0 warnings, 0 skipped (8 total)
       "details": { "found_count": 4, "symbols": ["markdown_convert", "markdown_converter_new", "markdown_converter_free", "markdown_result_free"] }
     },
     {
+      "name": "rust_toolchain",
+      "status": "pass",
+      "message": "rustc 1.97.1 meets MSRV; repository pins exact toolchain 1.97.1",
+      "details": { "rustc_version": "1.97.1", "msrv": "1.97", "pinned_channel": "1.97.1", "pinned_channel_expected": "1.97.1" }
+    },
+    {
       "name": "os_arch",
       "status": "pass",
       "message": "linux/x86_64 (glibc 2.31)",
@@ -130,8 +138,8 @@ Summary: 8 passed, 0 failed, 0 warnings, 0 skipped (8 total)
     }
   ],
   "summary": {
-    "total": 8,
-    "passed": 8,
+    "total": 9,
+    "passed": 9,
     "failed": 0,
     "warnings": 0,
     "skipped": 0

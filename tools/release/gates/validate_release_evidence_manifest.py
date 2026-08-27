@@ -299,9 +299,25 @@ def _check_blocking_semantics(manifest: dict, reasons: list) -> None:
 
 
 def _resolve_expected_sha(args) -> str | None:
-    """Resolve the frozen candidate SHA from the release-candidate-sha
-    manifest, or use the explicit --expected-sha when given."""
-    if args.expected_sha:
+    """
+    Resolve the expected candidate SHA from the explicit argument or release candidate manifest.
+    
+    Parameters:
+        args: Parsed command-line arguments containing the optional expected SHA and manifest path.
+    
+    Returns:
+        The validated 40-character lowercase hexadecimal candidate SHA, or None if unavailable.
+    
+    Raises:
+        ValueError: If the explicit or manifest-derived candidate SHA is malformed, or the release candidate manifest is missing.
+    """
+    if args.expected_sha is not None:
+        if not isinstance(args.expected_sha, str) or not CANDIDATE_SHA_PATTERN.fullmatch(
+            args.expected_sha
+        ):
+            raise ValueError(
+                "malformed: expected candidate_sha must be 40 lowercase hex"
+            )
         return args.expected_sha
     # Derive the release version from the selected manifest's parent
     # directory (artifacts/release/<version>/...) rather than hardcoding 0.9.2.
@@ -315,7 +331,15 @@ def _resolve_expected_sha(args) -> str | None:
             "for real final-evidence validation"
         )
     candidate = load_json(candidate_path, "release candidate manifest")
-    return candidate.get("candidate_sha")
+    candidate_sha = candidate.get("candidate_sha")
+    if not isinstance(candidate_sha, str) or not CANDIDATE_SHA_PATTERN.fullmatch(
+        candidate_sha
+    ):
+        raise ValueError(
+            "malformed: release candidate manifest candidate_sha must be "
+            "40 lowercase hex"
+        )
+    return candidate_sha
 
 
 def run_real_gate(args) -> int:

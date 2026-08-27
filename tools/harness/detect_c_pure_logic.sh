@@ -4,10 +4,10 @@
 #
 # Scans C source files for functions that do NOT reference any NGINX API,
 # indicating potential migration candidates to the Rust side per the
-# Rust-first FFI Migration Contract (B01, ADR-0010).
+# Rust-first FFI Migration Contract (Rust-first migration, ADR-0010).
 #
 # The authoritative migration decisions live in the manual audit
-# (docs/architecture/FFI_MIGRATION_CONTRACT.md B01.2).  This detector is a
+# (docs/architecture/FFI_MIGRATION_CONTRACT.md).  This detector is a
 # fast first-pass signal, not the source of truth.
 #
 # Modes:
@@ -28,13 +28,14 @@
 #   0 — advisory mode (always), or strict mode with no candidates
 #   1 — strict mode (--check) with one or more candidates, or usage error
 #
-# Corresponds to task B01.5 in v0.7.0 production readiness harness.
+# Corresponds to the v0.7.0 production readiness harness.
 #
 
 set -euo pipefail
 
 STRICT=0
 SRC_DIR=""
+EXPLICIT_DIR=0
 
 usage() {
     echo "Usage: $(basename "$0") [--check] [directory]" >&2
@@ -64,6 +65,7 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             SRC_DIR="$1"
+            EXPLICIT_DIR=1
             shift
             ;;
     esac
@@ -85,7 +87,10 @@ readonly NGINX_API_PATTERNS="ngx_palloc|ngx_pnalloc|ngx_pcalloc|ngx_pfree|ngx_po
 
 if [[ ! -d "$SRC_DIR" ]]; then
     echo "  [pure-logic] Source directory not found: $SRC_DIR" >&2
-    # Missing directory is not a failure in either mode (graceful skip).
+    if [[ "$STRICT" -eq 1 && "$EXPLICIT_DIR" -eq 1 ]]; then
+        exit 1
+    fi
+    # An implicit/default directory remains a graceful advisory skip.
     exit 0
 fi
 
@@ -193,7 +198,7 @@ echo "" >&2
 if [[ "$candidates" -gt 0 ]]; then
     echo "NOTE: Advisory findings. Consult" >&2
     echo "  docs/architecture/FFI_MIGRATION_CONTRACT.md for authoritative" >&2
-    echo "  migration decisions (B01.2 manual audit)." >&2
+    echo "  migration decisions (manual audit)." >&2
 else
     echo "No pure-logic migration candidates detected." >&2
 fi

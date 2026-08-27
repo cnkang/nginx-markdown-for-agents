@@ -1,9 +1,10 @@
 """Regression tests for the v0.8.x release-gate validator."""
 
-import re
+import tomllib
 from pathlib import Path
 
 from tools.release.gates.validate_release_gates_080 import (
+    CARGO_TOML_PATH,
     RELEASE_PACKAGES_WORKFLOW,
     ValidationResult,
     check_new_directives,
@@ -11,26 +12,21 @@ from tools.release.gates.validate_release_gates_080 import (
 )
 
 
-def _workflow_cargo_version() -> str:
-    """Extract the RELEASE_GATE_EXPECTED_CARGO_VERSION value from release-packages.yml."""
-    text = Path(RELEASE_PACKAGES_WORKFLOW).read_text(encoding="utf-8")
-    match = re.search(
-        r'RELEASE_GATE_EXPECTED_CARGO_VERSION:\s*["\']([^"\']+)["\']',
-        text,
-    )
-    assert match, "RELEASE_GATE_EXPECTED_CARGO_VERSION not found in release-packages.yml"
-    return match.group(1)
+def _cargo_package_version() -> str:
+    """Read the expected release version from the independent package source."""
+    cargo = tomllib.loads(CARGO_TOML_PATH.read_text(encoding="utf-8"))
+    return cargo["package"]["version"]
 
 
 def test_release_package_workflow_version_matches_active_release(monkeypatch):
     """The tag package workflow must use the active Cargo release version.
 
-    Reads the version declared in release-packages.yml and sets the
-    environment variable to match, ensuring the validator reports PASS
-    regardless of which release line the test runs against.
+    Reads the version declared by the Rust package source and sets the
+    environment variable to match. The workflow is then checked against that
+    independent release identity.
     """
-    workflow_version = _workflow_cargo_version()
-    monkeypatch.setenv("RELEASE_GATE_EXPECTED_CARGO_VERSION", workflow_version)
+    cargo_version = _cargo_package_version()
+    monkeypatch.setenv("RELEASE_GATE_EXPECTED_CARGO_VERSION", cargo_version)
     result = ValidationResult()
 
     validate_all(result)
@@ -41,7 +37,7 @@ def test_release_package_workflow_version_matches_active_release(monkeypatch):
         if check_id == "workflow:release-version"
     ]
     assert workflow_checks == [
-        ("PASS", f"release-packages.yml expects Cargo version {workflow_version}")
+        ("PASS", f"release-packages.yml declares release version {cargo_version}")
     ]
 
 

@@ -4,35 +4,49 @@
 
 ```mermaid
 flowchart LR
-    Request["Client Request"] --> ETag{"Has If-None-Match?"}
+    Request["Client Request"] --> FullBuffer{"Full-buffer<br/>response?"}
+    FullBuffer -->|yes| ETag{"Has If-None-Match?"}
+    FullBuffer -->|no - streaming| Convert["Convert & Return Markdown"]
     ETag -->|yes| Compare["Compare ETag"]
     Compare -->|match| NotModified["304 Not Modified"]
-    Compare -->|no match| Convert["Convert & Return Markdown"]
+    Compare -->|no match| Convert
     ETag -->|no| Convert
-    Convert --> SetHeaders["Set Vary: Accept<br/>Set ETag<br/>Set Content-Type"]
-    
+    Convert --> SetHeaders["Set Vary: Accept<br/>Set Content-Type"]
+
     style NotModified fill:#090,color:#fff
     style Convert fill:#009639,color:#fff
 ```
 
-This module generates cache-aware responses with proper ETags, Vary headers, and conditional request support. This ensures that browsers, CDNs, and reverse proxies cache Markdown variants correctly and efficiently.
+This module generates cache-aware responses with proper ETags, Vary headers, and conditional request support on the full-buffer path only. Streaming responses bypass ETag generation and `If-None-Match` validation entirely. They emit no ETag for clients or caches to revalidate. This ensures that browsers, CDNs, and reverse proxies cache Markdown variants correctly and efficiently.
 
 ## Key Features
 
-### ETag Generation
+### ETag Generation (Full-Buffer Responses Only)
 
-The module generates ETags for Markdown responses based on the converted output. This ensures that:
+The module generates ETags only for full-buffer Markdown responses, based on
+the converted output. Committed streaming responses deliberately emit no ETag
+and cannot be conditionally validated with `If-None-Match`. For full-buffer
+responses, this ensures that:
 - Identical HTML input produces identical ETags
 - Cache validation works correctly
 - 304 Not Modified responses save bandwidth
 
 ### Vary Header
 
-The module automatically adds `Vary: Accept` to responses, indicating that the response varies based on the Accept header. This prevents caches from serving the wrong variant.
+The module adds `Vary: Accept` whenever Accept negotiation determines whether
+the response is the Markdown representation or the original HTML
+representation. That includes negotiated pass-through responses. For example,
+when the client prefers HTML, unrelated fail-open paths do not claim an
+Accept-dependent cache variant.
 
 ### Conditional Requests
 
-The module supports conditional requests using `If-None-Match` (ETag-based) and preserves upstream `If-Modified-Since` (time-based) semantics.
+The module supports `If-None-Match` (ETag-based) validation only on the
+full-buffer path. Streaming responses bypass ETag generation and cannot be
+conditionally validated by this module. Converted responses also clear the
+source HTML `Last-Modified`. Only responses that pass through the original
+representation retain source validators. This prevents an HTML validator from
+validating a different Markdown representation.
 
 ## How It Works
 
@@ -41,12 +55,10 @@ The module supports conditional requests using `If-None-Match` (ETag-based) and 
 ```
 HTML Response
   └─> Convert to Markdown
-       └─> Generate ETag from Markdown output
-            └─> Add ETag header to response
-                 └─> Client caches with ETag
-                      └─> Next request includes If-None-Match
-                           └─> Module compares ETags
-                                └─> Return 304 if match
+       ├─> Full-buffer: generate ETag and add it to the response
+       │    └─> Next request includes If-None-Match
+       │         └─> Module compares ETags and returns 304 if matched
+       └─> Streaming commit: no ETag; If-None-Match is not validated
 ```
 
 ### ETag Format
@@ -61,7 +73,8 @@ The module computes the ETag value from the Markdown output using a hash functio
 
 ### Vary Header Behavior
 
-The module ensures `Vary: Accept` is present on all Markdown responses:
+The module ensures `Vary: Accept` is present on every representation selected
+through Accept negotiation:
 
 **Original Response**:
 ```http
@@ -115,7 +128,7 @@ Configure conditional request handling:
 location /docs/ {
     markdown_filter on;
 
-    # IMS-only: If-Modified-Since via upstream Last-Modified (no ETag)
+    # IMS-only: source-representation IMS only (no Markdown ETag)
     markdown_cache_validation ims_only;
 
     # Or full support (ETag + If-None-Match + If-Modified-Since)
@@ -128,8 +141,13 @@ location /docs/ {
 
 **Modes**:
 
-- `ims_only` (default): Skip module-side `If-None-Match` processing (performance optimization). `If-Modified-Since` remains handled by standard NGINX
-- `full`: Support Markdown-variant `If-None-Match` (ETag) and preserve upstream `If-Modified-Since` semantics
+- `ims_only` (default): Skip module-side `If-None-Match` processing. NGINX
+  may use `If-Modified-Since` only when the module passes through the original
+  response. A converted Markdown response clears the source `Last-Modified`
+  and returns a fresh 200.
+- `full`: Support Markdown-variant `If-None-Match` (ETag). Converted
+  responses use their Markdown ETag only. Source `If-Modified-Since` does not
+  validate the transformed body.
 - `off`: No conditional request support for Markdown variants
 
 **Performance Note**: `full` requires conversion to generate a Markdown-variant ETag for comparison, which has performance implications for conditional requests.
@@ -171,7 +189,10 @@ Vary: Accept
 
 ### If-Modified-Since (Time-Based)
 
-The module preserves upstream `Last-Modified` headers and delegates `If-Modified-Since` evaluation to NGINX core:
+The module delegates `If-Modified-Since` evaluation to NGINX core only for
+responses that keep the original upstream representation. A converted
+Markdown response clears both the source `Last-Modified` metadata and its
+header-list entries, so an HTML timestamp cannot produce a 304 for Markdown:
 
 ```http
 GET /page.html HTTP/1.1
@@ -181,15 +202,11 @@ If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT
 
 NGINX core handles this before the module runs, so the module only processes requests that pass the time-based check.
 
-**Semantic note**: the preserved `Last-Modified` value is the upstream
-HTML representation's timestamp, not a timestamp derived from the
-converted Markdown body.  This is intentional: `ims_only` cache
-validation compares against the source document's modification time, so
-a client that revalidates with `If-Modified-Since` receives a 304 when
-the upstream HTML has not changed, even though the served body is
-Markdown.  The transformed ETag (when `full` mode is on) is the
-representation-specific validator.  `Last-Modified` remains the
-source-time validator.
+**Semantic note**: an original-representation response may retain the
+upstream HTML timestamp and receive a source-based 304. A transformed
+response must not retain that timestamp: its representation-specific
+validator is the Markdown ETag when operators enable `full` mode, and an
+IMS-only request receives a fresh 200.
 
 ## Caching Strategies
 
@@ -225,10 +242,10 @@ CDNs must respect the `Vary: Accept` header to cache variants correctly:
 ```nginx
 location /docs/ {
     markdown_filter on;
-    
+
     # CDN-friendly caching
     add_header Cache-Control "public, max-age=3600";
-    
+
     proxy_pass http://backend;
 }
 ```
@@ -249,11 +266,11 @@ proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=my_cache:10m;
 server {
     location /docs/ {
         markdown_filter on;
-        
+
         proxy_cache my_cache;
         proxy_cache_key "$scheme$request_method$host$request_uri$http_accept";
         proxy_cache_valid 200 10m;
-        
+
         proxy_pass http://backend;
     }
 }
@@ -270,7 +287,7 @@ location /private/ {
     markdown_filter on;
     markdown_auth_policy deny;
     markdown_auth_cookies "session_id auth_token";
-    
+
     proxy_pass http://backend;
 }
 ```
@@ -421,7 +438,7 @@ For implementation details, see the source code and inline comments.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-18 | Hermes | Document Last-Modified preservation semantics (upstream HTML timestamp, source-time validator) |
+| 0.9.2 | 2026-08-27 | Codex | Document representation-specific validator semantics and clear source Last-Modified after conversion |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

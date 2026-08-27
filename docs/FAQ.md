@@ -32,7 +32,8 @@ This project draws inspiration from Cloudflare's announcement but provides a sel
 ### What are the system requirements?
 
 - **NGINX**: 1.24.0 or higher
-- **Rust**: 1.97.1 or higher (for source builds only; MSRV 1.97)
+- **Rust**: repository builds use the pinned 1.97.1 toolchain; the public
+  source-build MSRV is 1.97 (for source builds only)
 - **Operating System**: macOS or Linux (x86_64 or aarch64)
 - **Memory**: Minimum 512MB RAM per worker (more for large documents)
 
@@ -151,10 +152,6 @@ streaming engine for eligible large or chunked responses and retains
 full-buffer conversion for small responses and hard-blocked cases. Use
 `markdown_streaming off` to require full-buffer processing or
 `markdown_streaming force` to prefer streaming for every eligible response.
-This is distinct from the legacy Rust `incremental` API: that API still
-receives the complete NGINX-side buffer and accumulates bytes in Rust, so it is
-not true per-upstream-chunk streaming.
-
 See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0007](architecture/ADR/0007-streaming-default.md) for the reasoning behind this design.
 
 ---

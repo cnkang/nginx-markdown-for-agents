@@ -47,10 +47,9 @@ ngx_http_markdown_apply_memory_budget_override(
     const ngx_http_markdown_conf_t *prev,
     ngx_flag_t max_size_set)
 {
-    /* The legacy advanced.memory_budget field (static directive removed in
-     * 0.9.0) is fully removed in 0.9.2: the frozen conversion bound is
-     * markdown_limits conversion_memory, projected into max_size by the
-     * merge helper.  Only the explicit-flag propagation remains. */
+    /* The frozen conversion bound is markdown_limits conversion_memory,
+     * projected into max_size by the merge helper.  Only the explicit-flag
+     * propagation remains here. */
     conf->decompress.max_size_explicit =
         max_size_set || prev->decompress.max_size_explicit;
 }
@@ -107,9 +106,6 @@ static void
 ngx_http_markdown_merge_core_ptr_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev)
 {
-    ngx_conf_merge_size_value(conf->routing.large_body_threshold,
-                              prev->routing.large_body_threshold,
-                              NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
     ngx_conf_merge_uint_value(conf->routing.max_inflight,
                               prev->routing.max_inflight,
                               NGX_HTTP_MARKDOWN_MAX_INFLIGHT_DEFAULT);
@@ -148,7 +144,7 @@ ngx_http_markdown_merge_advanced_values(ngx_http_markdown_conf_t *conf,
 }
 
 /*
- * Apply only inheritance, defaults, and legacy-field projection. The caller
+ * Apply only inheritance, defaults, and effective-field projection. The caller
  * remains responsible for cross-key validation, logging, and registration.
  * The return value preserves whether max_size was explicit at this level.
  */

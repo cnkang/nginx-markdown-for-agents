@@ -102,7 +102,7 @@ PY
 #   0 always.
 cleanup() {
   local rc=$?
-  if [[ $rc -eq 0 && "${KEEP_ARTIFACTS}" -eq 0 && -n "${BUILDROOT}" && -d "${BUILDROOT}" ]]; then
+  if [[ $rc -eq 0 && "${KEEP_ARTIFACTS}" == "0" && -n "${BUILDROOT}" && -d "${BUILDROOT}" ]]; then
     rm -rf "${BUILDROOT}"
   fi
 

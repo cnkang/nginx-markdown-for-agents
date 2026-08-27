@@ -65,10 +65,10 @@ DEB_ARCH_RE='(amd64|arm64)'
 RPM_ARCH_RE='(x86_64|aarch64)'
 
 # Full DEB pattern
-DEB_PATTERN="^nginx-module-markdown-for-agents_${VERSION_RE}_nginx-${NGINX_VERSION_RE}_${DEB_ARCH_RE}\.deb\$"
+DEB_PATTERN="^nginx-module-markdown-for-agents_${VERSION_RE}_nginx-${NGINX_VERSION_RE}_${DEB_ARCH_RE}\.deb$"
 
 # Full RPM pattern
-RPM_PATTERN="^nginx-module-markdown-for-agents-${VERSION_RE}-nginx${NGINX_VERSION_RE}-1\.${RPM_ARCH_RE}\.rpm\$"
+RPM_PATTERN="^nginx-module-markdown-for-agents-${VERSION_RE}-nginx${NGINX_VERSION_RE}-1\.${RPM_ARCH_RE}\.rpm$"
 
 # ---------------------------------------------------------------------------
 # Helpers

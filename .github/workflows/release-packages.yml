@@ -91,8 +91,9 @@ permissions: {}
 # release-packages.yml is the canonical release package workflow and official release path.
 
 env:
+  RELEASE_VERSION: "0.9.2"
   RUST_TOOLCHAIN: 1.97.1
-  RUST_FEATURES: streaming,incremental,prune_noise_regions
+  RUST_FEATURES: streaming,prune_noise_regions
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
@@ -110,17 +111,59 @@ jobs:
       package_matrix: ${{ steps.resolve.outputs.package_matrix }}
       smoke_matrix: ${{ steps.resolve.outputs.smoke_matrix }}
       musl_matrix: ${{ steps.resolve.outputs.musl_matrix }}
+      feature_manifest_digest: ${{ steps.resolve.outputs.feature_manifest_digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
 
+      - name: Validate release entrypoint identity
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          checkout_sha="$(git rev-parse HEAD)"
+          if [[ "${checkout_sha}" != "${WORKFLOW_SHA}" ]]; then
+            echo "ERROR: checkout ${checkout_sha} does not match workflow SHA ${WORKFLOW_SHA}" >&2
+            exit 1
+          fi
+          case "${EVENT_NAME}:${REF_TYPE}" in
+            push:tag)
+              if [[ ! "${REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "ERROR: tag pushes must use a semantic-version tag" >&2
+                exit 1
+              fi
+              if [[ "${REF_NAME#v}" != "${RELEASE_VERSION}" ]]; then
+                echo "ERROR: tag ${REF_NAME} does not match RELEASE_VERSION ${RELEASE_VERSION}" >&2
+                exit 1
+              fi
+              ;;
+            workflow_dispatch:branch)
+              if [[ "${REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "ERROR: dispatch from a release-like branch is ambiguous; push the matching tag instead" >&2
+                exit 1
+              fi
+              ;;
+            workflow_dispatch:tag)
+              echo "Manual dispatch from ${REF_NAME} is artifact-only; tag promotion requires a tag push." >&2
+              ;;
+            *)
+              echo "ERROR: unsupported release entrypoint ${EVENT_NAME}:${REF_TYPE}" >&2
+              exit 1
+              ;;
+          esac
+        shell: bash
+
       - name: Resolve matrix from release-matrix.json
         id: resolve
         run: |
           python3 - <<'PY'
-          import json, os
+          import hashlib, json, os
+          from pathlib import Path
 
           with open("tools/release-matrix.json", "r") as f:
               data = json.load(f)
@@ -161,6 +204,28 @@ jobs:
               print("ERROR: No release package matrix entries resolved from tools/release-matrix.json")
               raise SystemExit(1)
 
+          manifest_path = (
+              Path("artifacts") / "release" / os.environ["RELEASE_VERSION"]
+              / "official-build-feature-manifest.json"
+          )
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          expected_manifest = {
+              "prune_noise_regions": True,
+              "streaming": True,
+          }
+          if manifest != expected_manifest:
+              print(
+                  "ERROR: official build feature manifest does not match the "
+                  "release feature contract"
+              )
+              raise SystemExit(1)
+          canonical_manifest = json.dumps(
+              manifest, sort_keys=True, separators=(",", ":")
+          ).encode("utf-8")
+          feature_manifest_digest = "sha256:" + hashlib.sha256(
+              canonical_manifest
+          ).hexdigest()
+
           # Build smoke-test matrix: each version × representative distros × archs
           smoke_containers = {
               "deb": [
@@ -194,6 +259,7 @@ jobs:
               out.write(f"nginx_versions={json.dumps(versions)}\n")
               out.write(f"package_matrix={json.dumps(package_matrix)}\n")
               out.write(f"smoke_matrix={json.dumps(smoke_matrix)}\n")
+              out.write(f"feature_manifest_digest={feature_manifest_digest}\n")
 
               # Musl dynamic-module matrix: entries owned by
               # release-binaries.yml (musl only).  Built in this workflow so
@@ -280,12 +346,14 @@ jobs:
       - name: Derive and validate version
         id: version
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
           TAG_REF: ${{ github.ref }}
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [[ -n "${INPUT_VERSION}" ]]; then
             VERSION="${INPUT_VERSION}"
-          elif printf '%s' "${TAG_REF}" | grep -qE '^refs/tags/v'; then
+          elif [[ "${EVENT_NAME}" == "push" && "${REF_TYPE}" == "tag" ]]; then
             VERSION="${TAG_REF#refs/tags/v}"
           else
             VERSION="$(
@@ -318,6 +386,48 @@ jobs:
           echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
           "${HOME}/.cargo/bin/rustc" --version
           "${HOME}/.cargo/bin/cargo" --version
+        shell: bash
+
+      - name: Resolve release build identity
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          checkout_sha="$(git rev-parse HEAD)"
+          if [[ "${checkout_sha}" != "${RELEASE_SHA}" ]]; then
+            echo "ERROR: checkout ${checkout_sha} is not the release SHA ${RELEASE_SHA}" >&2
+            exit 1
+          fi
+          rust_version="$(rustc -Vv | sed -n 's/^release: //p')"
+          if [[ ! "${rust_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: rustc -Vv did not provide a normalized release version" >&2
+            exit 1
+          fi
+          feature_manifest_digest="$(python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          path = (
+              Path("artifacts") / "release" / os.environ["RELEASE_VERSION"]
+              / "official-build-feature-manifest.json"
+          )
+          manifest = json.loads(path.read_text(encoding="utf-8"))
+          expected = {
+              "prune_noise_regions": True,
+              "streaming": True,
+          }
+          if manifest != expected:
+              raise SystemExit("official feature manifest is not canonical")
+          raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+          print("sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest())
+          PY
+          )"
+          echo "NGX_MARKDOWN_BUILD_KIND=release" >> "$GITHUB_ENV"
+          echo "NGX_MARKDOWN_SOURCE_SHA=${checkout_sha}" >> "$GITHUB_ENV"
+          echo "NGX_MARKDOWN_RUST_VERSION=${rust_version}" >> "$GITHUB_ENV"
+          echo "NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST=${feature_manifest_digest}" >> "$GITHUB_ENV"
         shell: bash
 
       - name: Determine Rust target triple
@@ -382,7 +492,6 @@ jobs:
           fi
           MISSING=0
           for sym in markdown_streaming_new_with_code \
-                     markdown_incremental_new_with_code \
                      markdown_decompress_bounded; do
             if ! grep -Eq "^_?${sym}$" <<<"${SYMBOLS}"; then
               echo "ERROR: Required symbol ${sym} not found in ${RUST_LIB}" >&2
@@ -402,6 +511,7 @@ jobs:
         env:
           NGINX_VERSION: ${{ matrix.nginx_version }}
           NGX_MARKDOWN_BROTLI_STREAMING: "on"
+          NGX_MARKDOWN_RUST_FEATURES: ${{ env.RUST_FEATURES }}
         run: |
           cd "${NGINX_SRC}"
           ./configure \
@@ -479,10 +589,6 @@ jobs:
             markdown_streaming_finalize
             markdown_streaming_abort
             markdown_streaming_output_free
-            markdown_incremental_new_with_code
-            markdown_incremental_feed
-            markdown_incremental_finalize
-            markdown_incremental_free
             markdown_decompress_bounded
             markdown_decompress_free
             markdown_convert
@@ -526,7 +632,7 @@ jobs:
   musl-build:
     name: Musl Build - NGINX ${{ matrix.nginx_version }} - ${{ matrix.arch }}
     needs: prepare
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     permissions:
       contents: read
@@ -611,6 +717,8 @@ jobs:
       - name: Set packaging environment variables
         id: pkg-env
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
           TAG_REF: ${{ github.ref }}
           INPUT_VERSION: ${{ inputs.version }}
           NGINX_VERSION: ${{ matrix.nginx_version }}
@@ -619,7 +727,7 @@ jobs:
           # Determine package version
           if [[ -n "${INPUT_VERSION}" ]]; then
             PKG_VERSION="${INPUT_VERSION}"
-          elif printf '%s' "${TAG_REF}" | grep -qE '^refs/tags/v'; then
+          elif [[ "${EVENT_NAME}" == "push" && "${REF_TYPE}" == "tag" ]]; then
             PKG_VERSION="${TAG_REF#refs/tags/v}"
           else
             PKG_VERSION="$(
@@ -647,6 +755,7 @@ jobs:
           esac
 
           # Artifact filenames per 0.8.x release package naming and layout conventions
+          RPM_NGINX_EVR="1:${NGINX_VERSION}"
           DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
           RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
 
@@ -654,6 +763,7 @@ jobs:
           {
             echo "PKG_VERSION=${PKG_VERSION}"
             echo "NGINX_VERSION=${NGINX_VERSION}"
+            echo "RPM_NGINX_EVR=${RPM_NGINX_EVR}"
             echo "NFPM_ARCH=${NFPM_ARCH}"
             echo "RPM_ARCH=${RPM_ARCH}"
             echo "DEB_FILENAME=${DEB_FILENAME}"
@@ -669,6 +779,7 @@ jobs:
 
           echo "PKG_VERSION=${PKG_VERSION}" >&2
           echo "NGINX_VERSION=${NGINX_VERSION}" >&2
+          echo "RPM_NGINX_EVR=${RPM_NGINX_EVR}" >&2
           echo "NFPM_ARCH=${NFPM_ARCH}" >&2
           echo "DEB_FILENAME=${DEB_FILENAME}" >&2
           echo "RPM_FILENAME=${RPM_FILENAME}" >&2
@@ -676,11 +787,13 @@ jobs:
 
       - name: Prepare nFPM config with version-stamped preinstall
         run: |
-          # Copy preinstall.sh to a temp directory and substitute the version
-          # placeholder there, keeping the tracked checkout unmodified.
+          # Render the preinstall template before nFPM copies it into the
+          # package; keep the tracked checkout unmodified.
           NFPM_TMP="$(mktemp -d)"
-          cp packaging/nfpm/scripts/preinstall.sh "${NFPM_TMP}/preinstall.sh"
-          sed -i "s/%%NGINX_VERSION%%/${NGINX_VERSION}/g" "${NFPM_TMP}/preinstall.sh"
+          packaging/nfpm/scripts/render-nfpm-config.sh \
+            packaging/nfpm/scripts/preinstall.sh \
+            "${NFPM_TMP}/preinstall.sh" \
+            "${NGINX_VERSION}"
 
           # Generate a temporary nfpm config that references the temp preinstall
           # while keeping all other paths relative to the workspace root.
@@ -809,6 +922,9 @@ jobs:
         env:
           NGINX_VERSION: ${{ matrix.nginx_version }}
           PACKAGE_FORMAT: ${{ matrix.format }}
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+          EXPECTED_RUST_VERSION: ${{ env.RUST_TOOLCHAIN }}
+          EXPECTED_FEATURE_MANIFEST_DIGEST: ${{ needs.prepare.outputs.feature_manifest_digest }}
         run: |
           PKG_FILE="$(find dist/ -name "*.${PACKAGE_FORMAT}" -print -quit)"
           if [[ -z "${PKG_FILE}" ]]; then
@@ -837,7 +953,7 @@ jobs:
   release-gate:
     name: Release Gate
     needs: [prepare, smoke-test]
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     # This environment supplies the independent candidate promotion anchor and
     # requires the same human approval that protects release signing.
@@ -864,7 +980,7 @@ jobs:
           python-version: '3.14.6'
 
       - name: Verify tag SHA is main CI-approved
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -1053,34 +1169,34 @@ jobs:
 
       - name: Run release gates
         env:
-          RELEASE_GATE_EXPECTED_CARGO_VERSION: "0.9.2"
+          RELEASE_GATE_EXPECTED_CARGO_VERSION: ${{ env.RELEASE_VERSION }}
           NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx
           MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so
           BENCHMARK_NGINX_VERSION: ${{ steps.bench-nginx.outputs.bench_nginx_version }}
         run: |
-          # Run the release gate validators that are not already covered
-          # by the build/package/smoke-test jobs above. The full
+          # Run the feature-oriented release validators that are not already
+          # covered by the build/package/smoke-test jobs above. The full
           # release-gates-check targets include build/test/fuzz which are
           # redundant here (the build and smoke-test jobs already verified
           # those), but we must run the Python gate validators and package
           # layout checks to ensure complete gate coverage. Do not run
-          # legacy local-spec validators here; tag release CI checkouts do not
+          # local-spec validators here; tag release CI checkouts do not
           # include user-local Kiro spec directories.
           python3 tools/release/gates/validate_naming.py
-          python3 tools/release/gates/validate_release_gates_090.py
           python3 tools/release/gates/validate_release_gates_080.py \
             --active-version "${RELEASE_GATE_EXPECTED_CARGO_VERSION}"
           python3 tools/release/gates/validate_config_directives.py
           python3 tools/release/gates/validate_release_gates_070.py --mode strict
-          python3 tools/release/gates/validate_metrics.py
-          python3 tools/release/gates/validate_reason_codes.py
+          python3 tools/release/gates/validate_schema_drift.py \
+            --version "${RELEASE_GATE_EXPECTED_CARGO_VERSION}"
+          python3 tools/reason-codegen/generate.py --check
           python3 tools/release/gates/validate_package_metadata.py
           python3 tools/release/gates/validate_k8s_manifests.py
           python3 tools/release/gates/validate_fuzz_packaging.py
           python3 tools/release/gates/validate_release_metadata.py \
             --version "${RELEASE_GATE_EXPECTED_CARGO_VERSION}"
-          # Run the 0.9.2-specific blocking checks that are not part of the
-          # legacy validator chain above.
+          # Run the 0.9.2-specific blocking checks that complete the current
+          # release contract above.
           python3 tools/harness/detect_public_surface_drift.py
           PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
           # 0.9.2 blocking qualification mirroring Makefile
@@ -1093,6 +1209,11 @@ jobs:
           make -C components/nginx-module/tests unit-streaming_impl
           make docs-check
           bash tools/harness/detect_version_consistency.sh
+          # Package compatibility regression suites: exact NGINX version
+          # policy, fail-closed removal lifecycle guard, and maintainer
+          # script executable trust. These gate every published package
+          # artifact and mirror `make test-package-compatibility`.
+          make test-package-compatibility
           bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm
           # The module-enabled NGINX binary is built in the AlmaLinux release
           # image and links to libcrypt.so.2. Run the benchmark in that same
@@ -1180,7 +1301,7 @@ jobs:
   official-docker-release-gate:
     name: Official NGINX Docker Release Gate
     needs: [release-gate]
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/official-nginx-docker.yml
     with:
       module_repo: ${{ github.server_url }}/${{ github.repository }}.git
@@ -1202,7 +1323,7 @@ jobs:
       && needs.official-docker-release-gate.result == 'success'
       && (needs.integrity-signing.result == 'success'
           || (needs.integrity-signing.result == 'skipped'
-              && github.ref_type != 'tag'))
+              && github.event_name == 'workflow_dispatch'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1214,14 +1335,14 @@ jobs:
           persist-credentials: false
 
       - name: Download signed package artifacts (tag)
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: signed-packages
           path: artifacts/
 
       - name: Download all DEB artifacts (workflow dispatch)
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-deb-*
@@ -1229,7 +1350,7 @@ jobs:
           merge-multiple: true
 
       - name: Download all RPM artifacts (workflow dispatch)
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-rpm-*
@@ -1237,7 +1358,7 @@ jobs:
           merge-multiple: true
 
       - name: Download all glibc module tarballs (workflow dispatch)
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-glibc-module-*
@@ -1245,7 +1366,7 @@ jobs:
           merge-multiple: true
 
       - name: Download all musl module tarballs (workflow dispatch)
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-musl-module-*
@@ -1259,7 +1380,7 @@ jobs:
         shell: bash
 
       - name: Add authenticated installer bootstrap assets (tag)
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
@@ -1275,6 +1396,7 @@ jobs:
 
       - name: Generate release manifest
         env:
+          GH_EVENT_NAME: ${{ github.event_name }}
           GH_REF_TYPE: ${{ github.ref_type }}
           GH_REF_NAME: ${{ github.ref_name }}
           GH_SHA: ${{ github.sha }}
@@ -1284,7 +1406,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [[ "${GH_REF_TYPE}" == "tag" ]]; then
+          if [[ "${GH_EVENT_NAME}" == "push" && "${GH_REF_TYPE}" == "tag" ]]; then
             TAG="${GH_REF_NAME}"
             VERSION="${TAG#v}"
             SOURCE_URL="https://github.com/${GH_REPO}/archive/refs/tags/${TAG}.tar.gz"
@@ -1349,7 +1471,7 @@ jobs:
           retention-days: 5
 
       - name: Upload installer bootstrap assets (tag)
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-bootstrap
@@ -1372,7 +1494,7 @@ jobs:
   integrity-signing:
     name: Integrity - GPG Sign
     needs: [smoke-test, release-gate, musl-build, official-docker-release-gate]
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1483,7 +1605,7 @@ jobs:
   integrity-signature:
     name: Integrity - Sign SHA256SUMS
     needs: [integrity-checksums, release-gate, official-docker-release-gate]
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1559,14 +1681,14 @@ jobs:
       && needs.official-docker-release-gate.result == 'success'
       && (needs.integrity-signature.result == 'success'
           || (needs.integrity-signature.result == 'skipped'
-              && github.ref_type != 'tag'))
+              && github.event_name == 'workflow_dispatch'))
     runs-on: ubuntu-24.04
     permissions:
       contents: write
 
     steps:
       - name: Download signed package artifacts (tag)
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: signed-packages
@@ -1574,14 +1696,14 @@ jobs:
           merge-multiple: true
 
       - name: Download installer bootstrap assets (tag)
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-bootstrap
           path: release-assets/
 
       - name: Download all DEB artifacts
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-deb-*
@@ -1589,7 +1711,7 @@ jobs:
           merge-multiple: true
 
       - name: Download all RPM artifacts
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-rpm-*
@@ -1597,7 +1719,7 @@ jobs:
           merge-multiple: true
 
       - name: Download all glibc module tarballs
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-glibc-module-*
@@ -1605,7 +1727,7 @@ jobs:
           merge-multiple: true
 
       - name: Download all musl module tarballs
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-musl-module-*
@@ -1619,14 +1741,14 @@ jobs:
           path: release-assets/
 
       - name: Download SHA256SUMS.asc
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: checksums-signature
           path: release-assets/
 
       - name: Download SHA256SUMS.asc (best-effort for non-tag)
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         continue-on-error: true
         with:
@@ -1646,13 +1768,13 @@ jobs:
         shell: bash
 
       - name: Upload to GitHub Release (tag push)
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           files: release-assets/*
 
       - name: Upload as workflow artifacts (workflow_dispatch)
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-packages

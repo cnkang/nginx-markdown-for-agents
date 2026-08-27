@@ -731,7 +731,6 @@ create_unset_conf(void)
     conf->decompress.max_size = NGX_CONF_UNSET_SIZE;
     conf->decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     conf->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    conf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     conf->routing.max_inflight = NGX_CONF_UNSET_UINT;
     conf->ops.diagnostics_enabled = NGX_CONF_UNSET;
 
@@ -752,7 +751,6 @@ create_unset_conf(void)
     conf->advanced.prune_noise = NGX_CONF_UNSET;
     conf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     conf->advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    conf->limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     conf->advanced.dynconf_enabled = NGX_CONF_UNSET;
     conf->advanced.dynconf_path.len = 0;
     conf->advanced.dynconf_path.data = NULL;

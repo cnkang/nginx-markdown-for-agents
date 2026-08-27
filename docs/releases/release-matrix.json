@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_from": {
     "path": "tools/release-matrix.json",
-    "sha256": "sha256:88941ce4bee589c9e3abe9de857318ef41e7df992502b39cfd8cb776ad2a22fb"
+    "sha256": "sha256:326e16064973f0ee44f3f17c5d36c3c886018da03fe6f3f71b2ae9a2df094cb6"
   },
   "entries": [
     {
@@ -11,7 +11,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "deb-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -20,7 +20,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -29,7 +29,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "rpm-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -38,7 +38,7 @@
       "libc": "musl",
       "target": "aarch64-unknown-linux-musl",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -47,7 +47,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "deb-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -56,7 +56,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -65,7 +65,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "rpm-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -74,7 +74,7 @@
       "libc": "musl",
       "target": "x86_64-unknown-linux-musl",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -83,7 +83,7 @@
       "libc": "darwin",
       "target": "aarch64-apple-darwin",
       "artifact_type": "homebrew-formula",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -92,7 +92,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "deb-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -101,8 +101,10 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "docker-image",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 2,
+      "image_ref": "nginx:1.26.3",
+      "image_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860"
     },
     {
       "nginx_version": "1.26.3",
@@ -110,7 +112,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -119,7 +121,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "rpm-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -128,8 +130,10 @@
       "libc": "musl",
       "target": "aarch64-unknown-linux-musl",
       "artifact_type": "docker-image",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 2,
+      "image_ref": "nginx:1.26.3-alpine3.20",
+      "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d"
     },
     {
       "nginx_version": "1.26.3",
@@ -137,7 +141,7 @@
       "libc": "musl",
       "target": "aarch64-unknown-linux-musl",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -146,7 +150,7 @@
       "libc": "any",
       "target": "any",
       "artifact_type": "source",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -155,7 +159,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "deb-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -164,8 +168,10 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "docker-image",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 2,
+      "image_ref": "nginx:1.26.3",
+      "image_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860"
     },
     {
       "nginx_version": "1.26.3",
@@ -173,7 +179,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -182,7 +188,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "rpm-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -191,8 +197,10 @@
       "libc": "musl",
       "target": "x86_64-unknown-linux-musl",
       "artifact_type": "docker-image",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 2,
+      "image_ref": "nginx:1.26.3-alpine3.20",
+      "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d"
     },
     {
       "nginx_version": "1.26.3",
@@ -200,7 +208,7 @@
       "libc": "musl",
       "target": "x86_64-unknown-linux-musl",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -209,7 +217,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "deb-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -218,7 +226,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -227,7 +235,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "rpm-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -236,7 +244,7 @@
       "libc": "musl",
       "target": "aarch64-unknown-linux-musl",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -245,7 +253,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "deb-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -254,7 +262,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -263,7 +271,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "rpm-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -272,7 +280,7 @@
       "libc": "musl",
       "target": "x86_64-unknown-linux-musl",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -281,7 +289,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "deb-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -290,7 +298,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -299,7 +307,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "rpm-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -308,7 +316,7 @@
       "libc": "musl",
       "target": "aarch64-unknown-linux-musl",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -317,7 +325,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "deb-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -326,7 +334,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -335,7 +343,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "rpm-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -344,7 +352,7 @@
       "libc": "musl",
       "target": "x86_64-unknown-linux-musl",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -353,7 +361,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "deb-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -362,8 +370,10 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "docker-image",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 2,
+      "image_ref": "nginx:1.31.4",
+      "image_digest": "sha256:8f029c543423e3eac6b08254718bc31eb75633b1e448026b6616927baa7d4bfe"
     },
     {
       "nginx_version": "1.31.4",
@@ -371,7 +381,7 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -380,17 +390,19 @@
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "rpm-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
       "nginx_version": "1.31.4",
-      "os": "alpine3.20",
+      "os": "alpine3.24",
       "libc": "musl",
       "target": "aarch64-unknown-linux-musl",
       "artifact_type": "docker-image",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 2,
+      "image_ref": "nginx:1.31.4-alpine3.24",
+      "image_digest": "sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913"
     },
     {
       "nginx_version": "1.31.4",
@@ -398,7 +410,7 @@
       "libc": "musl",
       "target": "aarch64-unknown-linux-musl",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -407,7 +419,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "deb-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -416,8 +428,10 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "docker-image",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 2,
+      "image_ref": "nginx:1.31.4",
+      "image_digest": "sha256:8f029c543423e3eac6b08254718bc31eb75633b1e448026b6616927baa7d4bfe"
     },
     {
       "nginx_version": "1.31.4",
@@ -425,7 +439,7 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -434,17 +448,19 @@
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "rpm-package",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
       "nginx_version": "1.31.4",
-      "os": "alpine3.20",
+      "os": "alpine3.24",
       "libc": "musl",
       "target": "x86_64-unknown-linux-musl",
       "artifact_type": "docker-image",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 2,
+      "image_ref": "nginx:1.31.4-alpine3.24",
+      "image_digest": "sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913"
     },
     {
       "nginx_version": "1.31.4",
@@ -452,7 +468,7 @@
       "libc": "musl",
       "target": "x86_64-unknown-linux-musl",
       "artifact_type": "dynamic-module",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     }
   ]

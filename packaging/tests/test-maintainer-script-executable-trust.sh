@@ -55,7 +55,7 @@ create_evil_dir() {
     TRUSTED_MARKER_DIR="${WORK_DIR}/${label}/trusted-markers"
     mkdir -p "${EVIL_DIR}" "${MARKER_DIR}" "${TRUSTED_MARKER_DIR}"
 
-    local cmds=(nginx cat readlink rm rmdir sed printf)
+    local cmds=(nginx cat grep readlink rm rmdir sed printf stat)
     for cmd in "${cmds[@]}"; do
         cat > "${EVIL_DIR}/${cmd}" <<SCRIPT
 #!/bin/sh
@@ -67,12 +67,15 @@ SCRIPT
 }
 
 # link_trusted_command — Link a host utility into the temporary trusted PATH.
-# Arguments: $1 = command name
+# link_trusted_command links an available executable into the sandbox trusted command directory.
 link_trusted_command() {
     local command_name="$1"
     local command_path=""
 
-    command_path="$(command -v "${command_name}")"
+    if ! command_path="$(command -v "${command_name}")"; then
+        fail "sandbox: trusted command not found: ${command_name}"
+        return 1
+    fi
     if [[ -z "${command_path}" || ! -x "${command_path}" ]]; then
         fail "sandbox: trusted command not found: ${command_name}"
         return 1
@@ -107,7 +110,7 @@ prepare_sandboxed_script() {
         "${SANDBOX_ROOT}/usr/share/nginx/modules-available" \
         "${script_dir}"
 
-    for command_name in cat readlink rm rmdir sed; do
+    for command_name in cat grep readlink rm rmdir sed stat; do
         link_trusted_command "${command_name}" || return 1
     done
 
@@ -156,7 +159,7 @@ run_sandboxed_script() {
 
 # assert_no_markers — Assert that no marker files were created.
 # Arguments: $1 = test label
-# Returns: 0; failures are tracked through FAIL_COUNT.
+# assert_no_markers verifies that no fake binaries executed and records the result without changing the test's control flow.
 assert_no_markers() {
     local label="$1"
     local any_found=0
@@ -177,23 +180,9 @@ assert_no_markers() {
     return 0
 }
 
-# assert_path_absent — Assert that a sandbox cleanup path was removed.
-# Arguments: $1 = label, $2 = path
-assert_path_absent() {
-    local label="$1"
-    local path="$2"
-
-    if [[ ! -e "${path}" && ! -L "${path}" ]]; then
-        pass "${label}: sandbox path removed"
-    else
-        fail "${label}: sandbox path remains: ${path}"
-    fi
-    return 0
-}
-
-# assert_path_present — Assert that a cleanup path remains after a simulated
-# cleanup failure.
-# Arguments: $1 = label, $2 = path
+# assert_path_present — Assert that a package cleanup path remains because the
+# package does not own operator-managed module configuration.
+# assert_path_present verifies that a sandbox path exists or is a symbolic link and records the result under the provided label.
 assert_path_present() {
     local label="$1"
     local path="$2"
@@ -252,7 +241,7 @@ if [[ -f "${SOURCE_SCRIPT}" ]]; then
     run_sandboxed_script bash remove
 
     assert_no_markers "preremove.sh"
-    assert_path_absent "preremove.sh symlink" \
+    assert_path_present "preremove.sh symlink" \
         "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
 
     if [[ "${RC}" -eq 0 ]]; then
@@ -261,26 +250,19 @@ if [[ -f "${SOURCE_SCRIPT}" ]]; then
         fail "preremove.sh: exit code ${RC} (expected 0)"
     fi
 
-    echo "--- NC-2b: preremove.sh cleanup failure ---" >&2
-    create_evil_dir "preremove-failure"
-    prepare_sandboxed_script "${SOURCE_SCRIPT}" "preremove-failure" "nfpm"
-    touch "${SANDBOX_ROOT}/usr/share/nginx/modules-available/mod-markdown.conf"
-    ln -s "${SANDBOX_ROOT}/usr/share/nginx/modules-available/mod-markdown.conf" \
-        "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
-    rm -f "${SANDBOX_ROOT}/usr/bin/rm"
-    cat > "${SANDBOX_ROOT}/usr/bin/rm" <<'SCRIPT'
-#!/bin/sh
-exit 1
-SCRIPT
-    chmod +x "${SANDBOX_ROOT}/usr/bin/rm"
-    run_sandboxed_script bash remove
+    echo "--- NC-2b: preremove.sh preserves an operator path ---" >&2
+    create_evil_dir "preremove-regular-file"
+    prepare_sandboxed_script "${SOURCE_SCRIPT}" "preremove-regular-file" "nfpm"
+    touch "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
+    run_sandboxed_script bash upgrade
 
-    assert_path_present "preremove.sh failed rm" \
+    assert_no_markers "preremove.sh regular file"
+    assert_path_present "preremove.sh regular file" \
         "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
     if [[ "${RC}" -eq 0 ]]; then
-        pass "preremove.sh: cleanup failure is non-fatal"
+        pass "preremove.sh: upgrade preserves operator file"
     else
-        fail "preremove.sh: cleanup failure exited ${RC}"
+        fail "preremove.sh: upgrade exited ${RC}"
     fi
 else
     fail "preremove.sh: script not found at ${SOURCE_SCRIPT}"

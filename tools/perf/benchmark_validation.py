@@ -20,10 +20,11 @@ _HTTP_STATUS_LINE_RE = re.compile(
 )
 _PROMETHEUS_LINE_RE = re.compile(
     r"^(?P<name>[a-zA-Z_:][a-zA-Z0-9_:]*)"
-    r"(?:\{(?P<labels>[^}]*)\})?\s+"
+    r"(?:\{(?P<labels>.*)\})?\s+"
     r"(?P<value>[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|[+-]?Inf|NaN)"
     r"(?:\s+\d+)?$"
 )
+_PROMETHEUS_LABEL_NAME_RE = re.compile(r"[a-zA-Z_]\w*", re.ASCII)
 
 #: Canonical module-benchmark scenario names.
 #: Kept here as a single source of truth shared by
@@ -150,18 +151,96 @@ def _failure(summary: dict, reason: str) -> dict:
     return summary
 
 
+def _skip_label_whitespace(text: str, position: int) -> int:
+    while position < len(text) and text[position] in " \t":
+        position += 1
+    return position
+
+
+def _parse_label_name(
+    text: str, position: int
+) -> tuple[str, int] | None:
+    position = _skip_label_whitespace(text, position)
+    match = _PROMETHEUS_LABEL_NAME_RE.match(text, position)
+    if match is None:
+        return None
+    position = _skip_label_whitespace(text, match.end())
+    if position >= len(text) or text[position] != "=":
+        return None
+    return match.group(0), position + 1
+
+
+def _decode_label_escape(
+    text: str, position: int
+) -> tuple[str, int] | None:
+    if position >= len(text):
+        return None
+    escaped = text[position]
+    decoded = {"\\": "\\", '"': '"', "n": "\n"}.get(escaped)
+    if decoded is None:
+        return None
+    return decoded, position + 1
+
+
+def _parse_label_value(
+    text: str, position: int
+) -> tuple[str, int] | None:
+    position = _skip_label_whitespace(text, position)
+    if position >= len(text) or text[position] != '"':
+        return None
+    position += 1
+    value: list[str] = []
+    while position < len(text):
+        character = text[position]
+        position += 1
+        if character == '"':
+            return "".join(value), position
+        if character == "\\":
+            decoded = _decode_label_escape(text, position)
+            if decoded is None:
+                return None
+            character, position = decoded
+        elif ord(character) < 0x20:
+            return None
+        value.append(character)
+    return None
+
+
+def _consume_label_separator(
+    text: str, position: int
+) -> tuple[int, bool] | None:
+    position = _skip_label_whitespace(text, position)
+    if position == len(text):
+        return position, True
+    if text[position] != ",":
+        return None
+    position += 1
+    if position == len(text):
+        return None
+    return position, False
+
+
 def _parse_prometheus_labels(label_text: str) -> dict[str, str] | None:
-    """Parse the simple quoted labels emitted by the module renderer."""
+    """Parse a Prometheus label set with duplicate and escape checks."""
     labels: dict[str, str] = {}
-    if not label_text:
-        return labels
-    for item in label_text.split(","):
-        key, separator, value = item.partition("=")
-        if separator != "=" or len(value) < 2:
+    position = 0
+    while position < len(label_text):
+        parsed_name = _parse_label_name(label_text, position)
+        if parsed_name is None:
             return None
-        if value[0] != '"' or value[-1] != '"':
+        key, position = parsed_name
+        if key in labels:
             return None
-        labels[key] = value[1:-1]
+        parsed_value = _parse_label_value(label_text, position)
+        if parsed_value is None:
+            return None
+        labels[key], position = parsed_value
+        separator = _consume_label_separator(label_text, position)
+        if separator is None:
+            return None
+        position, finished = separator
+        if finished:
+            return labels
     return labels
 
 

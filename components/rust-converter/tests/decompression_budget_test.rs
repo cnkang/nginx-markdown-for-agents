@@ -1,6 +1,6 @@
 //! Unit tests for bounded decompression within budget.
 //!
-//! Validates: REQ-0700-CORRECTNESS-003 (Rust 有界解压)
+//! Validates: (Rust bounded decompression)
 //!
 //! This test verifies that when compressed data has a compression ratio
 //! between 10x and 20x (within the default budget), decompression succeeds
@@ -11,34 +11,7 @@ use std::io::Write;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
-
-/// Simulate bounded decompression: decompress gzip data with an explicit budget.
-///
-/// Returns Ok(decompressed_bytes) if output fits within budget,
-/// or Err("budget exceeded") if decompressed size exceeds the budget.
-fn decompress_bounded(compressed: &[u8], budget: usize) -> Result<Vec<u8>, &'static str> {
-    use flate2::read::MultiGzDecoder;
-    use std::io::Read;
-
-    let mut decoder = MultiGzDecoder::new(compressed);
-    let mut output = Vec::new();
-    let mut buf = [0u8; 4096];
-
-    loop {
-        let n = decoder
-            .read(&mut buf)
-            .map_err(|_| "decompression I/O error")?;
-        if n == 0 {
-            break;
-        }
-        output.extend_from_slice(&buf[..n]);
-        if output.len() > budget {
-            return Err("budget exceeded");
-        }
-    }
-
-    Ok(output)
-}
+use nginx_markdown_converter::decompress::{Format, decompress_bounded};
 
 /// Create gzip-compressed data from a known payload.
 fn compress_gzip(data: &[u8]) -> Vec<u8> {
@@ -101,14 +74,14 @@ fn test_decompression_within_budget_ratio_10x_to_20x() {
     );
 
     // Decompress with budget — should succeed
-    let result = decompress_bounded(&compressed, budget);
+    let result = decompress_bounded(&compressed, Format::Gzip, budget, 0);
     assert!(
         result.is_ok(),
         "Decompression within budget should succeed, got: {:?}",
         result.err()
     );
 
-    let decompressed = result.unwrap();
+    let decompressed = result.unwrap().output;
     assert_eq!(
         decompressed.len(),
         original_size,
@@ -167,13 +140,13 @@ fn test_decompression_within_budget_html_payload() {
         budget
     };
 
-    let result = decompress_bounded(&compressed, effective_budget);
+    let result = decompress_bounded(&compressed, Format::Gzip, effective_budget, 0);
     assert!(
         result.is_ok(),
         "HTML decompression within budget should succeed (ratio={ratio:.1}x, \
          budget={effective_budget}, original={original_size})"
     );
 
-    let decompressed = result.unwrap();
+    let decompressed = result.unwrap().output;
     assert_eq!(decompressed, original_data);
 }

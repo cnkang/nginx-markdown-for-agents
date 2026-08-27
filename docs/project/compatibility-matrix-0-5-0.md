@@ -112,11 +112,11 @@ requirement.
 
 ## Sub-Capability Split Rules
 
-- Spec #12 owns the canonical row set
+- The release-gates governance spec owns the canonical row set
 - Downstream sub-specs (#13–#18) may split a canonical row into documented
   sub-capability rows
 - Downstream sub-specs must not introduce new top-level operator-facing capability
-  rows without first updating spec #12
+  rows without first updating the release-gates governance spec
 
 ## Document Updates
 

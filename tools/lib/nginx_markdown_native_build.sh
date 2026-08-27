@@ -457,7 +457,8 @@ markdown_prepare_rust_converter_release() {
     markdown_copy_rust_release_archive "${workspace_root}" "${rust_target}"
     markdown_sync_converter_header "${workspace_root}"
   )
-  return 0
+  local rc=$?
+  return "${rc}"
 }
 
 # Wait for an HTTP endpoint to become reachable.
@@ -590,7 +591,7 @@ markdown_extract_header() {
   local header="$2"
 
   awk -v hdr="${header}" 'BEGIN { lower=tolower(hdr) }
-    tolower($1) ~ tolower(hdr) ":" {
+    tolower($1) == (lower ":") {
       sub(/^[^:]+:[[:space:]]+/, ""); sub(/\r$/, ""); print; exit
     }' "${hdr_file}"
   return 0

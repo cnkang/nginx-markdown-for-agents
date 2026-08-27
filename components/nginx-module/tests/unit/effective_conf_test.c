@@ -136,15 +136,15 @@ typedef int ngx_fd_t;
 #define NGX_INVALID_FILE     (-1)
 
 #define NGX_FILE_RDONLY      0
+#define NGX_FILE_NONBLOCK    O_NONBLOCK
 #define NGX_FILE_OPEN        0
 
 static ngx_fd_t
 ngx_open_file(u_char *name, int mode, int create, int access)
 {
-    UNUSED(mode);
     UNUSED(create);
     UNUSED(access);
-    return open((const char *) name, O_RDONLY);
+    return open((const char *) name, mode);
 }
 
 #define ngx_close_file(fd) close(fd)
@@ -270,6 +270,17 @@ void
 ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code)
 {
     UNUSED(error_code);
+}
+
+uint32_t
+markdown_sha256_hex(const uint8_t *data, uintptr_t data_len,
+    uint8_t *output, uintptr_t output_len)
+{
+    UNUSED(data);
+    UNUSED(data_len);
+    UNUSED(output);
+    UNUSED(output_len);
+    return DYNCONF_ERR_INTERNAL;
 }
 
 #include "../../src/ngx_http_markdown_dynconf_impl.h"
@@ -401,11 +412,15 @@ test_effective_helpers_read_from_eff_when_present(void)
     ngx_memzero(&eff, sizeof(eff));
 
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
+    conf.enabled = 0;
+    conf.enabled_source = 3;
     conf.advanced.prune_noise = 0;
     conf.limits.conversion_memory = 1024;
     conf.stream.budget = 512;
 
     eff.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+    eff.enabled = 1;
+    eff.enabled_source = 7;
     eff.prune_noise = 1;
     eff.memory_budget = 2048;
     eff.streaming_budget = 1024;
@@ -424,11 +439,11 @@ test_effective_helpers_read_from_eff_when_present(void)
         ngx_http_markdown_effective_streaming_budget(&eff, &conf) == 1024,
         "effective_streaming_budget reads from eff");
     TEST_ASSERT(
-        ngx_http_markdown_effective_enabled(&eff, &conf) == eff.enabled,
+        ngx_http_markdown_effective_enabled(&eff, &conf) == 1,
         "effective_enabled reads from eff");
     TEST_ASSERT(
         ngx_http_markdown_effective_enabled_source(&eff, &conf)
-            == eff.enabled_source,
+            == 7,
         "effective_enabled_source reads from eff");
 
     TEST_PASS("effective_* helpers read from eff when present");

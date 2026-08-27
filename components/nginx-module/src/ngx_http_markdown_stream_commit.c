@@ -30,9 +30,6 @@
  *   header send, no partial Markdown response may be committed.
  */
 
-#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
-#endif
 #include "ngx_http_markdown_stream_commit.h"
 
 
@@ -42,13 +39,11 @@
 
 /*
  * Maximum number of header entries tracked per single header name
- * (Vary, ETag, Cache-Control).  Snapshot fails before Phase 1 mutation
- * when a header has more matching entries, preserving Rule 39 atomicity.
+ * (Vary, ETag, Cache-Control).  Keep this bound aligned with the header-plan
+ * capacity and fail before Phase 1 mutation when it is exceeded, preserving
+ * Rule 39 atomicity without imposing the old eight-entry limit.
  */
-/* Increased from 4 to 8 to accommodate responses with many Vary/ETag
- * entries.  Safety failure (returns NGX_ERROR before Phase 1 mutation)
- * is preserved. */
-#define NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX  8
+#define NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX  64
 
 /*
  * Per-header snapshot: records the original state of a header entry
@@ -123,7 +118,7 @@ ngx_http_markdown_stream_commit_snapshot_entry(
 /*
  * Snapshot all entries matching a header name in the headers_out list.
  * Records entry pointer, original value, and original hash for each.  Returns
- * NGX_ERROR before mutation if the fixed snapshot capacity is exceeded.
+ * NGX_ERROR before mutation if the bounded snapshot capacity is exceeded.
  */
 static ngx_int_t
 ngx_http_markdown_stream_commit_snapshot_header(
@@ -318,14 +313,10 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
                                          const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t                        rc;
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     ngx_flag_t                       auth_cache_control_required;
-#endif
     ngx_http_markdown_commit_snap_t  snap;
 
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     auth_cache_control_required = 0;
-#endif
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
@@ -383,7 +374,6 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     rc = ngx_http_markdown_auth_cache_control_required(
         r, conf, &auth_cache_control_required);
     if (rc == NGX_OK && auth_cache_control_required) {
@@ -396,9 +386,6 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         ngx_http_markdown_stream_commit_rollback(r, &snap);
         return NGX_ERROR;
     }
-#else
-    (void) conf;
-#endif
 
     /*
      * --- Phase 2: Infallible mutations ---

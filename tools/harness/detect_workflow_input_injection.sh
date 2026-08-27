@@ -61,7 +61,6 @@ findings=0
 while IFS= read -r -d '' file; do
     rel_path="${file#${REPO_ROOT}/}"
     in_run_block=0
-    in_env_block=0
     inline_run_command=0
     line_num=0
 
@@ -79,7 +78,6 @@ while IFS= read -r -d '' file; do
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]*$ ]] || \
            [[ "$line" =~ $block_scalar_re ]]; then
             in_run_block=1
-            in_env_block=0
             continue
         fi
 
@@ -92,13 +90,11 @@ while IFS= read -r -d '' file; do
         if [[ "$line" =~ $inline_run_re ]] || \
            [[ "$line" =~ $inline_run_dash_re ]]; then
             inline_run_command=1
-            in_env_block=0
         fi
 
         # Detect env: blocks (which are safe for input interpolation)
         if [[ "$line" =~ ^[[:space:]]*env:[[:space:]]*$ ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*env:[[:space:]]*$ ]]; then
-            in_env_block=1
             in_run_block=0
             continue
         fi
@@ -110,7 +106,6 @@ while IFS= read -r -d '' file; do
            [[ "$line" =~ ^[[:space:]]*steps: ]] || \
            [[ "$line" =~ ^[[:space:]]*jobs: ]]; then
             in_run_block=0
-            in_env_block=0
             continue
         fi
 
@@ -121,7 +116,6 @@ while IFS= read -r -d '' file; do
         # report safe module_ref/module_sha wiring as shell interpolation.
         if [[ "$line" =~ ^[[:space:]]*uses:[[:space:]]+ ]]; then
             in_run_block=0
-            in_env_block=0
             continue
         fi
 
@@ -153,31 +147,49 @@ while IFS= read -r -d '' file; do
             # Benign selectors such as steps.meta.outputs.version are not
             # command-bearing inputs and are not flagged; unknown selectors
             # fail closed so a new command-shaped output cannot slip through.
-            if [[ "$line" =~ \$(\{\{[[:space:]]*steps(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])\.[[:space:]]*outputs(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])[[:space:]]*\}\}) ]]; then
-                output_selector="${BASH_REMATCH[3]}"
-                # Normalize the index form (steps['build'].outputs['version'])
-                # to the dot form before the allowlist match: strip the
-                # surrounding brackets AND any single/double quotes so both
-                # forms become the same bare identifier the case patterns
-                # compare against.
-                if [[ "$output_selector" == \[*\] ]]; then
-                    output_selector="${output_selector#[}"
-                    output_selector="${output_selector%\]}"
-                    output_selector="${output_selector//\'/}"
-                    output_selector="${output_selector//\"/}"
+            step_output_re='^[^$]*\$(\{\{[[:space:]]*steps(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])\.[[:space:]]*outputs(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])[[:space:]]*\}\})'
+            remaining_line="$line"
+            while [[ -n "$remaining_line" ]]; do
+                if [[ "$remaining_line" =~ $step_output_re ]]; then
+                    full_match="${BASH_REMATCH[0]}"
+                    output_selector="${BASH_REMATCH[3]}"
+                    # Normalize the index form (steps['build'].outputs['version'])
+                    # to the dot form before the allowlist match: strip the
+                    # surrounding brackets AND any single/double quotes so both
+                    # forms become the same bare identifier the case patterns
+                    # compare against.
+                    if [[ "$output_selector" == \[*\] ]]; then
+                        output_selector="${output_selector#[}"
+                        output_selector="${output_selector%\]}"
+                        output_selector="${output_selector//\'/}"
+                        output_selector="${output_selector//\"/}"
+                    fi
+                    benign_data_selector="${output_selector#.}"
+                    case "${benign_data_selector}" in
+                        sha|version|raw_version|bench_nginx_version|nginx_version|path|repo|buildroot|nginx_bin|deb_filename|rpm_filename|tap_name|pull-request-number|enabled|supported|blocking|changed|has_changes|install_exit|nginx_test_exit|module_found|skip_reason|package_matrix|matrix_entries|smoke_matrix|musl_matrix|nginx_versions|targets|policy_reference)
+                            ;;
+                        *)
+                            echo "ERROR: ${rel_path}:${line_num}: step output directly interpolated in run block" >&2
+                            echo "  ${line}" >&2
+                            echo "  Fix: map a fixed identifier through env and a shell case statement" >&2
+                            findings=$((findings + 1))
+                            ;;
+                    esac
+                    remaining_line="${remaining_line:${#full_match}}"
+                    continue
                 fi
-                benign_data_selector="${output_selector#.}"
-                case "${benign_data_selector}" in
-                    sha|version|raw_version|bench_nginx_version|nginx_version|path|name|ref|commit|repo|title|body|buildroot|nginx_bin|checkout_ref|deb_filename|rpm_filename|tap_name|pull-request-number|enabled|supported|blocking|changed|has_changes|install_exit|nginx_test_exit|module_found|skip_reason|package_matrix|matrix_entries|smoke_matrix|musl_matrix|nginx_versions|targets|policy_reference)
-                        ;;
-                    *)
-                        echo "ERROR: ${rel_path}:${line_num}: step output directly interpolated in run block" >&2
-                        echo "  ${line}" >&2
-                        echo "  Fix: map a fixed identifier through env and a shell case statement" >&2
-                        findings=$((findings + 1))
-                        ;;
-                esac
-            fi
+
+                # Skip through a non-step interpolation or ordinary text so a
+                # later step-output interpolation on the same line is still
+                # audited.  This is deliberately anchored to the next dollar
+                # sign; it does not treat an unmatched prefix as clean.
+                if [[ "$remaining_line" =~ ^[^$]*\$ ]]; then
+                    prefix_to_dollar="${BASH_REMATCH[0]}"
+                    remaining_line="${remaining_line:${#prefix_to_dollar}}"
+                    continue
+                fi
+                break
+            done
 
             # External event data (PR head ref/title/body, release tag name,
             # issue fields, head_ref, ref_name) is attacker-influenced for
@@ -196,7 +208,7 @@ while IFS= read -r -d '' file; do
             # ref_name aliases.  Three separate patterns avoid embedding a
             # double-quote literal inside [[ =~ ]] (which would terminate
             # the quoted regex) while still matching both selector forms.
-            if [[ "$line" =~ \$\{\{[[:space:]]*github\.event\.(pull_request|release|issue|comment|inputs)((\.[a-zA-Z_.]+|\[[^]]*\])+)[[:space:]]*\}\} ]] || \
+            if [[ "$line" =~ \$\{\{[[:space:]]*github\.event\.[a-zA-Z_][a-zA-Z0-9_]*((\.[a-zA-Z_.]+|\[[^]]*\])+)[[:space:]]*\}\} ]] || \
                [[ "$line" =~ \$\{\{[[:space:]]*github\.event\[[^]]*\](\.[a-zA-Z_.]+|\[[^]]*\])+[[:space:]]*\}\} ]] || \
                [[ "$line" =~ \$\{\{[[:space:]]*(github\.head_ref|github\.ref_name)[[:space:]]*\}\} ]]; then
                 echo "ERROR: ${rel_path}:${line_num}: external event data directly interpolated in run block" >&2

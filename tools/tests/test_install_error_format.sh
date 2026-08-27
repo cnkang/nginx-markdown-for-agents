@@ -139,13 +139,9 @@ build_path_hiding() {
   return 0
 }
 
-# Run install.sh with a modified environment that hides nginx from PATH.
-# Captures stderr and validates [ERROR]/[SUGGEST] format.
-# run_hiding_nginx runs the install.sh script with `nginx` hidden from PATH and validates that stderr contains the required `[ERROR] <category>: <message>` and `[SUGGEST] <suggestion>` formats.
+# Run install.sh with nginx absent from PATH, capture its structured error
+# output, and store the captured streams in `_LAST_STDOUT` and `_LAST_STDERR`.
 # Usage: run_hiding_nginx <test_name> [extra_args...]
-# 
-# This function captures stdout and stderr from install.sh (with SKIP_ROOT_CHECK=1 and a PATH that hides `nginx`), verifies stderr is non-empty and contains both the `[ERROR]` and `[SUGGEST]` formats, and reports results using the pass/fail helpers.
-# run_hiding_nginx runs install.sh with nginx hidden from PATH, captures stdout and stderr, validates that stderr contains a structured "[ERROR] <category>: <message>" line and a "[SUGGEST]" line, sets `_LAST_STDOUT` and `_LAST_STDERR` with the captured outputs, cleans temporary files and the shim directory, and returns 0 on success (non-zero on failure).
 run_hiding_nginx() {
   local test_name="$1"
   shift
@@ -162,14 +158,8 @@ run_hiding_nginx() {
   shim_dir="$(cat "$shim_info")"
   rm -f "$shim_info"
 
-  cat > "$shim_dir/nginx" <<'EOF'
-#!/bin/sh
-exit 99
-EOF
-  chmod +x "$shim_dir/nginx"
-
   # Run install.sh with restricted PATH
-  SKIP_ROOT_CHECK=1 NGINX_BIN="$shim_dir/nginx" PATH="$restricted_path" \
+  SKIP_ROOT_CHECK=1 PATH="$restricted_path" \
     bash "$INSTALL_SCRIPT" "$@" >"$stdout_file" 2>"$stderr_file" || true
 
   local stderr_content stdout_content
@@ -401,20 +391,20 @@ else
 fi
 
 JSON_LINE="$(printf '%s\n' "$JSON_LINES" | tail -1)"
-if [[ -n "$JSON_LINE" ]] && command -v python3 >/dev/null 2>&1; then
-  if echo "$JSON_LINE" | python3 -c "
+if [[ -z "$JSON_LINE" ]]; then
+  fail "python3 hidden — no JSON line found in stdout"
+elif ! command -v python3 >/dev/null 2>&1; then
+  skip "python3 hidden — JSON schema validation skipped (python3 unavailable)"
+elif echo "$JSON_LINE" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 assert data.get('success') is False, 'success should be false'
 assert (data.get('error') or {}).get('category') == 'config', 'error.category should be config'
 " 2>/dev/null; then
     pass "python3 hidden — JSON error category remains config"
-  else
-    fail "python3 hidden — JSON error category validation failed" \
-         "json line: $(echo "$JSON_LINE" | head -1)"
-  fi
 else
-  fail "python3 hidden — no JSON line found in stdout"
+  fail "python3 hidden — JSON error category validation failed" \
+       "json line: $(echo "$JSON_LINE" | head -1)"
 fi
 echo ""
 
@@ -456,7 +446,7 @@ if command -v python3 > /dev/null 2>&1; then
 else
   # Fallback: simple grep-based check
   # Find exit 1 lines and check if nearby lines have emit_error or die_with_error
-  EXIT_LINES="$(grep -n 'exit 1' "$INSTALL_SCRIPT" | grep -v '^\s*#' || true)"
+  EXIT_LINES="$(grep -n 'exit 1' "$INSTALL_SCRIPT" | grep -Ev '^[0-9]+:[[:space:]]*#' || true)"
   ALL_OK=1
   while IFS= read -r eline; do
     [[ -z "$eline" ]] && continue

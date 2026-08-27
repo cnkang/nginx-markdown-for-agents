@@ -8,7 +8,7 @@ full-buffer decompression.
 
 ## Summary
 
-In 0.9.2, gzip, deflate, and Brotli responses are eligible for incremental
+In 0.9.2, gzip, deflate, and Brotli responses are eligible for streaming
 decompression when `markdown_streaming force` or `auto` selects streaming,
 automatic decompression turns on, and cache validation is not `full`.
 The `auto` route uses an internal bounded size heuristic. It is not an
@@ -38,9 +38,9 @@ eligible response, the following logic applies:
    unsupported encoding are not subject to `markdown_error_policy`.
 2. If `markdown_auto_decompress` is **on** and the module selects streaming with cache
    validation not `full`:
-   - **Deflate** (zlib-wrapped RFC 1950, with raw RFC 1951 compatibility fallback) decompresses incrementally.
-   - **Gzip** decompresses incrementally with gzip member/trailer validation.
-   - **Brotli** decompresses incrementally (single-stream, trailing-data
+   - **Deflate** (zlib-wrapped RFC 1950, with raw RFC 1951 compatibility fallback) uses streaming decompression.
+   - **Gzip** uses streaming decompression with gzip member/trailer validation.
+   - **Brotli** uses streaming decompression (single-stream, trailing-data
      rejection, no-progress guard) when the build defines `NGX_HTTP_BROTLI`.
 3. Full cache validation selects the bounded full-buffer path for all codecs.
 4. Brotli without `NGX_HTTP_BROTLI` defined routes to bounded full-buffer
@@ -58,7 +58,7 @@ Upstream response
   │    │
   │    └─ auto_decompress ON + supported encoding
   │         ├─ gzip, deflate, or Brotli (compiled) + streaming/cache gates pass
-  │         │    └─ Incremental decompression → streaming conversion
+  │         │    └─ Streaming decompression → streaming conversion
   │         ├─ Brotli (not compiled) or full cache validation
   │         │    └─ Bounded full-buffer decompression → conversion
   │         └─ unknown encoding
@@ -112,7 +112,7 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
   state is in-flight.
 
 - Deflate uses the zlib-wrapped RFC 1950 framing and also accepts raw RFC 1951
-  framing as a compatibility fallback for legacy servers. The paths decide
+  framing as a fallback for servers that emit raw deflate. The paths decide
   differently: the **full-buffer path** tries RFC 1950 first and retries the
   same input in raw RFC 1951 mode when RFC 1950 decoding fails with a format
   error before producing any output. The **streaming path** defers decoder

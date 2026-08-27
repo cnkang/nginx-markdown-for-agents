@@ -1,0 +1,8 @@
+{
+  "fixture-id": "benchmark/tables",
+  "page-type": "clean-article",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 2164,
+  "source-description": "Stable table fixture for module benchmark comparisons",
+  "failure-corpus": false
+}

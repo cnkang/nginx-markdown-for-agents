@@ -84,7 +84,10 @@ code reads from `conf->stream.*` exclusively. `markdown_streaming_auto_threshold
 is no longer a registered directive — `nginx -t` will fail if it appears in
 configuration.
 
-## Implementation Sketch
+## Historical Implementation Sketch (not actionable)
+
+The document retains the following v0.6.0 notes for historical context only. They do
+not describe current implementation work or a supported configuration surface.
 
 1. Change `ngx_conf_merge_uint_value(conf->streaming_engine, prev->streaming_engine, NGX_HTTP_MARKDOWN_STREAMING_AUTO)` in merge_conf
 2. Add `markdown_streaming_auto_threshold` directive with `ngx_conf_set_size_slot` handler
@@ -105,7 +108,7 @@ configuration.
 - Engine selection logic: `components/nginx-module/src/ngx_http_markdown_streaming_impl.h`
 - Streaming mode constants: `components/nginx-module/src/ngx_http_markdown_filter_module.h`
 - Config merge: `components/nginx-module/src/ngx_http_markdown_config_core_impl.h`
-- Migration guide: `docs/guides/streaming-default-migration.md`
+- Archived migration guide: `docs/archive/streaming-default-migration.md`
 
 ## Document Updates
 

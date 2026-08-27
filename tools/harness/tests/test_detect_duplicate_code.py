@@ -23,7 +23,8 @@ def _load_module():
         "detect_duplicate_code",
         REPO_ROOT / "tools/harness/detect_duplicate_code.py",
     )
-    assert spec and spec.loader
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["detect_duplicate_code"] = mod
     spec.loader.exec_module(mod)

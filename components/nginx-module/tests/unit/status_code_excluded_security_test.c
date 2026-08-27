@@ -476,6 +476,7 @@ test_status_checked_before_streaming(void)
      */
     r.headers_out.status = 500;
     set_ct(&r.headers_out.content_type, "text/html");
+    conf.max_size = 4096;
     r.headers_out.content_length_n = (off_t) conf.max_size + 1;
 
     TEST_ASSERT(ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)

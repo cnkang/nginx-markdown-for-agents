@@ -7,8 +7,8 @@
 //! # Supported Formats
 //!
 //! - `0` = gzip (RFC 1952)
-//! - `1` = deflate: zlib-wrapped (RFC 1950) by default, with legacy raw
-//!   RFC 1951 compatibility fallback (sniffed heuristically)
+//! - `1` = deflate: zlib-wrapped (RFC 1950) by default, with raw RFC 1951
+//!   fallback (sniffed heuristically)
 //! - `2` = brotli (RFC 7932)
 //!
 //! # Error Categories
@@ -25,17 +25,16 @@ use std::io::Read;
 
 /// Compression format identifier passed from C.
 ///
-/// Matches the FFI contract: 0=gzip, 1=deflate, 2=brotli.
+/// Matches the generated FFI constants: gzip=0, deflate=1, Brotli=2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Format {
     /// gzip (RFC 1952)
-    Gzip = 0,
-    /// deflate: zlib-wrapped (RFC 1950) by default, with legacy raw
-    /// RFC 1951 compatibility fallback
-    Deflate = 1,
+    Gzip = crate::ffi::abi::MARKDOWN_FORMAT_GZIP,
+    /// deflate: zlib-wrapped (RFC 1950) by default, with raw RFC 1951 fallback
+    Deflate = crate::ffi::abi::MARKDOWN_FORMAT_DEFLATE,
     /// brotli (RFC 7932)
-    Brotli = 2,
+    Brotli = crate::ffi::abi::MARKDOWN_FORMAT_BROTLI,
 }
 
 impl Format {
@@ -44,9 +43,9 @@ impl Format {
     /// Returns `None` for unrecognized format codes.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
-            0 => Some(Self::Gzip),
-            1 => Some(Self::Deflate),
-            2 => Some(Self::Brotli),
+            crate::ffi::abi::MARKDOWN_FORMAT_GZIP => Some(Self::Gzip),
+            crate::ffi::abi::MARKDOWN_FORMAT_DEFLATE => Some(Self::Deflate),
+            crate::ffi::abi::MARKDOWN_FORMAT_BROTLI => Some(Self::Brotli),
             _ => None,
         }
     }
@@ -209,7 +208,7 @@ fn classify_io_error(e: std::io::Error) -> DecompError {
             // message.  "corrupt deflate stream" is data corruption (bad
             // block type / checksum), NOT truncation: classifying it as
             // TruncatedInput mislabels the telemetry and, more importantly,
-            // defeats the raw-deflate compatibility retry (which only fires
+            // defeats the raw-deflate retry (which only fires
             // on FormatError).  Genuine truncation surfaces as "unexpected
             // eof"/"truncat"/"premature".
             let lower = msg.to_lowercase();
@@ -282,8 +281,8 @@ fn has_zlib_header(input: &[u8]) -> bool {
 /// The deflate layer accepts both framings: zlib-wrapped (RFC 1950, the
 /// HTTP-standard form) is selected when the input begins with a plausible
 /// zlib header; otherwise the input is decoded as raw deflate (RFC 1951) for
-/// compatibility with legacy servers.  Because the header sniff is a
-/// heuristic (see [`has_zlib_header`]), a wrapped-mode decode that fails with
+/// support for servers that provide raw deflate.  Because the header
+/// sniff is a heuristic (see [`has_zlib_header`]), a wrapped-mode decode that fails with
 /// a format error before producing any output is retried as raw RFC 1951.
 /// The retry is skipped once output has been produced (the framing was
 /// effectively confirmed) or when the failure is truncation/budget/I/O, so
@@ -433,6 +432,7 @@ fn decompress_brotli(input: &[u8], budget: usize, ratio: u64) -> Result<DecompRe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ffi::{MARKDOWN_FORMAT_BROTLI, MARKDOWN_FORMAT_DEFLATE, MARKDOWN_FORMAT_GZIP};
 
     /// Helper: compress data with gzip.
     fn gzip_compress(data: &[u8]) -> Vec<u8> {
@@ -611,20 +611,14 @@ mod tests {
     }
 
     #[test]
-    fn gzip_ratio_exceeded_above_threshold() {
+    fn gzip_ratio_exceeded() {
         /* A wire body that expands far beyond input_len * ratio must be
          * rejected as RatioExceeded on the single-layer path, matching the
          * multi-layer chain semantics (ratio 2 caps output at 2x input).
-         * Use near-incompressible bytes so the compressed wire body stays
-         * above the legacy fixture threshold while the decompressed output
-         * far exceeds 2x. */
+         * Use a deterministic payload whose decompressed output far exceeds
+         * 2x the encoded input. */
         let original: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
         let compressed = gzip_compress(&original);
-        assert!(
-            compressed.len() >= crate::encoding::RATIO_ACTIVATION_THRESHOLD,
-            "fixture must exceed the legacy fixture threshold (compressed={})",
-            compressed.len()
-        );
         let result = decompress_bounded(&compressed, Format::Gzip, 10 * 1024 * 1024, 2);
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -633,14 +627,9 @@ mod tests {
     }
 
     #[test]
-    fn deflate_ratio_exceeded_above_threshold() {
+    fn deflate_ratio_exceeded() {
         let original: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
         let compressed = deflate_compress(&original);
-        assert!(
-            compressed.len() >= crate::encoding::RATIO_ACTIVATION_THRESHOLD,
-            "fixture must exceed the legacy fixture threshold (compressed={})",
-            compressed.len()
-        );
         let result = decompress_bounded(&compressed, Format::Deflate, 10 * 1024 * 1024, 2);
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -649,14 +638,9 @@ mod tests {
     }
 
     #[test]
-    fn brotli_ratio_exceeded_above_threshold() {
+    fn brotli_ratio_exceeded() {
         let original: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
         let compressed = brotli_compress(&original);
-        assert!(
-            compressed.len() >= crate::encoding::RATIO_ACTIVATION_THRESHOLD,
-            "fixture must exceed the legacy fixture threshold (compressed={})",
-            compressed.len()
-        );
         let result = decompress_bounded(&compressed, Format::Brotli, 10 * 1024 * 1024, 2);
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -666,8 +650,7 @@ mod tests {
 
     #[test]
     fn ratio_enforced_for_small_input() {
-        /* Inputs below the historical threshold are still subject to the
-         * ratio ceiling. */
+        /* Small compressed inputs are subject to the same ratio ceiling. */
         let original = vec![b'T'; 100];
         let compressed = gzip_compress(&original);
         let result = decompress_bounded(&compressed, Format::Gzip, 10 * 1024, 2);
@@ -703,7 +686,7 @@ mod tests {
 
     #[test]
     fn deflate_accepts_raw_rfc1951_input() {
-        let original = b"<html><body>legacy raw deflate payload</body></html>";
+        let original = b"<html><body>raw deflate payload</body></html>";
         let raw = raw_deflate_compress(original);
         // Sanity: the raw stream must not carry a zlib header.
         assert!(
@@ -860,9 +843,19 @@ mod tests {
 
     #[test]
     fn format_from_u8_valid() {
-        assert_eq!(Format::from_u8(0), Some(Format::Gzip));
-        assert_eq!(Format::from_u8(1), Some(Format::Deflate));
-        assert_eq!(Format::from_u8(2), Some(Format::Brotli));
+        assert_eq!(Format::from_u8(MARKDOWN_FORMAT_GZIP), Some(Format::Gzip));
+        assert_eq!(
+            Format::from_u8(MARKDOWN_FORMAT_DEFLATE),
+            Some(Format::Deflate)
+        );
+        assert_eq!(
+            Format::from_u8(MARKDOWN_FORMAT_BROTLI),
+            Some(Format::Brotli)
+        );
+
+        assert_eq!(Format::Gzip as u8, MARKDOWN_FORMAT_GZIP);
+        assert_eq!(Format::Deflate as u8, MARKDOWN_FORMAT_DEFLATE);
+        assert_eq!(Format::Brotli as u8, MARKDOWN_FORMAT_BROTLI);
     }
 
     #[test]

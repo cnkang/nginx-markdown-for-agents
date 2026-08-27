@@ -17,6 +17,8 @@ graph TB
     Root --> Examples["examples/"]
     Root --> Tests["tests/"]
     Root --> Tools["tools/"]
+    Root --> Packaging["packaging/"]
+    Root --> Schemas["schemas/"]
     Root --> Makefile["Makefile"]
 
     Components --> NginxMod["nginx-module/<br/>C source + tests"]
@@ -50,6 +52,8 @@ graph TB
 | `examples/nginx-configs/` | Copy-paste-oriented NGINX configuration examples |
 | `tests/corpus/` | Shared HTML corpus used by converter and end-to-end validation |
 | `tools/` | Project scripts grouped by purpose such as docs, CI, corpus, packaging, and E2E verification |
+| `packaging/` | Package metadata, repository scripts, nFPM configuration, and packaging documentation |
+| `schemas/` | Versioned observability and contract schemas consumed by validators and generated artifacts |
 | `Makefile` | Top-level build and test entrypoints |
 
 ## Runtime Code Map

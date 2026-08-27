@@ -28,7 +28,7 @@ flowchart TD
     IncreaseLimit --> Verify
     DisableStream --> Verify
     Verify --> Monitor["Monitor metrics<br/>and error logs"]
-    
+
     style Trigger fill:#c00,color:#fff
     style Verify fill:#090,color:#fff
 ```
@@ -424,11 +424,19 @@ grep "markdown decision:" /var/log/nginx/error.log | \
   grep "reason=disabled" | tail -10
 ```
 
-For Method C (restoring fail-open), check that `failed_closed` entries stop and `failed_open` entries appear instead:
+For Method C (restoring fail-open), trigger a known conversion failure first and
+confirm that the module returns the original HTML. Then verify the corresponding
+decision-log entries after the old workers drain:
 
 ```bash
+curl -sS -H 'Accept: text/markdown' http://localhost/known-failing-path \
+  | grep -F '<html'
+
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -E "reason=failed_(open|closed)" | tail -10
+  grep "reason=failed_closed" | tail -10
+
+grep "markdown decision:" /var/log/nginx/error.log | \
+  grep "reason=failed_open" | tail -10
 ```
 
 ### 2. Confirm Metrics Stop Incrementing
@@ -436,15 +444,17 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 For Methods A and B, conversion metrics for the affected scope should stop incrementing:
 
 ```bash
-# Take a snapshot
-curl -s http://localhost/markdown-metrics | \
-  grep -E "conversions_(attempted|succeeded|failed)"
+# Take a snapshot of the frozen metric families.
+curl -s -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
+  grep -E 'nginx_markdown_(conversion_attempts_total|conversion_deliveries_total|requests_total\{[^}]*outcome="(failed_[^"]+|aborted)"|streaming_events_total)'
 
 # Wait 60 seconds, then compare
 sleep 60
 
-curl -s http://localhost/markdown-metrics | \
-  grep -E "conversions_(attempted|succeeded|failed)"
+curl -s -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
+  grep -E 'nginx_markdown_(conversion_attempts_total|conversion_deliveries_total|requests_total\{[^}]*outcome="(failed_[^"]+|aborted)"|streaming_events_total)'
 ```
 
 The counters should remain unchanged (or increase only for scopes that are still enabled).
@@ -530,7 +540,7 @@ connections drain or close (see the reload semantics above).
 |---------|------|--------|---------|
 | 0.9.2 | 2026-08-15 | Kang | Reload semantics distinguish new workers from keep-alive connections; Accept header on metric curls |
 | 0.9.2 | 2026-08-15 | Hermes | Use current metric names in the pre-rollback metric check |
-| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire the large-response threshold directive) |
 | 0.9.1 | 2026-07-05 | Kiro | Added 0.9.1 performance optimization rollback cross-reference |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

@@ -1,7 +1,7 @@
 /*
  * Test: reason_code_ffi
  *
- * Validates: REQ-0700-RUST-006 (B06.2)
+ * Validates: (reason-code FFI)
  *
  * Tests the C-side FFI accessor wrappers that call through to the
  * Rust-defined reason code enum.  Since unit tests do not link against
@@ -81,7 +81,7 @@ static const char *stub_metric_keys[] = {
     "markdown_failed_closed_total",  /* 17 */
     "markdown_errors_total",         /* 18 */
     "markdown_errors_total",         /* 19 */
-    "markdown_errors_total",         /* 20 */
+    "markdown_skipped_total",        /* 20 — overload */
     "markdown_errors_total",         /* 21 */
     "markdown_errors_total",         /* 22 */
     "markdown_errors_total",         /* 23 */
@@ -188,11 +188,9 @@ test_get_reason_code_str_valid(void)
 }
 
 
-/*
- * Test: lowercase and legacy reason names map to BYPASS_NO_TRANSFORM (25)
- */
+/* Test: canonical reason names map to BYPASS_NO_TRANSFORM (25). */
 static void
-test_bypass_no_transform_reverse_mapping(void)
+test_bypass_no_transform_mapping(void)
 {
     ngx_int_t  code;
 
@@ -207,10 +205,10 @@ test_bypass_no_transform_reverse_mapping(void)
     code = ngx_http_markdown_diagnostics_reason_to_code(
         (const u_char *) "BYPASS_NO_TRANSFORM",
         sizeof("BYPASS_NO_TRANSFORM") - 1);
-    TEST_ASSERT(code == 25,
-                "BYPASS_NO_TRANSFORM alias should map to code 25");
+    TEST_ASSERT(code == -1,
+                "legacy uppercase reason names must not be accepted");
 
-    TEST_PASS("BYPASS_NO_TRANSFORM reverse mappings are compatible");
+    TEST_PASS("canonical bypass_no_transform mapping is correct");
 }
 
 
@@ -396,6 +394,29 @@ test_bypass_no_transform_metric_key(void)
 
 
 /*
+ * Test: code 20 (overload) is an eligibility skip metric.
+ */
+static void
+test_overload_metric_key(void)
+{
+    ngx_str_t  str;
+    ngx_int_t  rc;
+
+    TEST_SUBSECTION("overload metric key");
+
+    rc = ngx_http_markdown_get_reason_code_metric_key(20, &str);
+    TEST_ASSERT(rc == NGX_OK,
+                "code 20 metric key should return NGX_OK");
+    TEST_ASSERT(str.len == sizeof("markdown_skipped_total") - 1,
+                "code 20 metric key length should match expected value");
+    TEST_ASSERT(memcmp(str.data, "markdown_skipped_total", str.len) == 0,
+                "code 20 metric key should be markdown_skipped_total");
+
+    TEST_PASS("overload metric key correct");
+}
+
+
+/*
  * Test: all valid codes produce non-empty strings
  */
 static void
@@ -439,11 +460,11 @@ int
 main(void)
 {
     printf("\n========================================\n");
-    printf("reason_code_ffi Tests (B06.2)\n");
+    printf("reason_code_ffi Tests \n");
     printf("========================================\n");
 
     test_get_reason_code_str_valid();
-    test_bypass_no_transform_reverse_mapping();
+    test_bypass_no_transform_mapping();
     test_encoding_header_invalid_reverse_mapping();
     test_get_reason_code_str_invalid();
     test_get_reason_code_str_null_output();
@@ -451,6 +472,7 @@ main(void)
     test_get_reason_code_metric_key_invalid();
     test_reason_code_total_count();
     test_bypass_no_transform_metric_key();
+    test_overload_metric_key();
     test_all_codes_produce_strings();
 
     printf("\n========================================\n");

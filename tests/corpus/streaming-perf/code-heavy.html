@@ -11,7 +11,7 @@
 <h2>JavaScript Example</h2>
 <pre><code class="language-javascript">function fibonacci(n) {
     if (n &lt;= 1) return n;
-    
+
     let prev = 0, curr = 1;
     for (let i = 2; i &lt;= n; i++) {
         const next = prev + curr;
@@ -29,12 +29,12 @@ console.log(fibonacci(10));
 <pre><code class="language-python">def quicksort(arr: list[int]) -&gt; list[int]:
     if len(arr) &lt;= 1:
         return arr
-    
+
     pivot = arr[len(arr) // 2]
     left = [x for x in arr if x &lt; pivot]
     middle = [x for x in arr if x == pivot]
     right = [x for x in arr if x &gt; pivot]
-    
+
     return quicksort(left) + middle + quicksort(right)
 
 # Test
@@ -45,7 +45,7 @@ print(quicksort([3, 6, 8, 10, 1, 2, 1]))
 <pre><code class="language-rust">fn binary_search(arr: &amp;[i32], target: i32) -&gt; Option&lt;usize&gt; {
     let mut left = 0;
     let mut right = arr.len();
-    
+
     while left &lt; right {
         let mid = left + (right - left) / 2;
         match arr[mid].cmp(&amp;target) {
