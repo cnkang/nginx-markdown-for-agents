@@ -223,7 +223,7 @@ test-nginx-unit-sanitize-smoke:
 .PHONY: test-package-compatibility
 test-package-compatibility:
 	@echo "=== Package Compatibility Suites ==="
-	@for t in test-preinstall-version-policy.sh test-package-removal-guard.sh test-maintainer-script-executable-trust.sh; do \
+	@for t in test-preinstall-version-policy.sh test-package-removal-guard.sh test-maintainer-script-executable-trust.sh test-deb-upgrade-invariant.sh; do \
 	  echo "  [$$t]"; \
 	  bash packaging/tests/$$t || { echo "FAIL: $$t" >&2; exit 1; }; \
 	done
@@ -721,6 +721,7 @@ release-gates-check-070:
 				mkdir -p dist; \
 				pkg_version="$${PKG_VERSION:-0.9.2}"; \
 				nginx_version="$${NGINX_VERSION:-1.26.3}"; \
+				nginx_version_ceil="$$(awk 'BEGIN { split(ARGV[1], p, "."); printf "%d.%d.%d", p[1], p[2], p[3] + 1 }' "$$nginx_version")"; \
 				rpm_nginx_evr="$${RPM_NGINX_EVR:-1:$$nginx_version}"; \
 				nfpm_preinstall="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preinstall.XXXXXX")"; \
 				nfpm_config="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-nfpm.XXXXXX")"; \
@@ -730,10 +731,12 @@ release-gates-check-070:
 				sed "s|./packaging/nfpm/scripts/preinstall.sh|$$nfpm_preinstall|" \
 					packaging/nfpm/nfpm.yaml > "$$nfpm_config"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
+					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
 					RPM_NGINX_EVR="$$rpm_nginx_evr" NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager deb \
 					--target "dist/nginx-module-markdown-for-agents_$${pkg_version}_nginx-$${nginx_version}_$${nfpm_arch}.deb"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
+					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
 					RPM_NGINX_EVR="$$rpm_nginx_evr" NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager rpm \
 					--target "dist/nginx-module-markdown-for-agents-$${pkg_version}-nginx$${nginx_version}-1.$${rpm_arch}.rpm"; \

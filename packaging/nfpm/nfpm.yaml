@@ -40,6 +40,7 @@ overrides:
   deb:
     depends:
       - "nginx (>= ${NGINX_VERSION})"
+      - "nginx (<< ${NGINX_VERSION_CEIL})"
       - "libbrotli1"
   rpm:
     depends:

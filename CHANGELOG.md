@@ -90,8 +90,10 @@ before/after examples.
   trailer list (`ngx_http_markdown_clear_trailers`).
 - DEB/RPM packages now require the EXACT NGINX version that builds them. The
   `preinstall.sh` script rejects any full-version difference
-  (including a patch release) as fatal, the DEB/RPM dependency metadata
-  pins the exact version (`nginx (= X.Y.Z)` / `nginx = 1:X.Y.Z`), and the
+  (including a patch release) as fatal, the DEB dependency metadata keeps the
+  pinned version installable across distro revisions while refusing any
+  next-patch NGINX upgrade (`nginx (>= X.Y.Z)` plus `nginx (<< X.Y.Z+1)`),
+  the RPM dependency pins the exact version (`nginx = 1:X.Y.Z`), and the
   project no longer makes the misleading "--with-compat same-minor
   compatibility" claim.
   NGINX's dynamic module loader rejects a version mismatch before

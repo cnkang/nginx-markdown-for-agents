@@ -74,7 +74,6 @@ NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
-    'nginx (>= ${NGINX_VERSION})',
     "nginx = ${RPM_NGINX_EVR}",
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
     "packager: deb",
@@ -85,6 +84,17 @@ NFPM_REQUIRED_SNIPPETS = [
     "/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md",
     "/usr/share/licenses/nginx-markdown-for-agents/LICENSE",
 ]
+# Semantic DEB dependency contract: the exact upstream NGINX version expressed
+# as a closed interval `[X.Y.Z, X.Y.(Z+1))`.  The floor accepts distro
+# revisions of the pinned version (`1.28.3-1~bookworm`), while the exclusive
+# ceiling refuses any next-patch NGINX upgrade that would break the dynamic
+# module ABI.  The validator parses the constraints and probes the interval
+# with dpkg-compatible version comparisons instead of matching literal text.
+_NGINX_UPSTREAM_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+_DEB_DEP_LINE_RE = re.compile(r'^\s*-\s+"?(nginx[^"]*)"?')
+_NGINX_DEP_RELATION_RE = re.compile(
+    r"^nginx\s*\(\s*(>=|<<|<=|=|>>|>)\s*([^)\s]+)\s*\)$"
+)
 NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN = (
     r'src: "\./packaging/nfpm/modules-available/mod-markdown\.conf"\n'
     r'\s+dst: "/usr/share/nginx/modules-available/mod-markdown\.conf"\n'
@@ -392,6 +402,194 @@ def _check_container_bash_shell(
         )
 
 
+def _dpkg_version_key(version: str) -> tuple:
+    """Return a sort key that orders Debian versions like dpkg does.
+
+    Debian version comparison splits the version into an optional epoch, an
+    upstream part, and a revision (the part after the last hyphen).  The
+    upstream and revision parts compare segment-wise: maximal non-digit
+    prefixes compare lexically, digit runs compare numerically, and the
+    shorter part loses against one that continues with a newer segment.
+    This key only needs to order the version shapes that appear in the
+    nginx.org repository (`X.Y.Z`, `X.Y.Z-R~distro`), which the full dpkg
+    algorithm covers for these inputs.
+    """
+
+    def _split_epoch(part: str) -> tuple[int, str]:
+        if ":" in part:
+            epoch, _, rest = part.partition(":")
+            return int(epoch), rest
+        return 0, part
+
+    def _segment_key(part: str) -> tuple:
+        # Split into alternating non-digit and digit segments; digits compare
+        # numerically (missing digit segment compares as zero).
+        segments: list[tuple[int, str, int]] = []
+        idx = 0
+        while idx < len(part):
+            if part[idx].isdigit():
+                num = 0
+                while idx < len(part) and part[idx].isdigit():
+                    num = num * 10 + int(part[idx])
+                    idx += 1
+                segments.append((1, "", num))
+            else:
+                start = idx
+                while idx < len(part) and not part[idx].isdigit():
+                    idx += 1
+                segments.append((0, part[start:idx], 0))
+        return (0, tuple(segments), 0)
+
+    def _part_key(part: str) -> tuple:
+        return _segment_key(part)
+
+    epoch, upstream = _split_epoch(version)
+    if "-" in upstream:
+        upstream_part, _, debian_part = upstream.rpartition("-")
+    else:
+        upstream_part, debian_part = upstream, ""
+    return (epoch, _part_key(upstream_part), _part_key(debian_part))
+
+
+def _dpkg_version_satisfies(candidate: str, relation: str, target: str) -> bool:
+    """Evaluate a Debian dependency relation with dpkg-compatible ordering."""
+    key_c = _dpkg_version_key(candidate)
+    key_t = _dpkg_version_key(target)
+    if key_c > key_t:
+        cmp = 1
+    elif key_c < key_t:
+        cmp = -1
+    else:
+        cmp = 0
+    return {
+        "<=": cmp <= 0,
+        ">=": cmp >= 0,
+        "<<": cmp < 0,
+        ">>": cmp > 0,
+        "=": cmp == 0,
+        "<": cmp < 0,
+        ">": cmp > 0,
+    }[relation]
+
+
+def _parse_nfpm_deb_depends(content: str) -> list[str]:
+    """Extract the DEB `depends` entries of the deb: overrides block."""
+    depends: list[str] = []
+    in_depends = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("depends:"):
+            in_depends = True
+            continue
+        if in_depends:
+            if stripped.startswith("- "):
+                match = _DEB_DEP_LINE_RE.match(line)
+                if match:
+                    depends.append(match.group(1).strip())
+            elif stripped and not stripped.startswith("-"):
+                in_depends = False
+    return depends
+
+
+def _parse_nginx_dep_constraints(depends: list[str]) -> dict[str, str]:
+    """Return the nginx relation constraints found in a depends list."""
+    constraints: dict[str, str] = {}
+    for dep in depends:
+        match = _NGINX_DEP_RELATION_RE.match(dep.strip())
+        if match:
+            constraints[match.group(1)] = match.group(2)
+    return constraints
+
+
+def validate_nfpm_deb_dependency_contract(
+    content: str,
+) -> tuple[bool, list[str]]:
+    """Prove the DEB nginx dependency interval preserves the exact-ABI
+    invariant.
+
+    The nFPM DEB overrides must express the pinned upstream version as
+    `nginx (>= X.Y.Z)` plus `nginx (<< X.Y.Z+1)`.  The check resolves the
+    `${NGINX_VERSION}`/`${NGINX_VERSION_CEIL}` placeholders by simulating the
+    release substitution (CEIL = next patch), then probes the interval the way
+    a package solver would:
+
+    * `X.Y.Z` satisfies the interval (the pinned install works);
+    * `X.Y.Z-1~distro` satisfies the interval (distro revisions work);
+    * `X.Y.Z+1` does NOT satisfy the interval (a plain NGINX patch upgrade
+      must force a matching module upgrade);
+    * `X.Y.(Z-1)` does not satisfy the interval (downgrades refuse).
+    """
+    errors: list[str] = []
+    depends = _parse_nfpm_deb_depends(content)
+    if not depends:
+        return False, ["no DEB depends entries found in the deb overrides block"]
+
+    constraints = _parse_nfpm_deb_depends_constraints(depends)
+    if constraints is None:
+        return False, ["could not parse the nginx dependency constraints"]
+
+    floor_value = constraints.get(">=")
+    ceil_value = constraints.get("<<")
+    if floor_value is None or ceil_value is None:
+        return (
+            False,
+            [
+                "DEB nginx dependency must use an interval floor (>=) and an "
+                f"exclusive ceiling (<<); found relations {sorted(constraints)}"
+            ],
+        )
+
+    pinned = floor_value.replace("${NGINX_VERSION}", "1.28.3")
+    ceil = ceil_value.replace("${NGINX_VERSION_CEIL}", "1.28.4")
+    if not _NGINX_UPSTREAM_VERSION_RE.match(pinned):
+        errors.append(f"floor version {floor_value!r} is not an upstream X.Y.Z version")
+        return False, errors
+    expected_ceil = _next_patch_version(pinned)
+    if ceil != expected_ceil:
+        errors.append(
+            f"ceiling {ceil_value!r} does not equal the pinned version's next "
+            f"patch ({expected_ceil})"
+        )
+        return False, errors
+
+    probes = [
+        ("1.28.3", True, "pinned upstream version satisfies"),
+        ("1.28.3-1~bookworm", True, "distro revision satisfies"),
+        ("1.28.4", False, "next patch must not satisfy"),
+        ("1.28.4-1~bookworm", False, "next patch with distro revision must not satisfy"),
+        ("1.30.0", False, "newer major must not satisfy"),
+        ("1.28.2", False, "previous patch must not satisfy"),
+        ("1.26.3", False, "older release must not satisfy"),
+    ]
+    for candidate, expected, label in probes:
+        in_interval = _dpkg_version_satisfies_interval(candidate, pinned, ceil)
+        if in_interval != expected:
+            errors.append(
+                f"version {candidate} unexpectedly "
+                f"{'satisfies' if in_interval else 'does not satisfy'} the "
+                f"interval [{pinned}, {ceil}) (expected {expected}: {label})"
+            )
+    return (not errors), errors
+
+
+def _parse_nfpm_deb_depends_constraints(depends: list[str]) -> dict[str, str] | None:
+    """Wrapper kept for symmetry with the other parser helpers."""
+    return _parse_nginx_dep_constraints(depends)
+
+
+def _dpkg_version_satisfies_interval(
+    candidate: str, floor: str, ceil: str
+) -> bool:
+    return _dpkg_version_satisfies(candidate, ">=", floor) and _dpkg_version_satisfies(
+        candidate, "<<", ceil
+    )
+
+
+def _next_patch_version(version: str) -> str:
+    major, minor, patch = version.split(".")
+    return f"{major}.{minor}.{int(patch) + 1}"
+
+
 def validate_nfpm_config(result: ValidationResult) -> None:
     """Validate the nFPM config used by release-packages.yml."""
     check_id = "nfpm:exists"
@@ -407,6 +605,17 @@ def validate_nfpm_config(result: ValidationResult) -> None:
             result.pass_(sid, f"nFPM config contains {snippet}")
         else:
             result.fail(sid, f"nFPM config missing {snippet}")
+    deb_ok, deb_errors = validate_nfpm_deb_dependency_contract(content)
+    if deb_ok:
+        result.pass_(
+            "nfpm:deb-dependency-interval",
+            "DEB nginx dependency interval preserves the exact NGINX ABI "
+            "(pinned version and distro revisions satisfy; next patch and "
+            "older versions do not)",
+        )
+    else:
+        for error in deb_errors:
+            result.fail("nfpm:deb-dependency-interval", error)
     if re.search(NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN, content):
         result.pass_(
             "nfpm:modules-available:deb-only",

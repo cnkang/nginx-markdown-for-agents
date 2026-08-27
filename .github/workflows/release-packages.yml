@@ -759,10 +759,21 @@ jobs:
           DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
           RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
 
-          # Export to GITHUB_ENV for subsequent steps
+          # Export to GITHUB_ENV for subsequent steps.  NGINX_VERSION_CEIL is
+          # the exclusive upper bound of the exact upstream version (X.Y.Z →
+          # X.Y.Z+1), so the DEB dependency interval accepts distro revisions
+          # of the pinned version while refusing any next-patch NGINX upgrade
+          # that would break the dynamic module ABI.
+          NGINX_VERSION_CEIL="$(
+            awk 'BEGIN {
+              split(ARGV[1], parts, ".");
+              printf "%d.%d.%d", parts[1], parts[2], parts[3] + 1;
+            }' "${NGINX_VERSION}"
+          )"
           {
             echo "PKG_VERSION=${PKG_VERSION}"
             echo "NGINX_VERSION=${NGINX_VERSION}"
+            echo "NGINX_VERSION_CEIL=${NGINX_VERSION_CEIL}"
             echo "RPM_NGINX_EVR=${RPM_NGINX_EVR}"
             echo "NFPM_ARCH=${NFPM_ARCH}"
             echo "RPM_ARCH=${RPM_ARCH}"

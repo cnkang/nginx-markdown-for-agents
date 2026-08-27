@@ -24,14 +24,16 @@ Key points:
 
 ### Package Dependency Scope
 
-The package manager dependency `nginx (>= ${NGINX_VERSION})` allows
-installation alongside any NGINX version at or above the build target.
-However, **runtime compatibility is only verified for the exact NGINX
-versions listed in the build matrix below**. Loading the module on any other
-NGINX version will likely fail with a binary compatibility signature mismatch
-(see "Version Mismatch Error Troubleshooting" below).
-Install the package only on the NGINX version matching the artifact
-filename.
+The package manager dependency pins the exact upstream NGINX version.  The DEB
+metadata uses the closed interval `nginx (>= ${NGINX_VERSION})` plus
+`nginx (<< next-patch)`, so distro revisions of the pinned version stay
+installable while a plain NGINX patch upgrade no longer satisfies the
+dependency — the package manager keeps the module and NGINX versions in lock
+step.  The RPM metadata pins the exact version (`nginx = 1:X.Y.Z`).
+**Runtime compatibility is only verified for the exact NGINX versions listed
+in the build matrix below**. Loading the module on any other NGINX version
+will fail with a version mismatch before signature checks. Install the
+package only on the NGINX version matching the artifact filename.
 
 ---
 
