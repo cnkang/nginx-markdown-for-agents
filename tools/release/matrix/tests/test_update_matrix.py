@@ -1202,8 +1202,8 @@ def test_canonical_dynamic_entry_existing_row_preserves_arch_key():
     assert row["arch"] == "amd64"
     assert row["nginx_version"] == "1.24.0"
     assert row["libc"] == "glibc"
-    # The projected row must still resolve a complete identity (the P1
-    # regression: `entry.pop("arch")` made _matrix_entry_identity raise).
+    # The projected row must still resolve a complete identity; removing
+    # `arch` previously made _matrix_entry_identity raise.
     assert um._matrix_entry_identity(row) == ("1.24.0", "glibc", "x86_64")
     assert row["feature_manifest_digest"] == um._feature_manifest_digest()
     assert row["abi_version"] == um._frozen_abi_version()

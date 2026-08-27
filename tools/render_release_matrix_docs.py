@@ -1472,8 +1472,13 @@ def main() -> int:
             print(f"  - {err}", file=sys.stderr)
         return 2
 
-    # Get normalized entries
-    entries = get_entries(matrix_data)
+    # Get normalized entries. Invalid alias/shape data is a schema failure,
+    # not an uncaught traceback from the renderer.
+    try:
+        entries = get_entries(matrix_data)
+    except (KeyError, TypeError, ValueError) as exc:
+        print(f"ERROR: Invalid release matrix entry: {exc}", file=sys.stderr)
+        return 2
     if not entries:
         print("WARNING: No entries found in release matrix.", file=sys.stderr)
 

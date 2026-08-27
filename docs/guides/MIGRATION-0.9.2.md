@@ -40,11 +40,9 @@ memory_budget=64m
 }
 ```
 
-The watcher emits `legacy line format detected - migrate to JSON v1` once
-per worker when the first non-whitespace byte of the watched file is not `{`.
-Leading whitespace before a JSON object therefore reaches JSON parsing instead
-of triggering the legacy-file classification. Do not treat a legacy file as a
-successful JSON reload. Migrate it and verify the next reload through the
+The 0.9.2 watcher accepts only JSON v1. The watcher rejects a legacy line-format
+file. The file does not trigger a successful reload or replace the active or
+last-known-good snapshot. Migrate it and verify the next reload through the
 diagnostics endpoint.
 
 The JSON contract is fail-closed: unknown keys, duplicate keys, unsupported
@@ -77,6 +75,41 @@ schema is [`schemas/diagnostics.schema.json`](../../schemas/diagnostics.schema.j
 Malformed, unknown, and excessively deep `Content-Encoding` chains follow the
 configured `markdown_error_policy`. Only `pass` forwards the original
 response. `fail_closed` and status policies reject it.
+
+### Historical reason-code names
+
+The active 0.9.2 registry accepts only canonical lowercase reason keys. The
+following names occurred in pre-0.9.2 logs or dashboards. Operators must
+migrate them when alerts or queries use those names:
+
+| Historical name | 0.9.2 canonical reason |
+|---|---|
+| `CONVERTED`, `ELIGIBLE_CONVERTED` | `converted` |
+| `SKIPPED_ACCEPT`, `SKIP_ACCEPT` | `skipped_accept` |
+| `SKIPPED_NO_ACCEPT` | `skipped_no_accept` |
+| `SKIPPED_CONDITIONAL` | `skipped_conditional` |
+| `FAILED_DECOMPRESSION` | `decompression_error` |
+| `DECOMPRESSION_BUDGET_EXCEEDED` | `decompression_budget_exceeded` |
+| `DECOMPRESSION_FORMAT_ERROR` | `decompression_format_error` |
+| `DECOMPRESSION_TRUNCATED_INPUT` | `decompression_truncated_input` |
+| `DECOMPRESSION_IO_ERROR` | `decompression_io_error` |
+| `PARSE_TIMEOUT` | `timeout` |
+| `PARSE_BUDGET_EXCEEDED` | `budget_exceeded` |
+| `REPLAY_BUFFER_ERROR` | `replay_error` |
+| `SKIPPED_ACCEPT_REJECT` | `skipped_accept_reject` |
+| `FFI_CALL_ERROR`, `FAIL_SYSTEM` | `ffi_panic` |
+| `NOT_ELIGIBLE` | `not_eligible` |
+| `DISABLED` | `disabled` |
+| `FAILED_OPEN`, `ELIGIBLE_FAILED_OPEN` | `failed_open` |
+| `FAILED_CLOSED`, `ELIGIBLE_FAILED_CLOSED` | `failed_closed` |
+| `FAIL_CONVERSION` | `conversion_error` |
+| `FAIL_RESOURCE_LIMIT` | `memory_budget_exceeded` |
+| `BYPASS_NO_TRANSFORM` | `bypass_no_transform` |
+
+Former streaming lifecycle labels are not reason aliases. They are now
+lowercase implementation events in the structured `event=` field, such as
+`engine_streaming`, `streaming_convert`, `streaming_budget_exceeded`, and
+`streaming_precommit_failopen`.
 
 ---
 
@@ -432,6 +465,7 @@ After 0.9.2, these 25 directives constitute the frozen public surface:
 After upgrading:
 
 ```bash
+set -euo pipefail
 # Validate configuration (must pass with no removed directives)
 sudo nginx -t
 
@@ -439,11 +473,12 @@ sudo nginx -t
 bash tools/doctor/nginx-markdown-doctor.sh
 
 # Verify metrics endpoint still works
-curl -s -H 'Accept: text/plain; version=0.0.4' \
-  http://localhost/markdown-metrics | head -5
+curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | sed -n '1,5p'
 
 # Verify diagnostics endpoint
-curl -s http://localhost/nginx-markdown/diagnostics | python3 -m json.tool | head
+curl --fail-with-body -sS http://localhost/nginx-markdown/diagnostics \
+  | python3 -m json.tool >/dev/null
 ```
 
 ---

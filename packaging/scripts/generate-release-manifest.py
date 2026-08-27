@@ -244,6 +244,10 @@ def build_manifest(
     artifact_dir = Path(validate_read_path(artifact_dir, purpose="release artifact directory"))
     if version:
         version = validate_version(version, "--version")
+    if tag is None and ref:
+        tag = tag_from_ref(ref)
+    tag_version = validate_version(version_from_tag(tag), "--tag") if tag else None
+    expected_package_version = version or tag_version
 
     # Discover packages — sort all files globally for deterministic ordering
     # that matches the validator's global-filename-sort check.
@@ -262,7 +266,7 @@ def build_manifest(
     packages = []
     detected_version = version
     for f in all_files:
-        entry = parse_package(f, expected_version=version)
+        entry = parse_package(f, expected_version=expected_package_version)
         packages.append(entry)
         # dynamic-module tarballs carry nginx_version/libc/arch instead of a
         # project version; only deb/rpm entries can supply the version.
@@ -279,8 +283,6 @@ def build_manifest(
     commit_sha = gi["commit"]
 
     # Tag / version
-    if tag is None and ref:
-        tag = tag_from_ref(ref)
     tag_version = None
     if tag:
         tag_version = validate_version(version_from_tag(tag), "--tag")

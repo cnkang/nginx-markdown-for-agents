@@ -181,6 +181,80 @@ check_pattern() {
     return 0
 }
 
+# is_function_definition — identify a shell function declaration.
+# Arguments: $1 = trimmed source line
+# Returns: 0 when the line starts a function definition, 1 otherwise
+is_function_definition() {
+    local line="$1"
+
+    if [[ "$line" =~ ^[a-zA-Z_][a-zA-Z_0-9]*[[:space:]]*\(\)[[:space:]]*(\{.*)?$ ]]; then
+        return 0
+    fi
+    if [[ "$line" =~ ^function[[:space:]]+[a-zA-Z_][a-zA-Z_0-9]*[[:space:]]*(\(\)[[:space:]]*)?(\{.*)?$ ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# function_brace_delta — count braces on a function source line.
+# This keeps function-body skipping correct for one-line definitions and
+# nested brace blocks while preserving the checker's Bash 3.2 portability.
+# Arguments: $1 = source line
+# Outputs: the net opening-brace delta
+function_brace_delta() {
+    local line="$1"
+    local braces
+    local opening
+    local closing
+
+    braces="$(printf '%s\n' "$line" | sed 's/[^{}]//g')"
+    opening="${braces//\}/}"
+    closing="${braces//\{}"
+    printf '%s\n' "$(( ${#opening} - ${#closing} ))"
+    return 0
+}
+
+# skip_function_line — update function-body state for the trusted-PATH
+# passes. Function definitions are declarations; commands in their bodies do
+# not resolve or execute until a later top-level call.
+# Arguments: $1 = source line; $2 = trimmed source line
+# Uses/updates globals FUNCTION_DEPTH and FUNCTION_PENDING.
+# Returns: 0 when the current line belongs to a function definition/body
+skip_function_line() {
+    local line="$1"
+    local trimmed="$2"
+    local delta=0
+
+    if [[ "$FUNCTION_DEPTH" -gt 0 ]]; then
+        delta="$(function_brace_delta "$line")"
+        FUNCTION_DEPTH=$((FUNCTION_DEPTH + delta))
+        return 0
+    fi
+
+    if [[ "$FUNCTION_PENDING" -eq 1 ]]; then
+        if [[ "$trimmed" == *"{"* ]]; then
+            FUNCTION_DEPTH=0
+            delta="$(function_brace_delta "$line")"
+            FUNCTION_DEPTH=$((FUNCTION_DEPTH + delta))
+            FUNCTION_PENDING=0
+        fi
+        return 0
+    fi
+
+    if is_function_definition "$trimmed"; then
+        if [[ "$trimmed" == *"{"* ]]; then
+            FUNCTION_DEPTH=0
+            delta="$(function_brace_delta "$line")"
+            FUNCTION_DEPTH=$((FUNCTION_DEPTH + delta))
+        else
+            FUNCTION_PENDING=1
+        fi
+        return 0
+    fi
+
+    return 1
+}
+
 # check_file — run all forbidden pattern checks against a single file
 # Arguments: $1 = file path
 # Returns: 0 always (violations tracked in VIOLATION_COUNT), 2 on file error
@@ -309,6 +383,8 @@ check_trusted_path() {
     local line=""
     local trimmed=""
     local trusted_path_root_initialized=0
+    FUNCTION_DEPTH=0
+    FUNCTION_PENDING=0
 
     # Pass 1: find a literal trusted PATH assignment in the top-level
     # prologue.  Do not accept assignments inside functions or control-flow
@@ -319,6 +395,10 @@ check_trusted_path() {
 
         trimmed="${line#"${line%%[![:space:]]*}"}"
         if [[ -z "$trimmed" || "$trimmed" == "#"* ]]; then
+            continue
+        fi
+
+        if skip_function_line "$line" "$trimmed"; then
             continue
         fi
 
@@ -360,6 +440,8 @@ check_trusted_path() {
     done < "$stripped_tmp"
 
     # Pass 2: find first external command usage
+    FUNCTION_DEPTH=0
+    FUNCTION_PENDING=0
     line_num=0
     while IFS= read -r line || [[ -n "$line" ]]; do
         line_num=$((line_num + 1))
@@ -372,6 +454,10 @@ check_trusted_path() {
         fi
         # Skip empty lines
         if [[ -z "$trimmed" ]]; then
+            continue
+        fi
+
+        if skip_function_line "$line" "$trimmed"; then
             continue
         fi
 
@@ -425,7 +511,7 @@ extract_rpm_post() {
     tmp_file="$(mktemp)"
     local in_post=0
 
-    while IFS= read -r line; do
+    while IFS= read -r line || [[ -n "$line" ]]; do
         case "$in_post" in
             0)
                 # Look for %post (not %postun, %posttrans)

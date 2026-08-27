@@ -52,13 +52,12 @@ before/after examples.
 - After 0.9.2, all 1.x releases maintain backward compatibility for a
   minimum of 24 months.
 - **Dynconf JSON v1 migration.** Convert legacy line-format keys
-  `markdown_filter` → `filter` and `streaming_budget` → `streaming_buffer`.
-  0.9.2 removes `memory_budget` from runtime configuration. Set static
-  `markdown_limits conversion_memory=<size>` instead. A watcher logs
-  `legacy line format detected - migrate to JSON v1` once per worker when a
-  watched file does not begin with `{`. See the
-  [breaking-change reference](docs/guides/0.9.2-breaking-changes.md) and
-  [migration guide](docs/guides/MIGRATION-0.9.2.md).
+  `markdown_filter` → `filter` and `streaming_budget` → `streaming_buffer`
+  before upgrading. 0.9.2 accepts only the JSON v1 contract. The watcher
+  rejects legacy line-format files. 0.9.2 removes `memory_budget` from runtime
+  configuration. Set static `markdown_limits conversion_memory=<size>`
+  instead. See the [breaking-change reference](docs/guides/0.9.2-breaking-changes.md)
+  and [migration guide](docs/guides/MIGRATION-0.9.2.md).
 - **Dynconf precedence and limits.** Explicit server/location values mask
   matching runtime keys and exposes them in diagnostics as `masked_keys`.
   The watcher logs each masked key. The `streaming_buffer` default is 2 MiB
@@ -67,9 +66,9 @@ before/after examples.
   `markdown_stream_flush_min` have no replacement.
 - **Content-Encoding policy.** Malformed, unknown, and excessively deep
   encoding chains follow `markdown_error_policy`. Only `pass` forwards the
-  original response. The supported `deflate` coding uses the zlib-wrapped
-  RFC 1950 format and additionally accepts raw RFC 1951 deflate as a
-  compatibility fallback for legacy servers. All three decode paths
+  original response. The supported `deflate` coding accepts the zlib-wrapped
+  RFC 1950 format and raw RFC 1951 deflate as a compatibility fallback for
+  legacy servers. All three decode paths
   (streaming, full-buffer, and the Rust chain decoder) apply the same
   sniffing decision: a valid zlib header selects zlib-wrapped, otherwise
   raw.
@@ -111,8 +110,6 @@ before/after examples.
 - C reason code constants were missing the decompression error series
   (codes 4–11). All 27 reason code constants are now synchronized between
   Rust and C.
-- `stream_state` `PRE_COMMIT` fallthrough now logs an invariant violation
-  instead of silently advancing state.
 - Prometheus `nginx_markdown_streaming_events_total{transition="fallback"}`
   now reports `reason="precommit_html_error"` (matching the logged reason at
   the fallback decision) instead of the incorrect
@@ -153,9 +150,18 @@ before/after examples.
   metric declarations, and reason codes against the declared inventory. The
   gate reads source metadata. Unit, integration, and E2E suites verify runtime
   behavior.
-- Release gates 0.9.2 (`make release-gates-check-092`), additive on 0.9.1
-  gates with the public surface source metadata/ABI drift gate and blocking
-  performance evidence against baseline 0.9.2.
+- Release gates 0.9.2 (`make release-gates-check-092`) use one current
+  candidate-bound blocking contract. Focused 0.7.0/0.8.0 compatibility checks
+  remain as regression inputs. The obsolete 0.9.0/0.9.1 wrapper chain is gone.
+
+### Removed
+
+- The project removed the standalone C/Rust streaming decision-state model and
+  its duplicate tests. Runtime streaming behavior now uses the minimal phase and
+  terminal latches required for backpressure and request lifetime.
+- The project retired the generic 0.5.0 release validator, the 0.9.0/0.9.1
+  release-chain wrappers, and duplicate fail-open/streaming E2E wrappers after
+  moving their valuable invariants into current feature-oriented gates.
 
 ## [0.9.1] - 2026-07-29
 
@@ -227,10 +233,10 @@ completing before the long-lived contract begins.
   across backpressure and request teardown.
 - Streaming decompression routing for gzip and zlib-wrapped RFC 1950 deflate
   responses under the streaming path with `markdown_auto_decompress on` and
-  `markdown_cache_validation` not `full`. Raw RFC 1951 remains outside the
-  supported 0.9.2 public contract. The project keeps the legacy C streaming
-  compatibility branch only for historical coverage and makes no compatibility
-  guarantee for it.
+  `markdown_cache_validation` not `full`. The 0.9.2 public contract accepts
+  raw RFC 1951 as the compatibility fallback when the zlib-wrapped
+  framing probe does not match. Current Rust and C paths enforce the same
+  framing and truncation rules.
   Gzip is member-aware across chunks.
 - Brotli streaming decompression: Brotli-compressed upstream responses now
   decompress incrementally via the streaming path (same as gzip/deflate) under
@@ -1187,7 +1193,7 @@ budget.
   `prune_protection_selectors`/`len`, `memory_budget` in `MarkdownOptions`.
 - ADR-0007: Streaming Engine as Default (auto mode).
 - ADR-0008: Noise Pruning Enabled by Default.
-- Migration guide: `docs/guides/streaming-default-migration.md` with rollback
+- Migration guide: `docs/archive/streaming-default-migration.md` with rollback
   instructions for both default changes.
 - Release gate validator: `tools/release/gates/validate_release_gates_060.py`
   (12 gates covering spec docs, ADRs, migration guide, directives, reason
@@ -1544,7 +1550,7 @@ agent content preservation.
 - Equivalence guarantee: single `feed` + `finalize` produces identical output to the full-buffer path
 - `max_buffer_size` field in `MarkdownOptions` C ABI struct, wired through from the NGINX `markdown_max_size` directive to control the incremental converter's memory ceiling
 - Path hit metrics (`fullbuffer_path_hits`, `incremental_path_hits`) exposed via the metrics endpoint
-- Large response design document (`LARGE_RESPONSE_DESIGN.md`) and rollout guide (`LARGE_RESPONSE_ROLLOUT.md`)
+- Large response design document (`LARGE_RESPONSE_DESIGN.md`) and archived rollout guide (`docs/archive/LARGE_RESPONSE_ROLLOUT.md`)
 - `large-100k` and `large-5m` performance tiers in `metrics-schema.json`
 - `generate_large_samples.sh` for creating large response test corpus with `--tier` filter and option validation
 - `memory_observer.sh` for cross-platform memory peak sampling with process fingerprinting to prevent PID reuse corruption

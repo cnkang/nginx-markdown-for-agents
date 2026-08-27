@@ -12,10 +12,7 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
-#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-/* Standalone header harnesses do not link the auth implementation. */
-#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 0
-#endif
+#include "markdown_converter.h"
 
 /*
  * Public module version reported in diagnostics/metrics.  This is the
@@ -78,7 +75,9 @@ ngx_http_markdown_brotli_workspace_limit(ngx_atomic_uint_t configured_limit)
 
 /*
  * Brotli decoder error classes shared by buffered and streaming paths.
- * The numeric ranges are part of brotli/decode.h's public error contract.
+ * Brotli 1.0.x reserves gaps in its error-code enum, so classify the
+ * documented format and allocation codes explicitly instead of treating
+ * contiguous numeric ranges as equivalent.
  */
 typedef enum {
     NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT = 0,
@@ -89,15 +88,34 @@ typedef enum {
 static ngx_inline ngx_http_markdown_brotli_error_class_e
 ngx_http_markdown_brotli_error_classify(int code)
 {
-    if (code >= -17 && code <= -1) {
+    switch (code) {
+    case -1:
+    case -2:
+    case -3:
+    case -4:
+    case -5:
+    case -6:
+    case -7:
+    case -8:
+    case -9:
+    case -10:
+    case -11:
+    case -12:
+    case -13:
+    case -14:
+    case -15:
+    case -16:
         return NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT;
-    }
-
-    if (code >= -30 && code <= -21) {
+    case -21:
+    case -22:
+    case -25:
+    case -26:
+    case -27:
+    case -30:
         return NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION;
+    default:
+        return NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL;
     }
-
-    return NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL;
 }
 
 /* C-side reload classification for file-system failures. */
@@ -175,13 +193,10 @@ void ngx_http_markdown_pending_output_set(ngx_chain_t **slot,
     ngx_chain_t *value);
 ngx_atomic_uint_t ngx_http_markdown_pending_output_current(void);
 
-/*
- * Processing path constants for threshold router
- */
+/* Processing path constants. */
 #define NGX_HTTP_MARKDOWN_PATH_FULLBUFFER   0  /* Full-buffer path */
-#define NGX_HTTP_MARKDOWN_PATH_INCREMENTAL  1  /* Incremental path */
 #define NGX_HTTP_MARKDOWN_TRUSTED_PROXIES_MAX  64  /* Requirement 13.1 */
-#define NGX_HTTP_MARKDOWN_PATH_STREAMING    2  /* Streaming path */
+#define NGX_HTTP_MARKDOWN_PATH_STREAMING    1  /* Streaming path */
 
 /*
  * Input disposition constants for streaming backpressure lifecycle.
@@ -360,19 +375,7 @@ ngx_http_markdown_path_selection(ngx_uint_t path,
 
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
-/*
- * Streaming fallback state machine types (v0.8.0 streaming fallback state machine).
- *
- * These types implement the pure-function decision engine defined in
- * the streaming fallback state machine design.  The state machine governs runtime transitions
- * between streaming, full-buffer, passthrough, and failure modes.
- *
- * Placement: unconditionally available (not gated by
- * MARKDOWN_STREAMING_ENABLED) because the v0.8.0 streaming architecture
- * uses these types regardless of the legacy compile-time feature flag.
- */
-
-/* State enum: every request follows exactly one deterministic path */
+/* Runtime states used by the streaming commit and post-commit latches. */
 typedef enum {
     NGX_HTTP_MD_STATE_NOT_ELIGIBLE = 0,
     NGX_HTTP_MD_STATE_STREAMING_CANDIDATE,
@@ -385,67 +388,14 @@ typedef enum {
     NGX_HTTP_MD_STATE_POST_COMMIT_ABORT
 } ngx_http_markdown_stream_state_e;
 
-/* Action enum: what the module does on each state transition */
-typedef enum {
-    NGX_HTTP_MD_ACTION_NONE = 0,
-    NGX_HTTP_MD_ACTION_PASS_HTML,
-    NGX_HTTP_MD_ACTION_REJECT_STATUS,
-    NGX_HTTP_MD_ACTION_COMMIT_HEADERS,
-    NGX_HTTP_MD_ACTION_CONTINUE_STREAMING,
-    NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
-    NGX_HTTP_MD_ACTION_SAFE_FINISH,
-    NGX_HTTP_MD_ACTION_ABORT,
-    NGX_HTTP_MD_ACTION_PASSTHROUGH
-} ngx_http_markdown_action_e;
-
-/* Reason code enum: why the transition occurred (metrics/logging) */
-typedef enum {
-    NGX_HTTP_MD_REASON_ELIGIBLE = 0,
-    NGX_HTTP_MD_REASON_NOT_ELIGIBLE,
-    NGX_HTTP_MD_REASON_PARSER_UNSUITABLE,
-    NGX_HTTP_MD_REASON_HARD_EXCLUDED,
-    NGX_HTTP_MD_REASON_FULL_DOC_FEATURE,
-    NGX_HTTP_MD_REASON_BUDGET_INIT_FAILURE,
-    NGX_HTTP_MD_REASON_REPLAY_OVERFLOW,
-    NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED,
-    NGX_HTTP_MD_REASON_STRICT_ETAG,
-    NGX_HTTP_MD_REASON_LOOK_BEHIND_OVERFLOW,
-    NGX_HTTP_MD_REASON_AUTO_RISK,
-    NGX_HTTP_MD_REASON_COMMIT_SUCCESS,
-    NGX_HTTP_MD_REASON_POST_COMMIT_ERROR,
-    NGX_HTTP_MD_REASON_ON_ERROR_PASS,
-    NGX_HTTP_MD_REASON_ON_ERROR_REJECT
-} ngx_http_markdown_reason_code_e;
-
-/* Decision struct: output of the pure decision engine */
-typedef struct {
-    ngx_http_markdown_stream_state_e  new_state;
-    ngx_http_markdown_action_e        action;
-    ngx_http_markdown_reason_code_e   reason;
-} ngx_http_markdown_decision_t;
-
 /*
- * Streaming policy mode constants (markdown_streaming directive, 0.9.0).
+ * Streaming policy mode constants (markdown_streaming directive).
  *
  * markdown_streaming off|auto|force is the sole processing-path selector.
  */
 #define NGX_HTTP_MARKDOWN_STREAMING_OFF    0
 #define NGX_HTTP_MARKDOWN_STREAMING_AUTO   1
 #define NGX_HTTP_MARKDOWN_STREAMING_FORCE  2
-
-/*
- * Profile constants removed in 0.9.2; retained as a zero-value sentinel
- * for diagnostics compatibility only.
- */
-#define NGX_HTTP_MARKDOWN_PROFILE_NONE             0
-
-#define NGX_HTTP_MARKDOWN_EXPLICIT_LIMIT_MEMORY      0x0001
-#define NGX_HTTP_MARKDOWN_EXPLICIT_LIMIT_TIMEOUT     0x0002
-#define NGX_HTTP_MARKDOWN_EXPLICIT_ERROR_POLICY      0x0004
-#define NGX_HTTP_MARKDOWN_EXPLICIT_ACCEPT_POLICY     0x0008
-#define NGX_HTTP_MARKDOWN_EXPLICIT_CACHE_VALIDATION  0x0010
-#define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY     0x0020
-#define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET     0x0080
 
 /* Canonical static-manifest explicitness bits. */
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FILTER       0x00000100
@@ -488,11 +438,6 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE 2
 
 /*
- * Threshold off sentinel — used in merge and path selection logic.
- */
-#define NGX_HTTP_MARKDOWN_THRESHOLD_OFF     0
-
-/*
  * Configuration constants for on_error / error_policy directive.
  *
  * The C runtime uses a two-field model:
@@ -506,7 +451,7 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return error status */
 
 /*
- * Default pre-commit error status for markdown_error_policy (Config V2).
+ * Default pre-commit error status for markdown_error_policy.
  *
  * markdown_error_policy fail_closed uses this (default: 502);
  * markdown_error_policy status <code> overrides it with 429 or 503.  Stored in
@@ -515,13 +460,11 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT  502
 
 /*
- * Configuration constants for markdown_accept directive (Config V2, 0.9.0).
+ * Configuration constants for markdown_accept directive.
  *
- * markdown_accept strict|wildcard|force replaces the removed
- * markdown_on_wildcard on|off directive.
  *   strict   - convert only on an explicit text/markdown Accept match
  *   wildcard - additionally convert on wildcard Accept (star/slash-star,
- *              text/star); equivalent to the old "markdown_on_wildcard on"
+ *              text/star)
  *   force    - convert regardless of the Accept header (dangerous)
  */
 #define NGX_HTTP_MARKDOWN_ACCEPT_STRICT    0  /* explicit text/markdown only */
@@ -529,8 +472,8 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_ACCEPT_FORCE     2  /* convert regardless of Accept */
 
 /*
- * Default for markdown_limits max_inflight (0.9.0 production protection
- * default).  The value is parsed and stored in Config V2; enforcement is
+ * Default for markdown_limits max_inflight.  The value is parsed and stored
+ * in the location configuration; enforcement is
  * implemented by the worker inflight guard.  Zero is rejected at config
  * parse time (must be 1..65535) — there is no "unlimited" sentinel.
  */
@@ -546,7 +489,7 @@ typedef struct {
     (1024 * 1024)
 
 /*
- * Default streaming budget for v0.8.0 stream.budget field.
+ * Default streaming budget for the stream.budget field.
  * Same value as NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT (2 MiB),
  * but available without MARKDOWN_STREAMING_ENABLED.
  */
@@ -632,9 +575,6 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3  /* Debug and above */
 
 /*
- */
-
-/*
  * Configuration source for markdown_filter directive
  */
 #define NGX_HTTP_MARKDOWN_ENABLED_UNSET    0  /* Not configured in this scope */
@@ -648,12 +588,22 @@ typedef struct {
  * Used for automatic decompression of compressed HTML before conversion.
  */
 typedef enum {
-    NGX_HTTP_MARKDOWN_COMPRESSION_NONE = 0,     /* No compression */
-    NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,         /* gzip compression */
-    NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,      /* deflate compression */
-    NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI,       /* brotli compression */
-    NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN       /* Unknown/unsupported compression */
+    NGX_HTTP_MARKDOWN_COMPRESSION_NONE = 0, /* No compression */
+    NGX_HTTP_MARKDOWN_COMPRESSION_GZIP = MARKDOWN_FORMAT_GZIP + 1,
+    NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE = MARKDOWN_FORMAT_DEFLATE + 1,
+    NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI = MARKDOWN_FORMAT_BROTLI + 1,
+    NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN = MARKDOWN_FORMAT_BROTLI + 2
 } ngx_http_markdown_compression_type_e;
+
+_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+                   == MARKDOWN_FORMAT_GZIP + 1,
+               "C compression enum must reserve NONE before FFI formats");
+_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+                   == MARKDOWN_FORMAT_DEFLATE + 1,
+               "C deflate enum must match the FFI format offset");
+_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+                   == MARKDOWN_FORMAT_BROTLI + 1,
+               "C Brotli enum must match the FFI format offset");
 
 /*
  * Active location configuration structure
@@ -661,10 +611,7 @@ typedef enum {
  * This structure holds the effective configuration directives for the
  * Markdown filter at a location scope. It supports NGINX's
  * configuration inheritance model (http, server, location); the merged
- * values are the active ones used for request handling. Zero-value
- * compatibility fields for the internal Config V2 FFI are limited to
- * the legacy fields (max_size, timeout, and the corresponding fields
- * in decompress), documented on the compat bundle below.
+ * values are the active ones used for request handling.
  *
  * Configuration defaults (defined in ngx_http_markdown_create_loc_conf):
  * - enabled: NGX_CONF_UNSET (inherit from parent)
@@ -704,7 +651,7 @@ typedef enum {
  * - limits.max_inflight:
  *   NGX_HTTP_MARKDOWN_LIMITS_MAX_INFLIGHT_DEFAULT (64)
  *
- * v0.8.0 streaming config defaults (streaming configuration directives):
+ * Streaming configuration defaults:
  * - stream.policy: auto
  * - stream.excluded_types: NULL
  */
@@ -748,21 +695,13 @@ typedef struct {
     ngx_uint_t   static_explicit_mask;
 } ngx_http_markdown_advanced_cfg_t;
 
-/*
- * Retained zero-value compatibility bundle for the internal Config V2 FFI.
- *
- * No public `markdown_profile` directive or request-path profile decision
- * exists in 0.9.2.  The bundle is not populated by the active command table
- * and remains only to keep the internal FFI layout stable.
- *
- * The bundle is value data only; it adds no request-path decision branch.
- */
+/* Configuration fields consumed by request processing and dynamic snapshots. */
 typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable/complex expression */
-    size_t       max_size;             /* legacy compat; decompressed_size via markdown_limits */
-    ngx_msec_t   timeout;              /* legacy compat; conversion_timeout via markdown_limits */
+    size_t       max_size;             /* conversion memory bound */
+    ngx_msec_t   timeout;              /* conversion timeout */
     ngx_uint_t   on_error;             /* markdown_error_policy pass|fail_closed|status (default: pass) */
     ngx_uint_t   error_status;         /* markdown_error_policy status <code> (default: 502; honored on fail-closed) */
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
@@ -773,7 +712,6 @@ typedef struct {
 
     struct {
         ngx_array_t *content_types;        /* markdown_content_types allowlist */
-        size_t       large_body_threshold; /* markdown_large_body_threshold */
         ngx_uint_t   max_inflight;         /* markdown_limits max_inflight */
     } routing;
 
@@ -788,7 +726,7 @@ typedef struct {
         ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
         size_t       max_size;             /* markdown_limits decompressed_size (default: same as max_size) */
         ngx_msec_t   parse_timeout;        /* markdown_limits parser_timeout (default: NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT = 10000ms) */
-        size_t       parser_budget;        /* legacy compat; parser_memory via markdown_limits */
+        size_t       parser_budget;        /* parser memory budget */
         ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_limits memory at this or parent level */
     } decompress;
 
@@ -810,10 +748,10 @@ typedef struct {
     ngx_http_markdown_limits_t  limits;
 
     /*
-     * Unified streaming configuration (v0.8.0+).
+     * Unified streaming configuration.
      *
      * This is the sole runtime source-of-truth for all streaming
-     * directives.  There is no compatibility layer from v0.6.x.
+     * directives.
      */
     struct {
         ngx_uint_t    policy;              /* markdown_streaming off|auto|force */
@@ -932,7 +870,7 @@ typedef struct {
     ngx_http_markdown_conf_t *dynconf_owner_conf;
     ngx_http_markdown_loc_validation_summary_t *loc_validation_summary;
     /*
-     * spec 47: http-only trusted-proxy CIDR set for forwarded-header trust.
+     * http-only trusted-proxy CIDR set for forwarded-header trust.
      * trusted_proxies is a Rust-owned opaque handle (NULL when the directive
      * is absent or set to "off"); trusted_proxies_configured records whether
      * the directive was present (so "off" can be distinguished from "unset"
@@ -1073,9 +1011,7 @@ typedef struct {
         ngx_flag_t               failopen_delivery_pending;
     } fullbuffer;
 
-    /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
-     * NGX_HTTP_MARKDOWN_PATH_INCREMENTAL, or
-     * NGX_HTTP_MARKDOWN_PATH_STREAMING) */
+    /* Processing path selection (full-buffer or streaming). */
     ngx_uint_t                   processing_path;
 
     /* Copy of the active dynconf snapshot into request pool at header_filter
@@ -1126,10 +1062,13 @@ typedef struct {
         ngx_http_markdown_error_category_t    last_category;
         ngx_flag_t                           has_category;
         ngx_flag_t                           terminal_decision_recorded;
+        /* Header-phase rejection is being finalized; do not process the
+         * generated error response as a new conversion request. */
+        ngx_flag_t                           header_reject;
     } error;
 
     /*
-     * v0.8.0 streaming state machine context (streaming fallback state machine).
+     * Streaming state machine context.
      *
      * Unconditional (not feature-gated) because the state machine
      * governs all requests regardless of the streaming converter
@@ -1141,6 +1080,7 @@ typedef struct {
         ngx_http_markdown_buffer_t        replay_buf;      /* Replay buffer for pre-commit fallback */
         size_t                            replay_capacity; /* Max replay buffer size (from config) */
         ngx_flag_t                        replay_initialized;
+        ngx_flag_t                        replay_overflowed;
         ngx_flag_t                        headers_committed; /* Header chain accepted (incl. NGX_AGAIN) */
     } stream_sm;
 
@@ -1171,7 +1111,7 @@ typedef struct {
         /* Pending output chain for backpressure */
         ngx_chain_t                      *pending_output;
 
-        /* Incremental decompressor state */
+        /* Streaming decompressor state */
         void                             *decompressor;
 
         /* Per-request statistics */
@@ -1393,6 +1333,9 @@ typedef struct {
 
 } ngx_http_markdown_ctx_t;
 
+/* Release a request's conversion slot before a terminal response finalizes it. */
+void ngx_http_markdown_release_inflight_for_request(const ngx_http_request_t *r);
+
 /*
  * Metrics structure for observability
  *
@@ -1464,15 +1407,7 @@ typedef struct {
     ngx_atomic_t  input_bytes;              /* Sum of input HTML sizes in bytes */
     ngx_atomic_t  output_bytes;             /* Sum of output Markdown sizes in bytes */
 
-    /*
-     * Latency histogram buckets.
-     *
-     * Grouped into a sub-struct so that the parent
-     * ngx_http_markdown_metrics_t stays within the 20-field limit
-     * enforced by static analysis (SonarCloud rule c:S1820).
-     * The JSON/text output format is unaffected — keys are still
-     * emitted as flat "conversion_latency_buckets" sub-object.
-     */
+    /* Latency histogram buckets grouped to keep the parent compact. */
     struct {
         ngx_atomic_t  le_10ms;     /* Completed conversions <= 10ms */
         ngx_atomic_t  le_100ms;    /* Completed conversions <= 100ms */
@@ -1480,12 +1415,7 @@ typedef struct {
         ngx_atomic_t  gt_1000ms;   /* Completed conversions > 1000ms */
     } conversion_latency;
 
-    /*
-     * Frozen v1 histogram storage, split by conversion engine.  The
-     * legacy aggregate above remains for the pre-v1 JSON/text helpers;
-     * these bounded fields provide the engine label required by the
-     * Prometheus v1 contract without per-request or per-path state.
-     */
+    /* Frozen v1 histogram storage, split by conversion engine. */
     struct {
         struct {
             ngx_atomic_t  le_1ms;
@@ -1517,15 +1447,7 @@ typedef struct {
         } streaming;
     } conversion_latency_v1;
 
-    /*
-     * Decompression metrics.
-     *
-     * Grouped into an anonymous sub-struct so that the parent
-     * ngx_http_markdown_metrics_t stays within the 20-field limit
-     * enforced by static analysis (SonarCloud rule c:S1820).
-     * The JSON/text output format is unaffected — keys are still
-     * emitted as flat "decompressions_*" names.
-     */
+    /* Decompression metrics grouped to keep the parent compact. */
     struct {
         ngx_atomic_t  attempted;   /* Total decompression attempts */
         ngx_atomic_t  succeeded;   /* Successful decompressions */
@@ -1557,16 +1479,9 @@ typedef struct {
         } brotli_failures;
     } decompressions;
 
-    /*
-     * Path hit metrics (threshold router).
-     *
-     * Grouped into a sub-struct so that the parent
-     * ngx_http_markdown_metrics_t stays within the 20-field limit
-     * enforced by static analysis (SonarCloud rule c:S1820).
-     */
+    /* Path hit metrics, grouped to keep the parent struct compact. */
     struct {
         ngx_atomic_t  fullbuffer;      /* Requests routed to full-buffer path */
-        ngx_atomic_t  incremental;     /* Requests routed to incremental path */
 #ifdef MARKDOWN_STREAMING_ENABLED
         ngx_atomic_t  streaming;       /* Requests routed to streaming path */
 #endif
@@ -1598,10 +1513,6 @@ typedef struct {
         ngx_atomic_t  precommit_failopen_total;  /* Pre-Commit fail-open */
         ngx_atomic_t  precommit_reject_total;    /* Pre-Commit fail-closed */
         ngx_atomic_t  budget_exceeded_total;     /* Memory budget exceeded */
-#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
-        ngx_atomic_t  shadow_total;              /* Shadow mode runs (debug only) */
-        ngx_atomic_t  shadow_diff_total;         /* Shadow output diffs (debug only) */
-#endif
         ngx_atomic_t  last_ttfb_ms;              /* Last streaming TTFB (milliseconds) */
         ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak estimate (bytes; not RSS) */
 
@@ -1612,7 +1523,7 @@ typedef struct {
         ngx_atomic_t  streaming_failure_postcommit_safe_finish; /* Post-commit safe finish */
         ngx_atomic_t  terminal_aborted_total;             /* Terminal abort outcome (delivery confirmed) */
 
-        /* Engine choice counters (v0.8.0 observability) */
+        /* Engine choice counters */
         struct {
             ngx_atomic_t  streaming;   /* Chose true streaming engine */
             ngx_atomic_t  full_buffer; /* Chose full-buffer engine */
@@ -1652,18 +1563,10 @@ typedef struct {
         ngx_atomic_t  no_accept;     /* SKIPPED_NO_ACCEPT */
         ngx_atomic_t  conditional;   /* SKIPPED_CONDITIONAL */
         ngx_atomic_t  compression_passthrough; /* SKIP_COMPRESSION_PASSTHROUGH */
-        ngx_atomic_t  no_transform;  /* BYPASS_NO_TRANSFORM */
+        ngx_atomic_t  no_transform;  /* bypass_no_transform */
     } skips;
 
-    /*
-     * Conversion result counters.
-     *
-     * Grouped into a sub-struct so that the parent
-     * ngx_http_markdown_metrics_t stays within the 20-field
-     * limit enforced by static analysis (SonarCloud rule
-     * c:S1820).  The JSON/text output format is unaffected
-     * — keys are still emitted as flat names.
-     */
+    /* Conversion result counters grouped to keep the parent compact. */
     struct {
         ngx_atomic_t  failopen_count;
         ngx_atomic_t  delivery_count;
@@ -1690,15 +1593,7 @@ typedef struct {
         } parse_interrupts;
     } results;
 
-    /*
-     * Performance metrics: backpressure, decompression path,
-     * and output delivery mode.
-     *
-     * Grouped into a sub-struct so that the parent
-     * ngx_http_markdown_metrics_t stays within the 20-field
-     * limit enforced by static analysis (SonarCloud rule
-     * c:S1820).
-     */
+    /* Performance metrics grouped to keep the parent compact. */
     struct {
         ngx_atomic_t  backpressure_total;
         ngx_atomic_t  backpressure_resume_total;
@@ -1710,25 +1605,6 @@ typedef struct {
         ngx_atomic_t  copied_output_total;
     } perf;
 
-    /*
-     * Per-path metrics (removed in 0.9.2 — unbounded cardinality risk).
-     * Retained under debug guard for development diagnostics only.
-     */
-#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
-
-#define NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN  1024
-    struct {
-        ngx_rbtree_t       path_tree;
-        ngx_rbtree_node_t  sentinel;
-        ngx_atomic_t       path_entries;
-        ngx_atomic_t       path_conversions;
-        ngx_atomic_t       path_conversion_time_sum_ms;
-        ngx_uint_t         cardinality_limit;
-        ngx_atomic_t       overflow_count;
-        ngx_atomic_t       unretained_conversions;
-        ngx_atomic_t       unretained_conversion_time_sum_ms;
-    } per_path;
-#endif /* MARKDOWN_METRICS_PER_PATH_DEBUG */
 } ngx_http_markdown_metrics_t;
 
 /* Called by the production dynconf watcher after each reload attempt. */
@@ -1745,22 +1621,6 @@ void ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes);
 void ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes);
 void ngx_http_markdown_metrics_record_postcommit_abort(void);
 void ngx_http_markdown_metrics_record_postcommit_safe_finish(void);
-
-/*
- * Per-path metric node stored in the shared RB-tree.
- * Removed from production in 0.9.2 (unbounded cardinality risk).
- * Retained under debug guard for development diagnostics only.
- */
-#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
-typedef struct {
-    ngx_rbtree_node_t  rbnode;
-    ngx_uint_t         path_len;
-    u_char            *path;
-    ngx_atomic_t       conversions;
-    ngx_atomic_t       conversion_time_sum_ms;
-    ngx_atomic_t       entries;
-} ngx_http_markdown_path_metric_node_t;
-#endif /* MARKDOWN_METRICS_PER_PATH_DEBUG */
 
 /* Module declaration */
 extern ngx_module_t ngx_http_markdown_filter_module;
@@ -1779,6 +1639,9 @@ struct MarkdownConverterHandle;
 /* Determine if request should be converted based on Accept header */
 ngx_int_t ngx_http_markdown_should_convert(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf, ngx_uint_t *out_reason);
+
+/* Whether a non-conversion result depends on the Accept negotiation input. */
+ngx_flag_t ngx_http_markdown_accept_result_varies(ngx_uint_t reason);
 
 /* Resolve markdown_filter on/off state for the current request */
 ngx_flag_t ngx_http_markdown_is_enabled(ngx_http_request_t *r,
@@ -1848,10 +1711,9 @@ ngx_int_t ngx_http_markdown_stream_type_excluded(
  * Reason code lookup functions
  *
  * These functions map existing eligibility enum values and error categories
- * to stable uppercase snake_case reason code strings.  The returned strings
- * are shared between decision log entries and Prometheus metrics labels so
- * that operators can correlate logs with metric counters without translating
- * between different vocabularies.
+ * to canonical reason-code strings from reason_registry.toml.  The returned
+ * strings are shared between decision log entries and Prometheus metrics
+ * labels so operators can correlate both surfaces without translation.
  */
 
 /* Map eligibility enum to reason code string */
@@ -1862,15 +1724,16 @@ const ngx_str_t *ngx_http_markdown_reason_from_eligibility(
 const ngx_str_t *ngx_http_markdown_reason_from_error_category(
     ngx_http_markdown_error_category_t category, ngx_log_t *log);
 
-/* Return the ELIGIBLE_CONVERTED reason code */
+/* Return the converted reason code. */
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
 
-/* Return the ELIGIBLE_FAILED_OPEN reason code */
+/* Return the failed_open reason code. */
 const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
 
-/* Return the ELIGIBLE_FAILED_CLOSED reason code */
+/* Return the failed_closed reason code. */
 const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
 const ngx_str_t *ngx_http_markdown_reason_header_plan_apply_err(void);
+const ngx_str_t *ngx_http_markdown_reason_timeout(void);
 
 /* Return the SKIP_ACCEPT reason code (not in eligibility enum) */
 const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
@@ -1884,41 +1747,20 @@ const ngx_str_t *ngx_http_markdown_reason_skip_accept_reject(void);
 /* Return the SKIPPED_CONDITIONAL reason code (304 Not Modified) */
 const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
 
-/* Return the BYPASS_NO_TRANSFORM reason code (RFC 9111 §5.2.2.6) */
+/* Return the bypass_no_transform reason code (RFC 9111 §5.2.2.6) */
 const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
 const ngx_str_t *ngx_http_markdown_reason_encoding_header_invalid(void);
 const ngx_str_t *ngx_http_markdown_reason_decompression_format_error(void);
 
-/* Return the compressed-response passthrough reason in every build mode. */
-const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
-
-#ifdef MARKDOWN_STREAMING_ENABLED
-/* Streaming reason code accessors */
-const ngx_str_t *ngx_http_markdown_reason_engine_streaming(void);
-const ngx_str_t *ngx_http_markdown_reason_streaming_convert(void);
-const ngx_str_t *ngx_http_markdown_reason_streaming_fallback(void);
-const ngx_str_t *ngx_http_markdown_reason_streaming_fail_postcommit(void);
-const ngx_str_t *ngx_http_markdown_reason_streaming_skip_unsupported(void);
-const ngx_str_t *ngx_http_markdown_reason_streaming_budget_exceeded(void);
-const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_failopen(void);
-const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_reject(void);
-#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
-const ngx_str_t *ngx_http_markdown_reason_streaming_shadow(void);
-#endif
-const ngx_str_t *ngx_http_markdown_reason_eligible_streaming_auto(void);
-const ngx_str_t *ngx_http_markdown_reason_eligible_fullbuffer_auto(void);
-#endif /* MARKDOWN_STREAMING_ENABLED */
-
 /*
- * Rust FFI reason code accessors (v0.7.0+)
+ * Rust FFI reason code accessors
  *
  * These functions access reason code strings from the Rust-defined enum
  * via FFI. The declarative reason_registry.toml is the single source; the
  * Rust enum and C metadata are generated projections.
  *
- * New code should prefer these accessors over the legacy C-side string
- * literals defined above.  The legacy functions remain for backward
- * compatibility during the migration period.
+ * Use these accessors for registry-backed codes.  Runtime implementation
+ * events are logged separately and never become a second reason namespace.
  *
  * DO NOT define new reason code constants in C.  All reason codes must
  * come from the generated registry projections via these FFI accessors.
@@ -1952,10 +1794,13 @@ void ngx_http_markdown_clear_trailers(ngx_http_request_t *r);
 ngx_int_t ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r);
 
 /* Shared header helpers used by both full-buffer and streaming paths */
-#define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL  "text/markdown; charset=utf-8"
+#define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL  "text/markdown"
+#define NGX_HTTP_MARKDOWN_CHARSET_LITERAL      "utf-8"
 extern u_char ngx_http_markdown_content_type[];
 #define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN \
     (sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1)
+#define NGX_HTTP_MARKDOWN_CHARSET_LEN \
+    (sizeof(NGX_HTTP_MARKDOWN_CHARSET_LITERAL) - 1)
 ngx_int_t ngx_http_markdown_add_vary_accept(ngx_http_request_t *r);
 ngx_int_t ngx_http_markdown_set_etag(ngx_http_request_t *r,
     const u_char *etag, size_t etag_len);
@@ -2002,18 +1847,12 @@ ngx_http_markdown_auth_cache_control_required(
         return NGX_ERROR;
     }
 
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     if (r == NULL) {
         return NGX_ERROR;
     }
 
     *required = (conf != NULL
                  && ngx_http_markdown_is_authenticated(r, conf));
-#else
-    (void) r;
-    (void) conf;
-    *required = 0;
-#endif
 
     return NGX_OK;
 }
@@ -2137,6 +1976,13 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
 #define NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT     -106
 
 /*
+ * Internal terminal result for a failed full-buffer header rollback.
+ * Callers must not route this result through the configured fail-open policy:
+ * the response representation is no longer known to be restorable.
+ */
+#define NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED  -107
+
+/*
  * Safe buffer length helper.
  *
  * Computes the number of bytes between buf->pos and buf->last
@@ -2161,6 +2007,10 @@ ngx_http_markdown_buf_len_safe(const ngx_buf_t *buf)
 
     diff = buf->last - buf->pos;
     if (diff < 0) {
+#if (NGX_DEBUG)
+        /* A reversed range is invalid input, not an empty buffer. */
+        ngx_debug_point();
+#endif
         return 0;
     }
 

@@ -122,11 +122,10 @@ pub fn assert_header_pattern(
     pattern: &str,
     headers: &reqwest::header::HeaderMap,
 ) -> AssertionResult {
-    let actual_value = headers
-        .get(header_name)
-        .and_then(|v: &reqwest::header::HeaderValue| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
+    let actual_value = match headers.get(header_name) {
+        None => "(header missing)".to_string(),
+        Some(value) => value.to_str().unwrap_or("(invalid UTF-8)").to_string(),
+    };
     let (passed, regex_error) = match Regex::new(pattern) {
         Ok(re) => (re.is_match(&actual_value), None),
         Err(e) => (false, Some(e.to_string())),
@@ -216,6 +215,7 @@ pub fn assert_body_matches(name: &str, pattern: &str, body: &str) -> AssertionRe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
     #[test]
     fn test_assert_status_pass() {
@@ -223,6 +223,52 @@ mod tests {
         assert!(r.passed);
         assert_eq!(r.expected, "200");
         assert_eq!(r.actual, "200");
+    }
+
+    #[test]
+    fn test_assert_header_pattern_fails_when_header_missing() {
+        // A match-empty pattern such as ^$ must not pass just because the
+        // header is absent: the missing-header placeholder keeps the regex
+        // from matching and the assertion reports a failure.
+        let headers = HeaderMap::new();
+        let r = assert_header_pattern("etag_absent_guard", "ETag", r"^$", &headers);
+        assert!(!r.passed, "^$ must fail when the header is absent");
+        assert_eq!(r.actual, "(header missing)");
+        let message = r.message.unwrap_or_default();
+        assert!(message.contains("assertion=etag_absent_guard"), "{message}");
+        assert!(message.contains("header=ETag"), "{message}");
+        assert!(message.contains("pattern=/^$/"), "{message}");
+    }
+
+    #[test]
+    fn test_assert_header_pattern_fails_on_invalid_utf8_value() {
+        // Opaque (invalid UTF-8) header values must fail any text pattern,
+        // including ^$: the "(invalid UTF-8)" placeholder is substituted so
+        // the regex cannot accidentally match raw bytes.
+        let mut headers = HeaderMap::new();
+        let raw_value = vec![255u8, 254u8];
+        let opaque = HeaderValue::from_bytes(&raw_value).expect("opaque byte value builds");
+        headers.insert(HeaderName::from_static("etag"), opaque);
+
+        let r = assert_header_pattern("etag_utf8_guard", "ETag", r"^$", &headers);
+        assert!(!r.passed, "^$ must fail for an invalid UTF-8 header value");
+        assert_eq!(r.actual, "(invalid UTF-8)");
+        let message = r.message.unwrap_or_default();
+        assert!(
+            message.contains("actual='(invalid UTF-8)'"),
+            "diagnostics must name the invalid-UTF-8 placeholder: {message}"
+        );
+    }
+
+    #[test]
+    fn test_assert_header_pattern_matches_valid_utf8_baseline() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("etag"),
+            HeaderValue::from_static(""),
+        );
+        let r = assert_header_pattern("etag_empty_ok", "ETag", r"^$", &headers);
+        assert!(r.passed, "^$ matches a present empty header value");
     }
 
     #[test]

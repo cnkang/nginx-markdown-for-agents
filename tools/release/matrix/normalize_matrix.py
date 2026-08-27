@@ -47,6 +47,11 @@ CANONICAL_ENTRY_KEYS = [
     "abi_version",
 ]
 
+# Optional metadata for container-backed release rows. These fields do not
+# participate in matrix identity, but normalization must preserve them so
+# consumers can bind an image reference to its content digest.
+OPTIONAL_ENTRY_KEYS = frozenset({"image_ref", "image_digest"})
+
 # Legacy aliases: alias -> canonical key.
 LEGACY_ALIASES = {
     "nginx": "nginx_version",
@@ -75,7 +80,9 @@ DROPPED_LEGACY_KEYS = frozenset(
 # release keys plus the dropped legacy metadata keys (retained for
 # compatibility documents, never used for identity).
 COMPATIBILITY_ENTRY_KEYS = frozenset(
-    set(CANONICAL_ENTRY_KEYS) | set(DROPPED_LEGACY_KEYS)
+    set(CANONICAL_ENTRY_KEYS)
+    | set(DROPPED_LEGACY_KEYS)
+    | set(OPTIONAL_ENTRY_KEYS)
 )
 
 COMPATIBILITY_TIER_ALIASES = {
@@ -208,10 +215,16 @@ def normalize_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _fold_entry_keys(entry: Dict[str, Any]) -> Dict[str, Any]:
-    """Fold aliases into canonical keys, failing closed on disagreement."""
+    """Normalize entry keys to canonical names while preserving supported optional metadata and rejecting unknown or conflicting fields.
+    
+    Parameters:
+    	entry (Dict[str, Any]): Matrix entry whose canonical and legacy keys should be normalized.
+    
+    Returns:
+    	Dict[str, Any]: Entry with legacy aliases folded into canonical keys."""
     canonical: Dict[str, Any] = {}
     for key, value in entry.items():
-        if key in CANONICAL_ENTRY_KEYS:
+        if key in CANONICAL_ENTRY_KEYS or key in OPTIONAL_ENTRY_KEYS:
             if key in canonical and canonical[key] != value:
                 raise MatrixNormalizationError(
                     f"duplicate canonical key {key!r} disagrees with its earlier value"

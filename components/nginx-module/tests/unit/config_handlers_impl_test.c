@@ -570,7 +570,7 @@ ngx_http_conf_get_module_main_conf(ngx_conf_t *cf, ngx_module_t module)
 }
 
 /*
- * spec 47: stubs for the trusted-proxy FFI used by the
+ * stubs for the trusted-proxy FFI used by the
  * markdown_trusted_proxies directive handler.  The C unit-test build does not
  * link the Rust library, so the CIDR set handle and validation are stubbed.
  * g_trusted_push_rc lets a test force an invalid-CIDR rejection; the dummy
@@ -722,7 +722,6 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
     mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
     mcf->ops.metrics_enabled = NGX_CONF_UNSET;
-    mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
     mcf->stream.policy_explicit = -1;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
@@ -1210,7 +1209,7 @@ test_conditional_and_log_verbosity_handlers(void)
 }
 
 /*
- * Verify markdown_streaming off|auto|force handler (spec 49):
+ * Verify markdown_streaming off|auto|force handler (policy):
  * valid enum tokens, duplicate detection, invalid token rejection,
  * and that policy_explicit is recorded.
  *
@@ -1233,7 +1232,7 @@ test_streaming_policy_handler(void)
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
-    TEST_SUBSECTION("markdown_streaming policy handler (spec 49)");
+    TEST_SUBSECTION("markdown_streaming policy handler ");
 
     setup_cf(&cf, &args, values, 2);
     set_arg(&values[0], "markdown_streaming");
@@ -1397,19 +1396,11 @@ test_limits_handler(void)
 }
 
 /*
- * Verify metrics_format and metrics directive handlers: valid
- * formats, invalid format, handler installation, and duplicate
- * content handler.
- *
- * Semantic contract mirrored: ngx_http_markdown_metrics_format
- * maps format tokens to enum values; ngx_http_markdown_metrics_directive
- * installs the metrics content handler in the core location
- * configuration and rejects duplicates.
+ * Verify metrics handler installation and duplicate-handler rejection.
  *
  * Return: void.
  *
- * Side effects: modifies g_clcf; asserts on mcf.ops.metrics_format
- *               and clcf.handler.
+ * Side effects: modifies g_clcf and asserts on clcf.handler.
  */
 static void
 test_metrics_handlers(void)
@@ -1454,7 +1445,7 @@ test_metrics_handlers(void)
 
 
 /*
- * Verify v0.8.0 streaming directive handlers that live in the production
+ * Verify the streaming directive handlers that live in the production
  * handler header: threshold, flush_min, and excluded_types.
  *
  * Return: void.
@@ -1472,7 +1463,7 @@ test_v080_stream_directive_handlers(void)
     const ngx_str_t         *types;
     const char              *rc;
 
-    TEST_SUBSECTION("v0.8 stream directive handlers");
+    TEST_SUBSECTION("stream directive handlers");
 
     setup_cf(&cf, &args, values, 2);
 
@@ -1497,7 +1488,7 @@ test_v080_stream_directive_handlers(void)
                        types[0].len) == 0,
         "first excluded type value should match");
 
-    TEST_PASS("v0.8 stream directive handler branches covered");
+    TEST_PASS("stream directive handler branches covered");
 }
 
 /*
@@ -1878,7 +1869,7 @@ test_markdown_content_types_handler(void)
 }
 
 /*
- * spec 47: markdown_trusted_proxies directive handler.
+ * markdown_trusted_proxies directive handler.
  *
  * Covers the C thin-wrapper golden errors and marshaling: http-only context
  * enforcement, "off", duplicate detection, valid CIDR push, and invalid-CIDR

@@ -190,7 +190,8 @@ impl MarkdownConverter {
                 if i < alignments.len() {
                     alignments[i] = *col_align;
                 } else {
-                    alignments.push(*col_align);
+                    alignments.resize(i + 1, TableAlignment::Left);
+                    alignments[i] = *col_align;
                 }
             }
         }
@@ -351,8 +352,8 @@ impl MarkdownConverter {
     }
 
     fn extract_explicit_alignment(&self, attrs: &Ref<Vec<Attribute>>) -> Option<TableAlignment> {
-        if let Some(align) = self.find_align_attribute(attrs) {
-            return align;
+        if let Some(Some(align)) = self.find_align_attribute(attrs) {
+            return Some(align);
         }
         self.find_text_align_in_style(attrs)
     }

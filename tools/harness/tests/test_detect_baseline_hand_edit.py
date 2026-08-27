@@ -195,6 +195,26 @@ def test_changed_mode_ignores_unrelated_paths():
     assert findings == []
 
 
+def test_repo_commit_anchored_is_indeterminate_without_git(
+    real_git_sandbox, monkeypatch
+):
+    """An unusable git cannot prove anchoring; the predicate says unknown."""
+    origin, _tip_sha = real_git_sandbox
+    _bind_real_git(monkeypatch, origin)
+    monkeypatch.setattr(module, "_run_git", lambda args: None)
+    assert module.repo_commit_anchored(
+        "0" * 40, "baseline-stem"
+    ) is None
+
+
+def test_run_git_returns_none_when_git_unavailable(monkeypatch, tmp_path):
+    """No candidate and no PATH hit leave the helper without a binary."""
+    monkeypatch.setattr(module, "_GIT_BIN", None)
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+    module_result = module._run_git(["rev-parse", "HEAD"])
+    assert module_result is None
+
+
 def test_symlink_escaping_repo_root_rejected(tmp_path, monkeypatch):
     import os
     monkeypatch.setattr(module, "REPO_ROOT", tmp_path)

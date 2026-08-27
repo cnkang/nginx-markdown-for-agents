@@ -28,40 +28,6 @@ fn ffi_markdown_converter_free(handle: *mut MarkdownConverterHandle) {
     unsafe { nginx_markdown_converter::ffi::markdown_converter_free(handle) }
 }
 
-#[cfg(feature = "incremental")]
-fn ffi_markdown_incremental_new(
-    options: *const MarkdownOptions,
-) -> *mut IncrementalConverterHandle {
-    let mut handle = ptr::null_mut();
-    let code = unsafe {
-        nginx_markdown_converter::ffi::markdown_incremental_new_with_code(options, &mut handle)
-    };
-    assert_eq!(code, ERROR_SUCCESS);
-    handle
-}
-
-#[cfg(feature = "incremental")]
-fn ffi_markdown_incremental_feed(
-    handle: *mut IncrementalConverterHandle,
-    data: *const u8,
-    data_len: usize,
-) -> u32 {
-    unsafe { nginx_markdown_converter::ffi::markdown_incremental_feed(handle, data, data_len) }
-}
-
-#[cfg(feature = "incremental")]
-fn ffi_markdown_incremental_finalize(
-    handle: *mut IncrementalConverterHandle,
-    result: *mut MarkdownResult,
-) -> u32 {
-    unsafe { nginx_markdown_converter::ffi::markdown_incremental_finalize(handle, result) }
-}
-
-#[cfg(feature = "incremental")]
-fn ffi_markdown_incremental_free(handle: *mut IncrementalConverterHandle) {
-    unsafe { nginx_markdown_converter::ffi::markdown_incremental_free(handle) }
-}
-
 fn ffi_test_default_options() -> MarkdownOptions {
     MarkdownOptions {
         flavor: 0,
@@ -286,106 +252,6 @@ fn test_reuse_result_releases_previous_buffers() {
 
     ffi_markdown_result_free(&mut result);
     ffi_markdown_converter_free(converter);
-}
-
-#[cfg(feature = "incremental")]
-#[test]
-fn test_incremental_conversion_matches_full_buffer_output() {
-    let converter = markdown_converter_new();
-    assert!(!converter.is_null(), "Converter should not be NULL");
-
-    let html = b"<h1>Hello World</h1><p>This is a test.</p>";
-    let options = ffi_test_default_options();
-
-    let incremental = ffi_markdown_incremental_new(&options);
-    assert!(
-        !incremental.is_null(),
-        "Incremental converter should be created"
-    );
-
-    let feed_rc = ffi_markdown_incremental_feed(incremental, html.as_ptr(), html.len());
-    assert_eq!(
-        feed_rc, ERROR_SUCCESS,
-        "Feeding buffered HTML should succeed"
-    );
-
-    let mut incremental_result = ffi_test_empty_result();
-    let finalize_rc = ffi_markdown_incremental_finalize(incremental, &mut incremental_result);
-    assert_eq!(finalize_rc, ERROR_SUCCESS, "Finalize should succeed");
-    assert_eq!(
-        incremental_result.error_code, ERROR_SUCCESS,
-        "Incremental result should report success"
-    );
-
-    let mut full_result = ffi_test_empty_result();
-    ffi_markdown_convert(
-        converter,
-        html.as_ptr(),
-        html.len(),
-        &options,
-        &mut full_result,
-    );
-    assert_eq!(
-        full_result.error_code, ERROR_SUCCESS,
-        "Full-buffer conversion should succeed"
-    );
-
-    let incremental_markdown = unsafe {
-        slice::from_raw_parts(incremental_result.markdown, incremental_result.markdown_len)
-    };
-    let full_markdown =
-        unsafe { slice::from_raw_parts(full_result.markdown, full_result.markdown_len) };
-
-    assert_eq!(
-        incremental_markdown, full_markdown,
-        "Incremental finalize output should match full-buffer output"
-    );
-
-    ffi_markdown_result_free(&mut incremental_result);
-    ffi_markdown_result_free(&mut full_result);
-    ffi_markdown_converter_free(converter);
-}
-
-#[cfg(feature = "incremental")]
-#[test]
-fn test_incremental_feed_rejects_null_data_with_nonzero_length() {
-    let options = ffi_test_default_options();
-    let incremental = ffi_markdown_incremental_new(&options);
-    assert!(
-        !incremental.is_null(),
-        "Incremental converter should be created"
-    );
-
-    let feed_rc = ffi_markdown_incremental_feed(incremental, ptr::null(), 1);
-    assert_eq!(
-        feed_rc, ERROR_INVALID_INPUT,
-        "NULL chunk pointer with non-zero length should be rejected"
-    );
-
-    ffi_markdown_incremental_free(incremental);
-}
-
-#[cfg(feature = "incremental")]
-#[test]
-fn test_incremental_finalize_reports_null_handle() {
-    let mut result = ffi_test_empty_result();
-
-    let finalize_rc = ffi_markdown_incremental_finalize(ptr::null_mut(), &mut result);
-
-    assert_eq!(
-        finalize_rc, ERROR_INVALID_INPUT,
-        "NULL incremental handle should be rejected"
-    );
-    assert_eq!(
-        result.error_code, ERROR_INVALID_INPUT,
-        "Result should record the invalid-input error"
-    );
-    assert!(
-        !result.error_message.is_null(),
-        "Error message should be populated for NULL handle"
-    );
-
-    ffi_markdown_result_free(&mut result);
 }
 
 proptest! {
@@ -1479,9 +1345,9 @@ fn test_parser_memory_budget_allows_small_input() {
 /// Regression (TEST-2): a parse that overruns `parse_timeout` must fail with
 /// `ERROR_PARSE_TIMEOUT` rather than returning partial output.
 ///
-/// Uses a 10 ms deadline against a 500 KiB document to make timeout
-/// detection reliable on CI hardware while avoiding the 1 ms boundary
-/// flakiness.  To hedge against unusually fast machines, the timeout
+/// Uses a 1 ms deadline against a 500 KiB document to make timeout
+/// detection reliable on CI hardware.  To hedge against unusually fast
+/// machines, the timeout
 /// assertion is only made when the call genuinely took longer than the
 /// deadline; otherwise the conversion legitimately completed in time
 /// and must report success.
@@ -1605,87 +1471,4 @@ fn test_negotiate_accept_malformed_utf8() {
     }
     assert_eq!(result.should_convert, 0);
     assert_eq!(result.reason, NEGOTIATE_REASON_MALFORMED);
-}
-
-#[cfg(feature = "streaming")]
-#[test]
-fn test_shared_option_field_semantics_aligned() {
-    use nginx_markdown_converter::ffi::{MarkdownOptions, StreamingOptions};
-
-    let md_opts = MarkdownOptions {
-        flavor: 1,
-        timeout_ms: 5000,
-        generate_etag: 1,
-        estimate_tokens: 0,
-        front_matter: 0,
-        content_type: ptr::null(),
-        content_type_len: 0,
-        base_url: ptr::null(),
-        base_url_len: 0,
-        streaming_budget: 2 * 1024 * 1024,
-        prune_noise: 1,
-        prune_selectors: ptr::null(),
-        prune_selector_len: 0,
-        prune_protection_selectors: ptr::null(),
-        prune_protection_selector_len: 0,
-        memory_budget: 0,
-        parse_timeout_ms: 30000,
-        parser_memory_budget: 64 * 1024 * 1024,
-        flush_threshold: 16384,
-    };
-
-    let st_opts = StreamingOptions {
-        flavor: 1,
-        timeout_ms: 5000,
-        streaming_budget: 2 * 1024 * 1024,
-        flush_threshold: 16384,
-        generate_etag: 1,
-        estimate_tokens: 0,
-        front_matter: 0,
-        prune_noise: 1,
-        content_type: ptr::null(),
-        content_type_len: 0,
-        base_url: ptr::null(),
-        base_url_len: 0,
-        prune_selectors: ptr::null(),
-        prune_selector_len: 0,
-        prune_protection_selectors: ptr::null(),
-        prune_protection_selector_len: 0,
-    };
-
-    assert_eq!(
-        md_opts.flavor, st_opts.flavor,
-        "flavor must match across MarkdownOptions and StreamingOptions"
-    );
-    assert_eq!(
-        md_opts.timeout_ms, st_opts.timeout_ms,
-        "timeout_ms must match"
-    );
-    assert_eq!(
-        md_opts.streaming_budget, st_opts.streaming_budget,
-        "streaming_budget must match"
-    );
-    assert_eq!(
-        md_opts.flush_threshold, st_opts.flush_threshold,
-        "flush_threshold must match"
-    );
-    assert_eq!(
-        md_opts.generate_etag, st_opts.generate_etag,
-        "generate_etag must match"
-    );
-    assert_eq!(
-        md_opts.estimate_tokens, st_opts.estimate_tokens,
-        "estimate_tokens must match"
-    );
-    assert_eq!(
-        md_opts.front_matter, st_opts.front_matter,
-        "front_matter must match"
-    );
-
-    let md_prune_on = md_opts.prune_noise != 0;
-    let st_prune_on = st_opts.prune_noise != 0;
-    assert_eq!(
-        md_prune_on, st_prune_on,
-        "prune_noise boolean semantics must match (MarkdownOptions u32 vs StreamingOptions u8)"
-    );
 }

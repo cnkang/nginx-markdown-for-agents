@@ -5,7 +5,7 @@
  * configuration snapshot, recent decision history, metrics snapshot,
  * and dynamic configuration state.
  *
- * Requirement: REQ-0700-OPERABILITY-001
+ * Requirement: structured decision path logging
  * Risk Pack: dynamic-config-hot-reload
  */
 
@@ -67,8 +67,12 @@ struct ngx_cycle_s;
  * must be updated.  Truncation is detected at runtime by build_json and
  * returns NGX_ERROR (500) rather than serving incomplete JSON.
  */
-#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    34736
+#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    35168
 #define NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE 192
+
+#define NGX_HTTP_MARKDOWN_DIAG_RECORDING_DISABLED  0
+#define NGX_HTTP_MARKDOWN_DIAG_RECORDING_ACTIVE    1
+#define NGX_HTTP_MARKDOWN_DIAG_RECORDING_DEGRADED  2
 
 /* Dynconf fields reported when a candidate key is masked by static config. */
 #define NGX_HTTP_MARKDOWN_DIAG_MASK_FILTER            (1U << 0)
@@ -199,8 +203,8 @@ void ngx_http_markdown_diagnostics_record_reason_at_stage(
  * HTTP content handler for the diagnostics endpoint.
  *
  * Responds with the Diagnostics Schema v2 JSON document containing the
- * worker-local worker/runtime state, build identity, configuration snapshot,
- * and recent decision ring buffer.
+ * worker-local runtime state, shared-memory aggregate metrics, build identity,
+ * configuration snapshot, and recent decision ring buffer.
  *
  * Access control: the handler enforces a loopback-only peer boundary before
  * rendering. Native NGINX allow/deny/auth_basic/satisfy directives in the
@@ -258,6 +262,16 @@ ngx_int_t ngx_http_markdown_diagnostics_init_worker(struct ngx_cycle_s *cycle);
  * Returns 1 when the ring is initialized and enabled, 0 otherwise.
  */
 ngx_int_t ngx_http_markdown_diagnostics_recording_active(void);
+
+
+/*
+ * Return the low-cardinality recording state exported by diagnostics JSON.
+ *
+ * The state is disabled when no location enabled diagnostics, active after
+ * the per-worker ring is allocated, and degraded when allocation was
+ * requested but could not be completed.
+ */
+ngx_uint_t ngx_http_markdown_diagnostics_recording_state(void);
 
 
 /*
@@ -322,6 +336,7 @@ typedef struct {
     ngx_atomic_uint_t  streaming_requests_total;
     ngx_atomic_uint_t  precommit_failopen_total;
     ngx_atomic_uint_t  copied_output_total;
+    ngx_atomic_uint_t  diagnostics_recording_state;
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics (streaming observability) */
     ngx_atomic_uint_t  streaming_succeeded_total;
@@ -470,9 +485,8 @@ typedef struct {
  * Emits a single structured log line containing the complete
  * decision chain in key=value format for easy parsing:
  *
- *   markdown: accept_result=CONVERT
- *       conditional_result=PROCEED conversion_status=SUCCESS
- *       reason_code=CONVERTED duration_ms=12
+ *   markdown: outcome=converted stage=conversion reason=converted event=-
+ *       accept_result=CONVERT conditional_result=PROCEED duration_ms=12
  *
  * The log level is determined by the effective log_verbosity:
  *   - NGX_HTTP_MARKDOWN_LOG_DEBUG: NGX_LOG_DEBUG

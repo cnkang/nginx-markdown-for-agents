@@ -15,8 +15,10 @@ from coverage_gate import (
     CoverageSummary,
     GateResult,
     _compute_from_records,
+    _append_critical_results,
     check_gate,
     format_results,
+    parse_lcov_critical_paths,
     parse_lcov_summary,
 )
 
@@ -70,6 +72,18 @@ class TestParseLcovSummary(unittest.TestCase):
         self.assertEqual(result.lines_hit, 80)
         self.assertEqual(result.functions_found, 50)
         self.assertEqual(result.functions_hit, 40)
+
+    def test_parse_summary_header_with_multiple_separator_dots(self) -> None:
+        """Verify lcov versions that render repeated separator dots."""
+        content = "lines......: 9 of 10\nfunctions....: 4 of 5\n"
+        with NamedTemporaryFile(mode="w", suffix=".lcov", delete=False, encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            result = parse_lcov_summary(Path(f.name))
+        self.assertEqual(result.lines_found, 10)
+        self.assertEqual(result.lines_hit, 9)
+        self.assertEqual(result.functions_found, 5)
+        self.assertEqual(result.functions_hit, 4)
 
     def test_parse_records_fallback(self) -> None:
         """Verify fallback to counting DA/FNDA records when summary headers are absent."""
@@ -148,6 +162,49 @@ class TestComputeFromRecords(unittest.TestCase):
         self.assertEqual(result.lines_found, 3)
         self.assertEqual(result.lines_hit, 2)
 
+
+class TestCriticalPathCoverage(unittest.TestCase):
+    """Tests for source-record critical-path coverage aggregation."""
+
+    def test_merges_reports_and_measures_all_categories(self) -> None:
+        """Verify duplicate reports are merged by source file and line."""
+        first = textwrap.dedent("""\
+            SF:/repo/components/nginx-module/src/ngx_http_markdown_auth.c
+            DA:1,1
+            DA:2,0
+            SF:/repo/components/nginx-module/src/ngx_http_markdown_error.c
+            DA:1,1
+            SF:/repo/components/rust-converter/src/ffi/abi.rs
+            DA:1,1
+            DA:2,1
+            SF:/repo/components/rust-converter/src/decision/conditional.rs
+            DA:1,1
+            DA:2,1
+        """)
+        second = textwrap.dedent("""\
+            SF:/repo/components/nginx-module/src/ngx_http_markdown_auth.c
+            DA:1,1
+            DA:2,1
+            SF:/repo/components/rust-converter/src/ffi/abi.rs
+            DA:1,1
+            DA:2,0
+        """)
+        paths = []
+        for content in (first, second):
+            with NamedTemporaryFile(
+                mode="w", suffix=".lcov", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(content)
+                f.flush()
+                paths.append(Path(f.name))
+
+        summaries = parse_lcov_critical_paths(paths)
+
+        self.assertAlmostEqual(summaries["auth"].line_pct, 100.0)
+        self.assertAlmostEqual(summaries["error handling"].line_pct, 100.0)
+        self.assertAlmostEqual(summaries["FFI boundary"].line_pct, 100.0)
+        self.assertAlmostEqual(summaries["conditional requests"].line_pct, 100.0)
+
     def test_multiple_files(self) -> None:
         """Verify correct aggregation across multiple file records."""
         content = textwrap.dedent("""\
@@ -163,6 +220,38 @@ class TestComputeFromRecords(unittest.TestCase):
         result = _compute_from_records(content)
         self.assertEqual(result.lines_found, 3)
         self.assertEqual(result.lines_hit, 2)
+
+    def test_partial_report_checks_only_covered_categories(self) -> None:
+        """C-only or Rust-only reports must not fail absent categories."""
+        content = textwrap.dedent("""\
+            SF:/repo/components/nginx-module/src/ngx_http_markdown_auth.c
+            DA:1,1
+        """)
+        with NamedTemporaryFile(
+            mode="w", suffix=".lcov", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(content)
+            f.flush()
+            results: list[GateResult] = []
+            errors: list[str] = []
+            _append_critical_results(results, errors, [Path(f.name)], 90.0)
+
+        self.assertEqual(errors, [])
+        self.assertEqual([result.label for result in results], ["Critical: auth"])
+
+    def test_covered_category_without_lines_still_fails(self) -> None:
+        """A selected source file with no measured lines remains an error."""
+        content = "SF:/repo/components/nginx-module/src/ngx_http_markdown_auth.c\n"
+        with NamedTemporaryFile(
+            mode="w", suffix=".lcov", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(content)
+            f.flush()
+            results: list[GateResult] = []
+            errors: list[str] = []
+            _append_critical_results(results, errors, [Path(f.name)], 90.0)
+
+        self.assertIn("critical-path category has no measured lines: auth", errors)
 
 
 class TestCheckGate(unittest.TestCase):

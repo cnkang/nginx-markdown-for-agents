@@ -14,7 +14,7 @@
  *   6. Decision counter IS incremented when max-size failure occurs
  *
  * Corresponds to task A01.11.
- * Validates: REQ-0700-CORRECTNESS-001 (items 5, 6 of §5.1.1)
+ * Validates: (middle-chunk budget enforcement)
  */
 
 #include "../include/test_common.h"

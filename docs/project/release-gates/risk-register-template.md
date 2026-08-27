@@ -1,4 +1,9 @@
-# Risk Register Template
+# Historical Risk Register Template
+
+> **Archived contract:** this template describes the 0.4.0 release line. It is
+> retained for historical sub-spec records and does not define the active
+> 0.9.2 candidate scope or release requirements. Use the current release
+> checklist and gate validators for active releases.
 
 Requirements references: 11.1, 11.2, 11.3
 

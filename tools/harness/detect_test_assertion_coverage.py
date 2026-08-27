@@ -14,7 +14,7 @@ Detection strategy:
   This detector identifies tests that:
   1. Have no assertions at all (critical issue)
   2. Have only trivial assertions like assert!(true) (warning)
-  
+
   It excludes:
   - Tests that intentionally panic (should_panic attribute)
   - Tests that call functions which themselves assert
@@ -126,7 +126,14 @@ def _find_test_function_end(content: str, brace_start: int) -> int | None:
 
 
 def extract_test_functions(content: str) -> List[Tuple[str, int, str, bool, bool]]:
-    """Extract test functions with their line numbers and bodies."""
+    """Extract test functions and their source locations, bodies, and test classifications.
+    
+    Parameters:
+        content (str): Rust source code containing test functions.
+    
+    Returns:
+        List[Tuple[str, int, str, bool, bool]]: Test records containing the function name, one-based line number, function body, whether the test allows a panic, and whether it uses property-testing indicators.
+    """
     tests = []
 
     for match in TEST_FUNCTION_PATTERN.finditer(content):
@@ -153,19 +160,31 @@ def extract_test_functions(content: str) -> List[Tuple[str, int, str, bool, bool
     return tests
 
 
-def check_test_assertions(func_name: str, line_num: int, func_body: str, 
+def check_test_assertions(func_name: str, line_num: int, func_body: str,
                          has_should_panic: bool, is_property_test: bool) -> List[str]:
-    """Check if a test function has meaningful assertions."""
+    """
+                         Check whether a Rust test contains a recognized verification pattern.
+                         
+                         Parameters:
+                             func_name (str): Name of the test function.
+                             line_num (int): Source line number of the test function.
+                             func_body (str): Source code of the test body.
+                             has_should_panic (bool): Whether the test is expected to panic.
+                             is_property_test (bool): Whether the test uses property-based testing.
+                         
+                         Returns:
+                             List[str]: An issue message when the test lacks recognized assertions; otherwise, an empty list.
+                         """
     issues = []
-    
+
     # Skip tests that are expected to panic
     if has_should_panic:
         return issues
-    
+
     # Skip property-based tests (they have their own assertion mechanisms)
     if is_property_test:
         return issues
-    
+
     # Check for direct assertions
     assertion_patterns = [
         r'\bassert!\s*\(',
@@ -179,9 +198,9 @@ def check_test_assertions(func_name: str, line_num: int, func_body: str,
         r'\.expect\s*\(',
         r'\.unwrap\s*\(\s*\)',
     ]
-    
+
     has_assertion = any(re.search(pattern, func_body) for pattern in assertion_patterns)
-    
+
     # Check for calls to helper functions that likely contain assertions
     # These are common patterns in test code
     assertion_helpers = [
@@ -190,22 +209,22 @@ def check_test_assertions(func_name: str, line_num: int, func_body: str,
         r'\bcheck_\w+\s*\(',  # check_something
         r'\bverify_\w+\s*\(',  # verify_something
     ]
-    
+
     has_assertion_helper = any(re.search(pattern, func_body) for pattern in assertion_helpers)
-    
+
     # Check for FFI calls that test NULL handling (not crashing is the assertion)
     # These tests call functions with NULL and verify they don't crash
     ffi_null_patterns = [
         r'ffi_\w+\s*\([^)]*null[^)]*\)',  # ffi_function(null)
         r'ptr::null_mut\(\)',  # ptr::null_mut()
     ]
-    
+
     has_ffi_null_test = any(re.search(pattern, func_body, re.IGNORECASE) for pattern in ffi_null_patterns)
-    
+
     # If no direct assertion, no assertion helper, and not a NULL safety test, flag it
     if not has_assertion and not has_assertion_helper and not has_ffi_null_test:
         issues.append(f"Test '{func_name}' (line {line_num}) has no assertions")
-    
+
     return issues
 
 
@@ -255,6 +274,7 @@ def _scan_test_dir(test_dir: Path) -> tuple[List[str], List[str]]:
 
 
 def main():
+    """Scan the Rust test directory for tests lacking recognized assertions and exit with the resulting status."""
     test_dir = _resolve_test_dir()
 
     if not test_dir.exists():
@@ -267,7 +287,7 @@ def main():
         all_issues.extend(
             [f"Harness could not read Rust test file: {err}" for err in read_errors]
         )
-    
+
     if all_issues:
         print(f"Found {len(all_issues)} test assertion coverage issue(s):")
         for issue in all_issues:

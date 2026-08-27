@@ -17,10 +17,39 @@ Capture the active configuration and the frozen metric families before making
 changes:
 
 ```bash
-nginx -T 2>/dev/null | grep -E 'markdown_(streaming|auto_decompress|cache_validation|limits|stream_excluded_types)'
-curl -s -H 'Accept: application/json' \
-  http://localhost/nginx-markdown/diagnostics | python3 -m json.tool
-curl -s -H 'Accept: text/plain; version=0.0.4' \
+set -euo pipefail
+limits="$(nginx -T 2>/dev/null | awk '
+  /^[[:space:]]*markdown_limits[[:space:]]/ {
+    line = $0
+    if ($0 ~ /;/) {
+      print line
+      line = ""
+      in_limits = 0
+    } else {
+      in_limits = 1
+    }
+    next
+  }
+  in_limits {
+    line = line " " $0
+    if ($0 ~ /;/) {
+      print line
+      line = ""
+      in_limits = 0
+    }
+  }
+')"
+printf '%s\n' "$limits" | awk '
+  /conversion_memory=/ { conversion = 1 }
+  /parser_memory=/ { parser = 1 }
+  /streaming_buffer=/ { streaming = 1 }
+  END {
+    if (!conversion || !parser || !streaming) {
+      exit 1
+    }
+  }
+'
+curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' \
   http://localhost/markdown-metrics
 ```
 
@@ -32,6 +61,7 @@ Prometheus endpoint exposes exactly these relevant families:
 - `nginx_markdown_streaming_events_total{transition=...}`
 - `nginx_markdown_decompression_events_total{encoding=...,outcome=...,reason=...}`
 - `nginx_markdown_requests_total{outcome=...,stage=...,reason=...}`
+- `nginx_markdown_inflight_requests`
 
 ## Response uses full-buffer
 
@@ -41,7 +71,11 @@ selection reason. Prefer it over grepping `nginx -T`, which shows the
 configured value, not the per-request decision:
 
 ```bash
-curl -s http://127.0.0.1/nginx-markdown/diagnostics | jq '.streaming_config'
+curl -s -H 'Accept: application/json' \
+  http://127.0.0.1/nginx-markdown/diagnostics | \
+  jq '{effective: .configuration.effective,
+       sources: .configuration.effective_sources,
+       recent_decisions}'
 ```
 
 - `off` intentionally selects full-buffer.
@@ -58,8 +92,9 @@ The following conditions still select full-buffer or passthrough:
 - A build without the Brotli streaming feature uses the bounded full-buffer
   Brotli path.
 
-Inspect the `streaming` and `configuration.effective` objects in diagnostics,
-then compare attempts by engine:
+Inspect `configuration.effective`, `configuration.effective_sources`, and
+the `recent_decisions[]` entries in diagnostics, then compare attempts by
+engine:
 
 ```bash
 curl -s -H 'Accept: text/plain; version=0.0.4' \
@@ -172,8 +207,10 @@ separate budget-limit failure classification. The module records the event in
    increasing: `conversion_attempts_total` is cumulative, so an absolute
    comparison against a pre-reload value is not meaningful while in-flight
    requests from before the reload are still converting. Compare the delta
-   from your pre-reload baseline only after quiescence
-   (`nginx_markdown_inflight_requests` has returned to zero and no pre-reload
-   request remains in flight).
+   from your pre-reload baseline only after diagnostics/error logs and the
+   worker lifecycle show that no pre-reload request remains in flight. A zero
+   `nginx_markdown_inflight_requests` value alone is not proof of pre-reload
+   drain because it only describes the currently observed conversion
+   population.
 5. Re-enable with `auto` only after reviewing the reason labels and
    compressed-input evidence.

@@ -308,7 +308,6 @@ The 0.3.0 release includes:
 - Cooperative timeout mechanism
 - `cargo-fuzz` targets for parser, FFI, and security-validator paths
 - Internal FFI and metadata helper modules for a smaller public surface per file
-- Incremental processing API (`IncrementalConverter`) behind the `incremental` feature gate
 
 ### NGINX Module (`components/nginx-module/`)
 
@@ -326,7 +325,7 @@ The 0.3.0 release includes:
 - Automatic upstream decompression (gzip, brotli, deflate)
 - Authentication-aware caching (Cache-Control: private)
 - Variable-driven configuration support
-- Large response routing (retired `markdown_large_body_threshold` directive, no Config V2 replacement)
+- Bounded large-response streaming selected by the internal response-shape heuristic
 - Forwarded header trust control with `markdown_trusted_proxies` directive
 
 ## Test Coverage
@@ -426,7 +425,7 @@ breaking-release foundation.
   lifecycle management and cumulative budget enforcement.
 - **Full-buffer compressed copy reduction**: header accumulation helper and
   streaming-first routing reduce unnecessary copies for compressed responses.
-- **Performance evidence gate**: `make release-gates-check-091` (blocking for
+- **Performance evidence gate**: `make release-gates-check-092` (blocking for
   release tags) plus `make perf-evidence-check` (report-only), module
   benchmark harness exercises 8 scenarios including Brotli streaming.
 - **Doctor advice tool**: `make doctor` provides module-aware configuration
@@ -678,7 +677,8 @@ View the latest CI status: [GitHub Actions](https://github.com/cnkang/nginx-mark
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and aarch64)
 - NGINX 1.24.0 and later
-- Rust 1.97.1 and later for source builds (pinned baseline, MSRV 1.97)
+- Rust 1.97.1 is the repository's pinned build toolchain. Rust 1.97 is the
+  public source-build MSRV
 
 ### Docker Support
 - Official NGINX base images
@@ -742,9 +742,9 @@ See `examples/docker/` for Docker build examples.
 | 1.31.4 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.31.4 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.31.4 debian12 glibc amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
-| 1.31.4 alpine3.20 musl amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.4 alpine3.24 musl amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
 | 1.31.4 debian12 glibc arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
-| 1.31.4 alpine3.20 musl arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.4 alpine3.24 musl arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
 | 1.31.4 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.31.4 linux musl amd64 dynamic-module | `.github/workflows/release-binaries.yml` |
 | 1.31.4 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |

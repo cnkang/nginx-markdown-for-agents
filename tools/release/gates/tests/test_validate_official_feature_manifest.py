@@ -23,7 +23,7 @@ def isolated_paths(tmp_path: Path, monkeypatch) -> Path:
     cargo_dir = tmp_path / "rust-converter"
     cargo_dir.mkdir(parents=True, exist_ok=True)
     cargo_dir.joinpath("Cargo.toml").write_text(
-        '[features]\ndefault = ["incremental", "streaming", "prune_noise_regions"]\n',
+        '[features]\ndefault = ["streaming", "prune_noise_regions"]\n',
         encoding="utf-8",
     )
 
@@ -54,7 +54,6 @@ def test_write_mode_generates_then_validates_manifest(
     """--write must generate the expected artifact from valid Cargo inputs."""
     assert validator.main(["--write"]) == 0
     assert json.loads(isolated_paths.read_text(encoding="utf-8")) == {
-        "incremental": True,
         "streaming": True,
         "prune_noise_regions": True,
     }
@@ -64,7 +63,7 @@ def test_cargo_default_features_cannot_add_unmanifested_feature() -> None:
     """An unreviewed feature name in the default list must be rejected."""
     failures: list[str] = []
     validator.check_cargo_features(
-        '[features]\ndefault = ["incremental", "streaming", "prune_noise_regions", "unreviewed"]\n',
+        '[features]\ndefault = ["streaming", "prune_noise_regions", "unreviewed"]\n',
         failures,
     )
 
@@ -76,7 +75,7 @@ def test_cargo_dependency_feature_consumers_reject_forbidden_names() -> None:
     failures: list[str] = []
     validator.check_cargo_features(
         '[features]\n'
-        'default = ["incremental", "streaming", "prune_noise_regions"]\n'
+        'default = ["streaming", "prune_noise_regions"]\n'
         '[target."cfg(unix)".dependencies.parser]\n'
         'version = "1"\n'
         'features = ["brotli"]\n',
@@ -91,7 +90,7 @@ def test_non_string_dependency_feature_fails_closed() -> None:
     failures: list[str] = []
     validator.check_cargo_features(
         '[features]\n'
-        'default = ["incremental", "streaming", "prune_noise_regions"]\n'
+        'default = ["streaming", "prune_noise_regions"]\n'
         '[dependencies.parser]\n'
         'version = "1"\n'
         'features = [1]\n',

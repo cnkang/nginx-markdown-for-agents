@@ -41,7 +41,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # run in normal CI without hard-blocking on reviewable patterns.
 # Pass --strict to preserve exit status 1 when candidates are found.
 strict_mode=0
-for arg in "$@"; do
+for arg in ${1+"$@"}; do
     if [[ "$arg" == "--strict" ]]; then
         strict_mode=1
     fi
@@ -49,7 +49,7 @@ done
 
 # The first non-flag argument is the scan directory.
 SCAN_DIR=""
-for arg in "$@"; do
+for arg in ${1+"$@"}; do
     if [[ "$arg" != "--strict" ]]; then
         SCAN_DIR="$arg"
         break

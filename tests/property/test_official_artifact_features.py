@@ -3,8 +3,8 @@
 (Property 27).
 
 For any official release artifact (DEB, RPM, container, Homebrew), the
-compiled module SHALL use the same fixed feature set (incremental,
-streaming, prune_noise_regions all enabled). Custom source builds MAY
+compiled module SHALL use the same fixed feature set (streaming,
+prune_noise_regions all enabled). Custom source builds MAY
 disable features but SHALL expose their capability set through build_info
 diagnostics. No CI matrix tests all feature-flag combinations.
 
@@ -29,7 +29,7 @@ import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
-OFFICIAL_FEATURES = frozenset({"incremental", "streaming", "prune_noise_regions"})
+OFFICIAL_FEATURES = frozenset({"streaming", "prune_noise_regions"})
 
 
 def _resolve_manifest_path() -> pathlib.Path:
@@ -39,8 +39,15 @@ def _resolve_manifest_path() -> pathlib.Path:
     version directory that ships the manifest, so bumping the release version
     does not silently point this test at a stale artifact.
     """
-    release_dir = REPO_ROOT / "artifacts" / "release"
-    manifests = list(release_dir.glob("*/official-build-feature-manifest.json"))
+    repo_root = REPO_ROOT.resolve()
+    release_dir = (repo_root / "artifacts" / "release").resolve()
+    manifests = [path.resolve() for path in release_dir.glob(
+        "*/official-build-feature-manifest.json"
+    )]
+    manifests = [
+        path for path in manifests
+        if path.is_relative_to(release_dir) and path.is_file()
+    ]
     assert manifests, (
         "no official-build-feature-manifest.json under artifacts/release/"
     )
@@ -103,7 +110,9 @@ CUSTOM_BUILD_WORKFLOWS = (
 
 
 def _load_manifest() -> dict:
-    return json.loads(_resolve_manifest_path().read_text(encoding="utf-8"))
+    manifest_path = _resolve_manifest_path().resolve()
+    assert manifest_path.is_file(), f"manifest is not a regular file: {manifest_path}"
+    return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
 def _cargo_default_features() -> set[str]:
@@ -163,11 +172,10 @@ def _workflow_feature_flags(path: pathlib.Path) -> list[set[str]]:
     return parsed
 
 
-def test_official_feature_manifest_is_exact_three_key_object() -> None:
-    """The official build feature manifest is exactly {incremental: true,
-    streaming: true, prune_noise_regions: true}."""
+def test_official_feature_manifest_is_exact_two_key_object() -> None:
+    """The official build feature manifest contains only active features."""
     manifest = _load_manifest()
-    assert manifest == {"incremental": True, "streaming": True, "prune_noise_regions": True}
+    assert manifest == {"streaming": True, "prune_noise_regions": True}
 
 
 def test_cargo_default_features_match_official_manifest() -> None:
@@ -283,7 +291,7 @@ def test_feature_flag_parser_separates_cargo_sentinels(tmp_path: pathlib.Path) -
     workflow = tmp_path / "workflow.yml"
     workflow.write_text(
         "run: cargo build --no-default-features "
-        "--features incremental,streaming,prune_noise_regions "
+        "--features streaming,prune_noise_regions "
         "--all-features\n",
         encoding="utf-8",
     )

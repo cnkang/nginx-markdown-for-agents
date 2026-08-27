@@ -43,8 +43,8 @@ encoding, memory, or backpressure safety rules.
 
 ## Compressed response routing
 
-Gzip and both supported deflate framings use the incremental decoder when the
-streaming gates pass. Brotli uses the incremental decoder only when the
+Gzip and both supported deflate framings use the streaming decoder when the
+streaming gates pass. Brotli uses the streaming decoder only when the
 build compiles the feature. Otherwise it uses the bounded full-buffer Rust FFI path.
 Unsupported encodings pass through or follow the configured error policy.
 

@@ -312,7 +312,7 @@ def main() -> int:
 
     try:
         violations, reviews = audit(args.path)
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 

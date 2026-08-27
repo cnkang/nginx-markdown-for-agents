@@ -96,7 +96,7 @@ fi
 
 # Parse the checksums file: skip comments and blank lines, match identifier
 EXPECTED_SHA256=""
-while IFS= read -r line; do
+while IFS= read -r line || [[ -n "$line" ]]; do
     # Skip comments and blank lines
     case "$line" in
         '#'*|'') continue ;;

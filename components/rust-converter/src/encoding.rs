@@ -25,11 +25,6 @@ pub const MAX_DECODER_DEPTH: usize = 3;
 /// Maximum accepted token length in bytes.
 pub const MAX_TOKEN_LEN: usize = 128;
 
-/// Historical compatibility value for the former ratio activation threshold.
-/// Ratio enforcement now applies to every non-empty compressed layer; the
-/// value is retained for downstream source compatibility only.
-pub const RATIO_ACTIVATION_THRESHOLD: usize = 256;
-
 /// Content-Encoding token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -253,18 +248,17 @@ impl Default for DecodeLimits {
 ///
 /// The cumulative output budget applies across every non-identity
 /// intermediate output. The per-layer ratio check applies to every non-empty
-/// compressed input; zero compressed input is accepted for the initial decoder
-/// only. An empty intermediate output cannot feed another decoder layer.
+/// compressed input. A declared non-identity layer always runs its decoder,
+/// including for an empty wire body, so the single-format decoder can classify
+/// that body as truncated. An empty intermediate output cannot feed another
+/// decoder layer.
 ///
-/// **Empty-input contract (empty-input):** an empty wire body (`encoded` is empty)
-/// is a legal empty payload regardless of the declared chain — there is
-/// nothing to decode, so the call succeeds with an empty output instead of
-/// classifying the empty input as truncation. This intentionally differs
-/// from the single-format decompressors (`decompress_gzip`/`decompress_deflate`/
-/// `decompress_brotli`), which classify an empty compressed input as
-/// `TruncatedInput`; the chain decoder treats a zero-byte body as "no
-/// content" per HTTP semantics. Callers that need strict single-format
-/// truncation semantics must use the single-format entry points directly.
+/// **Empty-input contract (empty-input):** an empty wire body is transparent
+/// only when the effective chain contains no decoder layers (for example, an
+/// identity-only chain). If a non-identity layer is declared, the decoder is
+/// invoked and its `TruncatedInput` classification is preserved. This keeps
+/// chain decoding aligned with the single-format decompressors and prevents a
+/// missing encoded body from being accepted as a valid compressed response.
 pub fn decode_chain(
     encoded: &[u8],
     layers: &[Encoding],
@@ -277,13 +271,6 @@ pub fn decode_chain(
     let mut current: std::borrow::Cow<'_, [u8]> = std::borrow::Cow::Borrowed(encoded);
     let mut cumulative = 0usize;
     let mut has_decoded_layer = false;
-
-    /* An empty body is a legal empty payload: there is nothing to decode,
-     * so return success immediately instead of classifying the empty
-     * input as truncation on a later layer (empty-input). */
-    if current.is_empty() {
-        return Ok(Vec::new());
-    }
 
     /* Decode from the outermost layer (last declared) inward. */
     for enc in layers.iter().rev() {
@@ -342,9 +329,6 @@ fn decode_layer(
     encoding: Encoding,
     limits: DecodeLimits,
 ) -> Result<Vec<u8>, ChainDecodeError> {
-    if input.is_empty() {
-        return Ok(Vec::new());
-    }
     let format = match encoding {
         Encoding::Gzip => crate::decompress::Format::Gzip,
         Encoding::Deflate => crate::decompress::Format::Deflate,
@@ -360,9 +344,9 @@ fn decode_layer(
 /// accumulate the cumulative output budget.
 ///
 /// Ratio semantics: the per-layer ratio ceiling applies to every non-empty
-/// compressed `input_len`; there is no small-input exemption. (Zero-length
-/// input is accepted for the initial decoder only; a non-empty decoded output
-/// from an empty input is rejected as a ratio violation.)
+/// compressed `input_len`; there is no small-input exemption. An empty encoded
+/// input is handled by the format decoder and is classified as truncated
+/// before this post-decode accounting runs.
 fn validate_decoded_layer(
     input_len: usize,
     decoded_len: usize,
@@ -654,29 +638,37 @@ mod tests {
     }
 
     #[test]
-    fn decode_chain_empty_input_is_empty_payload() {
-        /* empty-input: an empty body with declared encodings is a legal empty
-         * payload — decode_chain returns an empty result instead of
-         * misclassifying it as truncation. */
-        let layers = vec![Encoding::Gzip, Encoding::Deflate];
-        let out = decode_chain(b"", &layers, DecodeLimits::default()).unwrap();
-        assert!(
-            out.is_empty(),
-            "empty input must decode to an empty payload"
-        );
+    fn decode_chain_empty_input_matches_single_format_contract() {
+        let identity_only =
+            decode_chain(b"", &[Encoding::Identity], DecodeLimits::default()).unwrap();
+        assert!(identity_only.is_empty());
+
+        for encoding in [Encoding::Gzip, Encoding::Deflate, Encoding::Br] {
+            let single = decode_chain(b"", &[encoding], DecodeLimits::default());
+            assert!(
+                matches!(single, Err(ChainDecodeError::TruncatedInput(_))),
+                "empty {:?} input must be truncated",
+                encoding
+            );
+
+            let multi = decode_chain(
+                b"",
+                &[encoding, Encoding::Identity, Encoding::Gzip],
+                DecodeLimits::default(),
+            );
+            assert!(
+                matches!(multi, Err(ChainDecodeError::TruncatedInput(_))),
+                "empty multi-layer {:?} input must be truncated",
+                encoding
+            );
+        }
     }
 
     #[test]
-    fn ratio_exceeded_above_threshold() {
-        /* Highly compressible payload: ratio far above 100:1, with a
-         * compressed size above the historical fixture threshold. */
+    fn ratio_exceeded() {
+        /* Highly compressible payload: ratio far above 100:1. */
         let original = vec![0u8; 1_000_000];
         let compressed = gzip_compress(&original);
-        assert!(
-            compressed.len() >= 256,
-            "expected compressed size above legacy fixture threshold, got {}",
-            compressed.len()
-        );
         let limits = DecodeLimits {
             max_output: 10 * 1024 * 1024,
             ratio: 10,
@@ -689,9 +681,8 @@ mod tests {
     fn ratio_enforced_for_small_input() {
         let original = vec![0u8; 100_000];
         let compressed = gzip_compress(&original);
-        assert!(compressed.len() < RATIO_ACTIVATION_THRESHOLD);
-        /* A small compressed input is still subject to the configured ratio;
-         * ratio=1 must reject the highly expanding layer. */
+        /* Ratio=1 must reject the highly expanding layer regardless of wire
+         * size. */
         let limits = DecodeLimits {
             max_output: 10 * 1024 * 1024,
             ratio: 1,
@@ -704,7 +695,6 @@ mod tests {
     fn ratio_ok_within_limits() {
         let original = vec![0u8; 1_000_000];
         let compressed = gzip_compress(&original);
-        assert!(compressed.len() >= 256);
         let limits = DecodeLimits {
             max_output: 10 * 1024 * 1024,
             ratio: 5000,
@@ -715,8 +705,8 @@ mod tests {
 
     #[test]
     fn zero_input_zero_output() {
-        /* Empty compressed input is a valid empty decode (no decoder work). */
-        let out = decode_chain(&[], &[Encoding::Gzip], DecodeLimits::default()).unwrap();
+        /* Identity-only chains preserve an empty body without decoder work. */
+        let out = decode_chain(&[], &[Encoding::Identity], DecodeLimits::default()).unwrap();
         assert!(out.is_empty());
     }
 
@@ -815,7 +805,6 @@ mod tests {
          * just the accepted result. */
         let original = vec![0u8; 1_000_000];
         let compressed = gzip_compress(&original);
-        assert!(compressed.len() >= RATIO_ACTIVATION_THRESHOLD);
         let limits = DecodeLimits {
             max_output: usize::MAX, // absolute budget effectively unbounded
             ratio: 1,               // ratio ceiling ≈ compressed_len bytes

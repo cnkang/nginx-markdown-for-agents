@@ -216,6 +216,7 @@ def _valid_diagnostics(draw):
             "scope": "worker-local",
         },
         "build": {
+            "build_kind": "release",
             "source_sha": draw(_sha_commit),
             "nginx_version": draw(
                 st.from_regex(r"[0-9]+\.[0-9]+\.[0-9]+", fullmatch=True)
@@ -223,6 +224,7 @@ def _valid_diagnostics(draw):
             "rust_version": draw(
                 st.from_regex(r"[0-9]+\.[0-9]+\.[0-9]+", fullmatch=True)
             ),
+            "feature_manifest_digest": draw(_sha256_digest),
             "features": draw(
                 st.lists(
                     st.from_regex(r"[a-z_]+", fullmatch=True),
@@ -238,6 +240,7 @@ def _valid_diagnostics(draw):
             "effective_sources": draw(_effective_sources()),
         },
         "runtime": {
+            "diagnostics_recording": "active",
             "inflight": draw(st.integers(min_value=0, max_value=10000)),
             "pending_output": draw(st.integers(min_value=0, max_value=10000)),
             "module_metrics": {
@@ -249,6 +252,9 @@ def _valid_diagnostics(draw):
                 ),
                 "copied_output_total": draw(
                     st.integers(min_value=0, max_value=10000)
+                ),
+                "diagnostics_recording_state": draw(
+                    st.integers(min_value=0, max_value=2)
                 ),
             },
         },

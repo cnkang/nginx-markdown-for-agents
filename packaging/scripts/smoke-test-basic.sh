@@ -60,12 +60,12 @@ detect_rpm_repo_baseurl() {
     case "${ID:-}" in
         amzn)
             # shellcheck disable=SC2016 # $basearch is expanded by dnf/yum.
-            printf 'http://nginx.org/packages/%samzn/%s/$basearch/\n' \
+            printf 'https://nginx.org/packages/%samzn/%s/$basearch/\n' \
                 "$channel" "${VERSION_ID%%.*}"
             ;;
         almalinux|centos|rocky|rhel)
             # shellcheck disable=SC2016 # $releasever/$basearch are expanded by dnf/yum.
-            printf 'http://nginx.org/packages/%scentos/$releasever/$basearch/\n' \
+            printf 'https://nginx.org/packages/%scentos/$releasever/$basearch/\n' \
                 "$channel"
             ;;
         *)
@@ -101,6 +101,87 @@ nginx_repo_channel() {
     return 0
 }
 
+remove_module_package() {
+    case "$PKG_FORMAT" in
+        deb)
+            dpkg --remove nginx-module-markdown-for-agents
+            ;;
+        rpm)
+            if command -v dnf >/dev/null 2>&1; then
+                dnf remove -y nginx-module-markdown-for-agents
+            elif command -v yum >/dev/null 2>&1; then
+                yum remove -y nginx-module-markdown-for-agents
+            else
+                die "Neither dnf nor yum found for RPM module removal"
+            fi
+            ;;
+        *)
+            die "Unsupported package format for module removal: ${PKG_FORMAT}"
+            ;;
+    esac
+    return 0
+}
+
+run_package_removal_lifecycle() {
+    local module_path="$1"
+    local config_path="/etc/nginx/nginx.conf"
+    local backup_path=""
+    local temp_path=""
+    local removal_status=0
+
+    if [[ ! -f "$config_path" ]]; then
+        die "${config_path} is required for the package removal lifecycle"
+    fi
+
+    backup_path="$(mktemp "${TMPDIR:-/tmp}/nginx-markdown-config.XXXXXX")" \
+        || die "Failed to create an NGINX configuration backup"
+    cp -p "$config_path" "$backup_path" \
+        || die "Failed to preserve the original NGINX configuration"
+    temp_path="$(mktemp "${config_path}.XXXXXX")" \
+        || die "Failed to create an NGINX configuration fixture"
+    {
+        printf 'load_module "%s";\n' "$module_path"
+        cat "$config_path"
+    } > "$temp_path" || die "Failed to enable the module in the NGINX configuration"
+    mv -f "$temp_path" "$config_path" \
+        || die "Failed to enable the module in the NGINX configuration"
+
+    info "Checking the enabled module configuration before removal..."
+    if ! "$NGINX_BIN" -t -c "$config_path" >"${INSTALL_LOG}" 2>&1; then
+        cp -p "$backup_path" "$config_path" || true
+        rm -f "$backup_path"
+        die "nginx -t failed after enabling the module for removal testing"
+    fi
+
+    info "Confirming package removal is blocked while load_module is active..."
+    if remove_module_package >>"${INSTALL_LOG}" 2>&1; then
+        removal_status=0
+    else
+        removal_status=$?
+    fi
+    if [[ "$removal_status" -eq 0 ]]; then
+        cp -p "$backup_path" "$config_path" || true
+        rm -f "$backup_path"
+        die "Package removal unexpectedly succeeded while the module was loaded"
+    fi
+
+    info "Disabling the module and retrying package removal..."
+    cp -p "$backup_path" "$config_path" \
+        || die "Failed to disable the module in the NGINX configuration"
+    rm -f "$backup_path"
+    if ! "$NGINX_BIN" -t -c "$config_path" >"${INSTALL_LOG}" 2>&1; then
+        die "nginx -t failed after disabling the module"
+    fi
+    if ! remove_module_package >>"${INSTALL_LOG}" 2>&1; then
+        die "Package removal failed after disabling the module"
+    fi
+    if ! "$NGINX_BIN" -t -c "$config_path" >"${INSTALL_LOG}" 2>&1; then
+        die "nginx -t failed after the module package was removed"
+    fi
+    info "Package removal lifecycle passed: active load blocked removal, disabled load removed cleanly"
+    return 0
+}
+
 detect_nginx_modules_path() {
     local modules_path
 
@@ -127,12 +208,14 @@ run_module_behavior_smoke() {
     local negative_conf=""
     local headers_file=""
     local body_file=""
+    local diagnostics_file=""
     local negative_log=""
     local nginx_pid=""
     local response_ok=0
     local content_type_ok=0
     local vary_ok=0
     local body_ok=0
+    local diagnostics_ok=0
     local i=0
 
     curl_bin="$(command -v curl 2>/dev/null || true)"
@@ -148,6 +231,7 @@ run_module_behavior_smoke() {
     negative_conf="${smoke_prefix}/negative.conf"
     headers_file="${smoke_prefix}/response.headers"
     body_file="${smoke_prefix}/response.body"
+    diagnostics_file="${smoke_prefix}/diagnostics.json"
     negative_log="${smoke_prefix}/negative.log"
 
     cat > "$smoke_root/index.html" <<'HTML'
@@ -169,6 +253,11 @@ http {
         listen 127.0.0.1:19999;
         root ${smoke_root};
         location / { index index.html; }
+        location /nginx-markdown/diagnostics {
+            markdown_diagnostics on;
+            allow 127.0.0.1;
+            deny all;
+        }
     }
 }
 CONF
@@ -213,16 +302,54 @@ CONF
         fi
     fi
 
-    kill "$nginx_pid" 2>/dev/null || true
-    wait "$nginx_pid" 2>/dev/null || true
-
     if [[ "$response_ok" -ne 1 ]]; then
+        kill "$nginx_pid" 2>/dev/null || true
+        wait "$nginx_pid" 2>/dev/null || true
         die "Module-enabled NGINX did not serve a Markdown request"
     fi
     if [[ "$content_type_ok" -ne 1 || "$vary_ok" -ne 1 || "$body_ok" -ne 1 ]]; then
+        kill "$nginx_pid" 2>/dev/null || true
+        wait "$nginx_pid" 2>/dev/null || true
         die "Positive module request did not produce the expected Markdown representation"
     fi
     info "Positive module request verified Content-Type, Vary, and Markdown body"
+
+    info "Reading diagnostics from the loaded package module..."
+    if "$curl_bin" -fsS -o "$diagnostics_file" \
+        http://127.0.0.1:19999/nginx-markdown/diagnostics; then
+        if grep -Fq '"schema_version":2' "$diagnostics_file" \
+            && grep -Fq '"diagnostics_recording":"active"' "$diagnostics_file"; then
+            diagnostics_ok=1
+        fi
+        if [[ -n "${EXPECTED_SOURCE_SHA:-}" \
+            || -n "${EXPECTED_RUST_VERSION:-}" \
+            || -n "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
+            if [[ -z "${EXPECTED_SOURCE_SHA:-}" \
+                || -z "${EXPECTED_RUST_VERSION:-}" \
+                || -z "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
+                diagnostics_ok=0
+            elif ! grep -Fq '"build_kind":"release"' "$diagnostics_file" \
+                || ! grep -Fq "\"source_sha\":\"${EXPECTED_SOURCE_SHA}\"" \
+                    "$diagnostics_file" \
+                || ! grep -Fq "\"rust_version\":\"${EXPECTED_RUST_VERSION}\"" \
+                    "$diagnostics_file" \
+                || ! grep -Fq \
+                    "\"feature_manifest_digest\":\"${EXPECTED_FEATURE_MANIFEST_DIGEST}\"" \
+                    "$diagnostics_file"; then
+                diagnostics_ok=0
+            fi
+        fi
+    fi
+
+    kill "$nginx_pid" 2>/dev/null || true
+    wait "$nginx_pid" 2>/dev/null || true
+
+    if [[ "$diagnostics_ok" -ne 1 ]]; then
+        die "Diagnostics response did not match the expected module contract"
+    fi
+    if [[ -n "${EXPECTED_SOURCE_SHA:-}" ]]; then
+        info "Release diagnostics identity matches source, Rust, and feature manifest"
+    fi
 
     info "Running negative control without load_module..."
     if "$NGINX_BIN" -t -p "$smoke_prefix" -c "$negative_conf" \
@@ -391,6 +518,7 @@ CONF
         rm -f "${TMP_CONF}"
         info "Module loads successfully (load_module + markdown_filter on verified)"
         run_module_behavior_smoke "$MODULE_PATH"
+        run_package_removal_lifecycle "$MODULE_PATH"
         ;;
 
     rpm)
@@ -458,28 +586,8 @@ REPO
         fi
         info "Module .so exists: $(ls -la "${MODULE_PATH}" 2>&1)"
 
-        # --- RPM: Add load_module to nginx.conf top ---
-        info "Adding load_module directive to top of nginx.conf..."
-        if [[ -f /etc/nginx/nginx.conf ]]; then
-            _tmp="$(mktemp /etc/nginx/nginx.conf.XXXXXX)" \
-                || die "Failed to create temp file for nginx.conf prepend"
-            printf 'load_module %s;\n' "${MODULE_PATH}" \
-                > "$_tmp" \
-                || die "Failed to write load_module line to temp file"
-            cat /etc/nginx/nginx.conf >> "$_tmp" \
-                || die "Failed to append original nginx.conf to temp file"
-            mv -f "$_tmp" /etc/nginx/nginx.conf \
-                || die "Failed to move temp file over nginx.conf"
-        else
-            die "/etc/nginx/nginx.conf not found"
-        fi
-
-        # --- RPM: Verify nginx -t (ABI compatibility) ---
-        info "Running nginx -t to verify module loads correctly..."
-        if ! "$NGINX_BIN" -t 2>&1; then
-            die "nginx -t failed — module ABI compatibility check FAILED"
-        fi
         run_module_behavior_smoke "$MODULE_PATH"
+        run_package_removal_lifecycle "$MODULE_PATH"
         ;;
 
     *)

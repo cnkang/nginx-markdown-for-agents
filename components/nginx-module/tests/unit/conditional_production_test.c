@@ -2,10 +2,6 @@
 #include <strings.h>
 
 #define MARKDOWN_STREAMING_ENABLED 1
-#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
-#endif
-
 #include "../../src/ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
 
@@ -44,6 +40,9 @@ struct MarkdownConverterHandle { int dummy; };
 
 #ifndef NGX_LOG_ERR
 #define NGX_LOG_ERR 3
+#endif
+#ifndef NGX_LOG_CRIT
+#define NGX_LOG_CRIT 2
 #endif
 #ifndef NGX_LOG_WARN
 #define NGX_LOG_WARN 4
@@ -260,12 +259,14 @@ ngx_list_push(ngx_list_t *list)
 }
 
 static int g_send_header_rc;
+static int g_finalize_call_count;
 static int g_prepare_options_rc;
 static int g_cond_result_code;
 static int g_convert_error_code;
 static uint8_t *g_convert_etag;
 static uintptr_t g_convert_etag_len;
 static uintptr_t g_decide_last_modified_len;
+static uintptr_t g_decide_if_modified_since_len;
 
 ngx_int_t
 ngx_http_markdown_set_etag(ngx_http_request_t *r, const u_char *etag,
@@ -321,6 +322,7 @@ ngx_http_finalize_request(ngx_http_request_t *r, ngx_int_t rc)
 {
     UNUSED(r);
     UNUSED(rc);
+    g_finalize_call_count++;
 }
 
 void
@@ -365,6 +367,8 @@ markdown_decide_conditional(const struct FFIConditionalInput *input,
 {
     g_decide_last_modified_len = input == NULL
                                  ? 0 : input->last_modified_len;
+    g_decide_if_modified_since_len = input == NULL
+                                     ? 0 : input->if_modified_since_len;
 
     if (out == NULL) {
         return;
@@ -503,7 +507,7 @@ ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
 {
     /* Test-local mirror of the production helper: invalidate all
      * Content-Type list entries, then point the dedicated field at the
-     * shared Markdown media type and clear its mirrors.  Mirrors the
+     * shared Markdown media type and set its charset and mirrors.  Mirrors the
      * semantics asserted by headers_test.c against the real helper. */
     ngx_list_part_t  *part;
     ngx_table_elt_t  *headers;
@@ -529,8 +533,9 @@ ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
         sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
     r->headers_out.content_type_len =
         sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
+    r->headers_out.charset.len = NGX_HTTP_MARKDOWN_CHARSET_LEN;
+    r->headers_out.charset.data =
+        (u_char *) NGX_HTTP_MARKDOWN_CHARSET_LITERAL;
     r->headers_out.content_type_lowcase = NULL;
     r->headers_out.content_type_hash = 0;
 }
@@ -593,6 +598,7 @@ make_req(void)
 {
     g_pool_fail_at = (size_t) -1;
     g_pool_allocations = 0;
+    g_finalize_call_count = 0;
 
     ngx_http_request_t *r = (ngx_http_request_t *)
         ngx_pcalloc(NULL, sizeof(ngx_http_request_t));
@@ -828,6 +834,8 @@ test_send_304_with_etag(void)
 
     ngx_int_t rc = ngx_http_markdown_send_304(r, &result);
     TEST_ASSERT(rc == NGX_DONE, "send_304 returns NGX_DONE");
+    TEST_ASSERT(g_finalize_call_count == 0,
+                "send_304 leaves finalization to the body-filter caller");
     TEST_ASSERT(r->headers_out.status == NGX_HTTP_NOT_MODIFIED,
         "Status is 304");
     TEST_ASSERT(r->headers_out.content_encoding == NULL
@@ -1066,7 +1074,7 @@ test_handle_inm_if_modified_since_only(void)
 }
 
 static void
-test_handle_ims_only_not_modified_without_conversion(void)
+test_handle_ims_only_cannot_synthesize_not_modified(void)
 {
     g_pool_offset = 0;
     g_prepare_options_rc = NGX_ERROR;
@@ -1092,10 +1100,15 @@ test_handle_ims_only_not_modified_without_conversion(void)
     struct MarkdownResult *result = NULL;
     ngx_int_t rc = ngx_http_markdown_handle_if_none_match(
         r, &conf, &ctx, NULL, &result);
-    TEST_ASSERT(rc == NGX_HTTP_NOT_MODIFIED,
-        "IMS-only matching date returns 304 without conversion");
-    TEST_ASSERT(result == NULL, "IMS-only path does not allocate result");
-    TEST_PASS("ims_only uses Rust conditional decision without ETag");
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "IMS-only request falls through to conversion instead of a "
+        "source-mtime 304");
+    TEST_ASSERT(result == NULL, "suppressed conditional path does not allocate result");
+    TEST_ASSERT(g_decide_if_modified_since_len == 0,
+        "decision input carries no If-Modified-Since value");
+    TEST_ASSERT(g_decide_last_modified_len == 0,
+        "decision input carries no source Last-Modified value");
+    TEST_PASS("ims_only validators withheld from converted-representation decision");
 }
 
 static void
@@ -1376,7 +1389,7 @@ test_handle_inm_with_ims_header(void)
 /* ── Bypass outcome tests ────────────────────────────────────── */
 
 /*
- * P0 regression test: Range header with conditional headers present
+ * Regression test: Range header with conditional headers present
  * must return Bypass, not proceed to conversion.
  */
 static void
@@ -1411,7 +1424,7 @@ test_handle_bypass_range_request(void)
 }
 
 /*
- * P0 regression test: Cache-Control: no-transform with conditional
+ * Regression test: Cache-Control: no-transform with conditional
  * headers present must return Bypass, not proceed to conversion.
  */
 static void
@@ -1446,7 +1459,7 @@ test_handle_bypass_no_transform(void)
 }
 
 /*
- * P0 regression test: has_no_transform detects no-transform in a
+ * Regression test: has_no_transform detects no-transform in a
  * comma-separated Cache-Control value.
  */
 static void
@@ -1466,7 +1479,7 @@ test_has_no_transform_in_comma_separated_list(void)
 }
 
 /*
- * P0 regression test: has_no_transform returns 0 when no-transform
+ * Regression test: has_no_transform returns 0 when no-transform
  * is absent.
  */
 static void
@@ -1485,7 +1498,7 @@ test_has_no_transform_absent(void)
 }
 
 /*
- * P0 regression test: has_no_transform returns 0 when no Cache-Control
+ * Regression test: has_no_transform returns 0 when no Cache-Control
  * header at all.
  */
 static void
@@ -1503,15 +1516,15 @@ test_has_no_transform_no_cache_control(void)
 /* ── last_modified_time fallback tests ──────────────────────── */
 
 /*
- * P1 regression test: IMS-only with only r->headers_out.last_modified_time
+ * Regression test: IMS-only with only r->headers_out.last_modified_time
  * set (no Last-Modified list header) must produce a valid Last-Modified
  * string for the Rust conditional decision, enabling a 304 match.
  */
 static void
-test_handle_ims_only_last_modified_time_fallback(void)
+test_handle_ims_only_scalar_time_not_consulted(void)
 {
     g_pool_offset = 0;
-    g_cond_result_code = 0;  /* NotModified */
+    g_cond_result_code = 0;  /* NotModified would be returned if consulted */
 
     ngx_http_request_t *r = make_req();
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
@@ -1532,18 +1545,20 @@ test_handle_ims_only_last_modified_time_fallback(void)
     struct MarkdownResult *result = NULL;
     ngx_int_t rc = ngx_http_markdown_handle_if_none_match(
         r, &conf, &ctx, NULL, &result);
-    TEST_ASSERT(rc == NGX_HTTP_NOT_MODIFIED,
-        "IMS-only with last_modified_time fallback returns 304");
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "scalar last_modified_time fallback cannot drive a 304 for a "
+        "converted response");
     TEST_ASSERT(result == NULL,
-        "IMS-only path does not allocate result");
-    TEST_ASSERT(g_decide_last_modified_len ==
-                    NGX_HTTP_MARKDOWN_HTTP_DATE_LEN,
-        "IMS-only fallback forwards the fixed RFC 1123 date length");
-    TEST_PASS("ims_only last_modified_time fallback to 304");
+        "suppressed fallback path does not allocate result");
+    TEST_ASSERT(g_decide_last_modified_len == 0,
+        "fallback date never reaches the decision input");
+    TEST_ASSERT(g_decide_if_modified_since_len == 0,
+        "request IMS value never reaches the decision input");
+    TEST_PASS("ims_only scalar last_modified_time withheld from decision");
 }
 
 /*
- * P1 regression test: IMS-only with last_modified_time == -1 (unset)
+ * Regression test: IMS-only with last_modified_time == -1 (unset)
  * and no Last-Modified list header must NOT produce a 304.
  */
 static void
@@ -1601,7 +1616,7 @@ main(void)
 
     test_handle_inm_disabled();
     test_handle_inm_if_modified_since_only();
-    test_handle_ims_only_not_modified_without_conversion();
+    test_handle_ims_only_cannot_synthesize_not_modified();
     test_handle_inm_no_inm_header();
     test_handle_inm_etag_disabled();
     test_handle_inm_buffer_not_initialized();
@@ -1619,7 +1634,7 @@ main(void)
     test_has_no_transform_absent();
     test_has_no_transform_no_cache_control();
 
-    test_handle_ims_only_last_modified_time_fallback();
+    test_handle_ims_only_scalar_time_not_consulted();
     test_handle_ims_only_no_last_modified_at_all();
 
     printf("\n========================================\n");

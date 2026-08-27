@@ -54,6 +54,12 @@ published: "2024-01-15"
 5. **author** (optional): From meta author tag
 6. **published** (optional): From article:published_time meta tag
 
+A complete metadata record requires `title` and `url`, but
+`write_front_matter()` does not fail conversion when either value is absent or
+empty. It omits each missing field and emits the remaining non-empty metadata
+fields, so partial front matter is valid output. Callers that require complete
+front matter must validate the extracted metadata before accepting the result.
+
 ### Configuration
 
 Enable YAML front matter by setting `include_front_matter`. The converter

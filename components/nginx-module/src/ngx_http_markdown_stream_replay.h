@@ -18,8 +18,13 @@
 /*
  * Initialize replay buffer from config precommit_buffer size.
  *
- * Allocates the backing store via ngx_alloc and registers a pool
- * cleanup handler so it is freed automatically when the request ends.
+ * Registers a pool cleanup handler and records the maximum size.  It does
+ * not allocate backing storage; ngx_http_markdown_stream_replay_append()
+ * allocates that storage lazily via ngx_alloc and it is freed automatically
+ * when the request ends.
+ *
+ * A capacity of zero disables replay, clears replay_initialized, and
+ * returns NGX_OK.
  *
  * Parameters:
  *   ctx      - Request context with stream_sm sub-struct
@@ -27,7 +32,7 @@
  *   capacity - Maximum replay buffer size in bytes
  *
  * Returns:
- *   NGX_OK    - Buffer initialized successfully
+ *   NGX_OK    - Buffer initialized successfully, or replay disabled
  *   NGX_ERROR - Allocation or cleanup registration failed
  */
 ngx_int_t

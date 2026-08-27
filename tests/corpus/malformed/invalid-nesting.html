@@ -6,23 +6,21 @@
 </head>
 <body>
     <!-- Test Purpose: Verify handling of incorrectly nested elements -->
-    
+
     <!-- Paragraph inside heading (invalid) -->
     <h1>Heading with <p>paragraph inside</p></h1>
-    
+
     <!-- Block element inside inline element (invalid) -->
     <span>
         <div>Block inside inline</div>
     </span>
-    
-    <!-- List item container -->
-    <ul>
-        <li>Orphaned list item</li>
-    </ul>
-    
+
+    <!-- List item without a list container -->
+    <li>Orphaned list item</li>
+
     <!-- Overlapping tags (invalid) -->
     <strong>Bold <em>and italic</strong> but em not closed</em>
-    
+
     <!-- Table elements in wrong order -->
     <table>
         <tbody>
@@ -38,21 +36,21 @@
             </tr>
         </thead>
     </table>
-    
+
     <!-- Anchor inside anchor (invalid) -->
     <a href="/outer">
         Outer link
         <a href="/inner">Inner link</a>
     </a>
-    
+
     <!-- Button inside anchor (questionable) -->
     <a href="/page">
         <button>Click me</button>
     </a>
-    
+
     <!-- Form elements in wrong context -->
     <option>Option without select</option>
-    
+
     <!-- Heading inside paragraph (invalid) -->
     <p>
         This is a paragraph

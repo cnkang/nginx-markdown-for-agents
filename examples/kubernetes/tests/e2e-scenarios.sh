@@ -9,7 +9,7 @@
 #   functionality is preserved.
 #
 # REQUIREMENTS:
-#   - REQ-0700-K8S-005: K8s/Ingress Smoke and E2E verification
+#   - K8s/Ingress Smoke and E2E verification
 #   - Design reference: design.md §12.3
 #
 # USAGE:
@@ -240,7 +240,7 @@ scenario_deploy() {
         kubectl create deployment "$DEPLOYMENT_NAME" \
             -n "$NAMESPACE" \
             --image="$IMAGE" \
-            --port=80 >&2 2>&1 || {
+            --port=8080 >&2 2>&1 || {
             log_error "Failed to create deployment"
             return 1
         }
@@ -253,7 +253,7 @@ scenario_deploy() {
         if [ -z "$svc_exists" ]; then
             kubectl expose deployment "$DEPLOYMENT_NAME" \
                 -n "$NAMESPACE" \
-                --port=80 --target-port=80 \
+                --port=8080 --target-port=8080 \
                 --name="$SERVICE_NAME" >&2 2>&1 || true
         fi
     else

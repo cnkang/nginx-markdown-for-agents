@@ -51,7 +51,7 @@ cookie_matches_pattern(const char *cookie_name, const char *pattern)
 
     /* Guard: if either string hits the 4096 boundary, it may not be
      * NUL-terminated within the buffer.  Return 0 (no match) to match
-     * the sibling test in auth_cache_control_test.c. */
+     * the production authentication contract. */
     if (cookie_len == 4096 || pattern_len == 4096) {
         return 0;
     }

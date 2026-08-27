@@ -1085,8 +1085,9 @@ test_gzip_later_member_grows_at_member_boundary(void)
     TEST_ASSERT(inflateInit2(&stream, MAX_WBITS + 16) == Z_OK,
                 "member-boundary inflate init");
 
-    rc = ngx_http_markdown_inflate_loop(&r, &g_conf, &stream,
+    rc = ngx_http_markdown_inflate_loop(&r, &stream,
         &output_data, &output_size, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        g_conf.decompress.max_size,
         &total_out);
 
     TEST_ASSERT(rc == NGX_OK,
@@ -1285,8 +1286,37 @@ test_gzip_budget_exceeded(void)
                 "budget errors should release decompression output");
 }
 
+static void
+test_c_decompressor_applies_ratio_limit(void)
+{
+    u_char plain[4096];
+    u_char compressed[256];
+    size_t compressed_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+
+    memset(plain, 'A', sizeof(plain));
+
+    init_request(&r);
+    g_conf.decompress.max_size = 1024 * 1024;
+    g_conf.limits.decompression_ratio = 1;
+    compressed_len = gzip_compress(plain, sizeof(plain),
+                                   compressed, sizeof(compressed));
+    in = make_chain(compressed, compressed_len, &in_buf);
+    out = NULL;
+
+    TEST_ASSERT(ngx_http_markdown_decompress(
+                    &r, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out)
+                == NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED,
+                "C decompressor must enforce decompression_ratio");
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "ratio errors must release decompression output");
+}
+
 /*
- * Test grow_output_buffer directly (lines 261-311).
+ * Test the zlib-aware decompression buffer growth helper directly.
  * Exercises the buffer growth path that is normally only reachable
  * when inflate fills the output buffer and needs more space.
  */
@@ -1299,6 +1329,7 @@ test_grow_output_buffer_direct(void)
     size_t frees_before;
     u_char *initial_buf;
     ngx_int_t rc;
+    z_stream stream;
 
     init_request(&r);
 
@@ -1310,10 +1341,12 @@ test_grow_output_buffer_direct(void)
     output_size = 400;
     g_conf.decompress.max_size = 1500;
     frees_before = g_heap_free_count;
-    rc = ngx_http_markdown_grow_output_buffer(
-        &r, &g_conf, &output_data, &output_size, 300);
+    ngx_memzero(&stream, sizeof(stream));
+    stream.total_out = 300;
+    rc = ngx_http_markdown_grow_decomp_buffer(
+        &r, &output_data, &output_size, &stream, 0, 1500);
     TEST_ASSERT(rc == NGX_OK,
-                "grow_output_buffer should succeed when under budget");
+                "decompression buffer growth should succeed under budget");
     /* new_size = max(300*2, 300+4096) = 4396, capped at max_size=1500 */
     TEST_ASSERT(output_size == 1500,
                 "grow_output_buffer should cap at max_size");
@@ -1331,10 +1364,12 @@ test_grow_output_buffer_direct(void)
     output_size = 400;
     g_conf.decompress.max_size = 200;
     frees_before = g_heap_free_count;
-    rc = ngx_http_markdown_grow_output_buffer(
-        &r, &g_conf, &output_data, &output_size, 250);
+    ngx_memzero(&stream, sizeof(stream));
+    stream.total_out = 250;
+    rc = ngx_http_markdown_grow_decomp_buffer(
+        &r, &output_data, &output_size, &stream, 0, 200);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
-                "grow_output_buffer should fail when used >= max_size");
+                "decompression buffer growth should fail at the budget");
     TEST_ASSERT(output_data == initial_buf,
                 "budget failure should retain the old buffer");
     TEST_ASSERT(g_heap_free_count == frees_before,
@@ -1349,12 +1384,14 @@ test_grow_output_buffer_direct(void)
     output_size = 400;
     g_conf.decompress.max_size = 10000;
     frees_before = g_heap_free_count;
-    rc = ngx_http_markdown_grow_output_buffer(
-        &r, &g_conf, &output_data, &output_size, 100);
+    ngx_memzero(&stream, sizeof(stream));
+    stream.total_out = 100;
+    rc = ngx_http_markdown_grow_decomp_buffer(
+        &r, &output_data, &output_size, &stream, 0, 10000);
     TEST_ASSERT(rc == NGX_OK,
-                "grow_output_buffer should succeed for small used");
+                "decompression buffer growth should succeed for small used");
     TEST_ASSERT(output_size == 4196,
-                "grow_output_buffer should use used+4096 when 2*used < used+4096");
+                "small growth should use used+4096 when doubling is smaller");
     TEST_ASSERT(g_heap_free_count == frees_before + 1,
                 "minimum growth should free its own old heap buffer");
     ngx_free(output_data);
@@ -1367,12 +1404,14 @@ test_grow_output_buffer_direct(void)
     output_size = 400;
     g_conf.decompress.max_size = 500;
     frees_before = g_heap_free_count;
-    rc = ngx_http_markdown_grow_output_buffer(
-        &r, &g_conf, &output_data, &output_size, 300);
+    ngx_memzero(&stream, sizeof(stream));
+    stream.total_out = 300;
+    rc = ngx_http_markdown_grow_decomp_buffer(
+        &r, &output_data, &output_size, &stream, 0, 500);
     TEST_ASSERT(rc == NGX_OK,
-                "grow_output_buffer should succeed when capped by max_size");
+                "decompression buffer growth should succeed when capped");
     TEST_ASSERT(output_size == 500,
-                "grow_output_buffer new_size should be capped at max_size");
+                "decompression buffer growth should be capped at the limit");
     TEST_ASSERT(g_heap_free_count == frees_before + 1,
                 "capped growth should free its own old heap buffer");
     ngx_free(output_data);
@@ -1386,10 +1425,12 @@ test_grow_output_buffer_direct(void)
     g_conf.decompress.max_size = 1500;
     g_alloc_fail_count = 1;
     frees_before = g_heap_free_count;
-    rc = ngx_http_markdown_grow_output_buffer(
-        &r, &g_conf, &output_data, &output_size, 300);
+    ngx_memzero(&stream, sizeof(stream));
+    stream.total_out = 300;
+    rc = ngx_http_markdown_grow_decomp_buffer(
+        &r, &output_data, &output_size, &stream, 0, 1500);
     TEST_ASSERT(rc == NGX_ERROR,
-                "grow_output_buffer should fail on allocation failure");
+                "decompression buffer growth should fail on allocation failure");
     TEST_ASSERT(output_data == initial_buf,
                 "allocation failure should retain the old buffer");
     TEST_ASSERT(g_heap_free_count == frees_before,
@@ -1399,7 +1440,7 @@ test_grow_output_buffer_direct(void)
     TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
                 "direct growth cases should balance heap ownership");
     TEST_ASSERT(g_pfree_count == 0,
-                "grow_output_buffer must never use ngx_pfree");
+                "decompression buffer growth must never use ngx_pfree");
 }
 
 /*
@@ -1420,12 +1461,12 @@ test_handle_inflate_stall_direct(void)
 
     init_request(&r);
     ctx.request = &r;
-    ctx.conf = &g_conf;
     ctx.stream = &stream;
     ctx.output_data = &output_data;
     ctx.output_size = &output_size;
     ctx.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
     ctx.completed_out = 0;
+    ctx.output_limit = g_conf.decompress.max_size;
 
     /* Branch 1: avail_out==0 -> should grow buffer and return NGX_AGAIN */
     output_data = ngx_alloc(sizeof(output_buf), r.connection->log);
@@ -1473,6 +1514,7 @@ test_handle_inflate_stall_direct(void)
                 "budget stall setup should allocate a heap buffer");
     output_size = 256;
     g_conf.decompress.max_size = 200;
+    ctx.output_limit = g_conf.decompress.max_size;
     memset(&stream, 0, sizeof(stream));
     stream.avail_out = 0;
     stream.avail_in = 10;
@@ -1884,28 +1926,50 @@ test_brotli_error_classification(void)
 
     TEST_SUBSECTION("Brotli decoder error classification");
 
-    for (code = -30; code <= -21; code++) {
+    for (code = -21; code >= -22; code--) {
         TEST_ASSERT(
             ngx_http_markdown_brotli_error_classify(code)
                 == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
-            "Brotli allocation range must use the system-error class");
+            "Brotli documented allocation code must use the system-error class");
     }
-
-    for (code = -17; code <= -1; code++) {
+    for (code = -25; code >= -27; code--) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+            "Brotli documented allocation code must use the system-error class");
+    }
+    TEST_ASSERT(
+        ngx_http_markdown_brotli_error_classify(-30)
+            == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+        "Brotli final documented allocation code must use the system-error class");
+    for (code = -16; code <= -1; code++) {
         TEST_ASSERT(
             ngx_http_markdown_brotli_error_classify(code)
                 == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
-            "Brotli input range must use the format-error class");
+            "Brotli documented format code must use the format-error class");
     }
-
-    TEST_ASSERT(
-        ngx_http_markdown_brotli_error_classify(-20)
-            == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-        "Brotli internal range must use the system-error class");
+    for (code = -17; code >= -20; code--) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+            "Brotli reserved/control code must use the system-error class");
+    }
+    for (code = -23; code >= -24; code--) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+            "Brotli reserved allocation code must use the system-error class");
+    }
+    for (code = -28; code >= -29; code--) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+            "Brotli reserved allocation code must use the system-error class");
+    }
     TEST_ASSERT(
         ngx_http_markdown_brotli_error_classify(-31)
             == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-        "Brotli unknown range must use the system-error class");
+        "Brotli unreachable code must use the system-error class");
 
     TEST_PASS("Brotli decoder error classification is consistent");
 }
@@ -1934,6 +1998,7 @@ main(void)
     test_gzip_output_chain_allocation_errors();
     test_gzip_format_error();
     test_gzip_budget_exceeded();
+    test_c_decompressor_applies_ratio_limit();
     test_grow_output_buffer_direct();
     test_handle_inflate_stall_direct();
     test_gzip_buffer_growth();

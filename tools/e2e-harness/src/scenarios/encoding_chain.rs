@@ -357,16 +357,18 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         ),
     );
 
-    /* Empty wire body with declared encodings: the empty-input contract
-     * makes this a legal empty payload, distinct from truncation — the
-     * chain decoder succeeds with an empty output (no error-policy
-     * passthrough, no 502). */
+    /* A zero-byte wire body with a declared chain is truncated input: the
+     * decoder rejects the missing encoded stream as `TruncatedInput`,
+     * never as a legal empty payload. Under PASS the original encoded
+     * response is preserved unchanged. */
     let empty_wire = request_markdown(&base_url, "/chain/empty-wire")?;
     push_assertion(
         &mut assertions,
-        "empty_wire_legal_empty_payload",
-        empty_wire.status == 200 && empty_wire.body.is_empty(),
-        "empty wire body with declared chain decodes to an empty payload",
+        "empty_wire_truncated_pass_original_response",
+        empty_wire.status == 200
+            && empty_wire.body.is_empty()
+            && empty_wire.headers.contains_key("Content-Encoding"),
+        "empty encoded body is treated as truncated and passed through",
         format!(
             "status={} content_encoding={:?} bytes={}",
             empty_wire.status,
@@ -376,9 +378,9 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     );
     push_assertion(
         &mut assertions,
-        "empty_wire_encoding_stripped",
-        !empty_wire.headers.contains_key("Content-Encoding"),
-        "Content-Encoding absent after empty decode",
+        "empty_wire_encoding_preserved",
+        empty_wire.headers.contains_key("Content-Encoding"),
+        "Content-Encoding is preserved for truncated pass-through",
         format!("headers={:?}", empty_wire.headers),
     );
 

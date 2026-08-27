@@ -9,7 +9,7 @@
  * cover NGINX runtime integration (pool allocation, logging) —
  * for that, see the e2e and integration test suites.
  *
- * As of v0.9.0, reason code strings are lowercase snake_case and
+ * Reason code strings are lowercase snake_case and
  * sourced from the Rust FFI (via stubs in this test).
  */
 
@@ -107,6 +107,8 @@ const ngx_str_t *ngx_http_markdown_reason_invalid_dynconf(void);
 const ngx_str_t *ngx_http_markdown_reason_degraded_snapshot(void);
 const ngx_str_t *ngx_http_markdown_reason_header_plan_apply_err(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_mid_flight_err(void);
+const ngx_str_t *ngx_http_markdown_reason_overload(void);
+const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
 
 
 /*
@@ -435,66 +437,6 @@ test_additional_reason_codes(void)
     TEST_PASS("Additional reason code accessors are correct");
 }
 
-
-#ifdef MARKDOWN_STREAMING_ENABLED
-/*
- * Test: streaming reason code accessor functions return
- * expected strings (still UPPERCASE for streaming-only codes).
- */
-static void
-test_streaming_reason_codes(void)
-{
-    const ngx_str_t *rc;
-
-    TEST_SUBSECTION("Streaming reason codes");
-
-    rc = ngx_http_markdown_reason_engine_streaming();
-    TEST_ASSERT(ngx_str_eq(rc, "ENGINE_STREAMING"),
-        "engine_streaming() -> ENGINE_STREAMING");
-
-    rc = ngx_http_markdown_reason_streaming_convert();
-    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_CONVERT"),
-        "streaming_convert() -> STREAMING_CONVERT");
-
-    rc = ngx_http_markdown_reason_streaming_fallback();
-    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_FALLBACK_PREBUFFER"),
-        "streaming_fallback() -> STREAMING_FALLBACK_PREBUFFER");
-
-    rc = ngx_http_markdown_reason_streaming_fail_postcommit();
-    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_FAIL_POSTCOMMIT"),
-        "streaming_fail_postcommit() -> STREAMING_FAIL_POSTCOMMIT");
-
-    rc = ngx_http_markdown_reason_streaming_skip_unsupported();
-    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_SKIP_UNSUPPORTED"),
-        "streaming_skip_unsupported() -> STREAMING_SKIP_UNSUPPORTED");
-
-    rc = ngx_http_markdown_reason_streaming_skip_compressed();
-    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_SKIP_COMPRESSED"),
-        "streaming_skip_compressed() -> STREAMING_SKIP_COMPRESSED");
-
-    rc = ngx_http_markdown_reason_streaming_budget_exceeded();
-    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_BUDGET_EXCEEDED"),
-        "streaming_budget_exceeded() -> STREAMING_BUDGET_EXCEEDED");
-
-    rc = ngx_http_markdown_reason_streaming_precommit_failopen();
-    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_PRECOMMIT_FAILOPEN"),
-        "streaming_precommit_failopen() -> STREAMING_PRECOMMIT_FAILOPEN");
-
-    rc = ngx_http_markdown_reason_streaming_precommit_reject();
-    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_PRECOMMIT_REJECT"),
-        "streaming_precommit_reject() -> STREAMING_PRECOMMIT_REJECT");
-
-#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
-    rc = ngx_http_markdown_reason_streaming_shadow();
-    TEST_ASSERT(ngx_str_eq(rc, "STREAMING_SHADOW"),
-        "streaming_shadow() -> STREAMING_SHADOW");
-#endif
-
-    TEST_PASS("All streaming reason codes correct");
-}
-#endif /* MARKDOWN_STREAMING_ENABLED */
-
-
 /*
  * Test: all non-streaming reason code strings match lowercase
  * snake_case ^[a-z][a-z0-9_]*$
@@ -564,26 +506,7 @@ main(void)
     test_skip_accept_reject_code();
     test_skip_conditional_code();
     test_additional_reason_codes();
-#ifdef MARKDOWN_STREAMING_ENABLED
-    test_streaming_reason_codes();
-#endif
     test_lowercase_snake_case_format();
-
-#ifdef MARKDOWN_STREAMING_ENABLED
-    TEST_SUBSECTION("streaming auto accessor");
-    TEST_ASSERT(ngx_http_markdown_reason_eligible_streaming_auto() != NULL,
-        "eligible_streaming_auto should return non-NULL");
-    TEST_ASSERT(
-        ngx_http_markdown_reason_eligible_streaming_auto()->len > 0,
-        "eligible_streaming_auto string should not be empty");
-
-    TEST_ASSERT(
-        ngx_http_markdown_reason_eligible_fullbuffer_auto() != NULL,
-        "eligible_fullbuffer_auto should return non-NULL");
-    TEST_ASSERT(
-        ngx_http_markdown_reason_eligible_fullbuffer_auto()->len > 0,
-        "eligible_fullbuffer_auto string should not be empty");
-#endif
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

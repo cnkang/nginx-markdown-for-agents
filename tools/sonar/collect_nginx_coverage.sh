@@ -186,7 +186,7 @@ done
 
 RUST_TARGET="$(markdown_detect_rust_target)"
 NGINX_VERSION="$(resolve_nginx_version "${NGINX_VERSION}")"
-BUILDROOT="$(mktemp -d /tmp/nginx-coverage-build.XXXXXX)"
+BUILDROOT="$(mktemp -d "${TMPDIR:-/tmp}/nginx-coverage-build.XXXXXX")"
 RUNTIME="${BUILDROOT}/runtime"
 
 umask 022
@@ -1188,7 +1188,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 
 # ── Extended reason code scenarios ──────────────────────────────────
 
-# Streaming success (exercises STREAMING_CONVERT reason code)
+# Streaming success (exercises the streaming_convert event)
 # Already covered by streaming/index.html above
 
 # Streaming budget fail with warn verbosity (exercises reason code + verbosity)
@@ -1365,7 +1365,7 @@ curl -sS -H 'Accept: application/json' \
 curl -sS -H 'Accept: ' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  accept empty: HTTP %{http_code}\n"
 
-# ── Extended Prometheus scenarios (coverage for ngx_http_markdown_prometheus_impl.h) ──
+# ── Extended Prometheus scenarios (coverage for the v1 metrics renderer) ──
 
 check_prometheus_response() {
   # Verify the frozen Prometheus response contract for one Accept variant.
@@ -1500,13 +1500,6 @@ if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
   --upstream-port 19296 \
   --markdown-max-size 1m; then
     echo "  WARNING: streaming failure/cache e2e coverage run failed; continuing" >&2
-fi
-
-echo "==> Running streaming e2e coverage"
-if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
-  bash "${WORKSPACE_ROOT}/tools/e2e/verify_streaming_e2e.sh" \
-  --nginx-bin "${RUNTIME}/sbin/nginx"; then
-    echo "  WARNING: streaming e2e coverage run failed; continuing" >&2
 fi
 
 echo "==> Running chunked streaming e2e coverage (smoke)"

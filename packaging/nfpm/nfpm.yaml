@@ -6,6 +6,7 @@
 # Environment variables (injected by workflow matrix):
 #   PKG_VERSION          - Project version (e.g. 0.8.2)
 #   NGINX_VERSION        - Target NGINX version (e.g. 1.26.3)
+#   RPM_NGINX_EVR        - RPM dependency epoch/version/release (e.g. 1:1.26.3)
 #   NFPM_ARCH            - Target architecture (e.g. amd64, arm64)
 #
 # Usage:
@@ -16,9 +17,10 @@
 #   NGINX dynamic modules require ABI compatibility with the EXACT NGINX
 #   version they were compiled against; the core loader rejects any
 #   version difference (including patch) before signature checks.
-#   DEB/RPM dependency metadata therefore pins the exact NGINX version,
-#   and the preinstall script enforces the exact-version guard at install
-#   time as a second line of defense.
+#   RPM dependency metadata pins the exact NGINX version. Debian package
+#   revisions are distribution-specific, so its dependency supplies a
+#   compatible lower bound while the preinstall script enforces the exact
+#   version at install time.
 
 name: "nginx-module-markdown-for-agents"
 arch: "${NFPM_ARCH}"
@@ -37,11 +39,11 @@ license: "BSD-2-Clause"
 overrides:
   deb:
     depends:
-      - "nginx (= ${NGINX_VERSION})"
+      - "nginx (>= ${NGINX_VERSION})"
       - "libbrotli1"
   rpm:
     depends:
-      - "nginx = 1:${NGINX_VERSION}"
+      - "nginx = ${RPM_NGINX_EVR}"
       - "libbrotli"
 
 contents:
@@ -65,7 +67,7 @@ contents:
   - src: "./LICENSE"
     dst: "/usr/share/licenses/nginx-markdown-for-agents/LICENSE"
 
-  - src: "./README.md"
+  - src: "./packaging/docs/README.md"
     dst: "/usr/share/doc/nginx-markdown-for-agents/README.md"
 
   - src: "./docs/guides/INSTALL.md"

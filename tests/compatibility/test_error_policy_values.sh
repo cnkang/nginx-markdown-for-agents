@@ -50,6 +50,7 @@ Options:
 Environment:
   NGINX_BIN            Alternative to --nginx-bin flag
 EOF
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do
@@ -99,11 +100,13 @@ log_test() {
   local desc="$1"
   TESTS_RUN=$((TESTS_RUN + 1))
   printf "  [%03d] %s ... " "${TESTS_RUN}" "${desc}" >&2
+  return 0
 }
 
 log_pass() {
   TESTS_PASSED=$((TESTS_PASSED + 1))
   echo "ok" >&2
+  return 0
 }
 
 log_fail() {
@@ -113,6 +116,7 @@ log_fail() {
   if [[ -n "${message}" ]]; then
     echo "       ${message}" >&2
   fi
+  return 0
 }
 
 # Write a config with the given error_policy value and run nginx -t.
@@ -169,6 +173,7 @@ EOF
       log_fail "$(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
     fi
   fi
+  return 0
 }
 
 # --- Main ---

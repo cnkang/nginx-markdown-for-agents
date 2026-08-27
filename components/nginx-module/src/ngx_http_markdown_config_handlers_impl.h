@@ -795,7 +795,7 @@ ngx_http_markdown_trusted_proxies_cleanup(void *data)
 
 
 /*
- * Configuration directive handler: markdown_trusted_proxies (spec 47).
+ * Configuration directive handler: markdown_trusted_proxies (trusted-proxy contract).
  *
  *   markdown_trusted_proxies <CIDR>...;
  *   markdown_trusted_proxies off;
@@ -1020,9 +1020,8 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
  * Configuration directive handler: markdown_error_policy
  * (pass | fail_closed | status <code>).
  *
- * Config V2 (0.9.0): unified error policy consolidating the removed legacy
- * on-error and streaming-on-error directives.  The single
- * on_error field is the runtime source of truth for every conversion path:
+ * The unified error policy uses one on_error field as the runtime source of
+ * truth for every conversion path:
  *   pass        -> on_error=PASS
  *   fail_closed -> on_error=REJECT, error_status=502
  *   status <c>  -> on_error=REJECT, error_status=<c>
@@ -1205,11 +1204,9 @@ ngx_http_markdown_cache_validation(ngx_conf_t *cf, ngx_command_t *cmd, void *con
     value = cf->args->elts;
 
     /*
-     * markdown_cache_validation (Config V2, 0.9.0) consolidates the removed
-     * legacy etag and conditional-request directives.  It writes
-     * both backing fields (policy.generate_etag, policy.conditional_requests),
-     * which remain the runtime source of truth for the conversion and
-     * conditional-request paths.
+     * markdown_cache_validation writes both backing fields
+     * (policy.generate_etag, policy.conditional_requests), which remain the
+     * runtime source of truth for conversion and conditional-request paths.
      *
      *   off      - no ETag, no conditional request handling
      *   ims_only - no ETag, If-Modified-Since only
@@ -1792,7 +1789,7 @@ ngx_http_markdown_dynconf_flag(ngx_conf_t *cf,
 }
 
 /*
- * Configuration directive handler: markdown_stream_excluded_types (v0.8.0)
+ * Configuration directive handler: markdown_stream_excluded_types
  *
  * Parses a space-separated list of MIME types and stores them in
  * conf->stream.excluded_types array.  Each type must be in

@@ -30,6 +30,9 @@
       "status": "pass"
     }
   ],
-  "blocking_pass": true,
-  "blocking_failures": []
+  "blocking_pass": false,
+  "blocking_failures": [
+    "parser_html",
+    "convert_html"
+  ]
 }

@@ -58,14 +58,23 @@ typedef struct {
  * Simulate the production fail-open delivery path.
  *
  * Production contract (Rule 38):
- *   1. Decision is recorded at the decision point (precommit_failopen_total
+ *   1. Decision is recorded once at the decision point (precommit_failopen_total
  *      for streaming, or log_decision() for buffer/header paths).
- *   2. The downstream filter is invoked.
+ *   2. The downstream filter is invoked for each attempt.
  *   3. ONLY if the downstream returns NGX_OK or NGX_DONE does
  *      results.failopen_count increment.
  *
  * This function models the post-fix behaviour for all six paths.
  */
+static void
+failopen_path_decide(failopen_metrics_t *m, failopen_path_t path)
+{
+    (void) path;
+    m->decision_count++;
+    m->precommit_failopen_total++;
+}
+
+
 static int
 failopen_path_deliver(failopen_metrics_t *m, failopen_path_t path,
     int downstream_rc)
@@ -73,10 +82,6 @@ failopen_path_deliver(failopen_metrics_t *m, failopen_path_t path,
     int  rc;
 
     (void) path;
-
-    /* Decision point: record decision, NOT delivery. */
-    m->decision_count++;
-    m->precommit_failopen_total++;
 
     /* Invoke downstream filter. */
     m->downstream_invocations++;
@@ -104,6 +109,7 @@ test_ok_delivery_increments_failopen(void)
 
     for (i = 0; i < 6; i++) {
         memset(&m, 0, sizeof(m));
+        failopen_path_decide(&m, (failopen_path_t) i);
         rc = failopen_path_deliver(&m, (failopen_path_t) i, NGX_OK);
         TEST_ASSERT(rc == NGX_OK, "downstream NGX_OK propagated");
         TEST_ASSERT(m.decision_count == 1, "decision recorded");
@@ -134,6 +140,7 @@ test_done_delivery_increments_failopen(void)
 
     for (i = 0; i < 6; i++) {
         memset(&m, 0, sizeof(m));
+        failopen_path_decide(&m, (failopen_path_t) i);
         rc = failopen_path_deliver(&m, (failopen_path_t) i, NGX_DONE);
         TEST_ASSERT(rc == NGX_DONE, "downstream NGX_DONE propagated");
         TEST_ASSERT(m.decision_count == 1, "decision recorded");
@@ -160,6 +167,7 @@ test_again_does_not_increment_delivery(void)
 
     for (i = 0; i < 6; i++) {
         memset(&m, 0, sizeof(m));
+        failopen_path_decide(&m, (failopen_path_t) i);
         rc = failopen_path_deliver(&m, (failopen_path_t) i, NGX_AGAIN);
         TEST_ASSERT(rc == NGX_AGAIN, "downstream NGX_AGAIN propagated");
         TEST_ASSERT(m.decision_count == 1,
@@ -189,6 +197,7 @@ test_error_does_not_increment_delivery(void)
 
     for (i = 0; i < 6; i++) {
         memset(&m, 0, sizeof(m));
+        failopen_path_decide(&m, (failopen_path_t) i);
         rc = failopen_path_deliver(&m, (failopen_path_t) i, NGX_ERROR);
         TEST_ASSERT(rc == NGX_ERROR, "downstream NGX_ERROR propagated");
         TEST_ASSERT(m.decision_count == 1, "decision recorded");
@@ -213,6 +222,7 @@ test_declined_does_not_increment_delivery(void)
 
     for (i = 0; i < 6; i++) {
         memset(&m, 0, sizeof(m));
+        failopen_path_decide(&m, (failopen_path_t) i);
         rc = failopen_path_deliver(&m, (failopen_path_t) i, NGX_DECLINED);
         TEST_ASSERT(rc == NGX_DECLINED, "downstream NGX_DECLINED propagated");
         TEST_ASSERT(m.failopen_count == 0,
@@ -236,6 +246,7 @@ test_again_then_ok_resume_increments_once(void)
     memset(&m, 0, sizeof(m));
 
     /* First attempt: downstream suspends. Decision recorded, no delivery. */
+    failopen_path_decide(&m, PATH_BUFFER_INIT_FAILURE);
     rc = failopen_path_deliver(&m, PATH_BUFFER_INIT_FAILURE, NGX_AGAIN);
     TEST_ASSERT(rc == NGX_AGAIN, "first attempt suspends");
     TEST_ASSERT(m.decision_count == 1, "decision recorded once");
@@ -244,11 +255,13 @@ test_again_then_ok_resume_increments_once(void)
     /* Resume: downstream accepts. Delivery recorded. */
     rc = failopen_path_deliver(&m, PATH_BUFFER_INIT_FAILURE, NGX_OK);
     TEST_ASSERT(rc == NGX_OK, "resume succeeds");
-    TEST_ASSERT(m.decision_count == 2, "second decision recorded");
+    TEST_ASSERT(m.decision_count == 1, "resume does not record a second decision");
+    TEST_ASSERT(m.precommit_failopen_total == 1,
+        "resume does not increment the precommit decision counter");
     TEST_ASSERT(m.failopen_count == 1,
         "failopen_count increments only after resume NGX_OK");
-    TEST_ASSERT(m.failopen_count < m.decision_count,
-        "delivery < decision after backpressure episode");
+    TEST_ASSERT(m.failopen_count == m.decision_count,
+        "delivery catches up to the single decision after resume");
 
     TEST_PASS("backpressure resume: single delivery increment");
 }
@@ -273,6 +286,7 @@ test_delivery_equals_success_count(void)
     memset(&m, 0, sizeof(m));
 
     for (i = 0; i < n; i++) {
+        failopen_path_decide(&m, PATH_HEADER_UNSUPPORTED_COMPRESSION);
         failopen_path_deliver(&m, PATH_HEADER_UNSUPPORTED_COMPRESSION,
             codes[i]);
         if (codes[i] == NGX_OK || codes[i] == NGX_DONE) {

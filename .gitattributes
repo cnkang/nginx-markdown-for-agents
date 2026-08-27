@@ -48,3 +48,7 @@ tests/corpus/encoding/latin1.html -text
 *.woff2 binary
 *.ttf binary
 *.eot binary
+
+# Fuzz corpus entries are byte-exact inputs, including files named *.txt.
+# Keep this path-specific rule last so it overrides every extension rule above.
+components/rust-converter/fuzz/corpus/** binary !eol

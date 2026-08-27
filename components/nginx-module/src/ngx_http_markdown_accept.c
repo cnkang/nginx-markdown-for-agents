@@ -178,3 +178,25 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
                  (ngx_uint_t) result.reason);
     return 0;
 }
+
+
+/* Return whether the selected response representation is determined by
+ * Accept negotiation.  Internal negotiation failures are deliberately
+ * excluded: that path is a generic fail-open/fail-closed outcome and must
+ * not advertise a cache variance that was never successfully negotiated. */
+ngx_flag_t
+ngx_http_markdown_accept_result_varies(ngx_uint_t reason)
+{
+    switch (reason) {
+    case NEGOTIATE_REASON_NO_ACCEPT:
+    case NEGOTIATE_REASON_LOWER_Q:
+    case NEGOTIATE_REASON_EXPLICIT_REJECT:
+    case NEGOTIATE_REASON_MALFORMED:
+        return 1;
+
+    case NEGOTIATE_REASON_CONVERT:
+    case NEGOTIATE_REASON_INTERNAL_ERROR:
+    default:
+        return 0;
+    }
+}

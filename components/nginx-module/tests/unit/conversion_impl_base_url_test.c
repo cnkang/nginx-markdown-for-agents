@@ -13,6 +13,13 @@
 #endif
 
 #include "../../src/ngx_http_markdown_filter_module.h"
+#include "../../src/ngx_http_markdown_diagnostics.h"
+
+/* The conversion-output tests exercise the production finalizer call. */
+struct ngx_module_s {
+    int unused;
+};
+ngx_module_t ngx_http_markdown_filter_module;
 
 /*
  * Stub effective-conf helpers required by conversion_impl.h.
@@ -44,49 +51,7 @@ ngx_http_markdown_effective_memory_budget(
 }
 
 /*
- * Local definition of MarkdownOptions matching the Rust FFI ABI layout.
- * This avoids depending on the cbindgen-generated markdown_converter.h
- * which only exists after building the Rust library (not available in
- * the C-only unit test CI job).
- */
-struct MarkdownOptions {
-    uint32_t       flavor;
-    uint32_t       timeout_ms;
-    uint8_t        generate_etag;
-    uint8_t        estimate_tokens;
-    uint8_t        front_matter;
-    const uint8_t *content_type;
-    uintptr_t      content_type_len;
-    const uint8_t *base_url;
-    uintptr_t      base_url_len;
-    uint64_t       streaming_budget;
-    uint32_t       prune_noise;
-    const uint8_t *prune_selectors;
-    uintptr_t      prune_selector_len;
-    const uint8_t *prune_protection_selectors;
-    uintptr_t      prune_protection_selector_len;
-    uint64_t       memory_budget;
-    uint32_t       parse_timeout_ms;
-    uint64_t       parser_memory_budget;
-    uint32_t       flush_threshold;
-};
-
-struct MarkdownResult {
-    uint8_t   *markdown;
-    uintptr_t  markdown_len;
-    uint8_t   *etag;
-    uintptr_t  etag_len;
-    uint32_t   token_estimate;
-    uint32_t   error_code;
-    uint8_t   *error_message;
-    uintptr_t  error_len;
-    uintptr_t  peak_memory_estimate;
-};
-
-struct MarkdownConverterHandle;
-
-/*
- * spec 47: local base-URL FFI ABI mirror + capturing stub.
+ * Capturing stub for the base-URL FFI entry point.
  *
  * The C unit-test build does not link the Rust library, so the trusted-proxy
  * decision (markdown_decide_base_url) is stubbed here.  The stub captures the
@@ -102,45 +67,15 @@ struct MarkdownConverterHandle;
 #define DECIDE_BASE_URL_INVALID 1
 #endif
 
-struct FFIBaseUrlInput {
-    const uint8_t                       *source_ip;
-    uintptr_t                            source_ip_len;
-    const struct MarkdownTrustedProxies *trusted;
-    const uint8_t                       *forwarded;
-    uintptr_t                            forwarded_len;
-    const uint8_t                       *x_forwarded_for;
-    uintptr_t                            x_forwarded_for_len;
-    const uint8_t                       *x_forwarded_proto;
-    uintptr_t                            x_forwarded_proto_len;
-    const uint8_t                       *x_forwarded_host;
-    uintptr_t                            x_forwarded_host_len;
-    const uint8_t                       *x_forwarded_port;
-    uintptr_t                            x_forwarded_port_len;
-    const uint8_t                       *host;
-    uintptr_t                            host_len;
-    const uint8_t                       *direct_scheme;
-    uintptr_t                            direct_scheme_len;
-    uint8_t                              is_unix_socket;
-    uint8_t                              trusted_configured;
-};
-typedef struct FFIBaseUrlInput FFIBaseUrlInput;
-
-struct FFIBaseUrlDecision {
-    uintptr_t base_url_len;
-    uint8_t   reason;
-    uint8_t   source;
-};
-typedef struct FFIBaseUrlDecision FFIBaseUrlDecision;
-
 /* Stub control + capture state for markdown_decide_base_url. */
-static struct FFIBaseUrlInput g_captured_base_url_input;
+static FFIBaseUrlInput g_captured_base_url_input;
 static ngx_uint_t             g_decide_base_url_calls;
 static const char            *g_stub_authority = "https://stub.example.com";
 static uint8_t                g_stub_decide_rc = DECIDE_BASE_URL_OK;
 static uint8_t                g_stub_decide_reason;
 static uint8_t                g_stub_decide_source;
 
-static uint8_t
+uint8_t
 markdown_decide_base_url(const struct FFIBaseUrlInput *input,
     uint8_t *out_buf, uintptr_t out_buf_cap,
     struct FFIBaseUrlDecision *out) /* SONAR_NOTE: must match FFI signature */
@@ -175,13 +110,15 @@ markdown_decide_base_url(const struct FFIBaseUrlInput *input,
  * specific return codes or trigger one-shot allocation failures
  * without modifying the stub function bodies.
  */
-static ngx_int_t g_forward_headers_rc = 0;
+static ngx_int_t g_forward_transformed_headers_rc = 0;
 static ngx_int_t g_update_headers_rc = 0;
 static ngx_int_t g_failopen_rc = 0;
 static ngx_uint_t g_failopen_call_count = 0;
 static ngx_int_t g_bypass_failopen_rc = 0;
 static ngx_uint_t g_bypass_failopen_call_count = 0;
 static ngx_int_t g_conditional_return_rc = NGX_DECLINED;
+static ngx_int_t g_send_304_rc = NGX_OK;
+static ngx_uint_t g_release_inflight_call_count = 0;
 static ngx_int_t g_next_body_filter_rc = 0;
 static ngx_chain_t *g_next_body_filter_last_input = NULL;
 static ngx_uint_t g_next_body_filter_call_count = 0;
@@ -191,7 +128,6 @@ static const ngx_str_t *g_last_decision_reason = NULL;
 static const ngx_str_t *g_last_decision_category = NULL;
 static ngx_uint_t g_last_failure_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 static ngx_uint_t g_last_failure_status = 0;
-static ngx_uint_t g_reason_streaming_shadow_calls = 0;
 static ngx_uint_t g_streaming_new_with_code_calls = 0;
 static ngx_uint_t g_streaming_feed_calls = 0;
 static ngx_uint_t g_streaming_finish_calls = 0;
@@ -204,10 +140,6 @@ static uint32_t g_streaming_new_with_code_rc = 0;
 static uint32_t g_streaming_feed_rc = 0;
 static uint32_t g_streaming_finalize_rc = 0;
 static uint32_t g_streaming_new_with_code_null_handle = 0;
-static ngx_uint_t g_slab_alloc_calls = 0;
-static ngx_uint_t g_slab_alloc_fail_after = 0;
-static ngx_uint_t g_shmtx_lock_calls = 0;
-static ngx_uint_t g_shmtx_unlock_calls = 0;
 
 /* Decompression failure helpers are owned by module_state_impl.h in the
  * production translation unit.  Keep this direct conversion-header test
@@ -279,7 +211,7 @@ ngx_http_markdown_record_decompression_failure_io(
 #define ERROR_DECOMPRESSION_IO_ERROR 14
 #endif
 
-static void
+void
 markdown_convert(struct MarkdownConverterHandle *handle, /* SONAR_NOTE: must match FFI signature */
     const uint8_t *html, uintptr_t html_len,
     const struct MarkdownOptions *options,
@@ -301,7 +233,7 @@ markdown_convert(struct MarkdownConverterHandle *handle, /* SONAR_NOTE: must mat
  * Per AGENTS.md rule 15: partial clears create false confidence and
  * can mask stale-state regressions, so every field is zeroed.
  */
-static void
+void
 markdown_result_free(struct MarkdownResult *result) /* SONAR_NOTE: must match FFI signature */
 {
     g_markdown_result_free_calls++;
@@ -324,7 +256,7 @@ markdown_result_free(struct MarkdownResult *result) /* SONAR_NOTE: must match FF
  * (timeout_ms=5000, generate_etag=0).  The production code must
  * call this instead of ngx_memzero to honour the FFI contract.
  */
-static void
+void
 markdown_options_init(struct MarkdownOptions *result)
 {
     if (result == NULL) {
@@ -339,7 +271,7 @@ markdown_options_init(struct MarkdownOptions *result)
  * FFI lifecycle stub for markdown_result_init.  Zeroes all fields
  * to guarantee a clean baseline before FFI calls populate the struct.
  */
-static void
+void
 markdown_result_init(struct MarkdownResult *result)
 {
     if (result == NULL) {
@@ -349,25 +281,13 @@ markdown_result_init(struct MarkdownResult *result)
 }
 
 /* FFI lifecycle stub for the borrowed base-URL input snapshot. */
-static void
+void
 markdown_base_url_input_init(struct FFIBaseUrlInput *result)
 {
     if (result == NULL) {
         return;
     }
     memset(result, 0, sizeof(*result));
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_shadow(void)
-{
-    static ngx_str_t  reason = {
-        sizeof("STREAMING_SHADOW") - 1,
-        (u_char *) "STREAMING_SHADOW"
-    };
-
-    g_reason_streaming_shadow_calls++;
-    return &reason;
 }
 
 void
@@ -380,6 +300,20 @@ ngx_http_markdown_log_decision(ngx_http_request_t *r,
     UNUSED(conf);
     UNUSED(eff);
     UNUSED(reason_code);
+    g_log_decision_calls++;
+}
+
+void
+ngx_http_markdown_log_decision_path(
+    ngx_http_request_t *r,
+    const void *conf,
+    const void *eff,
+    const ngx_http_markdown_decision_path_t *path)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(eff);
+    UNUSED(path);
     g_log_decision_calls++;
 }
 
@@ -581,6 +515,10 @@ struct ngx_http_request_s {
 };
 
 static ngx_str_t g_realip_remote_addr;
+
+#ifndef NGX_CONF_UNSET_SIZE
+#define NGX_CONF_UNSET_SIZE ((size_t) -1)
+#endif
 
 ngx_uint_t
 ngx_hash_key_lc(u_char *data, size_t len)
@@ -829,99 +767,16 @@ struct MarkdownConverterHandle *ngx_http_markdown_converter = NULL;
 ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r, ngx_chain_t *in) = NULL;
 
-#ifndef NGX_CONF_UNSET_SIZE
-#define NGX_CONF_UNSET_SIZE ((size_t) -1)
-#endif
-
-typedef struct {
-    int dummy;
-} ngx_shmtx_t;
-
-struct ngx_slab_pool_s {
-    ngx_shmtx_t   mutex;
-};
-typedef struct ngx_slab_pool_s ngx_slab_pool_t;
-
-struct ngx_shm_zone_s {
-    void          *data;
-    struct {
-        void      *addr;
-    } shm;
-};
-
-ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
-
-#ifndef ngx_atomic_fetch_add
-#define ngx_atomic_fetch_add(p, v)                                           \
-    ({                                                                        \
-        *(p) += (v);                                                          \
-        *(p);                                                                 \
-    })
-#endif
-
-static ngx_inline void
-ngx_shmtx_lock(ngx_shmtx_t *mtx)
-{
-    UNUSED(mtx);
-    g_shmtx_lock_calls++;
-}
-
-static ngx_inline void
-ngx_shmtx_unlock(ngx_shmtx_t *mtx)
-{
-    UNUSED(mtx);
-    g_shmtx_unlock_calls++;
-}
-
-static ngx_inline ngx_uint_t
-ngx_hash_key(u_char *data, size_t len)
-{
-    ngx_uint_t  hash;
-    hash = 0;
-    for (size_t i = 0; i < len; i++) {
-        hash = hash * 31 + data[i];
-    }
-    return hash;
-}
-
-static ngx_inline void *
-ngx_slab_alloc_locked(ngx_slab_pool_t *pool, size_t size)
-{
-    UNUSED(pool);
-    g_slab_alloc_calls++;
-    if (g_slab_alloc_fail_after != 0
-        && g_slab_alloc_calls == g_slab_alloc_fail_after)
-    {
-        return NULL;
-    }
-    return calloc(1, size);
-}
-
-static ngx_inline void
-ngx_slab_free_locked(ngx_slab_pool_t *pool, void *p)
-{
-    UNUSED(pool);
-    free(p);
-}
-
-static ngx_inline void
-ngx_rbtree_insert(ngx_rbtree_t *tree, ngx_rbtree_node_t *node)
-{
-    tree->root = node;
-}
-
-/*
- * Forward-headers stub returning the test-controlled g_forward_headers_rc,
- * allowing tests to simulate header forwarding failures.
- */
+/* The converted-representation path has its own forwarding seam so tests
+ * cannot accidentally verify source-representation Last-Modified behavior. */
 static ngx_int_t
-ngx_http_markdown_forward_headers(
-    ngx_http_request_t *r,     /* SONAR_NOTE c:S995 — must match production signature */
-    ngx_http_markdown_ctx_t *ctx)  /* SONAR_NOTE c:S995 — must match production signature */
+ngx_http_markdown_forward_transformed_headers(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
 {
     UNUSED(r);
     UNUSED(ctx);
-    return g_forward_headers_rc;
+    return g_forward_transformed_headers_rc;
 }
 
 __attribute__((unused))
@@ -1061,6 +916,13 @@ ngx_http_markdown_handle_if_none_match(
     return g_conditional_return_rc;
 }
 
+void
+ngx_http_markdown_release_inflight_for_request(const ngx_http_request_t *r)
+{
+    UNUSED(r);
+    g_release_inflight_call_count++;
+}
+
 ngx_int_t
 ngx_http_markdown_send_304(
     ngx_http_request_t *r,     /* SONAR_NOTE c:S995 — must match module header decl */
@@ -1068,7 +930,7 @@ ngx_http_markdown_send_304(
 {
     UNUSED(r);
     UNUSED(result);
-    return NGX_OK;
+    return g_send_304_rc;
 }
 
 /*
@@ -1101,14 +963,6 @@ init_request(ngx_http_request_t *r)
     r->pool = &g_pool;
     r->main = r;
 }
-
-
-/*
- * Per-path metrics infrastructure removed in 0.9.2 — markdown_metrics_per_path
- * directive deleted; init_per_path_metrics helper no longer needed.
- */
-
-
 static void
 set_single_header_list(ngx_http_request_t *r, ngx_table_elt_t *headers,
     ngx_uint_t count)
@@ -1163,13 +1017,15 @@ ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
 static void
 reset_stub_state(void)
 {
-    g_forward_headers_rc = NGX_OK;
+    g_forward_transformed_headers_rc = NGX_OK;
     g_update_headers_rc = NGX_OK;
     g_failopen_rc = NGX_OK;
     g_failopen_call_count = 0;
     g_bypass_failopen_rc = NGX_OK;
     g_bypass_failopen_call_count = 0;
     g_conditional_return_rc = NGX_DECLINED;
+    g_send_304_rc = NGX_OK;
+    g_release_inflight_call_count = 0;
     g_next_body_filter_rc = NGX_OK;
     g_next_body_filter_last_input = NULL;
     g_next_body_filter_call_count = 0;
@@ -1179,7 +1035,6 @@ reset_stub_state(void)
     g_last_decision_category = NULL;
     g_last_failure_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     g_last_failure_status = 0;
-    g_reason_streaming_shadow_calls = 0;
     g_streaming_new_with_code_calls = 0;
     g_streaming_feed_calls = 0;
     g_streaming_finish_calls = 0;
@@ -1215,7 +1070,7 @@ reset_base_url_stub(void)
  * Test: the thin wrapper marshals every request/config field into the FFI
  * input and appends the request URI to the FFI-produced authority.
  *
- * Validates spec 47 Requirement 10.4 (C is a thin wrapper that only
+ * Validates Requirement 10.4 (C is a thin wrapper that only
  * marshals) and Requirement 4.2 (C-side responsibilities).
  */
 static void
@@ -1433,7 +1288,7 @@ test_base_url_preserves_oversized_forwarded_presence(void)
 /*
  * Test: a Unix-domain socket peer is marshaled as is_unix_socket = 1.
  *
- * Validates spec 47 Requirement 2.1 (Unix socket handling).
+ * Validates Requirement 2.1 (Unix socket handling).
  */
 static void
 test_base_url_unix_socket_flag(void)
@@ -1530,7 +1385,7 @@ test_base_url_prefers_realip_peer(void)
 /*
  * Test: when markdown_trusted_proxies is absent, trusted_configured is 0.
  *
- * Validates spec 47 Requirement 1.2 / reason-code selection input.
+ * Validates Requirement 1.2 / reason-code selection input.
  */
 static void
 test_base_url_not_configured_marshaled(void)
@@ -1968,12 +1823,6 @@ TEST_PASS("prepare_conversion_options schema+server fallback correct");
 
 
 /*
- * Verify shadow compare exits early when prepare_conversion_options
- * rejects invalid shadow-mode options.
- */
-
-
-/*
  * Test: find_request_header_value with multi-part header list.
  */
 static void
@@ -2407,7 +2256,7 @@ test_send_conversion_output_paths(void)
     memset(&result, 0, sizeof(result));
     result.markdown = out;
     result.markdown_len = sizeof(out) - 1;
-    g_forward_headers_rc = NGX_ERROR;
+    g_forward_transformed_headers_rc = NGX_ERROR;
     rc = ngx_http_markdown_send_conversion_output(
         &r, &ctx, &conf, &result, 1);
     TEST_ASSERT(rc == NGX_ERROR, "forward header failure should propagate");
@@ -2646,7 +2495,7 @@ test_misc_conversion_helpers(void)
 }
 
 /*
- * P0 regression test: conditional bypass must NOT go through error_policy.
+ * Regression test: conditional bypass must NOT go through error_policy.
  *
  * When handle_if_none_match returns NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT,
  * resolve_conditional_result must call fail_open_buffered_response directly,
@@ -2696,6 +2545,54 @@ test_conditional_bypass_bypasses_error_policy(void)
     TEST_PASS("bypass bypasses error_policy");
 }
 
+/*
+ * Regression test: a conditional match is terminal.  The resolver must
+ * release request-scoped conversion state before the 304 finalizer runs and
+ * must propagate NGX_DONE to the body filter without touching the request
+ * again.
+ */
+static void
+test_conditional_match_propagates_terminal_done(void)
+{
+    ngx_http_request_t        r;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    struct MarkdownResult     result;
+    ngx_msec_t                elapsed_ms;
+    ngx_flag_t                has_result;
+    ngx_int_t                 rc;
+
+    TEST_SUBSECTION("conditional match propagates terminal NGX_DONE");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+
+    g_conditional_return_rc = NGX_HTTP_NOT_MODIFIED;
+    g_send_304_rc = NGX_DONE;
+    r.buffered = NGX_HTTP_MARKDOWN_BUFFERED;
+    elapsed_ms = 7;
+    has_result = 1;
+
+    rc = ngx_http_markdown_resolve_conditional_result(
+        &r, &ctx, &conf, &result, &elapsed_ms, &has_result);
+
+    TEST_ASSERT(rc == NGX_DONE,
+                "conditional match returns terminal NGX_DONE");
+    TEST_ASSERT(g_release_inflight_call_count == 1,
+                "conditional match releases inflight before finalization");
+    TEST_ASSERT(has_result == 0,
+                "conditional match does not expose a conversion result");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
+                "conditional match clears module buffering before 304");
+    TEST_ASSERT((time_t) r.headers_out.last_modified_time == (time_t) -1,
+                "conditional match clears source Last-Modified state");
+
+    TEST_PASS("conditional match propagates terminal NGX_DONE");
+}
+
 
 int
 main(void)
@@ -2733,6 +2630,7 @@ main(void)
     test_fullbuffer_cleanup_clears_aborted_pending_state();
     test_misc_conversion_helpers();
     test_conditional_bypass_bypasses_error_policy();
+    test_conditional_match_propagates_terminal_done();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

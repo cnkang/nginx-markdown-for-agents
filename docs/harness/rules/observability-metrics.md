@@ -198,7 +198,7 @@ Required:
      producer has finalized it, and assigns to the metrics struct.
   4. **All output formats**: JSON, plain-text, and Prometheus renderers
      emit the metric with consistent naming.
-  
+
   If any link is missing, **defer the metric** to the release that
   completes the chain. Shipping a metric with an incomplete data source
   creates a permanently-zero gauge that misleads operators and violates
@@ -210,7 +210,7 @@ Required:
   - FFI structs (`MarkdownResult`, `StreamingStats`, converter options)
   - Test helper type definitions that mirror production structs
   - Documentation and spec files that describe the interface contract
-  
+
   Before merging, grep for all references to the modified type across
   the language boundary and confirm each one compiles and stays
   semantically consistent. Do not assume "the other side will get
@@ -282,8 +282,8 @@ Required:
   exercise each newly covered value individually.  Without per-value test
   coverage, the fix can silently regress when the branch condition is later
   modified.
-- **Format string argument matching**: when adding new metric fields to text
-  or JSON renderers that use `ngx_snprintf` or `ngx_slprintf`, manually verify
+- **Format string argument matching**: when adding new metric fields to the
+  Prometheus v1 renderer that uses `ngx_snprintf` or `ngx_slprintf`, manually verify
   that the number and types of format specifiers (`%V`, `%uA`, `%uz`, `%O`,
   `%i`, `%T`, and so on) exactly match the argument list.  `ngx_snprintf` does not
   perform compile-time type checking — a mismatch silently produces corrupted
@@ -339,25 +339,12 @@ Verification:
 
 ### Streaming Reason Code Naming Convention
 
-Streaming C-only reason codes (defined in
-`components/nginx-module/src/ngx_http_markdown_reason.c` under
-`#ifdef MARKDOWN_STREAMING_ENABLED`) use UPPERCASE format (for example
-`STREAMING_CONVERT`, `STREAMING_FAIL_POSTCOMMIT`,
-`ELIGIBLE_STREAMING_AUTO`). This differs from the lowercase snake_case
-convention used by the Rust `ReasonCode` enum (for example
-`converted`, `decompression_error`, `bypass_no_transform`).
-
-This inconsistency is **known and documented**. It does not affect
-production behavior because these UPPERCASE codes are internal to the C
-streaming engine and are not emitted through the Rust FFI reason-code
-accessor path. They appear only in C-side `ngx_log_decision()` calls
-and metrics classification within the streaming filter path.
-
-**Migration plan**: If a future release promotes any of these internal
-streaming labels to operator-visible reason codes, add the lowercase
-`snake_case` entries to `components/rust-converter/reason_registry.toml`
-and regenerate the Rust/C projections. Do not add a parallel C mapping
-table. The registry generator already owns compatibility aliases for
-canonical legacy keys. Those aliases are distinct from the C-only streaming
-labels described here. Announce any newly public reason in the changelog
-and migration guide with a mapping table.
+Streaming transition details are implementation events, not reason-code
+labels. The module may record them in the structured `event` field, while the
+`outcome`, `stage`, and `reason` fields must use the canonical registry
+values. Do not add a parallel C reason table or expose internal transition
+names as operator-visible reason codes. If a future release promotes an event,
+add its lowercase `snake_case` entry to
+`components/rust-converter/reason_registry.toml` and regenerate the Rust/C
+projections. Announce the new public reason in the changelog and migration
+guide.

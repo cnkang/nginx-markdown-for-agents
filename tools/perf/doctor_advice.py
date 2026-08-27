@@ -42,6 +42,21 @@ _SCHEMA_RELATIVE_PATH = os.path.join("perf", "metrics-schema.json")
 _ALLOWED_ENDPOINT_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
+class _LocalhostRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects that leave the explicitly allowed endpoint hosts."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib.parse.urlparse(newurl)
+        if (
+            target.scheme not in ("http", "https")
+            or target.hostname not in _ALLOWED_ENDPOINT_HOSTS
+            or target.username is not None
+            or target.password is not None
+        ):
+            raise ValueError("redirect target is outside the allowed endpoint hosts")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _find_schema_path() -> Optional[str]:
     """Locate perf/metrics-schema.json relative to the repository root."""
     # Try relative to this script (tools/perf/doctor_advice.py -> repo root)
@@ -104,14 +119,15 @@ def fetch_metrics_http(url: str) -> Dict[str, Any]:
 
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        opener = urllib.request.build_opener(_LocalhostRedirectHandler)
+        with opener.open(req, timeout=10) as resp:
             data = resp.read()
             return json.loads(data)
-    except OSError as exc:
-        print(f"ERROR: Failed to fetch metrics from {url}: {exc}", file=sys.stderr)
-        sys.exit(2)
     except json.JSONDecodeError as exc:
         print(f"ERROR: Invalid JSON from {url}: {exc}", file=sys.stderr)
+        sys.exit(2)
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: Failed to fetch metrics from {url}: {exc}", file=sys.stderr)
         sys.exit(2)
 
 

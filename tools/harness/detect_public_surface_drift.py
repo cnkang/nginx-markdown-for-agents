@@ -31,7 +31,6 @@ DYNCONF_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http
 METRICS_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_metrics_v1_renderer.h")
 FFI_PATHS = (
     os.path.join(ROOT, "components", "rust-converter", "src", "ffi", "exports.rs"),
-    os.path.join(ROOT, "components", "rust-converter", "src", "ffi", "incremental.rs"),
     os.path.join(ROOT, "components", "rust-converter", "src", "ffi", "streaming.rs"),
     os.path.join(ROOT, "components", "rust-converter", "src", "dynconf", "ffi.rs"),
     REASON_CODE_PATH,
@@ -794,7 +793,7 @@ def extract_dynconf_keys_from_c():
     The production C path deliberately does not duplicate the JSON key table:
     Rust owns parsing and validation, while C owns bounded file I/O and the
     atomic snapshot commit.  Keep this check tied to both sides of that
-    boundary so a stale C-only key scan cannot mistake the legacy test parser
+    boundary so a C-only key scan cannot mistake the obsolete test parser
     for the production contract.
     """
     c_text = read_text(DYNCONF_PATH)

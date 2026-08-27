@@ -8,13 +8,13 @@ repos:
     hooks:
       - id: cargo-fmt
         name: cargo fmt
-        entry: cargo fmt --all -- --check
+        entry: make rust-fmt-check
         language: system
         types: [rust]
         pass_filenames: false
       - id: cargo-clippy
         name: cargo clippy
-        entry: cargo clippy --all-targets --all-features -- -D warnings
+        entry: make rust-clippy-check
         language: system
         types: [rust]
         pass_filenames: false
@@ -54,11 +54,13 @@ repos:
         name: detect backpressure resume patterns
         entry: tools/harness/detect_backpressure_resume.sh
         language: script
+        pass_filenames: false
         files: ^components/nginx-module/src/.*\.c$
       - id: detect-decompression-budget
         name: detect decompression budget enforcement
         entry: tools/harness/detect_decompression_budget.sh
         language: script
+        pass_filenames: false
         files: ^components/nginx-module/src/.*decomp.*\.c$
 
   # Write-time hygiene gates (2026-08-21 remediation, Rules 61/63/70/13)
@@ -94,12 +96,26 @@ repos:
         name: detect FFI fat pointer transfer
         entry: tools/harness/detect_ffi_fat_pointer_transfer.sh
         language: script
+        pass_filenames: false
         files: ^components/rust-converter/src/ffi/.*\.rs$
       - id: detect-ffi-panic-safety
         name: detect FFI panic safety
         entry: tools/harness/detect_ffi_panic_safety.sh
         language: script
+        pass_filenames: false
         files: ^components/rust-converter/src/ffi/.*\.rs$
+
+  # Helm templates contain Go-template directives and are not standalone YAML.
+  # Validate them through Helm rather than the generic YAML parser below.
+  - repo: local
+    hooks:
+      - id: helm-lint
+        name: Helm chart lint
+        entry: helm lint charts/nginx-markdown --set image.repository=nginx --set image.tag=1.28.2
+        language: system
+        pass_filenames: false
+        files: ^charts/nginx-markdown/
+
   # General code quality
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
@@ -108,10 +124,13 @@ repos:
         # Retained benchmark evidence is byte-bound to its recorded digest
         # (Rule 61); reformatting it would invalidate provenance.  Fix the
         # generator and re-finalize the baseline instead.
-        exclude: ^perf/baselines/.*-raw-probes/
+        # Fuzz corpus entries are also byte-exact inputs; never rewrite them.
+        exclude: ^(perf/baselines/.*-raw-probes/|components/rust-converter/fuzz/corpus/)
       - id: end-of-file-fixer
         # Same Rule 61 evidence-binding exclusion as trailing-whitespace.
-        exclude: ^perf/baselines/.*-raw-probes/
+        # Fuzz corpus entries are also byte-exact inputs; never rewrite them.
+        exclude: ^(perf/baselines/.*-raw-probes/|components/rust-converter/fuzz/corpus/)
       - id: check-yaml
+        exclude: ^charts/nginx-markdown/templates/
       - id: check-added-large-files
       - id: check-merge-conflict

@@ -53,7 +53,7 @@ or packaging documentation.
 - `tools/release-matrix.json` must include all supported platforms
 - `tools/release/matrix/` tooling must stay consistent with matrix schema
 - `.github/workflows/release-packages.yml`, `.github/workflows/release-rpm.yml`,
-  and `.github/workflows/sign-and-publish.yml` must agree on package artifact
+  and `.github/workflows/release-binaries.yml` must agree on package artifact
   names, supported NGINX versions, and architecture-specific runner labels.
 - `packaging/checksums.sha256` must cover every NGINX source version requested
   by active release workflows and release Dockerfiles.

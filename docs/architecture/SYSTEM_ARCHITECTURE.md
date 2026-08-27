@@ -235,7 +235,7 @@ This decision appears in [ADR-0003](ADR/0003-inline-origin-near-conversion.md).
 v0.8.0 adds a true streaming path alongside the existing full-buffer path.
 The NGINX module still owns request lifecycle, header ordering, policy gates,
 and backpressure handling. Rust owns conversion logic and exposes both
-full-buffer and incremental streaming FFI entrypoints.
+full-buffer and streaming FFI entrypoints.
 
 ### Processing-Path Selection and Defaults
 `markdown_streaming` defaults to `auto`. In auto mode, known small
@@ -257,7 +257,7 @@ After commit, failures are terminal because the response representation has
 already changed.
 
 ### Streaming FFI Contract
-The C side passes incremental chunks, EOF state, flush thresholds, and budget
+The C side passes streaming chunks, EOF state, flush thresholds, and budget
 limits through the streaming converter ABI. Rust reports structured streaming
 events and errors back to C so the module can preserve NGINX return-code
 semantics, apply fallback policy before commit, and update metrics only on the
@@ -323,7 +323,7 @@ The handler is loopback-only by default and denies external peers before
 rendering. Standard NGINX `allow`/`deny` directives may add restrictions but
 cannot broaden that boundary.
 
-### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf_snapshot.c`)
+### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf_impl.h`)
 `markdown_dynconf_dry_run on` validates a new configuration file during the
 dynconf reload cycle
 without replacing the active snapshot. Validation results use bounded
@@ -344,9 +344,9 @@ reason strings and metric families through the
 `markdown_reason_code_str()` / `markdown_reason_code_metric_key()` FFI
 exports (wrapped C-side by `ngx_http_markdown_get_reason_code_str()` and
 `ngx_http_markdown_get_reason_code_metric_key()`). C diagnostics also consume
-the generated metadata, discriminant, and compatibility-alias tables. No
-independent canonical C constants or mapping tables remain. C-only streaming
-event labels are a separate internal surface. This keeps the Rust enum,
+the generated metadata and discriminant tables. No independent canonical C
+constants or mapping tables remain. Streaming transition names use the
+separate bounded `event=` log field. This keeps the Rust enum,
 generated C metadata, diagnostics, docs, and metrics labels aligned.
 
 ### Header Plan Atomic Application (`ngx_http_markdown_header_plan.c`)
@@ -406,4 +406,8 @@ and rejects truncated final streams.
 The project applied internal optimizations to the full-buffer path. They reduce unnecessary data duplication during the transition from the NGINX buffer to the Rust converter and back.
 
 ### Performance Evidence & Gates
-Strict performance evidence gates guard the 0.9.1 release. The `make release-gates-check-091` target must pass, and operators monitor performance regression via `make perf-evidence-check`. Operators can use `python3 tools/perf/doctor_advice.py` and `tools/perf/run_module_benchmark.sh` to tune the module for their specific workload.
+Strict performance evidence gates guard the 0.9.2 release. The consolidated
+`make release-gates-check-092` target must pass, and operators monitor
+performance regression via `make perf-evidence-check`. Operators can use
+`python3 tools/perf/doctor_advice.py` and `tools/perf/run_module_benchmark.sh`
+to tune the module for their specific workload.

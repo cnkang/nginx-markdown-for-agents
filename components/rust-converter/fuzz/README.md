@@ -364,8 +364,19 @@ Confirm that fuzz-only functions are absent from release builds:
 
 ```bash
 cargo build --release
+# Fail fast when the release rlib is missing; nm below must inspect the
+# real artifact, not succeed vacuously on a nonexistent file.
+rlib=target/release/libnginx_markdown_converter.rlib
+if [ ! -f "$rlib" ]; then
+  echo "release rlib not found: $rlib (run cargo build --release first)" >&2
+  exit 1
+fi
 # Inspect exported symbols (should not contain fuzz-only functions)
-nm target/release/libnginx_markdown_converter.rlib 2>/dev/null | grep -c "fuzzing" || true
+if nm "$rlib" | grep -q "convert_with_raw_bytes"; then
+  echo "unexpected fuzz-only symbol in release build" >&2
+  exit 1
+fi
+echo "fuzz-only symbol is absent from the release build"
 ```
 
 ---

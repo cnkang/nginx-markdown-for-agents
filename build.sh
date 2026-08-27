@@ -5,7 +5,7 @@
 # repo-root wrapper small and delegate the project-specific logic to the
 # tracked .clusterfuzzlite script.
 
-if [ -f /src/.clusterfuzzlite/build.sh ]; then
+if [[ -f /src/.clusterfuzzlite/build.sh ]]; then
     exec /bin/bash /src/.clusterfuzzlite/build.sh "$@"
 fi
 

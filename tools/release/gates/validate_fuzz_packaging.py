@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Fuzz and packaging infrastructure validator for v0.7.0 release gates. 由 0.7.0 引入，被 0.8.0+ 门禁复用
+Fuzz and packaging infrastructure validator for the release gates.
 
-Validates the 11-item checklist from v0.7.0 fuzz and packaging infrastructure requirements (Requirement 2):
+Validates the 11-item fuzz and packaging infrastructure requirements:
 
 1. Fuzz targets exist (fuzz/Cargo.toml lists targets)
 2. ClusterFuzzLite PR workflow exists
@@ -299,7 +299,7 @@ def check_install_docs(result: ValidationResult) -> None:
 
 def print_report(result: ValidationResult) -> None:
     """Print a formatted validation report."""
-    print("v0.7.0 Fuzz & Packaging Infrastructure Validation Report")
+    print("Fuzz & Packaging Infrastructure Validation Report")
     print("=" * 60)
     for status, check_id, message in result.results:
         print(f"  {status:4s}  {check_id:35s}  {message}")

@@ -50,7 +50,7 @@ represents every decompression event:
 nginx_markdown_decompression_events_total{
   encoding="gzip|deflate|brotli",
   outcome="success|failure",
-  reason="ok|decompression_budget_exceeded|decompression_format_error|decompression_truncated_input|decompression_io_error"
+  reason="budget_exceeded|format_error|io_error|ok|truncated_input"
 }
 ```
 

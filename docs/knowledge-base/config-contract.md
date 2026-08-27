@@ -104,7 +104,7 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 | 25 | `bypass_no_transform` | `nginx_markdown_requests_total` |
 | 26 | `encoding_header_invalid` | `nginx_markdown_requests_total` |
 
-## FFI Surface Summary (46 exports, ABI v2)
+## FFI Surface Summary (42 exports, ABI v2)
 
 - **ABI version:** 2 (frozen for 0.9.2)
 - **Classification:** all `INTERNAL_ONLY`
@@ -116,7 +116,9 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 ## markdown_limits Keys
 
 `markdown_limits key=value ...` — each key at most once. Unknown keys, overflow,
-and malformed entries fail `nginx -t` or the atomic dynconf validation path.
+and malformed entries fail static NGINX configuration parsing (`nginx -t`).
+The generic `markdown_limits` directive is not parsed by the atomic dynconf
+path. Dynconf has its own supported-key schema and validation.
 Explicit zero values fail validation. This includes `max_inflight=0`.
 Configured `max_inflight` values must be integers greater than 0. The internal zero value
 for an unset or inherited `max_inflight` means unlimited. Defaults are
@@ -124,7 +126,6 @@ inheritance-based (`NGX_CONF_UNSET`). 0.9.2 documents no explicit defaults.
 
 | Key | Meaning |
 |---|---|
-
 | `conversion_timeout` | Wall-clock limit for conversion |
 | `parser_timeout` | Cooperative parser deadline |
 | `conversion_memory` | Full-buffer input/conversion bound |
@@ -144,5 +145,6 @@ authoritative names and migration guidance.
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-08-26 | Remove retired FFI exports from the active contract and synchronize the count with the inventory. |
 | 0.9.2 | 2026-08-12 | Synchronize dynconf metadata wording and the FFI export count with the frozen inventory. |
 | 0.9.2 | 2026-08-07 | Pilot: generate contract tables from public-surface-inventory.json ground truth (directives, dynconf, metrics, reason codes, FFI, limits). |

@@ -45,7 +45,7 @@ Required:
   - `ngx_http_handler_pt`: `ngx_http_request_t *r` must remain non-const
   - `ngx_http_output_header_filter_pt` / `ngx_http_output_body_filter_pt`:
     parameters must match the NGINX-defined function pointer types exactly
-  
+
   Adding `const` to these parameters causes function-pointer type mismatches
   that may compile with warnings but produce undefined behavior at runtime.
   Before adding `const` to any callback parameter, verify the parameter type

@@ -30,6 +30,33 @@ fn inline_code_should_use_a_fence_longer_than_embedded_backticks() {
     assert!(result.trim().contains("````value ``` with ticks````"));
 }
 
+/// Verifies that inline code gets padding on both sides when its payload
+/// begins with a backtick, so the fence cannot be confused with the payload.
+#[test]
+fn inline_code_starting_with_backtick_is_padded_on_both_sides() {
+    let result = convert_html(b"<p><code>`value</code></p>");
+
+    assert!(result.trim().contains("`` `value ``"), "got: {result:?}");
+}
+
+/// Verifies that inline code gets padding on both sides when its payload ends
+/// with a backtick.
+#[test]
+fn inline_code_ending_with_backtick_is_padded_on_both_sides() {
+    let result = convert_html(b"<p><code>value`</code></p>");
+
+    assert!(result.trim().contains("`` value` ``"), "got: {result:?}");
+}
+
+/// Verifies that an all-backtick inline-code payload is also separated from
+/// both fences.
+#[test]
+fn inline_code_made_only_of_backticks_is_padded_on_both_sides() {
+    let result = convert_html(b"<p><code>```</code></p>");
+
+    assert!(result.trim().contains("```` ``` ````"), "got: {result:?}");
+}
+
 /// Ensures that whitespace-only text nodes between inline elements preserve
 /// word separation in the Markdown output instead of being silently dropped.
 #[test]

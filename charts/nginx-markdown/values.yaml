@@ -5,14 +5,16 @@ replicaCount: 1
 # The runtime image is intentionally NOT defaulted: this chart has no
 # stock-runtime contract (the documented "installable with a stock nginx
 # image" applies only to local smoke with explicit overrides).  Helm
-# refuses to render the Deployment until BOTH image.repository and
-# image.tag are set explicitly, e.g.:
+# refuses to render the Deployment until image.repository and either
+# image.tag or image.digest are set explicitly, e.g.:
 #   --set image.repository=nginx --set image.tag=1.26.3
 # or the markdown-enabled image your release provides.
 image:
   repository: ""
   pullPolicy: IfNotPresent
   tag: ""
+  # An immutable digest takes precedence over tag when both are set.
+  digest: ""
 
 imagePullSecrets: []
 nameOverride: ""
@@ -91,12 +93,9 @@ markdown:
   # To enable the module, use an image that already contains
   # ngx_http_markdown_filter_module.so and set loadModule to its path.
   enabled: false
-  maxSize: "10m"
-  timeout: "5s"
   onError: "pass"
   flavor: "commonmark"
   tokenEstimate: false
-  etag: true
   # Cache validation mode: off | ims_only | full
   conditionalRequests: "ims_only"
   logVerbosity: "info"
@@ -110,7 +109,6 @@ markdown:
   streaming:
     # Processing-path policy: off | auto | force
     mode: "auto"
-    budget: "2m"
 
   # Noise pruning
   prune:
@@ -123,15 +121,15 @@ markdown:
 
   # markdown_limits keys (all optional; omitted keys keep module defaults)
   limits:
-    # conversionMemory: "10m"
-    # conversionTimeout: "5s"
+    # The chart exposes only the canonical markdown_limits vocabulary.
+    conversionMemory: "10m"
+    conversionTimeout: "5s"
+    # streamingBuffer: "2m"
     # parserMemory: "32m"
     # parserTimeout: "10s"
-    # streamingBuffer: "2m"
     # decompressedSize: "64m"
     # decompressionRatio: 100
     # maxInflight: 64
-    {}
 
 # Metrics endpoint
 metrics:

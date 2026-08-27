@@ -50,17 +50,34 @@
       "type": "object",
       "description": "Build identity. Global scope.",
       "required": [
+        "build_kind",
         "source_sha",
         "nginx_version",
         "rust_version",
+        "feature_manifest_digest",
         "features"
       ],
       "additionalProperties": false,
       "properties": {
-        "source_sha": {
+        "build_kind": {
           "type": "string",
-          "pattern": "^[0-9a-f]{40}$",
-          "description": "Git commit SHA of the module source."
+          "enum": [
+            "development",
+            "release"
+          ],
+          "description": "Whether this module was built as a development or release artifact."
+        },
+        "source_sha": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            {
+              "const": "development"
+            }
+          ],
+          "description": "Git commit SHA of the module source, or the explicit development marker."
         },
         "nginx_version": {
           "type": "string",
@@ -68,9 +85,28 @@
           "description": "NGINX version string."
         },
         "rust_version": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Rust compiler version used to build the converter."
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            },
+            {
+              "const": "development"
+            }
+          ],
+          "description": "Normalized Rust compiler version, or the explicit development marker."
+        },
+        "feature_manifest_digest": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "const": "development"
+            }
+          ],
+          "description": "Digest of the canonical Rust feature manifest, or the explicit development marker."
         },
         "features": {
           "type": "array",
@@ -118,12 +154,22 @@
       "type": "object",
       "description": "Live worker state. Worker-local scope.",
       "required": [
+        "diagnostics_recording",
         "inflight",
         "pending_output",
         "module_metrics"
       ],
       "additionalProperties": false,
       "properties": {
+        "diagnostics_recording": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "active",
+            "degraded_allocation_failure"
+          ],
+          "description": "Whether the diagnostics recent-decisions recorder is disabled, active, or degraded after allocation failure."
+        },
         "inflight": {
           "type": "integer",
           "minimum": 0,
@@ -140,7 +186,8 @@
           "required": [
             "streaming_requests_total",
             "precommit_failopen_total",
-            "copied_output_total"
+            "copied_output_total",
+            "diagnostics_recording_state"
           ],
           "additionalProperties": false,
           "properties": {
@@ -155,6 +202,11 @@
             "copied_output_total": {
               "type": "integer",
               "minimum": 0
+            },
+            "diagnostics_recording_state": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2
             }
           }
         }

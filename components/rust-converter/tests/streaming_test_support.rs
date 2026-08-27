@@ -23,9 +23,6 @@ use nginx_markdown_converter::streaming::{MemoryBudget, StreamingConverter, Stre
 #[path = "known_differences.rs"]
 pub mod known_differences;
 
-#[cfg(feature = "incremental")]
-use nginx_markdown_converter::incremental::IncrementalConverter;
-
 /// Metadata extracted from a fixture's `.meta.json` sidecar file, used to
 /// configure expected behavior and known differences for streaming tests.
 #[derive(Debug, Clone, Default)]
@@ -125,15 +122,10 @@ pub fn read_fixture(path: &Path) -> Vec<u8> {
 /// Read and parse the `.meta.json` sidecar file for a fixture, returning
 /// default metadata if no sidecar exists.
 pub fn read_fixture_meta(path: &Path) -> FixtureMeta {
-    let legacy_meta = PathBuf::from(format!("{}.meta.json", path.with_extension("").display()));
-    let direct_meta = PathBuf::from(format!("{}.meta.json", path.display()));
-    let meta_path = if legacy_meta.exists() {
-        legacy_meta
-    } else if direct_meta.exists() {
-        direct_meta
-    } else {
+    let meta_path = PathBuf::from(format!("{}.meta.json", path.with_extension("").display()));
+    if !meta_path.exists() {
         return FixtureMeta::default();
-    };
+    }
 
     let value: serde_json::Value = serde_json::from_slice(
         &fs::read(&meta_path).unwrap_or_else(|err| panic!("read {}: {err}", meta_path.display())),
@@ -242,21 +234,6 @@ pub fn convert_full_buffer(
 ) -> Result<String, ConversionError> {
     let dom = parse_html_with_charset(html, content_type)?;
     MarkdownConverter::with_options(options).convert(&dom)
-}
-
-/// Convert HTML to Markdown using the incremental conversion path (single feed).
-#[cfg(feature = "incremental")]
-pub fn convert_incremental(
-    html: &[u8],
-    content_type: Option<&str>,
-    options: ConversionOptions,
-) -> Result<String, ConversionError> {
-    let mut conv = IncrementalConverter::new(options);
-    if let Some(content_type) = content_type {
-        conv.set_content_type(Some(content_type.to_string()));
-    }
-    conv.feed_chunk(html)?;
-    conv.finalize()
 }
 
 /// Convert HTML through the streaming path as a single chunk, delegating to

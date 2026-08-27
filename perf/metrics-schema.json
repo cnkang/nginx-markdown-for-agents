@@ -328,7 +328,7 @@
       "properties": {
         "module_benchmark": {
           "type": "object",
-          "required": ["version", "timestamp", "scenarios", "memory_slope"],
+          "required": ["version", "timestamp", "git_commit", "scenarios", "memory_slope"],
           "properties": {
             "version": {
               "type": "string",
@@ -341,7 +341,7 @@
             },
             "git_commit": {
               "type": "string",
-              "description": "Full 40-character git commit SHA of the tested code"
+              "description": "Git commit identifier of the tested code; current release evidence uses a full 40-character SHA, while historical snapshots may retain an abbreviated SHA"
             },
             "platform": {
               "type": "string",
@@ -356,7 +356,7 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["name", "status"],
+                "required": ["name", "scenario_config", "status"],
                 "properties": {
                   "name": {
                     "type": "string",

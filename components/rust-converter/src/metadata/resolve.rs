@@ -125,6 +125,9 @@ impl MetadataExtractor {
     /// The URL with the last path segment removed, suitable for joining
     /// with a relative path.
     fn get_base_directory(&self, url: &str) -> String {
+        if url.ends_with('/') {
+            return url.to_string();
+        }
         let trimmed = url.trim_end_matches('/');
 
         if let Some(pos) = trimmed.rfind('/') {

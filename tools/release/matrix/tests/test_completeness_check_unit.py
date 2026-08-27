@@ -12,6 +12,7 @@ from tools.release.matrix.completeness_check import (
     expected_artifact_name,
     format_missing,
     load_matrix,
+    _normalize_arch,
     main,
 )
 
@@ -32,18 +33,18 @@ CURRENT_SCHEMA_ENTRY = {
     "owner_workflow": ".github/workflows/release-binaries.yml",
 }
 SAMPLE_FILENAME = "ngx_http_markdown_filter_module-1.24.0-glibc-x86_64.tar.gz"
-CURRENT_SCHEMA_FILENAME = "ngx_http_markdown_filter_module-1.24.0-musl-aarch64.tar.gz"
+CURRENT_SCHEMA_FILENAME = "ngx_http_markdown_filter_module-1.24.0-musl-arm64.tar.gz"
 
 
 def _write_matrix(tmp: Path, entries: list[dict], *, schema_version: str = "1.0.0") -> Path:
     """
     Create a minimal release-matrix.json in the given directory and return its path.
-    
+
     Parameters:
     	tmp (Path): Directory where release-matrix.json will be written.
     	entries (list[dict]): List of matrix entry objects to include under the "matrix" key.
     	schema_version (str): Schema version to write into the file (defaults to "1.0.0").
-    
+
     Returns:
     	Path: Path to the written release-matrix.json file.
     """
@@ -102,6 +103,20 @@ def test_load_matrix_empty(tmp_path):
     assert load_matrix(str(p)) == []
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("amd64", "amd64"),
+        ("arm64", "arm64"),
+        ("x86_64-unknown-linux-gnu", "amd64"),
+        ("aarch64-unknown-linux-gnu", "arm64"),
+        ("wasm32-unknown-unknown", "wasm32-unknown-unknown"),
+    ],
+)
+def test_normalize_arch_accepts_aliases_and_target_triples(raw, expected):
+    assert _normalize_arch(raw) == expected
+
+
 def test_load_matrix_current_schema_selects_release_binaries_entries(tmp_path):
     entries = [
         CURRENT_SCHEMA_ENTRY,
@@ -122,7 +137,7 @@ def test_load_matrix_current_schema_selects_release_binaries_entries(tmp_path):
         {
             "nginx": "1.24.0",
             "os_type": "musl",
-            "arch": "aarch64",
+            "arch": "arm64",
             "support_tier": "supported",
         }
     ]

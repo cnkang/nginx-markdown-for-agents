@@ -82,7 +82,11 @@ PEAK_MEMORY_MISSING_ERROR = (
 RECORD_SCHEMA_VERSION = "release.soak-qualification.v1"
 
 
-class SoakScenarioValidationError(Exception):
+class SoakQualificationValidationError(Exception):
+    """Report qualification errors without terminating the host process."""
+
+
+class SoakScenarioValidationError(SoakQualificationValidationError):
     """Report scenario-row errors without terminating real-mode aggregation."""
 
 
@@ -294,7 +298,7 @@ def _rss_evidence_issue(record: dict) -> str | None:
 
 def validate_against_manifest(record: dict, manifest: dict) -> None:
     if record["candidate_sha"] != manifest["candidate_sha"]:
-        raise SystemExit(
+        raise SoakQualificationValidationError(
             "ERROR: stale-digest: candidate sha mismatch: "
             f"{record['candidate_sha']} != {manifest['candidate_sha']}"
         )
@@ -304,7 +308,7 @@ def validate_against_manifest(record: dict, manifest: dict) -> None:
         or not isinstance(record["duration_seconds"], (int, float))
         or record["duration_seconds"] < floor
     ):
-        raise SystemExit(
+        raise SoakQualificationValidationError(
             "ERROR: below-threshold: soak duration "
             f"{record['duration_seconds']!r}s < {floor:.0f}s floor"
         )
@@ -349,7 +353,7 @@ def _check_peak_memory(record: dict, manifest: dict) -> None:
     """Per-request peak must stay within the scenario memory ceiling."""
     issue = _peak_memory_issue(record, manifest)
     if issue:
-        raise SystemExit(f"ERROR: {issue}")
+        raise SoakQualificationValidationError(f"ERROR: {issue}")
 
 
 def _peak_memory_issue(record: dict, manifest: dict) -> str | None:
@@ -377,20 +381,17 @@ def _peak_memory_issue(record: dict, manifest: dict) -> str | None:
 
 
 def validate_soak_outcome(record: dict, manifest: dict) -> None:
-    try:
-        _check_scenario_rows(record, manifest)
-    except SoakScenarioValidationError as exc:
-        raise SystemExit(str(exc)) from exc
+    _check_scenario_rows(record, manifest)
     rss_issue = _rss_evidence_issue(record)
     if rss_issue:
-        raise SystemExit(f"ERROR: {rss_issue}")
+        raise SoakQualificationValidationError(f"ERROR: {rss_issue}")
     if record.get("monotonic_growth_after_drain") is not False:
-        raise SystemExit(
+        raise SoakQualificationValidationError(
             "ERROR: below-threshold: monotonic worker-RSS growth after drain"
         )
     _check_peak_memory(record, manifest)
     if record.get("status") != "pass":
-        raise SystemExit(
+        raise SoakQualificationValidationError(
             f"ERROR: blocking-pending: soak record status {record.get('status')!r}"
         )
 
@@ -399,8 +400,23 @@ def fixture_main(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
     record = load_json(args.record_input, "soak record")
     validate_record_structure(record)
-    validate_against_manifest(record, manifest)
-    validate_soak_outcome(record, manifest)
+    if record.get("status") == "skip":
+        print(
+            f"SKIP: soak qualification fixture {args.record_input}: "
+            f"{record['skip_reason']}"
+        )
+        return 0
+    # Qualification validators raise a typed error with a formatted ERROR
+    # message; convert it into this entry point's ordinary status result.
+    failure_detail = ""
+    try:
+        validate_against_manifest(record, manifest)
+        validate_soak_outcome(record, manifest)
+    except SoakQualificationValidationError as failure:
+        failure_detail = str(failure)
+    if failure_detail:
+        print(failure_detail, file=sys.stderr)
+        return 1
     print(
         f"PASS: soak qualification fixture {args.record_input} is valid "
         f"({record['duration_seconds']}s, concurrency {record['concurrency']})"
@@ -1040,11 +1056,13 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
 
 
 def _cleanup_runtime_directory(runtime_dir: pathlib.Path) -> None:
+    runtime_root = SOAK_RUNTIME_ROOT.resolve()
+    resolved_runtime_dir = runtime_dir.resolve()
     if (
-        runtime_dir.name.startswith("markdown-soak-")
-        and runtime_dir.parent == SOAK_RUNTIME_ROOT
+        resolved_runtime_dir.name.startswith("markdown-soak-")
+        and resolved_runtime_dir.parent == runtime_root
     ):
-        shutil.rmtree(runtime_dir, ignore_errors=True)
+        shutil.rmtree(resolved_runtime_dir, ignore_errors=True)
 
 
 def _run_soak_session(
@@ -1220,6 +1238,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """
+    Run the qualification gate in fixture or real mode.
+    
+    Parameters:
+        argv: Optional command-line arguments. Uses process arguments when omitted.
+    
+    Returns:
+        0 on success, 1 for operational or qualification errors, or 2 when fixture
+        mode is missing its required record input.
+    """
     args = build_parser().parse_args(argv)
     try:
         if args.mode == "fixture":
@@ -1228,7 +1256,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             return fixture_main(args)
         return real_main(args)
-    except (FileNotFoundError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

@@ -30,7 +30,7 @@ fi
 # Both bsdtar (macOS) and GNU tar support NUL-delimited -T input.  Reading
 # files from the worktree, rather than HEAD, includes tracked local edits while
 # excluding ignored adapter state and other non-release files.
-tar --null -T "$file_list" -cf - | tar -xf - -C "$scan_root"
+tar --no-recursion --null -T "$file_list" -cf - | tar -xf - -C "$scan_root"
 
 if [[ -z "$(ls -A "$scan_root")" ]]; then
     echo "ERROR: gitleaks scan root is empty after extraction" >&2

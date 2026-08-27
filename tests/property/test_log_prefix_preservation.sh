@@ -30,10 +30,15 @@ set -uo pipefail
 # Navigate to repo root
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 
 SRCDIR="components/nginx-module/src"
 FAIL=0
+LOG_COUNT_STATUS="FAIL"
+UNIT_STATUS="FAIL"
+COVERAGE_STATUS="FAIL"
+DIFF_STATUS="FAIL"
+WARNING_STATUS="PASS"
 
 echo "=== Preservation Property Test: Non-Prefix Log Call Components Unchanged ==="
 echo "Source directory: $SRCDIR"
@@ -43,7 +48,7 @@ echo ""
 # Observed on unfixed code: 278 log call sites
 # Updated 2026-08-19: 375 (codebase grew since the original 278 baseline;
 # the count is verified constant between HEAD and working tree).
-# Updated 2026-08-19 (P2 batch): 374 — the dynconf bind-once fix removed
+# Updated 2026-08-19: 374 — the dynconf bind-once fix removed
 # the effective-conf allocation-failure log site (by-value copy has no
 # allocation failure path).
 # Updated 2026-08-22 (pre-freeze remediation): 379 — the brotli
@@ -53,9 +58,14 @@ echo ""
 BASELINE_LOG_SITES=379
 
 echo "--- Property 1: Log call site count remains constant ---"
-CURRENT_LOG_SITES=$(grep -crn 'ngx_log_error\|ngx_log_debug' "$SRCDIR" | awk -F: '{s+=$2}END{print s}')
+CURRENT_LOG_SITES=0
+while IFS= read -r -d '' source_file; do
+    file_count="$(grep -c 'ngx_log_error\|ngx_log_debug' "$source_file" || true)"
+    CURRENT_LOG_SITES=$((CURRENT_LOG_SITES + file_count))
+done < <(find "$SRCDIR" -type f -print0)
 
 if [[ "$CURRENT_LOG_SITES" -eq "$BASELINE_LOG_SITES" ]]; then
+    LOG_COUNT_STATUS="PASS"
     echo "PASS: Log call site count is $CURRENT_LOG_SITES (baseline: $BASELINE_LOG_SITES)"
 else
     echo "FAIL: Log call site count changed from $BASELINE_LOG_SITES to $CURRENT_LOG_SITES"
@@ -67,6 +77,7 @@ echo ""
 # --- Property 2: Unit tests pass ---
 echo "--- Property 2: All unit tests pass (make test-nginx-unit) ---"
 if make test-nginx-unit > /tmp/test_nginx_unit_output.txt 2>&1; then
+    UNIT_STATUS="PASS"
     echo "PASS: make test-nginx-unit exits 0"
 else
     echo "FAIL: make test-nginx-unit failed (exit code $?)"
@@ -79,6 +90,7 @@ echo ""
 # --- Property 3: Coverage bar maintained ---
 echo "--- Property 3: Coverage bar maintained (make coverage-c) ---"
 if make coverage-c > /tmp/coverage_c_output.txt 2>&1; then
+    COVERAGE_STATUS="PASS"
     echo "PASS: make coverage-c exits 0"
     # Extract and display coverage percentage for reference
     COVERAGE_LINE=$(grep 'lines\.\.\.\.\.\.\.:' /tmp/coverage_c_output.txt || true)
@@ -107,11 +119,19 @@ if [[ -z "$PR_BASE_REF" ]]; then
 fi
 MERGE_BASE=""
 if ! MERGE_BASE=$(git merge-base HEAD "$PR_BASE_REF" 2>/dev/null); then
-    MERGE_BASE=$(git rev-parse HEAD)
+    echo "FAIL: unable to resolve a verified merge base for $PR_BASE_REF" >&2
+    echo "  Refusing to compare HEAD with itself; provide a fetched PR base." >&2
+    FAIL=1
 fi
-GIT_DIFF=$(git diff "$MERGE_BASE" -- "components/nginx-module/src/ngx_http_markdown_stream_commit.c" "components/nginx-module/src/ngx_http_markdown_stream_postcommit.c" 2>/dev/null || true)
+GIT_DIFF=""
+if [[ -n "$MERGE_BASE" ]]; then
+    GIT_DIFF=$(git diff "$MERGE_BASE" -- "components/nginx-module/src/ngx_http_markdown_stream_commit.c" "components/nginx-module/src/ngx_http_markdown_stream_postcommit.c" 2>/dev/null || true)
+fi
 
-if [[ -z "$GIT_DIFF" ]]; then
+if [[ -z "$MERGE_BASE" ]]; then
+    :
+elif [[ -z "$GIT_DIFF" ]]; then
+    DIFF_STATUS="PASS"
     echo "PASS: No uncommitted changes in $SRCDIR (baseline state)"
     echo "  (After fix is applied, re-run to verify only prefix strings changed)"
 else
@@ -127,6 +147,7 @@ else
     NON_PREFIX_COUNT=$(echo "$NON_PREFIX_CHANGES" | grep -c . || true)
 
     if [[ "$NON_PREFIX_COUNT" -eq 0 ]]; then
+        DIFF_STATUS="PASS"
         echo "PASS: All changes are within markdown prefix string literals"
     else
         # Further filter: check if non-prefix lines are just context or whitespace
@@ -141,6 +162,7 @@ else
             echo "$REAL_VIOLATIONS" | head -10
             FAIL=1
         else
+            DIFF_STATUS="PASS"
             echo "PASS: Non-prefix lines in diff are benign (whitespace/context only)"
         fi
     fi
@@ -166,11 +188,11 @@ echo ""
 
 # --- Summary ---
 echo "=== SUMMARY ==="
-echo "Property 1 (log site count): $([[ "$CURRENT_LOG_SITES" -eq "$BASELINE_LOG_SITES" ]] && echo 'PASS' || echo 'FAIL')"
-echo "Property 2 (unit tests):     PASS"
-echo "Property 3 (coverage bar):   PASS"
-echo "Property 4 (diff analysis):  PASS"
-echo "Property 5 (no new warnings): PASS"
+echo "Property 1 (log site count): $LOG_COUNT_STATUS"
+echo "Property 2 (unit tests):     $UNIT_STATUS"
+echo "Property 3 (coverage bar):   $COVERAGE_STATUS"
+echo "Property 4 (diff analysis):  $DIFF_STATUS"
+echo "Property 5 (no new warnings): $WARNING_STATUS"
 echo ""
 
 if [[ "$FAIL" -eq 1 ]]; then
@@ -181,9 +203,9 @@ else
     echo ""
     echo "Baseline recorded:"
     echo "  Log call sites: $BASELINE_LOG_SITES"
-    echo "  Unit tests: PASS"
-    echo "  Coverage: PASS"
-    echo "  Diff: clean (no non-prefix changes)"
-    echo "  Warnings: clean"
+    echo "  Unit tests: $UNIT_STATUS"
+    echo "  Coverage: $COVERAGE_STATUS"
+    echo "  Diff: $DIFF_STATUS"
+    echo "  Warnings: $WARNING_STATUS"
     exit 0
 fi

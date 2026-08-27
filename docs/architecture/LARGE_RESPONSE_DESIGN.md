@@ -9,7 +9,11 @@ Since v0.8.0, the module supports **two conversion engines**:
 - **Full-buffer engine** (default for small responses): buffers the complete eligible response body before conversion through FFI. This remains the simplest and most tested path.
 - **Streaming engine** (enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline. The pipeline runs charset detection, tokenization, sanitization, a state machine, and emission, with per-request memory limits and backpressure.
 
-The legacy incremental path was a stepping stone toward true streaming. It sits behind the `incremental` Rust feature flag and routes through the retired `markdown_large_body_threshold` directive. It is **no longer the recommended path** for new deployments. See [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) and [ADR-0023](ADR/0023-single-streaming-policy.md) for the streaming design.
+The legacy incremental path was a stepping stone toward true streaming. The
+0.9.2 build removed it. This document retains it below only as historical
+context.
+See [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) and
+[ADR-0023](ADR/0023-single-streaming-policy.md) for the active streaming design.
 
 For background on the existing request lifecycle and buffering model, see:
 
@@ -65,14 +69,12 @@ tokenization, sanitization, state management, and emission. The
 memory. Its backpressure state preserves ownership across `NGX_AGAIN`. It is
 the supported large-response path in 0.9.2.
 
-### Historical Incremental Path (retired in 0.9.0)
+### Historical Incremental Path (removed in 0.9.2)
 
-> ⚠️ **RETIRED IN 0.9.0** — The incremental conversion path described below is
+> ⚠️ **REMOVED IN 0.9.2** — The incremental conversion path described below is
 > a historical record, not a current feature claim. The 0.9.2 binary does not
-> expose `markdown_large_body_threshold`. The `markdown_incremental_*` FFI
-> functions remain in the production FFI registry (see
-> [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md)) but no operator
-> threshold selects this path. Use `markdown_streaming` and
+> expose `markdown_large_body_threshold` or any `markdown_incremental_*` FFI
+> exports. Use `markdown_streaming` and
 > `markdown_limits streaming_buffer=` for the active path.
 
 When the feature-gated incremental conversion path handled a request, the NGINX
@@ -89,8 +91,8 @@ The historical call sequence was:
    return code
 
 True per-upstream-chunk feeding from NGINX was never implemented by this retired
-path. The current implementation buffers first, then delegates to the incremental
-Rust API. No operator threshold selects this path.
+path. The old implementation buffered first, then delegated to the incremental
+Rust API. No current build or operator setting selects this path.
 
 In historical terms, the retired incremental path represented:
 
@@ -108,19 +110,19 @@ It was not a true streaming or peak-memory-reduction path. The request body stil
 
 > [!WARNING]
 > **Historical architecture warning: do not increase the old 64 MiB limit**
-> 
+>
 > A 64 MiB HTML document currently translates to roughly 2.5GB-3GB of peak RAM consumption during Rust DOM tree construction. That is an empirical ~40x memory bloat factor.
-> 
+>
 > Because NGINX uses a multi-worker concurrency model, increasing this limit
 > (for example to 1 GB) exposes the server to extreme OOM (Out Of Memory) risks.
 > Just 4 concurrent 1 GB requests would demand over 160 GB of RAM. This triggers the OS OOM Killer, crashes NGINX workers, and takes down all other in-flight requests. It also creates a massive DoS attack vector.
-> 
+>
 > **To safely support GB-scale responses in the future**, the architecture must be fundamentally shifted from DOM-tree building to a **Streaming SAX Parser**. True stream processing maintains $O(1)$ memory by discarding parsed chunks instantly. It is the only safe way to surpass the 64 MiB limit without unbounded memory amplification.
 
 The incremental API and its threshold router are historical pre-0.9.0
-material. The 0.9.2 binary does not expose `markdown_large_body_threshold`.
-Use `markdown_streaming` and `markdown_limits streaming_buffer=` for the active
-path.
+material. The 0.9.2 binary does not expose their directive, configuration field,
+or FFI exports. Use `markdown_streaming` and
+`markdown_limits streaming_buffer=` for the active path.
 
 ## Historical pre-0.9.0 threshold router
 
@@ -128,11 +130,9 @@ path.
 > directive was a **reject-only stub** in 0.9.0 and 0.9.1. The 0.9.2 release
 > deleted the stub, so setting it in `nginx.conf` now fails `nginx -t`
 > with the standard `unknown directive` error. There is no Config V2
-> replacement. The
-> internal `routing.large_body_threshold` struct field persists for the
-> feature-gated incremental path, but the threshold is no longer
-> user-configurable. The following sections remain as historical design
-> reference for pre-0.9.0 deployments.
+> replacement. The 0.9.2 breaking boundary removed the
+> `routing.large_body_threshold` field and feature-gated incremental path. The following
+> sections remain as historical design reference for pre-0.9.0 deployments.
 
 The Threshold Router is the decision point in the NGINX C module that selects which processing path a request follows.
 
@@ -276,7 +276,7 @@ For all inputs that produce correct results through the full-buffer path, the ac
 
 > ⚠️ **HISTORICAL** — The table below describes the retired `markdown_large_body_threshold` routing removed in 0.9.2. It does not apply to the active `markdown_streaming` path.
 
-|| Error Scenario | Handling | User-Visible Behavior ||
+| Error Scenario | Handling | User-Visible Behavior |
 |---------------|----------|----------------------|
 | `feed_chunk()` failure | Returns `ConversionError`; C module applies `markdown_error_policy` | fail-open: original HTML; fail-closed: 502 |
 | `finalize()` failure | Same as above | Same as above |
@@ -297,7 +297,9 @@ markdown_streaming off;
 nginx -s reload
 ```
 
-This immediately routes all requests back to the full-buffer path. See [LARGE_RESPONSE_ROLLOUT.md](../guides/LARGE_RESPONSE_ROLLOUT.md) for the full rollout and rollback playbook.
+This immediately routes all requests back to the full-buffer path. Git history
+retains the pre-0.9.0 rollout playbook. Current operators should use the
+[Rollback Guide](../guides/ROLLBACK_GUIDE.md#rollback-methods).
 
 ## Related Documents
 

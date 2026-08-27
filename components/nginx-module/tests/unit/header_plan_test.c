@@ -9,7 +9,7 @@
  *   EMPTY -> BUILDING (add operations) -> APPLY -> [success] -> APPLIED
  *                                               -> [failure] -> ROLLED_BACK
  *
- * Corresponds to task B04.6.
+ * Corresponds to the header-plan task.
  *
  * Rules: 15 (FFI struct changes → both sides), 29 (clear flags after
  * gated op succeeds, not before).

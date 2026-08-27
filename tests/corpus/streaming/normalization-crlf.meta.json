@@ -2,7 +2,7 @@
   "fixture-id": "streaming/normalization-crlf",
   "page-type": "clean-article",
   "expected-conversion-result": "converted",
-  "input-size-bytes": 380,
+  "input-size-bytes": 779,
   "source-description": "Line ending and whitespace normalization scenarios",
   "failure-corpus": false,
   "streaming_notes": {

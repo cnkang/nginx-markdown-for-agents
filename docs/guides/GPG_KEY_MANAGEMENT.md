@@ -304,7 +304,8 @@ rm -f private-signing-subkey.asc
 
 ### Workflow Usage
 
-The `sign-and-publish.yml` workflow uses these secrets to:
+The `release-packages.yml` workflow uses these secrets in its
+`integrity-signing` and `integrity-signature` jobs to:
 
 1. Import the private key into the CI runner's GPG keyring
 2. Configure gpg-agent for non-interactive signing
@@ -351,7 +352,7 @@ rpm -K nginx-markdown-module-*.rpm
 
 - Limit GPG secret access to repository administrators only.
 - Use GitHub environment protection rules for the signing workflow.
-- Require approval for manual workflow dispatch of `sign-and-publish`.
+- Require approval for manual workflow dispatch of `release-packages.yml`.
 - Audit secret access through GitHub audit logs.
 
 ### Compromise Response

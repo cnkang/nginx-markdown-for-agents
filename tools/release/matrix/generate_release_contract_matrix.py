@@ -144,7 +144,7 @@ def project_entry(entry: dict[str, Any]) -> dict[str, Any]:
     if missing:
         raise ValueError(f"policy matrix row is missing required keys: {missing}")
 
-    return {
+    projected = {
         "nginx_version": entry["nginx_version"],
         "os": _project_os(entry),
         "libc": _project_libc(entry),
@@ -153,10 +153,25 @@ def project_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "feature_manifest_digest": entry["feature_manifest_digest"],
         "abi_version": entry["abi_version"],
     }
+    for key in ("image_ref", "image_digest"):
+        if key in entry:
+            projected[key] = entry[key]
+    return projected
 
 
 def build_projection(source: dict[str, Any]) -> dict[str, Any]:
-    """Build a deterministic release-contract projection."""
+    """
+    Build a deterministic release-contract projection from a policy matrix.
+    
+    Parameters:
+    	source (dict[str, Any]): Policy matrix containing a non-empty ``entries`` array.
+    
+    Returns:
+    	dict[str, Any]: Projection with schema metadata, source digest, and sorted release-contract entries.
+    
+    Raises:
+    	ValueError: If the source has no non-empty ``entries`` array or projects to duplicate release-contract rows.
+    """
     entries = source.get("entries")
     if not isinstance(entries, list) or not entries:
         raise ValueError("policy matrix must contain a non-empty entries array")
@@ -221,6 +236,7 @@ def _write_projection(projection: dict[str, Any]) -> None:
         ) as temporary:
             temporary_path = Path(temporary.name)
             temporary.write(json.dumps(projection, indent=2) + "\n")
+        temporary_path.chmod(0o644)
         os.replace(temporary_path, output)
     except (OSError, ValueError):
         if temporary_path is not None:

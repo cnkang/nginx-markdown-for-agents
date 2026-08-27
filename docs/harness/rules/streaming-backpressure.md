@@ -1,6 +1,6 @@
 ---
 domain: streaming-backpressure
-rules: [1, 2, 38, 47, 51, 52, 64, 69]
+rules: [1, 2, 38, 47, 51, 52, 64, 71]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/streaming/**"
@@ -250,7 +250,7 @@ items by file type:
 28. Fail-open replay buffer integrity: if the change touches fail-open or streaming pre-commit paths, verify (a) replay buffer init failure triggers `precommit_error`, (b) replay buffer append failure triggers `precommit_error` (not just a warning), (c) `failopen_completed` flag prevents duplicate `finalize_request` after terminal-buffer passthrough, (d) `results.failopen_count` increments only after downstream `NGX_OK` (not at decision point). (Rule 38)
 29. NGX_DONE terminal semantics: after `ngx_http_finalize_request()`, the function must return immediately. Callers receiving `NGX_DONE` must treat it as terminal success — no further filter calls or body sends. Multi-step header modifications must be atomic (abort on first failure). Fixed-capacity rollback snapshots must fail before mutation when capacity gets exceeded; they must never silently omit mutable entries. (Rule 39)
 30. Invalidated header filtering: all header lookup/iteration functions must skip entries where `hash == 0`. NGINX marks deleted headers by zeroing hash, reading such entries returns stale data. (Rule 40)
-31. Format string argument matching: when adding metrics to text/JSON renderers using `ngx_snprintf`, verify specifier count and types match the argument list exactly. (Rule 8)
+31. Format string argument matching: when adding metrics to the Prometheus v1 renderer using `ngx_snprintf`, verify specifier count and types match the argument list exactly. (Rule 8)
 
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly, initial state documented in comments only. (Rule 16)
@@ -441,6 +441,16 @@ Required:
   or an equivalent dedicated branch).  Folding `NGX_AGAIN` into the
   `NGX_ERROR` path or returning immediately without preserving pending
   output truncates the response under downstream backpressure.
+- For a header-chain call, make the accepted-header branch visible and keep
+  processing the body rather than treating `NGX_AGAIN` as an error:
+  ```c
+  rc = ngx_http_next_header_filter(r);
+  if (rc == NGX_AGAIN) {
+      /* headers are queued; preserve pending body state and continue */
+  } else if (rc != NGX_OK) {
+      return rc;
+  }
+  ```
 - A new function that may return `NGX_AGAIN` must register in
   `detect_ngx_again_call_sites.sh` `NGX_AGAIN_APIS` so every call site is
   audited; the detector's known-API list is the single registry.

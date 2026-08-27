@@ -1,7 +1,7 @@
 /*
  * Test: header_plan_prepare_commit
  *
- * Validates the spec 48 two-phase prepare/commit header plan model:
+ * Validates the two-phase prepare/commit header plan model:
  *   - prepare performs all fallible work without mutating headers_out
  *   - a prepare failure at op index N leaves r->headers_out unchanged
  *     (no partial mutation), regardless of N (1st, 2nd, 3rd op)
@@ -76,7 +76,7 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
 
     g_palloc_calls++;
     if (g_in_commit) {
-        /* spec 48: commit must perform no allocation. */
+        /* commit must perform no allocation. */
         g_commit_allocs++;
     }
 
@@ -314,7 +314,7 @@ test_prepare_does_not_mutate_on_fault(void)
                 "X-Added must not appear after aborted prepare");
     TEST_ASSERT(count_active("Content-Length") == 2,
                 "both Content-Length entries must remain active");
-    TEST_ASSERT(g_commit_allocs == 0, "commit phase must not run");
+    TEST_ASSERT(g_in_commit == 0, "commit phase must not run");
     TEST_ASSERT(g_plan_freed == 1, "plan must be freed on error");
 
     TEST_PASS("Prepare fault leaves headers_out untouched");
@@ -347,7 +347,7 @@ test_no_partial_mutation_second_op(void)
                 "X-Added must not be present");
     TEST_ASSERT(count_active("Content-Length") == 2,
                 "Content-Length entries must remain active");
-    TEST_ASSERT(g_commit_allocs == 0, "commit phase must not run");
+    TEST_ASSERT(g_in_commit == 0, "commit phase must not run");
 
     TEST_PASS("2nd op prepare failure causes no partial mutation");
 }
@@ -379,7 +379,7 @@ test_no_partial_mutation_third_op(void)
                 "pushed X-Added slot must stay inert (hash==0)");
     TEST_ASSERT(count_active("Content-Length") == 2,
                 "Content-Length entries must remain active");
-    TEST_ASSERT(g_commit_allocs == 0, "commit phase must not run");
+    TEST_ASSERT(g_in_commit == 0, "commit phase must not run");
 
     TEST_PASS("3rd op prepare failure causes no partial mutation");
 }
@@ -414,7 +414,7 @@ test_alloc_failure_mid_prepare_no_mutation(void)
                 "partially prepared X-Added must stay inert");
     TEST_ASSERT(count_active("Content-Length") == 2,
                 "Content-Length entries must remain active");
-    TEST_ASSERT(g_commit_allocs == 0, "commit phase must not run");
+    TEST_ASSERT(g_in_commit == 0, "commit phase must not run");
 
     TEST_PASS("Allocation failure mid-prepare causes no mutation");
 }

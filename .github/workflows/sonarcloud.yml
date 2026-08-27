@@ -2,6 +2,19 @@ name: SonarCloud
 
 on:
   workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: "Optional PR number for a manual PR analysis"
+        required: false
+        type: string
+      pull_request_branch:
+        description: "Head branch for a manual PR analysis"
+        required: false
+        type: string
+      pull_request_base:
+        description: "Base branch for a manual PR analysis"
+        required: false
+        type: string
   pull_request:
     branches: [main, master]
     paths:
@@ -63,6 +76,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Python for source audits
         if: steps.token.outputs.enabled == 'true'
@@ -168,8 +182,52 @@ jobs:
           --include-exceptions
           --include-generated
 
+      - name: Validate manual PR analysis inputs
+        if: >-
+          steps.token.outputs.enabled == 'true' &&
+          github.event_name == 'workflow_dispatch' &&
+          inputs.pull_request_number != ''
+        env:
+          PR_NUMBER: ${{ inputs.pull_request_number }}
+          PR_BRANCH: ${{ inputs.pull_request_branch }}
+          PR_BASE: ${{ inputs.pull_request_base }}
+        shell: bash
+        run: |
+          if [[ -z "${PR_BRANCH}" || -z "${PR_BASE}" ]]; then
+            echo "pull_request_branch and pull_request_base are required when pull_request_number is set" >&2
+            exit 1
+          fi
+
       - name: SonarCloud Scan
-        if: steps.token.outputs.enabled == 'true'
+        if: >-
+          steps.token.outputs.enabled == 'true' &&
+          (
+            github.event_name == 'pull_request' ||
+            (github.event_name == 'workflow_dispatch' &&
+             inputs.pull_request_number != '')
+          )
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
+        with:
+          args: >
+            -Dproject.settings=.sonarcloud.properties
+            -Dsonar.organization=cnkang
+            -Dsonar.projectKey=cnkang_nginx-markdown-for-agents
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number || inputs.pull_request_number }}
+            -Dsonar.pullrequest.branch=${{ github.head_ref || inputs.pull_request_branch }}
+            -Dsonar.pullrequest.base=${{ github.base_ref || inputs.pull_request_base }}
+
+      - name: SonarCloud Branch Scan
+        if: >-
+          steps.token.outputs.enabled == 'true' &&
+          (
+            github.event_name != 'pull_request' &&
+            (
+              github.event_name != 'workflow_dispatch' ||
+              inputs.pull_request_number == ''
+            )
+          )
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0

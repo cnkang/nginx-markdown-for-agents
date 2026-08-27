@@ -62,10 +62,10 @@ def load_json(path):
 def build_direction_map(metrics_schema):
     """
     Build a mapping of metric names to their direction from a metrics schema.
-    
+
     Parameters:
         metrics_schema (dict): Schema containing a "metrics" list of objects, each with at least "name" and "direction" keys.
-    
+
     Returns:
         dict: A mapping where keys are metric names (str) and values are their directions (str).
     """
@@ -75,9 +75,9 @@ def build_direction_map(metrics_schema):
 def get_threshold(thresholds_cfg, platform, tier, metric):
     """
     Retrieve threshold settings for a metric within a specified tier and platform.
-    
+
     Looks up the threshold configuration for `metric` under `tier` for `platform`; if not found it falls back to the `"default"` platform entry and then to the built-in `DEFAULT_THRESHOLDS`.
-    
+
     Returns:
         dict: A mapping containing `warning_pct` and `blocking_pct` for the metric.
     """
@@ -94,12 +94,12 @@ def get_threshold(thresholds_cfg, platform, tier, metric):
 def compute_deviation(current, baseline):
     """
     Compute the percentage deviation between current and baseline for threshold comparisons.
-    
+
     The deviation is (current - baseline) / baseline * 100. If baseline is zero, returns sentinel values to avoid infinite results:
     - baseline == 0 and current == 0 -> 0.0
     - baseline == 0 and current > 0 -> 100.0
     - baseline == 0 and current < 0 -> -100.0
-    
+
     Returns:
         deviation_pct (float): Percentage difference of current relative to baseline.
     """
@@ -113,15 +113,15 @@ def compute_deviation(current, baseline):
 def judge_metric(deviation_pct, direction, warning_pct, blocking_pct):
     """
     Determine the verdict ('pass', 'warn', or 'fail') for a metric deviation against configured thresholds.
-    
+
     For direction "lower_is_better", positive deviation percentages indicate regressions. For direction "higher_is_better", thresholds are expressed as negative numbers and negative deviation percentages indicate regressions. Any other direction is treated as informational and results in "pass".
-    
+
     Parameters:
         deviation_pct (float): Deviation percentage of current vs baseline.
         direction (str): Metric direction, e.g. "lower_is_better" or "higher_is_better".
         warning_pct (float): Warning threshold percentage.
         blocking_pct (float): Blocking threshold percentage.
-    
+
     Returns:
         str: `'pass'`, `'warn'`, or `'fail'` indicating the metric verdict.
     """
@@ -150,14 +150,14 @@ def judge_metric(deviation_pct, direction, warning_pct, blocking_pct):
 
 def build_skipped_verdict(reason, platform):
     """
-    Emit a "skipped" verdict report and its reason.
+    Create and emit a verdict report indicating that performance checks were skipped.
     
     Parameters:
-        reason (str): Human-readable explanation for skipping; written to stderr.
-        platform (str): Platform name to include in the report.
-
+        reason (str): Explanation for why the checks were skipped.
+        platform (str): Platform name included in the report.
+    
     Returns:
-        dict: The verdict report object emitted to stdout.
+        dict: The emitted skipped-verdict report.
     """
     report = {
         "schema_version": "1.0.0",
@@ -179,27 +179,19 @@ def build_skipped_verdict(reason, platform):
 
 def _metric_comparison(cur_tier, base_tier, metric, direction_map, thresholds_cfg, platform, tier_name):
     """
-    Compare a single metric between a current and baseline tier and produce a verdict payload.
+    Compare a metric between current and baseline tier measurements.
     
     Parameters:
-        cur_tier (dict): Measurement values for the current tier.
-        base_tier (dict): Measurement values for the baseline tier.
-        metric (str): Metric name to compare.
-        direction_map (dict): Mapping of metric names to direction strings (e.g., "lower_is_better", "higher_is_better", "informational").
-        thresholds_cfg (dict): Thresholds configuration used to look up warning and blocking percentages.
-        platform (str): Platform name for threshold lookup.
-        tier_name (str): Tier identifier used for threshold lookup.
+    	cur_tier (dict): Current tier measurement values.
+    	base_tier (dict): Baseline tier measurement values.
+    	metric (str): Metric name to evaluate.
+    	direction_map (dict): Mapping of metric names to comparison directions.
+    	thresholds_cfg (dict): Threshold configuration for the metric.
+    	platform (str): Platform used for threshold lookup.
+    	tier_name (str): Tier used for threshold lookup.
     
     Returns:
-        dict or None: A dict with keys:
-            - "name" (str): the metric name.
-            - "payload" (dict): containing:
-                - "baseline": baseline value.
-                - "current": current value.
-                - "deviation_pct": deviation percentage rounded to four decimals.
-                - "verdict": metric verdict string.
-            - "verdict" (str): the metric verdict.
-        Returns None if the metric is informational or if either value is missing.
+    	dict or None: A metric comparison payload with baseline and current values, percentage deviation, and verdict; `None` for informational or missing metrics.
     """
     direction = direction_map.get(metric, "lower_is_better")
     if direction == "informational":
@@ -233,7 +225,7 @@ def _metric_comparison(cur_tier, base_tier, metric, direction_map, thresholds_cf
 def _compare_tier_metrics(base_tier, cur_tier, direction_map, thresholds_cfg, platform, tier_name):
     """
     Compare comparable metrics between a baseline tier and a current tier and aggregate per-metric verdicts.
-    
+
     Returns:
         tier_comparison (dict): Mapping of metric name to payload with keys including baseline, current, deviation, and verdict.
         has_warning (bool): `True` if any metric verdict is "warn", `False` otherwise.
@@ -268,7 +260,7 @@ def _compare_tier_metrics(base_tier, cur_tier, direction_map, thresholds_cfg, pl
 def _overall_verdict(has_warning, has_failure):
     """
     Determine the overall report verdict from aggregated tier results.
-    
+
     Returns:
         str: `"fail"` if has_failure is True, `"warn"` if has_warning is True (and no failures), `"pass"` otherwise.
     """
@@ -283,13 +275,14 @@ def build_verdict_report(
     baseline, current, thresholds_cfg, direction_map, platform,
 ):
     """
-    Builds a verdict report comparing current measurements to a baseline.
+    Build a verdict report comparing current measurements with a baseline.
     
-    Writes report JSON to stdout and a human-readable summary to stderr.
+    The report is emitted as JSON to standard output, and a human-readable
+    summary is written to standard error.
     
     Returns:
-        tuple: (report, has_failure) where `report` is the verdict report dictionary and
-        `has_failure` is True if any metric exceeded a blocking threshold, False otherwise.
+        tuple: The report dictionary and a boolean indicating whether any metric
+            exceeded a blocking threshold.
     """
     comparison_tiers = {}
     has_failure = False
@@ -355,7 +348,7 @@ def _emit_json(data):
 def _stderr(msg):
     """
     Write a message to the process's standard error stream.
-    
+
     Parameters:
         msg (str): Text to write to stderr.
     """
@@ -365,7 +358,7 @@ def _stderr(msg):
 def _print_text_summary(comparison_tiers, overall):
     """
     Print a concise, human-readable performance comparison summary to standard error.
-    
+
     Parameters:
     	comparison_tiers (dict): Mapping of tier name to a mapping of metric name to metric entry.
     		Each metric entry is a dict containing at least:
@@ -407,10 +400,10 @@ def _print_text_summary(comparison_tiers, overall):
 def parse_args(argv=None):
     """
     Parse CLI arguments for the performance threshold engine.
-    
+
     Parameters:
         argv (list[str] | None): Optional list of argument strings to parse. If None, the system command-line arguments are used.
-    
+
     Returns:
         argparse.Namespace: Parsed arguments with the attributes:
             - baseline: path to the baseline JSON
@@ -454,10 +447,10 @@ def parse_args(argv=None):
 def main(argv=None):
     """
     Run the threshold engine CLI flow and emit verdict JSON to stdout.
-    
+
     Parameters:
         argv (list[str] | None): Optional list of command-line arguments to parse; if None, uses sys.argv.
-    
+
     Returns:
         int: Exit code — 0 when the run is skipped or no blocking failures are found, 1 on any error or when any metric exceeds a blocking threshold.
     """
@@ -574,8 +567,15 @@ def get_module_level_thresholds(thresholds_cfg):
     Returns:
         dict: Mapping of metric name to threshold value (percentage or absolute).
     """
-    section = thresholds_cfg.get("module_level", DEFAULT_MODULE_LEVEL_THRESHOLDS)
-    return {k: v for k, v in section.items() if isinstance(v, (int, float))}
+    section = thresholds_cfg.get("module_level")
+    if isinstance(section, dict):
+        numeric = {
+            k: v for k, v in section.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)
+        }
+        if numeric:
+            return numeric
+    return dict(DEFAULT_MODULE_LEVEL_THRESHOLDS)
 
 
 def evaluate_module_level(current_metrics, baseline_metrics, thresholds_cfg, has_baseline=True):
@@ -676,12 +676,23 @@ def _evaluate_single_module_metric(metric_name, threshold_value, direction,
         }
 
     # percentage deviation
-    base_val = baseline_metrics.get(metric_name) if has_baseline else None
-    if not has_baseline or base_val is None:
+    if not has_baseline:
         return {
             "metric": metric_name,
             "status": "skipped",
             "reason": "cannot evaluate percentage threshold: missing baseline",
+            "threshold": threshold_value,
+            "actual": None,
+            "baseline": None,
+            "current": cur_val,
+        }
+
+    base_val = baseline_metrics.get(metric_name)
+    if base_val is None:
+        return {
+            "metric": metric_name,
+            "status": "missing_evidence",
+            "reason": "baseline metric is missing",
             "threshold": threshold_value,
             "actual": None,
             "baseline": None,

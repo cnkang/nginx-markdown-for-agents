@@ -298,6 +298,333 @@ fn ffi_test_empty_result() -> MarkdownResult {
     }
 }
 
+fn ffi_test_gzip_bytes(input: &[u8]) -> Vec<u8> {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::io::Write;
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(input)
+        .expect("gzip input should be writable");
+    encoder.finish().expect("gzip encoder should finish")
+}
+
+#[test]
+fn test_ffi_initializers_zero_caller_storage() {
+    let mut options = ffi_test_default_options();
+    options.timeout_ms = 17;
+    unsafe {
+        markdown_options_init(&mut options);
+        markdown_options_init(ptr::null_mut());
+    }
+    assert_eq!(options.timeout_ms, 5000);
+    assert_eq!(options.generate_etag, 0);
+    assert_eq!(options.flavor, 0);
+
+    let mut result = ffi_test_empty_result();
+    result.error_code = ERROR_INTERNAL;
+    unsafe {
+        markdown_result_init(&mut result);
+        markdown_result_init(ptr::null_mut());
+    }
+    assert_eq!(result.error_code, 0);
+    assert!(result.markdown.is_null());
+
+    let mut plan = FFIHeaderPlan {
+        handle: ptr::null_mut(),
+        entries: ptr::null(),
+        count: 11,
+    };
+    unsafe {
+        markdown_header_plan_init(&mut plan);
+        markdown_header_plan_init(ptr::null_mut());
+    }
+    assert_eq!(plan.count, 0);
+    assert!(plan.entries.is_null());
+
+    let base_url_sentinel = 0u8;
+    let mut base_url = unsafe { std::mem::zeroed::<FFIBaseUrlInput>() };
+    base_url.source_ip = &base_url_sentinel;
+    unsafe {
+        markdown_base_url_input_init(&mut base_url);
+        markdown_base_url_input_init(ptr::null_mut());
+    }
+    assert!(base_url.source_ip.is_null());
+    assert_eq!(base_url.source_ip_len, 0);
+
+    let mut decomp_sentinel = 0u8;
+    let mut decomp = FFIDecompResult {
+        output: &mut decomp_sentinel,
+        output_len: 9,
+        error_category: ERROR_INTERNAL,
+    };
+    unsafe {
+        markdown_decomp_result_init(&mut decomp);
+        markdown_decomp_result_init(ptr::null_mut());
+    }
+    assert!(decomp.output.is_null());
+    assert_eq!(decomp.output_len, 0);
+    assert_eq!(decomp.error_category, 0);
+
+    let mut chain_sentinel = 0u8;
+    let mut chain = FFIChainDecodeResult {
+        output: &mut chain_sentinel,
+        output_len: 9,
+        error_category: ERROR_INTERNAL,
+    };
+    unsafe {
+        markdown_chain_decode_result_init(&mut chain);
+        markdown_chain_decode_result_init(ptr::null_mut());
+    }
+    assert!(chain.output.is_null());
+    assert_eq!(chain.output_len, 0);
+    assert_eq!(chain.error_category, 0);
+}
+
+#[test]
+fn test_ffi_header_plan_lifecycle() {
+    let content_type = b"text/html; charset=utf-8";
+    let mut plan = FFIHeaderPlan {
+        handle: ptr::null_mut(),
+        entries: ptr::null(),
+        count: 0,
+    };
+
+    unsafe {
+        markdown_build_header_plan(content_type.as_ptr(), content_type.len(), 1, &mut plan);
+    }
+    assert!(plan.count > 0);
+    let entries = unsafe { std::slice::from_raw_parts(plan.entries, plan.count) };
+    assert!(entries.iter().any(|entry| entry.op_type == 0));
+    assert!(entries.iter().any(|entry| entry.op_type == 3));
+    assert!(entries.iter().any(|entry| entry.op_type == 2));
+    unsafe { markdown_header_plan_free(&mut plan) };
+    assert_eq!(plan.count, 0);
+    assert!(plan.entries.is_null());
+
+    let invalid_content_type = [0xff, 0xfe];
+    unsafe {
+        markdown_build_header_plan(
+            invalid_content_type.as_ptr(),
+            invalid_content_type.len(),
+            0,
+            &mut plan,
+        );
+    }
+    assert!(plan.count > 0);
+    unsafe {
+        markdown_header_plan_free(&mut plan);
+        markdown_header_plan_free(ptr::null_mut());
+        markdown_build_header_plan(ptr::null(), 0, 0, ptr::null_mut());
+    }
+}
+
+#[test]
+fn test_ffi_decompression_entrypoints() {
+    let mut result = FFIDecompResult {
+        output: ptr::null_mut(),
+        output_len: 0,
+        error_category: 0,
+    };
+
+    let invalid_format =
+        unsafe { markdown_decompress_bounded(ptr::null(), 0, 255, 1024, 100, &mut result) };
+    assert_eq!(invalid_format, DECOMP_CATEGORY_INVALID_ARGS);
+    assert_eq!(result.error_category, DECOMP_CATEGORY_INVALID_ARGS);
+
+    let null_input =
+        unsafe { markdown_decompress_bounded(ptr::null(), 1, 0, 1024, 100, &mut result) };
+    assert_eq!(null_input, DECOMP_CATEGORY_INVALID_ARGS);
+
+    let empty = [];
+    let empty_input =
+        unsafe { markdown_decompress_bounded(empty.as_ptr(), 0, 0, 1024, 100, &mut result) };
+    assert_ne!(empty_input, DECOMP_CATEGORY_INVALID_ARGS);
+    unsafe { markdown_decompress_free(&mut result) };
+
+    let compressed = ffi_test_gzip_bytes(b"ffi decompression");
+    let success = unsafe {
+        markdown_decompress_bounded(
+            compressed.as_ptr(),
+            compressed.len(),
+            0,
+            1024,
+            100,
+            &mut result,
+        )
+    };
+    assert_eq!(success, 0);
+    assert_eq!(result.error_category, 0);
+    let output = unsafe { std::slice::from_raw_parts(result.output, result.output_len) };
+    assert_eq!(output, b"ffi decompression");
+    unsafe {
+        markdown_decompress_free(&mut result);
+        markdown_decompress_free(ptr::null_mut());
+        markdown_decompress_bounded(
+            compressed.as_ptr(),
+            compressed.len(),
+            0,
+            1024,
+            100,
+            ptr::null_mut(),
+        );
+    }
+}
+
+#[test]
+fn test_ffi_encoding_chain_entrypoints() {
+    let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+
+    let valid = b"gzip, identity, br";
+    let classification =
+        unsafe { markdown_parse_encoding_chain(valid.as_ptr(), valid.len(), &mut result) };
+    assert_eq!(classification, ENCODING_CHAIN_VALID);
+    assert_eq!(result.layer_count, 2);
+    assert_eq!(result.layers, [0, 2, 0]);
+    assert_eq!(result.identity_present, 1);
+
+    let unknown = b"gzip, zstd";
+    let classification =
+        unsafe { markdown_parse_encoding_chain(unknown.as_ptr(), unknown.len(), &mut result) };
+    assert_eq!(classification, ENCODING_CHAIN_UNKNOWN_TOKEN);
+
+    let malformed = b"gzip,";
+    let classification =
+        unsafe { markdown_parse_encoding_chain(malformed.as_ptr(), malformed.len(), &mut result) };
+    assert_eq!(classification, ENCODING_CHAIN_MALFORMED);
+
+    let empty = [];
+    let classification = unsafe { markdown_parse_encoding_chain(empty.as_ptr(), 0, &mut result) };
+    assert_eq!(classification, ENCODING_CHAIN_MALFORMED);
+
+    let invalid_args = unsafe { markdown_parse_encoding_chain(ptr::null(), 1, &mut result) };
+    assert_eq!(invalid_args, ENCODING_CHAIN_INVALID_ARGS);
+    let null_result =
+        unsafe { markdown_parse_encoding_chain(valid.as_ptr(), valid.len(), ptr::null_mut()) };
+    assert_eq!(null_result, ENCODING_CHAIN_INVALID_ARGS);
+}
+
+#[test]
+fn test_ffi_chain_decode_entrypoints() {
+    let input = b"identity output";
+    let mut result = FFIChainDecodeResult {
+        output: ptr::null_mut(),
+        output_len: 0,
+        error_category: 0,
+    };
+
+    let identity = unsafe {
+        markdown_decode_encoding_chain(
+            input.as_ptr(),
+            input.len(),
+            ptr::null(),
+            0,
+            1024,
+            100,
+            &mut result,
+        )
+    };
+    assert_eq!(identity, 0);
+    let output = unsafe { std::slice::from_raw_parts(result.output, result.output_len) };
+    assert_eq!(output, input);
+    unsafe { markdown_chain_decode_free(&mut result) };
+    assert!(result.output.is_null());
+
+    let too_large = unsafe {
+        markdown_decode_encoding_chain(
+            input.as_ptr(),
+            input.len(),
+            ptr::null(),
+            0,
+            2,
+            100,
+            &mut result,
+        )
+    };
+    assert_eq!(too_large, DECOMP_CATEGORY_BUDGET_EXCEEDED);
+
+    let unknown_layer = [9u8];
+    let invalid_layer = unsafe {
+        markdown_decode_encoding_chain(
+            ptr::null(),
+            0,
+            unknown_layer.as_ptr(),
+            1,
+            1024,
+            100,
+            &mut result,
+        )
+    };
+    assert_eq!(invalid_layer, DECOMP_CATEGORY_INVALID_ARGS);
+
+    let too_deep = [0u8, 0, 0, 0];
+    let depth_error = unsafe {
+        markdown_decode_encoding_chain(
+            ptr::null(),
+            0,
+            too_deep.as_ptr(),
+            too_deep.len() as u32,
+            1024,
+            100,
+            &mut result,
+        )
+    };
+    assert_eq!(depth_error, DECOMP_CATEGORY_INVALID_ARGS);
+
+    let null_layers = unsafe {
+        markdown_decode_encoding_chain(ptr::null(), 0, ptr::null(), 1, 1024, 100, &mut result)
+    };
+    assert_eq!(null_layers, DECOMP_CATEGORY_INVALID_ARGS);
+    unsafe {
+        markdown_chain_decode_free(&mut result);
+        markdown_chain_decode_free(ptr::null_mut());
+        markdown_decode_encoding_chain(ptr::null(), 0, ptr::null(), 1, 1024, 100, ptr::null_mut());
+    }
+}
+
+#[test]
+fn test_ffi_trusted_proxy_entrypoints() {
+    let handle = markdown_trusted_proxies_new();
+    assert!(!handle.is_null());
+
+    let valid = b"192.0.2.0/24";
+    let invalid = b"not-a-cidr";
+    let invalid_utf8 = [0xff];
+    assert_eq!(
+        unsafe { markdown_trusted_proxies_push(handle, valid.as_ptr(), valid.len()) },
+        0
+    );
+    assert_eq!(
+        unsafe { markdown_trusted_proxies_push(handle, invalid.as_ptr(), invalid.len()) },
+        1
+    );
+    assert_eq!(
+        unsafe { markdown_trusted_proxies_push(handle, invalid_utf8.as_ptr(), invalid_utf8.len()) },
+        1
+    );
+    assert_eq!(
+        unsafe { markdown_trusted_proxies_push(handle, valid.as_ptr(), 0) },
+        2
+    );
+    assert_eq!(
+        unsafe { markdown_trusted_proxies_push(ptr::null_mut(), valid.as_ptr(), valid.len()) },
+        2
+    );
+    unsafe {
+        markdown_trusted_proxies_free(handle);
+        markdown_trusted_proxies_free(ptr::null_mut());
+    }
+}
+
+#[test]
+fn test_ffi_error_classifier_entrypoint() {
+    assert_eq!(markdown_classify_error_code(ERROR_PARSE), 0);
+    assert_eq!(markdown_classify_error_code(ERROR_TIMEOUT), 1);
+    assert_eq!(markdown_classify_error_code(ERROR_MEMORY_LIMIT), 2);
+    assert_eq!(markdown_classify_error_code(ERROR_INTERNAL), 3);
+}
+
 /// Verifies that passing a NULL converter handle to `markdown_convert` produces
 /// an error rather than crashing.
 #[test]

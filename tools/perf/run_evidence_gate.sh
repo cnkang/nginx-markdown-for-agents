@@ -20,6 +20,13 @@ resolve_python3() {
 }
 
 PYTHON3="$(resolve_python3)" || exit 1
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+case "$SCRIPT_PATH" in
+  */*) SCRIPT_DIR="${SCRIPT_PATH%/*}" ;;
+  *) SCRIPT_DIR="." ;;
+esac
+SCRIPT_DIR="$(cd "$SCRIPT_DIR" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 GATE_MODE="${EVIDENCE_GATE_MODE:-non-blocking}"
 ALLOW_SKIP_MODULE="${EVIDENCE_GATE_ALLOW_SKIP_MODULE:-0}"
 BASELINE_VERSION="${MODULE_BASELINE_VERSION:-092}"
@@ -63,7 +70,7 @@ if [[ "$GATE_MODE" == "blocking" && "$BASELINE_VERSION" == "092" ]]; then
 fi
 MODULE_BASELINE_VERSION="$BASELINE_VERSION" \
     EVIDENCE_GATE_REQUIRE_BASELINE_HEAD="$REQUIRE_BASELINE_HEAD" \
-    "$PYTHON3" tools/perf/evidence_gate.py "${GATE_ARGS[@]}"
+    "$PYTHON3" "$REPO_ROOT/tools/perf/evidence_gate.py" "${GATE_ARGS[@]}"
 rc=$?
 if [[ "$errexit_was_set" == "1" ]]; then
   set -e

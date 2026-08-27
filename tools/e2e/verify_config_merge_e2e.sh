@@ -57,8 +57,9 @@ assert_http_status() {
 
   local base="${raw_dir}/${label// /_}"
   # shellcheck disable=SC2086
-  curl -sS -D "${base}.hdr" -o "${base}.body" \
+    curl -sS -D "${base}.hdr" -o "${base}.body" \
     -H "${ACCEPT_MARKDOWN}" ${extra_headers} \
+    --connect-timeout 5 \
     --max-time 30 \
     "${url}" >/dev/null
   grep -qi "${expected}" "${base}.hdr" || {
@@ -195,11 +196,15 @@ else
 fi
 
 for cmd in curl python3 grep; do
-  markdown_need_cmd "$cmd"
+  if ! markdown_need_cmd "$cmd"; then
+    exit 2
+  fi
 done
 if [[ -z "${NGINX_BIN}" ]]; then
   for cmd in tar make cargo; do
-    markdown_need_cmd "$cmd"
+    if ! markdown_need_cmd "$cmd"; then
+      exit 2
+    fi
   done
 fi
 

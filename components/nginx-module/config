@@ -183,7 +183,7 @@ ngx_markdown_rust_features=${NGX_MARKDOWN_RUST_FEATURES-default}
 
 case "$ngx_markdown_rust_features" in
     default)
-        ngx_markdown_rust_features=prune_noise_regions,streaming,incremental
+        ngx_markdown_rust_features=prune_noise_regions,streaming
         ;;
     none)
         ngx_markdown_rust_features=
@@ -203,7 +203,7 @@ case "$ngx_markdown_rust_features" in
             fi
 
             case "$ngx_markdown_feature" in
-                incremental|streaming|prune_noise_regions)
+                streaming|prune_noise_regions)
                     ;;
                 *)
                     echo "configuration error: invalid NGX_MARKDOWN_RUST_FEATURES='$NGX_MARKDOWN_RUST_FEATURES'" >&2
@@ -215,22 +215,95 @@ case "$ngx_markdown_rust_features" in
 esac
 
 case ",$ngx_markdown_rust_features," in
-    *,incremental,*)
-        CFLAGS="$CFLAGS -DMARKDOWN_INCREMENTAL_ENABLED"
-        ;;
-esac
-
-case ",$ngx_markdown_rust_features," in
     *,streaming,*)
         CFLAGS="$CFLAGS -DMARKDOWN_STREAMING_ENABLED"
         ;;
 esac
 
-# Check if module is configured as dynamic
+# Embed an explicit build identity in the module diagnostics document.  Local
+# builds use a deliberately non-release identity; release builds must supply
+# the exact source, Rust compiler, and feature-manifest identity from the
+# immutable build inputs.
+ngx_markdown_build_kind=${NGX_MARKDOWN_BUILD_KIND-development}
+ngx_markdown_source_sha=${NGX_MARKDOWN_SOURCE_SHA-development}
+ngx_markdown_rust_version=${NGX_MARKDOWN_RUST_VERSION-development}
+ngx_markdown_feature_manifest_digest=${NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST-development}
+
+case "$ngx_markdown_build_kind" in
+    development)
+        if test "$ngx_markdown_source_sha" != development \
+           || test "$ngx_markdown_rust_version" != development \
+           || test "$ngx_markdown_feature_manifest_digest" != development; then
+            echo "configuration error: development builds must use the development build identity" >&2
+            exit 1
+        fi
+        ;;
+    release)
+        if ! printf '%s\n' "$ngx_markdown_source_sha" \
+            | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "configuration error: release source SHA must be a 40-character lowercase hex value" >&2
+            exit 1
+        fi
+        if ! printf '%s\n' "$ngx_markdown_rust_version" \
+            | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "configuration error: release Rust version must be normalized semver" >&2
+            exit 1
+        fi
+        if ! printf '%s\n' "$ngx_markdown_feature_manifest_digest" \
+            | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "configuration error: release feature manifest digest is invalid" >&2
+            exit 1
+        fi
+        if ! command -v rustc >/dev/null 2>&1; then
+            echo "configuration error: release builds require rustc to verify the compiler identity" >&2
+            exit 1
+        fi
+        ngx_markdown_rustc_version=$(rustc -Vv 2>/dev/null \
+            | sed -n 's/^release: //p')
+        if test "$ngx_markdown_rustc_version" != "$ngx_markdown_rust_version"; then
+            echo "configuration error: configured Rust version does not match rustc -Vv" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "configuration error: NGX_MARKDOWN_BUILD_KIND must be development or release" >&2
+        exit 1
+        ;;
+esac
+
+ngx_markdown_define_string() {
+    CFLAGS="$CFLAGS -D$1=\\\"$2\\\""
+}
+
+ngx_markdown_define_string NGX_HTTP_MARKDOWN_BUILD_KIND \
+    "$ngx_markdown_build_kind"
+ngx_markdown_define_string NGX_HTTP_MARKDOWN_SOURCE_SHA \
+    "$ngx_markdown_source_sha"
+ngx_markdown_define_string NGX_HTTP_MARKDOWN_RUST_VERSION \
+    "$ngx_markdown_rust_version"
+ngx_markdown_define_string NGX_HTTP_MARKDOWN_FEATURE_MANIFEST_DIGEST \
+    "$ngx_markdown_feature_manifest_digest"
+
+case ",$ngx_markdown_rust_features," in
+    *,prune_noise_regions,*)
+        CFLAGS="$CFLAGS -DMARKDOWN_PRUNE_NOISE_ENABLED"
+        ;;
+esac
+
+# Register separate header and body filter hooks.  NGINX uses one module-array
+# order for both hooks, but the header hook must run before not_modified while
+# the body hook must run after copy_filter has materialized file buffers.
 if test -n "$ngx_module_link"; then
-    # Dynamic module
     ngx_module_type=HTTP_AUX_FILTER
-    ngx_module_name=$ngx_addon_name
+    if test "$ngx_module_link" = DYNAMIC; then
+        # Keep the primary name first so the dynamic artifact retains the
+        # established ngx_http_markdown_filter_module.so filename.
+        ngx_module_name="$ngx_addon_name \
+                         ngx_http_markdown_body_filter_module"
+    else
+        ngx_module_name=ngx_http_markdown_body_filter_module
+    fi
+
     ngx_module_srcs="$ngx_addon_dir/src/ngx_http_markdown_filter_module.c \
                      $ngx_addon_dir/src/ngx_http_markdown_accept.c \
                      $ngx_addon_dir/src/ngx_http_markdown_auth.c \
@@ -245,24 +318,43 @@ if test -n "$ngx_module_link"; then
                      $ngx_addon_dir/src/ngx_http_markdown_reason_ffi.c \
                      $ngx_addon_dir/src/ngx_http_markdown_diagnostics_reason.c \
                      $ngx_addon_dir/src/ngx_http_markdown_diagnostics.c \
-                     $ngx_addon_dir/src/ngx_http_markdown_dynconf_snapshot.c \
-                     $ngx_addon_dir/src/ngx_http_markdown_stream_state.c \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_replay.c \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_commit.c \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.c"
     ngx_module_deps="$ngx_addon_dir/src/ngx_http_markdown_filter_module.h \
                      $ngx_addon_dir/src/ngx_http_markdown_header_plan.h \
                      $ngx_addon_dir/src/ngx_http_markdown_diagnostics.h \
-                     $ngx_addon_dir/src/ngx_http_markdown_dynconf_snapshot.h \
-                     $ngx_addon_dir/src/ngx_http_markdown_stream_state.h \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_replay.h \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_commit.h \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.h"
-    
-    . auto/module
+
+    if test "$ngx_module_link" = DYNAMIC; then
+        # Header filters are initialized in module-array order but run in the
+        # reverse order.  Keep the body hook before copy_filter in the array
+        # and the header hook after not_modified.  Keeping slice after the
+        # header hook preserves the core filter order when it is available.
+        ngx_module_order="ngx_http_markdown_body_filter_module \
+                          ngx_http_copy_filter_module \
+                          $ngx_addon_name \
+                          ngx_http_slice_filter_module"
+
+        . auto/module
+    else
+        # Static addons are accumulated by module type.  Place the body hook
+        # in the auxiliary group and the header hook in the final core-filter
+        # group to give the two hooks their independent runtime positions.
+        . auto/module
+        ngx_module_type=HTTP_INIT_FILTER
+        ngx_module_name=$ngx_addon_name
+        . auto/module
+    fi
 else
     # Static module
-    HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES $ngx_addon_name"
+    # Keep compatibility with older NGINX configure scripts while preserving
+    # the independent body/header filter positions.
+    HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES \
+                            ngx_http_markdown_body_filter_module"
+    HTTP_INIT_FILTER_MODULES="$HTTP_INIT_FILTER_MODULES $ngx_addon_name"
     NGX_ADDON_SRCS="$NGX_ADDON_SRCS \
                     $ngx_addon_dir/src/ngx_http_markdown_filter_module.c \
                     $ngx_addon_dir/src/ngx_http_markdown_accept.c \
@@ -278,17 +370,15 @@ else
                     $ngx_addon_dir/src/ngx_http_markdown_reason_ffi.c \
                     $ngx_addon_dir/src/ngx_http_markdown_diagnostics_reason.c \
                     $ngx_addon_dir/src/ngx_http_markdown_diagnostics.c \
-                    $ngx_addon_dir/src/ngx_http_markdown_dynconf_snapshot.c \
-                    $ngx_addon_dir/src/ngx_http_markdown_stream_state.c \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_replay.c \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_commit.c \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.c"
     NGX_ADDON_DEPS="$NGX_ADDON_DEPS $ngx_addon_dir/src/ngx_http_markdown_filter_module.h \
                     $ngx_addon_dir/src/ngx_http_markdown_header_plan.h \
-                    $ngx_addon_dir/src/ngx_http_markdown_stream_state.h \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_replay.h \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_commit.h \
-                    $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.h"
+                    $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.h \
+                    $ngx_addon_dir/src/ngx_http_markdown_diagnostics.h"
 fi
 
 # Note: ngx_module_libs is consumed by NGINX's auto/module logic for both

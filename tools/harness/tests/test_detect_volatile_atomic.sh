@@ -59,7 +59,7 @@ C
 
 output_file="${tmp_dir}/clean.out"
 exit_code=0
-(cd "${tmp_dir}" && bash "${DETECTOR}") >"${output_file}" 2>&1 || exit_code=$?
+bash "${DETECTOR}" "${src_dir}" >"${output_file}" 2>&1 || exit_code=$?
 if [[ "${exit_code}" -eq 0 ]]; then
     pass "no volatile -> exit 0"
 else
@@ -73,7 +73,7 @@ volatile int flag = 0;
 C
 
 exit_code=0
-(cd "${tmp_dir}" && bash "${DETECTOR}") >"${output_file}" 2>&1 || exit_code=$?
+bash "${DETECTOR}" "${src_dir}" >"${output_file}" 2>&1 || exit_code=$?
 if [[ "${exit_code}" -eq 0 ]]; then
     pass "justified volatile -> exit 0"
 else
@@ -90,7 +90,7 @@ C
 rm -f "${src_dir}/justified.c"
 
 exit_code=0
-(cd "${tmp_dir}" && bash "${DETECTOR}") >"${output_file}" 2>&1 || exit_code=$?
+bash "${DETECTOR}" "${src_dir}" >"${output_file}" 2>&1 || exit_code=$?
 if [[ "${exit_code}" -ne 0 ]] && grep -q 'VIOLATION' "${output_file}"; then
     pass "unjustified volatile -> exit 1 + VIOLATION"
 else
@@ -106,7 +106,7 @@ void publish(int *dst, int *src) {
 C
 
 exit_code=0
-(cd "${tmp_dir}" && bash "${DETECTOR}") >"${output_file}" 2>&1 || exit_code=$?
+bash "${DETECTOR}" "${src_dir}" >"${output_file}" 2>&1 || exit_code=$?
 if [[ "${exit_code}" -ne 0 ]] && grep -q '__atomic_' "${output_file}"; then
     pass "direct __atomic_* -> exit 1 + VIOLATION"
 else

@@ -41,8 +41,8 @@ privileged execution, then verifies both Markdown and HTML responses:
 
 ```bash
 # Step 1: Download and authenticate the versioned release installer
-RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSLo "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc" -o nginx-markdown-for-agents-release.asc "${RELEASE_BASE}/nginx-markdown-for-agents-release.asc"
-TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "$GNUPGHOME"' EXIT; gpg --batch --homedir "$GNUPGHOME" --import nginx-markdown-for-agents-release.asc; VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1; grep -E "  ${INSTALLER}$" SHA256SUMS | sha256sum -c - && sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}" && sudo nginx -t && sudo nginx -s reload
+set -euo pipefail; RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSL -o "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc" -o nginx-markdown-for-agents-release.asc "${RELEASE_BASE}/nginx-markdown-for-agents-release.asc"
+TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "$GNUPGHOME"' EXIT; gpg --batch --homedir "$GNUPGHOME" --import nginx-markdown-for-agents-release.asc; VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1; CHECKSUM_LINE="$(awk -v file="${INSTALLER}" '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"; printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -; sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"; sudo nginx -t; sudo nginx -s reload
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 ```
@@ -65,6 +65,12 @@ Content-Type: text/html
 ```
 
 The install script auto-enables `markdown_filter on` and wires the `load_module` directive. When automatic wiring completes successfully, you do not need to edit the configuration manually. If the installer reports manual actions, follow its instructions to finish the wiring. The NGINX default welcome page (`/usr/share/nginx/html/index.html`) serves as the demo content source — no upstream or proxy configuration needed.
+
+The installation host must provide Bash and the standard release-verification
+utilities used by the script, including `awk`, `curl`, `gpg`, and `tar`.
+Debian/Ubuntu hosts can install `gawk` and `gnupg2`. Alpine hosts can install
+`gawk` and `gnupg`. The installer validates these commands before it performs
+any privileged operation.
 
 > **Note:** If you need a standalone demo configuration file, see [`examples/nginx-configs/00-minimal-demo.conf`](../../examples/nginx-configs/00-minimal-demo.conf).
 
@@ -128,17 +134,20 @@ The install script performs the following automatically:
 - Default behavior: installation fails when the selected artifact cannot pass
   authentication against the release's signed `SHA256SUMS` manifest. The
   installer downloads `SHA256SUMS` and `SHA256SUMS.asc` from the same release,
-  verifies the detached signature with the pinned release signing key, binds the
-  artifact hash to its exact entry in the verified manifest, and cross-checks
-  the manifest digest against the release API digest when one is present. If the
-  signature, key, manifest, or fingerprint trust material is missing, the
-  installer fails closed and does not install the artifact.
-- `TRUSTED_FINGERPRINT` pins the release signing key. The default is the
-  fingerprint of the signing subkey of the checked-in release key
-  (`packaging/nginx-markdown-for-agents-release.asc`). Operators must override
-  it with an independently authenticated fingerprint before trusting a
-  different key.
-- `DOWNLOAD_URL_OVERRIDE` (operator-supplied URL) always requires `DOWNLOAD_SHA256`.
+  verifies the detached signature with the pinned public key embedded in the
+  installer, binds the artifact hash to its exact entry in the verified
+  manifest, and cross-checks the manifest digest against the release API digest
+  when one is present. The standalone installer does not trust a public key
+  downloaded from the same release. If the signature, key, manifest, or
+  fingerprint trust material is missing, the installer fails closed and does
+  not install the artifact.
+- `TRUSTED_FINGERPRINT` pins the embedded release signing key. The default is
+  the fingerprint of the signing subkey of the checked-in release key
+  (`packaging/nginx-markdown-for-agents-release.asc`). Operators maintaining a
+  replacement installer must update the embedded key and verify its
+  independently authenticated fingerprint before changing this value.
+- `DOWNLOAD_URL_OVERRIDE` (operator-supplied URL) always requires
+  `DOWNLOAD_SHA256`.
   The operator-supplied digest is the independent trust anchor for that path.
   The installer performs no manifest download or GPG verification.
 - The installer has no checksumless bypass. If an independently authenticated
@@ -177,8 +186,9 @@ brew install cnkang/nginx-markdown/nginx-markdown-module
 
 Notes:
 - If you publish and maintain your own tap, replace `cnkang/nginx-markdown` with your tap name.
-- The formula ties to GitHub release tag artifacts (`refs/tags/<tag>.tar.gz`).
-- Generate SHA-256 from the downloadable GitHub tag artifact, not local `git archive`.
+- The formula ties to the immutable full-commit archive produced by the release
+  workflow, not the movable tag archive.
+- Generate SHA-256 from that published full-commit artifact, not local `git archive`.
 - Tap publish and macOS post-release verification automation have documentation in [`docs/guides/HOMEBREW_TAP_RELEASE.md`](./HOMEBREW_TAP_RELEASE.md).
 
 If you need deterministic control over compiler flags or local patching, use [Manual Source Build](#6-secondary-manual-source-build).
@@ -187,9 +197,9 @@ If you need deterministic control over compiler flags or local patching, use [Ma
 
 ## 4.2 Linux Package Artifacts
 
-**Tier: Secondary** (v0.7.0+)
+**Tier: Secondary** (release gate)
 
-Starting with v0.7.0, release workflows can build DEB and RPM artifacts for
+Release workflows can build DEB and RPM artifacts for
 supported Linux distributions. Public GitHub Release asset availability is
 tag-specific: confirm that the target release contains the exact package,
 `SHA256SUMS`, and `SHA256SUMS.asc` before running these commands. `SHA256SUMS`
@@ -211,9 +221,9 @@ VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=amd64
 
-curl -fsSLo SHA256SUMS "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
-curl -fsSLo SHA256SUMS.asc "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
-curl -fsSLo "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb" "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
+curl -fsSL -o SHA256SUMS "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fsSL -o SHA256SUMS.asc "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
+curl -fsSL -o "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb" "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 # Import the release signing key through an independently authenticated channel before GPG verification.
 # Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
 # Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
@@ -239,9 +249,9 @@ VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 
-curl -fsSLo SHA256SUMS "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
-curl -fsSLo SHA256SUMS.asc "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
-curl -fsSLo "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm" "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
+curl -fsSL -o SHA256SUMS "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fsSL -o SHA256SUMS.asc "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
+curl -fsSL -o "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm" "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 # Import the release signing key through an independently authenticated channel before GPG verification.
 # Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
 # Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
@@ -793,8 +803,8 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 |-------|---------|-----|------|------|------|
 | 1.31.4 | mainline | debian12 | glibc | arm64 | supported |
 | 1.31.4 | mainline | debian12 | glibc | amd64 | supported |
-| 1.31.4 | mainline | alpine3.20 | musl | arm64 | supported |
-| 1.31.4 | mainline | alpine3.20 | musl | amd64 | supported |
+| 1.31.4 | mainline | alpine3.24 | musl | arm64 | supported |
+| 1.31.4 | mainline | alpine3.24 | musl | amd64 | supported |
 | 1.26.3 | stable | debian12 | glibc | arm64 | supported |
 | 1.26.3 | stable | debian12 | glibc | amd64 | supported |
 | 1.26.3 | stable | alpine3.20 | musl | arm64 | supported |
@@ -1031,7 +1041,7 @@ dlopen() "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so" failed
 **Root Cause:**
 The `load_module` directive is missing from `nginx.conf`, or the path to the `.so` file is incorrect. This can happen when the install script's auto-wiring was incomplete or the module file moved after installation.
 
-**Resolution Steps:**
+**Resolution:**
 
 > If your NGINX uses a custom `--conf-path` or `--modules-path`, replace the default paths below with the values from `nginx -V`.
 
@@ -1103,7 +1113,7 @@ module ".../ngx_http_markdown_filter_module.so" version 1024000 instead of 10280
 This means your current NGINX binary ABI changed, but an old module binary is
 still enabled in config.
 
-**Resolution Steps:**
+**Resolution:**
 
 1. Check your exact NGINX version:
    ```bash
@@ -1147,7 +1157,7 @@ ERROR: Architecture "s390x" is not supported. Supported: x86_64, aarch64
 **Root Cause:**
 Pre-built binaries are only available for `x86_64` and `aarch64` architectures. Other architectures (for example `s390x`, `ppc64le`, `armv7l`) are not in the release matrix.
 
-**Resolution Steps:**
+**Resolution:**
 
 1. Confirm your architecture:
    ```bash
@@ -1174,7 +1184,7 @@ or the install script reports a libc detection mismatch.
 **Root Cause:**
 The user installed a glibc-linked binary on a musl-based system (for example Alpine Linux), or the reverse. The two C standard library implementations are not ABI-compatible.
 
-**Resolution Steps:**
+**Resolution:**
 
 > If your NGINX uses a custom `--conf-path` or `--modules-path`, replace the default paths below with the values from `nginx -V`.
 
@@ -1235,7 +1245,7 @@ curl: (6) Could not resolve host: github.com
 **Root Cause:**
 The system cannot reach GitHub to download the pre-built binary or checksum file. This is typically caused by network restrictions, proxy configuration, DNS resolution failures, or air-gapped environments.
 
-**Resolution Steps:**
+**Resolution:**
 
 1. Test connectivity to GitHub:
    ```bash
@@ -1250,7 +1260,10 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    ```bash
    nslookup github.com
    ```
-4. If the system is air-gapped, manually download the binary and checksum on a connected machine.
+4. If the system is air-gapped, manually download the binary, signed
+   manifest, signature, and release public key on a connected machine. Confirm
+   the key's fingerprint through an independently authenticated channel before
+   importing it. The release asset itself is not the trust anchor.
    Use manual download only for air-gapped or troubleshooting scenarios. Prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Set these values from a GitHub Release that lists both assets.
@@ -1260,7 +1273,16 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    ARCH="<arch>"
    BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
    wget "${BASE_URL}/ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz"
-   wget "${BASE_URL}/ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz.sha256"
+   wget "${BASE_URL}/SHA256SUMS"
+   wget "${BASE_URL}/SHA256SUMS.asc"
+   wget "${BASE_URL}/nginx-markdown-for-agents-release.asc"
+   TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75
+   gpg --import nginx-markdown-for-agents-release.asc
+   VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+   [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1
+   grep -E "  ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}\.tar\.gz$" SHA256SUMS \
+     | sha256sum -c -
    ```
 5. Transfer the files to the target system and install manually, or use the [Manual Source Build](#6-secondary-manual-source-build) instructions.
 
@@ -1286,25 +1308,14 @@ The release does not provide a usable signed `SHA256SUMS` manifest/signature, or
 **Root Cause:**
 The SHA-256 hash of the downloaded binary does not match the expected checksum from the release. Possible causes: a corrupted download, an incomplete transfer, a network intermediary modifying the file, or a tampered artifact.
 
-**Resolution Steps:**
+**Resolution:**
 
 1. Remove the cached download and repeat the authenticated release-bound
    sequence in [Shortest Success Path](#2-shortest-success-path).
-2. If the failure persists, manually verify the checksum.
-   Use manual download only for troubleshooting. Prefer the [install script](#4-primary-install-script) for normal installations.
-   ```bash
-   # Set these values from a GitHub Release that lists both assets.
-   RELEASE_TAG="<published-release-tag>"
-   NGINX_VERSION="<nginx-version>"
-   OS_TYPE="<os-type>"
-   ARCH="<arch>"
-   BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
-   wget "${BASE_URL}/ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz"
-   wget "${BASE_URL}/ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz.sha256"
-
-   # Verify
-   sha256sum -c "ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz.sha256"
-   ```
+2. If the failure persists, do not substitute a standalone checksum file or
+   bypass the signed manifest. Repeat the authenticated release-bound sequence
+   from [Shortest Success Path](#2-shortest-success-path), and report the
+   release-gate failure if verification of the signed manifest still fails.
 3. If the checksum still fails, try downloading from a different network or machine to rule out a network intermediary.
 4. If the issue persists, report it on the project's GitHub issue tracker. The release artifact may need to be re-published.
 5. Do not bypass verification for a published release. If the release lacks an
@@ -1333,7 +1344,7 @@ The eligibility requirements are:
    working and replay budget. It does not change the response-body eligibility
    limit.
 
-**Resolution Steps:**
+**Resolution:**
 
 1. Confirm that the module loads and `markdown_filter on` activates:
    ```bash
@@ -1371,7 +1382,7 @@ The upstream response for those pages does not meet the eligibility criteria. Co
 - **Status code is not 200** — the upstream returns a redirect (301, 302), a client error (403, 404), or a server error (500, 502). Only `200 OK` responses are eligible.
 - **Content-Type is not `text/html`** — the upstream returns `application/json`, `text/plain`, `application/xml`, or another non-HTML content type.
 
-**Resolution Steps:**
+**Resolution:**
 
 1. Check the upstream response headers for the affected page:
    ```bash
@@ -1395,7 +1406,7 @@ The module fails to convert responses that the upstream compressed. The error lo
 **Root Cause:**
 The upstream server sends a compressed response (gzip, brotli, or deflate). The module supports automatic gzip, Brotli, and deflate decompression. Conversion failures can happen when the module's built-in decompression is not enabled or not handling the encoding correctly. It can also happen when NGINX's own compression interacts with the module's pipeline.
 
-**Resolution Steps:**
+**Resolution:**
 
 1. Check if the upstream is sending compressed responses:
    ```bash

@@ -7,8 +7,8 @@
 //! 3. 500 Internal Server Error — no conversion, passthrough
 //! 4. 502 Bad Gateway — no conversion, passthrough
 //! 5. 503 Service Unavailable — no conversion, passthrough
-//! 6. 301 Redirect — not converted, follows redirect
-//! 7. 302 Redirect — not converted, follows redirect
+//! 6. 301 Redirect — not converted, preserves redirect status and Location
+//! 7. 302 Redirect — not converted, preserves redirect status and Location
 //! 8. 410 Gone — no conversion, passthrough
 
 use crate::assertions;
@@ -64,29 +64,35 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         }
     }
 
-    // Case 6: 301 redirect handling
+    // Case 6: 301 redirect handling. The shared client deliberately does not
+    // follow redirects so the upstream status and Location header are tested.
     let url_301 = format!("{base_url}/md/301");
     if let Some(resp) = common::try_get_with_headers(
         &url_301,
         &headers,
         &mut assertions,
-        "case6_301_redirect_200",
+        "case6_301_redirect_301",
     ) {
-        let redirected_to_200 = resp.status == 200;
+        let preserved_redirect = resp.status == 301;
         assertions.push(AssertionResult {
-            name: "case6_301_redirect_200".to_string(),
-            passed: redirected_to_200,
-            expected: "200 (after following redirect)".to_string(),
+            name: "case6_301_redirect_301".to_string(),
+            passed: preserved_redirect,
+            expected: "301 (without following redirect)".to_string(),
             actual: resp.status.to_string(),
-            message: if redirected_to_200 {
+            message: if preserved_redirect {
                 None
             } else {
                 Some(format!(
-                    "[FAIL] assertion=case6_301_redirect_200 expected=200 actual={}",
+                    "[FAIL] assertion=case6_301_redirect_301 expected=301 actual={}",
                     resp.status
                 ))
             },
         });
+        assertions.push(assertions::assert_header_present(
+            "case6_301_location",
+            "Location",
+            &resp.headers,
+        ));
     }
 
     // Case 7: 302 redirect handling
@@ -95,23 +101,28 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         &url_302,
         &headers,
         &mut assertions,
-        "case7_302_redirect_200",
+        "case7_302_redirect_302",
     ) {
-        let redirected_to_200 = resp.status == 200;
+        let preserved_redirect = resp.status == 302;
         assertions.push(AssertionResult {
-            name: "case7_302_redirect_200".to_string(),
-            passed: redirected_to_200,
-            expected: "200 (after following redirect)".to_string(),
+            name: "case7_302_redirect_302".to_string(),
+            passed: preserved_redirect,
+            expected: "302 (without following redirect)".to_string(),
             actual: resp.status.to_string(),
-            message: if redirected_to_200 {
+            message: if preserved_redirect {
                 None
             } else {
                 Some(format!(
-                    "[FAIL] assertion=case7_302_redirect_200 expected=200 actual={}",
+                    "[FAIL] assertion=case7_302_redirect_302 expected=302 actual={}",
                     resp.status
                 ))
             },
         });
+        assertions.push(assertions::assert_header_present(
+            "case7_302_location",
+            "Location",
+            &resp.headers,
+        ));
     }
 
     Ok(common::finalize_report(SCENARIO, start, assertions))

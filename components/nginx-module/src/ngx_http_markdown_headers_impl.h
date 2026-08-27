@@ -7,8 +7,8 @@
 #ifndef NGX_HTTP_MARKDOWN_HEADERS_IMPL_H
 #define NGX_HTTP_MARKDOWN_HEADERS_IMPL_H
 
-#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
+#ifndef NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED
+#define NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED  -107
 #endif
 
 #ifndef NGX_HTTP_MARKDOWN_LOG_DEBUG1
@@ -25,11 +25,10 @@
 
 /*
  * Keep the standalone header harness and production translation units on
- * the same final-header authentication decision.  Production includes this
+ * the same final-header authentication decision. Production includes this
  * file after filter_module.h, which supplies the identical helper first;
- * the guard prevents a duplicate static definition there.  Standalone
- * harnesses compile with the auth policy disabled and therefore need no
- * auth-function declarations.
+ * the guard prevents a duplicate static definition there. The standalone
+ * harness supplies a test adapter for the authentication implementation.
  */
 static ngx_int_t
 ngx_http_markdown_auth_cache_control_required(
@@ -40,18 +39,12 @@ ngx_http_markdown_auth_cache_control_required(
         return NGX_ERROR;
     }
 
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     if (r == NULL) {
         return NGX_ERROR;
     }
 
     *required = (conf != NULL
                  && ngx_http_markdown_is_authenticated(r, conf));
-#else
-    (void) r;
-    (void) conf;
-    *required = 0;
-#endif
 
     return NGX_OK;
 }
@@ -594,10 +587,11 @@ ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
      * ngx_http_markdown_filter_module.h, which every production TU
      * includes before this header. */
     r->headers_out.content_type.data = ngx_http_markdown_content_type;
-    r->headers_out.content_type.len = sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
-    r->headers_out.content_type_len = sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
+    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.charset.len = NGX_HTTP_MARKDOWN_CHARSET_LEN;
+    r->headers_out.charset.data =
+        (u_char *) NGX_HTTP_MARKDOWN_CHARSET_LITERAL;
     r->headers_out.content_type_lowcase = NULL;
     r->headers_out.content_type_hash = 0;
 }
@@ -616,7 +610,7 @@ ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
  *     - X-Markdown-Tokens header allocation and value formatting
  *     - Cache-Control in-place value rewrite (auth) with allocation
  *     A bounded transaction snapshot is taken before the first operation.
- *     Helpers may use inert list slots or legacy in-place auth rewrites
+ *     Helpers may use inert list slots or in-place auth rewrites
  *     during prepare, but ANY failure restores the snapshot exactly.
  *     Rust-owned plan resources are freed and `header_plan_apply_error` is
  *     logged.
@@ -657,7 +651,7 @@ ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
  *
  * The individual header helpers have their own prepare/commit behavior, but
  * the full-buffer path combines several helpers and the authentication
- * policy still has legacy in-place rewrites.  Snapshot all existing header
+ * policy still has in-place rewrites.  Snapshot all existing header
  * entries and dedicated response fields before the first helper so any
  * prepare failure can restore the exact pre-conversion representation.
  * Newly pushed list slots are made unreachable by restoring the saved list
@@ -681,6 +675,13 @@ typedef struct {
 } ngx_http_markdown_header_snapshot_t;
 
 
+/**
+ * Captures the response-header state needed to roll back a header update.
+ *
+ * @param r Request whose response headers are captured.
+ * @param snapshot Destination for the captured header state.
+ * @returns NGX_OK on success, or NGX_ERROR if the header list exceeds the snapshot limit, allocation fails, or a nonempty part has no element storage.
+ */
 static ngx_int_t
 ngx_http_markdown_header_snapshot_prepare(
     ngx_http_request_t *r,
@@ -690,7 +691,7 @@ ngx_http_markdown_header_snapshot_prepare(
     const ngx_table_elt_t  *headers;
     ngx_uint_t        count;
 
-    memset(snapshot, 0, sizeof(*snapshot));
+    ngx_memzero(snapshot, sizeof(*snapshot));
     snapshot->headers_out = r->headers_out;
     snapshot->allow_ranges = r->allow_ranges ? 1U : 0U;
     snapshot->original_last = r->headers_out.headers.last;
@@ -743,13 +744,26 @@ ngx_http_markdown_header_snapshot_prepare(
 }
 
 
-static void
+/**
+ * Restores response headers and range settings from a saved snapshot.
+ *
+ * @param r Request whose response state is restored.
+ * @param snapshot Snapshot containing the saved response state.
+ * @return NGX_OK on success, or NGX_ERROR if the arguments or live header list are invalid.
+ */
+static ngx_int_t
 ngx_http_markdown_header_snapshot_restore(
     ngx_http_request_t *r,
     const ngx_http_markdown_header_snapshot_t *snapshot)
 {
-    if (snapshot == NULL) {
-        return;
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *headers;
+    ngx_uint_t        restored;
+
+    if (r == NULL || snapshot == NULL
+        || (snapshot->entry_count != 0 && snapshot->entries == NULL))
+    {
+        return NGX_ERROR;
     }
 
     if (snapshot->original_last != NULL) {
@@ -761,34 +775,64 @@ ngx_http_markdown_header_snapshot_restore(
     r->allow_ranges = snapshot->allow_ranges;
 
     /*
-     * Re-walk the live list after restoring its metadata.  NGINX normally
-     * appends a new part without moving existing elements, but a compatible
-     * list implementation may relocate a part while pushing.  Ordinal
-     * restoration avoids writing through snapshot-time element pointers and
-     * also leaves a truncated/malformed list fail-closed.
+     * Validate the restored list before writing any saved elements.  NGINX
+     * normally appends a new part without moving existing elements, but a
+     * compatible list implementation may relocate a part while pushing.
+     * Ordinal restoration avoids writing through snapshot-time element
+     * pointers and rejects a truncated or malformed live list.
      */
+    restored = 0;
+    for (part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
     {
-        ngx_table_elt_t  *headers;
-        ngx_uint_t        restored;
-
-        restored = 0;
-        for (ngx_list_part_t *part = &r->headers_out.headers.part;
-             part != NULL && restored < snapshot->entry_count;
-             part = part->next)
+        if (restored > snapshot->entry_count
+            || part->nelts > snapshot->entry_count - restored
+            || (part->nelts != 0 && part->elts == NULL))
         {
-            if (part->nelts > snapshot->entry_count - restored
-                || (part->nelts != 0 && part->elts == NULL))
-            {
-                return;
-            }
+            return NGX_ERROR;
+        }
 
-            headers = part->elts;
-            for (ngx_uint_t i = 0; i < part->nelts; i++) {
-                headers[i] = snapshot->entries[restored].saved;
-                restored++;
-            }
+        restored += part->nelts;
+    }
+
+    if (restored != snapshot->entry_count) {
+        return NGX_ERROR;
+    }
+
+    restored = 0;
+    for (part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            headers[i] = snapshot->entries[restored].saved;
+            restored++;
         }
     }
+
+    return NGX_OK;
+}
+
+
+/**
+ * Restores a saved response-header snapshot and reports restoration failure.
+ *
+ * @param r Request whose response headers are restored.
+ * @param snapshot Saved response-header state to restore.
+ * @return NGX_OK on success; NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED if restoration fails.
+ */
+static ngx_int_t
+ngx_http_markdown_header_snapshot_restore_status(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_header_snapshot_t *snapshot)
+{
+    if (ngx_http_markdown_header_snapshot_restore(r, snapshot) != NGX_OK) {
+        return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
+    }
+
+    return NGX_OK;
 }
 
 
@@ -1007,7 +1051,7 @@ ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
      * them on a converted response would make integrity-checking clients
      * validate the wrong bytes.  Streaming (stream_commit.c) and 304
      * (conditional.c) already strip these; this closes the full-buffer
-     * and incremental paths so the mutation contract is uniform. */
+     * path so the mutation contract is uniform. */
     static u_char  hdr_content_md5[] = "Content-MD5";
     static u_char  hdr_digest[] = "Digest";
     static u_char  hdr_content_digest[] = "Content-Digest";
@@ -1040,19 +1084,9 @@ ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
      * response never propagates source-HTML representation trailers. */
     ngx_http_markdown_clear_trailers(r);
 
-    /* C1: Content-Type dedicated field */
-    r->headers_out.content_type.data = ngx_http_markdown_content_type;
-    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
+    /* C1: Content-Type dedicated field and charset */
+    ngx_http_markdown_set_representation_content_type(r);
     r->headers_out.content_encoding = NULL;
-    /* Clear the lowercased/hash cache of the upstream media type: the
-     * header filter matches against content_type_lowcase/hash, so a
-     * stale text/html cache would let downstream matching (e.g. gzip
-     * or SSI) treat the Markdown response as HTML. */
-    r->headers_out.content_type_lowcase = NULL;
-    r->headers_out.content_type_hash = 0;
 
     /* C2: ETag — populate the pre-allocated inert slot */
     if (prep->has_etag) {
@@ -1117,6 +1151,17 @@ ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
 }
 
 
+/**
+ * Updates response headers for the Markdown representation.
+ *
+ * Restores the original headers when a preparation step fails.
+ *
+ * @param r      Request whose response headers are updated.
+ * @param result Markdown conversion result containing representation metadata.
+ * @param conf   Module configuration controlling header generation.
+ * @return NGX_OK on success, NGX_ERROR on preparation failure, or
+ *         NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED if rollback fails.
+ */
 ngx_int_t
 ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                  const struct MarkdownResult *result,
@@ -1143,14 +1188,14 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    memset(&prep, 0, sizeof(ngx_http_markdown_fullcov_prepared_t));
+    ngx_memzero(&prep, sizeof(ngx_http_markdown_fullcov_prepared_t));
 
     /* ================================================================
      * PREPARE PHASE: all fallible operations, no r->headers_out mutation
      * (except inert hash==0 pushes which are observably no-op).
      * ================================================================ */
 
-    /* P1: FFI plan (Content-Type/Encoding/Length delete-all, ETag placeholder) */
+    /* FFI plan (Content-Type/Encoding/Length delete-all, ETag placeholder). */
     markdown_header_plan_init(&plan);
     markdown_build_header_plan(
         ngx_http_markdown_content_type,
@@ -1165,53 +1210,81 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "FFI plan prepare aborted");
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore_status(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: header snapshot restore failed");
+            return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
+        }
         return NGX_ERROR;
     }
 
-    /* P2: ETag */
+    /* ETag. */
     rc = ngx_http_markdown_fullcov_prepare_etag(r, result, conf, &prep);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "ETag prepare failed");
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore_status(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: header snapshot restore failed");
+            return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
+        }
         return NGX_ERROR;
     }
 
-    /* P3: Vary: Accept */
+    /* Vary: Accept. */
     rc = ngx_http_markdown_fullcov_prepare_vary(r, &prep);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "Vary prepare failed");
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore_status(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: header snapshot restore failed");
+            return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
+        }
         return NGX_ERROR;
     }
 
-    /* P4: X-Markdown-Tokens */
+    /* X-Markdown-Tokens. */
     rc = ngx_http_markdown_fullcov_prepare_token(r, result, conf, &prep);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "token header prepare failed");
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore_status(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: header snapshot restore failed");
+            return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
+        }
         return NGX_ERROR;
     }
 
     /* P5: Cache-Control auth modification */
     rc = ngx_http_markdown_auth_cache_control_required(
         r, conf, &auth_cache_control_required);
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     if (rc == NGX_OK && auth_cache_control_required) {
         rc = ngx_http_markdown_modify_cache_control_for_auth(r);
     }
-#endif
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "Cache-Control auth modification failed");
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore_status(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: header snapshot restore failed");
+            return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
+        }
         return NGX_ERROR;
     }
 
@@ -1231,29 +1304,14 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-/*
- * Rewrite response headers for a HEAD request so they describe the
- * Markdown representation that a GET with the same Accept header would
- * select (HTTP semantics: HEAD carries the same headers as GET, no body).
+/**
+ * Rewrites HEAD response headers to describe the negotiated Markdown representation.
  *
- * The upstream HEAD response carries no body, so no body-derived field
- * (Content-Length, ETag) can be computed.  Those fields are removed
- * rather than fabricated: a fabricated Content-Length or empty-input
- * ETag would contradict the GET representation of the same URL.  The
- * header set still describes the Markdown representation (Content-Type,
- * Vary: Accept) and strips all source-HTML representation metadata.
+ * Removes source representation metadata and body-derived fields, sets the
+ * Markdown content type, and adds `Vary: Accept`.
  *
- * Replaces the former Decision E fail-open behavior (superseded
- * 2026-08-19): the body filter previously forwarded the upstream HTML
- * headers unchanged for header-only HEAD requests, which contradicted
- * the Rust-side HTTP representation contract (scenario_07_head_fullbuffer,
- * scenario_08_head_streaming).
- *
- * r - current HTTP request
- *
- * Returns:
- *   NGX_OK    on success
- *   NGX_ERROR on allocation failure (Vary append)
+ * @param r Current HTTP request.
+ * @return NGX_OK on success; NGX_ERROR if header preparation or allocation fails.
  */
 ngx_int_t
 ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
@@ -1339,7 +1397,13 @@ ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
     /* Vary: Accept — the representation varies by Accept negotiation. */
     rc = ngx_http_markdown_add_vary_accept(r);
     if (rc != NGX_OK) {
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore_status(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: HEAD header snapshot restore failed");
+            return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
+        }
         return rc;
     }
 

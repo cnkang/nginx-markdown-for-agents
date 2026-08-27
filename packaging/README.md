@@ -19,7 +19,7 @@ packaging/
 │   ├── smoke-test-basic.sh    # Basic installation + module load test
 │   ├── smoke-test-diagnostics.sh  # Failure diagnostic output
 │   └── validate-version.sh    # Version format validation
-├── matrix.yaml                # Build matrix configuration (NGINX versions, arches, platforms)
+├── ../tools/release-matrix.json # Canonical build matrix (NGINX versions, arches, platforms)
 └── README.md                  # This file
 ```
 
@@ -36,6 +36,7 @@ The configuration uses template variables injected by the CI matrix:
 |----------|-------------|---------|
 | `PKG_VERSION` | Project version (from tag or workflow input) | `0.9.2` |
 | `NGINX_VERSION` | Target NGINX version from build matrix | `1.26.3` |
+| `RPM_NGINX_EVR` | Exact RPM dependency epoch/version/release | `1:1.26.3` |
 | `NFPM_ARCH` | Target architecture | `amd64`, `arm64` |
 
 ### Building Packages Locally
@@ -44,13 +45,31 @@ The configuration uses template variables injected by the CI matrix:
 # Set required environment variables
 export PKG_VERSION="0.9.2"
 export NGINX_VERSION="1.26.3"
+export RPM_NGINX_EVR="1:${NGINX_VERSION}"
 export NFPM_ARCH="amd64"
 
+# Render the version-bound preinstall script before nFPM copies maintainer
+# scripts into the package.  Keep the tracked template unchanged.
+NFPM_TMP="$(mktemp -d)"
+trap 'rm -rf "${NFPM_TMP}"' EXIT
+packaging/nfpm/scripts/render-nfpm-config.sh \
+  packaging/nfpm/scripts/preinstall.sh "${NFPM_TMP}/preinstall.sh" \
+  "${NGINX_VERSION}"
+sed "s|./packaging/nfpm/scripts/preinstall.sh|${NFPM_TMP}/preinstall.sh|" \
+  packaging/nfpm/nfpm.yaml > "${NFPM_TMP}/nfpm.yaml"
+
 # Generate DEB
-nfpm package --packager deb --target "dist/nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
+nfpm package --config "${NFPM_TMP}/nfpm.yaml" --packager deb \
+  --target "dist/nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
 
 # Generate RPM
-nfpm package --packager rpm --target "dist/nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.x86_64.rpm"
+case "${NFPM_ARCH}" in
+  amd64) RPM_ARCH=x86_64 ;;
+  arm64) RPM_ARCH=aarch64 ;;
+  *) echo "unsupported NFPM_ARCH: ${NFPM_ARCH}" >&2; exit 1 ;;
+esac
+nfpm package --config "${NFPM_TMP}/nfpm.yaml" --packager rpm \
+  --target "dist/nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
 ```
 
 ### Extending the Configuration
@@ -127,7 +146,7 @@ When you enable GPG signing, verify the signature on `SHA256SUMS`:
 
 ```bash
 # Import the project's public signing key (one-time)
-gpg --import nginx-markdown-for-agents-release.asc
+gpg --import packaging/nginx-markdown-for-agents-release.asc
 
 # Verify the signature
 gpg --verify SHA256SUMS.asc SHA256SUMS
@@ -141,7 +160,7 @@ printed in this repository — a repository value alone does not establish
 identity. The signing subkey fingerprint is
 `15C792438EAA762B421E60D21E8D41E7D19A8A75` (primary key
 `7A3743687FEEE0313128355038724643EA12C02A`). Confirm it with
-`gpg --show-keys nginx-markdown-for-agents-release.asc` before trusting the
+`gpg --show-keys packaging/nginx-markdown-for-agents-release.asc` before trusting the
 signature. `SHA256SUMS` detects accidental corruption during transfer and
 storage, but it is not a tamper-proof security boundary by itself — a
 malicious actor who can replace packages can also replace the checksums file.
@@ -161,12 +180,14 @@ packaging/scripts/gpg-sign-checksums.sh -f dist/SHA256SUMS
 
 ### Adding a New NGINX Version
 
-1. Edit `packaging/matrix.yaml` — append the version to `nginx_versions`
+1. Edit `tools/release-matrix.json` — add or update the canonical `entries`
+   row and its checksum when required.
 2. No workflow or nFPM config changes needed. The matrix drives everything
 
 ### Adding a New Platform
 
-1. Add an entry under `smoke_test_containers` in `matrix.yaml`
+1. Add the platform to the relevant `entries` rows in
+   `tools/release-matrix.json`
 2. Update the workflow matrix include/exclude rules if the new platform
    requires special handling (for example, a different repo URL)
 
@@ -182,6 +203,7 @@ packaging/scripts/gpg-sign-checksums.sh -f dist/SHA256SUMS
 
 ### Adding a New Architecture
 
-1. Append to `architectures` in `matrix.yaml`
-2. Add a corresponding runner entry under `build_runners`
+1. Add the architecture to the relevant `target` rows in
+   `tools/release-matrix.json`
+2. Add a corresponding workflow matrix entry when the runner differs
 3. nFPM handles the new arch via the `NFPM_ARCH` environment variable

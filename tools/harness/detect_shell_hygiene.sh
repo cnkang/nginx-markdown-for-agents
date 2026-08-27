@@ -50,7 +50,6 @@
 set -euo pipefail
 
 readonly SCAN_DIR="${1:-tools}"
-readonly SCRIPT_NAME="$(basename "$0")"
 readonly MSG_NONE_FOUND="  (none found)"
 
 errors=0
@@ -265,7 +264,7 @@ readonly WARNING_ALLOWLIST=(
 
 # Files where specific violations are known and accepted.
 # Format: "relative/path"
-# (Legacy array kept for backward compat with scanning loop)
+# The array is retained for the scanner loop; add only scoped exceptions.
 readonly RETURN_EXEMPT_FILES=(
 )
 
@@ -334,7 +333,7 @@ while IFS= read -r script_file; do
             }
             if (depth == 0) {
                 # Single-line function: check for return on this line
-                if ($0 ~ /[[:space:]]return[[:space:];]/ || $0 ~ /[[:space:]]return[[:space:]]*[0-9]/) {
+                if ($0 ~ /(^|[[:space:];])return([[:space:];]|$)/ || $0 ~ /[[:space:]]return[[:space:]]*[0-9]/) {
                     has_return = 1
                 }
                 print func_name ":" func_line ":" has_return
@@ -343,7 +342,7 @@ while IFS= read -r script_file; do
             # Multi-line function: scan until closing brace
             while (depth > 0) {
                 if ((getline) <= 0) break
-                if ($0 ~ /[[:space:]]return[[:space:];]/ || $0 ~ /[[:space:]]return[[:space:]]*[0-9]/) {
+                if ($0 ~ /(^|[[:space:];])return([[:space:];]|$)/ || $0 ~ /[[:space:]]return[[:space:]]*[0-9]/) {
                     has_return = 1
                 }
                 for (i = 1; i <= length($0); i++) {
@@ -444,7 +443,6 @@ while IFS= read -r match; do
     # Skip lines inside heredocs (embedded POSIX sh scripts use [ ] legitimately)
     # Check if this line falls between a <<'EOF' and EOF marker
     local_line="$line"
-    in_heredoc=0
     heredoc_start=$(awk -v target="$local_line" '
         /<<-?[[:space:]]*'\''?EOF'\''?/ || /<<-?[[:space:]]*'\''?SCRIPT'\''?/ {
             hd_start = NR
@@ -556,7 +554,7 @@ echo "" >&2
 # Inside `if ! cmd; then ... $? ...; fi`, bash's $? reflects the negated
 # status, so the original exit code is unobservable.  Per AGENTS.md
 # Rules 11/18 and fix 6fcf1bb9, capture with `cmd || rc=$?` instead.
-echo "--- Pattern (f): \$? inside negated conditional body ---"
+echo "--- Pattern (f): \$? inside negated conditional body ---" >&2
 
 negation_hits=0
 while IFS= read -r script_file; do
@@ -590,6 +588,82 @@ while IFS= read -r script_file; do
         errors=$((errors + 1))
         negation_hits=$((negation_hits + 1))
     done < <(awk '
+        function close_one_block() {
+            if (depth > 0) {
+                delete block_type[depth]
+                delete block_neg[depth]
+                delete block_active[depth]
+                depth--
+            }
+        }
+        function mask_shell_literals(text,    i, ch, quote, escaped,
+                                     previous, j, masked) {
+            masked = ""
+            quote = ""
+            escaped = 0
+            for (i = 1; i <= length(text); i++) {
+                ch = substr(text, i, 1)
+                if (quote != "") {
+                    if (escaped) {
+                        masked = masked " "
+                        escaped = 0
+                        continue
+                    }
+                    if (quote == "\"" && ch == "\\") {
+                        masked = masked " "
+                        escaped = 1
+                        continue
+                    }
+                    if (ch == quote) {
+                        quote = ""
+                    }
+                    masked = masked " "
+                    continue
+                }
+                if (ch == "\"" || ch == sprintf("%c", 39)) {
+                    quote = ch
+                    masked = masked " "
+                    continue
+                }
+                previous = (i > 1) ? substr(text, i - 1, 1) : ""
+                if (ch == "#" \
+                    && (i == 1 || previous ~ /[[:space:];|&()]/)) {
+                    for (j = i; j <= length(text); j++) {
+                        masked = masked " "
+                    }
+                    break
+                }
+                masked = masked ch
+            }
+            return masked
+        }
+        function close_same_line_terminators(text, token, pattern,
+                                              masked, expected_type, opener,
+                                              opener_match) {
+            expected_type = (token == "fi" ? "if" : \
+                             token == "done" ? "loop" : \
+                             token == "esac" ? "case" : "")
+            if (depth == 0 || block_type[depth] != expected_type) {
+                return
+            }
+            masked = mask_shell_literals(text)
+            opener = (token == "fi" ? "then" : \
+                      token == "done" ? "do" : \
+                      token == "esac" ? "in" : "")
+            if (opener != "") {
+                opener_match = match(masked, "(^|[;[:space:]])" opener "([;[:space:]]|$)")
+                if (opener_match) {
+                    masked = substr(masked, opener_match + RLENGTH)
+                }
+            }
+            pattern = "(^|[;[:space:]])" token "([;[:space:]]|$)"
+            while (match(masked, pattern)) {
+                if (depth > 0 && block_type[depth] == expected_type) {
+                    close_one_block()
+                }
+                masked = substr(masked, RSTART + RLENGTH)
+            }
+        }
         BEGIN { depth = 0 }
         {
             line = $0
@@ -623,11 +697,15 @@ while IFS= read -r script_file; do
             }
 
             if (is_fi || is_done || is_esac) {
-                if (depth > 0) {
-                    delete block_type[depth]
-                    delete block_neg[depth]
-                    delete block_active[depth]
-                    depth--
+                if (is_fi) {
+                    close_one_block()
+                    close_same_line_terminators(substr(trimmed, 3), "fi")
+                } else if (is_done) {
+                    close_one_block()
+                    close_same_line_terminators(substr(trimmed, 5), "done")
+                } else {
+                    close_one_block()
+                    close_same_line_terminators(substr(trimmed, 5), "esac")
                 }
                 next
             }
@@ -649,6 +727,7 @@ while IFS= read -r script_file; do
                 block_type[depth] = "if"
                 block_neg[depth] = is_negopen
                 block_active[depth] = has_then
+                close_same_line_terminators(line, "fi")
                 next
             }
             if (is_loop) {
@@ -656,6 +735,7 @@ while IFS= read -r script_file; do
                 block_type[depth] = "loop"
                 block_neg[depth] = is_negopen
                 block_active[depth] = has_do
+                close_same_line_terminators(line, "done")
                 next
             }
             if (is_case) {
@@ -663,6 +743,7 @@ while IFS= read -r script_file; do
                 block_type[depth] = "case"
                 block_neg[depth] = 0
                 block_active[depth] = 0
+                close_same_line_terminators(line, "esac")
                 next
             }
             if (has_then && depth > 0 && block_type[depth] == "if") {
@@ -671,6 +752,9 @@ while IFS= read -r script_file; do
             if (has_do && depth > 0 && block_type[depth] == "loop") {
                 block_active[depth] = 1
             }
+            close_same_line_terminators(line, "fi")
+            close_same_line_terminators(line, "done")
+            close_same_line_terminators(line, "esac")
         }
     ' "$script_file" 2>/dev/null || true)
 done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)

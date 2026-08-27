@@ -45,6 +45,10 @@ fail() {
     echo "FAIL: $1" >&2
 }
 
+skip() {
+    echo "SKIP: $1" >&2
+}
+
 usage() {
     echo "Usage: $0 [apt|yum|both]" >&2
     echo "" >&2
@@ -190,10 +194,10 @@ if [[ "$MODE" = "apt" ]] || [ "$MODE" = "both" ]; then
                 echo "$VERIFY_OUTPUT" >&2
             fi
         else
-            fail "APT Release.gpg not available (repo may not be published yet)"
+            skip "APT Release.gpg not available (repo may not be published yet)"
         fi
     else
-        fail "APT Release file not available at $APT_RELEASE_URL"
+        skip "APT Release file not available at $APT_RELEASE_URL"
         echo "Repository may not be published yet. This is expected pre-release." >&2
     fi
 
@@ -250,17 +254,22 @@ if [[ "$MODE" = "yum" ]] || [ "$MODE" = "both" ]; then
 
     # Verify RPM package signature if an .rpm file is available
     if command -v rpm >/dev/null 2>&1; then
-        RPM_FILES=$(find "${TMPDIR}" -name "*.rpm" 2>/dev/null)
-        if [[ -n "$RPM_FILES" ]]; then
-            for rpm_file in $RPM_FILES; do
-                RPM_SIG=$(rpm -K "$rpm_file" 2>&1) || true
-                if echo "$RPM_SIG" | grep -qi "pgp\|gpg.*OK"; then
+        rpm_files_found=0
+        while IFS= read -r -d '' rpm_file; do
+            rpm_files_found=1
+                RPM_SIG=""
+                RPM_RC=0
+                RPM_SIG=$(rpm -K "$rpm_file" 2>&1) || RPM_RC=$?
+                if [[ "$RPM_RC" -eq 0 ]] \
+                    && ! echo "$RPM_SIG" | grep -qi "NOT OK" \
+                    && echo "$RPM_SIG" | grep -qi "pgp\|gpg.*OK\|digests signatures OK"; then
                     pass "RPM package signature valid: $(basename "$rpm_file")"
                 else
                     fail "RPM package signature check: $(basename "$rpm_file")"
+                    echo "$RPM_SIG" >&2
                 fi
-            done
-        else
+        done < <(find "${TMPDIR}" -type f -name "*.rpm" -print0 2>/dev/null)
+        if [[ "$rpm_files_found" -eq 0 ]]; then
             pass "no local .rpm files to verify (expected in CI)"
         fi
     else

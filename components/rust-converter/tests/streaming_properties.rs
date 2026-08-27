@@ -1,7 +1,7 @@
 //! Property-based tests for the streaming conversion engine.
 //!
 //! These tests validate the core correctness properties defined in the
-//! design document for spec #13 (Rust Streaming Engine Core).
+//! design document for the Rust Streaming Engine Core sub-spec.
 
 #![cfg(feature = "streaming")]
 
@@ -1086,11 +1086,8 @@ proptest! {
         let mut conv = StreamingConverter::new(opts, MemoryBudget::default());
         conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
 
-        let streaming_url = if conv.feed_chunk(html_bytes).is_ok() {
-            conv.peek_final_url()
-        } else {
-            None // streaming fallback — skip comparison
-        };
+        prop_assume!(conv.feed_chunk(html_bytes).is_ok());
+        let streaming_url = conv.peek_final_url();
 
         // Full-buffer path
         if let Ok(dom) = parse_html(html_bytes) {

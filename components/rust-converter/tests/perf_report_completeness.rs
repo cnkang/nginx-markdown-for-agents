@@ -12,7 +12,7 @@
 //! mirror the report structure in test code — any schema drift in the
 //! production binary will be caught.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
@@ -75,8 +75,8 @@ fn repo_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest_dir
         .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.to_path_buf())
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
         .unwrap_or(manifest_dir)
 }
 
@@ -169,6 +169,11 @@ fn run_binary_for_tier(tier: &str) -> Value {
 /// ```
 #[test]
 fn report_contains_all_tiers_and_core_metrics() {
+    assert_eq!(
+        TIER_CLI_NAMES.len(),
+        EXPECTED_TIER_KEYS.len(),
+        "tier CLI names and expected keys must stay aligned"
+    );
     for (cli_name, expected_key) in TIER_CLI_NAMES.iter().zip(EXPECTED_TIER_KEYS.iter()) {
         let report = run_binary_for_tier(cli_name);
 

@@ -393,8 +393,11 @@ def _document_update_rows_are_sorted(table_lines: list[str]) -> bool:
         if len(cells) >= 3:
             rows.append((_parse_document_update_version(cells[1]), cells[2], line))
 
-    expected = [row[2] for row in sorted(rows, key=lambda row: row[:2], reverse=True)]
-    return expected == data_lines
+    retained_rows = [row[2] for row in rows]
+    expected = [
+        row[2] for row in sorted(rows, key=lambda row: row[:2], reverse=True)
+    ]
+    return expected == retained_rows
 
 
 def check_document_updates_order(files: list[Path]) -> list[str]:
@@ -432,11 +435,22 @@ def main() -> int:
     failures.extend(check_english_policy(files))
     failures.extend(check_internal_reference_policy(files))
     failures.extend(check_operator_config_examples(files))
+    changelog_path = ROOT / "CHANGELOG.md"
+    changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
+    version_match = re.search(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
+    release_notes_path = None
+    if version_match:
+        candidate_release_notes = (
+            ROOT / "docs" / "releases"
+            / f"{version_match.group(1)}-release-notes.md"
+        )
+        if candidate_release_notes.is_file():
+            release_notes_path = candidate_release_notes
     failures.extend(
         check_release_status_consistency(
-            ROOT / "CHANGELOG.md",
+            changelog_path,
             ROOT / "docs" / "project" / "PROJECT_STATUS.md",
-            ROOT / "docs" / "release" / "0.9.1-release-notes.md",
+            release_notes_path,
         )
     )
     failures.extend(check_duplicate_sync())

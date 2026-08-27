@@ -13,8 +13,8 @@
 #define AUTH_ALLOW 0
 #define AUTH_DENY 1
 #define CACHE_VALIDATION_NONE    0
-#define CACHE_VALIDATION_ETAG     1
-#define CACHE_VALIDATION_FULL    2
+#define CACHE_VALIDATION_IF_MODIFIED_SINCE 1
+#define CACHE_VALIDATION_DISABLED          2
 
 typedef struct {
     int markdown_filter;
@@ -95,10 +95,10 @@ static int valid_markdown_filter(const char *v) {
 /*
  * Validate a conditional_requests directive value.
  *
- * Returns: 1 if "full_support", "if_modified_since_only", or "disabled", 0 otherwise.
+ * Returns: 1 if "full", "ims_only", or "off", 0 otherwise.
  */
 static int valid_conditional(const char *v) {
-    return STR_EQ(v, "full_support") || STR_EQ(v, "if_modified_since_only") || STR_EQ(v, "disabled");
+    return STR_EQ(v, "full") || STR_EQ(v, "ims_only") || STR_EQ(v, "off");
 }
 
 /*
@@ -133,7 +133,7 @@ module_defaults(void)
     c.markdown_front_matter = 0;
     c.markdown_accept = 0;
     c.markdown_auth_policy = AUTH_ALLOW;
-    c.markdown_cache_validation = CACHE_VALIDATION_ETAG;
+    c.markdown_cache_validation = CACHE_VALIDATION_IF_MODIFIED_SINCE;
     c.markdown_auto_decompress = 1;
     return c;
 }
@@ -163,9 +163,9 @@ test_value_validation(void)
     TEST_ASSERT(valid_auth_policy("allow"), "auth_policy should accept allow");
     TEST_ASSERT(valid_auth_policy("deny"), "auth_policy should accept deny");
     TEST_ASSERT(!valid_auth_policy("block"), "auth_policy should reject invalid value");
-    TEST_ASSERT(valid_conditional("full_support"), "conditional should accept full_support");
-    TEST_ASSERT(valid_conditional("if_modified_since_only"), "conditional should accept if_modified_since_only");
-    TEST_ASSERT(valid_conditional("disabled"), "conditional should accept disabled");
+    TEST_ASSERT(valid_conditional("full"), "conditional should accept full");
+    TEST_ASSERT(valid_conditional("ims_only"), "conditional should accept ims_only");
+    TEST_ASSERT(valid_conditional("off"), "conditional should accept off");
     TEST_ASSERT(!valid_conditional("enabled"), "conditional should reject invalid value");
     TEST_ASSERT(valid_content_type_token("text/event-stream"), "stream type must include slash");
     TEST_ASSERT(!valid_content_type_token("texteventstream"), "stream type without slash is invalid");
@@ -188,7 +188,8 @@ test_default_values(void)
 
     TEST_ASSERT(c.markdown_filter == 0, "markdown_filter default off");
     TEST_ASSERT(c.markdown_flavor == FLAVOR_COMMONMARK, "flavor default commonmark");
-    TEST_ASSERT(c.markdown_cache_validation == CACHE_VALIDATION_ETAG, "cache_validation default etag");
+    TEST_ASSERT(c.markdown_cache_validation == CACHE_VALIDATION_IF_MODIFIED_SINCE,
+                "cache_validation default if_modified_since");
     TEST_ASSERT(c.markdown_auto_decompress == 1, "auto_decompress default on");
     TEST_PASS("Default values verified");
 }

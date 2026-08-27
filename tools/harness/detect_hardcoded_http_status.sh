@@ -87,14 +87,14 @@ for file in $error_files; do
         fi
 
         # Check for hardcoded status in return
-        if echo "$trimmed" | grep -qE 'return.*NGX_HTTP_BAD_GATEWAY'; then
-            echo "WARN: ${rel_path}:${line_num}: hardcoded NGX_HTTP_BAD_GATEWAY in return" >&2
+        if echo "$trimmed" | grep -qE 'return.*NGX_HTTP_(BAD_GATEWAY|INTERNAL_SERVER_ERROR)'; then
+            echo "WARN: ${rel_path}:${line_num}: hardcoded HTTP error status in return" >&2
             echo "  ${trimmed}" >&2
             echo "  Consider: return (ngx_int_t) conf->error_status;" >&2
             findings=$((findings + 1))
         fi
 
-    done < <(grep -nE 'return.*NGX_HTTP_BAD_GATEWAY' "$file" || true)
+    done < <(grep -nE 'return.*NGX_HTTP_(BAD_GATEWAY|INTERNAL_SERVER_ERROR)' "$file" || true)
 done
 
 if [[ $findings -gt 0 ]]; then

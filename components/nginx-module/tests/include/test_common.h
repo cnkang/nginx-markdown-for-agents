@@ -1,9 +1,9 @@
 /*
  * Common Test Utilities Header
- * 
+ *
  * This header provides common includes, macros, and utilities
  * for all test files in components/nginx-module/tests.
- * 
+ *
  * Usage:
  *   #include "test_common.h"
  *   ... rest of your test code
@@ -26,10 +26,10 @@
 
 /*
  * Macro to suppress unused parameter warnings
- * 
+ *
  * Use this in stub functions that need to match nginx API
  * signatures but don't use all parameters.
- * 
+ *
  * Example:
  *   ngx_int_t stub_function(ngx_http_request_t *r) {
  *       UNUSED(r);
@@ -40,10 +40,10 @@
 
 /*
  * Test assertion macro
- * 
+ *
  * Checks a condition and exits with error if it fails.
  * Provides file and line number information.
- * 
+ *
  * Example:
  *   TEST_ASSERT(result == NGX_OK, "Function should return NGX_OK");
  */
@@ -59,9 +59,9 @@
 
 /*
  * Test pass macro
- * 
+ *
  * Prints a success message with checkmark.
- * 
+ *
  * Example:
  *   TEST_PASS("Compression detection works correctly");
  */
@@ -70,9 +70,9 @@
 
 /*
  * Test fail macro
- * 
+ *
  * Prints a failure message and exits.
- * 
+ *
  * Example:
  *   TEST_FAIL("Unexpected return value");
  */
@@ -85,9 +85,9 @@
 
 /*
  * Test section header macro
- * 
+ *
  * Prints a formatted section header for test output.
- * 
+ *
  * Example:
  *   TEST_SECTION("Compression Detection Tests");
  */
@@ -96,9 +96,9 @@
 
 /*
  * Test subsection header macro
- * 
+ *
  * Prints a formatted subsection header.
- * 
+ *
  * Example:
  *   TEST_SUBSECTION("Testing gzip format");
  */
@@ -107,10 +107,10 @@
 
 /*
  * Verify macro (non-fatal assertion)
- * 
+ *
  * Checks a condition and prints warning if it fails,
  * but doesn't exit. Useful for optional checks.
- * 
+ *
  * Example:
  *   VERIFY(size > 0, "Size should be positive");
  */
@@ -124,9 +124,9 @@
 
 /*
  * Array size macro
- * 
+ *
  * Returns the number of elements in a static array.
- * 
+ *
  * Example:
  *   int arr[] = {1, 2, 3};
  *   size_t count = ARRAY_SIZE(arr);  (returns 3)
@@ -150,9 +150,9 @@ test_str_eq(const char *a, const char *b)
 
 /*
  * Memory comparison macro
- * 
+ *
  * Compares two memory regions and returns true if equal.
- * 
+ *
  * Example:
  *   if (MEM_EQ(buf1, buf2, size)) { ... }
  */

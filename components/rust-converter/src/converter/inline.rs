@@ -29,7 +29,7 @@
 //! [`escape_markdown_title`] applies minimal escaping for link title attributes
 //! (backslash and double-quote) to produce valid Markdown link syntax.
 
-use super::*;
+use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData};
 
 impl MarkdownConverter {
     /// Escape backslash and double-quote characters in a Markdown link title.
@@ -177,6 +177,10 @@ impl MarkdownConverter {
         let mut code_content = String::new();
         self.extract_code_content(node, &mut code_content, depth, ctx)?;
         let fence = "`".repeat(self.longest_backtick_run(&code_content) + 1);
+        if code_content.starts_with('`') || code_content.ends_with('`') {
+            code_content.insert(0, ' ');
+            code_content.push(' ');
+        }
         output.push_str(&fence);
         output.push_str(&code_content);
         output.push_str(&fence);

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Package metadata validator for v0.7.0 release gates. 由 0.7.0 引入，被 0.8.0+ 门禁复用
+Package metadata validator for the release gates.
 
-Validates that the package metadata files used by the v0.7.0 workflow exist
+Validates that the package metadata files used by the release workflows exist
 and contain required fields/paths:
 
 1. packaging/nfpm/nfpm.yaml - Required nFPM metadata and install layout paths
@@ -38,7 +38,7 @@ RPM_SPEC = (
 GITHUB_WORKFLOWS_DIR = PROJECT_ROOT / ".github" / "workflows"
 RELEASE_PACKAGES_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-packages.yml"
 RELEASE_RPM_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-rpm.yml"
-SIGN_AND_PUBLISH_WORKFLOW = GITHUB_WORKFLOWS_DIR / "sign-and-publish.yml"
+RELEASE_BINARIES_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-binaries.yml"
 CHECKSUMS_FILE = PROJECT_ROOT / "packaging" / "checksums.sha256"
 RELEASE_MATRIX = PROJECT_ROOT / "tools" / "release-matrix.json"
 INSTALLATION_DOC = PROJECT_ROOT / "docs" / "guides" / "INSTALLATION.md"
@@ -54,6 +54,12 @@ GATE3_LOCAL_PACKAGE_SMOKE = PROJECT_ROOT / "tools" / "release" / "gates" / (
 NFPM_POSTINSTALL = (
     PROJECT_ROOT / "packaging" / "nfpm" / "scripts" / NFPM_POSTINSTALL_NAME
 )
+NFPM_PREREMOVE = (
+    PROJECT_ROOT / "packaging" / "nfpm" / "scripts" / "preremove.sh"
+)
+PACKAGE_REMOVAL_GUARD_TEST = (
+    PROJECT_ROOT / "packaging" / "tests" / "test-package-removal-guard.sh"
+)
 RELEASE_DOCKERFILES = [
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc",
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl",
@@ -68,8 +74,8 @@ NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
-    'nginx (= ${NGINX_VERSION})',
-    "nginx = 1:${NGINX_VERSION}",
+    'nginx (>= ${NGINX_VERSION})',
+    "nginx = ${RPM_NGINX_EVR}",
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
     "packager: deb",
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
@@ -86,7 +92,7 @@ NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN = (
     r"\s+packager: deb"
 )
 RPM_REQUIRED_FIELDS = ["Name", "Version", "Requires"]
-RPM_REQUIRED_SECTIONS = ["%post", "%changelog"]
+RPM_REQUIRED_SECTIONS = ["%post", "%preun", "%changelog"]
 MODULE_NAME_SURFACES = [
     NFPM_CONFIG,
     RPM_SPEC,
@@ -118,7 +124,7 @@ RELEASE_ARTIFACT_SNIPPETS = {
     RELEASE_RPM_WORKFLOW: [
         "name: pkg-rpm-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.nginx_channel }}",
     ],
-    SIGN_AND_PUBLISH_WORKFLOW: ["pattern: 'pkg-*'"],
+
 }
 ARCH_RUNNER_SNIPPET = (
     "runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || "
@@ -137,21 +143,29 @@ STANDALONE_RPM_WORKFLOW_SNIPPETS = [
 STANDALONE_VERSION_FORBIDDEN_SNIPPETS = [
     './packaging/scripts/validate-version.sh "${{ inputs.version }}"',
 ]
-_VALIDATE_RELEASE_TAG_INPUT = "Validate release tag input"
-SIGN_AND_PUBLISH_SECURITY_SNIPPETS = [
-    "Checkout trusted workflow scripts",
-    "ref: ${{ github.event.repository.default_branch }}",
-    "fetch-depth: 0",
+RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS = [
+    "integrity-signing:",
+    "needs: [prepare, integrity-checksums]",
+    "environment: release-signing",
+    "name: Preflight - validate GPG secrets",
+    "GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}",
+    "GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}",
+    "GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}",
+    "name: Checkout repository",
+    "ref: ${{ github.sha }}",
     "persist-credentials: false",
-    _VALIDATE_RELEASE_TAG_INPUT,
-    'INPUT_VERSION: ${{ inputs.version }}',
-    'version="${INPUT_VERSION}"',
-    '^v[0-9]+\\.[0-9]+\\.[0-9]+$',
-    './packaging/scripts/validate-version.sh "${package_version}"',
-    'git show-ref --verify --quiet "refs/tags/${version}"',
+    "name: Download SHA256SUMS",
+    "name: binary-checksums",
+    "name: Sign SHA256SUMS",
+    "./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS",
+    "name: Upload SHA256SUMS.asc",
+    "name: binary-checksums-signature",
+    "path: artifacts/SHA256SUMS.asc",
+    "if-no-files-found: error",
 ]
-SIGN_AND_PUBLISH_FORBIDDEN_SNIPPETS = [
+RELEASE_BINARY_SIGNING_FORBIDDEN_SNIPPETS = [
     "ref: ${{ inputs.version }}",
+    "ref: ${{ github.ref }}",
 ]
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
@@ -177,6 +191,13 @@ SMOKE_RPM_INSTALL_SNIPPETS = [
     'dnf install -y "${PACKAGE_FILE}"',
     'yum install -y "${PACKAGE_FILE}"',
 ]
+SMOKE_REMOVAL_LIFECYCLE_SNIPPETS = [
+    "remove_module_package()",
+    "run_package_removal_lifecycle()",
+    '"$NGINX_BIN" -t -c "$config_path"',
+    "Package removal unexpectedly succeeded while the module was loaded",
+    "Package removal lifecycle passed",
+]
 GATE3_LOCAL_ARCH_SNIPPETS = [
     'pkg_pattern="*_${ARCH}.deb"',
     'pkg_pattern="*-1.${RPM_ARCH}.rpm"',
@@ -191,6 +212,23 @@ NFPM_POSTINSTALL_SNIPPETS = [
 ]
 NFPM_POSTINSTALL_FORBIDDEN_SNIPPETS = [
     "/usr/share/doc/nginx-module-markdown-for-agents/README.md",
+]
+NFPM_PREREMOVE_SNIPPETS = [
+    "remove|0)",
+    "upgrade|1|deconfigure|failed-upgrade|abort-upgrade|abort-remove|abort-deconfigure)",
+    "nginx_candidate=\"$(command -v nginx",
+    "-T 2>&1",
+    r"ngx_http_markdown_filter_module\\.so",
+    "Remove that directive, run 'nginx -t', then retry package removal.",
+    "No NGINX configuration was modified automatically.",
+]
+RPM_PREUN_SNIPPETS = [
+    "%preun",
+    "if [ \"$1\" -eq 0 ]; then",
+    "-T 2>&1",
+    r"ngx_http_markdown_filter_module\\.so",
+    "run 'nginx -t', and retry RPM removal.",
+    "exit 1",
 ]
 RELEASE_BUILD_GLIBC_SNIPPETS = {
     RELEASE_PACKAGES_WORKFLOW: ["container: almalinux@sha256:"],
@@ -220,17 +258,20 @@ RELEASE_RUST_BUILD_INVARIANTS = [
     "--config profile.release.lto=false",
     "target/${RUST_TARGET}/release/libnginx_markdown_converter.a",
     "markdown_streaming_new_with_code",
-    "markdown_incremental_new_with_code",
     "markdown_decompress_bounded",
 ]
 
-# These wrappers were removed by the v0.9.1 coordinated FFI reset. Match them
-# as complete identifiers so active replacements such as
-# `markdown_streaming_new_with_code` cannot satisfy or trip the wrong check.
+# These wrapper symbols are not part of the current FFI contract. Match them
+# as complete identifiers so active replacements cannot satisfy or trip the
+# wrong check.
 RETIRED_RELEASE_FFI_SYMBOLS = [
     "markdown_streaming_new",
     "markdown_streaming_free",
     "markdown_incremental_new",
+    "markdown_incremental_new_with_code",
+    "markdown_incremental_feed",
+    "markdown_incremental_finalize",
+    "markdown_incremental_free",
 ]
 
 _CHECK_CHECKSUMS_EXISTS = "checksums:exists"
@@ -238,7 +279,7 @@ _CHECK_CHECKSUMS_EXISTS = "checksums:exists"
 PACKAGE_DOC_REQUIRED_SNIPPETS = {
     INSTALLATION_DOC: [
         "## 4.2 Linux Package Artifacts",
-        "**Tier: Secondary** (v0.7.0+)",
+        "**Tier: Secondary** (release gate)",
         "The project plans APT/YUM repository publishing",
         CANONICAL_PACKAGE_NAME,
         CANONICAL_MODULE_SO,
@@ -409,9 +450,9 @@ def validate_nginx_dependency_constraints(result: ValidationResult) -> None:
     RPM requires the epoch prefix (1:) to disambiguate nginx.org package
     epochs across minor branches; a naked `nginx = %{nginx_version}`
     resolves against whatever epoch the local distro's nginx carries and
-    is therefore not a reliable exact pin.  DEB has no epoch concept and
-    `nginx (= ${NGINX_VERSION})` IS the correct exact form (asserted
-    positively via NFPM_REQUIRED_SNIPPETS).
+    is therefore not a reliable exact pin.  Debian package revisions vary by
+    distribution, so nFPM uses a target-version lower bound there while the
+    version-bound preinstall script enforces the exact NGINX version.
     """
     for path in (NFPM_CONFIG, RPM_SPEC):
         rel = path.relative_to(PROJECT_ROOT)
@@ -802,54 +843,57 @@ def validate_release_artifact_flow(result: ValidationResult) -> None:
             "smoke-runner:arch",
             "release-packages smoke tests must use arch-matched runners",
         )
-    _validate_sign_and_publish_security(result)
+    _validate_release_binary_signing_security(result)
 
 
-def _validate_sign_and_publish_security(result: ValidationResult) -> None:
-    """Ensure signing jobs do not execute caller-selected code with secrets."""
-    workflow = read_safe(SIGN_AND_PUBLISH_WORKFLOW)
+def _validate_release_binary_signing_security(result: ValidationResult) -> None:
+    """Ensure the live binary-signing job binds inputs before using secrets."""
+    workflow = read_safe(RELEASE_BINARIES_WORKFLOW)
     if not workflow:
-        result.fail("sign-publish-security:exists", "sign-and-publish.yml not found")
+        result.fail(
+            "release-signing-security:exists",
+            "release-binaries.yml is required for binary signing validation",
+        )
         return
-    _check_snippets(
-        workflow, SIGN_AND_PUBLISH_SECURITY_SNIPPETS, "sign-publish-security",
-        "sign-and-publish.yml", result,
-    )
-    for snippet in SIGN_AND_PUBLISH_FORBIDDEN_SNIPPETS:
-        sid = f"sign-publish-security:forbid:{snippet[:18]}"
-        if snippet in workflow:
-            result.fail(
-                sid,
-                f"sign-and-publish.yml must not contain {snippet}",
-            )
-        else:
-            result.pass_(
-                sid,
-                f"sign-and-publish.yml omits {snippet}",
-            )
 
-    validation_pos = workflow.find(_VALIDATE_RELEASE_TAG_INPUT)
-    secret_pos = workflow.find("- name: Import GPG private key")
-    if validation_pos != -1 and secret_pos != -1 and validation_pos < secret_pos:
+    start = workflow.find("\n  integrity-signing:")
+    end = workflow.find("\n  package-artifacts:", start)
+    if start == -1 or end == -1:
+        result.fail(
+            "release-signing-security:job",
+            "release-binaries.yml must define a bounded integrity-signing job",
+        )
+        return
+
+    job = workflow[start:end]
+    _check_snippets(
+        job,
+        RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS,
+        "release-signing-security",
+        "release-binaries.yml integrity-signing job",
+        result,
+    )
+    _check_forbidden_snippets(
+        job,
+        RELEASE_BINARY_SIGNING_FORBIDDEN_SNIPPETS,
+        "release-signing-security",
+        "release-binaries.yml integrity-signing job",
+        result,
+    )
+
+    preflight_pos = job.find("name: Preflight - validate GPG secrets")
+    checkout_pos = job.find("name: Checkout repository")
+    sign_pos = job.find("name: Sign SHA256SUMS")
+    if preflight_pos < checkout_pos < sign_pos:
         result.pass_(
-            "sign-publish-security:validation-before-secrets",
-            "release tag input validation runs before GPG secret import",
+            "release-signing-security:secret-order",
+            "GPG preflight and trusted checkout precede checksum signing",
         )
     else:
         result.fail(
-            "sign-publish-security:validation-before-secrets",
-            "release tag input validation must run before GPG secret import",
+            "release-signing-security:secret-order",
+            "GPG preflight and trusted checkout must precede checksum signing",
         )
-    _check_minimum_count(
-        workflow, "ref: ${{ github.event.repository.default_branch }}", 2,
-        "sign-publish-security:trusted-checkout-count",
-        "both signing jobs checkout trusted workflow scripts", result,
-    )
-    _check_minimum_count(
-        workflow, _VALIDATE_RELEASE_TAG_INPUT, 2,
-        "sign-publish-security:validation-count",
-        "both signing jobs validate the release tag before secrets", result,
-    )
 
 
 def _check_minimum_count(
@@ -937,6 +981,24 @@ def validate_smoke_test_rpm_install(result: ValidationResult) -> None:
     )
 
 
+def validate_smoke_test_removal_lifecycle(result: ValidationResult) -> None:
+    """Require package smoke tests to exercise real removal lifecycle guards."""
+    content = read_safe(SMOKE_TEST_BASIC)
+    if not content:
+        result.fail(
+            "smoke-removal:exists",
+            f"{SMOKE_TEST_BASIC_NAME} not found",
+        )
+        return
+    _check_snippets(
+        content,
+        SMOKE_REMOVAL_LIFECYCLE_SNIPPETS,
+        "smoke-removal",
+        SMOKE_TEST_BASIC_NAME,
+        result,
+    )
+
+
 def validate_gate3_local_arch_selection(result: ValidationResult) -> None:
     """Validate local Gate 3 smoke selects architecture-matched packages."""
     content = read_safe(GATE3_LOCAL_PACKAGE_SMOKE)
@@ -967,6 +1029,45 @@ def validate_nfpm_postinstall_lifecycle(result: ValidationResult) -> None:
             result.pass_(sid, f"{NFPM_POSTINSTALL_NAME} omits {snippet}")
 
 
+def validate_nfpm_preremove_lifecycle(result: ValidationResult) -> None:
+    """Require fail-closed removal guards for nFPM and the regression test."""
+    content = read_safe(NFPM_PREREMOVE)
+    if not content:
+        result.fail("nfpm-preremove:exists", "preremove.sh not found")
+    else:
+        _check_snippets(
+            content, NFPM_PREREMOVE_SNIPPETS, "nfpm-preremove",
+            "preremove.sh", result,
+        )
+
+    guard_test = read_safe(PACKAGE_REMOVAL_GUARD_TEST)
+    if not guard_test:
+        result.fail(
+            "nfpm-preremove:test-exists",
+            "test-package-removal-guard.sh not found",
+        )
+        return
+    _check_snippets(
+        guard_test,
+        [
+            "run_case reference remove 1",
+            "run_case reference upgrade 0",
+            "run_case clear remove 0",
+            "run_case unreadable remove 1",
+            "No NGINX configuration was modified automatically",
+        ],
+        "nfpm-preremove:test",
+        "test-package-removal-guard.sh",
+        result,
+    )
+
+    spec = read_safe(RPM_SPEC)
+    if not spec:
+        result.fail("rpm-preun:exists", "RPM spec not found")
+        return
+    _check_snippets(spec, RPM_PREUN_SNIPPETS, "rpm-preun", str(RPM_SPEC), result)
+
+
 def validate_release_build_glibc_baseline(result: ValidationResult) -> None:
     """Validate release builds use the supported RPM glibc baseline."""
     for path, snippets in RELEASE_BUILD_GLIBC_SNIPPETS.items():
@@ -986,7 +1087,7 @@ def validate_release_rust_build_invariants(result: ValidationResult) -> None:
 
     Prevents regressions if the release workflow is refactored: the workflow
     must set RUST_TARGET, cross-compile with the correct triple, and verify
-    that streaming/incremental/decompression FFI symbols are exported.
+    that current streaming/decompression FFI symbols are exported.
     """
     content = read_safe(RELEASE_PACKAGES_WORKFLOW)
     if not content:
@@ -1045,7 +1146,7 @@ def validate_package_installation_docs(result: ValidationResult) -> None:
 
 def print_report(result: ValidationResult) -> None:
     """Print a formatted validation report."""
-    print("v0.7.0 Package Metadata Validation Report")
+    print("Package Metadata Validation Report")
     print("=" * 60)
     for status, check_id, message in result.results:
         print(f"  {status:4s}  {check_id:35s}  {message}")
@@ -1067,8 +1168,10 @@ def main() -> int:
     validate_standalone_workflow_packaging(result)
     validate_smoke_test_repo_selection(result)
     validate_smoke_test_rpm_install(result)
+    validate_smoke_test_removal_lifecycle(result)
     validate_gate3_local_arch_selection(result)
     validate_nfpm_postinstall_lifecycle(result)
+    validate_nfpm_preremove_lifecycle(result)
     validate_release_build_glibc_baseline(result)
     validate_release_rust_build_invariants(result)
     validate_package_installation_docs(result)

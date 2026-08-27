@@ -22,10 +22,12 @@ AUTO_DISABLE_STALE_MODULE="${AUTO_DISABLE_STALE_MODULE:-0}"
 # NGINX_BIN overrides PATH discovery with an operator-chosen absolute path to
 # the nginx executable; the installer validates it before any invocation.
 NGINX_BIN="${NGINX_BIN:-}"
-# TRUSTED_FINGERPRINT pins the release signing key.  The default matches the
-# checked-in release signing key in packaging/nginx-markdown-for-agents-release.asc
-# (signing subkey 15C792438EAA762B421E60D21E8D41E7D19A8A75).  Operators may
-# override it with an independently authenticated fingerprint.
+# TRUSTED_FINGERPRINT pins the embedded release signing key.  The default
+# matches the checked-in release signing key in
+# packaging/nginx-markdown-for-agents-release.asc (signing subkey
+# 15C792438EAA762B421E60D21E8D41E7D19A8A75).  Operators may override it with
+# an independently authenticated fingerprint for a replacement key embedded
+# in their locally maintained installer.
 TRUSTED_FINGERPRINT="${TRUSTED_FINGERPRINT:-15C792438EAA762B421E60D21E8D41E7D19A8A75}"
 MIN_SUPPORTED_NGINX_VERSION="1.24.0"
 SOURCE_BUILD_URL="https://github.com/cnkang/nginx-markdown-for-agents/tree/main/docs/guides/INSTALLATION.md#6-secondary-manual-source-build"
@@ -109,6 +111,22 @@ OPENSSL_BIN=""
 # --- Structured error helpers ---
 
 # emit_error <category> <message>
+# _json_escape_string <dest_var> <value>
+# Writes a JSON-safe encoding of value into dest_var: backslash, double
+# quote, newline, carriage return, and tab escapes. All JSON string
+# interpolation in this script must go through this one escaping rule so
+# every field stays byte-for-byte consistent.
+_json_escape_string() {
+  local __dest_var="$1"
+  local __value="${2//\\/\\\\}"
+  __value="${__value//\"/\\\"}"
+  __value="${__value//$'\n'/\\n}"
+  __value="${__value//$'\r'/\\r}"
+  __value="${__value//$'\t'/\\t}"
+  printf -v "$__dest_var" '%s' "$__value"
+  return 0
+}
+
 # emit_error prints an error message prefixed with "[ERROR] <category>: " to stderr and records `category` and `message` in the script's JSON state variables `_json_error_category` and `_json_error_message`.
 emit_error() {
   local category="$1"
@@ -141,6 +159,13 @@ json_output() {
   local json_nginx_version="${_json_nginx_version}"
   local json_os_type="${_json_os_type}"
   local json_arch="${_json_arch}"
+  local escaped_nginx_version=""
+  local escaped_os_type=""
+  local escaped_arch=""
+
+  _json_escape_string escaped_nginx_version "$json_nginx_version"
+  _json_escape_string escaped_os_type "$json_os_type"
+  _json_escape_string escaped_arch "$json_arch"
 
   # Prefer jq for correct escaping and structure when available
   if [[ -n "$JQ_BIN" ]]; then
@@ -185,12 +210,7 @@ json_output() {
       else
         suggestions_json+=","
       fi
-      # Escape backslashes, double quotes, and control characters in suggestion text
-      local escaped="${s//\\/\\\\}"
-      escaped="${escaped//\"/\\\"}"
-      escaped="${escaped//$'\n'/\\n}"
-      escaped="${escaped//$'\r'/\\r}"
-      escaped="${escaped//$'\t'/\\t}"
+      _json_escape_string escaped "$s"
       suggestions_json+="\"${escaped}\""
     done
     suggestions_json+="]"
@@ -207,7 +227,9 @@ json_output() {
       else
         versions_json+=","
       fi
-      versions_json+="\"${v}\""
+      local escaped_version=""
+      _json_escape_string escaped_version "$v"
+      versions_json+="\"${escaped_version}\""
     done
     versions_json+="]"
   fi
@@ -215,16 +237,17 @@ json_output() {
   # Build error object or null
   local error_json="null"
   if [[ -n "$_json_error_category" ]]; then
-    local escaped_msg="${_json_error_message//\\/\\\\}"
-    escaped_msg="${escaped_msg//\"/\\\"}"
-    escaped_msg="${escaped_msg//$'\n'/\\n}"
-    escaped_msg="${escaped_msg//$'\r'/\\r}"
-    escaped_msg="${escaped_msg//$'\t'/\\t}"
-    error_json="{\"category\":\"${_json_error_category}\",\"message\":\"${escaped_msg}\"}"
+    # The category gets exactly the same escaping as the message so a
+    # category carrying backslashes or quotes cannot break the envelope.
+    local escaped_cat=""
+    local escaped_msg=""
+    _json_escape_string escaped_cat "${_json_error_category}"
+    _json_escape_string escaped_msg "${_json_error_message}"
+    error_json="{\"category\":\"${escaped_cat}\",\"message\":\"${escaped_msg}\"}"
   fi
 
-    printf '{"success":%s,"nginx_version":"%s","os_type":"%s","arch":"%s","error":%s,"available_versions":%s,"suggestions":%s}\n' \
-    "$json_success" "$json_nginx_version" "$json_os_type" "$json_arch" \
+  printf '{"success":%s,"nginx_version":"%s","os_type":"%s","arch":"%s","error":%s,"available_versions":%s,"suggestions":%s}\n' \
+    "$json_success" "$escaped_nginx_version" "$escaped_os_type" "$escaped_arch" \
     "$error_json" "$versions_json" "$suggestions_json" >&3
   return 0
 }
@@ -434,18 +457,60 @@ is_trusted_nginx_path() {
   return 1
 }
 
+# bootstrap_system_tool resolves the small set of metadata tools needed before
+# the normal executable cache is initialized. Alpine keeps coreutils applets
+# under /bin, while Debian and macOS commonly expose them under /usr/bin.
+bootstrap_system_tool() {
+  local name="$1"
+  local candidate=""
+  local -a candidates=()
+
+  case "$name" in
+    stat|uname)
+      candidates=(
+        "/usr/bin/${name}"
+        "/bin/${name}"
+        "/usr/local/bin/${name}"
+        "/usr/local/sbin/${name}"
+      )
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate" ]] && [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 # stat_owner prints the numeric owner of a file using the host's stat syntax.
+# Follow trusted system symlinks so distro-managed command aliases such as
+# /usr/bin/awk and Alpine's coreutils applets are checked by their targets.
 stat_owner() {
   local path="$1"
-  local uname_bin="${UNAME_BIN:-/usr/bin/uname}"
-  local stat_bin="${STAT_BIN:-/usr/bin/stat}"
+  local uname_bin="${UNAME_BIN:-}"
+  local stat_bin="${STAT_BIN:-}"
+
+  if [[ -z "$uname_bin" ]] || [[ ! -x "$uname_bin" ]]; then
+    uname_bin="$(bootstrap_system_tool uname)" || return 1
+  fi
+  if [[ -z "$stat_bin" ]] || [[ ! -x "$stat_bin" ]]; then
+    stat_bin="$(bootstrap_system_tool stat)" || return 1
+  fi
+
   case "$("$uname_bin" -s 2>/dev/null)" in
     Darwin)
-      "$stat_bin" -f '%u' "$path"
+      "$stat_bin" -L -f '%u' "$path"
       return $?
       ;;
     *)
-      "$stat_bin" -c '%u' "$path"
+      "$stat_bin" -L -c '%u' "$path"
       return $?
       ;;
   esac
@@ -455,15 +520,23 @@ stat_owner() {
 # syntax. A failed stat is propagated so privileged checks fail closed.
 stat_mode() {
   local path="$1"
-  local uname_bin="${UNAME_BIN:-/usr/bin/uname}"
-  local stat_bin="${STAT_BIN:-/usr/bin/stat}"
+  local uname_bin="${UNAME_BIN:-}"
+  local stat_bin="${STAT_BIN:-}"
+
+  if [[ -z "$uname_bin" ]] || [[ ! -x "$uname_bin" ]]; then
+    uname_bin="$(bootstrap_system_tool uname)" || return 1
+  fi
+  if [[ -z "$stat_bin" ]] || [[ ! -x "$stat_bin" ]]; then
+    stat_bin="$(bootstrap_system_tool stat)" || return 1
+  fi
+
   case "$("$uname_bin" -s 2>/dev/null)" in
     Darwin)
-      "$stat_bin" -f '%Lp' "$path"
+      "$stat_bin" -L -f '%Lp' "$path"
       return $?
       ;;
     *)
-      "$stat_bin" -c '%a' "$path"
+      "$stat_bin" -L -c '%a' "$path"
       return $?
       ;;
   esac
@@ -538,57 +611,14 @@ is_secure_root_path() {
   return 0
 }
 
-# is_secure_trusted_path accepts the root-owned system layout and the
-# user-owned Homebrew layout used by macOS package installations. SUDO_UID is
-# the installing user's identity when the script is invoked through sudo; a
-# direct root invocation does not receive this exception.
+# is_secure_trusted_path accepts only the root-owned system layout.  A
+# privileged installer never writes through a user-owned Homebrew tree: the
+# owner can replace a validated component between the check and the write.
 is_secure_trusted_path() {
-  local path="$1"
-  local root=""
-  local current="/"
-  local remainder=""
-  local component=""
-  local owner=""
-  local mode=""
-  local installing_uid="${SUDO_UID:-}"
-  local user_root=0
-
-  is_secure_root_path "$path" && return 0
-  [[ "$EUID" -eq 0 ]] || return 1
-  [[ "$installing_uid" =~ ^[0-9]+$ ]] || return 1
-
-  for root in \
-    /opt/homebrew /opt/homebrew/etc/nginx \
-    /usr/local/opt /usr/local/Cellar /usr/local/etc/nginx; do
-    case "$path" in
-      "$root"|"$root"/*)
-        user_root=1
-        break
-        ;;
-      *)
-        ;;
-    esac
-  done
-  [[ "$user_root" -eq 1 ]] || return 1
-
-  remainder="${path#/}"
-  while [[ -n "$remainder" ]]; do
-    component="${remainder%%/*}"
-    if [[ "$remainder" == */* ]]; then
-      remainder="${remainder#*/}"
-    else
-      remainder=""
-    fi
-    [[ -n "$component" ]] || continue
-    current="${current%/}/${component}"
-    [[ -e "$current" ]] || return 1
-    owner="$(stat_owner "$current" 2>/dev/null)" || return 1
-    [[ "$owner" == "0" || "$owner" == "$installing_uid" ]] || return 1
-    mode="$(stat_mode "$current" 2>/dev/null)" || return 1
-    [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
-    (( (8#$mode & 8#22) == 0 )) || return 1
-  done
-  return 0
+  if is_secure_root_path "$1"; then
+    return 0
+  fi
+  return 1
 }
 
 # bootstrap_readlink selects a fixed system readlink before canonicalize_path
@@ -675,9 +705,10 @@ is_trusted_nginx_destination_path() {
 }
 
 # validate_privileged_destination validates an existing or not-yet-created
-# path before any installer write.  For a new path, the nearest existing
-# ancestor is checked; all existing components must be root-owned and not
-# group/other writable, and no path component may be a symlink.
+# path before any installer write. For an existing file, its parent is checked;
+# for a new path, the nearest existing ancestor is checked. All existing
+# components must be root-owned and not group/other writable, and no path
+# component may be a symlink.
 validate_privileged_destination() {
   local path="$1"
   local label="$2"
@@ -698,11 +729,17 @@ validate_privileged_destination() {
   fi
 
   existing="$path"
-  while [[ ! -e "$existing" ]]; do
+  if [[ -e "$existing" ]] && [[ ! -d "$existing" ]]; then
     parent="$("$DIRNAME_BIN" "$existing")" || return 1
     [[ "$parent" != "$existing" ]] || return 1
     existing="$parent"
-  done
+  else
+    while [[ ! -e "$existing" ]]; do
+      parent="$("$DIRNAME_BIN" "$existing")" || return 1
+      [[ "$parent" != "$existing" ]] || return 1
+      existing="$parent"
+    done
+  fi
   [[ -d "$existing" ]] || die_with_error "$CATEGORY_CONFIG" \
     "Refusing to write ${label}: existing parent is not a directory: ${existing}" \
     "$MSG_CHECK_PERMS_DISK"
@@ -728,10 +765,12 @@ validate_privileged_destination() {
 }
 
 # resolve_trusted_executable resolves a command name using only the fixed
-# system PATH.  It prints a canonical absolute path and never executes the
-# candidate.  Root callers additionally require root-owned, non-writable path
-# components; non-root development runs still get the same allowlist and
-# canonical-target checks without requiring system ownership.
+# system PATH. It validates both the literal path and its canonical target but
+# returns the literal path for invocation so multi-call binaries retain their
+# applet name (for example, Alpine's /usr/bin/cat -> /bin/coreutils link).
+# Root callers additionally require root-owned, non-writable path components;
+# non-root development runs still get the same allowlist and canonical-target
+# checks without requiring system ownership.
 resolve_trusted_executable() {
   local name="$1"
   local candidate=""
@@ -757,7 +796,7 @@ resolve_trusted_executable() {
     is_secure_trusted_path "$resolved" || return 1
   fi
 
-  printf '%s\n' "$resolved"
+  printf '%s\n' "$candidate"
   return 0
 }
 
@@ -837,9 +876,9 @@ cache_trusted_executables() {
 #
 # When NGINX_BIN is set it must be an absolute path to an executable file whose
 # literal location and resolved target are under the trusted roots.  Otherwise
-# PATH discovery is used with the same checks.  When running as root, system
-# paths must be root-owned and non-writable by group/other; trusted Homebrew
-# paths may be owned by the installing user.
+# PATH discovery is used with the same checks.  When running as root, all
+# executable and destination path components must be root-owned and
+# non-writable by group/other.
 #
 # Returns:
 #   0 on success with NGINX_BIN set; exits with a structured error otherwise.
@@ -973,6 +1012,89 @@ verify_release_signature() {
 
   echo "[+] Release signature verified (fingerprint ${expected_upper})"
   return 0
+}
+
+# write_embedded_release_key writes the release public key that is trusted by
+# this installer. Keeping the key in the standalone script avoids making the
+# signed release depend on an unsigned key fetched from the same release. The
+# checked-in packaging key is the source of truth; release validation keeps
+# this embedded copy synchronized with it.
+write_embedded_release_key() {
+  local destination="$1"
+
+  if "$CAT_BIN" > "$destination" <<'EOF'
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+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
+U0DqXogBsapoV1N0APQG
+=siJo
+-----END PGP PUBLIC KEY BLOCK-----
+EOF
+  then
+    return 0
+  fi
+
+  return 1
 }
 
 # manifest_digest_for prints the 64-hex digest for the exact asset name listed
@@ -1587,9 +1709,6 @@ NGINX_CONF_PATH="$(resolve_path_with_prefix "$NGINX_CONF_PATH_RAW" "$NGINX_PREFI
 if [[ -z "$NGINX_CONF_PATH" ]]; then
   NGINX_CONF_PATH="/etc/nginx/nginx.conf"
 fi
-if [[ -n "$NGINX_PREFIX" ]]; then
-  validate_privileged_destination "$NGINX_PREFIX" "NGINX prefix"
-fi
 if [[ -n "$NGINX_MODULES_PATH" ]]; then
   validate_privileged_destination "$NGINX_MODULES_PATH" "NGINX modules path"
 fi
@@ -1710,6 +1829,14 @@ if [[ -z "$DOWNLOAD_URL" ]]; then
     "Or build the module from source: ${SOURCE_BUILD_URL}"
 fi
 
+if [[ -z "$DOWNLOAD_URL_OVERRIDE" && -n "$RELEASE_TAG"
+      && "$DOWNLOAD_URL" != *"/releases/download/${RELEASE_TAG}/"* ]]; then
+  die_with_error "checksum" \
+    "Asset URL does not belong to the verified release ${RELEASE_TAG}: ${DOWNLOAD_URL}." \
+    "Re-run without overrides; if the mismatch persists, report it at https://github.com/${REPO}/issues." \
+    "Build and install from source if no signed release is available."
+fi
+
 echo "[+] Downloading $DOWNLOAD_URL ..."
 if ! TMP_DIR="$("$MKTEMP_BIN" -d)"; then
   die_with_error "$CATEGORY_FILESYSTEM" \
@@ -1736,13 +1863,20 @@ fi
 #     operator-supplied digest is the independent trust anchor.
 #   - Release-API path (default): the asset digest from the release API is
 #     cross-checked against a signed SHA256SUMS manifest whose signature must
-#     verify against the pinned release signing key.  The manifest digest is
-#     authoritative; the API digest is a secondary consistency check.  Fail
-#     closed when the signature, key, manifest, or trust material is missing.
+#     verify against the pinned key embedded in this installer. The manifest
+#     digest is authoritative; the API digest is a secondary consistency
+#     check. Fail closed when the signature, key, manifest, or trust material
+#     is missing.
 if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]]; then
   if [[ -n "$DOWNLOAD_SHA256" ]]; then
-    ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"
-    if [[ "$ACTUAL_SHA256" != "$DOWNLOAD_SHA256" ]]; then
+    if ! ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"; then
+      die_with_error "checksum" \
+        "No SHA-256 hashing tool is available to verify ${ASSET_NAME}." \
+        "Install sha256sum, shasum, or openssl and retry." \
+        "Do not install the artifact without checksum verification."
+    fi
+    EXPECTED_SHA256="$(printf '%s' "$DOWNLOAD_SHA256" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
       die_with_error "checksum" \
         "Checksum verification failed for ${ASSET_NAME}. Expected: ${DOWNLOAD_SHA256}, Actual: ${ACTUAL_SHA256}." \
         "Re-download the file and try again." \
@@ -1769,7 +1903,18 @@ else
       "Use a published release tag or provide DOWNLOAD_URL_OVERRIDE together with DOWNLOAD_SHA256." \
       "Build and install from source if no signed release is available."
   fi
-  TRUSTED_KEY_URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/nginx-markdown-for-agents-release.asc"
+  # Exact requested-tag identity: when the operator named a release, the
+  # API metadata that produced every URL and digest below must describe
+  # precisely that tag. Normalize a single leading v so both spellings of
+  # the same version compare equal.
+  REQUESTED_TAG_NORM="${RELEASE_VERSION#v}"
+  RESOLVED_TAG_NORM="${RELEASE_TAG#v}"
+  if [[ "$REQUESTED_TAG_NORM" != "$RESOLVED_TAG_NORM" ]]; then
+    die_with_error "checksum" \
+      "Resolved release tag ${RELEASE_TAG} does not match the requested version ${RELEASE_VERSION}; refusing to mix metadata across releases." \
+      "Verify the requested version and retry, or pin the exact tag in the download URL." \
+      "Build and install from source if no signed release is available."
+  fi
   if ! "$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS" "$SHA256SUMS_URL"; then
     die_with_error "network" \
       "Failed to download SHA256SUMS manifest." \
@@ -1782,10 +1927,10 @@ else
       "Check your network connection and try again." \
       "See ${SOURCE_BUILD_URL}"
   fi
-  if ! "$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/release-key.asc" "$TRUSTED_KEY_URL"; then
-    die_with_error "network" \
-      "Failed to download the trusted release signing key." \
-      "Check your network connection and try again." \
+  if ! write_embedded_release_key "$TMP_DIR/release-key.asc"; then
+    die_with_error "$CATEGORY_FILESYSTEM" \
+      "Failed to materialize the embedded release signing key." \
+      "$MSG_CHECK_PERMS_TMP_DISK" \
       "See ${SOURCE_BUILD_URL}"
   fi
 
@@ -1804,7 +1949,12 @@ else
       "See ${SOURCE_BUILD_URL}"
   fi
 
-  ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"
+  if ! ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"; then
+    die_with_error "checksum" \
+      "No SHA-256 hashing tool is available to verify ${ASSET_NAME}." \
+      "Install sha256sum, shasum, or openssl and retry." \
+      "Do not install the artifact without checksum verification."
+  fi
   if [[ "$ACTUAL_SHA256" != "$MANIFEST_SHA256" ]]; then
     die_with_error "checksum" \
       "Checksum verification failed for ${ASSET_NAME} against the signed manifest. Expected: ${MANIFEST_SHA256}, Actual: ${ACTUAL_SHA256}." \

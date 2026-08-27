@@ -14,7 +14,8 @@
 #   3. PATH after first command (cat before PATH=) → VIOLATION
 #   4. Conditional PATH assignment → VIOLATION
 #   5. Correct script (PATH= without self-ref before any command) → 0 violations
-#   6. Default target set includes all 3 nfpm scripts
+#   6. Function-definition bodies are ignored by the trusted-PATH scan
+#   7. Default target set includes all 3 nfpm scripts
 #
 # EXIT CODES:
 #   0 — All fixture assertions passed
@@ -31,7 +32,16 @@ PASS_COUNT=0
 FAIL_COUNT=0
 
 pass() { local msg="$1"; PASS_COUNT=$((PASS_COUNT + 1)); printf 'PASS: %s\n' "$msg" >&2; return 0; }
-fail() { local msg="$1"; FAIL_COUNT=$((FAIL_COUNT + 1)); printf 'FAIL: %s\n' "$msg" >&2; return 0; }
+fail() {
+    local msg="$1"
+    local detail="${2:-}"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    printf 'FAIL: %s\n' "$msg" >&2
+    if [[ -n "${detail}" ]]; then
+        printf '      Detail: %s\n' "${detail}" >&2
+    fi
+    return 0
+}
 
 ##############################################################################
 # Setup
@@ -232,10 +242,48 @@ fi
 echo "" >&2
 
 ##############################################################################
-# Fixture 6: Default target set includes all 3 nfpm scripts
+# Fixture 6: Function bodies are not top-level command resolution
 ##############################################################################
 
-echo "--- Fixture 6: Default target set coverage ---" >&2
+echo "--- Fixture 6: Function-definition body isolation ---" >&2
+
+FIXTURE_6="${WORK_DIR}/fixture_function_body.sh"
+cat > "${FIXTURE_6}" <<'SCRIPT'
+#!/bin/sh
+set -e
+helper() {
+    cat /dev/null
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    return 0
+}
+function keyword_helper() {
+    cat /dev/null
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    return 0
+}
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+cat /dev/null
+exit 0
+SCRIPT
+chmod +x "${FIXTURE_6}"
+
+RC=0
+OUTPUT="$(bash "${GATE_SCRIPT}" "${FIXTURE_6}" 2>&1)" || RC=$?
+
+if [[ "${RC}" -eq 0 ]]; then
+    pass "Fixture 6: function body does not affect top-level PATH ordering"
+else
+    fail "Fixture 6: function body does not affect top-level PATH ordering" \
+        "expected exit 0, got exit ${RC}: ${OUTPUT}"
+fi
+
+echo "" >&2
+
+##############################################################################
+# Fixture 7: Default target set includes all 3 nfpm scripts
+##############################################################################
+
+echo "--- Fixture 7: Default target set coverage ---" >&2
 
 RC=0
 OUTPUT="$(cd "${REPO_ROOT}" && bash "${GATE_SCRIPT}" 2>&1)" || RC=$?
@@ -252,9 +300,9 @@ for script_name in "nfpm/scripts/preinstall.sh" "nfpm/scripts/postinstall.sh" "n
 done
 
 if [[ "${NFPM_SCRIPTS_FOUND}" -eq 3 ]]; then
-    pass "Fixture 6: default target set includes all 3 nfpm scripts"
+    pass "Fixture 7: default target set includes all 3 nfpm scripts"
 else
-    fail "Fixture 6: missing nfpm scripts in default set:${NFPM_SCRIPTS_MISSING}"
+    fail "Fixture 7: missing nfpm scripts in default set:${NFPM_SCRIPTS_MISSING}"
 fi
 
 echo "" >&2

@@ -27,7 +27,8 @@ def _load_module():
         "detect_auto_generated_naming",
         REPO_ROOT / "tools/harness/detect_auto_generated_naming.py",
     )
-    assert spec and spec.loader
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["detect_auto_generated_naming"] = mod
     spec.loader.exec_module(mod)
@@ -95,7 +96,8 @@ def test_spec_version_suffix_is_exempt(det, tmp_path):
             return report
         """,
     )
-    assert errors == [] and warnings == []
+    assert errors == []
+    assert warnings == []
 
 
 def test_adr_code_suffix_is_exempt(det, tmp_path):
@@ -106,7 +108,8 @@ def test_adr_code_suffix_is_exempt(det, tmp_path):
             return result
         """,
     )
-    assert errors == [] and warnings == []
+    assert errors == []
+    assert warnings == []
 
 
 def test_exit_code_suffix_is_exempt(det, tmp_path):
@@ -120,7 +123,8 @@ def test_exit_code_suffix_is_exempt(det, tmp_path):
             pass
         """,
     )
-    assert errors == [] and warnings == []
+    assert errors == []
+    assert warnings == []
 
 
 def test_error_code_suffix_is_exempt(det, tmp_path):
@@ -131,7 +135,8 @@ def test_error_code_suffix_is_exempt(det, tmp_path):
             pass
         """,
     )
-    assert errors == [] and warnings == []
+    assert errors == []
+    assert warnings == []
 
 
 def test_semver_suffix_is_exempt(det, tmp_path):
@@ -142,7 +147,8 @@ def test_semver_suffix_is_exempt(det, tmp_path):
             pass
         """,
     )
-    assert errors == [] and warnings == []
+    assert errors == []
+    assert warnings == []
 
 
 def test_charset_standard_suffix_is_exempt(det, tmp_path):
@@ -153,7 +159,8 @@ def test_charset_standard_suffix_is_exempt(det, tmp_path):
             pass
         """,
     )
-    assert errors == [] and warnings == []
+    assert errors == []
+    assert warnings == []
 
 
 def test_rust_example_numbering_is_exempt(det, tmp_path):
@@ -168,7 +175,8 @@ def test_rust_example_numbering_is_exempt(det, tmp_path):
         encoding="utf-8",
     )
     errors, warnings = det._scan_file(fixture, True)
-    assert errors == [] and warnings == []
+    assert errors == []
+    assert warnings == []
 
 
 def test_classify_name_helper(det):

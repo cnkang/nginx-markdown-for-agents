@@ -276,7 +276,11 @@ if [[ "$GENERATE_EVIDENCE_PACK" == true ]]; then
   log "  evidence output: $EVIDENCE_OUTPUT"
 
   if [[ -n "$PARITY_REPORT" ]]; then
-    log "  parity report: $PARITY_REPORT"
+    if [[ -f "$PARITY_REPORT" ]]; then
+      log "  parity report: $PARITY_REPORT"
+    else
+      log "[warn] parity report not found: $PARITY_REPORT; parity evidence will be unavailable"
+    fi
   fi
 
   if ! command -v python3 &>/dev/null; then

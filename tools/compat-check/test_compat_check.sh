@@ -22,7 +22,14 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 HELPER_SCRIPT="$SCRIPT_DIR/nginx-markdown-compat-check.sh"
+VERSION_FILE="${REPO_ROOT}/components/rust-converter/Cargo.toml"
+PROJECT_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${VERSION_FILE}" | head -1)"
+if [[ -z "${PROJECT_VERSION}" ]]; then
+    printf '[ERROR] unable to resolve project version from %s\n' "${VERSION_FILE}" >&2
+    exit 1
+fi
 X86_64_ARCH="x86_64"
 EXIT_CODE_DESC="exit code"
 STATUS_DESC="status"
@@ -222,7 +229,7 @@ configure arguments: --prefix=/etc/nginx --with-compat --with-http_ssl_module"
     assert_stdout_contains "ARCH=$X86_64_ARCH" "arch" || failed=1
     assert_stdout_contains "WITH_COMPAT=yes" "with-compat" || failed=1
     assert_stdout_contains "NGINX_SOURCE=nginx.org" "source" || failed=1
-    assert_stdout_contains "EXPECTED_PACKAGE=nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb" "package name" || failed=1
+    assert_stdout_contains "EXPECTED_PACKAGE=nginx-module-markdown-for-agents_${PROJECT_VERSION}_nginx-1.26.3_amd64.deb" "package name" || failed=1
 
     return $failed
 }
@@ -328,7 +335,7 @@ configure arguments: --prefix=/etc/nginx --with-compat --with-http_ssl_module"
     assert_exit_code 0 "$EXIT_CODE_DESC" || failed=1
     assert_stdout_contains "STATUS=supported" "$STATUS_DESC" || failed=1
     assert_stdout_contains "ARCH=aarch64" "arch" || failed=1
-    assert_stdout_contains "EXPECTED_PACKAGE=nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_arm64.deb" "package name" || failed=1
+    assert_stdout_contains "EXPECTED_PACKAGE=nginx-module-markdown-for-agents_${PROJECT_VERSION}_nginx-1.26.3_arm64.deb" "package name" || failed=1
 
     return $failed
 }

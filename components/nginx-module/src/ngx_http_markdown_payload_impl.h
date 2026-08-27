@@ -18,12 +18,12 @@ static ngx_int_t ngx_http_markdown_next_header_filter_with_auth(
 
 static ngx_int_t ngx_http_markdown_forward_headers(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx);
+static ngx_int_t ngx_http_markdown_forward_transformed_headers(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
 static ngx_int_t ngx_http_markdown_send_buffered_original_response(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
 static ngx_int_t ngx_http_markdown_fail_open_with_buffered_prefix(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *remaining);
-static void ngx_http_markdown_reclassify_fail_open_path(
-    ngx_http_markdown_ctx_t *ctx);
 static ngx_int_t ngx_http_markdown_handle_decompression_alloc_error(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
@@ -67,33 +67,6 @@ static const ngx_str_t *ngx_http_markdown_compression_name(
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 
-/*
- * Reclassify an incremental-path attempt as full-buffer fail-open.
- *
- * Incremental routing increments the path-hit metric before the final
- * conversion outcome is known.  If that path later fails open and serves the
- * original buffered body, operators should see the request counted with the
- * full-buffer/fail-open behavior that actually reached the client.  The
- * decrement guard avoids underflow after counter resets or partial tests.
- */
-static void
-ngx_http_markdown_reclassify_fail_open_path(ngx_http_markdown_ctx_t *ctx)
-{
-    if (ctx == NULL
-        || ctx->processing_path != NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
-    {
-        return;
-    }
-
-    if (ngx_http_markdown_metrics != NULL
-        && ngx_http_markdown_metrics->path_hits.incremental > 0)
-    {
-        NGX_HTTP_MARKDOWN_METRIC_ADD(path_hits.incremental, -1);
-    }
-    NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.fullbuffer);
-    ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
-}
-
 /* Return original HTML when conversion fails or is ineligible (fail-open). */
 static ngx_int_t
 ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
@@ -106,7 +79,6 @@ ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, debug_message);
     }
 
-    ngx_http_markdown_reclassify_fail_open_path(ctx);
     ctx->eligible = 0;
 
     rc = ngx_http_markdown_forward_headers(r, ctx);
@@ -535,7 +507,6 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: fail-open strategy - returning original HTML");
-    ngx_http_markdown_reclassify_fail_open_path(ctx);
     ctx->eligible = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
     rc = ngx_http_markdown_forward_headers(r, ctx);
@@ -886,13 +857,13 @@ ngx_http_markdown_decompression_format(
 {
     switch (type) {
     case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-        *format = 0;
+        *format = MARKDOWN_FORMAT_GZIP;
         return NGX_OK;
     case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-        *format = 1;
+        *format = MARKDOWN_FORMAT_DEFLATE;
         return NGX_OK;
     case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-        *format = 2;
+        *format = MARKDOWN_FORMAT_BROTLI;
         return NGX_OK;
     default:
         return NGX_DECLINED;
@@ -935,7 +906,7 @@ static ngx_int_t
 ngx_http_markdown_decompression_error(uint32_t ffi_rc)
 {
     /* Invalid arguments and unknown FFI categories intentionally share the
-     * legacy I/O error path; no distinct local return code exists. */
+     * I/O error path; no distinct local return code exists. */
     switch (ffi_rc) {
     case 101:
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
@@ -1006,6 +977,7 @@ static ngx_int_t
 ngx_http_markdown_wrap_decompression_output(
     ngx_http_request_t *r,
     FFIDecompResult *result,
+    size_t max_output,
     ngx_chain_t **decompressed_chain)
 {
     size_t          output_len;
@@ -1013,7 +985,16 @@ ngx_http_markdown_wrap_decompression_output(
     ngx_buf_t      *b;
     ngx_chain_t    *cl;
 
+    /*
+     * Rust has enforced the configured decompression budget before
+     * returning this successful result, so this ownership copy remains
+     * bounded by the same request limit.
+    */
     output_len = (size_t) result->output_len;
+    if (output_len > max_output) {
+        markdown_decompress_free(result);
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    }
     output_buf = ngx_alloc(output_len, r->connection->log);
     if (output_buf == NULL) {
         markdown_decompress_free(result);
@@ -1081,6 +1062,7 @@ static ngx_int_t
 ngx_http_markdown_wrap_chain_decompression_output(
     ngx_http_request_t *r,
     FFIChainDecodeResult *result,
+    size_t max_output,
     ngx_chain_t **decompressed_chain)
 {
     size_t          output_len;
@@ -1088,7 +1070,16 @@ ngx_http_markdown_wrap_chain_decompression_output(
     ngx_buf_t      *b;
     ngx_chain_t    *cl;
 
+    /*
+     * Rust has enforced the configured decompression budget before
+     * returning this successful result, so this ownership copy remains
+     * bounded by the same request limit.
+    */
     output_len = (size_t) result->output_len;
+    if (output_len > max_output) {
+        markdown_chain_decode_free(result);
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    }
     output_buf = ngx_alloc(output_len, r->connection->log);
     if (output_buf == NULL) {
         markdown_chain_decode_free(result);
@@ -1228,7 +1219,8 @@ ngx_http_markdown_decompress_via_rust(
         }
 
         return ngx_http_markdown_wrap_chain_decompression_output(
-            r, &chain_result, decompressed_chain);
+            r, &chain_result, conf->decompress.max_size,
+            decompressed_chain);
     }
 
     /*
@@ -1315,7 +1307,7 @@ ngx_http_markdown_decompress_via_rust(
     }
 
     return ngx_http_markdown_wrap_decompression_output(
-        r, &result, decompressed_chain);
+        r, &result, conf->decompress.max_size, decompressed_chain);
 #endif /* NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 }
 
@@ -1584,17 +1576,63 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
 }
 
 /*
- * Forward deferred response headers to the next filter in the chain.
+ * Representation kind for deferred header forwarding.
+ *
+ * The distinction is contractual: a converted response carries
+ * Markdown-derived validators only, so its forwarding path must never
+ * re-introduce the source HTML Last-Modified value the module preserved
+ * at header-filter entry.  Fail-open and pass-through delivery replay
+ * the upstream HTML representation, whose preserved source validators
+ * remain authoritative.
+ */
+typedef enum {
+    NGX_HTTP_MARKDOWN_FORWARD_SOURCE_REPRESENTATION = 0,
+    NGX_HTTP_MARKDOWN_FORWARD_TRANSFORMED_REPRESENTATION
+} ngx_http_markdown_forward_kind_e;
+
+static ngx_int_t ngx_http_markdown_forward_headers_for(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_forward_kind_e kind);
+
+/*
+ * Forward deferred response headers for an original-representation
+ * delivery (fail-open replay or ineligible pass-through) to the next
+ * filter in the chain.
  *
  * Header forwarding is explicit and idempotent because the module may choose
  * conversion, fail-open, decompression fallback, or streaming fallback after
- * the header filter has deferred output.  The helper restores source
- * Last-Modified metadata when needed, calls the next header filter before any
- * body bytes are sent, and marks `headers_forwarded` only after the downstream
- * filter accepts the headers.
+ * the header filter has deferred output.  For this representation kind the
+ * helper restores source Last-Modified metadata when needed, calls the next
+ * header filter before any body bytes are sent, and marks `headers_forwarded`
+ * only after the downstream filter accepts the headers.
  */
 static ngx_int_t
 ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
+{
+    return ngx_http_markdown_forward_headers_for(
+        r, ctx, NGX_HTTP_MARKDOWN_FORWARD_SOURCE_REPRESENTATION);
+}
+
+/*
+ * Forward deferred response headers for the transformed Markdown
+ * representation (full-buffer conversion commit) to the next filter.
+ *
+ * Decision G contract: the converted representation's weak validator must
+ * not describe the source HTML mtime.  ETag (Markdown-derived, strong) is
+ * the sole validator for converted responses, so this path never restores
+ * the preserved source Last-Modified metadata.
+ */
+static ngx_int_t
+ngx_http_markdown_forward_transformed_headers(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    return ngx_http_markdown_forward_headers_for(
+        r, ctx, NGX_HTTP_MARKDOWN_FORWARD_TRANSFORMED_REPRESENTATION);
+}
+
+static ngx_int_t
+ngx_http_markdown_forward_headers_for(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx, ngx_http_markdown_forward_kind_e kind)
 {
     ngx_int_t rc;
 
@@ -1602,7 +1640,21 @@ ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t
         return NGX_OK;
     }
 
-    if (ctx->lifecycle.last_modified.has_last_modified_time) {
+    /*
+     * Restore the preserved source mtime only when the delivered bytes
+     * remain the upstream HTML representation AND the outgoing validator
+     * fields still describe that representation.  A transformer that has
+     * already rewritten the outgoing fields (conversion commit, HEAD
+     * representation rewrite, 304 synthesis) invalidates them by clearing
+     * both mirrors; restoring over such rewritten state would silently
+     * reintroduce a stale validator.  This guard makes every forwarding
+     * call site safe regardless of which wrapper it uses.
+     */
+    if (kind == NGX_HTTP_MARKDOWN_FORWARD_SOURCE_REPRESENTATION
+        && ctx->lifecycle.last_modified.has_last_modified_time
+        && r->headers_out.last_modified != NULL
+        && r->headers_out.last_modified_time != (time_t) -1)
+    {
         r->headers_out.last_modified_time =
             ctx->lifecycle.last_modified.source_last_modified_time;
     }

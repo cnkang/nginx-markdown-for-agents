@@ -136,6 +136,17 @@ def test_awk_single_quoted_field_not_a_reference():
     assert "NF" not in module.extract_run_vars(run)
 
 
+def test_comments_heredocs_and_escaped_dollars_are_not_references():
+    run = (
+        "# $COMMENTED\n"
+        "printf '\\$SINGLE_QUOTED' \"\\$ESCAPED ${EXPANDED}\"\n"
+        "cat <<'PAYLOAD'\n"
+        "${HEREDOC}\n"
+        "PAYLOAD\n"
+    )
+    assert module.extract_run_vars(run) == {"EXPANDED"}
+
+
 def test_github_runner_vars_are_known():
     run = "echo ${GITHUB_WORKSPACE} ${RUNNER_TEMP} ${HOME}\n"
     assert module.extract_run_vars(run) == set()

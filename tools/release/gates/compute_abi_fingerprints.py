@@ -14,7 +14,8 @@ Formulas (documented in components/rust-converter/src/ffi/abi.rs):
   self-referential field makes the fingerprint reproducible.
 - MARKDOWN_SYMBOL_SET_HASH: SHA-256 of the sorted newline-joined names of
   every matching ``#[unsafe(no_mangle)] pub extern "C" fn`` found by
-  ``FFI_EXPORT_RE`` in the four export modules, truncated to the first 8
+  ``FFI_EXPORT_RE`` in the three export modules (``exports.rs``,
+  ``streaming.rs``, and ``dynconf/ffi.rs``), truncated to the first 8
   bytes.  The scan does not exclude cfg-gated duplicates or helpers.
 - MARKDOWN_LAYOUT_FINGERPRINT: SHA-256 of the sorted unique
   ``struct_name:size`` lines parsed from the generated NGINX FFI
@@ -83,7 +84,6 @@ def symbol_export_names() -> set[str]:
     for path in (
         EXPORTS_PATH,
         STREAMING_PATH,
-        REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "incremental.rs",
         DYNCONF_FFI_PATH,
     ):
         text = _repo_file(path).read_text(encoding="utf-8")
@@ -127,12 +127,6 @@ def layout_fingerprint() -> int:
         raise ValueError("no struct sizes parsed from layout-check header")
     payload = "\n".join(sorted(set(lines))).encode("utf-8")
     return truncate8(hashlib.sha256(payload).digest())
-
-
-def rust_struct_size(name: str) -> int | None:
-    """Legacy probe helper (unused; sizes come from the C layout header)."""
-    del name
-    return None
 
 
 def checked_in_abi_constants() -> dict[str, int]:

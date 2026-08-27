@@ -237,7 +237,8 @@ make -C components/nginx-module/tests unit-streaming_equiv_brotli_property
 5. **Corrupted Compressed Data (Error Handling)**
    - Upstream returns corrupted gzip data
    - Module detects error and applies fail-open strategy
-   - Returns the original eligible HTML response (200 OK)
+   - Returns the original upstream response, preserving its original
+     `Content-Encoding`
    - Logs error with category=conversion
 
 6. **Size Limit Enforcement**
@@ -471,7 +472,7 @@ stays identical regardless of codec (gzip, deflate, or Brotli).
 |-------|------|----------------|
 | E2E | `verify_brotli_streaming_e2e.sh` | Real Brotli streaming through the native module with a constrained slow reader; asserts complete output, a positive backpressure metric delta, and worker survival |
 | E2E | `verify_chunked_streaming_native_e2e.sh` Case 4d | Real downstream backpressure (slow reader, throttled socket) with gzip streaming — exercises the codec-agnostic pending output save/resume path, asserts exact output equivalence, terminal-once, and backpressure metrics |
-| E2E | `verify_failopen_backpressure_e2e.sh` | Fail-open passthrough under backpressure (codec-agnostic) |
+| E2E | `verify_chunked_streaming_native_e2e.sh` Cases 2/4d | Fail-open passthrough and downstream backpressure (codec-agnostic) |
 | Property | `streaming_equiv_brotli_property_test.c` | Brotli streaming produces byte-identical output to full-buffer across arbitrary random chunk splits (100+ iterations) |
 | Unit | `streaming_test.c` §14.4 | Codec-agnostic buffered flag management, deferred finalize resume |
 | Unit | `streaming_decomp_test.c` (multi-chunk) | Brotli multi-chunk feeding with 2-byte-at-a-time splits, verifying correct reassembly without data loss or duplication |

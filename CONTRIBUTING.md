@@ -47,7 +47,7 @@ Before contributing, ensure you have:
    ```bash
    # Install Rust (if not already installed)
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   
+
     # Install cbindgen
     cargo install cbindgen --version 0.29.2 --locked
    ```
@@ -113,7 +113,7 @@ git checkout -b feature/your-feature-name
    # Rust tests
    cd components/rust-converter
    cargo test --all
-   
+
    # NGINX module tests
    make -C components/nginx-module/tests unit
    ```
@@ -123,7 +123,7 @@ git checkout -b feature/your-feature-name
    # Rust formatting
    cd components/rust-converter
    cargo fmt --all
-   
+
    # Check Rust code
    cargo clippy --all-targets --all-features
    ```
@@ -376,24 +376,24 @@ All contributions must include appropriate documentation:
    ```markdown
    ## Description
    Brief description of changes
-   
+
    ## Related Issues
    Closes #123
-   
+
    ## Changes Made
    - Change 1
    - Change 2
-   
+
    ## Testing
    - [ ] Unit tests pass
    - [ ] Integration tests pass
    - [ ] Manual testing completed
-   
+
    ## Documentation
    - [ ] Code comments added
    - [ ] User documentation updated
    - [ ] API documentation updated
-   
+
    ## Checklist
    - [ ] Code follows project style guidelines
    - [ ] Tests added for new functionality

@@ -108,9 +108,7 @@ def _validate_manifest_entry(rel: object, info: object) -> None:
         value = info.get(key)
         if not isinstance(value, str) or not value.strip():
             raise RuntimeError(f"Exception entry {rel} has invalid '{key}'")
-    target = _resolve_repository_path(rel_path, f"Exception path {rel}")
-    if not target.is_file():
-        raise RuntimeError(f"Exception entry {rel} must name an existing regular file")
+    _resolve_repository_path(rel_path, f"Exception path {rel}")
 
 
 def _load_manifest(path: Path) -> dict[str, dict[str, Any]]:

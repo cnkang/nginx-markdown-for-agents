@@ -594,17 +594,32 @@ def _select_files(
         except RuntimeError as exc:
             parser.error(str(exc))
     if args.paths:
-        files: list[Path] = []
-        root = ROOT.resolve()
-        for supplied in args.paths:
-            candidate = (ROOT / supplied).resolve()
-            try:
-                candidate.relative_to(root)
-            except ValueError:
-                parser.error(f"path is outside repository root: {supplied}")
-            files.append(candidate)
-        return files, None
-    return _tracked_md_files(), None
+        return _resolve_explicit_paths(parser, args.paths), None
+    return _select_default_files()
+
+
+def _resolve_explicit_paths(
+    parser: argparse.ArgumentParser, supplied_paths: list[str]
+) -> list[Path]:
+    files: list[Path] = []
+    root = ROOT.resolve()
+    for supplied in supplied_paths:
+        candidate = (ROOT / supplied).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            parser.error(f"path is outside repository root: {supplied}")
+        files.append(candidate)
+    return files
+
+
+def _select_default_files() -> tuple[list[Path], str | None]:
+    try:
+        return _tracked_md_files(), None
+    except RuntimeError:
+        # Missing git must behave like --changed's failure path: fall back
+        # to the on-disk rglob sweep instead of aborting the default run.
+        return sorted(ROOT.glob("**/*.md")), None
 
 
 def _audit_files(

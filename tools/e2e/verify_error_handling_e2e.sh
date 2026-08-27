@@ -11,8 +11,6 @@ set -euo pipefail
 #  5) 206 Partial Content is not converted
 #  6) markdown_limits conversion_memory= boundary: under-limit response
 #     converts, over-limit response fail-opens
-#  7) Metrics endpoint is reachable
-
 NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
 PORT="${PORT:-18097}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-19097}"

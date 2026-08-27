@@ -49,6 +49,7 @@
  *
  * Returns:
  *   NGX_OK    - Safe-finish completed, response closed gracefully
+ *   NGX_AGAIN - Downstream backpressure; pending output was preserved
  *   NGX_ERROR - Cannot safe-finish; caller should abort
  */
 ngx_int_t
@@ -75,6 +76,7 @@ ngx_http_markdown_stream_postcommit_safe_finish(
  *
  * Returns:
  *   NGX_OK    - Abort completed, response terminated
+ *   NGX_AGAIN - Downstream backpressure; terminal output was preserved
  *   NGX_ERROR - Terminal chain send failed
  */
 ngx_int_t
@@ -127,7 +129,7 @@ ngx_http_markdown_stream_postcommit_log(
     ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx,
     const char *action,
-    ngx_http_markdown_reason_code_e reason);
+    ngx_uint_t reason);
 
 
 #endif /* NGX_HTTP_MARKDOWN_STREAM_POSTCOMMIT_H_INCLUDED_ */

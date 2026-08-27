@@ -23,7 +23,6 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Front matter (YAML) | ✅ | ✅ | Emitted in pre-commit phase |
 | Noise pruning | ✅ | ✅ | Applied during parsing |
 | Dynamic configuration | ✅ | ✅ | Runtime engine switching supported |
-| Shadow mode | ✅ | N/A | Runs streaming in background against full-buffer result |
 | Decompression (gzip) | ✅ | ✅ | Member-aware; streaming since 0.9.1 |
 | Decompression (deflate) | ✅ | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 fallback: full-buffer retries as raw after a zero-output format error; streaming detects once on the first two bytes and reports a format error for misclassified streams; streaming since 0.9.1 |
 | Decompression (Brotli) | ✅ | ✅ | Requires `NGX_HTTP_BROTLI`; streaming since 0.9.1 |
@@ -74,19 +73,12 @@ Markdown response.
 The `X-Markdown-Tokens` header requires knowing the full output length.
 Since streaming sends chunks incrementally, this header is not emitted.
 
-### Shadow mode
-
-Shadow mode is a validation tool: it runs the streaming engine in the background
-while serving the full-buffer result to the client. This lets operators compare
-output and metrics without affecting live traffic. It is not a delivery mode
-itself.
-
 ## Deciding Which Mode to Use
 
 Use **full-buffer** when:
 
 - You need ETag-based caching and conditional requests
-- Response sizes are moderate (within `markdown_limits conversion_memory=<size>`, the hard cumulative input-size cap shared by both buffered and streaming paths). Streaming adds `parser_memory=` for the Rust parser allocation bound
+- Response sizes are moderate (within `markdown_limits conversion_memory=<size>`, the hard cumulative input-size cap shared by both buffered and streaming paths). Both engines use `parser_memory=` for the Rust parser allocation bound. Streaming additionally uses `streaming_buffer=` for its bounded working/replay storage.
 - Downstream consumers require token estimation headers
 
 Use **streaming** when:
@@ -95,7 +87,7 @@ Use **streaming** when:
 - Time-to-first-byte matters more than conditional caching
 - You accept that post-commit errors produce truncated output
 
-Use **auto** (default since 0.8.0) to let the module choose based on response size thresholds.
+Use **auto** (default since 0.8.0) to let the module choose based on the bounded response-shape heuristic.
 
 ## Related Documentation
 

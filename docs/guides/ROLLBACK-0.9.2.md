@@ -49,7 +49,7 @@ Publication and artifact availability are separate release gates.
    hard-coding one path:
 
    ```bash
-   MODULES_DIR="$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')"
+   MODULES_DIR="${MODULES_DIR:-$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')}"
    if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
      # No modules-path in the running binary: do NOT guess a directory.
      # Set MODULES_DIR explicitly to the directory that holds the currently
@@ -62,12 +62,12 @@ Publication and artifact availability are separate release gates.
      echo "ERROR: cannot locate the NGINX modules directory" >&2
      exit 1
    fi
-   if [[ ! -f "$MODULES_DIR/ngx_http_markdown_filter_module.so.0.9.1.bak" ]]; then
-     echo "ERROR: $MODULES_DIR/ngx_http_markdown_filter_module.so.0.9.1.bak not found;" >&2
-     echo "       obtain a verified 0.9.1 release artifact before restoring" >&2
+   MODULE_091_ARTIFACT="${MODULE_091_ARTIFACT:?set this to the downloaded and verified 0.9.1 module artifact}"
+   if [[ ! -f "$MODULE_091_ARTIFACT" ]]; then
+     echo "ERROR: verified 0.9.1 module artifact not found: $MODULE_091_ARTIFACT" >&2
      exit 1
    fi
-   sudo cp "$MODULES_DIR/ngx_http_markdown_filter_module.so.0.9.1.bak" \
+   sudo cp "$MODULE_091_ARTIFACT" \
        "$MODULES_DIR/ngx_http_markdown_filter_module.so"
    ```
 
@@ -182,7 +182,7 @@ Key reversions:
 | `markdown_streaming auto` | `markdown_streaming_engine auto` |
 | `markdown_streaming force` | `markdown_streaming_engine on` |
 | `markdown_flavor commonmark` | `markdown_flavor commonmark` (unchanged) |
-| `markdown_otel on` | `markdown_otel_tracing on` (partial — some 0.9.1 OTel directives have no 0.9.0 equivalent; note that 0.9.2 removed OTel entirely, so no 0.9.2 configuration contains either form) |
+| `markdown_otel on` + `markdown_otel_endpoint <url>` | `markdown_otel_tracing on`; 0.9.0 has no endpoint directive, so move `<url>` to the 0.9.0 collector/native-OTel configuration before enabling tracing. Do not leave `markdown_otel_endpoint` in the restored NGINX configuration. |
 
 ### Step 3: Install 0.9.0 binary and validate
 
@@ -290,7 +290,7 @@ When rolling back from 0.9.2 to 0.9.1:
 | C reason code constants | Decompression series (4–11) constants unavailable in `components/nginx-module/src/ngx_http_markdown_reason.c` |
 | OTel surface | Present in 0.9.1 documentation; removed from 0.9.2, so restore the old configuration before rollback |
 | Dynconf diagnostics | `POST action=rollback` is rejected; restore the watched file atomically |
-| `stream_state` logging | `PRE_COMMIT` fallthrough returns to silent behavior |
+| Streaming terminal diagnostics | The retired standalone decision-state model is absent; rely on the current phase/terminal latch diagnostics and shared lowercase reason registry |
 | Prometheus metric families | **Differ between the versions.** 0.9.2 exposes exactly the twelve frozen v1 families (`nginx_markdown_build_info`, `nginx_markdown_conversion_attempts_total`, `nginx_markdown_conversion_deliveries_total`, `nginx_markdown_conversion_duration_seconds`, `nginx_markdown_decompression_events_total`, `nginx_markdown_dynconf_reloads_total`, `nginx_markdown_inflight_requests`, `nginx_markdown_input_bytes_total`, `nginx_markdown_output_bytes_total`, `nginx_markdown_requests_total`, `nginx_markdown_streaming_events_total`, `nginx_markdown_streaming_peak_memory_bytes`). The 0.9.1 binary re-emits the legacy surface it shipped with: per-path families (`per_path_conversions_total`, `per_path_overflow_total`, …), shadow metrics, profile/passthrough/decision families, and the debug/perf families removed in 0.9.2 (see `docs/guides/prometheus-metrics.md`). Renamed families include `conversions_total` → `conversion_attempts_total`/`conversion_deliveries_total`, `decompressions_total` → `decompression_events_total`, and `streaming_failure_total` → `streaming_events_total` labels. |
 
 After rollback, validate every dashboard and alert that consumes the

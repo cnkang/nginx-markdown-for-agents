@@ -5,6 +5,8 @@
   "seed_sources": [
     {"path": "components/rust-converter/fuzz/corpus/<target>/basic.*", "kind": "tracked-seed", "targets": "all 14 fuzz targets"},
     {"path": "tests/corpus/**/*.html", "kind": "conversion-corpus", "categories": ["simple", "complex", "malformed", "edge-cases", "encoding", "brotli", "streaming", "streaming-perf", "large"]},
+    {"path": "tests/corpus/**/*.md", "kind": "conversion-corpus", "categories": ["brotli"]},
+    {"path": "tests/corpus/**/*.br", "kind": "conversion-corpus", "categories": ["brotli"]},
     {"path": "tools/corpus/samples/**", "kind": "large-samples", "tiers": ["large-100k", "large-5m", "large-10m", "extra-large-64m"]}
   ],
   "determinism_gate": "tools/corpus/verify_determinism.sh (tracked fixtures must be byte-identical)"

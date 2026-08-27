@@ -15,12 +15,13 @@
 typedef unsigned char u_char;
 typedef intptr_t ngx_int_t;
 typedef uintptr_t ngx_uint_t;
-typedef uintptr_t ngx_flag_t;
+typedef intptr_t ngx_flag_t;
 typedef uintptr_t ngx_msec_t;
 
 #define NGX_OK 0
 #define NGX_ERROR -1
 #define NGX_LOG_DEBUG_HTTP 0
+#define NGX_LOG_CRIT 3
 #define NGX_LOG_ERR 1
 #define NGX_LOG_WARN 2
 #define NGX_INT32_LEN 11
@@ -91,14 +92,12 @@ typedef struct {
     ngx_uint_t flavor;
     ngx_flag_t token_estimate;
     ngx_flag_t front_matter;
-    ngx_flag_t on_wildcard;
     struct {
         ngx_uint_t auth_policy;
         void *auth_cookies;
         ngx_flag_t generate_etag;
         ngx_uint_t conditional_requests;
     } policy;
-    void *stream_types;
 } ngx_http_markdown_conf_t;
 
 typedef struct MarkdownResult {
@@ -164,12 +163,14 @@ extern u_char *ngx_http_markdown_sprintf_token(u_char *buf, ngx_uint_t token_cou
     (str)->len = sizeof(text) - 1; (str)->data = (u_char *) text
 
 #define ngx_memcpy memcpy
+#define ngx_memzero(dst, n) memset((dst), 0, (n))
 /* Shared content-type constant and length used by headers_impl.h */
-#define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL  "text/markdown; charset=utf-8"
+#define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL  "text/markdown"
+#define NGX_HTTP_MARKDOWN_CHARSET_LITERAL      "utf-8"
 extern u_char ngx_http_markdown_content_type[];
 #define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN \
     (sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1)
-
-#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 0
+#define NGX_HTTP_MARKDOWN_CHARSET_LEN \
+    (sizeof(NGX_HTTP_MARKDOWN_CHARSET_LITERAL) - 1)
 
 #endif

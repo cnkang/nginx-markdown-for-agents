@@ -276,9 +276,11 @@ fn encoding_chain_fixture_bytes(
             }
         }
         EncodingFault::EmptyWire => {
-            /* Empty-input contract: the wire body is empty while the
-             * declared chain stays intact — the chain decoder treats it
-             * as a legal empty payload, not truncation. */
+            /* Zero-byte wire body while the declared chain stays intact:
+             * the module rejects the missing encoded stream as truncated
+             * input (`TruncatedInput`), never as a legal empty payload;
+             * under PASS the original encoded response is preserved
+             * unchanged. */
             bytes = Vec::new();
         }
         EncodingFault::None | EncodingFault::Truncated => {}
@@ -454,25 +456,20 @@ fn scenario_response(
     plain_response(method, 404, "text/plain", "not found")
 }
 
-/// Conditional/cache-aware response for `/md/html`.
+/// Builds the cache-aware response for the `/md/html` route.
 ///
-/// ETag / If-None-Match logic:
-/// - INM `*` matches any entity (returns 304).
-/// - Strong ETag match (exact string) returns 304.
-/// - Weak ETag match (`W/"<etag>"`) returns 304.
+/// Conditional requests matching the configured ETag or containing a modification
+/// date with `2030` receive a `304 Not Modified` response with cache metadata.
+/// Other authenticated requests use private caching and vary by `Cookie`; other
+/// requests use public caching and vary by `Accept`. `HEAD` requests return the
+/// source HTML without a body.
 ///
-/// If-Modified-Since: a sentinel date containing "2030" triggers 304.
+/// # Examples
 ///
-/// 304 early return: sends headers (ETag, Vary) but no body,
-/// preserving cache metadata for downstream.
-///
-/// Auth-based cache policy:
-/// - Authenticated (Cookie contains `session_user=`): Cache-Control `private, max-age=0`, Vary `Cookie`.
-/// - Unauthenticated: Cache-Control `public, max-age=60`, Vary `Accept`.
-///
-/// Conversion happens before cache metadata is applied: the
-/// `html_or_markdown_by_accept` call produces the response body,
-/// then `into_response_with_cache` appends Cache-Control/ETag/Vary.
+/// ```ignore
+/// let response = md_html_response(state, Method::GET, headers);
+/// assert_eq!(response.status(), StatusCode::OK);
+/// ```
 fn md_html_response(
     state: Arc<FixtureState>,
     method: Method,
@@ -518,7 +515,8 @@ fn md_html_response(
      * not exist upstream, and the module would pass the already-Markdown
      * response through untouched. */
     if method == Method::HEAD {
-        return html_response(method, 200, "<h1>fixture html</h1>", true, Some(etag), vary);
+        return html_response(method, 200, "<h1>fixture html</h1>", true, Some(etag), vary)
+            .into_response_with_cache(cc, etag, vary);
     }
 
     html_or_markdown_by_accept(
@@ -880,5 +878,23 @@ mod tests {
             std::io::Read::read_to_end(&mut decoder, &mut out).unwrap();
         }
         assert!(!out.is_empty());
+    }
+
+    /// Regression: the EmptyWire contract is a zero-byte wire body with a
+    /// fully intact declared chain. The runtime treats those bytes as
+    /// truncated input (`TruncatedInput`), not as a legal empty payload,
+    /// so the fixture must emit no body bytes and must not touch tokens.
+    #[test]
+    fn empty_wire_fault_keeps_declared_chain_with_zero_wire_bytes() {
+        let source = "<html><body>empty-wire</body></html>";
+        let chain = vec![EncodingLayer::Gzip, EncodingLayer::Deflate];
+        let (bytes, tokens) =
+            encoding_chain_fixture_bytes(source, &chain, &EncodingFault::EmptyWire).unwrap();
+        assert!(
+            bytes.is_empty(),
+            "EmptyWire emits zero wire bytes: {} bytes",
+            bytes.len()
+        );
+        assert_eq!(tokens, vec!["gzip", "deflate"]);
     }
 }

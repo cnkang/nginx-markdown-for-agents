@@ -32,6 +32,7 @@ NGINX_URL="${NGINX_URL:-http://localhost:8080}"
 METRICS_PATH="${METRICS_PATH:-/nginx-markdown/metrics}"
 TEST_PATH="${TEST_PATH:-/chunked-test}"
 ACCEPT_MARKDOWN="Accept: text/markdown"
+RESPONSE_HEADERS=""
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -46,6 +47,14 @@ fail() {
     FAIL_COUNT=$((FAIL_COUNT + 1))
     echo "FAIL: $msg" >&2
 }
+
+cleanup() {
+    if [[ -n "$RESPONSE_HEADERS" && -f "$RESPONSE_HEADERS" ]]; then
+        rm -f -- "$RESPONSE_HEADERS"
+    fi
+    return 0
+}
+trap cleanup EXIT
 
 check_prerequisites() {
     if ! command -v curl >/dev/null 2>&1; then
@@ -68,23 +77,29 @@ check_prerequisites
 
 echo "Step 1: Testing chunked transfer encoding handling..." >&2
 
-RESPONSE=$(curl -sf \
+RESPONSE_HEADERS="$(mktemp)"
+CURL_EXIT=0
+curl -sS \
     -H "$ACCEPT_MARKDOWN" \
     -H "Transfer-Encoding: chunked" \
-    -D - \
-    "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || true
+    -D "$RESPONSE_HEADERS" \
+    -o /dev/null \
+    "${NGINX_URL}${TEST_PATH}" 2>/dev/null || CURL_EXIT=$?
 
-if [[ -n "$RESPONSE" ]]; then
-    pass "received response for chunked request"
+if [[ "$CURL_EXIT" -ne 0 ]]; then
+    fail "chunked request failed (curl exit $CURL_EXIT)"
+elif grep -qi '^Transfer-Encoding:[[:space:]]*chunked[[:space:]]*$' \
+    "$RESPONSE_HEADERS"; then
+    pass "received a response with Transfer-Encoding: chunked"
 else
-    fail "no response for chunked request (endpoint may not exist)"
+    fail "response did not use Transfer-Encoding: chunked"
 fi
 
 # --- Step 2: Verify response is complete (not truncated) ---
 
 echo "Step 2: Verifying response completeness..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
     -H "$ACCEPT_MARKDOWN" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
 
@@ -108,7 +123,7 @@ esac
 echo "Step 3: Testing fail-open for oversized chunked content..." >&2
 
 # Generate a large request body to trigger max-size failure
-LARGE_ACCEPT_RESPONSE=$(curl -sf -o /dev/null -w "%{http_code}" \
+LARGE_ACCEPT_RESPONSE=$(curl -sS -o /dev/null -w "%{http_code}" \
     -H "$ACCEPT_MARKDOWN" \
     "${NGINX_URL}${TEST_PATH}?size=large" 2>/dev/null) || LARGE_ACCEPT_RESPONSE="000"
 
@@ -154,7 +169,7 @@ fi
 
 echo "Step 5: Verifying no truncation on replay..." >&2
 
-CONTENT_LENGTH=$(curl -sf -o /dev/null \
+CONTENT_LENGTH=$(curl -sS -o /dev/null \
     -w "%{size_download}" \
     -H "$ACCEPT_MARKDOWN" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || CONTENT_LENGTH="0"

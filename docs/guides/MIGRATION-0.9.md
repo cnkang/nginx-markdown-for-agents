@@ -255,7 +255,10 @@ sed -i 's/reason="FAIL_/reason="failed_/g' dashboard.json
 
 # Step 3: Replace old metric names with new unified families
 sed -i 's/markdown_skipped_accept_total/markdown_skipped_total{reason="skipped_accept"}/g' dashboard.json
-sed -i 's/markdown_parse_timeouts_total/markdown_failures_total{reason="timeout"}/g' dashboard.json
+jq 'walk(if type == "string" then gsub("nginx_markdown_parse_timeouts_total"; "nginx_markdown_failures_total{reason=\\"timeout\\"}") else . end)' dashboard.json > dashboard.json.tmp
+mv dashboard.json.tmp dashboard.json
+# Parse a representative dashboard fixture after the migration.
+jq empty dashboard.json
 ```
 
 #### Alert Migration Tips
@@ -381,8 +384,8 @@ http {
     # Accept negotiation (replaces markdown_on_wildcard)
     markdown_accept wildcard;
 
-    # Streaming configuration (replaces markdown_streaming_engine in v0.9.1)
-    markdown_streaming auto;
+    # Streaming configuration (0.9.0 directive)
+    markdown_streaming_engine auto;
     markdown_stream_threshold 1m;
     markdown_stream_flush_min 4k;
 

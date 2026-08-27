@@ -17,8 +17,9 @@ Keeping both controls would freeze contradictory inheritance, diagnostics,
 dynconf, and FFI state into v1.0.
 
 The experimental `markdown_flavor mdx` and `org-mode` values were also
-registered without distinct converter behavior. Accepting them implied an
-output contract the implementation did not provide.
+registered without distinct converter behavior. The project rejected them in
+0.9.1 because accepting them implied an output contract the implementation did
+not provide.
 
 ## Decision
 
@@ -43,7 +44,7 @@ the 0.9.1-era mapping:
 | `auto` | `markdown_streaming auto` |
 | `on` | `markdown_streaming force` |
 
-There is no compatibility alias. The same v0.9.1 baseline reset removes the
+There is no compatibility alias. The same v0.9.2 baseline reset removes the
 redundant C, Rust decision, profile, dynconf, and FFI fields.
 
 `markdown_flavor` supports only `commonmark` and `gfm`. The module rejects the

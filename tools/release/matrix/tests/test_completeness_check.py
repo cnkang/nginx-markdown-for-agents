@@ -14,7 +14,7 @@ import sys
 
 # Ensure the package root is on sys.path so the test can be invoked from
 # either the repository root or from tools/release/.
-_repo_root = Path(__file__).resolve().parents[3]
+_repo_root = Path(__file__).resolve().parents[4]
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
@@ -60,11 +60,11 @@ _matrix = (
 def _expected_names(entries):
     """
     Compute the expected artifact filenames for the given matrix entries.
-    
+
     Parameters:
         entries (Iterable[dict]): An iterable of release matrix entry objects (dicts with keys like
             "nginx", "os_type", "arch", "support_tier") for which artifact names should be derived.
-    
+
     Returns:
         set: A set of expected artifact filename strings, one per entry.
     """

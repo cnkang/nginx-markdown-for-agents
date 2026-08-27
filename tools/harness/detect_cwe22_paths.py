@@ -63,6 +63,10 @@ OPEN_CALL_RE = re.compile(
     r"(?:os\.)?open\s*\(",
 )
 
+PATH_OPEN_CALL_RE = re.compile(
+    r"\.[ \t]*open[ \t]*\(",
+)
+
 # Match builtin open() or os.open() — NOT .open() method calls.
 # A .open() call (e.g. path.open(encoding=...)) has a dot before open.
 BUILTIN_OPEN_CALL_RE = re.compile(
@@ -117,7 +121,7 @@ FD_VAR_RE = re.compile(
 
 # Imports/functions that are not the builtin open()
 NON_FILE_OPEN_RE = re.compile(
-    r"urlopen|webbrowser\.open",
+    r"urlopen|webbrowser\.open|(?:urllib\.request\.)?opener\.open",
 )
 
 # Lines that are Python comments or docstrings
@@ -175,7 +179,11 @@ def _is_safe_open_context(
     if _is_safe_open_arg(first_arg, validated_vars, hardcoded_vars):
         return True
     path_open_receiver = _extract_path_open_receiver(line)
-    if path_open_receiver and path_open_receiver in hardcoded_vars:
+    if path_open_receiver and (
+        path_open_receiver in hardcoded_vars
+        or _path_root(path_open_receiver) in hardcoded_vars
+        or _path_root(path_open_receiver) in validated_vars
+    ):
         return True
     return _is_safe_open_line_context(line, lines, lineno)
 
@@ -220,16 +228,53 @@ def _extract_assignment_lhs(line: str) -> str | None:
     return None
 
 
+def _is_ascii_identifier_start(character: str) -> bool:
+    return (
+        character == "_"
+        or "A" <= character <= "Z"
+        or "a" <= character <= "z"
+    )
+
+
+def _is_ascii_identifier_character(character: str) -> bool:
+    return (
+        _is_ascii_identifier_start(character)
+        or "0" <= character <= "9"
+    )
+
+
+def _receiver_start(line: str, end: int) -> int:
+    start = end
+    while start > 0 and line[start - 1] in " \t":
+        start -= 1
+    while start > 0 and (
+        _is_ascii_identifier_character(line[start - 1])
+        or line[start - 1] == "."
+    ):
+        start -= 1
+    return start
+
+
+def _is_valid_receiver(receiver: str) -> bool:
+    if not receiver:
+        return False
+    return all(
+        segment and _is_ascii_identifier_start(segment[0])
+        and all(_is_ascii_identifier_character(c) for c in segment[1:])
+        for segment in receiver.split(".")
+    )
+
+
 def _extract_path_open_receiver(line: str) -> str | None:
-    """Extract `foo` from `foo.open(` using deterministic parsing."""
-    needle = ".open("
-    idx = line.find(needle)
-    if idx <= 0:
+    """Extract a dotted receiver from ``foo.bar.open()`` deterministically."""
+    match = PATH_OPEN_CALL_RE.search(line)
+    if not match:
         return None
-    receiver = line[:idx].strip()
-    if receiver.isidentifier():
-        return receiver
-    return None
+
+    receiver = line[_receiver_start(line, match.start()):match.start()].rstrip(
+        " \t"
+    )
+    return receiver if _is_valid_receiver(receiver) else None
 
 
 def _is_file_derived_assignment(line: str) -> bool:

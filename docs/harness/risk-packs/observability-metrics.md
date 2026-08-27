@@ -1,7 +1,7 @@
 # Observability Metrics Pack
 
-Use this as the primary pack when metrics, reason-code visibility, text/JSON or
-Prometheus output, or release-gate monitoring semantics change.
+Use this as the primary pack when metrics, reason-code visibility, Prometheus
+output, or release-gate monitoring semantics change.
 
 ## Triggers
 
@@ -20,10 +20,8 @@ Prometheus output, or release-gate monitoring semantics change.
 - metric name semantics vs actual measurement point
 - reason-code additions vs log emission and severity classification
 - release-gate docs vs validator key paths
-- per-path labels escape consistently across JSON and Prometheus outputs:
-  JSON renderers use JSON escaping and Prometheus renderers use Prometheus
-  escaping for the same logical label value, and cardinality overflow
-  routes to a documented pseudo-path rather than silently dropping paths
+- Prometheus labels use bounded allowlists and Prometheus escaping. The
+  renderer must not reintroduce path, URI, or cardinality dimensions.
 - metrics that traverse NGINX header lists or request structures inspect all
   relevant list parts before deriving trace or label values
 

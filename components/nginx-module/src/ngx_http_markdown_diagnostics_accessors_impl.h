@@ -8,7 +8,7 @@
  * (ngx_http_markdown_filter_module.c) after the module_state_impl.h
  * and dynconf_impl.h headers have been included.
  *
- * Requirement: REQ-0700-OPERABILITY-001
+ * Requirement: structured decision path logging
  */
 
 #ifndef NGX_HTTP_MARKDOWN_DIAGNOSTICS_ACCESSORS_IMPL_H
@@ -35,6 +35,8 @@ ngx_http_markdown_diagnostics_collect_metrics(
     }
 
     ngx_memzero(out, sizeof(ngx_http_markdown_diag_metrics_t));
+    out->diagnostics_recording_state =
+        ngx_http_markdown_diagnostics_recording_state();
     out->pending_output =
         ngx_http_markdown_pending_output_current();
 
@@ -685,7 +687,7 @@ ngx_http_markdown_manifest_dynamic_value(
     const ngx_http_markdown_conf_t *conf,
     const u_char **value, size_t *value_len)
 {
-    if (conf->advanced.dynconf_enabled) {
+    if (conf->advanced.dynconf_enabled == 1) {
         *value = (const u_char *) "on";
         *value_len = sizeof("on") - 1;
     } else {
@@ -778,7 +780,7 @@ ngx_http_markdown_manifest_append_runtime_fields(
     }
     if (ngx_http_markdown_manifest_field_string(
             builder, "dynconf_dry_run",
-            conf->advanced.dynconf_dry_run
+            conf->advanced.dynconf_dry_run == 1
                 ? (const u_char *) "on" : (const u_char *) "off",
             conf->advanced.dynconf_dry_run ? sizeof("on") - 1
                 : sizeof("off") - 1,

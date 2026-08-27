@@ -12,7 +12,7 @@
  *     -> downstream NGX_AGAIN -> delivery_count unchanged (pending)
  *     -> downstream NGX_ERROR -> delivery_count unchanged (failed)
  *
- * Corresponds to task B06.9.
+ * Corresponds to the fail-open delivery decision task.
  *
  * Rules: 23 (delivery != decision counters), 38 (delivery after
  * downstream OK), 8 (delivery counters after success).

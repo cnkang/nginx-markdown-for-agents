@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# verify_real_nginx_ims.sh — Validate If-Modified-Since behaviour for Markdown responses.
+# verify_real_nginx_ims.sh — Validate conditional-request behaviour for Markdown
+# representations.
 #
 # Builds a local NGINX from source with the markdown module (or reuses
-# an existing binary), starts it with conditional-request support enabled,
-# and verifies that:
-#   1. A Markdown-negotiated response returns 200 with correct Content-Type.
-#   2. A subsequent request with the returned Last-Modified value yields 304.
-#   3. A request with an older If-Modified-Since value yields 200.
+# an existing binary), starts it with cache validation enabled,
+# and verifies the representation-validator contract:
+#   1. A Markdown-negotiated response returns 200 with correct Content-Type,
+#      a Markdown-derived ETag, and NO source HTML Last-Modified header.
+#   2. If-None-Match carrying the returned Markdown ETag yields 304;
+#      an unknown ETag yields 200.
+#   3. If-Modified-Since carrying the source HTML mtime never yields 304
+#      for a converted response — conversion runs and delivers fresh 200.
+#   4. Proxied upstream responses obey the same validator contract.
+#   5. HEAD responses describe the Markdown representation only (no source
+#      Last-Modified either).
 #
 # Usage:
 #   tools/ci/verify_real_nginx_ims.sh [--keep-artifacts] [--nginx-version VER] [--port PORT]
@@ -14,10 +21,10 @@
 # Environment variables:
 #   NGINX_BIN       Optional reusable module-enabled nginx binary
 #   NGINX_VERSION   NGINX version (default: stable)
-#   PORT            Listen port (default: 18088)
+#   PORT            Listen port (default: 18088); backend origin listens on PORT+1
 #
 # Exit behaviour:
-#   0 if all IMS validation checks pass.
+#   0 if all conditional-validation checks pass.
 #   1 if any check fails or prerequisites are missing.
 set -euo pipefail
 
@@ -35,6 +42,9 @@ LOAD_MODULE_LINE=""
 NGINX_BIN_OUTPUT_FILE=""
 BUILDROOT_OUTPUT_FILE=""
 ORIG_ARGS=("$@")
+readonly ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
+readonly HTTP_CODE_FORMAT='%{http_code}'
+readonly LAST_MODIFIED_HEADER_PATTERN='^Last-Modified:'
 
 usage() {
   cat <<EOF
@@ -186,7 +196,7 @@ PY
 trap cleanup EXIT
 
 RUST_TARGET="$(markdown_detect_rust_target)"
-BUILDROOT="$(mktemp -d /tmp/nginx-ims-verify.XXXXXX)"
+BUILDROOT="$(mktemp -d "${TMPDIR:-/tmp}/nginx-ims-verify.XXXXXX")"
 RUNTIME="${BUILDROOT}/runtime"
 
 # NGINX workers may run as an unprivileged user, so the temporary build root
@@ -218,6 +228,8 @@ else
     # code paths; this must match the Rust --features streaming flag above.
     ./configure \
       --without-http_rewrite_module \
+      --with-http_gunzip_module \
+      --with-http_auth_request_module \
       --with-cc-opt="-DMARKDOWN_STREAMING_ENABLED" \
       --prefix="${RUNTIME}" \
       --add-module="${WORKSPACE_ROOT}/components/nginx-module"
@@ -246,12 +258,32 @@ http {
     sendfile      on;
     keepalive_timeout  5;
 
+    # Plain upstream origin: serves the source HTML with its own
+    # Last-Modified and no module directives, so the frontend proxy
+    # location exercises conversion of an upstream (non-static) response.
+    server {
+        listen 127.0.0.1:$((PORT + 1));
+        server_name origin.localhost;
+
+        location / {
+            root html;
+        }
+    }
+
     server {
         listen 127.0.0.1:${PORT};
         server_name localhost;
 
         location / {
             root html;
+            markdown_filter on;
+            markdown_accept wildcard;
+            markdown_cache_validation full;
+            markdown_log_verbosity info;
+        }
+
+        location /proxy/ {
+            proxy_pass http://127.0.0.1:$((PORT + 1))/;
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation full;
@@ -273,35 +305,32 @@ echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
 sleep 1
 
-echo "==> Running If-Modified-Since validation scenario"
+echo "==> Running conditional-request validation scenario"
 (
   cd "${BUILDROOT}"
 
-  rm -f resp1.headers resp1.body resp2.headers resp2.body resp3.headers resp3.body
+  rm -f resp0.headers resp1.headers resp1.body resp2.headers resp2.body \
+        resp3.headers resp3.body resp4.headers resp4.body \
+        resp5.headers resp5.body resp6.headers
 
+  # Harvest the source HTML validators from the module-free origin.
+  code0="$(curl -sS -D resp0.headers -o /dev/null \
+    "http://127.0.0.1:$((PORT + 1))/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+  [[ "${code0}" == "200" ]] || { echo "Expected source HTML 200, got ${code0}" >&2; exit 1; }
+  lm="$(awk 'BEGIN{IGNORECASE=1} /^Last-Modified:/ {sub(/^Last-Modified:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' resp0.headers)"
+  [[ -n "${lm}" ]] || { echo "Source HTML missing Last-Modified header" >&2; exit 1; }
+
+  # 1. Converted Markdown GET: fresh 200, Markdown Content-Type, Vary,
+  #    Markdown-derived ETag, and never the source HTML Last-Modified.
   code1="$(curl -sS -D resp1.headers -o resp1.body \
-    -H 'Accept: text/markdown' \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
     "http://127.0.0.1:${PORT}/index.html" \
-    -w '%{http_code}')"
+    -w "${HTTP_CODE_FORMAT}")"
 
-  lm="$(awk 'BEGIN{IGNORECASE=1} /^Last-Modified:/ {sub(/^Last-Modified:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' resp1.headers)"
-  [[ -n "${lm}" ]] || { echo "Missing Last-Modified in first response" >&2; exit 1; }
-
-  code2="$(curl -sS -D resp2.headers -o resp2.body \
-    -H 'Accept: text/markdown' \
-    -H "If-Modified-Since: ${lm}" \
-    "http://127.0.0.1:${PORT}/index.html" \
-    -w '%{http_code}')"
-
-  code3="$(curl -sS -D resp3.headers -o resp3.body \
-    -H 'Accept: text/markdown' \
-    -H 'If-Modified-Since: Wed, 01 Jan 2020 00:00:00 GMT' \
-    "http://127.0.0.1:${PORT}/index.html" \
-    -w '%{http_code}')"
-
-  [[ "${code1}" == "200" ]] || { echo "Expected first response 200, got ${code1}" >&2; exit 1; }
-  [[ "${code2}" == "304" ]] || { echo "Expected IMS match response 304, got ${code2}" >&2; exit 1; }
-  [[ "${code3}" == "200" ]] || { echo "Expected IMS older-date response 200, got ${code3}" >&2; exit 1; }
+  etag="$(awk 'BEGIN{IGNORECASE=1} /^ETag:/ {sub(/^ETag:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' resp1.headers)"
+  [[ "${code1}" == "200" ]] || { echo "Expected converted response 200, got ${code1}" >&2; exit 1; }
+  [[ -n "${etag}" ]] || { echo "Converted response missing Markdown-derived ETag" >&2; exit 1; }
 
   grep -qi '^Content-Type: text/markdown; charset=utf-8' resp1.headers || {
     echo "Converted response missing markdown Content-Type" >&2
@@ -311,16 +340,14 @@ echo "==> Running If-Modified-Since validation scenario"
     echo "Converted response missing Vary: Accept" >&2
     exit 1
   }
+  if grep -qi "${LAST_MODIFIED_HEADER_PATTERN}" resp1.headers; then
+    echo "Converted response must not carry the source HTML Last-Modified" >&2
+    exit 1
+  fi
   grep -q '^# Hello IMS$' resp1.body || {
     echo "Converted response body does not contain expected Markdown heading" >&2
     exit 1
   }
-
-  # curl creates an empty file for a 304 with -o on most platforms; accept missing or empty.
-  if [[ -f resp2.body && -s resp2.body ]]; then
-    echo "Expected empty 304 response body, but resp2.body is non-empty" >&2
-    exit 1
-  fi
 
   cl="$(awk 'BEGIN{IGNORECASE=1} /^Content-Length:/ {gsub(/\r/, ""); print $2; exit}' resp1.headers)"
   body_size="$(wc -c < resp1.body | tr -d ' ')"
@@ -329,14 +356,93 @@ echo "==> Running If-Modified-Since validation scenario"
     exit 1
   }
 
+  # 2. If-None-Match with the returned Markdown ETag validates to 304;
+  #    an unknown ETag does not.
+  code2="$(curl -sS -D resp2.headers -o resp2.body \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    -H "If-None-Match: ${etag}" \
+    "http://127.0.0.1:${PORT}/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+  code3="$(curl -sS -D resp3.headers -o resp3.body \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    -H 'If-None-Match: "unknown-etag-value"' \
+    "http://127.0.0.1:${PORT}/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+
+  [[ "${code2}" == "304" ]] || { echo "Expected matching ETag response 304, got ${code2}" >&2; exit 1; }
+  [[ "${code3}" == "200" ]] || { echo "Expected unknown ETag response 200, got ${code3}" >&2; exit 1; }
+
+  # curl creates an empty file for a 304 with -o on most platforms; accept missing or empty.
+  if [[ -f resp2.body && -s resp2.body ]]; then
+    echo "Expected empty 304 response body, but resp2.body is non-empty" >&2
+    exit 1
+  fi
+
+  # 3. The source HTML mtime must never validate a converted response:
+  #    an IMS-only request converts and delivers a fresh 200 instead of 304.
+  code4="$(curl -sS -D resp4.headers -o resp4.body \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    -H "If-Modified-Since: ${lm}" \
+    "http://127.0.0.1:${PORT}/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+  [[ "${code4}" == "200" ]] || { echo "Source HTML mtime must not yield 304, got ${code4}" >&2; exit 1; }
+  if grep -qi "${LAST_MODIFIED_HEADER_PATTERN}" resp4.headers; then
+    echo "Fresh converted response after IMS-only request carries source Last-Modified" >&2
+    exit 1
+  fi
+  grep -q '^# Hello IMS$' resp4.body || {
+    echo "IMS-only fallback body is not the converted Markdown document" >&2
+    exit 1
+  }
+
+  # 4. Proxied upstream conversion obeys the same validator contract.
+  code5="$(curl -sS -D resp5.headers -o resp5.body \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    "http://127.0.0.1:${PORT}/proxy/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+  [[ "${code5}" == "200" ]] || { echo "Expected proxied conversion 200, got ${code5}" >&2; exit 1; }
+  grep -qi '^Content-Type: text/markdown; charset=utf-8' resp5.headers || {
+    echo "Proxied converted response missing markdown Content-Type" >&2
+    exit 1
+  }
+  grep -qi '^Vary: .*Accept' resp5.headers || {
+    echo "Proxied converted response missing Vary: Accept" >&2
+    exit 1
+  }
+  if grep -qi "${LAST_MODIFIED_HEADER_PATTERN}" resp5.headers; then
+    echo "Proxied converted response carries upstream Last-Modified" >&2
+    exit 1
+  fi
+
+  # 5. HEAD describes the Markdown representation only.
+  code6="$(curl -sS -I -D resp6.headers -o /dev/null \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    "http://127.0.0.1:${PORT}/index.html" \
+    -w "${HTTP_CODE_FORMAT}" | tr -d '\n')"
+  [[ "${code6}" == "200" ]] || { echo "Expected HEAD 200, got ${code6}" >&2; exit 1; }
+  grep -qi '^Content-Type: text/markdown; charset=utf-8' resp6.headers || {
+    echo "HEAD representation missing markdown Content-Type" >&2
+    exit 1
+  }
+  grep -qi '^Vary: .*Accept' resp6.headers || {
+    echo "HEAD representation missing Vary: Accept" >&2
+    exit 1
+  }
+  if grep -qi "${LAST_MODIFIED_HEADER_PATTERN}" resp6.headers; then
+    echo "HEAD representation carries source HTML Last-Modified" >&2
+    exit 1
+  fi
+
   echo "Validation summary:"
-  echo "  code1=${code1} code2=${code2} code3=${code3}"
-  echo "  Last-Modified=${lm}"
+  echo "  plain=${code0} get=${code1} inm_match=${code2} inm_miss=${code3} ims_only=${code4} proxy=${code5} head=${code6}"
+  echo "  source Last-Modified=${lm}"
+  echo "  Markdown ETag=${etag}"
   echo "  Content-Length=${cl}"
   echo "  Body bytes=${body_size}"
 )
 
-echo "==> Real NGINX IMS validation passed"
+echo "==> Real NGINX conditional-validation passed"
+
 
 if [[ -n "${NGINX_BIN_OUTPUT_FILE}" ]]; then
   printf '%s\n' "${NGINX_EXECUTABLE}" > "${NGINX_BIN_OUTPUT_FILE}"

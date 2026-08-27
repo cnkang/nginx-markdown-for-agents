@@ -31,9 +31,39 @@ def test_valid_soak_record_passes() -> None:
     assert _run_fixture("soak-qualification-valid.json") == 0
 
 
+def test_fixture_skip_record_is_accepted_before_threshold_checks(
+    tmp_path: Path,
+) -> None:
+    """An explicitly skipped fixture does not need fabricated soak evidence."""
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    record = json.loads(
+        (FIXTURE_DIR / "soak-qualification-valid.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    record["candidate_sha"] = "f" * 40
+    record["status"] = "skip"
+    record["skip_reason"] = "module binary unavailable in fixture environment"
+
+    manifest_path = tmp_path / "manifest.json"
+    record_path = tmp_path / "record.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    assert validator.main(
+        [
+            "--mode",
+            "fixture",
+            "--manifest",
+            str(manifest_path),
+            "--record-input",
+            str(record_path),
+        ]
+    ) == 0
+
+
 def test_below_threshold_fails() -> None:
-    with pytest.raises(SystemExit, match="below-threshold"):
-        _run_fixture("soak-qualification-below-threshold.json")
+    assert _run_fixture("soak-qualification-below-threshold.json") == 1
 
 
 def test_malformed_fails() -> None:
@@ -42,13 +72,11 @@ def test_malformed_fails() -> None:
 
 
 def test_blocking_pending_fails() -> None:
-    with pytest.raises(SystemExit, match="blocking-pending"):
-        _run_fixture("soak-qualification-blocking-pending.json")
+    assert _run_fixture("soak-qualification-blocking-pending.json") == 1
 
 
 def test_stale_digest_fails() -> None:
-    with pytest.raises(SystemExit, match="stale-digest"):
-        _run_fixture("soak-qualification-stale-digest.json")
+    assert _run_fixture("soak-qualification-stale-digest.json") == 1
 
 
 def test_missing_observation_fails() -> None:
@@ -140,16 +168,22 @@ def test_rss_evidence_requires_samples_and_nonnegative_values() -> None:
     )
 
     record["rss_time_series"] = []
-    with pytest.raises(SystemExit, match="insufficient-data"):
+    with pytest.raises(
+        validator.SoakQualificationValidationError, match="insufficient-data"
+    ):
         validator.validate_soak_outcome(record, manifest)
 
     record["rss_time_series"] = [[0.0, 100], [1.0, 101], [2.0, -1]]
-    with pytest.raises(SystemExit, match="insufficient-data"):
+    with pytest.raises(
+        validator.SoakQualificationValidationError, match="insufficient-data"
+    ):
         validator.validate_soak_outcome(record, manifest)
 
     record["rss_time_series"] = [[0.0, 100], [1.0, 101], [2.0, 102]]
     record["worker_rss_drain_samples"] = []
-    with pytest.raises(SystemExit, match="insufficient-data"):
+    with pytest.raises(
+        validator.SoakQualificationValidationError, match="insufficient-data"
+    ):
         validator.validate_soak_outcome(record, manifest)
 
 
@@ -212,7 +246,9 @@ def test_negative_error_rate_is_not_treated_as_zero() -> None:
     )
     record["per_scenario"][0]["error_rate"] = -0.1
 
-    with pytest.raises(SystemExit, match="error_rate"):
+    with pytest.raises(
+        validator.SoakQualificationValidationError, match="error_rate"
+    ):
         validator.validate_soak_outcome(record, manifest)
 
 
@@ -225,7 +261,9 @@ def test_non_finite_error_rate_is_rejected(value) -> None:
             encoding="utf-8"))
     record["per_scenario"][0]["error_rate"] = value
 
-    with pytest.raises(SystemExit, match="error_rate"):
+    with pytest.raises(
+        validator.SoakQualificationValidationError, match="error_rate"
+    ):
         validator.validate_soak_outcome(record, manifest)
 
 
@@ -249,7 +287,9 @@ def test_missing_per_request_peak_is_insufficient_data() -> None:
     record["module_managed_peak_observed"] = False
     record["per_request_peak_bytes"] = None
 
-    with pytest.raises(SystemExit, match="insufficient-data"):
+    with pytest.raises(
+        validator.SoakQualificationValidationError, match="insufficient-data"
+    ):
         validator.validate_soak_outcome(record, manifest)
 
 

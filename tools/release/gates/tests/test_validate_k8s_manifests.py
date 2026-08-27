@@ -12,12 +12,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 from tools.release.gates.validate_k8s_manifests import (  # noqa: E402
     GATE4_LOCAL_REQUIRED_SNIPPETS,
+    HELM_CANONICAL_LIMIT_KEYS,
     HELM_CONFIG_REQUIRED_SNIPPETS,
     HELM_DEPLOYMENT_FORBIDDEN_SNIPPETS,
     HELM_DEPLOYMENT_REQUIRED_SNIPPETS,
+    HELM_LEGACY_VALUE_KEYS,
     HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS,
     HELM_VALUES_REQUIRED_SNIPPETS,
     ValidationResult,
+)
+from tools.release.gates.validate_config_directives import (  # noqa: E402
+    CURRENT_LIMIT_KEYS,
 )
 from tools.release.gates import validate_k8s_manifests as validator  # noqa: E402
 
@@ -29,6 +34,49 @@ def test_helm_defaults_are_stock_nginx_safe() -> None:
     assert "load_module" in HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS
     assert "markdown_filter on;" in HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS
     assert "markdown_metrics" in HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS
+
+
+def test_helm_public_surface_uses_canonical_module_vocabulary() -> None:
+    """Values, schema, and templates must expose one limits vocabulary."""
+    result = ValidationResult()
+    validator.validate_helm_public_surface(result)
+
+    assert not result.has_failures, result.results
+    assert set(HELM_CANONICAL_LIMIT_KEYS.values()) == set(CURRENT_LIMIT_KEYS)
+    assert set(HELM_CANONICAL_LIMIT_KEYS) == {
+        validator._helm_limit_key(key) for key in CURRENT_LIMIT_KEYS
+    }
+    assert HELM_LEGACY_VALUE_KEYS == {"maxSize", "timeout", "etag", "budget"}
+
+
+def test_helm_digest_resolution_checks_both_supported_forms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit digest and repository@digest must both remain immutable."""
+    responses = iter(
+        [
+            subprocess.CompletedProcess(
+                args=["helm", "template"],
+                returncode=0,
+                stdout=(
+                    'image: "nginx@sha256:'
+                    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
+                ),
+            ),
+            subprocess.CompletedProcess(
+                args=["helm", "template"],
+                returncode=0,
+                stdout=(
+                    'image: "nginx@sha256:'
+                    'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"'
+                ),
+            ),
+        ]
+    )
+    monkeypatch.setattr(validator, "_run_helm_template", lambda *args: next(responses))
+    result = ValidationResult()
+    validator._validate_image_digest_render(result, "helm", Path("chart"))
+    assert not result.has_failures, result.results
 
 
 def test_empty_image_render_is_expected_but_explicit_image_must_render(
@@ -49,7 +97,7 @@ def test_empty_image_render_is_expected_but_explicit_image_must_render(
             subprocess.CompletedProcess(
                 args=["helm", "template"],
                 returncode=1,
-                stdout="Error: image.repository must be set explicitly",
+                stdout="Error: image.tag or image.digest must be set explicitly",
             ),
             subprocess.CompletedProcess(
                 args=["helm", "template"],

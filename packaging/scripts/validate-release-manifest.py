@@ -93,6 +93,19 @@ def validate_manifest(
     expected_version: str | None,
     require_bootstrap_assets: bool = False,
 ) -> list[str]:
+    """
+    Validate a release manifest and its associated artifacts.
+    
+    Parameters:
+    	manifest_path (Path): Path to the release manifest.
+    	artifact_dir (Path): Directory containing the release artifacts.
+    	sha256sums_path (Path | None): Optional path to the SHA256SUMS file.
+    	expected_version (str | None): Optional version that the manifest must declare.
+    	require_bootstrap_assets (bool): Whether semantic-version tag releases must include bootstrap assets.
+    
+    Returns:
+    	list[str]: Validation error messages; an empty list indicates a valid manifest.
+    """
     errors: list[str] = []
 
     # Load manifest
@@ -322,7 +335,7 @@ def validate_manifest(
                     f"nginx-markdown-for-agents-installer-{tag}.sh",
                     "nginx-markdown-for-agents-release.asc",
                 }
-            else:
+            elif require_bootstrap_assets:
                 errors.append(
                     "git.tag must be a semantic release tag to validate bootstrap assets"
                 )
@@ -346,6 +359,25 @@ def validate_manifest(
         for fname in sorted(sha256_entries):
             if fname not in allowed_sha256_names:
                 errors.append(f"Unexpected file in SHA256SUMS: {fname}")
+
+        # Every regular artifact file must be covered by the signed checksum
+        # manifest.  The manifest and its detached signature are the only
+        # metadata files intentionally exempt from this reverse check.
+        unhashed_metadata = {"SHA256SUMS", "SHA256SUMS.asc"}
+        try:
+            artifacts = sorted(artifact_dir.iterdir(), key=lambda item: item.name)
+        except OSError as exc:
+            errors.append(f"Cannot scan artifact directory: {exc}")
+        else:
+            for artifact in artifacts:
+                if (
+                    artifact.is_file()
+                    and artifact.name not in unhashed_metadata
+                    and artifact.name not in sha256_entries
+                ):
+                    errors.append(
+                        f"Artifact {artifact.name} is missing from SHA256SUMS"
+                    )
 
         for fname in sorted(bootstrap_filenames):
             fpath = artifact_dir / fname

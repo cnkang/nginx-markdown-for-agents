@@ -64,8 +64,13 @@ jobs:
           python3 - <<'PY'
           import json, os
 
-          with open("tools/matrix-diff.json", "r") as f:
-              diff = json.load(f)
+          diff_path = "tools/matrix-diff.json"
+          if os.path.exists(diff_path):
+              with open(diff_path, "r") as f:
+                  diff = json.load(f)
+          else:
+              # A source-only git diff is still a valid matrix update.
+              diff = {}
 
           added = diff.get("added_versions", [])
           removed = diff.get("removed_versions", [])

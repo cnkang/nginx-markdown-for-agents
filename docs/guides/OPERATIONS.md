@@ -233,7 +233,7 @@ else
     exit 2
 fi
 
-FAILED=$(echo "$METRICS" | grep 'nginx_markdown_requests_total{.*outcome="failed_' | awk '{sum += $2} END {print sum + 0}')
+FAILED=$(echo "$METRICS" | grep -E 'nginx_markdown_requests_total\{.*outcome="(failed_[^"]+|aborted)"' | awk '{sum += $2} END {print sum + 0}')
 ATTEMPTED=$(echo "$METRICS" | grep 'nginx_markdown_conversion_attempts_total' | awk '{sum += $2} END {print sum + 0}')
 
 if [ "$ATTEMPTED" -eq 0 ]; then
@@ -459,8 +459,12 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 #### Upgrading to 0.9.x
 
-- `fullbuffer_path_hits` and `incremental_path_hits` moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient. You need no data migration.
-- The Rust converter enables the `incremental` feature by default. The streaming path (`markdown_streaming off|auto|force`) controls runtime selection. `auto` uses an internal bounded heuristic rather than an operator-facing threshold directive. This replaces the retired threshold directive.
+- The 0.9.2 metrics layout is a breaking reset. Install the matching module
+  and allow a graceful reload to create the new shared-memory layout. The
+  frozen v1 metrics surface exposes the current path counters.
+- The streaming path (`markdown_streaming off|auto|force`) controls runtime
+  selection. `auto` uses an internal bounded heuristic. There is no
+  operator-facing response-size threshold.
 - `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add its proxy range in the `http` context. For example, use `markdown_trusted_proxies 10.0.0.0/8;`. Forwarded headers remain ignored for direct peers outside the configured CIDRs. Trusted proxies keep base URLs correct. Configure them explicitly. This restores the previous behavior.
 
 #### Upgrading to 0.2.x
@@ -904,7 +908,19 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
 
 ## Reason Code Reference for Operators
 
-Every request that enters the module's decision chain receives a reason code that explains the outcome. These reason codes appear in decision log entries using the `reason=` field and in Prometheus metrics as label values. The decision-log `reason=` field and the Prometheus label value use the same string for each reason code. You can correlate a log entry directly with a metric counter without translation. The request-level outcome classifications (`converted`, `failed_open`, `failed_closed`, `skipped`) appear in `nginx_markdown_requests_total` as both `outcome` and `reason` label values. The finer failure sub-classification (the decision-log `category` field, for example `conversion_error`) is intentionally **not** exposed as a metric label value. See [Failure Sub-Classification Codes](#failure-sub-classification-codes) below.
+Every request that enters the module's decision chain receives a canonical
+reason code that explains the outcome. These reason codes appear in decision
+log entries using the `reason=` field and in Prometheus metrics as label
+values. The decision-log `reason=` field and the Prometheus label value use the
+same string for each reason code. Streaming path transitions use a separate
+bounded `event=` field. They are not a second reason-code taxonomy. You can
+correlate a log entry directly with a metric counter without translation. The
+request-level outcome classifications (`converted`, `failed_open`,
+`failed_closed`, `skipped`) appear in `nginx_markdown_requests_total` as both
+`outcome` and `reason` label values. The finer failure sub-classification (the
+decision-log `category` field, for example `conversion_error`) is intentionally
+**not** exposed as a metric label value. See [Failure Sub-Classification
+Codes](#failure-sub-classification-codes) below.
 
 For the full decision chain model (check order, flowchart, and outcome determination logic), see [Decision Chain Model](../features/DECISION_CHAIN.md).
 
@@ -925,28 +941,22 @@ The table below maps each reason code to its internal enum, error category, requ
 | `failed_open` | FAILED | Conversion attempted but failed; original HTML served (`markdown_error_policy pass`) | Investigate the failure sub-classification (see below). The client received HTML, so no user impact. Review failure rate trends. |
 | `failed_closed` | FAILED | Conversion attempted but failed; 502 returned (`markdown_error_policy fail_closed`) | Urgent — clients are receiving errors. Switch to `markdown_error_policy pass` or disable conversion for the affected scope. Investigate root cause. |
 
-#### Engine Selection Codes
+#### Streaming Implementation Events
 
-When you enable the streaming engine, the engine selector emits a reason code indicating which path was chosen:
+When the streaming engine is active (`markdown_streaming auto` or `force`),
+bounded implementation transitions appear in the `event=` field. They are
+not reason codes, are not Prometheus reason labels, and do not require a
+second registry.
 
-| Reason Code | Family | Severity | Description | Suggested Operator Action |
-|---|---|---|---|---|
-| `ENGINE_STREAMING` | ENGINE | INFO | Streaming engine selected for this request | Informational — no action needed. Indicates the request entered the streaming conversion path. |
-
-#### Streaming Reason Codes
-
-When the streaming engine is active (`markdown_streaming auto` or `force`), the engine emits the following reason codes at streaming decision points:
-
-| Reason Code | Family | Severity | Description | Suggested Operator Action |
-|---|---|---|---|---|
-| `STREAMING_CONVERT` | STREAMING | INFO | Streaming conversion completed successfully | No action needed — this is the streaming success path. |
-| `STREAMING_FALLBACK_PREBUFFER` | STREAMING | WARN | Streaming abandoned pre-commit, fell back to full-buffer | Monitor fallback rate. High rates may indicate content features unsupported by the streaming engine. Consider excluding affected paths from streaming. |
-| `STREAMING_FAIL_POSTCOMMIT` | STREAMING | WARN | Post-commit error during streaming, response may be truncated | Urgent — headers were already sent. Monitor rate and rollback streaming if it exceeds 0.1%. |
-| `STREAMING_SKIP_UNSUPPORTED` | STREAMING | INFO | Streaming not supported for this request, fell through to full-buffer | Informational — the request was handled by the full-buffer path instead. |
-| `STREAMING_BUDGET_EXCEEDED` | STREAMING | WARN | Working-set memory budget exceeded during streaming | Review `markdown_limits streaming_buffer=<size>` configuration. Increase budget or exclude large pages from streaming scope. |
-| `STREAMING_PRECOMMIT_FAILOPEN` | STREAMING | WARN | Pre-commit error, fail-open to pass-through (original HTML served) | Investigate root cause. The client received HTML, so no user impact. Review error rate trends. |
-| `STREAMING_PRECOMMIT_REJECT` | STREAMING | WARN | Pre-commit error, fail-closed (error returned to client) | Urgent — clients are receiving errors. Switch to fail-open policy or disable streaming for the affected scope. |
-| `STREAMING_SHADOW` | STREAMING | INFO | Shadow mode comparison completed | Informational — shadow mode ran a comparison between streaming and full-buffer output. Check shadow diff metrics for divergence. |
+| Event | Stage | Description | Suggested Operator Action |
+|---|---|---|---|
+| `engine_streaming` / `streaming_path_selection` | `eligibility` | The streaming path was selected | Informational — correlate with the request outcome. |
+| `streaming_convert` | `postcommit` | Streaming conversion delivered its terminal output | No action needed — this is the streaming success path. |
+| `streaming_skip_unsupported` | `eligibility` | The request cannot use streaming | Informational — the full-buffer path handles the request. |
+| `streaming_fallback_prebuffer` | `precommit` | Streaming fell back before committing output | Monitor the fallback rate and investigate recurring conversion causes. |
+| `streaming_budget_exceeded` | `precommit` or `postcommit` | A streaming resource limit was reached | Review the relevant `markdown_limits` setting and the canonical `reason=` value. |
+| `streaming_precommit_failopen` / `streaming_precommit_reject` | `precommit` | Policy selected pass-through or rejection | Investigate the canonical failure reason and configured error policy. |
+| `streaming_postcommit_failure` / `streaming_fail_postcommit` | `postcommit` | Streaming failed after output commitment | Treat as urgent because the response may be truncated. Inspect the canonical terminal reason. |
 
 #### Failure Sub-Classification Codes
 
@@ -1014,26 +1024,27 @@ Example commands to check each state:
 curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics
 
 # Count NOT_ENABLED from logs
-grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=disabled"
+grep "markdown:" /var/log/nginx/error.log | grep -c "reason=disabled"
 
 # Count SKIPPED from logs (excluding the disabled/NOT_ENABLED state)
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -cE "reason=(not_eligible|skipped_accept|skipped_no_accept|skipped_conditional|skipped_accept_reject|bypass_no_transform)"
 
 # Count CONVERTED from logs
-grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=converted"
+grep "markdown:" /var/log/nginx/error.log | grep -c "reason=converted"
 
 # Count FAILED from logs
-grep "markdown decision:" /var/log/nginx/error.log | grep -cE 'reason=(failed_open|failed_closed)'
+grep "markdown:" /var/log/nginx/error.log | grep -cE 'reason=(failed_open|failed_closed)'
 ```
 
 ### Reason Code and Metrics Label Alignment
 
-Reason codes use lowercase snake_case strings in decision log entries (for example
-`not_eligible`, `converted`, `failed_open`) and the same strings as Prometheus
-`reason` label values. This means you can go from a metric spike to the
-corresponding log entries without any translation. (Streaming engine codes such
-as `ENGINE_STREAMING` remain uppercase.)
+Reason codes use lowercase snake_case strings in decision log entries (for
+example `not_eligible`, `converted`, `failed_open`) and the same strings as
+Prometheus `reason` label values. This means you can go from a metric spike to
+the corresponding log entries without any translation. Streaming transition
+details use lowercase bounded `event` values and never appear as `reason`
+labels.
 
 The alignment works as follows:
 
@@ -1052,14 +1063,14 @@ When you see a spike in a metric, use the same reason code string to find the co
 ```bash
 # Example: you see failed request samples increasing in the metrics endpoint
 # Find the matching log entries:
-grep "markdown decision:" /var/log/nginx/error.log | grep -E "category=(conversion_error|memory_budget_exceeded|timeout|ffi_panic)"
+grep "markdown:" /var/log/nginx/error.log | grep -E "category=(conversion_error|memory_budget_exceeded|timeout|ffi_panic)"
 
 # Example: you see failed_open or failed_closed samples increasing
 # Find the matching log entries:
-grep "markdown decision:" /var/log/nginx/error.log | grep -E 'reason=(failed_open|failed_closed)'
+grep "markdown:" /var/log/nginx/error.log | grep -E 'reason=(failed_open|failed_closed)'
 
 # See the full reason code distribution:
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c | sort -rn
 ```
 
@@ -1079,19 +1090,24 @@ The `markdown_log_verbosity` directive controls decision logging. You need no se
 
 ### Log Entry Format
 
-Every decision log entry uses a consistent, parseable structure with space-separated `key=value` pairs. The prefix `markdown decision:` identifies these entries in the NGINX error log.
+Every decision log entry uses a consistent, parseable structure with
+space-separated `key=value` pairs. The prefix `markdown:` identifies these
+entries in the NGINX error log.
 
 #### Base Format (info verbosity)
 
 ```text
-markdown decision: reason=<REASON_CODE> method=<METHOD> uri=<URI> content_type=<TYPE>
+markdown: outcome=<OUTCOME> stage=<STAGE> reason=<REASON_CODE> event=<EVENT> method=<METHOD> uri=<URI> content_type=<TYPE>
 ```
 
 Fields:
 
 | Field | Description | Example Values |
 |---|---|---|
+| `outcome` | Request-level terminal outcome from the canonical registry | `converted`, `failed_open`, `failed_closed`, `-` |
+| `stage` | Decision-chain stage that emitted the entry | `eligibility`, `conversion`, `precommit`, `postcommit` |
 | `reason` | The [reason code](#reason-code-table) for this request's outcome | `converted`, `skipped_accept`, `failed_open` |
+| `event` | Bounded streaming implementation event, or `-` for a reason-only entry | `engine_streaming`, `streaming_convert`, `-` |
 | `method` | HTTP request method | `GET`, `HEAD`, `POST` |
 | `uri` | Request URI (path only, no query string) | `/docs/api`, `/help/getting-started` |
 | `content_type` | Upstream response Content-Type, or `-` if absent | `text/html`, `application/json`, `-` |
@@ -1101,7 +1117,7 @@ Fields:
 When `markdown_log_verbosity` is set to `debug`, three additional fields append:
 
 ```text
-markdown decision: reason=<REASON_CODE> method=<METHOD> uri=<URI> content_type=<TYPE> filter_value=<VALUE> accept=<ACCEPT> status=<STATUS>
+markdown: outcome=<OUTCOME> stage=<STAGE> reason=<REASON_CODE> event=<EVENT> method=<METHOD> uri=<URI> content_type=<TYPE> filter_value=<VALUE> accept=<ACCEPT> status=<STATUS>
 ```
 
 Additional fields:
@@ -1119,25 +1135,25 @@ These examples show what operators will see in `/var/log/nginx/error.log`. The e
 #### Successful conversion (info verbosity)
 
 ```text
-2025/01/15 14:30:25 [info] 1234#0: *567 markdown decision: reason=converted method=GET uri=/docs/api content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /docs/api HTTP/1.1", upstream: "http://127.0.0.1:8080/docs/api", host: "example.com"
+2025/01/15 14:30:25 [info] 1234#0: *567 markdown: outcome=converted stage=conversion reason=converted event=- method=GET uri=/docs/api content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /docs/api HTTP/1.1", upstream: "http://127.0.0.1:8080/docs/api", host: "example.com"
 ```
 
 #### Skipped — Accept header does not request Markdown (info verbosity)
 
 ```text
-2025/01/15 14:30:26 [info] 1234#0: *568 markdown decision: reason=skipped_accept method=GET uri=/docs/api content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /docs/api HTTP/1.1", host: "example.com"
+2025/01/15 14:30:26 [info] 1234#0: *568 markdown: outcome=skipped stage=eligibility reason=skipped_accept event=- method=GET uri=/docs/api content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /docs/api HTTP/1.1", host: "example.com"
 ```
 
 #### Conversion failed open (warn verbosity or higher)
 
 ```text
-2025/01/15 14:30:27 [warn] 1234#0: *569 markdown decision: reason=failed_open method=GET uri=/blog/post-1 content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /blog/post-1 HTTP/1.1", upstream: "http://127.0.0.1:8080/blog/post-1", host: "example.com"
+2025/01/15 14:30:27 [warn] 1234#0: *569 markdown: outcome=failed_open stage=conversion reason=failed_open event=- method=GET uri=/blog/post-1 content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /blog/post-1 HTTP/1.1", upstream: "http://127.0.0.1:8080/blog/post-1", host: "example.com"
 ```
 
 #### Debug extended format
 
 ```text
-2025/01/15 14:30:28 [info] 1234#0: *570 markdown decision: reason=not_eligible method=POST uri=/api/submit content_type=text/html filter_value=on accept=text/markdown status=200 while sending to client, client: 10.0.0.5, server: example.com, request: "POST /api/submit HTTP/1.1", host: "example.com"
+2025/01/15 14:30:28 [info] 1234#0: *570 markdown: outcome=skipped stage=eligibility reason=not_eligible event=- method=POST uri=/api/submit content_type=text/html filter_value=on accept=text/markdown status=200 while sending to client, client: 10.0.0.5, server: example.com, request: "POST /api/submit HTTP/1.1", host: "example.com"
 ```
 
 ### Verbosity Gating
@@ -1175,13 +1191,13 @@ The module maps decision outcomes to NGINX log levels so that NGINX's own `error
 
 | Outcome Type | NGINX Log Level | Reason Codes |
 |---|---|---|
-| Non-failure | `NGX_LOG_INFO` | All `not_eligible`/`skipped_*`/`disabled`/`converted` codes, `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_SHADOW`, `STREAMING_SKIP_UNSUPPORTED` |
-| Failure | `NGX_LOG_WARN` | `failed_open`, `failed_closed`, `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_PRECOMMIT_FAILOPEN`, `STREAMING_PRECOMMIT_REJECT`, `STREAMING_BUDGET_EXCEEDED`, `STREAMING_FALLBACK_PREBUFFER` |
+| Non-failure | `NGX_LOG_INFO` | `converted`, `skipped_*`, `disabled`, and non-terminal `event=` entries |
+| Failure | `NGX_LOG_WARN` | `failed_open`, `failed_closed`, `aborted`, and canonical failure reason codes |
 
 This means:
 - If your NGINX `error_log` level is set to `warn`, you will only see failure decision entries (including streaming failures) regardless of `markdown_log_verbosity`.
 - If your NGINX `error_log` level is set to `info` or `debug`, the `markdown_log_verbosity` directive controls which entries appear. The module emits streaming non-failure entries at `info` level.
-- For full decision logging visibility (including all streaming outcomes), ensure `error_log` is at `info` level or lower.
+- For full decision logging visibility (including non-terminal streaming events), ensure `error_log` is at `info` level or lower.
 
 ### Parsing Decision Log Entries
 
@@ -1190,13 +1206,13 @@ Decision log entries use a consistent `key=value` format designed for easy parsi
 #### Find all decision log entries
 
 ```bash
-grep "markdown decision:" /var/log/nginx/error.log
+grep "markdown:" /var/log/nginx/error.log
 ```
 
 #### Count entries by reason code
 
 ```bash
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[A-Za-z_]+' | sort | uniq -c | sort -rn
 ```
 
@@ -1214,14 +1230,14 @@ Example output:
 #### Find all failures
 ```bash
 # Find all failures
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E 'reason=(failed_open|failed_closed)'
 ```
 
 #### Extract URIs that failed conversion
 ```bash
 # Extract URIs that failed conversion
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E 'reason=(failed_open|failed_closed)' | \
   sed -nE 's/.*uri=([^ ]+).*/\1/p' | sort | uniq -c | sort -rn
 ```
@@ -1229,7 +1245,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 #### Show reason code distribution per hour
 
 ```bash
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   awk '{print substr($1,1,13), $0}' | \
   grep -oP '^\S+ .*reason=\K[A-Za-z_]+' | sort | uniq -c
 ```
@@ -1237,8 +1253,8 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 #### Extract full decision fields with awk
 
 ```bash
-grep "markdown decision:" /var/log/nginx/error.log | \
-  awk -F'markdown decision: ' '{print $2}' | \
+grep "markdown:" /var/log/nginx/error.log | \
+  awk -F'markdown: ' '{print $2}' | \
   awk -F' (while|,) ' '{print $1}'
 ```
 
@@ -1253,7 +1269,7 @@ reason=failed_open method=GET uri=/blog/post-1 content_type=text/html
 #### Monitor decisions in real time
 
 ```bash
-tail -f /var/log/nginx/error.log | grep "markdown decision:"
+tail -f /var/log/nginx/error.log | grep "markdown:"
 ```
 
 ### Related Documentation
@@ -1313,6 +1329,6 @@ plain-text metric fields are part of the 0.9.2 contract.
 | 0.9.2 | 2026-08-24 | Hermes | memory_budget_exceeded log pattern description now refers only to memory-limit failures |
 | 0.9.2 | 2026-08-15 | Hermes | Update failure categories to conversion_error, memory_budget_exceeded, timeout, and ffi_panic |
 | 0.9.2 | 2026-08-08 | Kang | Added missing nginx_markdown_streaming_peak_memory_bytes metric row |
-| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation). Retire the large-response threshold directive. |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

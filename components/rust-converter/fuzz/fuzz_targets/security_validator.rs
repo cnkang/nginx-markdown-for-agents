@@ -12,7 +12,9 @@ use nginx_markdown_converter::parser::parse_html;
 use nginx_markdown_converter::security::SecurityValidator;
 
 fn walk_dom(handle: &Handle, validator: &SecurityValidator, depth: usize) {
-    let _ = validator.validate_depth(depth);
+    if validator.validate_depth(depth).is_err() {
+        return;
+    }
 
     if let NodeData::Element { name, attrs, .. } = &handle.data {
         let attrs_ref = attrs.borrow();

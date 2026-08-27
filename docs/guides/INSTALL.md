@@ -63,17 +63,47 @@ validated for the tested NGINX version encoded in the package name.
 ### DEB-based Systems (Ubuntu, Debian)
 
 ```bash
+set -euo pipefail
 # Set this to the version of the package you downloaded.
 VERSION="<published-version>"
-sudo dpkg -i "nginx-module-markdown-for-agents_${VERSION}_nginx-1.26.3_amd64.deb"
+NGINX_VERSION=1.26.3
+ARCH=amd64
+RELEASE_TAG="v${VERSION}"
+BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
+curl -fsSL -o SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fsSL -o SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75
+VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+  | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+[[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || { echo "release fingerprint mismatch" >&2; exit 1; }
+PACKAGE="nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
+curl -fsSL -o "${PACKAGE}" "${BASE_URL}/${PACKAGE}"
+CHECKSUM_LINE="$(awk -v package="${PACKAGE}" '$2 == package { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"
+printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -
+sudo dpkg -i "./${PACKAGE}"
 ```
 
 ### RPM-based Systems (RHEL, AlmaLinux, Amazon Linux)
 
 ```bash
+set -euo pipefail
 # Set this to the version of the package you downloaded.
 VERSION="<published-version>"
-sudo rpm -i "nginx-module-markdown-for-agents-${VERSION}-nginx1.26.3-1.x86_64.rpm"
+NGINX_VERSION=1.26.3
+ARCH=x86_64
+RELEASE_TAG="v${VERSION}"
+BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
+curl -fsSL -o SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fsSL -o SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75
+VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+  | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+[[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || { echo "release fingerprint mismatch" >&2; exit 1; }
+PACKAGE="nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
+curl -fsSL -o "${PACKAGE}" "${BASE_URL}/${PACKAGE}"
+CHECKSUM_LINE="$(awk -v package="${PACKAGE}" '$2 == package { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"
+printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -
+sudo rpm -i "./${PACKAGE}"
 ```
 
 The package installs:
@@ -159,10 +189,12 @@ fails (non-zero exit) unless the status is `200`, the media type is
 successful exit is deterministic evidence of conversion:
 
 ```bash
+set -euo pipefail
 # Serve an <h1>Welcome</h1> page from a local fixture, or point the first
 # curl at any page on your site that renders a known <h1>:
 headers=$(mktemp)
 body=$(mktemp)
+trap 'rm -f "$headers" "$body"' EXIT
 status=$(curl -s -o "$body" -D "$headers" -H "Accept: text/markdown" \
     -w '%{http_code}' http://localhost/)
 content_type=$(awk 'BEGIN{IGNORECASE=1} /^Content-Type:/{sub(/\r$/,""); print $2}' "$headers")
@@ -228,10 +260,12 @@ For the full list of supported versions and architectures, see the
 [Compatibility Matrix](./INSTALLATION.md#7-compatibility-matrix).
 
 For Kubernetes and Helm deployments, see
-[`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md). The Helm chart runs
-with stock NGINX by default. To use the module, deploy an explicit
-module-enabled image. When `markdown.enabled=true`, set `markdown.loadModule`
-to the in-container module path.
+[`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md). The Helm chart
+requires explicit `image.repository` and `image.tag` values. The chart supports
+a stock NGINX image only as its module-disabled smoke-test override. That image
+does not contain this module. To use Markdown conversion, deploy an image
+that contains the module, set `markdown.enabled=true`, and set
+`markdown.loadModule` to the in-container module path.
 
 ### Automated Diagnostics
 

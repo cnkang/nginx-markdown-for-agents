@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import doctor_advice as doctor_advice_module
 from doctor_advice import (
     Finding,
+    _LocalhostRedirectHandler,
     _evaluate_d01,
     _evaluate_d02,
     _evaluate_d03,
@@ -63,6 +64,45 @@ class TestInputValidation:
         assert exc.value.code == 2
         assert not called
         assert "host must be localhost" in capsys.readouterr().err
+
+    def test_localhost_redirect_handler_forwards_standard_headers(
+        self, monkeypatch,
+    ):
+        """The redirect override preserves urllib's current callback contract."""
+        captured = {}
+
+        def fake_redirect(_self, req, fp, code, msg, headers, newurl):
+            captured.update({
+                "req": req,
+                "fp": fp,
+                "code": code,
+                "msg": msg,
+                "headers": headers,
+                "newurl": newurl,
+            })
+            return "redirected"
+
+        monkeypatch.setattr(
+            doctor_advice_module.urllib.request.HTTPRedirectHandler,
+            "redirect_request",
+            fake_redirect,
+        )
+
+        headers = {"Location": "http://localhost/metrics"}
+        result = _LocalhostRedirectHandler().redirect_request(
+            "request", "file", 302, "Found", headers,
+            "http://localhost/metrics",
+        )
+
+        assert result == "redirected"
+        assert captured == {
+            "req": "request",
+            "fp": "file",
+            "code": 302,
+            "msg": "Found",
+            "headers": headers,
+            "newurl": "http://localhost/metrics",
+        }
 
     def test_fetch_metrics_file_rejects_traversal(self, capsys):
         """Traversal markers in metrics paths are rejected."""

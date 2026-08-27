@@ -4,27 +4,20 @@
  * Includes the actual production source so coverage instruments the real
  * decision paths that gate all conversion.
  *
- * As of spec 46 (Rust-first decision core), the eligibility *decision* lives
+ * As of the Rust-first decision core, the eligibility *decision* lives
  * in the Rust core (markdown_decide_eligibility); the C function
  * ngx_http_markdown_check_eligibility is a thin wrapper that marshals
  * request/config fields into an FFIEligibilityInput, calls the FFI, and maps
  * the returned u8 back to ngx_http_markdown_eligibility_t.
  *
  * Because the C unit-test build does not link the Rust library, this test
- * stubs markdown_decide_eligibility with a self-contained reference port of
- * the legacy C decision (the "parity oracle").  Driving the production
- * wrapper across the decision matrix and asserting the result matches the
- * legacy oracle proves two things:
- *   1. the wrapper marshals every request/config field faithfully (otherwise
- *      the oracle, which reads only the marshalled struct, would diverge);
- *   2. the wrapper maps the returned u8 back to the correct enum.
- * The Rust side's agreement with the same matrix is covered independently by
- * the Rust unit tests in decision/eligibility.rs and the FFI tests in
- * ffi/exports.rs.
+ * stubs markdown_decide_eligibility with a controlled return value. The C
+ * tests verify request/config marshalling and the returned discriminant
+ * mapping; eligibility semantics are tested by the Rust decision-core tests.
  *
  * Validates: FR-02.1 (method), FR-02.2 (status), FR-02.3 (content-type),
  *            FR-02.8 (streaming), FR-07.2 (range), FR-10.1 (size),
- *            spec 46 Req 3 (parity) and Req 4 (thin wrapper).
+ *            the FFI boundary and thin-wrapper requirements.
  */
 
 #include "../include/test_common.h"
@@ -148,6 +141,7 @@ typedef struct ngx_pool_cleanup_s {
 
 static ngx_pool_cleanup_t  test_cleanup;
 static ngx_uint_t          test_alloc_calls;
+static ngx_uint_t          test_free_calls;
 
 ngx_pool_cleanup_t *
 ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
@@ -166,7 +160,16 @@ ngx_alloc(size_t size, ngx_log_t *log)
     return malloc(size);
 }
 
-#define ngx_free free
+static void
+test_ngx_free(void *data)
+{
+    if (data != NULL) {
+        test_free_calls++;
+    }
+    free(data);
+}
+
+#define ngx_free test_ngx_free
 #define ngx_memcpy memcpy
 
 #include "../../src/ngx_http_markdown_buffer.c"
@@ -175,146 +178,15 @@ ngx_alloc(size_t size, ngx_log_t *log)
 static ngx_pool_t g_pool;
 
 /*
- * Parity oracle + FFI capture for markdown_decide_eligibility.
+ * FFI capture stub for markdown_decide_eligibility.
  *
- * reference_decide() is a self-contained port of the legacy C decision order
- * (filter -> method -> status/206 -> range -> streaming -> content-type ->
- * size), operating only on the marshalled FFIEligibilityInput.  The returned
- * u8 codes match the ngx_http_markdown_eligibility_t discriminants.
+ * The Rust decision engine owns eligibility semantics. This C test exercises
+ * only the request-to-FFI boundary and the returned discriminant mapping.
  */
 static struct FFIEligibilityInput  g_last_input;
 static int                         g_have_last_input;
-static int                         g_force_mode;
 static uint8_t                     g_forced_code;
 static int                         g_call_count;
-
-/* Case-insensitive ASCII compare over the first n bytes. */
-static int
-ref_strncasecmp(const uint8_t *a, const uint8_t *b, size_t n)
-{
-    for (size_t i = 0; i < n; i++) {
-        unsigned char ca = (unsigned char) a[i];
-        unsigned char cb = (unsigned char) b[i];
-        unsigned char la = (ca >= 'A' && ca <= 'Z') ? (ca | 0x20) : ca;
-        unsigned char lb = (cb >= 'A' && cb <= 'Z') ? (cb | 0x20) : cb;
-        if (la != lb) {
-            return (int) la - (int) lb;
-        }
-    }
-    return 0;
-}
-
-/* Case-insensitive prefix match with type-token boundary (NUL/';'/SP/HTAB). */
-static int
-ref_match_prefix(const uint8_t *ct, size_t ct_len,
-                 const uint8_t *needle, size_t needle_len)
-{
-    if (ct_len < needle_len) {
-        return 0;
-    }
-    if (ref_strncasecmp(ct, needle, needle_len) != 0) {
-        return 0;
-    }
-    if (ct_len == needle_len) {
-        return 1;
-    }
-    {
-        uint8_t b = ct[needle_len];
-        return (b == ';' || b == ' ' || b == '\t');
-    }
-}
-
-static int
-ref_is_streaming(const struct FFIEligibilityInput *in)
-{
-    static const uint8_t  text_event_stream[] = "text/event-stream";
-    static const uint8_t  application_x_ndjson[] = "application/x-ndjson";
-    static const uint8_t  application_stream_json[] =
-        "application/stream+json";
-
-    if (in->content_type_len == 0) {
-        return 0;
-    }
-    if (ref_match_prefix(in->content_type, in->content_type_len,
-                         text_event_stream, sizeof(text_event_stream) - 1))
-    {
-        return 1;
-    }
-    if (ref_match_prefix(in->content_type, in->content_type_len,
-                         application_x_ndjson,
-                         sizeof(application_x_ndjson) - 1))
-    {
-        return 1;
-    }
-    if (ref_match_prefix(in->content_type, in->content_type_len,
-                         application_stream_json,
-                         sizeof(application_stream_json) - 1))
-    {
-        return 1;
-    }
-    for (uintptr_t i = 0; i < in->stream_types_count; i++) {
-        if (ref_match_prefix(in->content_type, in->content_type_len,
-                             in->stream_types[i].data,
-                             in->stream_types[i].len))
-        {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int
-ref_content_type_allowed(const struct FFIEligibilityInput *in)
-{
-    static const uint8_t  text_html[] = "text/html";
-
-    if (in->content_type_len == 0) {
-        return 0;
-    }
-    if (in->content_types_count == 0) {
-        return ref_match_prefix(in->content_type, in->content_type_len,
-                                text_html, sizeof(text_html) - 1);
-    }
-    for (uintptr_t i = 0; i < in->content_types_count; i++) {
-        if (ref_match_prefix(in->content_type, in->content_type_len,
-                             in->content_types[i].data,
-                             in->content_types[i].len))
-        {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static uint8_t
-reference_decide(const struct FFIEligibilityInput *in)
-{
-    if (!in->filter_enabled) {
-        return 8; /* INELIGIBLE_CONFIG */
-    }
-    if (!in->method_get_or_head) {
-        return 1; /* INELIGIBLE_METHOD */
-    }
-    if (in->status != 200) {
-        return (in->status == 206) ? 7 : 2; /* RANGE : STATUS */
-    }
-    if (in->has_range_header) {
-        return 7; /* INELIGIBLE_RANGE */
-    }
-    if (ref_is_streaming(in)) {
-        return 5; /* INELIGIBLE_STREAMING */
-    }
-    if (!ref_content_type_allowed(in)) {
-        return 3; /* INELIGIBLE_CONTENT_TYPE */
-    }
-    if (in->content_length >= 0 && in->body_limit != 0
-        && (uint64_t) in->content_length > (uint64_t) in->body_limit)
-    {
-        return 4; /* INELIGIBLE_SIZE */
-    }
-
-    return 0; /* ELIGIBLE */
-}
 
 uint8_t
 markdown_decide_eligibility(const struct FFIEligibilityInput *input)
@@ -326,16 +198,11 @@ markdown_decide_eligibility(const struct FFIEligibilityInput *input)
         g_have_last_input = 1;
     }
 
-    if (g_force_mode) {
-        return g_forced_code;
-    }
-
     if (input == NULL) {
-        /* Mirror the Rust NULL contract (Rule 46): safe skip. */
-        return 8; /* INELIGIBLE_CONFIG */
+        return 8;
     }
 
-    return reference_decide(input);
+    return g_forced_code;
 }
 
 static void
@@ -371,346 +238,8 @@ reset_ffi_capture(void)
     g_palloc_offset = 0;
     g_have_last_input = 0;
     g_call_count = 0;
-    g_force_mode = 0;
     g_forced_code = 0;
     memset(&g_last_input, 0, sizeof(g_last_input));
-}
-
-
-/*
- * Parity: Content-Type matching through the production wrapper with the
- * default (unconfigured) text/html allowlist.  Mirrors the legacy
- * check_content_type matrix but now exercises the thin wrapper + oracle.
- */
-static void
-test_parity_content_type_default(void)
-{
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-
-    TEST_SUBSECTION("parity: default text/html content-type matching");
-
-    init_conf(&conf);
-    conf.max_size = 10 * 1024 * 1024;
-
-    init_base_request(&r);
-    reset_ffi_capture();
-    set_str(&r.headers_out.content_type, "text/html");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "text/html should match default -> ELIGIBLE");
-
-    set_str(&r.headers_out.content_type, "text/html;charset=utf-8");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "text/html;charset=utf-8 should match (';' boundary)");
-
-    set_str(&r.headers_out.content_type, "text/html encoding=utf-8");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "text/html with space separator should match");
-
-    set_str(&r.headers_out.content_type, "text/html\t;charset=utf-8");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "text/html with HTAB separator should match");
-
-    set_str(&r.headers_out.content_type, "text/htmlx");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE,
-        "text/htmlx must NOT match (no boundary char)");
-
-    set_str(&r.headers_out.content_type, "application/json");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE,
-        "application/json must NOT match default");
-
-    r.headers_out.content_type.len = 0;
-    r.headers_out.content_type.data = NULL;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE,
-        "empty content-type must NOT match");
-
-    TEST_PASS("Default text/html content-type parity correct");
-}
-
-
-/*
- * Parity: configured markdown_content_types allowlist replaces the default,
- * exercised through the wrapper (verifies the marshalled FFIStr array).
- */
-static void
-test_parity_content_type_custom_allowlist(void)
-{
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-    ngx_array_t ct_array;
-    ngx_str_t ct_entries[2];
-
-    TEST_SUBSECTION("parity: custom content-type allowlist");
-
-    init_conf(&conf);
-    conf.max_size = 10 * 1024 * 1024;
-
-    set_str(&ct_entries[0], "text/html");
-    set_str(&ct_entries[1], "application/xhtml+xml");
-    ct_array.elts = ct_entries;
-    ct_array.nelts = 2;
-    ct_array.size = sizeof(ngx_str_t);
-    ct_array.nalloc = 2;
-    ct_array.pool = &g_pool;
-    conf.routing.content_types = &ct_array;
-
-    init_base_request(&r);
-    reset_ffi_capture();
-
-    set_str(&r.headers_out.content_type, "text/html");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "text/html matches custom allowlist");
-
-    set_str(&r.headers_out.content_type, "application/xhtml+xml");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "application/xhtml+xml matches custom allowlist");
-
-    set_str(&r.headers_out.content_type,
-            "application/xhtml+xml\t;charset=utf-8");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "custom allowlist should accept HTAB separator");
-
-    set_str(&r.headers_out.content_type, "application/json");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE,
-        "application/json not in allowlist");
-
-    /* Confirm the configured allowlist was marshalled across the FFI. */
-    TEST_ASSERT(g_have_last_input && g_last_input.content_types_count == 2,
-                "content_types_count marshalled as 2");
-
-    TEST_PASS("Custom content-type allowlist parity correct");
-}
-
-
-/*
- * Parity: streaming detection (built-in SSE + configured stream_types)
- * through the wrapper.  Streaming must win over the content-type check.
- */
-static void
-test_parity_streaming_detection(void)
-{
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-
-    TEST_SUBSECTION("parity: streaming detection");
-
-    init_conf(&conf);
-    conf.max_size = 10 * 1024 * 1024;
-
-    init_base_request(&r);
-    reset_ffi_capture();
-
-    set_str(&r.headers_out.content_type, "text/event-stream");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
-        "text/event-stream -> INELIGIBLE_STREAMING");
-
-    set_str(&r.headers_out.content_type, "text/event-stream;charset=utf-8");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
-        "text/event-stream with charset -> INELIGIBLE_STREAMING");
-
-    /* stream_types directive removed in 0.9.2; stream_types always NULL/0 */
-    reset_ffi_capture();
-    set_str(&r.headers_out.content_type, "application/x-ndjson\t;charset=utf-8");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
-        "application/x-ndjson -> INELIGIBLE_STREAMING via hard exclusion");
-    TEST_ASSERT(g_have_last_input && g_last_input.stream_types_count == 0,
-                "stream_types_count marshalled as 0 (directive removed)");
-
-    set_str(&r.headers_out.content_type, "text/html");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "text/html not in stream_types -> ELIGIBLE");
-
-    TEST_PASS("Streaming detection parity correct");
-}
-
-
-/*
- * Parity: the full decision chain in legacy order, through the wrapper.
- */
-static void
-test_check_eligibility_full_chain(void)
-{
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-    ngx_table_elt_t range_hdr;
-
-    TEST_SUBSECTION("parity: full decision chain");
-
-    init_conf(&conf);
-    conf.max_size = 10 * 1024 * 1024;
-    memset(&range_hdr, 0, sizeof(range_hdr));
-
-    init_base_request(&r);
-    reset_ffi_capture();
-
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "valid GET/200/text-html should be ELIGIBLE");
-
-    r.method = NGX_HTTP_HEAD;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "HEAD method should be ELIGIBLE");
-
-    r.method = 2;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,
-        "POST method -> INELIGIBLE_METHOD");
-
-    r.method = NGX_HTTP_GET;
-    r.headers_out.status = 404;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
-        "404 status -> INELIGIBLE_STATUS");
-
-    r.headers_out.status = NGX_HTTP_PARTIAL_CONTENT;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
-        "206 status -> INELIGIBLE_RANGE (not INELIGIBLE_STATUS)");
-
-    r.headers_out.status = NGX_HTTP_OK;
-    r.headers_in.range = &range_hdr;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
-        "Range header present -> INELIGIBLE_RANGE");
-
-    r.headers_in.range = NULL;
-    set_str(&r.headers_out.content_type, "text/event-stream");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
-        "SSE content type -> INELIGIBLE_STREAMING");
-
-    set_str(&r.headers_out.content_type, "application/json");
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE,
-        "application/json -> INELIGIBLE_CONTENT_TYPE");
-
-    set_str(&r.headers_out.content_type, "text/html");
-    r.headers_out.content_length_n = 100 * 1024 * 1024;
-    conf.max_size = 10 * 1024 * 1024;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,
-        "oversized response -> INELIGIBLE_SIZE");
-
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 0, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
-        "filter_enabled=0 -> INELIGIBLE_CONFIG");
-
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, NULL, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
-        "NULL conf -> INELIGIBLE_CONFIG");
-
-    TEST_PASS("Full eligibility decision chain parity correct");
-}
-
-
-/*
- * Parity: size boundary cases through the wrapper, including the
- * memory_budget precedence resolved by the effective-conf helper.
- */
-static void
-test_parity_size_boundary(void)
-{
-    ngx_http_request_t                  r;
-    ngx_http_markdown_conf_t            conf;
-    ngx_http_markdown_effective_conf_t  eff;
-
-    TEST_SUBSECTION("parity: size limit boundary");
-
-    init_conf(&conf);
-    init_base_request(&r);
-    reset_ffi_capture();
-
-    conf.max_size = 1024;
-
-    r.headers_out.content_length_n = 1024;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "exactly max_size should be ELIGIBLE");
-
-    r.headers_out.content_length_n = 1025;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,
-        "max_size+1 -> INELIGIBLE_SIZE");
-
-    r.headers_out.content_length_n = -1;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "missing Content-Length (-1) should be ELIGIBLE");
-
-    /* max_size=0 means unlimited. */
-    conf.max_size = 0;
-    r.headers_out.content_length_n = 100 * 1024 * 1024;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "max_size=0 (unlimited) + large CL should be ELIGIBLE");
-
-    /* eff->memory_budget stricter than conf.max_size governs. */
-    memset(&eff, 0, sizeof(eff));
-    conf.max_size = 10 * 1024 * 1024;
-    eff.memory_budget = 512;
-    r.headers_out.content_length_n = 1024;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, &eff)
-            == NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,
-        "eff.memory_budget < CL -> INELIGIBLE_SIZE");
-    TEST_ASSERT(g_have_last_input && g_last_input.body_limit == 512,
-                "body_limit resolved to memory_budget (512)");
-
-    /* eff->memory_budget unlimited sentinel falls back to max_size. */
-    eff.memory_budget = (size_t) -1;
-    r.headers_out.content_length_n = 1024;
-    TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1, &eff)
-            == NGX_HTTP_MARKDOWN_ELIGIBLE,
-        "eff.memory_budget=unlimited + CL within max_size -> ELIGIBLE");
-
-    TEST_PASS("Size limit boundary parity correct");
 }
 
 
@@ -733,6 +262,7 @@ test_method_get_head_equivalent(void)
 
     init_base_request(&r);
     reset_ffi_capture();
+    g_forced_code = NGX_HTTP_MARKDOWN_ELIGIBLE;
 
     r.method = NGX_HTTP_GET;
     e_get = ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL);
@@ -748,6 +278,7 @@ test_method_get_head_equivalent(void)
                 "GET and HEAD yield the same ELIGIBLE decision");
 
     r.method = 2; /* neither GET nor HEAD */
+    g_forced_code = NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD;
     TEST_ASSERT(
         ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
             == NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,
@@ -833,14 +364,12 @@ test_u8_to_enum_mapping(void)
 
     for (uint8_t code = 0; code < 9; code++) {
         reset_ffi_capture();
-        g_force_mode = 1;
         g_forced_code = code;
         TEST_ASSERT(
             ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
                 == expect[code],
             "FFI u8 maps to matching eligibility enum");
     }
-    g_force_mode = 0;
 
     TEST_PASS("u8-to-enum mapping correct");
 }
@@ -971,6 +500,7 @@ test_zero_limit_buffer_initializes_lazily(void)
     memset(&pool, 0, sizeof(pool));
     pool.log = &log;
     test_alloc_calls = 0;
+    test_free_calls = 0;
 
     TEST_ASSERT(ngx_http_markdown_buffer_init(&buffer, 0, &pool) == NGX_OK,
                 "zero limit should initialize as unlimited");
@@ -1000,6 +530,7 @@ test_buffer_release_frees_backing_store(void)
     memset(&pool, 0, sizeof(pool));
     pool.log = &log;
     test_alloc_calls = 0;
+    test_free_calls = 0;
 
     TEST_ASSERT(ngx_http_markdown_buffer_init(&buffer, 0, &pool) == NGX_OK,
                 "init should succeed");
@@ -1016,6 +547,8 @@ test_buffer_release_frees_backing_store(void)
                 "release should free the backing store");
     TEST_ASSERT(buffer.size == 0 && buffer.capacity == 0,
                 "release should reset size/capacity");
+    TEST_ASSERT(test_free_calls == 1,
+                "release should free the backing store exactly once");
 
     /* Idempotent: second release is a no-op. */
     ngx_http_markdown_buffer_release(&buffer);
@@ -1024,6 +557,8 @@ test_buffer_release_frees_backing_store(void)
 
     /* Pool cleanup after active release must not double-free. */
     test_cleanup.handler(test_cleanup.data);
+    TEST_ASSERT(test_free_calls == 1,
+                "pool cleanup after release must not access or free storage");
     TEST_PASS("buffer_release frees backing store and is idempotent");
 }
 
@@ -1043,11 +578,6 @@ main(void)
     printf("eligibility_impl Tests (production code)\n");
     printf("========================================\n");
 
-    test_parity_content_type_default();
-    test_parity_content_type_custom_allowlist();
-    test_parity_streaming_detection();
-    test_check_eligibility_full_chain();
-    test_parity_size_boundary();
     test_method_get_head_equivalent();
     test_marshalling_fidelity();
     test_u8_to_enum_mapping();

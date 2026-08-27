@@ -56,7 +56,7 @@ assert_detector_flags() {
         && [[ "${DETECTOR_OUTPUT}" == *"ERROR"*"negated conditional"* ]]; then
         echo "  PASS: ${label} flagged"
     else
-        echo "  FAIL: ${label} not flagged"
+        echo "  FAIL: ${label} not flagged" >&2
         failures=$((failures + 1))
     fi
     return 0
@@ -67,10 +67,10 @@ assert_detector_clean() {
     local label="$2"
     run_detector "${fixture}"
     if [[ "${DETECTOR_RC}" -ne 0 ]]; then
-        echo "  FAIL: ${label} detector exited ${DETECTOR_RC}"
+        echo "  FAIL: ${label} detector exited ${DETECTOR_RC}" >&2
         failures=$((failures + 1))
     elif [[ "${DETECTOR_OUTPUT}" == *"ERROR"*"negated conditional"* ]]; then
-        echo "  FAIL: ${label} wrongly flagged"
+        echo "  FAIL: ${label} wrongly flagged" >&2
         failures=$((failures + 1))
     else
         echo "  PASS: ${label} clean"
@@ -139,6 +139,35 @@ assert_detector_flags "${TMPDIR_TEST}/case1" "multi-line dead branch"
 assert_detector_flags "${TMPDIR_TEST}/case2" "single-line dead branch"
 assert_detector_clean "${TMPDIR_TEST}/case3" "capture idiom"
 assert_detector_clean "${TMPDIR_TEST}/case4" "plain status usage"
+
+# Fixture 4b: a terminator after a command on the same line must close the
+# negated branch; otherwise the following clean status would inherit stale
+# branch state.
+mkdir -p "${TMPDIR_TEST}/case4b"
+cat > "${TMPDIR_TEST}/case4b/same_line_terminator.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+if ! probe; then
+    echo "handled"; fi
+echo "status"
+EOF
+assert_detector_clean "${TMPDIR_TEST}/case4b" "same-line fi terminator"
+
+# Fixture 4c: an operand named `fi` must not close the current block before
+# the actual terminator.  The nested clean branch remains under the outer
+# negated branch and therefore its status read must still be flagged.
+mkdir -p "${TMPDIR_TEST}/case4c"
+cat > "${TMPDIR_TEST}/case4c/terminator_operand.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+if ! [ "$mode" = fi ]; then
+    if true; then
+        rc=$?
+    fi
+fi
+EOF
+assert_detector_flags "${TMPDIR_TEST}/case4c" \
+    "terminator operand is not a block close"
 
 # Fixture 5: nested control flow must retain the outer negated branch.
 mkdir -p "${TMPDIR_TEST}/case5"

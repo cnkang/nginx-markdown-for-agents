@@ -58,8 +58,7 @@ typedef size_t          ngx_msec_t;
 
 /* Streaming constants (mirror module header) */
 #define PATH_FULLBUFFER   0
-#define PATH_INCREMENTAL  1
-#define PATH_STREAMING    2
+#define PATH_STREAMING    1
 
 #define POLICY_OFF    0
 #define POLICY_AUTO   1
@@ -96,8 +95,6 @@ typedef size_t          ngx_msec_t;
 typedef struct {
     ngx_uint_t   streaming_policy;       /* resolved policy value */
     ngx_uint_t   conditional_requests;
-    size_t       large_body_threshold;
-    size_t       streaming_auto_threshold;
     size_t       max_size;
     size_t       streaming_budget;
     ngx_uint_t   on_error;
@@ -185,7 +182,7 @@ static void test_preserve_duplicate_directive(void);
  * 4. conditional_requests full_support -> PATH_FULLBUFFER
  * 5. Content-Type is text/event-stream -> PATH_FULLBUFFER
  * 6. policy == force -> PATH_STREAMING
- * 7. policy == auto + CL >= threshold -> PATH_STREAMING
+ * 7. policy == auto + CL >= fixed threshold -> PATH_STREAMING
  * 8. policy == auto + no CL -> PATH_STREAMING
  * 9. policy == auto + CL < threshold -> PATH_FULLBUFFER
  */
@@ -231,8 +228,7 @@ test_select_processing_path(const test_conf_t *conf,
 
     /* Rules 7-9: policy auto */
     if (r->content_length >= 0
-        && (size_t) r->content_length
-           < conf->streaming_auto_threshold)
+        && (size_t) r->content_length < (1024 * 1024))
     {
         /* CL < auto_threshold: full-buffer */
         return PATH_FULLBUFFER;
@@ -479,18 +475,17 @@ test_policy_auto_large_cl(void)
     memset(&conf, 0, sizeof(conf));
     conf.streaming_policy = POLICY_AUTO;
     conf.conditional_requests = CONDITIONAL_DISABLED;
-    conf.streaming_auto_threshold = 1024;
 
     memset(&req, 0, sizeof(req));
     req.method = NGX_HTTP_GET;
     req.status = NGX_HTTP_OK;
-    req.content_length = 2048;
+    req.content_length = 2 * 1024 * 1024;
     req.content_type = "text/html";
 
     TEST_ASSERT(
         test_select_processing_path(&conf, &req)
             == PATH_STREAMING,
-        "auto + CL >= threshold should select streaming");
+        "auto + large CL should select streaming");
     TEST_PASS("auto + large CL selects streaming");
 }
 
@@ -505,18 +500,17 @@ test_policy_auto_small_cl(void)
     memset(&conf, 0, sizeof(conf));
     conf.streaming_policy = POLICY_AUTO;
     conf.conditional_requests = CONDITIONAL_DISABLED;
-    conf.streaming_auto_threshold = 1024;
 
     memset(&req, 0, sizeof(req));
     req.method = NGX_HTTP_GET;
     req.status = NGX_HTTP_OK;
-    req.content_length = 512;
+    req.content_length = 512 * 1024;
     req.content_type = "text/html";
 
     TEST_ASSERT(
         test_select_processing_path(&conf, &req)
             == PATH_FULLBUFFER,
-        "auto + CL < threshold should select full-buffer");
+        "auto + small CL should select full-buffer");
     TEST_PASS("auto + small CL selects full-buffer");
 }
 
@@ -531,7 +525,6 @@ test_policy_auto_no_cl(void)
     memset(&conf, 0, sizeof(conf));
     conf.streaming_policy = POLICY_AUTO;
     conf.conditional_requests = CONDITIONAL_DISABLED;
-    conf.streaming_auto_threshold = 1024;
 
     memset(&req, 0, sizeof(req));
     req.method = NGX_HTTP_GET;
@@ -1734,7 +1727,7 @@ test_timeout_precommit(void)
 
 /* ================================================================
  * 15.6 Streaming Headers Policy
- * Feature: streaming-failure-cache-semantics, shadow_diff_total ≤ shadow_total invariant, backward compatibility
+ * Feature: streaming-failure-cache-semantics
  *
  * Validates: commit boundary header modifications
  *
@@ -2141,7 +2134,7 @@ test_commit_boundary_strips_upstream_etag(void)
 
 /*
  * Verify that all pre-commit fail-open paths record
- * the STREAMING_PRECOMMIT_FAILOPEN reason code and
+ * the streaming_precommit_failopen event and
  * increment precommit_failopen_total.
  *
  * This covers decompression failure, size overflow,
@@ -2263,7 +2256,7 @@ test_init_failure_respects_error_policy(void)
  * nginx_markdown_passthrough_total continue to account
  * for streaming fail-open events.
  *
- * Validates: backward compatibility of failopen_count
+ * Validates: stable failopen_count metric semantics
  */
 static void
 test_streaming_failopen_increments_global_counter(void)
@@ -2776,8 +2769,6 @@ typedef struct {
     unsigned  failed_total;
     unsigned  succeeded_total;
     unsigned  budget_exceeded_total;
-    unsigned  shadow_total;
-    unsigned  shadow_diff_total;
 } test_streaming_metrics_t;
 
 
@@ -3752,350 +3743,8 @@ test_precommit_memory_limit_budget_parity(void)
 }
 
 
-/*
- * Shadow-mode tests are retained as an opt-in historical fixture.  The
- * production directive and runtime path were removed from the 0.9.2
- * contract, so the fixture must not participate in the default unit suite.
- */
-#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
 /* ================================================================
- * Shadow Mode Configuration Tests (shadow mode and TTFB)
- *
- * Validates: FALLBACK always routes to full-buffer (shadow directive), backward compatibility
- * (backward compatibility)
- * ================================================================ */
-
-/* Forward declarations for shadow config tests */
-static void test_config_shadow_legal_values(void);
-static void test_config_shadow_default_value(void);
-static void test_config_shadow_inheritance(void);
-static void test_config_shadow_invalid_values(void);
-
-
-/*
- * Verify that on/off are accepted as legal values for
- * markdown_streaming_shadow.
- *
- * Validates: FALLBACK always routes to full-buffer
- */
-static void
-test_config_shadow_legal_values(void)
-{
-    TEST_SUBSECTION(
-        "Config: streaming_shadow legal values");
-
-    /*
-     * ngx_flag_t uses 0 (off) and 1 (on).
-     * Verify the two values are distinct.
-     */
-    {
-        struct {
-            const char  *name;
-            ngx_flag_t   value;
-        } flag_table[] = {
-            { "off", 0 },
-            { "on",  1 }
-        };
-
-        for (size_t i = 0; i < ARRAY_SIZE(flag_table);
-             i++)
-        {
-            TEST_ASSERT(
-                flag_table[i].name != NULL,
-                "Flag entry name should not be NULL");
-        }
-
-        TEST_ASSERT(flag_table[0].value == 0,
-            "off should be 0");
-        TEST_ASSERT(flag_table[1].value == 1,
-            "on should be 1");
-        TEST_ASSERT(
-            flag_table[0].value != flag_table[1].value,
-            "on and off must be distinct values");
-    }
-
-    TEST_PASS(
-        "streaming_shadow legal values accepted");
-}
-
-
-/*
- * Verify that the default value is off (0).
- *
- * The merge logic uses:
- *   ngx_conf_merge_value(conf->stream.shadow,
- *       prev->stream.shadow, 0);
- *
- * Validates: FALLBACK always routes to full-buffer (default = off)
- */
-static void
-test_config_shadow_default_value(void)
-{
-    ngx_flag_t  streaming_shadow;
-
-    TEST_SUBSECTION(
-        "Config: streaming_shadow default value");
-
-    /*
-     * Simulate unset config: NGX_CONF_UNSET
-     * triggers the default in merge.
-     */
-    streaming_shadow = -1;  /* NGX_CONF_UNSET */
-
-    /* Simulate merge with default */
-    if (streaming_shadow == -1) {
-        streaming_shadow = 0;  /* default: off */
-    }
-
-    TEST_ASSERT(streaming_shadow == 0,
-        "Default streaming_shadow should be off (0)");
-
-    TEST_PASS(
-        "streaming_shadow defaults to off");
-}
-
-
-/*
- * Verify that streaming_shadow inherits from parent
- * when child is unset.
- *
- * Validates: FALLBACK always routes to full-buffer (http/server/location context)
- */
-static void
-test_config_shadow_inheritance(void)
-{
-    ngx_flag_t  parent_shadow;
-    ngx_flag_t  child_shadow;
-
-    TEST_SUBSECTION(
-        "Config: streaming_shadow inheritance");
-
-    /* Parent sets on, child unset -> inherits on */
-    parent_shadow = 1;
-    child_shadow = -1;  /* NGX_CONF_UNSET */
-
-    if (child_shadow == -1) {
-        child_shadow = parent_shadow;
-    }
-
-    TEST_ASSERT(child_shadow == 1,
-        "Child should inherit parent shadow=on");
-
-    /* Parent sets off, child unset -> inherits off */
-    parent_shadow = 0;
-    child_shadow = -1;
-
-    if (child_shadow == -1) {
-        child_shadow = parent_shadow;
-    }
-
-    TEST_ASSERT(child_shadow == 0,
-        "Child should inherit parent shadow=off");
-
-    /* Child overrides parent */
-    parent_shadow = 0;
-    child_shadow = 1;
-
-    /* No merge needed, child already set */
-    TEST_ASSERT(child_shadow == 1,
-        "Child override should take precedence");
-
-    TEST_PASS(
-        "streaming_shadow inheritance works correctly");
-}
-
-
-/*
- * Verify that invalid values are rejected.
- *
- * Since ngx_conf_set_flag_slot only accepts on/off,
- * any other value causes NGINX config parse failure.
- * We verify the flag semantics here.
- *
- * Validates: FALLBACK always routes to full-buffer
- */
-static void
-test_config_shadow_invalid_values(void)
-{
-    const char  *invalid_values[] = {
-        "yes", "enabled", "true", "1",
-        "no", "disabled", "false", "0", ""
-    };
-    size_t       num_values;
-
-    TEST_SUBSECTION(
-        "Config: streaming_shadow invalid values");
-
-    num_values = ARRAY_SIZE(invalid_values);
-
-    for (size_t i = 0; i < num_values; i++) {
-        const char  *val;
-        int          is_valid;
-
-        val = invalid_values[i];
-
-        /*
-         * Simulate ngx_conf_set_flag_slot lookup:
-         * only "on" and "off" are valid.
-         */
-        is_valid = (strcmp(val, "on") == 0
-                    || strcmp(val, "off") == 0);
-
-        TEST_ASSERT(is_valid == 0,
-            "Invalid value should not match flag");
-    }
-
-    TEST_PASS(
-        "streaming_shadow rejects invalid values "
-        "(enforced by ngx_conf_set_flag_slot)");
-}
-
-
-/* ================================================================
- * Shadow Mode Runtime Tests (shadow mode and TTFB)
- *
- * These tests verify shadow mode behavior using lightweight
- * stubs.  The actual FFI calls are tested via e2e tests.
- *
- * Validates: decompression safety, engine selection / shadow error isolation, shadow_diff_total ≤ shadow_total invariant
- * ================================================================ */
-
-/* Forward declarations for shadow runtime tests */
-static void test_shadow_metrics_increment(void);
-static void test_shadow_diff_metrics(void);
-static void test_shadow_error_isolation(void);
-
-
-/*
- * Verify that shadow_total increments when shadow mode runs.
- *
- * Validates: shadow_diff_total ≤ shadow_total invariant (shadow_diff_total <= shadow_total)
- *
- * Limitation: This test directly manipulates counters rather than
- * exercising the production ngx_http_markdown_shadow_compare()
- * branch logic, because that function requires a full NGINX
- * request context and FFI.  It verifies counter types and the
- * shadow_diff_total <= shadow_total invariant only.  End-to-end
- * shadow mode behavior is covered by integration/e2e tests.
- */
-static void
-test_shadow_metrics_increment(void)
-{
-    test_streaming_metrics_t  m;
-
-    TEST_SUBSECTION(
-        "Shadow: shadow_total increments");
-
-    memset(&m, 0, sizeof(m));
-
-    /* Simulate shadow run */
-    m.shadow_total++;
-
-    TEST_ASSERT(m.shadow_total == 1,
-        "shadow_total should be 1 after one run");
-    TEST_ASSERT(m.shadow_diff_total == 0,
-        "shadow_diff_total should be 0 when no diff");
-    TEST_ASSERT(
-        m.shadow_diff_total <= m.shadow_total,
-        "shadow_diff_total <= shadow_total invariant");
-
-    TEST_PASS(
-        "shadow_total increments correctly");
-}
-
-
-/*
- * Verify that shadow_diff_total increments only on diff.
- *
- * Validates: shadow_diff_total ≤ shadow_total invariant
- *
- * Limitation: Same as test_shadow_metrics_increment — direct
- * counter manipulation, not production branch logic.
- */
-static void
-test_shadow_diff_metrics(void)
-{
-    test_streaming_metrics_t  m;
-
-    TEST_SUBSECTION(
-        "Shadow: shadow_diff_total on diff");
-
-    memset(&m, 0, sizeof(m));
-
-    /* Two shadow runs, one with diff */
-    m.shadow_total++;
-    /* no diff */
-
-    m.shadow_total++;
-    m.shadow_diff_total++;  /* diff detected */
-
-    TEST_ASSERT(m.shadow_total == 2,
-        "shadow_total should be 2");
-    TEST_ASSERT(m.shadow_diff_total == 1,
-        "shadow_diff_total should be 1");
-    TEST_ASSERT(
-        m.shadow_diff_total <= m.shadow_total,
-        "shadow_diff_total <= shadow_total invariant");
-
-    TEST_PASS(
-        "shadow_diff_total increments on diff only");
-}
-
-
-/*
- * Verify that shadow mode errors do not affect the
- * client response path (error isolation).
- *
- * Validates: engine selection / shadow error isolation
- */
-static void
-test_shadow_error_isolation(void)
-{
-    test_streaming_metrics_t  m;
-    ngx_int_t                 client_rc;
-
-    TEST_SUBSECTION(
-        "Shadow: error isolation");
-
-    memset(&m, 0, sizeof(m));
-
-    /*
-     * Simulate: full-buffer succeeds (client_rc = NGX_OK),
-     * then shadow streaming init fails.
-     * Client response must not be affected.
-     *
-     * shadow_total increments unconditionally at function
-     * entry (per C2 fix) to reflect attempts, not only
-     * successful comparisons.  This keeps the
-     * shadow_diff_rate formula well-defined even when the
-     * streaming engine fails to initialize.
-     */
-    client_rc = NGX_OK;
-
-    /* Shadow attempt recorded at entry before init */
-    m.shadow_total++;
-
-    /* Shadow init failure — no diff counter increment */
-    /* streaming error logged but ignored */
-
-    TEST_ASSERT(client_rc == NGX_OK,
-        "Client response unaffected by shadow error");
-    TEST_ASSERT(m.shadow_total == 1,
-        "shadow_total should increment on shadow "
-        "attempt (even when init fails)");
-    TEST_ASSERT(m.shadow_diff_total == 0,
-        "shadow_diff_total not incremented on "
-        "init failure");
-
-    TEST_PASS(
-        "Shadow errors isolated from client response");
-}
-
-
-#endif /* MARKDOWN_STREAMING_SHADOW_DEBUG */
-
-/* ================================================================
- * TTFB Gauge Regression Tests (shadow mode and TTFB)
+ * TTFB Gauge Regression Tests
  *
  * Validates that the TTFB latch in send_output and
  * resume_pending correctly distinguishes non-empty data
@@ -5163,23 +4812,8 @@ main(void)
     test_metrics_deferred_lastbuf_again_then_ok();
     test_metrics_deferred_lastbuf_again_then_error();
 
-#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
     TEST_SECTION(
-        "17.1 streaming_shadow Config Parsing");
-    test_config_shadow_legal_values();
-    test_config_shadow_default_value();
-    test_config_shadow_inheritance();
-    test_config_shadow_invalid_values();
-
-    TEST_SECTION(
-        "17.2 Shadow Mode Runtime");
-    test_shadow_metrics_increment();
-    test_shadow_diff_metrics();
-    test_shadow_error_isolation();
-#endif /* MARKDOWN_STREAMING_SHADOW_DEBUG */
-
-    TEST_SECTION(
-        "17.3 TTFB Gauge Regression");
+        "17.1 TTFB Gauge Regression");
     test_ttfb_empty_lastbuf_no_record();
     test_ttfb_nonempty_pending_records();
 

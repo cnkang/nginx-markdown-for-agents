@@ -4,7 +4,6 @@
 # Install: pip install -r requirements-dev.txt
 # Used by: pytest tools/release/gates/tests/
 #          pytest tools/release/matrix/tests/
-#          pytest tools/release/legacy/tests/
 #          pytest tests/property/
 -r requirements-perf.txt
 hypothesis==6.135.2

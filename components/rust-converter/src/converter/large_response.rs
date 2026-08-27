@@ -9,6 +9,8 @@
 //!    appended, eliminating the need for a separate full-pass normalization step
 //!    after traversal completes.
 
+use super::normalize::{closes_fence, opens_fence};
+
 /// Threshold multiplier for pre-allocating the output buffer.
 /// For large documents, we estimate output at ~40% of input size
 /// (HTML-to-Markdown typically reduces size by 60–85%).
@@ -58,11 +60,11 @@ pub(crate) struct FusedNormalizer {
     output: String,
     /// Whether the previous line was blank (for collapsing consecutive blanks).
     prev_blank: bool,
-    /// Length of the active opening fence (number of backticks), or `None`
-    /// when outside a fenced code block.  A closing fence must have at least
-    /// as many backticks as the opening fence and contain nothing else
+    /// Character and length of the active opening fence, or `None` when
+    /// outside a fenced code block. A closing fence must use the same
+    /// character, have at least the opening length, and contain nothing else
     /// (after trimming), matching CommonMark semantics.
-    active_fence_len: Option<usize>,
+    active_fence: Option<(u8, usize)>,
 }
 
 impl FusedNormalizer {
@@ -75,7 +77,7 @@ impl FusedNormalizer {
         Self {
             output: String::with_capacity(capacity),
             prev_blank: false,
-            active_fence_len: None,
+            active_fence: None,
         }
     }
 
@@ -93,18 +95,18 @@ impl FusedNormalizer {
         let line = line.strip_suffix('\r').unwrap_or(line);
 
         let trimmed_start = line.trim_start();
-        let fence_len = super::normalize::measure_fence_len(line);
-        let is_opening_fence = self.active_fence_len.is_none() && fence_len >= 3;
-        let is_closing_fence = self
-            .active_fence_len
-            .map(|len| fence_len >= len && trimmed_start[fence_len..].trim().is_empty())
-            .unwrap_or(false);
+        let fence = super::normalize::measure_fence(line);
+        let fence_info = fence
+            .and_then(|(_, len)| trimmed_start.get(len..))
+            .unwrap_or("");
+        let is_opening_fence = self.active_fence.is_none() && opens_fence(fence, fence_info);
+        let is_closing_fence = closes_fence(self.active_fence, fence, fence_info);
 
         if is_opening_fence || is_closing_fence {
             if is_opening_fence {
-                self.active_fence_len = Some(fence_len);
+                self.active_fence = fence;
             } else {
-                self.active_fence_len = None;
+                self.active_fence = None;
             }
             self.output.push_str(line.trim_end());
             self.output.push('\n');
@@ -112,7 +114,7 @@ impl FusedNormalizer {
             return;
         }
 
-        if self.active_fence_len.is_some() {
+        if self.active_fence.is_some() {
             self.output.push_str(line);
             self.output.push('\n');
             self.prev_blank = false;
@@ -228,53 +230,104 @@ mod tests {
     }
 
     /// Reference implementation matching `MarkdownConverter::normalize_output`.
+    ///
+    /// Kept as an independent mirror of the production algorithm: the fence
+    /// predicates below are deliberately re-derived here instead of shared,
+    /// so a production regression cannot silently fold into the reference.
     fn normalize_reference(input: &str) -> String {
         let output = input.replace("\r\n", "\n");
         let mut result = String::with_capacity(output.len());
         let mut prev_blank = false;
-        let mut active_fence_len: Option<usize> = None;
+        let mut active_fence: Option<(u8, usize)> = None;
 
         for line in output.lines() {
-            let trimmed_start = line.trim_start();
-            let fence_len = crate::converter::normalize::measure_fence_len(line);
-            let is_opening_fence = active_fence_len.is_none() && fence_len >= 3;
-            let is_closing_fence = active_fence_len
-                .map(|len| fence_len >= len && trimmed_start[fence_len..].trim().is_empty())
-                .unwrap_or(false);
+            let fence = crate::converter::normalize::measure_fence(line);
+            let fence_info = fence
+                .and_then(|(_, len)| line.trim_start().get(len..))
+                .unwrap_or("");
 
-            if is_opening_fence || is_closing_fence {
-                if is_opening_fence {
-                    active_fence_len = Some(fence_len);
-                } else {
-                    active_fence_len = None;
-                }
-                result.push_str(line.trim_end());
-                result.push('\n');
+            if active_fence.is_none() && reference_opens_fence(fence, fence_info) {
+                active_fence = fence;
+                push_reference_fence_boundary(&mut result, line);
+                prev_blank = false;
+                continue;
+            }
+            if reference_closes_fence(active_fence, fence, fence_info) {
+                active_fence = None;
+                push_reference_fence_boundary(&mut result, line);
                 prev_blank = false;
                 continue;
             }
 
-            if active_fence_len.is_some() {
-                result.push_str(line);
-                result.push('\n');
-                prev_blank = false;
-                continue;
-            }
-
-            let trimmed = line.trim_end();
-            if trimmed.is_empty() {
-                if !prev_blank {
-                    result.push('\n');
-                    prev_blank = true;
-                }
-            } else {
-                result.push_str(&normalize_line_whitespace(trimmed));
-                result.push('\n');
-                prev_blank = false;
-            }
+            prev_blank =
+                push_reference_body_line(&mut result, line, active_fence.is_some(), prev_blank);
         }
 
         fix_reference_trailing_newlines(result)
+    }
+
+    /// Whether a fence marker opens a new block when none is active:
+    /// three or more marker characters and no backtick in a backtick
+    /// fence's info string.
+    fn reference_opens_fence(fence: Option<(u8, usize)>, fence_info: &str) -> bool {
+        match fence {
+            Some((marker, len)) => {
+                let ch = marker as char;
+                len >= 3 && (ch == '~' || !fence_info.contains('`'))
+            }
+            None => false,
+        }
+    }
+
+    /// Whether a fence marker closes the active block: same character, at
+    /// least the opening length, nothing else on the line.
+    fn reference_closes_fence(
+        active_fence: Option<(u8, usize)>,
+        fence: Option<(u8, usize)>,
+        fence_info: &str,
+    ) -> bool {
+        match (active_fence, fence) {
+            (Some((active_marker, active_len)), Some((marker, len))) => {
+                let active_ch = active_marker as char;
+                let ch = marker as char;
+                active_ch == ch && len >= active_len && fence_info.trim().is_empty()
+            }
+            _ => false,
+        }
+    }
+
+    /// Append a fence boundary line verbatim apart from trailing whitespace.
+    fn push_reference_fence_boundary(result: &mut String, line: &str) {
+        result.push_str(line.trim_end());
+        result.push('\n');
+    }
+
+    /// Append one reference-normalized body line and return the blank-run state.
+    ///
+    /// Lines inside a code block are preserved verbatim; outside, trailing
+    /// whitespace is stripped, whitespace runs collapse, and consecutive
+    /// blank lines reduce to a single newline.
+    fn push_reference_body_line(
+        result: &mut String,
+        line: &str,
+        in_code_block: bool,
+        prev_blank: bool,
+    ) -> bool {
+        if in_code_block {
+            result.push_str(line);
+            result.push('\n');
+            return false;
+        }
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            if !prev_blank {
+                result.push('\n');
+            }
+            return true;
+        }
+        result.push_str(&normalize_line_whitespace(trimmed));
+        result.push('\n');
+        false
     }
 
     fn fix_reference_trailing_newlines(mut result: String) -> String {

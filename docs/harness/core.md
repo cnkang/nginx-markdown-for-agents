@@ -64,10 +64,10 @@ Run checks in phases:
 2. Focused semantic checks
    - one or more pack-specific commands from the routing manifest
 3. Coverage (when touching production source files)
-   - C module changes: `make coverage-c` (advisory per-file thresholds logged but not blocking)
-   - Rust converter changes: `make coverage-rust`
-   - Aggregate 80% minimum as release-readiness advisory bar (logged, not CI-blocking)
-   - Critical paths (auth, error handling, FFI boundary, conditional requests): 90% target
+   - C module changes: `make coverage-c` followed by `make coverage-gate`
+   - Rust converter changes: `make coverage-rust` followed by `make coverage-gate`
+   - Aggregate 80% minimum for both C and Rust, enforced by `coverage_gate.py`
+   - Critical paths (auth, error handling, FFI boundary, conditional requests): 90% line coverage, enforced by `coverage_gate.py`
 4. Broader umbrella checks
    - runtime smoke, replay-driven comparisons, or release-level checks
 
@@ -177,11 +177,11 @@ Repo-owned docs keep durable truth. The state carrier keeps execution memory.
 
 ## Coverage Standards
 
-- **Minimum**: 80% aggregate line coverage for both the C module and the Rust converter. The coverage gate (`coverage_gate.py`) enforces this bound and blocks below it
+- **Minimum**: 80% aggregate line coverage for both the C module and the Rust converter. The repository gate `tools/ci/coverage_gate.py` enforces this bound and blocks below it
 - **Target**: 90% aggregate line coverage. This target is aspirational and not enforced
-- **Critical paths** (auth, error handling, FFI boundary, conditional requests): 90% line coverage for new code. This threshold is advisory — the gate logs it at runtime but does not block on it
-- The project collects coverage via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`)
-- Per-file thresholds stay advisory: the programmatic gate enforces only the aggregate minimum above
+- **Critical paths** (auth, error handling, FFI boundary, conditional requests): The same gate enforces the 90% line-coverage threshold
+- The project collects coverage via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`). Both feed `tools/ci/coverage_gate.py`
+- The coverage gate merges critical-path coverage by source file and line, so default and streaming Rust reports cannot double-count the same source
 - The lcov report is always produced regardless of coverage level, ensuring SonarCloud trends remain visible
 
 ## Spec Template Convention
@@ -219,7 +219,7 @@ pre-output checklist.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-24 | Kang | Coverage standards now state enforcement explicitly: 80 percent aggregate blocks via coverage_gate.py; 90 percent target and critical-path thresholds are advisory |
+| 0.9.2 | 2026-08-25 | Kang | Coverage standards now enforce 80 percent aggregate and 90 percent critical-path line coverage via coverage_gate.py |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.8.2 | 2026-06-23 | Kang | Added checkable-outcome guidance for risk cards and verification closeout |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

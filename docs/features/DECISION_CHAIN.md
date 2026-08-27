@@ -11,8 +11,9 @@ lowercase snake_case strings** in both:
 - Decision log entries: `markdown: reason=<code> ...` (see `components/nginx-module/src/ngx_http_markdown_decision_log_impl.h`)
 - Prometheus metrics labels (`reason="<code>"`, see `components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h`)
 
-C-only streaming engine labels are internal event names, not canonical reason
-codes or Prometheus label values. See the boundary below.
+Streaming engine transitions are internal event names, not canonical reason
+codes or Prometheus label values. The logger emits them in the bounded
+`event=` field. See the boundary below.
 
 The single source of truth for the reason code list is
 `components/rust-converter/reason_registry.toml`. The Rust, C, diagnostics, and
@@ -39,7 +40,7 @@ flowchart TD
     H -->|No| J{"Content-Type<br/>text/html?"}
     J -->|No| K["not_eligible"]
     J -->|Yes| L{"Size within<br/>budget?"}
-    L -->|No| M["not_eligible"]
+    L -->|No| M["memory_budget_exceeded"]
     L -->|Yes| N{"Auth policy<br/>denies request?"}
     N -->|Yes| O["not_eligible"]
     N -->|No| P{"Accept header<br/>requests MD?"}
@@ -52,13 +53,15 @@ flowchart TD
     T -->|Failure + fail_closed| W["failed_closed"]
 ```
 
-> **Note on eligibility granularity.** Checks 2 through 8 (method, status, range,
-> content-type, size, auth) no longer produce distinct reason codes. They are
-> collapsed into a single canonical code `not_eligible`, because the request
-> state is the same — *not eligible for conversion* — regardless of which
-> specific check short-circuited. The individual failing check is still visible
-> in the decision log's structured metadata (`method`, `content_type`, `status`)
-> for diagnostics, but the reason code string is `not_eligible`.
+> **Note on eligibility granularity.** Checks 2 through 5 and check 7
+> (method, status, range, content-type, auth) no longer produce distinct reason
+> codes. The module maps them to a single canonical code `not_eligible`, because
+> the request state is the same — *not eligible for conversion* — regardless of
+> which specific check short-circuited. The individual failing check is still
+> visible in the decision log's structured metadata (`method`, `content_type`,
+> `status`) for diagnostics, but the reason code string is `not_eligible`.
+> The size check (check 6) is the exception: an over-limit response reports the
+> dedicated `memory_budget_exceeded` classification, as [Parser Budget](PARSER_BUDGET.md) documents.
 
 ## Check Order
 
@@ -71,15 +74,16 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 | 3 | Response status | Is the upstream response status `200 OK`? A `206 Partial Content` status is classified as a range request (same reason code as check 4). Other non-200 responses (redirects, errors, etc.) are not eligible. | `not_eligible` |
 | 4 | Range request | Is this a range request (`Range` header present)? Range requests are not eligible because partial content cannot be converted. | `not_eligible` |
 | 5 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `not_eligible` |
-| 6 | Response size | Is the response body size within the configured `markdown_limits conversion_memory=` budget? This is a hard cumulative input-size cap applied to both buffered and streaming paths. Oversized responses are not eligible. | `not_eligible` |
+| 6 | Response size | Is the response body size within the configured `markdown_limits conversion_memory=` budget? This is a hard cumulative input-size cap applied to both buffered and streaming paths. The cap gates eligibility and blocks conversion before the FFI attempt. Oversized input is never truncated. | `memory_budget_exceeded` |
 | 7 | Auth policy | Is the request authenticated and `markdown_auth_policy` set to `deny`? Authenticated requests are detected through the existing `Authorization` header and auth-cookie checks. | `not_eligible` |
 | 8 | Accept negotiation | Does the `Accept` header indicate the client wants Markdown? Evaluated per `markdown_accept` (`strict` | `wildcard` | `force`). | `skipped_accept_reject` / `skipped_no_accept` / `skipped_accept` (see below) |
 | 9 | Conversion attempt | All checks passed. The module attempts HTML-to-Markdown conversion. | _(see outcome determination below)_ |
 
 ### Accept negotiation outcomes
 
-Checks 2–7 collapse to the canonical `not_eligible` reason when they reject a
-request. Accept negotiation is the exception: when the request is otherwise
+Checks 2–5 and 7 collapse to the canonical `not_eligible` reason when they
+reject a request, and the size check (6) reports `memory_budget_exceeded`.
+Accept negotiation is the other exception: when the request is otherwise
 eligible but the `Accept` header does not resolve in favor of Markdown, the module emits one of three distinct skip
 reason codes (this is the one eligibility branch that preserves sub-case
 granularity, because the failure cause is operationally meaningful for content
@@ -165,27 +169,29 @@ Every request that enters the decision chain ends up in one of four mutually exc
 
 Operators can determine request state counts from metrics and logs:
 - NOT_ENABLED: count of `reason="disabled"` in decision log entries (`grep "reason=disabled" error.log`)
-- SKIPPED: count of `reason="not_eligible"`, `reason="skipped_*"` in decision log entries
+- SKIPPED: count of `reason="not_eligible"`, `reason="skipped_*"`, and
+  `reason="bypass_no_transform"` in decision log entries
 - CONVERTED: `nginx_markdown_requests_total{outcome="converted"}` metric (successful deliveries are additionally tracked by `nginx_markdown_conversion_deliveries_total`)
-- FAILED_OPEN: `nginx_markdown_requests_total{outcome="failed_open"}` (`failed_open`)
-- FAILED_CLOSED: `nginx_markdown_requests_total{outcome="failed_closed"}` (`failed_closed`)
+- FAILED: `nginx_markdown_requests_total{outcome="failed_open"}` (`failed_open`)
+- FAILED: `nginx_markdown_requests_total{outcome="failed_closed"}` (`failed_closed`)
 
 ## Reason Code Reference
 
 The registry declares the complete set of 27 reason codes in
 `components/rust-converter/reason_registry.toml`. The generator projects it
-into `reason_code.rs`, C metadata, diagnostics aliases, and release artifacts.
+into `reason_code.rs`, C metadata, diagnostics lookup, and release artifacts.
 The projections mirror [Observability Schema v2](../architecture/observability-schema-v2.md).
 All `as_str()` values are lowercase snake_case. The table below maps the
 high-level decision outcomes described in this document to their reason codes.
 The full registry (including decompression, dynconf, and canonical streaming
-outcome codes) lives in the schema document. C-only streaming event labels are
-not registry entries.
+outcome codes) lives in the schema document. Streaming implementation events
+are not registry entries.
 
 | Decision Outcome | Reason Code | Request State | Description |
 |---|---|---|---|
 | Module disabled | `disabled` | NOT_ENABLED | Module disabled by configuration for this scope |
-| Not eligible (method/status/range/content-type/size/auth) | `not_eligible` | SKIPPED | Response not eligible for conversion |
+| Not eligible (method/status/range/content-type/auth) | `not_eligible` | SKIPPED | Response not eligible for conversion |
+| Size gate blocked (`markdown_limits conversion_memory=` exceeded) | `memory_budget_exceeded` | FAILED | Hard cumulative input-size cap blocks conversion before the FFI attempt. The input is never truncated, and the primary outcome follows `markdown_error_policy` |
 | Accept negotiation — no match | `skipped_accept` | SKIPPED | Accept header present but does not request Markdown |
 | Accept negotiation — no header (strict) | `skipped_no_accept` | SKIPPED | No Accept header present and `markdown_accept` is `strict` |
 | Accept negotiation — explicit reject | `skipped_accept_reject` | SKIPPED | `Accept` explicitly rejects Markdown (`q=0`) |
@@ -198,7 +204,8 @@ not registry entries.
 > **Removed reason codes.** Earlier releases documented per-check uppercase codes
 > such as `SKIP_METHOD`, `SKIP_STATUS`, `SKIP_CONFIG`, and `ELIGIBLE_CONVERTED`.
 > The 0.9.0 observability schema consolidated these: eligibility checks
-> 2–7 now emit `not_eligible`, scope-off emits `disabled`, and the conversion
+> 2–5 and 7 emit `not_eligible`, the size gate (6) emits
+> `memory_budget_exceeded`, scope-off emits `disabled`, and the conversion
 > outcomes are `converted` / `failed_open` / `failed_closed`. If you are
 > correlating old dashboards or alerts, update them to the lowercase codes above.
 
@@ -207,7 +214,6 @@ not registry entries.
 | Reason Code / Behavior | Description |
 |------------------------|-------------|
 | `replay_error` | Fail-open replay buffer init or append failure; sets `precommit_error` flag (prevents duplicate finalize calls) |
-| `failopen_completed` | Once-then-skip flag preventing duplicate `ngx_http_finalize_request` calls within a request lifetime |
 | `decompression_budget_exceeded` | Decompression budget (`markdown_limits decompressed_size=`) exceeded; classified as a decompression error |
 | `decompression_format_error` | Compressed input has invalid format (not valid gzip/deflate/brotli) |
 | `decompression_truncated_input` | Compressed input was truncated (incomplete stream) |
@@ -220,10 +226,14 @@ not registry entries.
 | `streaming_mid_flight_error` | Streaming conversion mid-flight error |
 | Delivery vs Decision counter separation | `failopen_count` (delivery) increments only after downstream `NGX_OK`; decision counter increments on decision regardless of downstream status |
 
+`failopen_completed` is an internal request-lifetime control flag, not a
+public reason code. It prevents duplicate `ngx_http_finalize_request` calls
+when the module resumes or re-enters a fail-open path.
+
 All canonical reason codes use lowercase snake_case format. The same strings
 appear in both decision log entries and Prometheus metrics labels, so operators
 can correlate log entries with metric counters without translation. Internal
-C-only streaming event labels are outside this operator-visible contract.
+streaming events are outside this operator-visible contract and use `event=`.
 
 ## Implementation Details
 
@@ -236,9 +246,9 @@ The check order matches the eligibility evaluation in `components/nginx-module/s
 The generated Rust `ReasonCode::as_str()` projection produces the reason code
 strings. The `markdown_reason_code_str()` FFI accessor surfaces them to C. C-side
 canonical reason data comes from generated discriminant and metadata macros.
-the accessor converts each discriminant into the canonical lowercase string.
-Legacy C-only streaming event labels remain a separate internal compatibility
-surface. See [Observability Schema v2](../architecture/observability-schema-v2.md)
+The accessor converts each discriminant into the canonical lowercase string.
+Streaming transitions remain a separate bounded event surface. See
+[Observability Schema v2](../architecture/observability-schema-v2.md)
 for the full registry and FFI accessor list.
 
 ## Related Documentation

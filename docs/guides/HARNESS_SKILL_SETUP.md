@@ -26,8 +26,9 @@ npx skills ls
 
 Notes:
 
-- The repository requires `--full-depth` because it stores skills under
-  `skills/` instead of at the repo root.
+- `--full-depth` is optional. Use it when the installer needs to discover a
+  skill below the repository root. Omit it if your `npx skills` version already
+  discovers `skills/` automatically.
 - This installs a project-scoped skill by default (recommended for contributors).
 - If your setup prompts for an agent target, select the agent you use in your
   IDE/CLI.

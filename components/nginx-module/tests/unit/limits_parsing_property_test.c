@@ -342,17 +342,21 @@ ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
 }
 
 /* Rust FFI stubs required by the config header. */
-void markdown_trusted_proxies_free(void *handle)
+void
+markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle)
 {
     UNUSED(handle);
 }
 
-void *markdown_trusted_proxies_new(void)
+struct MarkdownTrustedProxies *
+markdown_trusted_proxies_new(void)
 {
     return NULL;
 }
 
-int markdown_trusted_proxies_push(void *set, u_char *data, size_t len)
+uint8_t
+markdown_trusted_proxies_push(struct MarkdownTrustedProxies *set,
+    const uint8_t *data, uintptr_t len)
 {
     UNUSED(set);
     UNUSED(data);

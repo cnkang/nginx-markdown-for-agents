@@ -5,6 +5,7 @@
 #   PASS            - installed NGINX version == target (exact)
 #   REJECT same-minor  - installed NGINX 1.26.4 vs target 1.26.3 (patch diff → fatal)
 #   REJECT diff-minor  - installed NGINX 1.27.0 vs target 1.26.3 (minor diff → fatal)
+#   REJECT unparseable - nginx -v output cannot prove ABI compatibility
 #
 # preinstall.sh reads `nginx -v` from PATH; this test injects a fake
 # `nginx` executable that prints a configurable version, then invokes the
@@ -44,7 +45,7 @@ mkdir -p "${FAKE_ROOT}/bin"
 
 # Symlink real commands needed by preinstall.sh into the sandbox.
 # Only link the fixed manifest — never recursive copy.
-for cmd in cat sed readlink rm rmdir printf basename; do
+for cmd in cat sed readlink rm rmdir printf basename stat; do
     real_path="$(command -v "${cmd}" 2>/dev/null || true)"
     if [[ -n "${real_path}" ]]; then
         ln -sf "${real_path}" "${FAKE_ROOT}/usr/bin/${cmd}"
@@ -110,26 +111,44 @@ fi
 
 # Scenario 2: same minor, different patch → fatal (exit 1)
 fake_nginx "1.26.4"
-if run_preinstall "1.26.3"; then
+rc=0
+run_preinstall "1.26.3" || rc=$?
+if [[ "$rc" -eq 0 ]]; then
     fail "same-minor patch diff (1.26.4 vs 1.26.3) must be REJECTED"
 else
-    pass "same-minor patch diff rejected"
+    if [[ "$rc" -eq 1 ]]; then
+        pass "same-minor patch diff rejected with status 1"
+    else
+        fail "same-minor patch diff returned unexpected status $rc"
+    fi
 fi
 
 # Scenario 3: different minor → fatal (exit 1)
 fake_nginx "1.27.0"
-if run_preinstall "1.26.3"; then
+rc=0
+run_preinstall "1.26.3" || rc=$?
+if [[ "$rc" -eq 0 ]]; then
     fail "different-minor (1.27.0 vs 1.26.3) must be REJECTED"
 else
-    pass "different-minor rejected"
+    if [[ "$rc" -eq 1 ]]; then
+        pass "different-minor rejected with status 1"
+    else
+        fail "different-minor returned unexpected status $rc"
+    fi
 fi
 
 # Scenario 4: major diff → fatal (exit 1)
 fake_nginx "2.0.0"
-if run_preinstall "1.26.3"; then
+rc=0
+run_preinstall "1.26.3" || rc=$?
+if [[ "$rc" -eq 0 ]]; then
     fail "major diff (2.0.0 vs 1.26.3) must be REJECTED"
 else
-    pass "major diff rejected"
+    if [[ "$rc" -eq 1 ]]; then
+        pass "major diff rejected with status 1"
+    else
+        fail "major diff returned unexpected status $rc"
+    fi
 fi
 
 # Scenario 5: nginx not installed → proceed (exit 0).
@@ -159,7 +178,7 @@ done
 # the probe, a second shadowing binary could bypass or corrupt the check.
 # Here: single fake binary, matching version, must proceed; then a tampered
 # probe (fake binary stops printing the version line) must take the warn path
-# and still exit 0 — never command-not-found (127).
+# and exit 1 because an unparseable version cannot prove ABI compatibility.
 fake_nginx "1.26.3"
 if run_preinstall "1.26.3"; then
     pass "resolved-identity probe: matching fake binary proceeds"
@@ -174,12 +193,26 @@ exit 0
 EOF
 chmod +x "${FAKE_ROOT}/usr/sbin/nginx"
 if run_preinstall "1.26.3"; then
-    pass "unparseable 'nginx -v' output takes the warn path with exit 0 (no command-not-found)"
+    fail "unparseable 'nginx -v' output must abort with exit 1"
 else
-    fail "unparseable 'nginx -v' output should warn and exit 0"
+    pass "unparseable 'nginx -v' output aborts with exit 1"
 fi
 
-# Scenario 8: negative control (T-B4) — simultaneous PATH injection AND
+# Scenario 8: executable failure must also abort rather than proceed without
+# a version check.
+cat > "${FAKE_ROOT}/usr/sbin/nginx" <<'EOF'
+#!/bin/bash
+echo "nginx: simulated execution failure" >&2
+exit 1
+EOF
+chmod +x "${FAKE_ROOT}/usr/sbin/nginx"
+if run_preinstall "1.26.3"; then
+    fail "failed 'nginx -v' execution must abort with exit 1"
+else
+    pass "failed 'nginx -v' execution aborts with exit 1"
+fi
+
+# Scenario 9: negative control (T-B4) — simultaneous PATH injection AND
 # TRUSTED_PATH_ROOT environment variable injection must both be ineffective.
 #
 # The script contains a literal `TRUSTED_PATH_ROOT=""` assignment that
@@ -218,14 +251,14 @@ chmod +x "${EVIL_DIR}/nginx"
 evil_script="$(sed "s|%%NGINX_VERSION%%|1.26.3|g" "${PREINSTALL}")"
 if ! PATH="${EVIL_DIR}:${PATH}" TRUSTED_PATH_ROOT="${EVIL_DIR}" \
     bash -c "${evil_script}" preinstall.sh install 2>/dev/null; then
-    echo "Scenario 8: preinstall returned nonzero; continuing with the " \
+    echo "Scenario 9: preinstall returned nonzero; continuing with the " \
         "marker assertion" >&2
 fi
 
 if [[ -f "${MARKER}" ]]; then
-    fail "Scenario 8: MARKER exists — evil nginx was executed despite trusted PATH"
+    fail "Scenario 9: MARKER exists — evil nginx was executed despite trusted PATH"
 else
-    pass "Scenario 8: MARKER does not exist — evil nginx was NOT executed"
+    pass "Scenario 9: MARKER does not exist — evil nginx was NOT executed"
 fi
 
 rm -rf "${EVIL_DIR}"

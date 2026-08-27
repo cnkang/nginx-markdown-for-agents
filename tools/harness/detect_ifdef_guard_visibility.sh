@@ -42,7 +42,7 @@ for arg in "$@"; do
 Usage: $0 [header] [src_dir]
   header  defaults to ${HEADER_FILE}
   src_dir  defaults to ${SRC_DIR}
-  --guard NAME  feature guard to check (default: ${GUARD_NAME})
+  --guard=NAME  feature guard to check (default: ${GUARD_NAME})
   --help   show this help
 USAGE
             exit 0
@@ -85,10 +85,6 @@ import os
 
 header_path, guard_name, src_dir = sys.argv[1:4]
 
-# MARKDOWN_STREAMING_SHADOW_DEBUG is only defined for a streaming build, so
-# code guarded by it also has the visibility of MARKDOWN_STREAMING_ENABLED.
-implied_guards = {'MARKDOWN_STREAMING_SHADOW_DEBUG': guard_name}
-
 def guard_enabled(stack):
     return any(name == guard_name and active for name, active, _ in stack)
 
@@ -113,8 +109,6 @@ def update_stack(stack, kind, expression):
             stack.pop()
     elif kind in ('ifdef', 'ifndef'):
         name = expression.strip()
-        if name in implied_guards:
-            name = implied_guards[name]
         active = name == guard_name and kind == 'ifdef'
         stack.append((name, active, active))
     elif kind == 'if':
@@ -314,8 +308,6 @@ func_names = [name for name in func_names if name not in outside_defs]
 def same_file(left, right):
     return os.path.realpath(left) == os.path.realpath(right)
 
-implied_guards = {'MARKDOWN_STREAMING_SHADOW_DEBUG': guard_name}
-
 def guard_expression(expression):
     positive = re.search(
         r'defined\s*\(\s*' + re.escape(guard_name) + r'\s*\)',
@@ -340,8 +332,6 @@ def push_directive(stack, kind, expression):
             stack.pop()
     elif kind in ('ifdef', 'ifndef'):
         name = expression.strip()
-        if name in implied_guards:
-            name = implied_guards[name]
         active = name == guard_name and kind == 'ifdef'
         stack.append((name, active, active))
     elif kind == 'if':

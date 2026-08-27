@@ -100,6 +100,13 @@ def test_missing_renderer_is_hard_violation(tmp_path) -> None:
     assert len(violations) >= 1
 
 
+def test_missing_input_path_is_an_operational_error(tmp_path, monkeypatch) -> None:
+    missing = tmp_path / "missing-metrics.h"
+    monkeypatch.setattr("sys.argv", ["detect_metrics_event_conservation", str(missing)])
+
+    assert module.main() == 2
+
+
 def test_comment_blanking_preserves_newline_structure() -> None:
     source = "before /* first line\n second line */ after\n// line comment\nend\n"
     blanked = module._strip_c_comments(source)

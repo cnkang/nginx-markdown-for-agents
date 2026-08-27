@@ -211,6 +211,35 @@ else
         "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
+# ── Fixture: clean-4 (pointer declaration with an unsigned base type) ──
+# A declaration such as `size_t *foo` must still classify the cast source as
+# unsigned.  The old declaration matcher stopped at the asterisk and treated
+# this known type as unknown, producing a false-positive warning.
+
+fixture_clean4_dir="${tmp_dir}/fixture-clean4/components/nginx-module/src"
+mkdir -p "${fixture_clean4_dir}"
+
+cat >"${fixture_clean4_dir}/test_clean4.c" <<'C'
+typedef unsigned long size_t;
+
+static size_t
+pointer_decl(size_t *foo)
+{
+    return (size_t) foo;
+}
+C
+
+output_file="${tmp_dir}/clean4.out"
+exit_code=0
+(cd "${tmp_dir}/fixture-clean4" && bash "${DETECTOR}" "${fixture_clean4_dir}") >"${output_file}" 2>&1 || exit_code=$?
+if [[ "${exit_code}" -eq 0 ]] && ! grep -q 'WARNING' "${output_file}" \
+    && grep -q 'unsigned source type' "${output_file}"; then
+    pass "clean-4: detector recognizes pointer declarations with unsigned base type"
+else
+    fail "clean-4: pointer declaration was not classified as unsigned" \
+        "got exit ${exit_code}: $(cat "${output_file}")"
+fi
+
 # ── Fixture: adversarial-1 (true positive — signed without guard) ──
 # ngx_int_t n without any guard → must produce WARNING.
 

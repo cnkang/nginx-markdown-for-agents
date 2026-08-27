@@ -51,7 +51,7 @@ usage() {
     printf 'Usage: %s <version>\n' "${SCRIPT_NAME}" >&2
     printf 'Example: %s 0.7.0\n' "${SCRIPT_NAME}" >&2
     printf 'Example: %s 1.2.3\n' "${SCRIPT_NAME}" >&2
-    return 1
+    return 0
 }
 
 err() {

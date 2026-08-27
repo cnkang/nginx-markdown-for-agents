@@ -37,7 +37,6 @@ The following families have current NGINX production consumers:
 | Decompression | `markdown_decompress_bounded`, `markdown_decomp_result_init`, `markdown_decompress_free` | Bounded Rust decompression path |
 | Error/reason | `markdown_classify_error_code`, `markdown_reason_code_str`, `markdown_reason_code_metric_key`, `markdown_reason_code_count` | Canonical cross-language classification and labels |
 | Streaming | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` | Streaming request lifecycle |
-| Incremental | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | **Retained internal legacy ABI symbols** (not production consumers): exported for the feature-gated C callers under `MARKDOWN_INCREMENTAL_ENABLED`; supported configurations do not route production requests through this path |
 | ABI alignment | `markdown_abi_version`, `markdown_abi_header_hash`, `markdown_abi_symbol_set_hash`, `markdown_abi_layout_fingerprint` | Startup-enforced version, generated-header, exported-symbol, and layout match |
 | Dynamic configuration | `markdown_dynconf_parse`, `markdown_dynconf_result_init`, `markdown_dynconf_result_free` | Runtime dynconf parsing and result handling |
 | Encoding chain and hash helpers | `markdown_chain_decode_free`, `markdown_chain_decode_result_init`, `markdown_decode_encoding_chain`, `markdown_parse_encoding_chain`, `markdown_sha256_hex` | Bounded decompression chain decode and SHA-256 hex helpers |
@@ -50,8 +49,8 @@ The canonical reason-code source is
 `components/rust-converter/src/decision/reason_code.rs` is a projection. The
 `markdown_reason_code_str`, `markdown_reason_code_metric_key`, and
 `markdown_reason_code_count` exports expose that source to the C consumer.
-Diagnostics use the generated C reason metadata header for bounded lookup and
-compatibility aliases. Reason-code variants and discriminants must
+Diagnostics use the generated C reason metadata header for bounded lookup of
+canonical names. Reason-code variants and discriminants must
 remain synchronized across both generated projections and this FFI boundary.
 
 ## Historical v0.9.1 removals
@@ -81,19 +80,18 @@ remain synchronized across both generated projections and this FFI boundary.
 
 ## Shared struct policy
 
-### `MarkdownOptions` and `StreamingOptions`
+### `MarkdownOptions`
 
-These remain separate because their lifecycles and consumers differ. Repeated
-semantic fields must update together, but the final v0.9.2 contract does not combine the
-structs merely for aesthetic deduplication. Both flavor fields accept only 0
-(CommonMark) and 1 (GFM) in the final v0.9.2 contract.
+`MarkdownOptions` is the single option layout shared by full-buffer and
+streaming FFI entry points. Both flavor fields accept only 0 (CommonMark) and
+1 (GFM) in the final v0.9.2 contract.
 
 ### Results and handles
 
 Result pointer fields are Rust-owned until their matching free function.
 The documented finalizer/free operation consumes each opaque converter,
-streaming, incremental, header-plan, and trusted-proxy handle. C must not use a
-handle or borrowed pointer after consumption.
+streaming, header-plan, and trusted-proxy handle. C must not use a handle or
+borrowed pointer after consumption.
 
 ## Initialization contract
 

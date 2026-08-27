@@ -15,10 +15,6 @@ Validate the binary and configuration:
 SNAPSHOT_DIR="$(mktemp -d)"
 nginx -t
 nginx -T 2>/dev/null | grep -E 'markdown_(filter|streaming|auto_decompress|cache_validation|limits|error_policy)'
-curl -fsS -H 'Accept: text/plain; version=0.0.4' \
-  http://localhost/markdown-metrics > "$SNAPSHOT_DIR/markdown-metrics.baseline"
-curl -fsS -H 'Accept: application/json' \
-  http://localhost/nginx-markdown/diagnostics > "$SNAPSHOT_DIR/markdown-diagnostics.baseline.json"
 ```
 
 Start with explicit, bounded settings:
@@ -51,9 +47,26 @@ http {
 }
 ```
 
+After NGINX loads the configuration and the local metrics/diagnostics locations
+are reachable, capture the baseline. Keeping these commands after the endpoint
+definition prevents a successful shell redirect from being mistaken for valid
+evidence when the endpoint is not available yet:
+
+```bash
+curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics > "$SNAPSHOT_DIR/markdown-metrics.baseline"
+curl -fsS -H 'Accept: application/json' \
+  http://localhost/nginx-markdown/diagnostics > \
+  "$SNAPSHOT_DIR/markdown-diagnostics.baseline.json"
+```
+
 Keep `markdown_error_policy pass` during the initial rollout so conversion
-errors preserve the upstream response. Use `markdown_streaming force` only for
-paths whose response size, cache requirements, and compressed encodings have completed testing.
+errors that occur before headers commit can preserve the upstream response.
+After NGINX commits headers or converted bytes, the original HTML is no longer
+replayable. A later failure follows the safe-finish/abort contract and
+may leave the client with a truncated Markdown response. Use
+`markdown_streaming force` only for paths whose response size, cache
+requirements, and compressed encodings have completed testing.
 
 ## Staged enablement
 
@@ -100,7 +113,9 @@ Continue when:
 
 Pause and investigate when:
 
-- `failed_closed`, `abort_start`, or `resume_failure` grows unexpectedly,
+- `failed_open`, `failed_closed`, `aborted`, `abort_start`, or `resume_failure`
+  grows unexpectedly. Compare each rate or count with the established
+  pre-rollout baseline,
 - compressed responses show repeated decompression failures with
   `reason="truncated_input"`, `reason="format_error"`, or
   `reason="io_error"` on `nginx_markdown_decompression_events_total`
@@ -131,7 +146,9 @@ and the conversion counters immediately before the reload, then compare
 **deltas after quiescence**, or wait until the diagnostics/error logs show the
 pre-reload requests reaching terminal. Do not poll the cumulative
 `nginx_markdown_requests_total` counter, which only advances and cannot show
-drain. Only then compare counters scoped to requests started after the
-reload. Verify that streaming attempts stop and full-buffer attempts remain
-healthy. Preserve the diagnostics JSON, Prometheus snapshot, error-log
-excerpts, and the exact configuration used for the incident.
+drain. Only then issue controlled requests for the rolled-back scope and
+compare the before/after deltas. The exported counters do not provide a
+reliable post-reload request scope. Verify that streaming attempts stop and
+full-buffer attempts remain healthy. Preserve the diagnostics JSON, Prometheus
+snapshot, error-log excerpts, and the exact configuration used for the
+incident.

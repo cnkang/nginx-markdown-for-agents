@@ -6,8 +6,10 @@ Validates 0.9.2-specific deliverables:
   - Reason code registry completeness (27 codes, including encoding_header_invalid)
   - Public surface inventory exists and is parseable
 
-Adds 0.9.2-specific checks to the 0.9.1 Make gate chain; prior checks
-remain delegated to that chain.
+Provides the current 0.9.2-specific contract checks. Focused 0.7.0/0.8.0
+validators and the candidate-bound performance gates are invoked by the
+Makefile/workflow orchestration; this validator does not delegate to a
+retired 0.9.0/0.9.1 wrapper chain.
 
 Exit codes:
   0 = all gates pass
@@ -25,7 +27,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.lib.path_validation import validate_read_path  # noqa: E402
-from tools.lib.reason_code import REASON_C_ACCESSOR_ALIASES
+from tools.lib.reason_code import REASON_C_ACCESSOR_ALIASES  # noqa: E402
 
 EXPECTED_VERSION = "0.9.2"
 EXPECTED_REASON_CODE_COUNT = 27

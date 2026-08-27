@@ -6,7 +6,7 @@ This document describes the parser budget enforcement strategy for the
 nginx-markdown-for-agents converter, including the feasibility analysis of
 mid-parse interruption and the alternative budget mechanisms used.
 
-**Requirement**: REQ-0700-CORRECTNESS-006 (TASK-A06)
+**Requirement**: parser timeout and parser budget
 
 ---
 
@@ -112,8 +112,8 @@ has no interruption mechanism, limiting input size bounds the worst-case parse t
     invokes `parse_html_with_charset`. This path cannot observe html5ever's internal
     allocations during `parse_document`, so it fails closed before parsing
     when the estimate exceeds the configured budget.
-- **Error code**: `ERROR_PARSE_BUDGET_EXCEEDED` (11)
-- **Reason code**: `PARSE_BUDGET_EXCEEDED`
+- **Internal error constant**: `ERROR_PARSE_BUDGET_EXCEEDED` (11)
+- **Public reason/category**: `budget_exceeded`
 - **Fail-open behavior**: Pass-through original content
 
 #### Streaming Memory Budget Breakdown
@@ -235,7 +235,7 @@ input size or elapsed time.
 Request arrives
     │
     ├─ markdown_limits conversion_memory= check (C layer)
-    │   └─ FAIL → pass-through, reason: not_eligible
+    │   └─ FAIL → pass-through, reason: memory_budget_exceeded
     │
     ├─ markdown_limits conversion_timeout= pre-check (overall FFI deadline)
     │   └─ FAIL → pass-through, reason: timeout
@@ -245,8 +245,9 @@ Request arrives
     │
     ├─ html5ever parse_document (uninterruptible)
     │   └─ Input capped by markdown_limits conversion_memory= before parsing
-    │      (default 64 MiB, configurable); parser allocations are bounded by
-    │      parser_memory=, not this directive
+    │      (default 64 MiB, configurable). An oversized input is classified as
+    │      not_eligible. Parser working-set estimates are bounded separately
+    │      by parser_memory=
     │
     ├─ markdown_limits conversion_timeout= / parser_timeout= post-parse check
     │   └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
@@ -265,8 +266,11 @@ The failure branches use the canonical lowercase codes from
 [DECISION_CHAIN.md](DECISION_CHAIN.md): the **primary outcome** is
 `failed_open` (with `markdown_error_policy pass`) or `failed_closed`
 (with `fail_closed`/`status N`), and the **failure category** is
-`timeout` or `budget_exceeded` (also `memory_budget_exceeded` for the
-`conversion_memory` cap). The category appears as the `reason` label on
+`timeout` or `budget_exceeded`. `conversion_memory` failures use
+`memory_budget_exceeded`. A `conversion_memory` failure is an eligibility
+cap and reports `memory_budget_exceeded` rather than `not_eligible` before
+the FFI conversion attempt. The category for a parser working-set
+failure is `budget_exceeded`. The category appears as the `reason` label on
 `nginx_markdown_requests_total`. The outcome appears in the `outcome`
 label. Both labels are lowercase canonical values — the internal
 converter constants (`PARSE_TIMEOUT`, `PARSE_BUDGET_EXCEEDED`) are not
@@ -381,4 +385,4 @@ For full directive syntax and examples, see `docs/guides/CONFIGURATION.md`.
 |---------|------|--------|---------|
 | 0.9.2 | 2026-08-24 | Kang | Named the parser_memory to parser_memory_budget FFI key mapping and located the full-buffer pre-parse check before parse_html_with_charset |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
-| 0.7.0 | 2026-05-17 | Kang | Initial parser budget documentation (TASK-A06.3) |
+| 0.7.0 | 2026-05-17 | Kang | Initial parser budget documentation (parser budget) |

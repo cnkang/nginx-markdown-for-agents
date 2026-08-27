@@ -2,7 +2,7 @@
   "fixture-id": "streaming/inline-spacing",
   "page-type": "clean-article",
   "expected-conversion-result": "converted",
-  "input-size-bytes": 508,
+  "input-size-bytes": 860,
   "source-description": "Inline spacing and BR handling with mixed formatting",
   "failure-corpus": false,
   "streaming_notes": {

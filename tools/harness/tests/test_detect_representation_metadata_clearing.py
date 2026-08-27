@@ -252,6 +252,17 @@ def test_multiline_signature_functions_are_scanned():
     assert len(hits) == 1, "multiline signature must be scanned"
 
 
+def test_single_line_signature_brace_is_scanned():
+    source = (
+        "static ngx_int_t head_representation(ngx_http_request_t *r) {\n"
+        "    r->headers_out.last_modified_time = (time_t) -1;\n"
+        "    return NGX_OK;\n"
+        "}\n"
+    )
+    hits = [f for f in findings_for(source) if f[3] == "P"]
+    assert len(hits) == 1, "same-line opening brace must be scanned"
+
+
 def test_multiline_signature_clean_function_passes():
     source = (
         "static ngx_int_t\n"

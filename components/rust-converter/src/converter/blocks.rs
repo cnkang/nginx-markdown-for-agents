@@ -33,7 +33,9 @@
 //! fence termination. [`longest_backtick_run`] is the helper that scans the
 //! payload for the longest contiguous backtick sequence.
 
-use super::*;
+use super::{
+    Attribute, ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData, Ref,
+};
 
 impl MarkdownConverter {
     /// Emit one list item while preserving multi-line/nested-item indentation.
@@ -71,43 +73,43 @@ impl MarkdownConverter {
             if index == 0 {
                 output.push_str(&base_indent);
                 output.push_str(marker);
-                let first_trimmed = line.trim_start();
                 // If the content already starts with a list marker (from a
                 // nested list that was converted earlier), emit a blank line
                 // after our marker and then the content with continuation
                 // indentation to avoid producing a malformed double-marker.
-                if first_trimmed.starts_with("- ")
-                    || first_trimmed.starts_with("* ")
-                    || first_trimmed.starts_with("1. ")
-                {
+                if Self::list_line_is_nested(line) {
                     output.push('\n');
-                    if !line.is_empty() {
-                        let already_indented = (!base_indent.is_empty()
-                            && line.starts_with(&base_indent))
-                            || line.starts_with(' ')
-                            || line.starts_with('\t');
-                        if !already_indented {
-                            output.push_str(&continuation_indent);
-                        }
-                        output.push_str(line);
-                        output.push('\n');
-                    }
+                    Self::append_list_item_line(output, line, &base_indent, &continuation_indent);
                     continue;
                 }
-            } else if !line.is_empty() {
+            } else if !line.is_empty() && !Self::list_line_is_indented(line, &base_indent) {
                 // Indent continuation lines unless they already carry
                 // indentation (from pre-formatted or nested content).
-                let already_indented = (!base_indent.is_empty() && line.starts_with(&base_indent))
-                    || line.starts_with(' ')
-                    || line.starts_with('\t');
-                if !already_indented {
-                    output.push_str(&continuation_indent);
-                }
+                output.push_str(&continuation_indent);
             }
 
             output.push_str(line);
             output.push('\n');
         }
+    }
+
+    /// Append one list-item payload line, adding the continuation indent when
+    /// the line is non-empty and does not already carry its own indentation.
+    ///
+    /// Shared by the first-line nested-item branch and usable for any single
+    /// line so marker/indent behavior stays consistent across call sites.
+    fn append_list_item_line(
+        output: &mut String,
+        line: &str,
+        base_indent: &str,
+        continuation_indent: &str,
+    ) {
+        if line.is_empty() || Self::list_line_is_indented(line, base_indent) {
+            return;
+        }
+        output.push_str(continuation_indent);
+        output.push_str(line);
+        output.push('\n');
     }
 
     /// Return the longest contiguous run of backticks in `content`.
@@ -275,14 +277,20 @@ impl MarkdownConverter {
         total
     }
 
-    /// Return a constant-time upper bound for a partially rendered item.
+    /// Estimates the maximum rendered length of a list item before its content is fully formatted.
     ///
-    /// The exact formatter has to inspect every line.  During child traversal
-    /// that would make the budget check quadratic, so use the content length
-    /// and a worst-case per-line prefix instead.  The exact length is checked
-    /// once after traversal, before the output buffer is mutated.
+    /// The estimate accounts for the item's depth, marker style, rendered line count, and
+    /// per-line formatting overhead. Returns a memory-limit error if the estimate overflows.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let upper_bound = Self::format_list_item_upper_bound(5, 1, 1, false).unwrap();
+    /// assert_eq!(upper_bound, 25);
+    /// ```
     fn format_list_item_upper_bound(
         content_len: usize,
+        newline_count: usize,
         depth: usize,
         ordered: bool,
     ) -> Result<usize, ConversionError> {
@@ -295,7 +303,7 @@ impl MarkdownConverter {
                 "generated Markdown list marker length overflow".to_string(),
             )
         })?;
-        let line_count = content_len.checked_add(1).ok_or_else(|| {
+        let line_count = newline_count.checked_add(1).ok_or_else(|| {
             ConversionError::MemoryLimit("generated Markdown list line count overflow".to_string())
         })?;
         let per_line_overhead = prefix_len
@@ -371,7 +379,17 @@ impl MarkdownConverter {
         Ok(())
     }
 
-    /// Handle list item elements (li) with optional timeout context.
+    /// Renders a list item using an unordered-list marker and the specified nesting depth.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// converter.handle_list_item_with_context(&node, &mut output, 0, None)?;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ConversionError`] if rendering the list item fails.
     pub(super) fn handle_list_item_with_context(
         &self,
         node: &Handle,
@@ -382,7 +400,64 @@ impl MarkdownConverter {
         self.handle_list_item_with_marker(node, output, depth, false, ctx)
     }
 
-    /// Handle list item elements with specific marker type.
+    /// Renders a list item's child content, including nested ordered and unordered lists.
+    ///
+    /// Nested lists are rendered at the next indentation depth, while other children
+    /// are traversed at that depth.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// let mut output = String::new();
+    /// let mut context = None;
+    ///
+    /// converter
+    ///     .render_list_item_child(&child, &mut output, depth, &mut context)
+    ///     .unwrap();
+    /// assert!(!output.is_empty());
+    /// ```
+    fn render_list_item_child(
+        &self,
+        child: &Handle,
+        item_output: &mut String,
+        depth: usize,
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        match child.data {
+            NodeData::Element { ref name, .. } => {
+                let tag_name = name.local.as_ref();
+                if tag_name == "ul" || tag_name == "ol" {
+                    if !item_output.is_empty() && !item_output.ends_with('\n') {
+                        item_output.push('\n');
+                    }
+                    self.handle_list_with_context(
+                        child,
+                        item_output,
+                        depth + 1,
+                        tag_name == "ol",
+                        ctx.as_deref_mut(),
+                    )?;
+                } else {
+                    self.traverse_node_optional(child, item_output, depth + 1, ctx.as_deref_mut())?;
+                }
+            }
+            _ => {
+                self.traverse_node_optional(child, item_output, depth + 1, ctx.as_deref_mut())?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Renders a list item using an ordered or unordered Markdown marker.
+    ///
+    /// Nested list content is rendered at the specified depth, and the conversion
+    /// context is used to enforce output limits when provided.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// converter.handle_list_item_with_marker(&node, &mut output, 0, false, None)?;
+    /// ```
     pub(super) fn handle_list_item_with_marker(
         &self,
         node: &Handle,
@@ -392,55 +467,32 @@ impl MarkdownConverter {
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         let mut item_output = String::new();
+        let mut newline_count = 0usize;
         let mut ctx = ctx;
         for child in node.children.borrow().iter() {
-            match child.data {
-                NodeData::Element { ref name, .. } => {
-                    let tag_name = name.local.as_ref();
-                    if tag_name == "ul" {
-                        if !item_output.is_empty() && !item_output.ends_with('\n') {
-                            item_output.push('\n');
-                        }
-                        self.handle_list_with_context(
-                            child,
-                            &mut item_output,
-                            depth + 1,
-                            false,
-                            ctx.as_deref_mut(),
-                        )?;
-                    } else if tag_name == "ol" {
-                        if !item_output.is_empty() && !item_output.ends_with('\n') {
-                            item_output.push('\n');
-                        }
-                        self.handle_list_with_context(
-                            child,
-                            &mut item_output,
-                            depth + 1,
-                            true,
-                            ctx.as_deref_mut(),
-                        )?;
-                    } else {
-                        self.traverse_node_optional(
-                            child,
-                            &mut item_output,
-                            depth + 1,
-                            ctx.as_deref_mut(),
-                        )?;
-                    }
-                }
-                _ => {
-                    self.traverse_node_optional(
-                        child,
-                        &mut item_output,
-                        depth + 1,
-                        ctx.as_deref_mut(),
-                    )?;
-                }
-            }
+            let child_output_start = item_output.len();
+
+            self.render_list_item_child(child, &mut item_output, depth, &mut ctx)?;
+
+            let appended_newlines = item_output[child_output_start..]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count();
+            newline_count = newline_count
+                .checked_add(appended_newlines)
+                .ok_or_else(|| {
+                    ConversionError::MemoryLimit(
+                        "generated Markdown list newline count overflow".to_string(),
+                    )
+                })?;
 
             if let Some(context) = ctx.as_deref_mut() {
-                let upper_bound =
-                    Self::format_list_item_upper_bound(item_output.len(), depth, ordered)?;
+                let upper_bound = Self::format_list_item_upper_bound(
+                    item_output.len(),
+                    newline_count,
+                    depth,
+                    ordered,
+                )?;
                 let projected_len = output.len().checked_add(upper_bound).ok_or_else(|| {
                     ConversionError::MemoryLimit(
                         "generated Markdown list output length overflow".to_string(),
@@ -562,5 +614,69 @@ impl MarkdownConverter {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MarkdownConverter;
+    use crate::error::ConversionError;
+
+    #[test]
+    fn list_line_indent_detection_matches_rendering_contract() {
+        // An empty base indent never matches by prefix; raw whitespace
+        // prefixes still count as pre-indented content.
+        assert!(MarkdownConverter::list_line_is_indented("  x", "  "));
+        assert!(MarkdownConverter::list_line_is_indented("   x", "  "));
+        assert!(!MarkdownConverter::list_line_is_indented("x", ""));
+        assert!(MarkdownConverter::list_line_is_indented(" x", ""));
+        assert!(MarkdownConverter::list_line_is_indented("\tx", ""));
+        assert!(!MarkdownConverter::list_line_is_indented("x", "  "));
+    }
+
+    #[test]
+    fn list_line_nested_marker_detection_covers_all_markers() {
+        assert!(MarkdownConverter::list_line_is_nested("- item"));
+        assert!(MarkdownConverter::list_line_is_nested("* item"));
+        assert!(MarkdownConverter::list_line_is_nested("1. item"));
+        assert!(MarkdownConverter::list_line_is_nested("  - deep"));
+        assert!(!MarkdownConverter::list_line_is_nested("-emph-no-space"));
+        assert!(!MarkdownConverter::list_line_is_nested("plain text"));
+    }
+
+    #[test]
+    fn list_item_upper_bound_covers_line_shapes_and_depth() {
+        assert_eq!(
+            MarkdownConverter::format_list_item_upper_bound(0, 0, 0, false).unwrap(),
+            6
+        );
+        assert_eq!(
+            MarkdownConverter::format_list_item_upper_bound(5, 0, 0, false).unwrap(),
+            11
+        );
+        assert_eq!(
+            MarkdownConverter::format_list_item_upper_bound(5, 1, 0, false).unwrap(),
+            17
+        );
+        assert_eq!(
+            MarkdownConverter::format_list_item_upper_bound(8, 3, 2, true).unwrap(),
+            72
+        );
+    }
+
+    #[test]
+    fn list_item_upper_bound_rejects_arithmetic_overflow() {
+        assert!(matches!(
+            MarkdownConverter::format_list_item_upper_bound(0, usize::MAX, 0, false),
+            Err(ConversionError::MemoryLimit(_))
+        ));
+        assert!(matches!(
+            MarkdownConverter::format_list_item_upper_bound(0, 0, usize::MAX, false),
+            Err(ConversionError::MemoryLimit(_))
+        ));
+        assert!(matches!(
+            MarkdownConverter::format_list_item_upper_bound(usize::MAX, 0, 0, false),
+            Err(ConversionError::MemoryLimit(_))
+        ));
     }
 }

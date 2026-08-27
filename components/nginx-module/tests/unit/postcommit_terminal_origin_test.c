@@ -5,8 +5,8 @@
  * and the fix for safe-finish + zero closing bytes + terminal
  * immediate definitive failure.
  *
- * Tests verify constant values, expand_buf overflow semantics, and
- * origin classification correctness.
+ * Tests verify expand_buf overflow semantics and origin classification
+ * correctness.
  */
 
 #include "../include/test_common.h"
@@ -16,16 +16,6 @@
 #define NGX_ERROR (-1)
 
 #include <ngx_http_markdown_filter_module.h>
-
-/*
- * DECOMP_ORIGIN constants are defined in the streaming decomp impl
- * header which has heavy NGINX dependencies.  Mirror the values here
- * for constant-value assertions; any drift will be caught by the
- * compile-time sizeof check below.
- */
-#define TEST_DECOMP_ORIGIN_NONE       0
-#define TEST_DECOMP_ORIGIN_ALLOCATION 1
-#define TEST_DECOMP_ORIGIN_INTERNAL   2
 
 /*
  * Minimal ngx_log_t for expand_buf signature.

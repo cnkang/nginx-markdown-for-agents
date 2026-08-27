@@ -589,10 +589,10 @@ test_should_convert_out_reason_null(void)
 
     memset(&r, 0, sizeof(r));
     memset(&conf, 0, sizeof(conf));
+    g_pool_offset = 0;
     r.connection = (ngx_connection_t *) ngx_palloc(NULL,
         sizeof(ngx_connection_t));
     memset(r.connection, 0, sizeof(ngx_connection_t));
-    g_pool_offset = 0;
     r.headers_in.headers = *create_header_list();
     add_header(&r.headers_in.headers, "Accept", "text/html");
 
@@ -603,6 +603,32 @@ test_should_convert_out_reason_null(void)
         &r, &conf, NULL);
     TEST_ASSERT(rc == 0, "NULL out_reason does not crash");
     TEST_PASS("NULL out_reason handled");
+}
+
+static void
+test_accept_result_vary_mapping(void)
+{
+    TEST_SUBSECTION("Accept-dependent response mapping");
+
+    TEST_ASSERT(ngx_http_markdown_accept_result_varies(
+                    NEGOTIATE_REASON_NO_ACCEPT) == 1,
+                "missing Accept must vary the passthrough representation");
+    TEST_ASSERT(ngx_http_markdown_accept_result_varies(
+                    NEGOTIATE_REASON_LOWER_Q) == 1,
+                "lower-q negotiation must vary the passthrough representation");
+    TEST_ASSERT(ngx_http_markdown_accept_result_varies(
+                    NEGOTIATE_REASON_EXPLICIT_REJECT) == 1,
+                "explicit rejection must vary the passthrough representation");
+    TEST_ASSERT(ngx_http_markdown_accept_result_varies(
+                    NEGOTIATE_REASON_MALFORMED) == 1,
+                "malformed negotiation must vary the passthrough representation");
+    TEST_ASSERT(ngx_http_markdown_accept_result_varies(
+                    NEGOTIATE_REASON_CONVERT) == 0,
+                "conversion is handled by representation commit");
+    TEST_ASSERT(ngx_http_markdown_accept_result_varies(
+                    NEGOTIATE_REASON_INTERNAL_ERROR) == 0,
+                "internal negotiation failure must not add Vary");
+    TEST_PASS("Accept-dependent response mapping verified");
 }
 
 /*
@@ -661,6 +687,7 @@ main(void)
     test_should_convert_ffi_convert();
     test_should_convert_ffi_skip();
     test_should_convert_out_reason_null();
+    test_accept_result_vary_mapping();
     test_markdown_options_init_defaults();
     test_markdown_options_init_null();
 

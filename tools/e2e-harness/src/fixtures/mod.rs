@@ -85,8 +85,10 @@ pub enum EncodingFault {
     DepthOverflow,
     /// Truncated compressed payload for the outer layer.
     Truncated,
-    /// Zero-byte wire body with a declared chain: the empty payload is a
-    /// legal empty body (empty-input contract), distinct from truncated.
+    /// Zero-byte wire body with a declared chain: the missing encoded
+    /// stream is rejected as truncated input (`TruncatedInput`), never
+    /// treated as a legal empty payload; under the PASS policy the
+    /// original encoded response is preserved unchanged.
     EmptyWire,
 }
 

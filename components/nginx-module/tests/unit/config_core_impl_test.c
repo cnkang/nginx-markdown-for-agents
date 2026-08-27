@@ -572,6 +572,7 @@ test_merge_conf(void)
      * values, then selectively override the fields under test.
      */
     memset(&parent, 0, sizeof(parent));
+    memset(&child, 0, sizeof(child));
     parent.enabled = NGX_CONF_UNSET;
     parent.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
     parent.max_size = NGX_CONF_UNSET_SIZE;
@@ -592,7 +593,6 @@ test_merge_conf(void)
     parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
     parent.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     parent.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    parent.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     parent.routing.max_inflight = NGX_CONF_UNSET_UINT;
     parent.ops.diagnostics_enabled = NGX_CONF_UNSET;
     parent.stream.policy = NGX_CONF_UNSET_UINT;
@@ -661,7 +661,6 @@ test_merge_conf(void)
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.routing.max_inflight = NGX_CONF_UNSET_UINT;
     child.ops.diagnostics_enabled = NGX_CONF_UNSET;
     child.stream.policy = NGX_CONF_UNSET_UINT;
@@ -720,7 +719,6 @@ test_merge_conf(void)
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.stream.policy = NGX_CONF_UNSET_UINT;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
@@ -1123,7 +1121,6 @@ test_merge_conf_double_unset(void)
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.stream.policy = NGX_CONF_UNSET_UINT;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
@@ -1380,7 +1377,7 @@ test_decompress_max_size_zero_rejected(void)
 }
 
 /*
- * Verify the spec 49 streaming/cache-validation conflict in merge_conf:
+ * Verify the streaming/cache-validation conflict in merge_conf:
  *   markdown_cache_validation full + markdown_streaming force => error.
  * Gated on policy_explicit so default configs are unaffected.
  */
@@ -1436,7 +1433,7 @@ test_streaming_full_force_conflict_rejected(void)
 }
 
 /*
- * Verify the spec 49 streaming/cache-validation soft conflict in merge_conf:
+ * Verify the streaming/cache-validation soft conflict in merge_conf:
  *   markdown_cache_validation full + markdown_streaming auto => warning only
  *   (merge still succeeds; streaming is blocked at runtime by Rust).
  */

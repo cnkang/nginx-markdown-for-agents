@@ -797,46 +797,6 @@
    "abi_version": 2,
    "classification": "INTERNAL_ONLY",
    "generated_header": "components/rust-converter/include/markdown_converter.h",
-   "name": "markdown_incremental_feed",
-   "params": "handle: *mut IncrementalConverterHandle, data: *const u8, data_len: usize",
-   "return_type": "u32",
-   "safety": "unsafe",
-   "signature": "markdown_incremental_feed(handle: *mut IncrementalConverterHandle, data: *const u8, data_len: usize) -> u32"
-  },
-  {
-   "abi_version": 2,
-   "classification": "INTERNAL_ONLY",
-   "generated_header": "components/rust-converter/include/markdown_converter.h",
-   "name": "markdown_incremental_finalize",
-   "params": "handle: *mut IncrementalConverterHandle, result: *mut MarkdownResult",
-   "return_type": "u32",
-   "safety": "unsafe",
-   "signature": "markdown_incremental_finalize(handle: *mut IncrementalConverterHandle, result: *mut MarkdownResult) -> u32"
-  },
-  {
-   "abi_version": 2,
-   "classification": "INTERNAL_ONLY",
-   "generated_header": "components/rust-converter/include/markdown_converter.h",
-   "name": "markdown_incremental_free",
-   "params": "handle: *mut IncrementalConverterHandle",
-   "return_type": "()",
-   "safety": "unsafe",
-   "signature": "markdown_incremental_free(handle: *mut IncrementalConverterHandle) -> ()"
-  },
-  {
-   "abi_version": 2,
-   "classification": "INTERNAL_ONLY",
-   "generated_header": "components/rust-converter/include/markdown_converter.h",
-   "name": "markdown_incremental_new_with_code",
-   "params": "options: *const MarkdownOptions, out_handle: *mut *mut IncrementalConverterHandle",
-   "return_type": "u32",
-   "safety": "unsafe",
-   "signature": "markdown_incremental_new_with_code(options: *const MarkdownOptions, out_handle: *mut *mut IncrementalConverterHandle) -> u32"
-  },
-  {
-   "abi_version": 2,
-   "classification": "INTERNAL_ONLY",
-   "generated_header": "components/rust-converter/include/markdown_converter.h",
    "name": "markdown_negotiate_accept",
    "params": "accept_header: *const u8, accept_header_len: usize, on_wildcard: u8, result: *mut FFIAcceptResult",
    "return_type": "()",

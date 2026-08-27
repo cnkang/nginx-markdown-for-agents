@@ -1,7 +1,7 @@
 /*
  * Test: streaming_config_contract
  *
- * Validates the v0.8.0 streaming configuration directives (streaming configuration directives):
+ * Validates the streaming configuration directives:
  * - Valid values for each directive (5.1)
  * - Invalid values rejected (5.2)
  * - Allocation failure paths (5.2c)
@@ -655,9 +655,8 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->routing.content_types = NGX_CONF_UNSET_PTR;
     mcf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
     mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
-    mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
 
-    /* v0.8.0 stream config fields */
+    /* Stream configuration fields. */
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
     mcf->stream.policy_explicit = -1;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;

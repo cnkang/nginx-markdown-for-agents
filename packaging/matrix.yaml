@@ -22,9 +22,9 @@
 #   Example: add "rockylinux:9" under rpm format.
 #
 # Mainline support:
-#   nginx.org mainline versions (e.g. 1.27.x) are future work.
-#   Once mainline ABI compatibility is validated, add the version
-#   to tools/release-matrix.json. No structural changes are needed.
+#   The currently validated nginx.org mainline entry is 1.31.4 below.
+#   Add newer mainline versions only after ABI compatibility is validated
+#   and the matching checksum and release-matrix entry are present.
 #
 # =============================================================================
 

@@ -31,5 +31,6 @@ RUN groupadd --gid "${FUZZ_GID}" fuzzer \
 
 WORKDIR /src
 COPY --chown=fuzzer:fuzzer . /src
+COPY --chown=fuzzer:fuzzer --chmod=0755 .clusterfuzzlite/build.sh /src/build.sh
 
 USER fuzzer

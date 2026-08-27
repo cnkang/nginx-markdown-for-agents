@@ -37,13 +37,18 @@ def _parse_directive_macro(
     name, value = parts
     if value == "\\":
         value = continuation
-    if value is None or len(value) < 2:
+    if value is None:
+        return None
+    value = value.strip()
+    if len(value) < 2:
         return None
     # A trailing C comment after the quoted value must be removed before
     # quote validation, so quoted definitions with comments are retained
     # while non-quoted values remain rejected.  A comment can never be a
     # valid directive value, so stripping it cannot mask a bad definition.
     value = re.split(r"/\*.*?\*/|//[^\n]*", value, maxsplit=1)[0].rstrip()
+    if len(value) < 2:
+        return None
     if value[0] != '"' or value[-1] != '"':
         return None
     return name, value[1:-1]

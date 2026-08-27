@@ -24,7 +24,7 @@ AI Agent 和 LLM 工具抓网页时，经常面对的是为浏览器而不是为
 
 与传统搜索爬虫为关键词排序建立索引不同，AI 爬虫的目标是提取知识用于生成答案。它们对 token 成本和语义清晰度更敏感——一个典型 HTML 页面的 token 数量可以是其 Markdown 等价内容的 3 倍甚至更多，而多出来的 token 大部分不携带有用信息。对于大规模运行的 AI 系统，这个成本差异会显著累积。
 
-这个模块把转换工作前移到 Web 层。NGINX 根据内容协商决定是否返回 Markdown，只在客户端明确请求 `text/markdown` 时进行转换。你也可以通过配置让 NGINX 针对特定 User-Agent 的 AI 爬虫自动注入 `text/markdown`，这样即使爬虫本身不会发送该头部，也能拿到干净、省 token 的 Markdown 内容。很多站点——技术文档、博客、开发者 Wiki——本身就是用 Markdown 编写内容再渲染成 HTML 发布的。对这类站点来说，这个转换实际上是在恢复内容的原始编写格式。
+这个模块把转换工作前移到 Web 层。NGINX 根据内容协商决定是否返回 Markdown；匹配的 User-Agent 可以通过 `markdown_accept force` 在模块内部强制选择 Markdown，而不是改写请求头。这样即使爬虫本身不会发送 `text/markdown`，也能拿到干净、省 token 的 Markdown 内容。很多站点——技术文档、博客、开发者 Wiki——本身就是用 Markdown 编写内容再渲染成 HTML 发布的。对这类站点来说，这个转换实际上是在恢复内容的原始编写格式。
 
 这遵循的是 HTTP 协议一直以来就有的内容协商模型：同一个 URL 根据客户端的请求为不同消费方提供不同的表示。
 
@@ -54,6 +54,7 @@ AI 爬虫（按 User-Agent 匹配）          -> Markdown（通过 NGINX 配置�
 ### 1. 安装模块
 
 ```bash
+set -euo pipefail
 # 下面的 RELEASE_TAG 以 v0.9.2 为示例。请在该版本正式发布后再执行这些命令；
 # 在此之前请替换为最新已发布的 release 标签
 # （见 https://github.com/cnkang/nginx-markdown-for-agents/releases）。
@@ -73,7 +74,15 @@ VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 \
   --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
   | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1
-grep -E "  ${INSTALLER}$" SHA256SUMS | sha256sum -c -
+CHECKSUM_LINE="$(awk -v file="${INSTALLER}" \
+  '$2 == file { count++; line = $0 } END { if (count == 1) print line }' \
+  SHA256SUMS)"
+[[ -n "$CHECKSUM_LINE" ]] || { echo "缺少唯一的校验和记录" >&2; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then
+  printf '%s\n' "$CHECKSUM_LINE" | sha256sum -c -
+else
+  printf '%s\n' "$CHECKSUM_LINE" | shasum -a 256 -c -
+fi
 sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 sudo nginx -t && sudo nginx -s reload
 ```
@@ -238,8 +247,8 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 | 1.31.4 | mainline | debian12 | glibc | arm64 | docker-image | supported | Yes |
 | 1.31.4 | mainline | debian12 | glibc | amd64 | deb-package | supported | Yes |
 | 1.31.4 | mainline | debian12 | glibc | amd64 | docker-image | supported | Yes |
-| 1.31.4 | mainline | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
-| 1.31.4 | mainline | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
+| 1.31.4 | mainline | alpine3.24 | musl | arm64 | docker-image | supported | Yes |
+| 1.31.4 | mainline | alpine3.24 | musl | amd64 | docker-image | supported | Yes |
 | 1.31.4 | mainline | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
 | 1.31.4 | mainline | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
@@ -441,7 +450,7 @@ v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能
   此时流式引擎会增量解压 gzip、zlib 封装 RFC 1950 deflate 及 Brotli 响应。模块同时接受 zlib 封装 RFC 1950 与原始 RFC 1951 deflate（raw 帧为兼容旧服务器的回退支持），不会强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`。`NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制该依赖。官方构件默认启用。
 - **全缓冲拷贝减少**：内部优化（默认开启，无配置项），通过将连续缓冲区直接传递给解压器并通过指针赋值交换输出，消除全缓冲压缩路径中冗余的 memcpy。
 - **`markdown_auto_decompress` 指令**：现已正式注册为可配置指令（默认开启）。此前仅为内部字段，无法通过 `nginx.conf` 设置。
-- **性能证据门禁**：模块级基准测试工具（`tools/perf/run_module_benchmark.sh`）与自动化发布门禁（`make release-gates-check-091`）在发布前强制验证延迟、TTFB、内存斜率和回退率阈值。
+- **性能证据门禁**：模块级基准测试工具（`tools/perf/run_module_benchmark.sh`）与 0.9.2 合并发布门禁在发布前强制验证延迟、TTFB、内存斜率和回退率阈值。
 - **Doctor 诊断工具**：`python3 tools/perf/doctor_advice.py` 分析运行时指标，为运维人员提供可操作的调优建议。
 - **新增 ADR**：[0020](docs/architecture/ADR/0020-hybrid-zero-copy-pool-cleanup.md)、[0021](docs/architecture/ADR/0021-gzip-deflate-streaming-decompression-routing.md)、[0022](docs/architecture/ADR/0022-performance-evidence-release-gate.md)、[0023](docs/architecture/ADR/0023-single-streaming-policy.md) 和 [0024](docs/architecture/ADR/0024-brotli-streaming-decompression.md)。
 

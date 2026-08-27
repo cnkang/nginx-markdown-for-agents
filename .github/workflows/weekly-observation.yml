@@ -67,7 +67,7 @@ jobs:
       contents: read
     env:
       RUST_TARGET: x86_64-unknown-linux-gnu
-      RUST_FEATURES: streaming,incremental,prune_noise_regions
+      RUST_FEATURES: streaming,prune_noise_regions
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

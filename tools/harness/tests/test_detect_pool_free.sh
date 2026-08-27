@@ -219,7 +219,10 @@ C
 out="${tmp_dir}/msg_check.out"
 rc=0
 run_detector "${src_dir}" "${out}" || rc=$?
-if [[ ! -s "${out}" ]]; then
+if [[ "${rc}" -eq 0 ]]; then
+    fail "failure message must not recommend ngx_pfree" \
+        "detector accepted a pool allocation freed with ngx_free"
+elif [[ ! -s "${out}" ]]; then
     fail "failure message must not recommend ngx_pfree" \
         "detector produced no output — violation not detected"
 elif grep -q "ngx_pfree" "${out}"; then

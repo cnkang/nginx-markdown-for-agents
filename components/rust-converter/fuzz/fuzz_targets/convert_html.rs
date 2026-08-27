@@ -18,9 +18,9 @@
 //!
 //! # Failure Definitions
 //!
-//! - Panic → logic defect (P1)
-//! - Sanitizer report → security defect (走安全漏洞报告流程)
-//! - Timeout (>60 s) → performance defect (P2)
+//! - Panic → logic defect
+//! - Sanitizer report → security defect  (reported through the security vulnerability process)
+//! - Timeout (>60 s) → performance defect
 //! - Output size exceeds bound → needs investigation (logged, not aborted)
 
 use libfuzzer_sys::fuzz_target;

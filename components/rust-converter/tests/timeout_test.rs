@@ -108,14 +108,14 @@ fn test_elapsed_time_tracking() {
     assert!(ctx.elapsed() >= Duration::from_millis(10));
 }
 
-/// Test backward compatibility - convert() method still works
+/// Test direct conversion without a timeout context.
 #[test]
-fn test_backward_compatibility() {
+fn test_direct_conversion_without_timeout() {
     let html = b"<h1>Title</h1><p>Content</p>";
     let dom = parse_html(html).expect("Parse failed");
     let converter = MarkdownConverter::new();
 
-    // Old method should still work (no timeout)
+    // Direct conversion should succeed without timeout enforcement.
     let result = converter.convert(&dom);
 
     assert!(result.is_ok());

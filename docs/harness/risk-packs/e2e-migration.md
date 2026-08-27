@@ -8,8 +8,7 @@ surface, wrapper parity, or harness governance for 0.6.3.
 - touched `tools/e2e-harness/**`
 - touched migrated wrapper paths under `tools/e2e/verify_*_e2e.sh`
 - touched `tools/e2e/run_e2e_suite.sh`
-- touched migration docs (`docs/project/0.6.3-e2e-parity.md`,
-  `docs/testing/E2E_TESTS.md`)
+- touched migration docs (`docs/testing/E2E_TESTS.md`)
 - keywords like `e2e-harness`, `bootstrap`, `reuse mode`, `wrapper parity`,
   `test-e2e-rust`
 

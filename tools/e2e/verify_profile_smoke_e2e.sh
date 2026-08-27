@@ -277,12 +277,21 @@ import json
 import sys
 
 data = json.load(sys.stdin)
-assert data["schema_version"] == 2
-assert "profile" not in data
-assert "streaming_config" not in data
-assert "metrics_snapshot" not in data
-assert "effective" in data["configuration"]
-assert "effective_sources" in data["configuration"]
+errors = []
+if data.get("schema_version") != 2:
+    errors.append("schema_version must be 2")
+for key in ("profile", "streaming_config", "metrics_snapshot"):
+    if key in data:
+        errors.append(f"legacy field {key!r} is present")
+configuration = data.get("configuration")
+if not isinstance(configuration, dict):
+    errors.append("configuration must be an object")
+else:
+    for key in ("effective", "effective_sources"):
+        if key not in configuration:
+            errors.append(f"configuration.{key} is missing")
+if errors:
+    raise SystemExit("diagnostics schema validation failed: " + "; ".join(errors))
 '; then
         pass "${path} exposes the frozen diagnostics schema"
     else
@@ -306,6 +315,7 @@ done
 # dynconf-mutable fields asserted above.
 assert_static_digest() {
     local path="$1" actual
+    STATIC_DIGEST=""
     if actual="$(extract_diag_field "${path}" configuration.static_digest)"; then
         if [[ "${actual}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             pass "${path} configuration.static_digest has sha256 shape"
@@ -322,11 +332,11 @@ assert_static_digest() {
 }
 
 STATIC_DIGEST=""
-assert_static_digest /strict/diagnostics
+if ! assert_static_digest /strict/diagnostics; then :; fi
 strict_static_digest="${STATIC_DIGEST}"
-assert_static_digest /balanced/diagnostics
+if ! assert_static_digest /balanced/diagnostics; then :; fi
 balanced_static_digest="${STATIC_DIGEST}"
-assert_static_digest /streaming/diagnostics
+if ! assert_static_digest /streaming/diagnostics; then :; fi
 streaming_static_digest="${STATIC_DIGEST}"
 
 if [[ "${strict_static_digest}" != "${balanced_static_digest}" &&

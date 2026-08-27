@@ -40,7 +40,7 @@
 // ════════════════════════════════════════════════════════════════════
 // Capability Matrix (0.5.0)
 //
-// Status values (aligned with sub-spec #12):
+// Status values (aligned with the release-gates sub-spec):
 //   streaming-supported         — fully supported in the streaming path
 //   full-buffer-only            — only available via the full-buffer path
 //   pre-commit-fallback-only    — streaming path falls back to full-buffer
@@ -79,7 +79,7 @@
 // - html5ever TokenSink operates at the token level without tree builder
 //   error recovery. Malformed HTML may produce different output compared
 //   to the full-buffer path which uses the tree builder. These differences
-//   are quantified by sub-spec #16 (streaming-parity-diff-testing).
+//   are quantified by the streaming-parity diff-testing sub-spec.
 // ════════════════════════════════════════════════════════════════════
 
 pub mod budget;

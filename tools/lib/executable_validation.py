@@ -28,21 +28,44 @@ _RUSTUP_DIR_NAME = ".rustup"
 
 
 def _trusted_roots() -> tuple[Path, ...]:
-    """Return the fixed system directories allowed for tool executables."""
-    return tuple(root.resolve() for root in _APPROVED_EXECUTABLE_DIRS)
+    """Provide configured executable roots and their resolved aliases.
+
+    Keep both forms because a discovered executable is checked first at its
+    literal PATH location and then at its resolved target.  On macOS ``/bin``
+    can resolve to ``/private/bin``; dropping the configured spelling would
+    reject a legitimate literal ``/bin/git`` entry.
+
+    Returns:
+        tuple[Path, ...]: The unique configured and resolved executable roots.
+    """
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for configured_root in _APPROVED_EXECUTABLE_DIRS:
+        for root in (configured_root, configured_root.resolve()):
+            if root not in seen:
+                roots.append(root)
+                seen.add(root)
+    return tuple(roots)
 
 
 def _is_under(path: Path, roots: tuple[Path, ...]) -> bool:
-    """Return whether an (unresolved) path is below one of the trusted roots.
+    """Check whether an (unresolved) path is below a trusted root.
 
-    Containment compares the candidate path against the resolved trusted
-    roots WITHOUT resolving the candidate itself.  Resolving the candidate
-    here would make a user-writable symlink that points into a trusted root
-    (for example `~/bin/foo -> /usr/bin/foo`) pass as trusted: the caller
-    checks the discovered PATH entry with this helper and validates the
-    resolved target separately via ``resolved_is_trusted``, so a symlink
+    Containment compares the candidate path against configured and resolved
+    trusted roots WITHOUT resolving the candidate itself.  Resolving the
+    candidate here would make a user-writable symlink that points into a
+    trusted root (for example, ``~/bin/foo -> /usr/bin/foo``) pass as trusted.
+    The caller checks the discovered PATH entry with this helper and validates
+    the resolved target separately via ``resolved_is_trusted``, so a symlink
     whose literal location is outside the trusted roots stays rejected even
     when its target is trusted.
+
+    Args:
+        path: Path to check without resolving it.
+        roots: Trusted root directories.
+
+    Returns:
+        True if the path is equal to or beneath a trusted root, otherwise false.
     """
     return any(path == root or root in path.parents for root in roots)
 
@@ -160,8 +183,10 @@ def _expand_toolchain_name(channel: str) -> str:
     return channel
 
 
-def _is_rustup_tool_shim(candidate: Path, resolved: Path, name: str) -> bool:
-    """Allow only a standard Rustup shim targeting its toolchain.
+def _resolve_rustup_tool_shim(
+    candidate: Path, resolved: Path, name: str
+) -> Path | None:
+    """Return the validated active-toolchain target for a Rustup shim.
 
     The concrete executable must come from the *active* toolchain per
     Rustup's own selection rules (RUSTUP_TOOLCHAIN env, then
@@ -172,13 +197,13 @@ def _is_rustup_tool_shim(candidate: Path, resolved: Path, name: str) -> bool:
     try:
         home = Path.home()
     except (RuntimeError, KeyError):
-        return False
+        return None
     tool_shim = home / ".cargo" / "bin" / name
     rustup_toolchains = home / _RUSTUP_DIR_NAME / "toolchains"
     if candidate != tool_shim:
-        return False
+        return None
     if resolved.name == name and rustup_toolchains.resolve() in resolved.parents:
-        return True
+        return resolved
 
     # Current Rustup installs use a small ``.cargo/bin/rustup`` dispatcher
     # rather than a direct symlink into the selected toolchain.  Resolve the
@@ -187,25 +212,27 @@ def _is_rustup_tool_shim(candidate: Path, resolved: Path, name: str) -> bool:
     rustup_dispatcher = home / ".cargo" / "bin" / "rustup"
     try:
         if resolved != rustup_dispatcher.resolve(strict=True):
-            return False
+            return None
         toolchain_root = rustup_toolchains.resolve(strict=True)
         active = _active_rustup_toolchain()
         if not active:
-            return False
+            return None
         toolchain = toolchain_root / active
         tool = toolchain / "bin" / name
         try:
             tool_resolved = tool.resolve(strict=True)
         except OSError:
-            return False
-        return (
-            tool_resolved.name == name
-            and toolchain_root in tool_resolved.parents
-            and tool_resolved.is_file()
-            and os.access(tool_resolved, os.X_OK)
-        )
-    except OSError:
-        return False
+            return None
+        if (
+            tool_resolved.name != name
+            or toolchain_root not in tool_resolved.parents
+            or not tool_resolved.is_file()
+            or not os.access(tool_resolved, os.X_OK)
+        ):
+            return None
+        return tool_resolved
+    except (OSError, RuntimeError):
+        return None
 
 
 def resolve_approved_executable(name: str) -> str | None:
@@ -221,7 +248,7 @@ def resolve_approved_executable(name: str) -> str | None:
     accepted at ``~/.cargo/bin/<name>`` even though ``~/.cargo/bin`` and the
     ``~/.rustup/toolchains`` roots are user-writable, because the shim is
     additionally constrained to resolve into the *active* toolchain per
-    Rustup's own selection rules (see ``_is_rustup_tool_shim``).  Every
+    Rustup's own selection rules (see ``_resolve_rustup_tool_shim``).  Every
     non-shim executable must sit under a trusted system root.
     """
     if name not in _APPROVED_EXECUTABLES:
@@ -247,13 +274,12 @@ def resolve_approved_executable(name: str) -> str | None:
 
     candidate_is_trusted = _is_under(candidate, trusted_roots)
     resolved_is_trusted = _is_under(resolved, trusted_roots)
-    is_rustup_shim = name in _RUSTUP_SHIM_TOOLS and _is_rustup_tool_shim(
-        candidate, resolved, name
-    )
-    if not (candidate_is_trusted and resolved_is_trusted) and not is_rustup_shim:
+    rustup_target = None
+    if name in _RUSTUP_SHIM_TOOLS:
+        rustup_target = _resolve_rustup_tool_shim(candidate, resolved, name)
+    if not (candidate_is_trusted and resolved_is_trusted) and rustup_target is None:
         return None
-    # Preserve a Rustup shim only after the dedicated shim check accepted it;
-    # every other executable is returned at its canonical resolved path.
-    if is_rustup_shim:
-        return str(candidate)
-    return str(resolved)
+    # Rustup dispatchers are accepted only after the dedicated shim check has
+    # bound the request to the active toolchain. Return that canonical target,
+    # never the user-writable dispatcher path.
+    return str(rustup_target if rustup_target is not None else resolved)

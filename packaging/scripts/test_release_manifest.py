@@ -388,6 +388,11 @@ class TestValidateManifest(unittest.TestCase):
                 for line in result.stderr.strip().splitlines()
                 if line.strip().startswith("✗")
             ]
+            if not errors:
+                errors.append(
+                    f"validator exited {result.returncode} without a structured error: "
+                    f"{result.stderr.strip() or result.stdout.strip()}"
+                )
             return errors
         return []
 
@@ -578,6 +583,29 @@ class TestValidateManifest(unittest.TestCase):
             any("CLI manifest differs" in e for e in errors),
             f"Expected manifest consistency error, got: {errors}",
         )
+
+    def test_missing_artifact_directory_is_a_controlled_validation_error(self):
+        """An unavailable artifact directory must not produce a traceback."""
+        self._make_valid_manifest()
+        missing_dir = Path(self.tmpdir) / "missing-artifacts"
+        self.sha256sums_path.write_text("", encoding="utf-8")
+        args = [
+            sys.executable,
+            str(VALIDATE_SCRIPT),
+            "-m",
+            str(self.manifest_path),
+            "-d",
+            str(missing_dir),
+            "--sha256sums",
+            str(self.sha256sums_path),
+        ]
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=30, check=False
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot scan artifact directory", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_nontag_no_source_validates(self):
         """Non-tag manifest with --no-source should pass validation."""
@@ -816,7 +844,7 @@ class TestValidateManifest(unittest.TestCase):
 
     def test_dynamic_module_tarball_missing_identity_rejected(self):
         """Validator must reject dynamic-module entries missing the
-        nginx_version/libc/arch identity keys (run20 P3-5 regression:
+        nginx_version/libc/arch identity keys (required-key regression:
         the required_keys negative branch was untested)."""
         fname = "ngx_http_markdown_filter_module-1.28.3-glibc-x86_64.tar.gz"
         self.artifact_dir.joinpath(fname).write_bytes(b"fake-glibc-tarball")

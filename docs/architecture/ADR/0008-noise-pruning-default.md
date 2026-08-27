@@ -57,8 +57,12 @@ Tag-name-only selectors apply to **all** elements matching the selected tag name
 
 If pruning removes all content from the output:
 1. Log reason code `PRUNE_EMPTY_FALLBACK`
-2. Return the unpruned conversion result (full content preserved)
+2. Return the unpruned conversion result only when the converter has not
+   committed output **and** all consumed input remains fully replayable
 3. Increment `prune_empty_fallback_total` metric
+
+When streaming has exceeded the replay buffer or output is post-commit, apply
+the configured streaming failure policy instead of returning unpruned content.
 
 This prevents data loss when pruning selectors are too aggressive.
 
@@ -129,7 +133,7 @@ pub struct PruneConfig {
 - Pruning implementation: `components/rust-converter/src/converter/pruning.rs`
 - FFI ABI: `components/rust-converter/src/ffi/abi.rs`
 - FFI options: `components/rust-converter/src/ffi/options.rs`
-- Migration guide: `docs/guides/streaming-default-migration.md`
+- Archived migration guide: `docs/archive/streaming-default-migration.md`
 
 ## Document Updates
 

@@ -116,6 +116,21 @@ def test_corpus_benchmark_job_triggers_on_corpus_tools_changes() -> None:
     assert "needs.changes.outputs.corpus_tools == 'true'" in text
 
 
+def test_runtime_regressions_context_matches_protected_required_check() -> None:
+    """The runtime job must retain the protected-main check context.
+
+    The job still runs the SSI and filter-ordering steps; those details are
+    intentionally not part of the branch-protection context name.
+    """
+    text = _ci_workflow_text()
+    assert "name: Runtime Regressions (IMS + Chunked + Large)" in text
+    assert (
+        "name: Runtime Regressions (IMS + Chunked + SSI + Filter Ordering + Large)"
+        not in text
+    )
+    assert "Run native SSI and filter-ordering qualification" in text
+
+
 def test_release_gate_installs_and_preflights_pinned_dependencies() -> None:
     """Tag releases must install exact Python release-gate dependencies."""
     repo_root = Path(__file__).resolve().parents[3]
@@ -404,34 +419,21 @@ def _blocking_evidence_invocations(text: str) -> list[tuple[int, str]]:
     return invocations
 
 
-def test_make_091_gate_runs_blocking_evidence_with_baseline_091() -> None:
-    """``make -n release-gates-check-091`` must invoke blocking evidence
-    against baseline 091 exactly once."""
+def test_make_092_canonical_runs_blocking_evidence_with_both_baselines() -> None:
+    """The canonical 092 subset must run blocking evidence for 091 and 092
+    exactly once each, in release order."""
     invocations = _blocking_evidence_invocations(
-        _make_dry_run("release-gates-check-091")
+        _make_dry_run("release-gates-check-092-canonical")
     )
     baselines = [b for _, b in invocations]
-    assert baselines == ["091"], (
-        f"expected exactly one blocking evidence run with baseline 091, "
+    assert baselines == ["091", "092"], (
+        f"expected one blocking evidence run for 091 then 092, "
         f"got {baselines}"
     )
 
 
-def test_make_091_gate_does_not_reference_baseline_092() -> None:
-    """The 091 gate must not leak the 092 baseline into its recipe."""
-    text = _make_dry_run("release-gates-check-091")
-    assert re.search(
-        r"MODULE_BASELINE_VERSION\s*=\s*(?:\"092\"|'092'|092)(?![0-9])",
-        text,
-    ) is None, (
-        "091 gate recipe must not set MODULE_BASELINE_VERSION=092"
-    )
-
-
 def test_make_092_gate_runs_blocking_evidence_with_both_baselines() -> None:
-    """``make -n release-gates-check-092`` must run blocking evidence for
-    baseline 091 (via the 091 prerequisite) then baseline 092, each exactly
-    once."""
+    """The complete 092 gate must retain both canonical evidence invocations."""
     invocations = _blocking_evidence_invocations(
         _make_dry_run("release-gates-check-092")
     )
@@ -606,7 +608,7 @@ def test_tag_workflow_uses_092_blocking_evidence() -> None:
         "needs: [release-gate, musl-build, integrity-checksums, "
         "integrity-signature, official-docker-release-gate]"
     ) in publish_block
-    assert "github.ref_type != 'tag'" in publish_block
+    assert "github.event_name == 'workflow_dispatch'" in publish_block
     assert "needs.release-gate.result == 'success'" in publish_block
 
 

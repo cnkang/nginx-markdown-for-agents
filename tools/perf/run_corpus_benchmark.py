@@ -109,7 +109,32 @@ def discover_fixtures(corpus_dir: Path) -> list[dict]:
             continue
         validated_meta = validate_read_path(meta_path, purpose="corpus meta")
         validated_html = validate_read_path(html_path, purpose="fixture html")
-        meta = json.loads(validated_meta.read_text(encoding="utf-8"))
+        try:
+            meta = json.loads(validated_meta.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            print(
+                f"WARNING: invalid metadata {meta_path}: {exc}, skipping",
+                file=sys.stderr,
+            )
+            continue
+        if not isinstance(meta, dict):
+            print(
+                f"WARNING: invalid metadata {meta_path}: expected a JSON object, skipping",
+                file=sys.stderr,
+            )
+            continue
+        required = ("fixture-id", "page-type")
+        missing = [
+            key for key in required
+            if not isinstance(meta.get(key), str) or not meta[key].strip()
+        ]
+        if missing:
+            print(
+                f"WARNING: {meta_path} missing required metadata "
+                f"({', '.join(missing)}), skipping",
+                file=sys.stderr,
+            )
+            continue
         meta["_html_path"] = str(validated_html)
         meta["_meta_path"] = str(meta_path)
         fixtures.append(meta)

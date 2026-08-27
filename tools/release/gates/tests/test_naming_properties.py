@@ -71,21 +71,52 @@ def test_invalid_nginx_directive_no_prefix(name):
 
 @settings(max_examples=100)
 @given(suffix=_lower_alnum_underscore())
-def test_valid_prometheus_metric_plain(suffix):
-    """Valid metric: nginx_markdown_<suffix>."""
+def test_invalid_prometheus_metric_without_unit_suffix(suffix):
+    """Metrics must end in one legal Prometheus unit suffix."""
     name = f"nginx_markdown_{suffix}"
-    assert is_valid_prometheus_metric(name), f"should accept: {name}"
+    assert not is_valid_prometheus_metric(name), f"should reject: {name}"
 
 
 @settings(max_examples=100)
 @given(
     suffix=_lower_alnum_underscore(),
-    unit=st.sampled_from(["_total", "_bytes", "_seconds", "_info"]),
+    unit=st.sampled_from([
+        "_total",
+        "_bytes",
+        "_seconds",
+        "_info",
+        "_bytes_total",
+        "_seconds_total",
+    ]),
 )
 def test_valid_prometheus_metric_with_unit(suffix, unit):
     """Valid metric with unit suffix."""
+    assume(not suffix.endswith((
+        "_total", "_bytes", "_seconds", "_info",
+    )))
     name = f"nginx_markdown_{suffix}{unit}"
     assert is_valid_prometheus_metric(name), f"should accept: {name}"
+
+
+def test_valid_prometheus_metric_canonical_counter_units():
+    """Counters may use the canonical bytes_total and seconds_total units."""
+    for name in (
+        "nginx_markdown_response_bytes_total",
+        "nginx_markdown_request_duration_seconds_total",
+    ):
+        assert is_valid_prometheus_metric(name), f"should accept: {name}"
+
+
+def test_invalid_prometheus_metric_repeated_unit_suffix():
+    """The metric base must not consume a second unit suffix."""
+    for name in (
+        "nginx_markdown_requests_total_total",
+        "nginx_markdown_payload_bytes_seconds",
+        "nginx_markdown_build_info_info",
+        "nginx_markdown_response_bytes_bytes_total",
+        "nginx_markdown_duration_seconds_seconds_total",
+    ):
+        assert not is_valid_prometheus_metric(name), f"should reject: {name}"
 
 
 @settings(max_examples=100)
@@ -99,16 +130,16 @@ def test_invalid_prometheus_metric_no_prefix(name):
 # --- Reason code tests ---
 
 @settings(max_examples=100)
-@given(code=_upper_alnum_underscore())
+@given(code=st.from_regex(r"[a-z][a-z0-9_]{0,30}", fullmatch=True))
 def test_valid_reason_code(code):
-    """Valid reason codes match uppercase SNAKE_CASE."""
+    """Valid reason codes match lowercase snake_case."""
     assert is_valid_reason_code(code), f"should accept: {code}"
 
 
 @settings(max_examples=100)
-@given(code=st.from_regex(r"[a-z][a-z0-9_]{0,20}", fullmatch=True))
-def test_invalid_reason_code_lowercase(code):
-    """Lowercase strings must be rejected as reason codes."""
+@given(code=_upper_alnum_underscore())
+def test_invalid_reason_code_uppercase(code):
+    """Uppercase strings must be rejected as reason codes."""
     assert not is_valid_reason_code(code), f"should reject: {code}"
 
 

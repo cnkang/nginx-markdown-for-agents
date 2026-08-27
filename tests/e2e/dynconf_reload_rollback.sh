@@ -3,6 +3,7 @@
 #
 # The diagnostics endpoint is read-only. This test models operator restore by
 # replacing the watched file atomically, while preserving caller-owned files.
+# DYNCONF_FILE must point to the file configured in the running NGINX instance.
 
 set -e
 
@@ -96,14 +97,18 @@ canonical_target_path() {
 
 path_is_inside_test_directory() {
     local path="$1"
+    [[ -n "$TEST_TMPDIR" && -n "$path" ]] || return 1
     [[ "$path" == "$TEST_TMPDIR"/* ]]
 }
 
 requested_dynconf_path() {
     if [[ "$CALLER_DYNCONF_FILE_SET" -eq 1 ]]; then
         printf '%s\n' "$CALLER_DYNCONF_FILE"
-    else
+    elif [[ "${DYNCONF_RELOAD_ROLLBACK_LIBRARY:-0}" == "1" ]]; then
         printf '%s/markdown-dynamic.conf\n' "$TEST_TMPDIR"
+    else
+        echo "Error: DYNCONF_FILE must be set to the configured dynconf path" >&2
+        return 1
     fi
 }
 
@@ -639,7 +644,9 @@ trap 'cleanup 129' HUP
 trap 'cleanup 130' INT
 trap 'cleanup 143' TERM
 
-REQUESTED_DYNCONF_FILE="$(requested_dynconf_path)"
+if ! REQUESTED_DYNCONF_FILE="$(requested_dynconf_path)"; then
+    exit 2
+fi
 if ! prepare_dynconf_ownership "$REQUESTED_DYNCONF_FILE"; then
     echo "Error: unable to prepare dynconf ownership" >&2
     exit 1

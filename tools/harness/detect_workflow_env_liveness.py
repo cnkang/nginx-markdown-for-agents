@@ -52,10 +52,174 @@ def _merge_continuations(run_text):
     return run_text.replace("\\\n", " ")
 
 
-def _mask_single_quoted(run_text):
-    """Blank out single-quoted spans; the shell does not expand $ inside."""
-    return re.sub(r"'[^']*'", lambda m: "'" + " " * (len(m.group(0)) - 2)
-                  + "'", run_text)
+class _ShellMaskState:
+    """Mutable state for masking one shell line."""
+
+    def __init__(self, line):
+        self.line = line
+        self.output = list(line)
+        self.contexts = [None]
+        self.heredoc_delimiters = []
+
+
+def _mask_single_quoted_character(state, index):
+    character = state.line[index]
+    state.output[index] = " " if character != "\n" else "\n"
+    if character == "'":
+        state.contexts[-1] = None
+    return index + 1
+
+
+def _mask_double_quoted_character(state, index):
+    character = state.line[index]
+    if character == "\\" and index + 1 < len(state.line):
+        if state.line[index + 1] == "$":
+            state.output[index + 1] = " "
+        return index + 2
+    if (
+        character == "$"
+        and index + 1 < len(state.line)
+        and state.line[index + 1] == "("
+    ):
+        state.contexts.append(None)
+        return index + 2
+    if character == '"':
+        state.contexts[-1] = None
+    return index + 1
+
+
+def _mask_quoted_character(state, index):
+    if state.contexts[-1] == "'":
+        return _mask_single_quoted_character(state, index)
+    return _mask_double_quoted_character(state, index)
+
+
+def _mask_escaped_character(state, index):
+    if state.line[index + 1] == "$":
+        state.output[index + 1] = " "
+    return index + 2
+
+
+def _is_command_substitution(state, index):
+    return (
+        state.line[index] == "$"
+        and index + 1 < len(state.line)
+        and state.line[index + 1] == "("
+    )
+
+
+def _is_comment_start(state, index):
+    if index == 0:
+        return True
+    previous = state.line[index - 1]
+    return previous.isspace() or previous in ";|&()<>"
+
+
+def _mask_comment(state, index):
+    for rest in range(index, len(state.line)):
+        if state.line[rest] != "\n":
+            state.output[rest] = " "
+
+
+def _skip_heredoc_whitespace(line, index):
+    while index < len(line) and line[index] in " \t":
+        index += 1
+    return index
+
+
+def _extract_heredoc_delimiter(line, index):
+    if index < len(line) and line[index] == "-":
+        index += 1
+    index = _skip_heredoc_whitespace(line, index)
+    if index >= len(line):
+        return None
+    if line[index] in "'\"":
+        quote = line[index]
+        end = line.find(quote, index + 1)
+        return line[index + 1:end] if end != -1 else None
+    end = index
+    while end < len(line) and (line[end].isalnum() or line[end] == "_"):
+        end += 1
+    return line[index:end] if end > index else None
+
+
+def _record_heredoc_delimiter(state, index):
+    delimiter = _extract_heredoc_delimiter(state.line, index + 2)
+    if delimiter is not None:
+        state.heredoc_delimiters.append(delimiter)
+
+
+def _mask_unquoted_character(state, index):
+    character = state.line[index]
+    if character == "\\" and index + 1 < len(state.line):
+        return _mask_escaped_character(state, index), False
+    if character == "'":
+        state.output[index] = " "
+        state.contexts.append("'")
+        return index + 1, False
+    if character == '"':
+        state.contexts.append('"')
+        return index + 1, False
+    if _is_command_substitution(state, index):
+        state.contexts.append(None)
+        return index + 2, False
+    if character == ")" and len(state.contexts) > 1:
+        state.contexts.pop()
+        return index + 1, False
+    if character == "#" and _is_comment_start(state, index):
+        _mask_comment(state, index)
+        return len(state.line), True
+    if (
+        character == "<"
+        and index + 1 < len(state.line)
+        and state.line[index + 1] == "<"
+    ):
+        _record_heredoc_delimiter(state, index)
+    return index + 1, False
+
+
+def _mask_shell_line(line):
+    """Mask shell text where parameter expansion is not performed."""
+    state = _ShellMaskState(line)
+    index = 0
+    while index < len(line):
+        if state.contexts[-1] is not None:
+            index = _mask_quoted_character(state, index)
+            continue
+        index, stopped = _mask_unquoted_character(state, index)
+        if stopped:
+            break
+    return "".join(state.output), state.heredoc_delimiters
+
+
+def _blank_shell_line(line):
+    return "".join("\n" if char == "\n" else " " for char in line)
+
+
+def _consume_heredoc_line(line, pending_heredocs, masked_lines):
+    delimiter = pending_heredocs[0]
+    terminator = line.rstrip("\r\n")
+    if terminator.startswith("\t"):
+        terminator = terminator.lstrip("\t")
+    if terminator == delimiter:
+        pending_heredocs.pop(0)
+        masked_lines.append(line)
+        return
+    masked_lines.append(_blank_shell_line(line))
+
+
+def _mask_shell_non_expanding(run_text):
+    """Mask comments, quoted literals, escaped dollars, and heredoc bodies."""
+    masked_lines = []
+    pending_heredocs = []
+    for line in run_text.splitlines(keepends=True):
+        if pending_heredocs:
+            _consume_heredoc_line(line, pending_heredocs, masked_lines)
+            continue
+        masked, heredocs = _mask_shell_line(line)
+        masked_lines.append(masked)
+        pending_heredocs.extend(heredocs)
+    return "".join(masked_lines)
 
 
 def extract_run_vars(run_text):
@@ -63,14 +227,17 @@ def extract_run_vars(run_text):
     refs = set()
     if not isinstance(run_text, str):
         return refs
-    masked = _mask_single_quoted(_merge_continuations(run_text))
+    masked = _mask_shell_non_expanding(_merge_continuations(run_text))
     # Mask ${{ }} expressions; they are not shell variables.
     masked = re.sub(r"\$\{\{.*?\}\}", " ", masked)
-    for match in re.finditer(r"\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))",
-                             masked):
-        name = match.group(1) or match.group(2)
-        if not KNOWN_ENV_RE.match(name):
-            refs.add(name)
+    for pattern in (
+        r"\$\{(?:#)?([A-Za-z_][A-Za-z0-9_]*)",
+        r"\$([A-Za-z_][A-Za-z0-9_]*)",
+    ):
+        for match in re.finditer(pattern, masked):
+            name = match.group(1)
+            if not KNOWN_ENV_RE.match(name):
+                refs.add(name)
     return refs
 
 

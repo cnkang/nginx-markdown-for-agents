@@ -420,9 +420,11 @@ def _make_doc_with_dynconf(dynconf):
         "product_version": "0.9.2",
         "worker": {"pid": 1234, "scope": "worker-local"},
         "build": {
+            "build_kind": "release",
             "source_sha": "a" * 40,
             "nginx_version": "1.27.0",
             "rust_version": "1.91.0",
+            "feature_manifest_digest": "sha256:" + "c" * 64,
             "features": ["streaming"],
         },
         "configuration": {
@@ -432,12 +434,14 @@ def _make_doc_with_dynconf(dynconf):
             "effective_sources": _static_sources(),
         },
         "runtime": {
+            "diagnostics_recording": "active",
             "inflight": 0,
             "pending_output": 0,
             "module_metrics": {
                 "streaming_requests_total": 0,
                 "precommit_failopen_total": 0,
                 "copied_output_total": 0,
+                "diagnostics_recording_state": 1,
             },
         },
         "recent_decisions": [],
@@ -451,9 +455,11 @@ def _make_doc_with_config(effective, sources):
         "product_version": "0.9.2",
         "worker": {"pid": 1234, "scope": "worker-local"},
         "build": {
+            "build_kind": "release",
             "source_sha": "a" * 40,
             "nginx_version": "1.27.0",
             "rust_version": "1.91.0",
+            "feature_manifest_digest": "sha256:" + "c" * 64,
             "features": [],
         },
         "configuration": {
@@ -472,12 +478,14 @@ def _make_doc_with_config(effective, sources):
             "effective_sources": sources,
         },
         "runtime": {
+            "diagnostics_recording": "active",
             "inflight": 0,
             "pending_output": 0,
             "module_metrics": {
                 "streaming_requests_total": 0,
                 "precommit_failopen_total": 0,
                 "copied_output_total": 0,
+                "diagnostics_recording_state": 1,
             },
         },
         "recent_decisions": [],

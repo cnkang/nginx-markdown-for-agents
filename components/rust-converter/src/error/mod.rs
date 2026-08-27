@@ -14,7 +14,7 @@
 //! new `ConversionError` variant requires updating both this mapping and
 //! the C-side classification in `ngx_http_markdown_error.c`.
 //!
-//! ## Error Classification (spec 51)
+//! ## Error Classification
 //!
 //! The [`classification`] submodule defines the unified error policy layer:
 //! error classes, policies, and behavior decisions that determine how each

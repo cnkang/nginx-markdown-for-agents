@@ -67,16 +67,19 @@ Required:
   and with `-MAX_WBITS` (raw) otherwise. Raw probes count as supported
   behavior and must keep passing on both the streaming and full-buffer paths.
 - Truncated gzip members, zlib-wrapped deflate streams, and raw RFC 1951
-  deflate streams must be
-  explicitly rejected
-  with a budget or integrity error, not silently accepted.  When
-  `inflate()` returns `Z_BUF_ERROR` or `Z_DATA_ERROR` on a terminal
-  chunk, the decompressor must propagate a `DECOMP_CATEGORY_TRUNCATED`
-  error rather than returning partial output.
+  deflate streams must be explicitly rejected with a budget or integrity
+  error, not silently accepted. `DECOMP_CATEGORY_TRUNCATED` is valid only
+  when the decoder has confirmed that the final member is incomplete. A
+  terminal `Z_DATA_ERROR` caused by corruption, malformed framing, or an
+  invalid checksum must retain the corresponding integrity or malformed-input
+  category. The decoder must not relabel it as truncation merely because it occurred
+  on the terminal chunk.
 - Test harnesses that produce new compressed payloads for streaming
-  decompression tests must use zlib-wrapped deflate (`windowBits = 15`).
-  Mismatched compression modes between a test payload and the frozen public
-  decoder contract produce false passes or false failures.
+  decompression tests must use zlib-wrapped deflate (`windowBits = 15`) by
+  default. Tests may use raw RFC 1951 fixtures when they explicitly cover
+  raw-deflate compatibility. Mismatched compression modes between a test
+  payload and the frozen public decoder contract produce false passes or false
+  failures.
 - When the decompression implementation shares between full-buffer and
   streaming,
   both paths must handle the same public deflate format. If full-buffer uses
@@ -117,8 +120,8 @@ Verification:
 - `grep -rn 'TRUNCATED\|truncated.*\(gzip\|deflat\|brotli\)\|Z_BUF_ERROR\|Z_DATA_ERROR\|no.progress' components/rust-converter/src/ components/nginx-module/src/`
 - Verify truncated-stream rejection propagates a budget/integrity error.
 - Verify the no-progress guard detects `Z_BUF_ERROR` with no state change.
-- `make test-rust` — streaming decompression tests cover zlib-wrapped
-  deflate and truncated-stream rejection.
+- `make test-rust` — streaming decompression tests cover zlib-wrapped and raw
+  RFC 1951 deflate in both decoders, plus truncated-stream rejection.
 - `make test-nginx-unit` — C unit tests cover the no-progress guard via
   `TEST_INFLATE_MODE_FEED_BUF_ERROR_NO_PROGRESS` and gzip member lifecycle.
 - `make verify-chunked-native-e2e-smoke` — native gzip streaming exercises

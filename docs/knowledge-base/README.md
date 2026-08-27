@@ -94,6 +94,7 @@ you need a machine-readable value or count.
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-08-26 | Synchronize the knowledge-base contract with the current FFI inventory after removing retired exports. |
 | 0.9.2 | 2026-08-12 | Synchronize the knowledge-base contract with the current dynconf and FFI inventory. |
 | 0.9.2 | 2026-08-11 | Align streaming transition sources and diagnostics Schema v2 alias with the production renderer. |
 | 0.9.2 | 2026-08-07 | Pilot: create decision-layer KB skeleton (L1 index + L2 config contract) from inventory ground truth. |

@@ -22,10 +22,10 @@ from report_utils import (
 def _write_report(data):
     """
     Write a JSON-serializable object to a temporary `.json` file and return its path.
-    
+
     Parameters:
         data (Any): JSON-serializable object to write.
-    
+
     Returns:
         file_path (str): Path to the created temporary JSON file. The file is created with a `.json` suffix and is not deleted automatically.
     """

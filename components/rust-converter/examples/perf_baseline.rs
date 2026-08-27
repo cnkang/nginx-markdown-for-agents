@@ -1271,6 +1271,12 @@ fn build_measurement_report(
                 "fallback_rate": fallback_rate,
                 "req_per_s": streaming.stats.req_per_s,
                 "input_mb_per_s": streaming.stats.input_mb_per_s,
+                "stage_breakdown": {
+                    "parse_pct": 0.0,
+                    "convert_pct": 0.0,
+                    "etag_pct": 0.0,
+                    "token_pct": 0.0,
+                },
                 "iterations": cfg.iterations,
                 "warmup": cfg.warmup,
             });
@@ -1299,6 +1305,12 @@ fn build_measurement_report(
                 "peak_memory_bytes": streaming.peak_memory_bytes,
                 "req_per_s": streaming.stats.req_per_s,
                 "input_mb_per_s": streaming.stats.input_mb_per_s,
+                "stage_breakdown": {
+                    "parse_pct": 0.0,
+                    "convert_pct": 0.0,
+                    "etag_pct": 0.0,
+                    "token_pct": 0.0,
+                },
                 "iterations": cfg.iterations,
                 "warmup": cfg.warmup,
             });
@@ -1471,6 +1483,7 @@ fn run_single_mode(
                 eprintln!(
                     "warning: streaming engine requested but streaming feature is not enabled"
                 );
+                std::process::exit(1);
             }
         }
         BenchmarkEngine::Both => {
@@ -1514,6 +1527,7 @@ fn run_single_mode(
                 eprintln!(
                     "warning: streaming engine requested but streaming feature is not enabled"
                 );
+                std::process::exit(1);
                 if let Some(path) = json_output {
                     let report = build_measurement_report(
                         &[(sample, ffi_result, cfg)],

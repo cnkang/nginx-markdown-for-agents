@@ -167,14 +167,13 @@ echo "==> Compiling and linking the dynamic module"
 
 POSTCOMMIT_OBJECT="$(find "${BUILDROOT}/src/objs" -type f \
   -name '*stream_postcommit*.o' -print -quit)"
-MODULE="$(find "${BUILDROOT}/src/objs" -maxdepth 2 -type f \
-  -name 'ngx_http_markdown*.so' -print -quit)"
+MODULE="${BUILDROOT}/src/objs/ngx_http_markdown_filter_module.so"
 if [[ -z "${POSTCOMMIT_OBJECT}" || ! -f "${POSTCOMMIT_OBJECT}" ]]; then
   echo "FAIL: stream_postcommit.c was not compiled" >&2
   exit 1
 fi
-if [[ -z "${MODULE}" || ! -f "${MODULE}" ]]; then
-  echo "FAIL: dynamic module was not linked" >&2
+if [[ ! -f "${MODULE}" ]]; then
+  echo "FAIL: dynamic module was not linked at the established artifact path" >&2
   exit 1
 fi
 echo "  stream_postcommit.c compile result: PASS"

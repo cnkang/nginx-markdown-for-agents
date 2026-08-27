@@ -144,8 +144,11 @@ curl -fsSLO "https://github.com/<org>/nginx-markdown-for-agents/releases/downloa
 After downloading both the package and `SHA256SUMS`:
 
 ```bash
-# Verify a specific package against the checksum file
-sha256sum --check --ignore-missing SHA256SUMS
+set -euo pipefail
+# Verify the specific package; an absent matching entry is an error.
+PACKAGE="nginx-module-markdown-for-agents_${VERSION}_nginx-1.26.3_amd64.deb"
+CHECKSUM_LINE="$(awk -v package="${PACKAGE}" '$2 == package { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"
+printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -
 ```
 
 Or verify manually:
@@ -223,12 +226,15 @@ unsigned release asset.
 ### Importing the Project Public Key
 
 Before verifying signatures, obtain the project signing public key and its
-full fingerprint. The project checks the public key in at
+full fingerprint through an independently authenticated channel. The project
+checks the public key in at
 `packaging/nginx-markdown-for-agents-release.asc` and publishes its
 signing-subkey fingerprint as `15C792438EAA762B421E60D21E8D41E7D19A8A75`
 (primary key `7A3743687FEEE0313128355038724643EA12C02A`). A key ID or
-keyserver result only transports the key. It does not establish identity —
-verify the full fingerprint with `gpg --show-keys` after import. See
+keyserver result only transports the key. It does not establish identity.
+`gpg --show-keys` only displays the fingerprint of the key you imported. It
+does not authenticate that fingerprint. Compare it with the fingerprint from
+the independent trusted source before trusting the key. See
 [GPG Key Management](GPG_KEY_MANAGEMENT.md) for the verification contract.
 
 ```bash

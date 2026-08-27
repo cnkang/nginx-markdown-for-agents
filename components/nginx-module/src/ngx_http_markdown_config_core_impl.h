@@ -28,90 +28,6 @@ static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     const ngx_http_markdown_conf_t *conf);
 
 /*
- * Per-path RB-tree helpers removed from production in 0.9.2.
- * Retained under debug guard only.
- */
-#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
-/*
- * Choose the RB-tree branch direction for a node vs an existing tree node.
- *
- * Compares by rbtree key (hash) first, then by path_len and path bytes
- * to resolve hash collisions.  Returns &temp->left or &temp->right.
- */
-static ngx_rbtree_node_t **
-ngx_http_markdown_path_rbtree_choose_branch(ngx_rbtree_node_t *temp,
-    const ngx_rbtree_node_t *node)
-{
-    const ngx_http_markdown_path_metric_node_t  *n;
-    const ngx_http_markdown_path_metric_node_t  *t;
-
-    if (node->key < temp->key) {
-        return &temp->left;
-    }
-
-    if (node->key > temp->key) {
-        return &temp->right;
-    }
-
-    n = (const ngx_http_markdown_path_metric_node_t *) node;
-    t = (const ngx_http_markdown_path_metric_node_t *) temp;
-
-    if (n->path_len < t->path_len) {
-        return &temp->left;
-    }
-
-    if (n->path_len > t->path_len) {
-        return &temp->right;
-    }
-
-    if (ngx_memcmp(n->path, t->path, n->path_len) < 0) {
-        return &temp->left;
-    }
-
-    return &temp->right;
-}
-
-/*
- * RB-tree insert callback for per-path metric nodes.
- *
- * Compares by rbnode.key (hash) first, then by path_len
- * and path bytes to resolve hash collisions.
- */
-static void
-ngx_http_markdown_path_rbtree_insert_value(ngx_rbtree_node_t *temp,
-    ngx_rbtree_node_t *node, ngx_rbtree_node_t *sentinel)
-{
-    ngx_rbtree_node_t  **p;
-
-    for ( ;; ) {
-        p = ngx_http_markdown_path_rbtree_choose_branch(temp, node);
-
-        if (*p == sentinel) {
-            break;
-        }
-
-        temp = *p;
-    }
-
-    *p = node;
-    node->parent = temp;
-    node->left = sentinel;
-    node->right = sentinel;
-    ngx_rbt_red(node);
-}
-#endif /* MARKDOWN_METRICS_PER_PATH_DEBUG */
-
-/*
- * Default per-path cardinality limit (debug builds only).
- *
- * Per-path metrics removed from production in 0.9.2 due to
- * unbounded cardinality risk.
- */
-#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
-#define NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT  100
-#endif
-
-/*
  * Shared-memory initializer for cross-worker metrics storage.
  *
  * On reload, nginx may pass previous zone data (`data != NULL`), which is
@@ -146,14 +62,6 @@ ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data)
     }
 
     ngx_memzero(metrics, sizeof(ngx_http_markdown_metrics_t));
-
-#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
-    ngx_rbtree_init(&metrics->per_path.path_tree,
-                    &metrics->per_path.sentinel,
-                    ngx_http_markdown_path_rbtree_insert_value);
-    metrics->per_path.cardinality_limit =
-        NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT;
-#endif
 
     shpool->data = metrics;
     shm_zone->data = metrics;
@@ -471,12 +379,11 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->decompress.max_size = NGX_CONF_UNSET_SIZE;
     conf->decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     conf->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    conf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     conf->routing.max_inflight = NGX_CONF_UNSET_UINT;
     conf->ops.diagnostics_enabled = NGX_CONF_UNSET;
     conf->ops.metrics_enabled = NGX_CONF_UNSET;
 
-    /* v0.8.0 streaming config */
+    /* Streaming configuration. */
     conf->stream.policy = NGX_CONF_UNSET_UINT;
     conf->stream.policy_explicit = -1;
     conf->stream.excluded_types = NGX_CONF_UNSET_PTR;
@@ -612,9 +519,8 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     }
 
     /*
-     * Re-project the legacy compat fields after any clamp so downstream
-     * legacy readers observe the same effective values as the unified
-     * limits struct.
+     * Keep compatibility mirrors synchronized after any clamp so all
+     * downstream readers observe the same effective values.
      */
     conf->decompress.parse_timeout = conf->limits.parser_timeout;
     conf->decompress.parser_budget = conf->limits.parser_memory;
@@ -627,12 +533,9 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * level, inherit max_size.  This must run after memory_budget override
      * so the default tracks the effective max_size.
      *
-     * NOTE (0.9.2-contract): under the 0.9.2 contract this branch is effectively
-     * dead — config_merge_impl.h always assigns
-     * conf->decompress.max_size = conf->limits.decompressed_size (which
-     * has an independent 10m default) before this point, so the value is
-     * never NGX_CONF_UNSET_SIZE here.  Retained defensively for config
-     * paths that bypass the merge helper.
+     * The merge helper normally assigns conf->decompress.max_size from
+     * conf->limits.decompressed_size before this point. Keep the guard for
+     * configuration paths that bypass the merge helper.
      */
     if (conf->decompress.max_size == NGX_CONF_UNSET_SIZE) {
         conf->decompress.max_size = conf->max_size;
@@ -1147,8 +1050,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        "auth_cookie_patterns=%ui etag=%ui "
                        "conditional_requests=%V "
                        "log_verbosity=%V "
-                        "content_types=%ui "
-                       "large_body_threshold=%uz"
+                        "content_types=%ui"
 #ifdef MARKDOWN_STREAMING_ENABLED
                         " streaming_policy=%s"
                         " streaming_budget=%uz"
@@ -1169,8 +1071,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        (ngx_uint_t) conf->policy.generate_etag,
                        ngx_http_markdown_conditional_requests_name(conf->policy.conditional_requests),
                        ngx_http_markdown_log_verbosity_name(conf->policy.log_verbosity),
-                        content_type_count,
-                       conf->routing.large_body_threshold
+                        content_type_count
 #ifdef MARKDOWN_STREAMING_ENABLED
                         , streaming_policy_str
                         , conf->stream.budget

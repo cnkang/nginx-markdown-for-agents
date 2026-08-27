@@ -40,10 +40,6 @@
 
 #define MARKDOWN_STREAMING_ENABLED 1
 
-#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
-#endif
-
 #ifndef ngx_str_set
 #define ngx_str_set(str, text)                                    \
     (str)->len = sizeof(text) - 1; (str)->data = (u_char *) text
@@ -413,7 +409,7 @@ ngx_pnalloc(ngx_pool_t *pool, size_t size)
  * (not included by this test's standalone harness).  Mirror the
  * production semantics: invalidate all Content-Type list entries, then
  * point the dedicated field at the shared Markdown media type and
- * clear its charset/lowcase/hash mirrors. */
+ * set its charset/lowcase/hash mirrors. */
 void
 ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
 {
@@ -441,8 +437,9 @@ ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
         sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
     r->headers_out.content_type_len =
         sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
+    r->headers_out.charset.len = NGX_HTTP_MARKDOWN_CHARSET_LEN;
+    r->headers_out.charset.data =
+        (u_char *) NGX_HTTP_MARKDOWN_CHARSET_LITERAL;
     r->headers_out.content_type_lowcase = NULL;
     r->headers_out.content_type_hash = 0;
 }
@@ -469,7 +466,9 @@ ngx_http_markdown_clear_trailers(ngx_http_request_t *r)
 }
 
 
-static ngx_table_elt_t test_headers_storage[32];
+static ngx_table_elt_t test_headers_storage[
+    NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX + 1];
+static ngx_table_elt_t test_trailers_storage[2];
 
 static void test_setup(void)
 {
@@ -489,16 +488,25 @@ static void test_setup(void)
     test_content_length_elt.hash = 1;
     test_request.headers_out.content_length = &test_content_length_elt;
 
-    /* Initialize headers list with capacity 32 */
+    /* Leave room for the bounded snapshot overflow case. */
     test_request.headers_out.headers.part.elts = test_headers_storage;
     test_request.headers_out.headers.part.nelts = 0;
     test_request.headers_out.headers.part.next = NULL;
     test_request.headers_out.headers.size = sizeof(ngx_table_elt_t);
-    test_request.headers_out.headers.nalloc = 32;
+    test_request.headers_out.headers.nalloc =
+        NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX + 1;
     test_request.headers_out.headers.pool = NULL;
     test_request.headers_out.etag = NULL;
     test_request.headers_out.accept_ranges = NULL;
     test_request.allow_ranges = 0;
+
+    memset(test_trailers_storage, 0, sizeof(test_trailers_storage));
+    test_request.headers_out.trailers.part.elts = test_trailers_storage;
+    test_request.headers_out.trailers.part.nelts = 0;
+    test_request.headers_out.trailers.part.next = NULL;
+    test_request.headers_out.trailers.size = sizeof(ngx_table_elt_t);
+    test_request.headers_out.trailers.nalloc = 2;
+    test_request.headers_out.trailers.pool = NULL;
 
     test_vary_accept_called = 0;
     test_vary_accept_rc = NGX_OK;
@@ -541,6 +549,7 @@ static void test_commit_removes_representation_metadata(void)
 {
     ngx_http_markdown_ctx_t ctx;
     ngx_table_elt_t        *h;
+    ngx_int_t               rc;
 
     test_setup();
     memset(&ctx, 0, sizeof(ctx));
@@ -580,7 +589,19 @@ static void test_commit_removes_representation_metadata(void)
     ngx_str_set(&h->value, "sha-256=:deadbeef:");
     test_request.headers_out.headers.part.nelts = 6;
 
-    ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+    /* Seed an upstream response trailer: headers_out.trailers is an
+     * independent list emitted by HTTP/2/3 and chunked encodings even
+     * without a Trailer declaration, so the commit must suppress it too. */
+    h = &test_trailers_storage[0];
+    h->hash = 1;
+    ngx_str_set(&h->key, "Digest");
+    ngx_str_set(&h->value, "sha-256=:deadbeef:");
+    test_request.headers_out.trailers.part.nelts = 1;
+
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "representation metadata commit returns NGX_OK");
 
     TEST_ASSERT(test_request.allow_ranges == 0,
                 "allow_ranges cleared");
@@ -604,6 +625,8 @@ static void test_commit_removes_representation_metadata(void)
     TEST_ASSERT(test_find_header_in_list(&test_request.headers_out.headers,
                                          "Repr-Digest", 11) == NULL,
                 "Repr-Digest invalidated");
+    TEST_ASSERT(test_trailers_storage[0].hash == 0,
+                "Digest trailer entry suppressed (hash cleared)");
     TEST_PASS("Commit removes representation-integrity metadata");
 }
 
@@ -690,9 +713,16 @@ static void test_content_type_set(void)
                 == NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN,
                 "content_type_len correct");
     TEST_ASSERT(memcmp(test_request.headers_out.content_type.data,
-                       "text/markdown; charset=utf-8",
+                       NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL,
                        NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN) == 0,
-                "Content-Type value correct");
+                "Content-Type media type correct");
+    TEST_ASSERT(test_request.headers_out.charset.len
+                == NGX_HTTP_MARKDOWN_CHARSET_LEN,
+                "Content-Type charset length correct");
+    TEST_ASSERT(memcmp(test_request.headers_out.charset.data,
+                       NGX_HTTP_MARKDOWN_CHARSET_LITERAL,
+                       NGX_HTTP_MARKDOWN_CHARSET_LEN) == 0,
+                "Content-Type charset correct");
     TEST_PASS("Content-Type set correctly after commit");
 }
 
@@ -1301,10 +1331,54 @@ static void test_snapshot_overflow_fails_before_mutation(void)
     TEST_PASS("All snapshot overflows fail before Phase 1 mutation");
 }
 
+static void test_snapshot_header_count_boundaries(void)
+{
+    static const char *const names[] = {
+        "Vary", "ETag", "Cache-Control"
+    };
+    static const size_t name_lens[] = { 4, 4, 13 };
+    static const ngx_uint_t counts[] = { 0, 1, 7, 8, 9 };
+    ngx_http_markdown_hdr_snap_t snap;
+    ngx_int_t rc;
+    ngx_uint_t name_index;
+    ngx_uint_t count_index;
+    ngx_uint_t i;
+
+    for (name_index = 0; name_index < sizeof(names) / sizeof(names[0]);
+         name_index++)
+    {
+        for (count_index = 0;
+             count_index < sizeof(counts) / sizeof(counts[0]);
+             count_index++)
+        {
+            test_setup();
+            for (i = 0; i < counts[count_index]; i++) {
+                test_push_header(names[name_index], "value");
+            }
+
+            memset(&snap, 0, sizeof(snap));
+            rc = ngx_http_markdown_stream_commit_snapshot_header(
+                &test_request,
+                (const u_char *) names[name_index],
+                name_lens[name_index],
+                &snap);
+
+            TEST_ASSERT(rc == NGX_OK,
+                        "0/1/7/8/9 matching headers remain snapshot-safe");
+            TEST_ASSERT(snap.count == counts[count_index],
+                        "snapshot records every repeated header");
+            TEST_ASSERT(snap.orig_nelts == counts[count_index],
+                        "snapshot preserves the complete list count");
+        }
+    }
+
+    TEST_PASS("Snapshot boundaries cover Vary, ETag, and Cache-Control");
+}
+
 /* --- Multipart header list rollback regression tests (Rule 39 / Rule 40) --- */
 
-static ngx_table_elt_t  mp_part1_storage[8];
-static ngx_table_elt_t  mp_part2_storage[8];
+static ngx_table_elt_t  mp_part1_storage[NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX];
+static ngx_table_elt_t  mp_part2_storage[NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX];
 static ngx_list_part_t  mp_part2;
 
 static void test_setup_multipart(void)
@@ -1331,6 +1405,7 @@ static void test_setup_multipart(void)
     test_request.headers_out.headers.part.nelts = 0;
     test_request.headers_out.headers.part.next = NULL;
     test_request.headers_out.headers.size = sizeof(ngx_table_elt_t);
+    /* Keep the first part small so rollback tests exercise a second part. */
     test_request.headers_out.headers.nalloc = 8;
     test_request.headers_out.headers.pool = NULL;
     test_request.headers_out.etag = NULL;
@@ -1357,7 +1432,8 @@ static ngx_table_elt_t *
 mp_push_part1(const char *key, const char *value)
 {
     ngx_uint_t idx = test_request.headers_out.headers.part.nelts;
-    TEST_ASSERT(idx < 8, "part1 not full");
+    TEST_ASSERT(idx < NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX,
+                "part1 not full");
     ngx_table_elt_t *h = &mp_part1_storage[idx];
     h->hash = 1;
     h->key.data = (u_char *) key;
@@ -1372,7 +1448,8 @@ static ngx_table_elt_t *
 mp_push_part2(const char *key, const char *value)
 {
     ngx_uint_t idx = mp_part2.nelts;
-    TEST_ASSERT(idx < 8, "part2 not full");
+    TEST_ASSERT(idx < NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX,
+                "part2 not full");
     ngx_table_elt_t *h = &mp_part2_storage[idx];
     h->hash = 1;
     h->key.data = (u_char *) key;
@@ -1684,6 +1761,7 @@ int main(void)
     test_rollback_etag_failure_rolls_back_vary();
     test_rollback_restores_typed_etag_pointer();
     test_snapshot_overflow_fails_before_mutation();
+    test_snapshot_header_count_boundaries();
 
     TEST_SECTION("Multipart header list rollback (Rule 39 / Rule 40)");
     test_multipart_rollback_vary_in_part2();

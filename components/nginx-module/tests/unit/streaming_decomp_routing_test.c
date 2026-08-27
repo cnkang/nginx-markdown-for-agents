@@ -44,11 +44,21 @@ enum {
 
 typedef enum {
     NGX_HTTP_MARKDOWN_COMPRESSION_NONE    = 0,
-    NGX_HTTP_MARKDOWN_COMPRESSION_GZIP    = 1,
-    NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE = 2,
-    NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI  = 3,
-    NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN = 4
+    NGX_HTTP_MARKDOWN_COMPRESSION_GZIP    = MARKDOWN_FORMAT_GZIP + 1,
+    NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE = MARKDOWN_FORMAT_DEFLATE + 1,
+    NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI  = MARKDOWN_FORMAT_BROTLI + 1,
+    NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN = MARKDOWN_FORMAT_BROTLI + 2
 } ngx_http_markdown_compression_type_e;
+
+_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+                   == MARKDOWN_FORMAT_GZIP + 1,
+               "gzip C/R format mapping drifted");
+_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+                   == MARKDOWN_FORMAT_DEFLATE + 1,
+               "deflate C/R format mapping drifted");
+_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+                   == MARKDOWN_FORMAT_BROTLI + 1,
+               "Brotli C/R format mapping drifted");
 
 /* ----------------------------------------------------------------
  * Cache validation mode enum
@@ -732,13 +742,13 @@ test_budget_exceeded_postcommit_safe_finish(void)
 }
 
 static void
-test_budget_incremental_accumulation(void)
+test_budget_cumulative_accumulation(void)
 {
     decomp_ctx_t ctx;
     int budget_err;
 
     TEST_SUBSECTION(
-        "budget incremental accumulation triggers at "
+        "budget cumulative accumulation triggers at "
         "boundary");
 
     init_decomp_ctx(&ctx, STATE_PRE_COMMIT, 1000);
@@ -1361,7 +1371,7 @@ main(void)
     /* Section 4: Budget exceedance fail-open / safe-finish */
     test_budget_exceeded_precommit_failopen();
     test_budget_exceeded_postcommit_safe_finish();
-    test_budget_incremental_accumulation();
+    test_budget_cumulative_accumulation();
     test_budget_exact_boundary_no_exceed();
 
     /* Section 5: Inflate error pre/post-commit */

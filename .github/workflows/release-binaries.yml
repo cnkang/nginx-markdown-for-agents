@@ -12,8 +12,10 @@ permissions: {}
 
 # Release integrity:
 #   - Every dynamic-module archive is listed in SHA256SUMS.
-#   - Published releases additionally carry SHA256SUMS.asc, signed in the
+#   - Tag artifacts additionally carry SHA256SUMS.asc, signed in the
 #     protected release-signing environment.
+#   - This workflow only builds, signs, and uploads workflow artifacts.
+#     release-packages.yml is the sole GitHub Release publication path.
 
 jobs:
   prepare:
@@ -283,18 +285,18 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
-  publish-release:
-    name: Publish Binaries to Release
+  package-artifacts:
+    name: Upload Binary Artifacts
     needs: [prepare, completeness-check, integrity-checksums, integrity-signing]
     runs-on: ubuntu-latest
     if: >-
       always()
       && needs.completeness-check.result == 'success'
       && needs.integrity-checksums.result == 'success'
-      && needs.integrity-signing.result == 'success'
-      && needs.prepare.outputs.publication_tag != ''
+      && (needs.integrity-signing.result == 'success'
+          || needs.integrity-signing.result == 'skipped')
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -307,8 +309,8 @@ jobs:
           name: binary-checksums
           path: release-assets
 
-      - name: Download SHA256SUMS.asc
-        if: needs.prepare.outputs.publication_tag != ''
+      - name: Download SHA256SUMS.asc (tag)
+        if: needs.integrity-signing.result == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: binary-checksums-signature
@@ -395,13 +397,15 @@ jobs:
               f.write("\n".join(lines))
           PY
 
-      - name: Upload Assets
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          tag_name: ${{ needs.prepare.outputs.publication_tag }}
-          files: |
+          name: release-binaries
+          path: |
             artifacts/**/*.tar.gz
             artifacts/nginx-version-groups.json
             artifacts/nginx-version-groups.md
             release-assets/SHA256SUMS
             release-assets/SHA256SUMS.asc
+          if-no-files-found: error
+          retention-days: 5

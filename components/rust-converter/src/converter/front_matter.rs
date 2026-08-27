@@ -24,7 +24,7 @@
 //! is always terminated with a trailing `---` followed by a blank line to
 //! ensure clean separation from the Markdown body.
 
-use super::*;
+use super::{ConversionContext, ConversionError, MarkdownConverter};
 
 impl MarkdownConverter {
     /// Optionally prepend YAML front matter extracted from DOM metadata.

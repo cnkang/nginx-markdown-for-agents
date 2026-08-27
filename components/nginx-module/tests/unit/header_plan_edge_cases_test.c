@@ -6,7 +6,6 @@
  *   - Plan exceeding NGX_HTTP_MARKDOWN_PLAN_MAX_ENTRIES → NGX_ERROR
  *   - MODIFY with NULL key and NULL value (etag placeholder) → NGX_OK
  *   - MODIFY with NULL value but non-zero value_len → NGX_ERROR
- *   - Rollback reverses all operations on failure
  *   - plan_find_header skips hash=0 entries
  *   - Case-insensitive name matching
  *   - Unknown op_type → NGX_ERROR
@@ -14,7 +13,7 @@
  * Coverage targets:
  *   ngx_http_markdown_header_plan.c (apply_header_plan,
  *   plan_apply_set, plan_apply_delete, plan_apply_modify,
- *   plan_rollback, plan_find_header, plan_name_eq)
+ *   plan_find_header, plan_name_eq)
  *
  * Rules: 15 (FFI struct changes), 29 (clear flags after gated op),
  *        16 (no dead stores), 28 (full chain iteration).

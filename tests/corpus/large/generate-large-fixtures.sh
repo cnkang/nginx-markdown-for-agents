@@ -54,7 +54,13 @@ for fixture_id, target_size in targets:
         parts.append(block)
         current_size += block_size
 
-    parts.append("</body></html>\n")
+    suffix = "</body></html>\n"
+    remaining = target_size - current_size - len(suffix.encode("utf-8"))
+    if remaining > 0:
+        parts.append(block[:remaining])
+        current_size += remaining
+
+    parts.append(suffix)
     content = "".join(parts)
 
     html_path.write_text(content, encoding="utf-8")

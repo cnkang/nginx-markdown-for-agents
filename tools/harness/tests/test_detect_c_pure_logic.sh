@@ -2,7 +2,7 @@
 #
 # test_detect_c_pure_logic.sh — Unit tests for the C pure-logic detector.
 #
-# Validates B01.5 detector behaviour: pure-logic candidate detection,
+# Validates the pure-logic detector behaviour: pure-logic candidate detection,
 # NGINX-API exclusion, trivial-function and test/stub skipping, advisory vs
 # strict (--check) exit codes, and bounded (non-hanging) execution.
 

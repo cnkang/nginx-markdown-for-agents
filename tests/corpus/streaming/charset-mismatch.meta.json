@@ -2,7 +2,7 @@
   "fixture-id": "streaming/charset-mismatch",
   "page-type": "clean-article",
   "expected-conversion-result": "converted",
-  "input-size-bytes": 296,
+  "input-size-bytes": 737,
   "source-description": "Content-Type and meta charset mismatch handling",
   "failure-corpus": false,
   "streaming_notes": {

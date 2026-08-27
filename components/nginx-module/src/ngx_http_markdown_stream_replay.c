@@ -49,6 +49,7 @@ ngx_http_markdown_stream_replay_init(ngx_http_markdown_ctx_t *ctx,
     /* Zero capacity means replay is intentionally disabled */
     if (capacity == 0) {
         ctx->stream_sm.replay_initialized = 0;
+        ctx->stream_sm.replay_overflowed = 0;
         return NGX_OK;
     }
 
@@ -70,6 +71,7 @@ ngx_http_markdown_stream_replay_init(ngx_http_markdown_ctx_t *ctx,
 
     ctx->stream_sm.replay_capacity = capacity;
     ctx->stream_sm.replay_initialized = 1;
+    ctx->stream_sm.replay_overflowed = 0;
 
     return NGX_OK;
 }
@@ -163,6 +165,7 @@ ngx_http_markdown_stream_replay_append(ngx_http_markdown_ctx_t *ctx,
     if (buf->size > buf->max_size
         || len > (buf->max_size - buf->size))
     {
+        ctx->stream_sm.replay_overflowed = 1;
         return NGX_DECLINED;
     }
 
@@ -174,6 +177,7 @@ ngx_http_markdown_stream_replay_append(ngx_http_markdown_ctx_t *ctx,
             buf->capacity, required, buf->max_size);
 
         if (new_capacity < required) {
+            ctx->stream_sm.replay_overflowed = 1;
             return NGX_DECLINED;
         }
 
@@ -220,7 +224,9 @@ ngx_http_markdown_stream_replay_available(const ngx_http_markdown_ctx_t *ctx)
         return 0;
     }
 
-    if (ctx->stream_sm.replay_buf.size > ctx->stream_sm.replay_buf.max_size) {
+    if (ctx->stream_sm.replay_overflowed
+        || ctx->stream_sm.replay_buf.size > ctx->stream_sm.replay_buf.max_size)
+    {
         return 0;
     }
 

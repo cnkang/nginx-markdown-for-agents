@@ -2,6 +2,13 @@
 set -euo pipefail
 
 NGINX_TAG="${NGINX_TAG:-mainline}"
+EXPECTED_NGINX_VERSION="${EXPECTED_NGINX_VERSION:-}"
+IMAGE_REFERENCE="${IMAGE_REFERENCE:-}"
+IMAGE_DIGEST="${IMAGE_DIGEST:-}"
+MATRIX_ROW_ID="${MATRIX_ROW_ID:-}"
+MATRIX_OS="${MATRIX_OS:-}"
+MATRIX_LIBC="${MATRIX_LIBC:-}"
+MATRIX_ARCH="${MATRIX_ARCH:-}"
 PORT="${PORT:-18080}"
 KEEP_IMAGE="${KEEP_IMAGE:-0}"
 MODULE_REPO="${MODULE_REPO:-https://github.com/cnkang/nginx-markdown-for-agents.git}"
@@ -11,25 +18,37 @@ SKIP_BUILD="${SKIP_BUILD:-0}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-}"
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE_NAME=""
+IMAGE_BUILT=0
+IMAGE_BINDING_ESTABLISHED=0
 CONTAINER_NAME=""
 TMP_DIR=""
+ACTUAL_NGINX_VERSION=""
 
+# usage displays command syntax, examples, and supported environment variables.
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--nginx-tag TAG] [--module-repo URL] [--module-ref REF] [--module-sha SHA] [--image-name NAME] [--artifact-dir DIR] [--port PORT] [--skip-build] [--keep-image]
+Usage: $(basename "$0") [--nginx-tag REF] --expected-nginx-version VERSION [--image-reference REF] --image-digest DIGEST [--module-repo URL] [--module-ref REF] [--module-sha SHA] [--image-name NAME] [--artifact-dir DIR] [--port PORT] [--skip-build] [--keep-image]
 
 Builds the official NGINX-based Docker example from source and validates
 runtime Markdown negotiation behavior.
 
 Examples:
-  $(basename "$0") --nginx-tag mainline --module-sha FULL_40_HEX_COMMIT_SHA
-  $(basename "$0") --nginx-tag stable-alpine --port 18083
-  $(basename "$0") --nginx-tag mainline --module-ref main --module-sha FULL_40_HEX_COMMIT_SHA
-  $(basename "$0") --skip-build --module-sha FULL_40_HEX_COMMIT_SHA --image-name nginx-markdown-official-check:stable-amd64
-  $(basename "$0") --artifact-dir /tmp/official-nginx-docker/mainline-amd64
+  $(basename "$0") --nginx-tag 1.31.4 --expected-nginx-version 1.31.4 \
+    --image-reference nginx:1.31.4 --image-digest sha256:DIGEST \
+    --module-sha FULL_40_HEX_COMMIT_SHA
+  $(basename "$0") --skip-build --expected-nginx-version 1.31.4 \
+    --image-reference nginx:1.31.4 --image-digest sha256:DIGEST \
+    --module-sha FULL_40_HEX_COMMIT_SHA \
+    --image-name nginx-markdown-official-check:1.31.4-debian12-glibc-amd64
+  $(basename "$0") --artifact-dir /tmp/official-nginx-docker/row
 
 Environment variables:
   NGINX_TAG   Default: mainline
+  EXPECTED_NGINX_VERSION Required exact x.y.z version from release-matrix.json
+  IMAGE_REFERENCE Exact immutable image tag associated with the matrix row
+  IMAGE_DIGEST Required pinned multi-architecture image digest
+  MATRIX_ROW_ID Release-matrix row identity for evidence
+  MATRIX_OS / MATRIX_LIBC / MATRIX_ARCH Target row platform metadata
   MODULE_REPO Default: https://github.com/cnkang/nginx-markdown-for-agents.git
   MODULE_REF  Reachability hint. Default: main
   MODULE_SHA  Required full 40-character lowercase commit ID
@@ -46,6 +65,30 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --nginx-tag)
       NGINX_TAG="$2"
+      shift 2
+      ;;
+    --expected-nginx-version)
+      EXPECTED_NGINX_VERSION="$2"
+      shift 2
+      ;;
+    --image-reference)
+      IMAGE_REFERENCE="$2"
+      shift 2
+      ;;
+    --image-digest)
+      IMAGE_DIGEST="$2"
+      shift 2
+      ;;
+    --matrix-row-id)
+      MATRIX_ROW_ID="$2"
+      shift 2
+      ;;
+    --arch)
+      MATRIX_ARCH="$2"
+      shift 2
+      ;;
+    --libc)
+      MATRIX_LIBC="$2"
       shift 2
       ;;
     --module-repo)
@@ -96,6 +139,18 @@ if ! printf '%s' "${MODULE_SHA}" | grep -Eq '^[0-9a-f]{40}$'; then
   echo "MODULE_SHA must be a full 40-character lowercase commit ID" >&2
   exit 2
 fi
+if ! printf '%s' "${EXPECTED_NGINX_VERSION}" \
+  | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "EXPECTED_NGINX_VERSION must be an exact x.y.z version" >&2
+  exit 2
+fi
+if ! printf '%s' "${IMAGE_DIGEST}" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+  echo "IMAGE_DIGEST must be a full sha256 digest" >&2
+  exit 2
+fi
+if [[ -z "${IMAGE_REFERENCE}" ]]; then
+  IMAGE_REFERENCE="nginx:${NGINX_TAG}"
+fi
 
 # Verify that a required command is available in PATH.
 #
@@ -139,7 +194,7 @@ build_image() {
   fi
 
   "${build_cmd[@]}" \
-    --build-arg "NGINX_IMAGE=nginx:${NGINX_TAG}" \
+    --build-arg "NGINX_IMAGE=${IMAGE_REFERENCE}@${IMAGE_DIGEST}" \
     --build-arg "MODULE_REPO=${MODULE_REPO}" \
     --build-arg "MODULE_REF=${MODULE_REF}" \
     --build-arg "MODULE_SHA=${MODULE_SHA}" \
@@ -147,12 +202,16 @@ build_image() {
     -t "${IMAGE_NAME}" \
     "${WORKSPACE_ROOT}"
 
+  IMAGE_BUILT=1
+  IMAGE_BINDING_ESTABLISHED=1
+
   return 0
 }
 
 # Sanitize a Docker tag string for safe use as an image name component.
 #
-# Replaces all non-alphanumeric characters (except . : _ -) with hyphens
+# Replaces all non-alphanumeric characters (except . _ -) with hyphens.
+# Colons are intentionally replaced so the result is safe as a container name.
 # using C locale for deterministic behaviour across platforms.
 #
 # Arguments:
@@ -166,15 +225,16 @@ build_image() {
 sanitize_tag() {
   local raw_tag="$1"
   # Force C collation and keep "-" last so tag normalization is locale-stable.
-  printf '%s' "${raw_tag}" | LC_ALL=C tr -c '[:alnum:].:_-' '-'
+  printf '%s' "${raw_tag}" | LC_ALL=C tr -c '[:alnum:]._-' '-'
 
   return 0
 }
 
 # Append a GitHub Actions step summary with validation results.
 #
-# Only writes when GITHUB_STEP_SUMMARY is set.  Includes tag, image,
-# module ref, nginx -t status, and content negotiation results.
+# Only writes when GITHUB_STEP_SUMMARY is set. Includes the exact release
+# matrix identity, version binding, image digest, module ref, nginx -t status,
+# and content negotiation results.
 #
 # Globals read:
 #   GITHUB_STEP_SUMMARY  - GitHub Actions step summary file path
@@ -201,11 +261,16 @@ append_step_summary() {
     echo "### Official NGINX Docker Validation"
     echo
     echo "- Status: ${status}"
-    echo "- Tag: \`${NGINX_TAG}\`"
+    echo "- Matrix row: \`${MATRIX_ROW_ID:-<not-provided>}\`"
+    echo "- Expected NGINX version: \`${EXPECTED_NGINX_VERSION}\`"
+    echo "- Actual NGINX version: \`${ACTUAL_NGINX_VERSION:-<not-checked>}\`"
+    echo "- Image reference: \`${IMAGE_REFERENCE}\`"
+    echo "- Image digest: \`${IMAGE_DIGEST}\`"
+    echo "- Platform: \`${MATRIX_OS:-<not-provided>}/${MATRIX_LIBC:-<not-provided>}/${MATRIX_ARCH:-<not-provided>}\`"
     echo "- Image: \`${IMAGE_NAME}\`"
-      echo "- Module ref: \`${MODULE_REF}\`"
-      echo "- Module sha: \`${MODULE_SHA}\`"
-      echo "- Runtime UID: \`${runtime_uid:-<not-checked>}\`"
+    echo "- Module ref: \`${MODULE_REF}\`"
+    echo "- Module sha: \`${MODULE_SHA}\`"
+    echo "- Runtime UID: \`${runtime_uid:-<not-checked>}\`"
     if [[ -f "${TMP_DIR}/nginx-t.stderr" ]]; then
       if grep -q "test is successful" "${TMP_DIR}/nginx-t.stderr"; then
         echo "- nginx -t: ok"
@@ -225,6 +290,32 @@ append_step_summary() {
     echo
   } >> "${GITHUB_STEP_SUMMARY}"
 
+  return 0
+}
+
+# Record the immutable matrix binding before the functional requests run.
+# This file is uploaded on failure and remains useful in successful step logs.
+write_release_evidence() {
+  [[ -n "${ARTIFACT_DIR}" ]] || return 0
+
+  mkdir -p "${ARTIFACT_DIR}"
+  {
+    printf 'matrix_row_id=%s\n' "${MATRIX_ROW_ID}"
+    printf 'expected_nginx_version=%s\n' "${EXPECTED_NGINX_VERSION}"
+    printf 'actual_nginx_version=%s\n' "${ACTUAL_NGINX_VERSION}"
+    printf 'image_reference=%s\n' "${IMAGE_REFERENCE}"
+    if [[ "${IMAGE_BINDING_ESTABLISHED}" -eq 1 ]]; then
+      printf 'image_digest=%s\n' "${IMAGE_DIGEST}"
+      printf 'image_digest_binding=build-input\n'
+    else
+      printf 'image_digest_binding=not-established\n'
+    fi
+    printf 'image_arch=%s\n' "${MATRIX_ARCH}"
+    printf 'image_libc=%s\n' "${MATRIX_LIBC}"
+    printf 'image_os=%s\n' "${MATRIX_OS}"
+    printf 'module_source_sha=%s\n' "${MODULE_SHA}"
+    printf 'built_image_id=%s\n' "${IMAGE_ID:-}"
+  } > "${ARTIFACT_DIR}/release-matrix-evidence.txt"
   return 0
 }
 
@@ -293,7 +384,7 @@ cleanup() {
     docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
   fi
 
-  if [[ "${KEEP_IMAGE}" -ne 1 && -n "${IMAGE_NAME}" ]]; then
+  if [[ "${KEEP_IMAGE}" -ne 1 && "${IMAGE_BUILT}" -eq 1 && -n "${IMAGE_NAME}" ]]; then
     docker rmi -f "${IMAGE_NAME}" >/dev/null 2>&1 || true
   fi
 
@@ -305,7 +396,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for cmd in docker curl awk grep sed; do
+for cmd in docker curl awk grep sed head; do
   need_cmd "${cmd}"
 done
 
@@ -315,6 +406,7 @@ if [[ -z "${IMAGE_NAME}" ]]; then
 fi
 CONTAINER_NAME="nginx-markdown-official-check-${safe_tag}-${RANDOM}"
 TMP_DIR="$(mktemp -d /tmp/nginx-official-docker-check.XXXXXX)"
+IMAGE_ID=""
 if [[ -n "${ARTIFACT_DIR}" ]]; then
   mkdir -p "${ARTIFACT_DIR}"
 fi
@@ -322,9 +414,35 @@ fi
 if [[ "${SKIP_BUILD}" -eq 1 ]]; then
   echo "==> Reusing prebuilt image ${IMAGE_NAME}"
 else
-  echo "==> Building image from official nginx:${NGINX_TAG}"
+  echo "==> Building image from ${IMAGE_REFERENCE}@${IMAGE_DIGEST}"
   build_image
 fi
+
+echo "==> Verifying exact NGINX version before functional tests"
+version_output=""
+version_rc=0
+version_output="$(docker run --rm --entrypoint nginx "${IMAGE_NAME}" -v 2>&1)" \
+  || version_rc=$?
+if [[ "${version_rc}" -ne 0 ]]; then
+  echo "Unable to run nginx -v in ${IMAGE_NAME}" >&2
+  printf '%s\n' "${version_output}" >&2
+  exit 1
+fi
+ACTUAL_NGINX_VERSION="$(printf '%s\n' "${version_output}" \
+  | sed -n 's#.*nginx/\([0-9][0-9.]*\).*#\1#p' | head -1)"
+IMAGE_ID="$(docker image inspect "${IMAGE_NAME}" --format '{{.Id}}' 2>/dev/null || true)"
+write_release_evidence
+if [[ "${ACTUAL_NGINX_VERSION}" != "${EXPECTED_NGINX_VERSION}" ]]; then
+  echo "NGINX version mismatch: expected ${EXPECTED_NGINX_VERSION}, " \
+    "actual ${ACTUAL_NGINX_VERSION:-<unparseable>}" >&2
+  exit 1
+fi
+if [[ "${IMAGE_BINDING_ESTABLISHED}" -eq 1 ]]; then
+  echo "Exact NGINX version ${ACTUAL_NGINX_VERSION} verified from ${IMAGE_REFERENCE}@${IMAGE_DIGEST}"
+else
+  echo "Exact NGINX version ${ACTUAL_NGINX_VERSION} verified from reused image; digest binding was not established by --skip-build"
+fi
+echo "Built image ID: ${IMAGE_ID:-<unavailable>}"
 
 echo "==> Starting container on 127.0.0.1:${PORT}"
 docker run -d \

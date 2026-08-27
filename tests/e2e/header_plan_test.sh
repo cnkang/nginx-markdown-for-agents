@@ -212,9 +212,9 @@ X_HEADERS=$(echo "$HEADERS" | grep -i "^x-" | tr -d '\r') || true
 
 if [[ -n "$X_HEADERS" ]]; then
     pass "custom X- headers present:"
-    echo "$X_HEADERS" | while IFS= read -r line; do
+    while IFS= read -r line; do
         pass "  $line"
-    done
+    done <<< "$X_HEADERS"
 else
     pass "no custom X- headers (header plan may not add any)"
 fi

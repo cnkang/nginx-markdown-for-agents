@@ -10,6 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+cd "$REPO_ROOT"
 RUNNER="$REPO_ROOT/tools/perf/run_perf_baseline.sh"
 REPORT_UTILS="$REPO_ROOT/tools/perf/report_utils.py"
 

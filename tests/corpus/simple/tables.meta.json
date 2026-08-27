@@ -2,7 +2,7 @@
   "fixture-id": "simple/tables",
   "page-type": "clean-article",
   "expected-conversion-result": "converted",
-  "input-size-bytes": 2164,
+  "input-size-bytes": 2232,
   "source-description": "HTML with table elements for table-to-markdown conversion testing",
   "failure-corpus": false
 }

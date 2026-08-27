@@ -29,13 +29,15 @@ Changed-file mode (--changed PATH...):
 Usage:
     python3 tools/harness/detect_baseline_hand_edit.py [--changed PATH ...]
 
-Exit codes: 0 clean, 1 violations found.
+Exit codes: 0 clean, 1 violations found, 2 baseline directory is missing.
 """
 
 import argparse
 import hashlib
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -75,19 +77,53 @@ def is_finalized_baseline(path):
     )
 
 
-def repo_is_shallow():
-    """True when this checkout is a shallow clone."""
-    marker = REPO_ROOT / ".git" / "shallow"
-    if marker.exists():
-        return True
+_GIT_CANDIDATES = ("/usr/bin/git", "/bin/git", "/usr/local/bin/git", "/opt/homebrew/bin/git")
+
+
+def resolve_git_executable():
+    """Return one validated absolute git path, or None when unavailable.
+
+    A single canonical executable feeds every subprocess call so the
+    detector cannot be steered toward a shim earlier on PATH between two
+    independent invocations.
+    """
+    for candidate in _GIT_CANDIDATES:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    which_git = shutil.which("git")
+    if which_git:
+        resolved = Path(os.path.realpath(which_git))
+        if resolved.is_file() and os.access(resolved, os.X_OK):
+            return str(resolved)
+    return None
+
+
+_GIT_BIN = resolve_git_executable()
+
+
+def _run_git(args):
+    """Run git with the canonical executable; None means git unusable."""
+    if _GIT_BIN is None:
+        return None
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--is-shallow-repository"],
+            [_GIT_BIN, *args],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
         )
     except OSError:
+        return None
+    return result
+
+
+def repo_is_shallow():
+    """True when this checkout is a shallow clone."""
+    marker = REPO_ROOT / ".git" / "shallow"
+    if marker.exists():
+        return True
+    result = _run_git(["rev-parse", "--is-shallow-repository"])
+    if result is None:
         return False
     return result.returncode == 0 and result.stdout.strip() == "true"
 
@@ -99,14 +135,8 @@ def _git_stdout(*args):
     collapse to "".  Every caller reads only a NON-EMPTY answer as
     evidence, so a failure can never be mistaken for a positive result.
     """
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-    except OSError:
+    result = _run_git(args)
+    if result is None:
         return ""
     if result.returncode != 0:
         return ""
@@ -183,15 +213,12 @@ def repo_commit_exists(sha):
     explicit SKIP instead of silently passing — a full clone and a shallow
     clone must reach the same verdict for the same baseline.
     """
-    try:
-        result = subprocess.run(
-            ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-    except OSError:
-        return True
+    result = _run_git(["cat-file", "-e", f"{sha}^{{commit}}"])
+    if result is None:
+        # An unusable git makes object presence unknowable, so the
+        # predicate answers indeterminate instead of pretending the
+        # commit exists; callers surface that as an explicit SKIP.
+        return None
     if result.returncode != 0 and repo_is_shallow():
         return None
     return result.returncode == 0

@@ -8,7 +8,7 @@
 #   Prometheus metrics accessibility, and pod health.
 #
 # REQUIREMENTS:
-#   - REQ-0700-K8S-005: K8s/Ingress Smoke and E2E verification
+#   - K8s/Ingress Smoke and E2E verification
 #   - Design reference: design.md §12.3
 #
 # USAGE:
@@ -59,14 +59,13 @@ set -e
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-SCRIPT_NAME="$(basename "$0")"
 # The Helm chart's selector is app.kubernetes.io/name=<chart name> +
 # app.kubernetes.io/instance=<release> (see _helpers.tpl selectorLabels);
 # the legacy app=nginx-markdown label matches nothing the chart deploys.
 # The chart's NGINX container listens on 8080 (the Service maps 80→8080),
 # so pod port-forward uses the container port.
 NAMESPACE="${K8S_NAMESPACE:-default}"
-LABEL_SELECTOR="${K8S_LABEL_SELECTOR:-app.kubernetes.io/name=nginx-markdown}"
+LABEL_SELECTOR="${K8S_LABEL_SELECTOR:-app.kubernetes.io/name=nginx-markdown,app.kubernetes.io/instance=nginx-markdown}"
 LOCAL_PORT="8080"
 REMOTE_PORT="8080"
 METRICS_PATH="${METRICS_PATH:-/_markdown_metrics}"
@@ -75,6 +74,7 @@ BASE_URL=""
 PORT_FORWARD_PID=""
 PASS_COUNT=0
 FAIL_COUNT=0
+METRICS_BODY_FILE=""
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -103,15 +103,26 @@ log_error() {
     printf '[ERROR] %s\n' "$1" >&2
 }
 
+# cleanup stops the background port-forward process when one is active.
 cleanup() {
-    if [ -n "$PORT_FORWARD_PID" ]; then
+    if [[ -n "$METRICS_BODY_FILE" ]]; then
+        rm -f "$METRICS_BODY_FILE"
+        METRICS_BODY_FILE=""
+    fi
+    if [[ -n "$PORT_FORWARD_PID" ]]; then
         kill "$PORT_FORWARD_PID" 2>/dev/null || true
         wait "$PORT_FORWARD_PID" 2>/dev/null || true
         log_info "Stopped port-forward (PID $PORT_FORWARD_PID)"
     fi
 }
 
+# check_prerequisites validates the metrics path and required commands for the selected connection mode.
 check_prerequisites() {
+    if [[ "$METRICS_PATH" != /* ]]; then
+        log_error "Metrics path must begin with '/': $METRICS_PATH"
+        return 2
+    fi
+
     if ! command -v curl >/dev/null 2>&1; then
         log_error "curl is required but not found in PATH"
         return 2
@@ -193,6 +204,7 @@ test_health_check() {
     return 1
 }
 
+# test_markdown_conversion verifies that the `/test` endpoint returns Markdown content when requested with the `text/markdown` Accept header.
 test_markdown_conversion() {
     log_info "Test: Markdown conversion (Accept: text/markdown)"
 
@@ -228,7 +240,7 @@ test_markdown_conversion() {
             local body
             body="$(printf '%s' "$response" | sed -n '/^\r*$/,$p' | tail -n +2)" || true
             case "$body" in
-                *"# "*|*"## "*|*"- "*|*"* "*)
+                *"# "*|*"- "*|*"* "*)
                     log_pass "Markdown conversion: response body contains markdown syntax"
                     ;;
                 *)
@@ -284,14 +296,22 @@ test_metrics_endpoint() {
     local http_code
     local body
 
+    METRICS_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/nginx-markdown-smoke.XXXXXX")" || {
+        log_fail "Metrics endpoint: unable to create a temporary response file"
+        return 1
+    }
+
     # Access the /metrics endpoint
-    http_code="$(curl -s -o /tmp/smoke_metrics_body.$$ -w '%{http_code}' \
+    if ! http_code="$(curl -s -o "$METRICS_BODY_FILE" -w '%{http_code}' \
         --connect-timeout "$CURL_TIMEOUT" \
         --max-time "$CURL_TIMEOUT" \
-        "${BASE_URL}${METRICS_PATH}" 2>/dev/null)" || true
+        "${BASE_URL}${METRICS_PATH}" 2>/dev/null)"; then
+        http_code=""
+    fi
 
-    body="$(cat /tmp/smoke_metrics_body.$$ 2>/dev/null)" || true
-    rm -f /tmp/smoke_metrics_body.$$
+    body="$(cat "$METRICS_BODY_FILE" 2>/dev/null)" || body=""
+    rm -f "$METRICS_BODY_FILE"
+    METRICS_BODY_FILE=""
 
     if [ -z "$http_code" ] || [ "$http_code" = "000" ]; then
         log_fail "Metrics endpoint: no response received"

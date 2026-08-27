@@ -24,10 +24,13 @@ plumbing, or error-code classification change.
   consuming handles, so panic/error paths cannot expose stale values
 - fat-pointer safety when transferring slice/Vec ownership to C (Rule 53):
   use `as_mut_ptr` + `mem::forget`, never `Box::into_raw` for slices.
-  The free path must receive the ORIGINAL allocation: pass pointer, length,
-  AND the original capacity back together and reconstruct with
-  `Vec::from_raw_parts`. Do NOT `shrink_to_fit` before transfer — a
-  reallocation invalidates the pointer and leaks the original block.
+  Vec transfers must pass pointer, length, and original capacity back together
+  and reconstruct with `Vec::from_raw_parts`. Do NOT `shrink_to_fit` before
+  transfer. The documented streaming output ABI is the deliberate exception:
+  it transfers a `Box<[u8]>`, whose allocation has the exact invariant
+  `len == capacity`, so `(data, len)` is sufficient for
+  `markdown_streaming_output_free`. Do not apply the Vec rule to that exact
+  capacity path without bumping the ABI and all consumers.
 - Empty results return NULL instead of zero-length allocations (Rule 53).
 
 ## Minimum Verification

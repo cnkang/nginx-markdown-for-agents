@@ -1,4 +1,9 @@
-# Cross-Spec Naming Convention Reference — 0.4.0
+# Historical Cross-Spec Naming Convention Reference — 0.4.0
+
+> **Historical:** this document records the 0.4.0 contract and is not the
+> active 0.9.2 naming registry. The repository defines active names through
+> registries and their validators, including `tools/release-matrix.json`, the
+> metrics/reason-code registries, and `make release-gates-check`.
 
 > Requirements references: 4.1, 4.2, 4.3, 4.4, 4.5
 
@@ -111,29 +116,28 @@ label contract. This table mirrors it for operator reference.
 
 The module emits reason codes in both decision-log `reason=` fields and
 Prometheus metric label values. Values in these two operator-visible tiers must
-match exactly and use lowercase `snake_case`. Streaming lifecycle constants
-are internal transition names, not a second operator-visible reason taxonomy:
+match exactly and use lowercase `snake_case`. Streaming lifecycle values are
+internal transition names, not a second operator-visible reason taxonomy:
 
 - **Decision-chain reason codes** — lowercase snake_case. Returned by
   `ngx_http_markdown_get_reason_code_str()` (resolved from the Rust
   `ReasonCode` registry). Examples: `not_eligible`, `skipped_accept`,
   `skipped_conditional`, `disabled`, `converted`, `failed_open`, `failed_closed`,
   `bypass_no_transform`.
-- **Streaming engine internal transition names** — uppercase snake_case. Examples:
-  `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_FALLBACK_PREBUFFER`,
-  `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_SKIP_UNSUPPORTED`,
-  `STREAMING_BUDGET_EXCEEDED`, `STREAMING_PRECOMMIT_FAILOPEN`,
-  `STREAMING_PRECOMMIT_REJECT`, `STREAMING_SHADOW`.
+- **Streaming engine internal transition names** — lowercase snake_case in the
+  structured `event=` field. Examples: `engine_streaming`,
+  `streaming_convert`, `streaming_fallback_prebuffer`,
+  `streaming_fail_postcommit`, `streaming_skip_unsupported`,
+  `streaming_budget_exceeded`, `streaming_precommit_failopen`,
+  `streaming_precommit_reject`.
 
 The generator creates the authoritative operator-visible reason-code list from
 `components/rust-converter/reason_registry.toml`. The Rust `ReasonCode` registry
 is authoritative for **both** the decision-log `reason=` codes and the
 Prometheus `reason` label values. They must match exactly and use lowercase
-`snake_case`. Uppercase streaming lifecycle transition names cannot appear as
-`reason` values. Keep them internal or expose them only through a separate
-transition metric (see the metrics registry).
-Streaming accessors may retain internal uppercase transition labels only where
-the metrics registry explicitly defines them.
+`snake_case`. Streaming lifecycle transition names cannot appear as `reason`
+values. Keep them in the bounded `event=` field or expose them through a
+separate transition metric.
 
 ### Decision-chain reason code table (lowercase)
 

@@ -126,26 +126,12 @@
         "make release-gates-check-080"
       ]
     },
-    "v090-gates": {
-      "phase": "focused-semantic",
-      "commands": [
-        "make release-gates-check-090"
-      ]
-    },
-    "v091-gates": {
-      "phase": "focused-semantic",
-      "commands": [
-        "make release-gates-check-091",
-        "make perf-evidence-check"
-      ],
-      "notes": "0.9.1 release gate: blocking performance evidence gate for RC tags; perf-evidence-check is non-blocking report-only mode"
-    },
     "v092-gates": {
       "phase": "focused-semantic",
       "commands": [
         "make release-gates-check-092"
       ],
-      "notes": "0.9.2 blocking gate: 091 prerequisite then 092 blocking performance evidence (baseline 092), source metadata/ABI drift, reason-code registry, and version consistency"
+      "notes": "0.9.2 blocking gate: consolidated 0.9.x regression/compatibility checks, blocking performance evidence for baselines 091 and 092, source metadata/ABI drift, reason-code registry, and version consistency"
     },
     "public-surface-drift": {
       "phase": "focused-semantic",
@@ -179,6 +165,7 @@
     "release-governance": {
       "phase": "focused-semantic",
       "commands": [
+        "make workflow-context-check",
         "make release-gates-check-080",
         "make release-gates-check-092",
         "make release-gates-check",
@@ -247,7 +234,8 @@
       "phase": "umbrella",
       "commands": [
         "make verify-chunked-native-e2e-smoke",
-        "make verify-streaming-failure-cache-e2e"
+        "make verify-streaming-failure-cache-e2e",
+        "make verify-dynconf-convergence-e2e"
       ]
     },
     "release-quality": {
@@ -327,9 +315,7 @@
       ],
       "paths": [
         "components/nginx-module/**",
-        "components/rust-converter/src/incremental.rs",
         "components/rust-converter/src/charset.rs",
-        "tools/e2e/**",
         "tools/e2e-harness/**"
       ],
       "keywords": [
@@ -745,6 +731,7 @@
       "paths": [
         ".github/workflows/release-rpm.yml",
         ".github/workflows/release-packages.yml",
+        ".github/workflows/release-binaries.yml",
         ".github/workflows/homebrew-*.yml",
         "charts/nginx-markdown/**",
         "packaging/homebrew/**",
@@ -815,6 +802,7 @@
         "harness-sync",
         "docs-tooling",
         "nginx-protocol",
+        "runtime-e2e",
         "release-quality"
       ]
     },
@@ -841,8 +829,6 @@
         "tools/e2e/verify_examples_nginx_t.sh",
         "docs/guides/MIGRATION-0.9.2.md",
         "docs/guides/0.9.2-breaking-changes.md",
-        "docs/project/0.6.3-e2e-parity.md",
-        "docs/project/0.6.3-test-surface-audit.md",
         "docs/testing/E2E_TESTS.md"
       ],
       "keywords": [

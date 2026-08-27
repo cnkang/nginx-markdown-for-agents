@@ -108,7 +108,7 @@ def test_approved_cargo_accepts_only_rustup_toolchain_shim(
         lambda _name: str(shim),
     )
 
-    assert executable_validation.resolve_approved_executable("cargo") == str(shim)
+    assert executable_validation.resolve_approved_executable("cargo") == str(cargo)
 
 
 def test_approved_cargo_rejects_user_home_fake(monkeypatch, tmp_path):
@@ -146,7 +146,7 @@ def test_approved_rustfmt_accepts_rustup_toolchain_shim(monkeypatch, tmp_path):
         lambda _name: str(shim),
     )
 
-    assert executable_validation.resolve_approved_executable("rustfmt") == str(shim)
+    assert executable_validation.resolve_approved_executable("rustfmt") == str(rustfmt)
 
 
 def test_approved_rustfmt_accepts_standard_rustup_dispatcher(
@@ -198,7 +198,9 @@ def test_approved_rustfmt_accepts_standard_rustup_dispatcher(
         lambda _name: str(shim),
     )
 
-    assert executable_validation.resolve_approved_executable("rustfmt") == str(shim)
+    assert executable_validation.resolve_approved_executable("rustfmt") == str(
+        toolchain_rustfmt
+    )
 
 
 def test_discover_fixtures_persists_validated_html_path(tmp_path):
@@ -209,7 +211,10 @@ def test_discover_fixtures_persists_validated_html_path(tmp_path):
     html_path.write_text("<html><body>ok</body></html>", encoding="utf-8")
 
     meta_path = corpus_dir / "sample.meta.json"
-    meta_path.write_text(json.dumps({"fixture-id": "sample"}), encoding="utf-8")
+    meta_path.write_text(
+        json.dumps({"fixture-id": "sample", "page-type": "article"}),
+        encoding="utf-8",
+    )
 
     fixtures = discover_fixtures(corpus_dir)
 

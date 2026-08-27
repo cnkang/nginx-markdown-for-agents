@@ -1,9 +1,8 @@
 /*
  * Test: dynconf_production
  *
- * Exercises the production Rust-backed dynconf wrapper.  The legacy line
- * parser test remains useful for compatibility coverage, but this target
- * deliberately compiles without NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST so
+ * Exercises the production Rust-backed dynconf wrapper.  The target
+ * deliberately compiles without test-only implementation substitutions so
  * file and FFI failure accounting cannot regress unnoticed.
  */
 
@@ -16,6 +15,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <sys/stat.h>
@@ -31,6 +31,9 @@
 #endif
 #ifndef NGX_ERROR
 #define NGX_ERROR (-1)
+#endif
+#ifndef NGX_CONF_UNSET
+#define NGX_CONF_UNSET (-1)
 #endif
 #ifndef NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED
 #define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED 0
@@ -186,6 +189,7 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 #define NGX_FILE_ERROR (-1)
 #define NGX_INVALID_FILE (-1)
 #define NGX_FILE_RDONLY O_RDONLY
+#define NGX_FILE_NONBLOCK O_NONBLOCK
 #define NGX_FILE_OPEN 0
 #define ngx_file_info_t struct stat
 #define ngx_file_info(name, info) stat((const char *) (name), (info))
@@ -193,10 +197,30 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 
 static ngx_uint_t g_reload_counts[256];
 static int g_open_fail;
+
+/*
+ * Watchdog for special-file regression coverage: if a reload ever latches
+ * inside open() on a writer-less FIFO again, SIGALRM aborts the test with
+ * an explicit message instead of letting CI time out.
+ */
+static void
+test_fifo_watchdog(int signo)
+{
+    const char  msg[] =
+        "\nFAIL: dynconf reload hung inside open() on a FIFO "
+        "(blocking-open regression)\n";
+
+    UNUSED(signo);
+    if (write(STDERR_FILENO, msg, sizeof(msg) - 1) < 0) {
+        /* diagnostics are best-effort during watchdog exit */
+    }
+    _exit(2);
+}
 static int g_fd_info_fail;
 static int g_read_fail;
 static int g_alloc_fail;
 static int g_invalid_digest;
+static ngx_uint_t g_parse_calls;
 static off_t g_forced_size = -1;
 static ngx_uint_t g_masked_fields_warns;
 
@@ -222,13 +246,14 @@ test_log_capture(ngx_uint_t level, const char *fmt)
 static ngx_fd_t
 ngx_open_file(u_char *name, int mode, int create, int access)
 {
-    UNUSED(mode);
     UNUSED(create);
     UNUSED(access);
     if (g_open_fail) {
         return NGX_INVALID_FILE;
     }
-    return open((const char *) name, O_RDONLY);
+    /* Honor the caller's access-mode flags (including O_NONBLOCK) so
+     * special-file handling behaves like the real nginx wrapper. */
+    return open((const char *) name, mode);
 }
 
 static ngx_int_t
@@ -540,6 +565,30 @@ test_contains_bytes(const uint8_t *data, uintptr_t data_len,
     return 0;
 }
 
+uint32_t
+markdown_sha256_hex(const uint8_t *data, uintptr_t data_len,
+    uint8_t *output, uintptr_t output_len)
+{
+    static const uint8_t digest[] =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    static const uint8_t digest_v2[] =
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+    const uint8_t *selected_digest;
+
+    if (output == NULL || output_len < 64
+        || (data == NULL && data_len != 0))
+    {
+        return DYNCONF_ERR_INVALID_TYPE;
+    }
+
+    selected_digest = test_contains_bytes(data, data_len,
+                                          "\"schema_version\":2")
+        ? digest_v2
+        : digest;
+    memcpy(output, selected_digest, 64);
+    return DYNCONF_OK;
+}
+
 void
 markdown_dynconf_parse(const uint8_t *data, uintptr_t data_len,
     FFIDynconfResult *result)
@@ -549,7 +598,10 @@ markdown_dynconf_parse(const uint8_t *data, uintptr_t data_len,
     static const uint8_t digest_v2[] =
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
     static const uint8_t invalid_message[] = "invalid JSON";
+    static uint8_t invalid_digest[64];
     const uint8_t *selected_digest;
+
+    g_parse_calls++;
 
     if (data == NULL || data_len == 0
         || (data_len >= sizeof("invalid") - 1
@@ -558,6 +610,13 @@ markdown_dynconf_parse(const uint8_t *data, uintptr_t data_len,
         result->error_code = DYNCONF_ERR_INVALID_JSON;
         result->error_message = invalid_message;
         result->error_message_len = sizeof(invalid_message) - 1;
+        if (markdown_sha256_hex(data, data_len,
+                                invalid_digest, sizeof(invalid_digest))
+            == DYNCONF_OK)
+        {
+            result->source_digest = invalid_digest;
+            result->source_digest_len = sizeof(invalid_digest);
+        }
         return;
     }
 
@@ -625,6 +684,7 @@ reset_state(void)
     g_read_fail = 0;
     g_alloc_fail = 0;
     g_invalid_digest = 0;
+    g_parse_calls = 0;
     g_forced_size = -1;
     g_masked_fields_warns = 0;
 }
@@ -716,6 +776,43 @@ test_failure_paths_are_exact_once(const char *path)
 }
 
 static void
+test_fifo_watch_path_is_rejected_promptly(void)
+{
+    char fifo_path[128];
+    ngx_http_markdown_dynconf_watcher_t watcher;
+    ngx_http_markdown_conf_t conf;
+    ngx_log_t log;
+    ngx_int_t rc;
+
+    TEST_SUBSECTION("special-file watch paths fail fast instead of latching");
+
+    snprintf(fifo_path, sizeof(fifo_path),
+             "/tmp/nginx-markdown-dynconf-fifo-%ld",
+             (long) getpid());
+    TEST_ASSERT(mkfifo(fifo_path, 0600) == 0,
+                "fixture FIFO should be created");
+
+    /* A blocking O_RDONLY open() on a writer-less FIFO parks the caller
+     * inside open(); with the non-blocking production open this reload
+     * must return an IO error instead of hanging here. */
+    signal(SIGALRM, test_fifo_watchdog);
+    alarm(30);
+    reset_state();
+    init_watcher(&watcher, &conf, fifo_path);
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
+    alarm(0);
+
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR,
+                "FIFO watch path should return IO error");
+    TEST_ASSERT(g_reload_counts[NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO] == 1,
+                "FIFO watch path should record one IO error");
+
+    alarm(0);
+    unlink(fifo_path);
+    TEST_PASS("FIFO watch path fails fast without latching the worker");
+}
+
+static void
 test_ffi_paths(const char *path)
 {
     ngx_http_markdown_dynconf_watcher_t watcher;
@@ -734,15 +831,20 @@ test_ffi_paths(const char *path)
                 "invalid FFI result should record one parse error");
     TEST_ASSERT(watcher.diagnostic_state.last_error_len > 0,
                 "invalid FFI result should set last_error");
-    TEST_ASSERT(watcher.legacy_format_warning_logged == 1,
-                "legacy input should emit the migration warning once");
+    TEST_ASSERT(watcher.diagnostic_state.last_rejected_source_digest[0]
+                    != '\0',
+                "invalid FFI result should record source digest");
+    TEST_ASSERT(watcher.diagnostic_state.last_rejected_error_len > 0,
+                "invalid FFI result should record rejection error");
+    {
+        ngx_uint_t parse_calls = g_parse_calls;
 
-    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
-    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
-                "repeated legacy input should remain invalid");
-    TEST_ASSERT(watcher.legacy_format_warning_logged == 1,
-                "legacy migration warning must remain one-time per watcher");
-
+        rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
+        TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                    "repeated invalid input should remain invalid");
+        TEST_ASSERT(g_parse_calls == parse_calls,
+                    "unchanged rejected content should skip reparsing");
+    }
     reset_state();
     write_file(path, "{\"schema_version\":1,\"filter\":\"on\"}");
     init_watcher(&watcher, &conf, path);
@@ -762,9 +864,6 @@ test_ffi_paths(const char *path)
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
                 "JSON with leading OWS should apply successfully");
-    TEST_ASSERT(watcher.legacy_format_warning_logged == 0,
-                "JSON leading OWS must not trigger the legacy warning");
-
     reset_state();
     g_invalid_digest = 1;
     init_watcher(&watcher, &conf, path);
@@ -777,6 +876,32 @@ test_ffi_paths(const char *path)
                 "malformed digest should set a bounded last_error");
 
     TEST_PASS("production dynconf FFI paths are covered");
+}
+
+static void
+test_unset_dry_run_is_not_validation_only(const char *path)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_log_t                             log;
+    ngx_int_t                             rc;
+
+    TEST_SUBSECTION("production dynconf unset dry-run flag");
+
+    reset_state();
+    write_file(path, "{\"schema_version\":1,\"filter\":\"on\"}");
+    init_watcher(&watcher, &conf, path);
+    conf.advanced.dynconf_dry_run = NGX_CONF_UNSET;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "unset dry-run flag should use normal reload behavior");
+    TEST_ASSERT(watcher.active_snapshot.valid == 1,
+                "unset dry-run flag should publish the valid snapshot");
+    TEST_ASSERT(watcher.digest_state.generation == 1,
+                "unset dry-run flag should advance the active generation");
+
+    TEST_PASS("unset dry-run flag is treated as off");
 }
 
 static void
@@ -1072,7 +1197,10 @@ main(void)
     write_file(path, "{\"schema_version\":1}");
     test_failure_paths_are_exact_once(path);
     reset_state();
+    test_fifo_watch_path_is_rejected_promptly();
+    reset_state();
     test_ffi_paths(path);
+    test_unset_dry_run_is_not_validation_only(path);
     test_successful_reload_is_idempotent(path);
     test_reload_replaces_omitted_fields(path);
     test_diagnostics_renderer_tracks_dynconf_lkg(path);

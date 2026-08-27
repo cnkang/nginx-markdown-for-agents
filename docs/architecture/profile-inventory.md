@@ -117,8 +117,6 @@ profile fields in the current module.
 | `markdown_metrics_per_path_cardinality` | 100 | http | Global |
 | `markdown_metrics_shm_size` | 8×pagesize | http | Global |
 | `markdown_diagnostics` | off | http, server, location | on\|off |
-| `markdown_otel` | off | http, server, location | on\|off |
-| `markdown_otel_endpoint` | (empty) | http, server, location | Internal URI |
 
 ### Parsing / Decompression
 

@@ -23,7 +23,7 @@ static uintptr_t g_stub_entry_count = 0;
 
 static const uint8_t stub_ct_key[] = "Content-Type";
 static const uint8_t stub_ct_val[] =
-    "text/markdown; charset=utf-8";
+    NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
 static const uint8_t stub_ce_key[] = "Content-Encoding";
 static const uint8_t stub_cl_key[] = "Content-Length";
 /* stub_vary_key/stub_vary_val removed: Vary is handled post-plan */
@@ -104,13 +104,12 @@ markdown_header_plan_free(struct FFIHeaderPlan *plan)
     plan->count = 0;
 }
 
-/*
- * Stub for ngx_http_markdown_apply_header_plan.
+/**
+ * Applies a header plan to an HTTP response.
  *
- * In the standalone test harness, this delegates to the best-effort
- * loop in the impl header (which calls the stub plan builder above).
- * For unit tests, we simulate atomic success by applying each entry
- * via the same logic the production code uses.
+ * @param r Request whose response headers are updated.
+ * @param plan Header operations to apply; the plan is released before returning.
+ * @return NGX_OK on success, or NGX_ERROR if the request or plan contains an invalid operation or an allocation fails.
  */
 ngx_int_t
 ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
@@ -156,6 +155,9 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
                     entry->value_len;
                 r->headers_out.content_type_len =
                     entry->value_len;
+                r->headers_out.charset.data =
+                    (u_char *) NGX_HTTP_MARKDOWN_CHARSET_LITERAL;
+                r->headers_out.charset.len = NGX_HTTP_MARKDOWN_CHARSET_LEN;
             } else {
                 /* Other SET headers: push to list */
                 ngx_table_elt_t *h;
@@ -260,4 +262,46 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/*
+ * Test adapters. The production header implementation always evaluates the
+ * authentication contract; this standalone harness supplies no-auth and
+ * no-op cache-control implementations instead of changing production
+ * semantics.
+ */
+ngx_int_t
+ngx_http_markdown_is_authenticated(
+    const ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf)
+{
+    (void) r;
+    (void) conf;
+    return 0;
+}
+
+ngx_int_t
+ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
+{
+    (void) r;
+    return NGX_OK;
+}
+
 #include "../../src/ngx_http_markdown_headers_impl.h"
+
+/**
+ * Restores header snapshot status using a zero-initialized test request and snapshot.
+ *
+ * @return The status returned by the header snapshot restoration operation.
+ */
+ngx_int_t
+ngx_http_markdown_test_header_snapshot_restore_status(void)
+{
+    ngx_http_markdown_header_snapshot_t snapshot;
+    ngx_http_request_t                  request;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(&request, 0, sizeof(request));
+    snapshot.entry_count = 1;
+
+    return ngx_http_markdown_header_snapshot_restore_status(
+        &request, &snapshot);
+}

@@ -24,7 +24,6 @@
 set -euo pipefail
 
 readonly SRC_DIR="${1:-components/nginx-module/src}"
-readonly SCRIPT_NAME="$(basename "$0")"
 readonly NONE_FOUND_MSG="  (none found)"
 
 # Files where (size_t) NGX_ERROR is allowed (config handlers return
@@ -53,15 +52,10 @@ echo "" >&2
 #   - Range check: NGX_OK return from validation helper
 #   - Explicit allowlist annotations: /* CWE-190:guarded */
 
-readonly PATTERN_SSIZE_TO_SIZE='\(size_t\)[[:space:]]*(parsed|raw|rc|len|n)[^a-zA-Z]'
-
 # ── Pattern (b): narrowing casts to smaller integer types ──
 #
 # (uint32_t), (uint8_t), (uInt), (int) applied to size_t or
 # ngx_uint_t values without an upper-bound comparison.
-
-readonly NARROW_TYPES='uint32_t|uint8_t|uInt|int'
-readonly WIDE_TYPES='size_t|ngx_uint_t|off_t|ngx_int_t'
 
 # ── Known guarded cast patterns (file:pattern → guard description) ──
 #
@@ -154,7 +148,8 @@ while IFS= read -r match; do
         if [[ "$impl_start" -lt 1 ]]; then
             impl_start=1
         fi
-        if sed -n "${impl_start},${line}p" "$file" 2>/dev/null | grep -qE 'ngx_http_markdown_dynconf_parse_size_safe\b'; then
+        if sed -n "${impl_start},${line}p" "$file" 2>/dev/null \
+            | grep -qE 'ngx_http_markdown_dynconf_parse_size_safe[[:space:]]*\('; then
             echo "  OK      ${file}:${line} — ngx_parse_size inside dynconf_parse_size_safe implementation" >&2
         else
             echo "  ERROR   ${file}:${line} — ngx_parse_size without dynconf_parse_size_safe wrapper" >&2
@@ -326,20 +321,20 @@ while IFS= read -r match; do
         func_window="$(sed -n "${func_start},${line}p" "$file" 2>/dev/null)"
         declaration_line="$(printf '%s\n' "$func_window" \
             | grep -nE \
-                "(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char|ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]*]+${cast_ident}\\b" \
+                "(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char|ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]]+\\*[[:space:]]*${cast_ident}([^[:alnum:]_]|$)|(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char|ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]]+${cast_ident}([^[:alnum:]_]|$)" \
             | tail -1 || true)"
 
         # Unsigned type set
         is_unsigned=0
         if printf '%s\n' "$declaration_line" | grep -qE \
-            "(ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]*]+${cast_ident}\\b"; then
+            "(^|[^[:alnum:]_])(ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]]+\\*[[:space:]]*${cast_ident}([^[:alnum:]_]|$)|(^|[^[:alnum:]_])(ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]]+${cast_ident}([^[:alnum:]_]|$)"; then
             is_unsigned=1
         fi
 
         # Signed type set
         is_signed=0
         if printf '%s\n' "$declaration_line" | grep -E \
-            "(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char)[[:space:]*]+${cast_ident}\\b" \
+            "(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char)[[:space:]]+\\*[[:space:]]*${cast_ident}([^[:alnum:]_]|$)|(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char)[[:space:]]+${cast_ident}([^[:alnum:]_]|$)" \
             | grep -qvE 'u_char|unsigned'; then
             is_signed=1
         fi

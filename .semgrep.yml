@@ -145,7 +145,6 @@ rules:
       include:
         - /components/rust-converter/src/ffi/exports.rs
         - /components/rust-converter/src/ffi/streaming.rs
-        - /components/rust-converter/src/ffi/incremental.rs
     patterns:
       - pattern-either:
           - pattern: panic!(...)

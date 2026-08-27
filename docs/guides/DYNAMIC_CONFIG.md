@@ -103,35 +103,6 @@ The configuration cycle aggregates the minimum applicable conversion-memory
 value and the union of dynconf block masks across merged locations. This
 summary is cycle-owned and does not maintain a fixed-size per-location index.
 
-### Migrating legacy line-format files
-
-Older releases used line-format keys. Convert them before relying on the JSON
-v1 contract:
-
-```text
-schema_version=0.9
-markdown_filter=on
-streaming_budget=16m
-memory_budget=64m
-```
-
-becomes:
-
-```json
-{
-  "schema_version": 1,
-  "filter": "on",
-  "streaming_buffer": 16777216
-}
-```
-
-`memory_budget` is no longer a runtime key. Use static
-`markdown_limits conversion_memory=<size>` as its replacement. When a watched file's
-first byte is not `{`, the watcher logs
-`legacy line format detected - migrate to JSON v1` once per worker.
-
----
-
 ## Reload Semantics
 
 The dynconf timer performs a three-phase staged commit:

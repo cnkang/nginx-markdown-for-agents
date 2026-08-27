@@ -27,7 +27,6 @@ typedef struct {
 
     struct {
         ngx_array_t *content_types;
-        size_t       large_body_threshold; /* internal routing heuristic */
         ngx_uint_t   max_inflight;
     } routing;
 
@@ -60,21 +59,23 @@ Each key inherits independently across `http`, `server`, and `location`.
 The merge step then binds the effective values to the runtime fields shown in
 the structure above and rejects cross-key violations before mutation:
 
-- `parser_timeout <= conversion_timeout`
+- `parser_timeout <= conversion_timeout` when `conversion_timeout` is nonzero
 - `parser_memory <= conversion_memory`
 - `streaming_buffer <= conversion_memory`
 
-Zero handling: `conversion_timeout=0` disables only the overall conversion
-deadline. A nonzero `parser_timeout` stays valid beside it and keeps its
-parser-phase deadline. When both keys are explicitly configured and
-`parser_timeout` exceeds `conversion_timeout`, `nginx -t` fails. When only
-one side is explicit, the merge step clamps the parser value down to the
-conversion bound instead.
+Zero handling: `conversion_timeout=0` disables the overall conversion
+deadline and removes that upper-bound comparison. A nonzero `parser_timeout`
+stays valid beside it and keeps its parser-phase deadline, including when
+both keys are explicitly configured. When `conversion_timeout` is nonzero and
+both keys are explicitly configured, `nginx -t` fails if
+`parser_timeout` exceeds it. When only one side is explicit, the merge step
+clamps the parser value down only to a nonzero conversion bound.
 
 `streaming_buffer` is the total per-request streaming working-set and
 pre-commit replay budget. It is not merely a transport chunk size. A value
-that is too small for the converter's resident state can produce a
-`STREAMING_BUDGET_EXCEEDED` fail-open decision.
+that is too small for the converter's resident state can produce a fail-open
+decision with the public `budget_exceeded` reason. The internal
+`streaming_budget_exceeded` event is not a canonical public reason code.
 
 The defaults are `30s`, `10s`, `64m`, `32m`, `2m`, `10m`, `100`, and `64`, in
 the order shown in the example.

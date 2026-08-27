@@ -93,11 +93,6 @@ pub struct StructuralStateMachine {
     stack: Vec<StructuralContext>,
     /// Memory budget used for stack enforcement.
     budget: MemoryBudget,
-    /// **Deprecated / dead field.** The [`IncrementalEmitter`](super::emitter::IncrementalEmitter)
-    /// now manages block-separator state internally via its own `needs_block_separator`
-    /// tracking, making this field redundant. Retained for internal API
-    /// compatibility; safe to remove in the next breaking-change release.
-    pub needs_block_separator: bool,
     /// Current list nesting depth (for indentation).
     pub list_depth: usize,
     /// Current blockquote nesting depth.
@@ -142,7 +137,6 @@ impl StructuralStateMachine {
         Self {
             stack: Vec::new(),
             budget: budget.clone(),
-            needs_block_separator: false,
             list_depth: 0,
             blockquote_depth: 0,
             in_head: false,
@@ -849,7 +843,7 @@ mod tests {
         StreamEvent::Text(s.to_string())
     }
 
-    /// Verifies that an `h1` start tag enters a `Heading(1)` context and that the corresponding end tag exits it and requests a block separator.
+    /// Verifies that an `h1` start tag enters and exits a heading context.
     ///
     /// # Examples
     ///
@@ -859,7 +853,6 @@ mod tests {
     /// assert_eq!(action, StateMachineAction::Enter(StructuralContext::Heading(1)));
     /// let action = sm.process_event(&end_tag("h1")).unwrap();
     /// assert_eq!(action, StateMachineAction::Exit(StructuralContext::Heading(1)));
-    /// assert!(sm.needs_block_separator);
     /// ```
     #[test]
     fn test_heading_context() {
@@ -874,8 +867,6 @@ mod tests {
             action,
             StateMachineAction::Exit(StructuralContext::Heading(1))
         );
-        // needs_block_separator is deprecated/dead on the state machine;
-        // the emitter manages its own copy independently.
     }
 
     #[test]
@@ -1444,7 +1435,7 @@ mod tests {
         ));
     }
 
-    // --- Misnested ordered-list counter regression tests (P1) ---
+    // --- Misnested ordered-list counter regression tests ---
 
     /// `</blockquote>` closing over `<ol><li>` must drain the OrderedList
     /// and pop its counter so `ordered_list_counters` is empty afterwards.

@@ -109,6 +109,23 @@ sha256_file() {
   return 0
 }
 
+request_status() {
+  local method="$1"
+  local interface="$2"
+  shift 2
+  local -a request=(curl -sS)
+
+  if [[ "$method" == "HEAD" ]]; then
+    request+=(-I)
+  fi
+  if [[ -n "$interface" ]]; then
+    request+=(--interface "$interface")
+  fi
+  request+=("$@")
+  "${request[@]}"
+  return $?
+}
+
 MODULE_SHA="$(sha256_file "${NGINX_MODULE_SO}")"
 
 stop_case_nginx() {
@@ -236,11 +253,6 @@ EOF
   # Test each handler with GET and HEAD
   for handler in diagnostics metrics; do
     for method in GET HEAD; do
-      local method_flag=""
-      if [[ "${method}" == "HEAD" ]]; then
-        method_flag="-I"
-      fi
-
       local expected_auth expected_unauth
       local auth_requires_credentials=0
       case "${policy}" in
@@ -264,8 +276,8 @@ EOF
       # Authorized request
       local auth_status
       local -a curl_cmd=(curl -sS)
-      if [[ -n "${method_flag}" ]]; then
-        curl_cmd+=("${method_flag}")
+      if [[ "${method}" == "HEAD" ]]; then
+        curl_cmd+=(-I)
       fi
       if [[ "${auth_requires_credentials}" -eq 1 ]]; then
         curl_cmd+=(-u "${AUTH_USER}:${AUTH_PASSWORD}")
@@ -294,7 +306,7 @@ EOF
               "${expected_unauth}" "skipped" "${config_digest}" >> "${RESULT_TSV}"
             continue
           fi
-          if ! unauth_status="$(curl -sS --interface 127.0.0.2 ${method_flag} \
+          if ! unauth_status="$(request_status "${method}" 127.0.0.2 \
             -o /dev/null -w '%{http_code}' \
             "http://127.0.0.1:${PORT}/${handler}" 2>/dev/null)"; then
             unauth_status=000
@@ -307,7 +319,9 @@ EOF
             "${policy}" "${handler}" "${method}" "unauthorized" "${expected_unauth}" "${unauth_status}" "${config_digest}" >> "${RESULT_TSV}"
           ;;
         auth_basic)
-          unauth_status="$(curl -sS ${method_flag} -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/${handler}" 2>/dev/null)" || unauth_status=000
+          unauth_status="$(request_status "${method}" "" -o /dev/null \
+            -w '%{http_code}' "http://127.0.0.1:${PORT}/${handler}" \
+            2>/dev/null)" || unauth_status=000
           if [[ "${unauth_status}" != "${expected_unauth}" ]]; then
             echo "FAIL: ${policy}/${handler}/${method}/unauthorized: expected=${expected_unauth} actual=${unauth_status}" >&2
             fail_count=$((fail_count + 1))
@@ -318,7 +332,7 @@ EOF
         satisfy_any)
           # satisfy any: 127.0.0.1 is allowed, so even without credentials it passes
           # Omitting credentials verifies that the allow rule alone is sufficient.
-          unauth_status="$(curl -sS ${method_flag} \
+          unauth_status="$(request_status "${method}" "" \
             -o /dev/null -w '%{http_code}' \
             "http://127.0.0.1:${PORT}/${handler}" 2>/dev/null)" || unauth_status=000
           # satisfy any: allow 127.0.0.1 passes without credentials.
@@ -339,7 +353,7 @@ EOF
               "${expected_unauth}" "skipped" "${config_digest}" >> "${RESULT_TSV}"
             continue
           fi
-          if ! outside_status="$(curl -sS --interface 127.0.0.2 ${method_flag} \
+          if ! outside_status="$(request_status "${method}" 127.0.0.2 \
             -o /dev/null -w '%{http_code}' \
             "http://127.0.0.1:${PORT}/${handler}" 2>/dev/null)"; then
             outside_status=000

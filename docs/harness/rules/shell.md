@@ -87,6 +87,13 @@ Required:
   `run_case || rc=$?` (safe under `set -e`), then test `${rc}`.  The same
   applies to `while !`/`until !` bodies.
 
+The portable status-capture pattern is:
+
+```bash
+rc=0
+run_case || rc=$?
+```
+
 
 ### Rule 41 — Shell harness detectors must use POSIX ERE
 
@@ -104,20 +111,21 @@ Required:
   `\(...\)` — on **any** line that feeds a regex-capable command or a
   regex variable assignment, not only literal `grep`/`sed`/`awk` lines:
   ```bash
-  # 1) PCRE classes \s, \d, \w on regex-command or pattern-assignment lines.
-  #    Hold the needle in a runtime variable so this gate never matches its
-  #    own source line inside a detect_*.sh script (self-scan exclusion).
-  _pcre_needle='\s|\d|\w'
+  # 1) PCRE classes on regex-command or pattern-assignment lines. Construct
+  #    the backslash at runtime so the gate can scan its own source without
+  #    matching the detector's example as a prohibited literal.
+  _backslash='\'
+  _pcre_needle="${_backslash}${_backslash}s|${_backslash}${_backslash}d|${_backslash}${_backslash}w"
   if grep -REn "${_pcre_needle}" tools/harness/detect_*.sh \
       | grep -E 'grep|sed|awk|egrep|perl|pattern=|regex=' \
       | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then
       echo "FAIL: prohibited PCRE regex classes found" >&2
       exit 1
   fi
-  # 2) BRE-only grouping \(...\) on regex-capable command lines and shell
-  #    pattern assignments (embedded Python heredocs are exempt: they use
-  #    Python re semantics)
-  _bre_needle='\('   # constructed at runtime; see self-scan note above
+  # 2) BRE-only grouping on regex-capable command lines and shell pattern
+  #    assignments. Embedded Python heredocs are exempt: they use Python re
+  #    semantics.
+  _bre_needle="${_backslash}${_backslash}[()]"   # constructed at runtime
   if grep -REn "${_bre_needle}" tools/harness/detect_*.sh \
       | grep -E 'grep|sed|awk|egrep|pattern=|regex=' \
       | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then

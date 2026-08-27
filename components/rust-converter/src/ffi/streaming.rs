@@ -95,159 +95,6 @@ fn effective_flush_threshold(raw: u32) -> usize {
     }
 }
 
-/// Configuration options for the streaming converter, passed from C to Rust.
-///
-/// **Legacy type.** Superseded by `MarkdownOptions`; not consumed by any
-/// exported FFI function in the frozen 0.9.2 ABI. Retained for
-/// layout-stability tests only.
-///
-/// This `#[repr(C)]` struct is the purpose-built configuration interface for
-/// the streaming (incremental) conversion path. C callers populate this struct
-/// and pass a pointer to [`markdown_streaming_new_with_code`] (or a future overload that
-/// accepts `StreamingOptions` directly) to create a converter instance.
-///
-/// # Memory Budget
-///
-/// The `streaming_budget` field controls the total memory ceiling for the
-/// streaming converter. When non-zero it overrides the compiled-in default
-/// (2 MiB). Peak working-set memory is bounded to `O(streaming_budget)`,
-/// not `O(input_size)`, for supported content.
-///
-/// # Flush Behaviour
-///
-/// `flush_threshold` controls the minimum number of accumulated Markdown bytes
-/// before the converter flushes output. A threshold of 0 means "use the
-/// default threshold" so zero-initialized FFI callers keep stable batching
-/// semantics. Larger values reduce per-chunk FFI call overhead at the cost of
-/// slightly delayed output.
-///
-/// # Pointer Fields
-///
-/// Pointer/length pairs (`base_url`, `content_type`) are borrowed from the
-/// C caller for the duration of the `markdown_streaming_new_with_code` call only. Rust
-/// copies any values it needs to retain. The caller must not free these
-/// buffers until `markdown_streaming_new_with_code` returns.
-///
-/// # ABI contract
-///
-/// This streaming ABI keeps its own `#[repr(C)]` layout because its lifecycle
-/// differs from `MarkdownOptions`. Repeated semantics must update in both
-/// structs, generated headers, layout tests, and docs in the same change.
-///
-/// Any layout change must follow the versioned bundled-boundary policy and
-/// update both header copies in the same change set. See AGENTS.md Rule 15.
-#[repr(C)]
-pub struct StreamingOptions {
-    /// Markdown flavor selector.
-    ///
-    /// - `0` = CommonMark (default)
-    /// - `1` = GitHub Flavored Markdown (GFM)
-    ///
-    /// Other values are rejected during option decoding.
-    pub flavor: u32,
-
-    /// Cooperative conversion timeout in milliseconds.
-    ///
-    /// The streaming converter checks the deadline after processing each
-    /// chunk. If the elapsed wall-clock time exceeds this value, `feed`
-    /// returns `ERROR_TIMEOUT`. A value of `0` disables the timeout.
-    pub timeout_ms: u32,
-
-    /// Total streaming memory budget in bytes (0 = use compiled-in default).
-    ///
-    /// Controls the peak memory ceiling for the streaming path. The
-    /// converter distributes this budget across its internal subsystems
-    /// (token buffer, nesting stack, pending output, charset sniff).
-    /// Exceeding this budget causes `feed` to return `ERROR_BUDGET_EXCEEDED`.
-    ///
-    /// Populated from `markdown_limits streaming_buffer=<size>` (Config V2).
-    pub streaming_budget: u64,
-
-    /// Flush threshold in bytes (0 = use default threshold).
-    ///
-    /// Controls the minimum number of accumulated output bytes before
-    /// `feed` returns non-empty output to the caller. A value of 0 means
-    /// "use the default threshold" so zero-initialized callers do not
-    /// accidentally opt into lowest-latency flushing.
-    ///
-    /// Larger values allow the emitter to batch output across multiple
-    /// elements, reducing FFI round-trip frequency at the cost of slightly
-    /// delayed delivery to the downstream filter chain.
-    pub flush_threshold: u32,
-
-    /// Non-zero when Rust should generate a streaming Markdown-variant ETag.
-    ///
-    /// When enabled, the converter maintains an incremental BLAKE3 hash
-    /// over emitted Markdown bytes. The final ETag is available after
-    /// `markdown_streaming_finalize` completes successfully.
-    pub generate_etag: u8,
-
-    /// Non-zero when Rust should estimate token count for the output.
-    ///
-    /// Token estimation uses a character-counting heuristic with the
-    /// configured `chars_per_token` ratio. The estimate is available
-    /// in `MarkdownResult.token_estimate` after finalize.
-    pub estimate_tokens: u8,
-
-    /// Non-zero when Rust should extract YAML front matter metadata.
-    ///
-    /// Enables extraction of title, description, canonical URL and other
-    /// metadata from `<head>` during streaming. Front matter is prepended
-    /// to the final Markdown output on finalize.
-    pub front_matter: u8,
-
-    /// Non-zero when noise region pruning is enabled.
-    ///
-    /// When enabled, structural HTML regions matching the configured prune
-    /// selectors (e.g. `<nav>`, `<footer>`, `<aside>`) are excluded from
-    /// the Markdown output. Protection selectors override prune selectors.
-    pub prune_noise: u8,
-
-    /// Borrowed Content-Type bytes from the C caller (charset detection hint).
-    ///
-    /// Must either be NULL with `content_type_len == 0` or point to
-    /// `content_type_len` readable bytes for the duration of the FFI call.
-    /// Rust copies the value if needed. Used for charset sniffing when the
-    /// upstream response declares a non-UTF-8 encoding.
-    pub content_type: *const u8,
-
-    /// Length in bytes of the `content_type` field.
-    pub content_type_len: usize,
-
-    /// Borrowed base URL for resolving relative links in the HTML.
-    ///
-    /// Must either be NULL with `base_url_len == 0` or point to
-    /// `base_url_len` readable UTF-8 bytes for the duration of the FFI call.
-    /// Rust copies the value for internal use. When set, relative URLs in
-    /// `<a href>`, `<img src>`, and similar attributes are resolved against
-    /// this base before emission.
-    pub base_url: *const u8,
-
-    /// Length in bytes of the `base_url` field.
-    pub base_url_len: usize,
-
-    /// Borrowed prune selector string (space-separated tag names to prune).
-    ///
-    /// Example: `"nav footer aside"`. Must either be NULL with
-    /// `prune_selector_len == 0` or point to `prune_selector_len` readable
-    /// UTF-8 bytes. Rust copies the value for internal use.
-    pub prune_selectors: *const u8,
-
-    /// Length in bytes of the `prune_selectors` field.
-    pub prune_selector_len: usize,
-
-    /// Borrowed protection selector string (space-separated tag names to protect).
-    ///
-    /// Elements matching both a prune selector and a protection selector are
-    /// kept (protection wins). Must either be NULL with
-    /// `prune_protection_selector_len == 0` or point to
-    /// `prune_protection_selector_len` readable UTF-8 bytes.
-    pub prune_protection_selectors: *const u8,
-
-    /// Length in bytes of the `prune_protection_selectors` field.
-    pub prune_protection_selector_len: usize,
-}
-
 /// Opaque handle wrapping a [`StreamingConverter`] for the C ABI.
 pub struct StreamingConverterHandle {
     inner: StreamingConverter,
@@ -1180,97 +1027,23 @@ mod tests {
     }
 
     #[test]
-    fn test_budget_from_streaming_total_scales_down() {
-        // With no unified memory budget set, the streaming budget alone
-        // drives the working-set caps.
-        let budget = budget_from_streaming_total(64 * 1024, 0);
-        let sum =
-            budget.state_stack + budget.output_buffer + budget.charset_sniff + budget.lookahead;
+    fn test_budget_from_streaming_total_precedence_all_combinations() {
+        let cases = [
+            (0, 0, 2 * 1024 * 1024),
+            (64 * 1024, 0, 64 * 1024),
+            (0, 16 * 1024 * 1024, 16 * 1024 * 1024),
+            (64 * 1024 * 1024, 16 * 1024 * 1024, 16 * 1024 * 1024),
+            (16 * 1024 * 1024, 64 * 1024 * 1024, 16 * 1024 * 1024),
+        ];
 
-        assert_eq!(budget.total, 64 * 1024);
-        assert_eq!(sum, budget.total);
-    }
-
-    #[test]
-    fn test_unified_memory_budget_caps_streaming() {
-        // The unified conversion_memory budget must cap the streaming
-        // working set even when streaming_buffer is configured larger.
-        let budget = budget_from_streaming_total(64 * 1024 * 1024, 16 * 1024 * 1024);
-        assert_eq!(budget.total, 16 * 1024 * 1024);
-    }
-
-    // ================================================================
-    // StreamingOptions layout tests
-    // ================================================================
-
-    #[test]
-    fn test_streaming_options_is_repr_c() {
-        use std::mem::{align_of, size_of};
-
-        /* Verify the struct has predictable C layout (no Rust reordering) */
-        assert_eq!(align_of::<StreamingOptions>(), 8);
-        /* Size depends on field count and padding; just verify it is stable */
-        assert!(
-            size_of::<StreamingOptions>() > 0,
-            "StreamingOptions must have non-zero size"
-        );
-    }
-
-    #[test]
-    fn test_streaming_options_field_offsets() {
-        use std::mem::offset_of;
-
-        /* Verify field ordering matches the declared layout */
-        assert_eq!(offset_of!(StreamingOptions, flavor), 0);
-        assert_eq!(offset_of!(StreamingOptions, timeout_ms), 4);
-        assert_eq!(offset_of!(StreamingOptions, streaming_budget), 8);
-        assert_eq!(offset_of!(StreamingOptions, flush_threshold), 16);
-        assert_eq!(offset_of!(StreamingOptions, generate_etag), 20);
-        assert_eq!(offset_of!(StreamingOptions, estimate_tokens), 21);
-        assert_eq!(offset_of!(StreamingOptions, front_matter), 22);
-        assert_eq!(offset_of!(StreamingOptions, prune_noise), 23);
-        assert_eq!(offset_of!(StreamingOptions, content_type), 24);
-        assert_eq!(offset_of!(StreamingOptions, content_type_len), 32);
-        assert_eq!(offset_of!(StreamingOptions, base_url), 40);
-        assert_eq!(offset_of!(StreamingOptions, base_url_len), 48);
-        assert_eq!(offset_of!(StreamingOptions, prune_selectors), 56);
-        assert_eq!(offset_of!(StreamingOptions, prune_selector_len), 64);
-        assert_eq!(offset_of!(StreamingOptions, prune_protection_selectors), 72);
-        assert_eq!(
-            offset_of!(StreamingOptions, prune_protection_selector_len),
-            80
-        );
-    }
-
-    #[test]
-    fn test_streaming_options_size() {
-        use std::mem::size_of;
-
-        /* 88 bytes after the current FFI freeze removed the temporary
-         * token-estimation override fields. */
-        assert_eq!(size_of::<StreamingOptions>(), 88);
-    }
-
-    #[test]
-    fn test_streaming_options_default_zeroed() {
-        /* Verify that a zeroed struct produces valid "use defaults" semantics */
-        let opts: StreamingOptions = unsafe { std::mem::zeroed() };
-        assert_eq!(opts.flavor, 0); /* CommonMark */
-        assert_eq!(opts.timeout_ms, 0); /* no timeout */
-        assert_eq!(opts.streaming_budget, 0); /* use default */
-        assert_eq!(opts.flush_threshold, 0); /* use default */
-        assert_eq!(opts.generate_etag, 0); /* disabled */
-        assert_eq!(opts.estimate_tokens, 0); /* disabled */
-        assert_eq!(opts.front_matter, 0); /* disabled */
-        assert_eq!(opts.prune_noise, 0); /* disabled */
-        assert!(opts.content_type.is_null());
-        assert_eq!(opts.content_type_len, 0);
-        assert!(opts.base_url.is_null());
-        assert_eq!(opts.base_url_len, 0);
-        assert!(opts.prune_selectors.is_null());
-        assert_eq!(opts.prune_selector_len, 0);
-        assert!(opts.prune_protection_selectors.is_null());
-        assert_eq!(opts.prune_protection_selector_len, 0);
+        for (streaming_budget, memory_budget, expected_total) in cases {
+            let budget = budget_from_streaming_total(streaming_budget, memory_budget);
+            assert_eq!(
+                budget.total, expected_total,
+                "unexpected effective budget for streaming={}, memory={}",
+                streaming_budget, memory_budget
+            );
+        }
     }
 
     #[test]

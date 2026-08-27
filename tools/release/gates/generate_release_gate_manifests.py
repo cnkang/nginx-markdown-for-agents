@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,16 +25,40 @@ from pathlib import Path
 # directory is not on sys.path.  Add the repo root and the gates
 # directory so the sibling generate_soak_scenario_manifest import below
 # resolves (its own lib.* imports need <repo>/tools on sys.path).
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 _GATES_DIR = Path(__file__).resolve().parent
-for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "tools"), str(_GATES_DIR)):
+for _p in (str(REPO_ROOT), str(REPO_ROOT / "tools"), str(_GATES_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
 from generate_soak_scenario_manifest import build_manifest  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-OUTPUT_ROOT = REPO_ROOT / "artifacts" / "release" / "0.9.2"
+_CARGO_MANIFEST = REPO_ROOT / "components" / "rust-converter" / "Cargo.toml"
+
+
+def _release_version() -> str:
+    """Read and validate the active release version from Cargo metadata."""
+    try:
+        document = tomllib.loads(_CARGO_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError(f"unable to read active release version: {exc}") from exc
+    package = document.get("package")
+    version = package.get("version") if isinstance(package, dict) else None
+    if not isinstance(version, str) or re.fullmatch(
+        _SEMVER_PATTERN, version
+    ) is None:
+        raise ValueError("Cargo package version must be MAJOR.MINOR.PATCH")
+    return version
+
+
+_SEMVER_PATTERN = r"\d+\.\d+\.\d+"
+
+FUZZ_QUALIFICATION_RECORD_NAME = "fuzz-qualification-record.json"
+SOAK_QUALIFICATION_RECORD_NAME = "soak-qualification-record.json"
+
+RELEASE_VERSION = _release_version()
+RELEASE_ARTIFACT_ROOT = Path("artifacts") / "release" / RELEASE_VERSION
+OUTPUT_ROOT = REPO_ROOT / RELEASE_ARTIFACT_ROOT
 FEATURE_MANIFEST = OUTPUT_ROOT / "official-build-feature-manifest.json"
 ABI_HEADER = REPO_ROOT / "components" / "rust-converter" / "include" / "markdown_converter.h"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -42,8 +67,14 @@ OBSERVATION_STATE_SCHEMA = "schemas/observation-state.schema.json"
 SHORT_SOAK_SCOPE = "release/scope/short-soak-scope.json"
 CANONICAL_PERF_ENV = "release/performance/canonical-environment.json"
 
+
+def _release_artifact_ref(filename: str) -> str:
+    """Return a repository-relative path under the active release directory."""
+    return (RELEASE_ARTIFACT_ROOT / filename).as_posix()
+
+
 TRACKED_RELEASE_INPUTS = (
-    "artifacts/release/0.9.2/official-build-feature-manifest.json",
+    _release_artifact_ref("official-build-feature-manifest.json"),
     "docs/releases/release-matrix.json",
     "schemas/release-matrix.schema.json",
     FINAL_EVIDENCE_SCHEMA,
@@ -257,7 +288,20 @@ def build_fuzz_manifests(candidate_sha: str, created_at: str) -> tuple[dict, dic
 
 
 def build_artifact_index(candidate_sha: str, created_at: str, artifact_root: Path) -> dict:
-    """Bind every downloaded DEB/RPM byte to the candidate identity."""
+    """
+    Build an artifact index that binds each downloaded DEB or RPM artifact to a release candidate.
+    
+    Parameters:
+    	candidate_sha (str): Full Git SHA identifying the release candidate.
+    	created_at (str): Timestamp recorded in the generated index.
+    	artifact_root (Path): Repository-contained directory containing downloaded artifacts.
+    
+    Returns:
+    	dict: Artifact index containing each artifact's relative path, type, SHA-256 digest, candidate identity, ABI version, and verification metadata.
+    
+    Raises:
+    	ValueError: If the artifact directory is outside the repository, contains no DEB or RPM artifacts, includes symlinks or paths escaping the repository, has an inconsistent artifact type, or the ABI version cannot be read.
+    """
     try:
         artifact_root = artifact_root.resolve()
         artifact_root.relative_to(REPO_ROOT.resolve())
@@ -299,9 +343,10 @@ def build_artifact_index(candidate_sha: str, created_at: str, artifact_root: Pat
             )
         relative = resolved.relative_to(REPO_ROOT).as_posix()
         artifact_type = path.suffix[1:]
+        relative_id = relative.replace("/", "__")
         artifacts.append({
             "artifact_type": artifact_type,
-            "release_matrix_row_id": f"downloaded-{artifact_type}-{path.name}",
+            "release_matrix_row_id": f"downloaded-{artifact_type}-{relative_id}",
             "artifact_id": relative,
             "candidate_sha": candidate_sha,
             "artifact_sha256": _sha256_file(resolved),
@@ -332,13 +377,12 @@ def _record_value(path: Path, field: str = "status"):
 def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, dict]:
     """Build transparent evidence for this job and its separate CI jobs."""
     root = OUTPUT_ROOT
-    fuzz_pass = _record_value(root / "fuzz-qualification-record.json", "blocking_pass")
-    soak_status = _record_value(root / "soak-qualification-record.json")
+    fuzz_pass = _record_value(root / FUZZ_QUALIFICATION_RECORD_NAME, "blocking_pass")
+    soak_status = _record_value(root / SOAK_QUALIFICATION_RECORD_NAME)
     # The blocking performance evidence is produced by the release-gate job's
     # `make release-perf-evidence-blocking BASELINE_VERSION=092` step, which
-    # writes perf/reports/evidence-092.json.  There is no
-    # performance-qualification-report.json writer anywhere in the tree; the
-    # legacy read below was a guaranteed-fail dead path.
+    # writes perf/reports/evidence-092.json. This is the sole performance
+    # report consumed by final evidence generation.
     performance_path = (
         REPO_ROOT / "perf" / "reports" / "evidence-092.json"
     )
@@ -374,13 +418,13 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
             "domain": "fuzz",
             "blocking": True,
             "status": "pass" if fuzz_pass is True else "fail",
-            "artifact_ref": "artifacts/release/0.9.2/fuzz-qualification-record.json",
+            "artifact_ref": _release_artifact_ref(FUZZ_QUALIFICATION_RECORD_NAME),
         },
         {
             "domain": "soak",
             "blocking": True,
             "status": "pass" if soak_status == "pass" else "fail",
-            "artifact_ref": "artifacts/release/0.9.2/soak-qualification-record.json",
+            "artifact_ref": _release_artifact_ref(SOAK_QUALIFICATION_RECORD_NAME),
         },
         {
             "domain": "security",
@@ -449,11 +493,11 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
             },
             "fuzz": {
                 "blocking_targets": [],
-                "campaign_ref": "artifacts/release/0.9.2/fuzz-qualification-record.json",
+                "campaign_ref": _release_artifact_ref(FUZZ_QUALIFICATION_RECORD_NAME),
             },
             "soak": {
                 "runs": [],
-                "soak_ref": "artifacts/release/0.9.2/soak-qualification-record.json",
+                "soak_ref": _release_artifact_ref(SOAK_QUALIFICATION_RECORD_NAME),
             },
             "security": {
                 "sast_status": "accepted_residual",

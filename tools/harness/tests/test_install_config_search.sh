@@ -31,6 +31,12 @@ source "${TMP_DIR}/config-search-function.sh"
 FIND_BIN="$(command -v find)"
 GREP_BIN="$(command -v grep)"
 SH_BIN="$(command -v sh)"
+for required_tool in "$FIND_BIN" "$GREP_BIN" "$SH_BIN"; do
+  if [[ ! -x "$required_tool" ]]; then
+    echo "FAIL: required executable is unavailable: $required_tool" >&2
+    exit 1
+  fi
+done
 mkdir -p "${TMP_DIR}/conf.d"
 printf '%s\n' 'load_module modules/example.so;' \
   > "${TMP_DIR}/conf.d/example.conf"

@@ -53,8 +53,6 @@ typedef struct {
         ngx_atomic_t  precommit_failopen_total;
         ngx_atomic_t  precommit_reject_total;
         ngx_atomic_t  budget_exceeded_total;
-        ngx_atomic_t  shadow_total;
-        ngx_atomic_t  shadow_diff_total;
         ngx_atomic_t  last_ttfb_ms;
         ngx_atomic_t  last_peak_memory_bytes;
         ngx_atomic_t  streaming_fallback_precommit_pass;
@@ -152,6 +150,12 @@ ngx_http_markdown_pending_output_current(void)
 
 #include "ngx_http_markdown_diagnostics_accessors_impl.h"
 
+ngx_uint_t
+ngx_http_markdown_diagnostics_recording_state(void)
+{
+    return NGX_HTTP_MARKDOWN_DIAG_RECORDING_ACTIVE;
+}
+
 /* ── Tests ─────────────────────────────────────────────────────── */
 
 static void
@@ -184,6 +188,9 @@ test_collect_metrics_null_zone(void)
     TEST_ASSERT(out.failopen_total == 0, "failopen should be 0");
     TEST_ASSERT(out.pending_output == 7,
                 "pending_output should survive a NULL metrics zone");
+    TEST_ASSERT(out.diagnostics_recording_state
+                == NGX_HTTP_MARKDOWN_DIAG_RECORDING_ACTIVE,
+                "recording state should be collected without a metrics zone");
 
     TEST_PASS("NULL zone zeroes all fields");
 }
@@ -214,6 +221,9 @@ test_collect_metrics_with_data(void)
                 "copied_output should be 2");
     TEST_ASSERT(out.pending_output == 3,
                 "pending_output should count requests with pending chains");
+    TEST_ASSERT(out.diagnostics_recording_state
+                == NGX_HTTP_MARKDOWN_DIAG_RECORDING_ACTIVE,
+                "recording state should be collected with metrics data");
 
     TEST_PASS("Metrics collected correctly");
 }

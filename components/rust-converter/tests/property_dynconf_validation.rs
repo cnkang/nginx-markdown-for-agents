@@ -103,7 +103,7 @@ fn static_only_key() -> impl Strategy<Value = &'static str> {
     ]
 }
 
-/// Legacy/unknown key names that must be rejected.
+/// Removed or unknown key names that must be rejected.
 fn unknown_key() -> impl Strategy<Value = String> {
     prop_oneof![
         Just("streaming_budget".to_string()),
@@ -303,8 +303,8 @@ proptest! {
         let err = result.unwrap_err();
         assert!(
             err.kind == DynconfParseErrorKind::NestingDepthExceeded
-                || err.kind == DynconfParseErrorKind::UnknownKey,
-            "expected nesting/unknown rejection, got {:?}",
+                || err.kind == DynconfParseErrorKind::InvalidType,
+            "expected nesting/type rejection under a known key, got {:?}",
             err.kind
         );
     }
@@ -382,16 +382,15 @@ proptest! {
 
 /// Build a deeply nested JSON object with the given depth.
 fn build_nested_json(depth: usize) -> String {
-    let mut input = String::new();
-    for i in 0..depth {
-        input.push_str("{\"k");
-        input.push_str(&i.to_string());
-        input.push_str("\":");
+    let mut input = String::from(r#"{"schema_version":1,"filter":"#);
+    for _ in 0..depth {
+        input.push_str("{\"nested\":");
     }
     input.push('1');
     for _ in 0..depth {
         input.push('}');
     }
+    input.push('}');
     input
 }
 
@@ -439,11 +438,11 @@ proptest! {
         );
     }
 
-    /// Property: legacy names (streaming_budget, memory_budget) are rejected.
+    /// Property: removed names (streaming_budget, memory_budget) are rejected.
     ///
     /// **Validates: Requirements 3.4**
     #[test]
-    fn prop_legacy_names_rejected(
+    fn prop_removed_names_rejected(
         name in prop_oneof![
             Just("streaming_budget"),
             Just("memory_budget"),
@@ -582,8 +581,8 @@ fn test_property4_all_static_only_keys_rejected() {
 #[test]
 fn test_property4_nesting_at_exact_boundary() {
     // Depth exactly at limit (8) should be OK if structure is otherwise valid
-    // But since dynconf only accepts flat objects with known keys, deep nesting
-    // is inherently invalid. Verify depth 9 is rejected.
+    // The nested value is under the known `filter` key, so this exercises the
+    // parser's depth guard rather than an unknown top-level field.
     let input = build_nested_json(9);
 
     let result = parse_dynconf(input.as_bytes());

@@ -118,11 +118,18 @@ def _validate_single_sop(heading: str, sop: str) -> list[str]:
     """Validate structure and category of a single SOP section."""
     errors: list[str] = []
     sop_lower = sop.lower()
-    if "**symptom" not in sop_lower and "symptom:" not in sop_lower:
+
+    def has_label(label: str) -> bool:
+        return bool(
+            re.search(rf"\*\*{re.escape(label)}(?::)?\*\*", sop_lower)
+            or re.search(rf"\b{re.escape(label)}\s*:", sop_lower)
+        )
+
+    if not has_label("symptom"):
         errors.append(f"'{heading}' missing Symptom subsection")
-    if "**root cause" not in sop_lower and "root cause:" not in sop_lower:
+    if not has_label("root cause"):
         errors.append(f"'{heading}' missing Root Cause subsection")
-    if "**resolution" not in sop_lower and "resolution" not in sop_lower:
+    if not has_label("resolution"):
         errors.append(f"'{heading}' missing Resolution subsection")
     if heading in SOP_EXPECTED_CATEGORIES:
         expected_cat = SOP_EXPECTED_CATEGORIES[heading]

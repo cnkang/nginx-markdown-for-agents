@@ -393,8 +393,9 @@ grep -qi '^Content-Type: text/html' "${RAW_DIR}/error.hdr" || {
 
 echo "==> Case 4: HEAD through proxy"
 : > "${RAW_DIR}/head.body"
-head_code="$(curl -sS -D "${RAW_DIR}/head.hdr" -o "${RAW_DIR}/head.body" \
-  -X HEAD -H 'Accept: text/markdown' \
+head_code="$(curl -sS --head --max-time 30 \
+  -D "${RAW_DIR}/head.hdr" -o "${RAW_DIR}/head.body" \
+  -H 'Accept: text/markdown' \
   "http://127.0.0.1:${PORT}/simple" \
   -w '%{http_code}')"
 [[ "${head_code}" == "200" ]] || { echo "Expected HEAD /simple 200, got ${head_code}" >&2; exit 1; }

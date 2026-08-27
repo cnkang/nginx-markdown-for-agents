@@ -36,6 +36,9 @@ readonly -a DEFAULT_MODULE_PATHS=(
 OUTPUT_JSON=0
 MODULE_PATH=""
 NGINX_BIN="__unset__"
+NGINX_BIN_REQUESTED=""
+NGINX_BIN_RESOLVED=""
+NGINX_BIN_INVALID=0
 
 # Result accumulators
 CHECKS_JSON=""
@@ -81,6 +84,54 @@ EOF
 # Print a message to stderr
 msg() {
     printf '%s\n' "$*" >&2
+    return 0
+}
+
+# Resolve the nginx executable once after argument parsing.  Checks consume
+# this absolute path so a changing PATH cannot make one report use a
+# different binary from another report.
+resolve_nginx_binary() {
+    local candidate="$NGINX_BIN"
+    local resolved=""
+    local resolved_dir=""
+    local resolved_name=""
+    local explicit_request=0
+
+    if [[ "$candidate" == "__unset__" ]]; then
+        candidate="nginx"
+    else
+        explicit_request=1
+    fi
+    NGINX_BIN_REQUESTED="$candidate"
+
+    if [[ -z "$candidate" ]]; then
+        return 0
+    fi
+
+    if [[ "$candidate" == */* ]]; then
+        if [[ ! -x "$candidate" ]]; then
+            if [[ $explicit_request -eq 1 ]]; then
+                NGINX_BIN_INVALID=1
+            fi
+            return 0
+        fi
+        resolved="$candidate"
+    else
+        resolved=$(command -v "$candidate" 2>/dev/null || true)
+        if [[ -z "$resolved" || "$resolved" != /* || ! -x "$resolved" ]]; then
+            if [[ $explicit_request -eq 1 ]]; then
+                NGINX_BIN_INVALID=1
+            fi
+            return 0
+        fi
+    fi
+
+    resolved_dir=$(cd -P "$(dirname "$resolved")" 2>/dev/null && pwd) || return 0
+    resolved_name="$(basename "$resolved")"
+    if [[ -z "$resolved_dir" || -z "$resolved_name" ]]; then
+        return 0
+    fi
+    NGINX_BIN_RESOLVED="${resolved_dir}/${resolved_name}"
     return 0
 }
 
@@ -197,23 +248,21 @@ json_escape() {
 
 # Check 1: nginx version detection
 check_nginx_version() {
-    local nginx_bin
-    if [[ "$NGINX_BIN" == "__unset__" ]]; then
-        nginx_bin="nginx"
-    else
-        nginx_bin="$NGINX_BIN"
-    fi
+    local nginx_bin="$NGINX_BIN_RESOLVED"
 
-    # If nginx_bin is empty string, skip
+    # An explicitly requested but unusable binary is a configuration error;
+    # an omitted binary remains an environment-dependent skip.
     if [[ -z "$nginx_bin" ]]; then
-        emit_check "nginx_version" "skip" "nginx binary not specified (--nginx-bin empty)"
-        return 0
-    fi
-
-    # Check if binary exists / is executable
-    if ! command -v "$nginx_bin" >/dev/null 2>&1; then
-        emit_check "nginx_version" "skip" "nginx binary not found in PATH" \
-            '{"binary":"'"$(json_escape "$nginx_bin")"'"}'
+        if [[ $NGINX_BIN_INVALID -eq 1 ]]; then
+            emit_check "nginx_version" "fail" \
+                "explicit nginx executable is missing or not executable" \
+                '{"binary":"'"$(json_escape "$NGINX_BIN_REQUESTED")"'"}'
+        elif [[ -z "$NGINX_BIN_REQUESTED" ]]; then
+            emit_check "nginx_version" "skip" "nginx binary not specified (--nginx-bin empty)"
+        else
+            emit_check "nginx_version" "skip" "nginx executable not found or not executable" \
+                '{"binary":"'"$(json_escape "$NGINX_BIN_REQUESTED")"'"}'
+        fi
         return 0
     fi
 
@@ -236,7 +285,7 @@ check_nginx_version() {
     DETECTED_NGINX_VERSION="$version"
 
     emit_check "nginx_version" "pass" "nginx version ${version} detected" \
-        '{"version":"'"$version"'"}'
+        '{"path":"'"$(json_escape "$nginx_bin")"'","version":"'"$version"'"}'
     return 0
 }
 
@@ -283,22 +332,11 @@ check_module_exists() {
 
 # Check 3: basic config syntax validation
 check_config_valid() {
-    local nginx_bin
-    if [[ "$NGINX_BIN" == "__unset__" ]]; then
-        nginx_bin="nginx"
-    else
-        nginx_bin="$NGINX_BIN"
-    fi
+    local nginx_bin="$NGINX_BIN_RESOLVED"
 
     # If nginx_bin is empty string, skip
     if [[ -z "$nginx_bin" ]]; then
-        emit_check "config_valid" "skip" "nginx binary not specified (--nginx-bin empty)"
-        return
-    fi
-
-    # Check if binary exists / is executable
-    if ! command -v "$nginx_bin" >/dev/null 2>&1; then
-        emit_check "config_valid" "skip" "nginx binary not found in PATH"
+        emit_check "config_valid" "skip" "nginx executable unavailable"
         return
     fi
 
@@ -378,20 +416,10 @@ CONF
 
 # Check 4: configure arguments (--with-compat)
 check_configure_args() {
-    local nginx_bin
-    if [[ "$NGINX_BIN" == "__unset__" ]]; then
-        nginx_bin="nginx"
-    else
-        nginx_bin="$NGINX_BIN"
-    fi
+    local nginx_bin="$NGINX_BIN_RESOLVED"
 
     if [[ -z "$nginx_bin" ]]; then
-        emit_check "configure_args" "skip" "nginx binary not specified (--nginx-bin empty)"
-        return 0
-    fi
-
-    if ! command -v "$nginx_bin" >/dev/null 2>&1; then
-        emit_check "configure_args" "skip" "nginx binary not found in PATH"
+        emit_check "configure_args" "skip" "nginx executable unavailable"
         return 0
     fi
 
@@ -516,55 +544,36 @@ check_rust_linkage() {
 # channel 1.97.1) and separately declares the MSRV floor (Cargo.toml
 # rust-version 1.97). This check verifies the active rustc satisfies the
 # MSRV and that a repository checkout pins the exact contract toolchain.
-check_rust_toolchain() {
-    local msrv_floor="1.97"          # Cargo.toml rust-version (MSRV floor)
-    local expected_msrv="1.97.1"     # rust-toolchain.toml channel (exact pin)
+_rust_msrv_ok() {
+    local rustc_version="$1"
+    local msrv_floor="$2"
+    local version_major version_minor minimum_major minimum_minor
 
-    if ! command -v rustc >/dev/null 2>&1; then
-        emit_check "rust_toolchain" "skip" "rustc not available (install Rust via rustup)" \
-            '{"rustc_version":null,"msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
+    version_major=$(printf '%s\n' "$rustc_version" | cut -d. -f1)
+    version_minor=$(printf '%s\n' "$rustc_version" | cut -d. -f2)
+    minimum_major="${msrv_floor%.*}"
+    minimum_minor="${msrv_floor#*.}"
+
+    [[ -n "$version_major" && -n "$version_minor" ]] || return 1
+    if (( version_major > minimum_major )); then
         return 0
     fi
-
-    local rustc_version
-    rustc_version=$(rustc --version 2>/dev/null | awk '{print $2}' || true)
-
-    local msrv_ok="false"
-    if [[ -z "$rustc_version" ]]; then
-        # An unreadable version is a warning, not a fail: the verdict is
-        # "cannot verify MSRV", matching the below-MSRV branch severity so
-        # an unreadable rustc does not block a healthy toolchain report.
-        emit_check "rust_toolchain" "warn" \
-            "rustc version could not be determined; MSRV verification skipped" \
-            '{"rustc_version":null,"msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
+    if (( version_major == minimum_major \
+        && version_minor >= minimum_minor )); then
         return 0
     fi
-    local min="$msrv_floor"
-    local ver_major ver_minor
-    ver_major=$(printf '%s\n' "$rustc_version" | cut -d. -f1)
-    ver_minor=$(printf '%s\n' "$rustc_version" | cut -d. -f2)
-    if [[ -n "$ver_major" && -n "$ver_minor" ]] \
-        && (( ver_major > ${min%.*} )) 2>/dev/null; then
-        msrv_ok="true"
-    elif [[ -n "$ver_major" && -n "$ver_minor" ]] \
-        && (( ver_major == ${min%.*} )) 2>/dev/null \
-        && (( ver_minor >= ${min#*.} )) 2>/dev/null; then
-        msrv_ok="true"
-    fi
+    return 1
+}
 
-    # Resolve symlinked installations before looking for repository metadata.
-    # A packaged or copied doctor script must not accidentally inspect the
-    # caller's current directory and report a repository toolchain as active.
-    local doctor_source="${BASH_SOURCE[0]:-}"
+_resolve_doctor_source() {
+    local doctor_source="${1:-}"
     local doctor_dir doctor_link symlink_hops=0
     local max_symlink_hops=40
+
     while [[ -n "$doctor_source" && -L "$doctor_source" ]]; do
         symlink_hops=$((symlink_hops + 1))
         if (( symlink_hops > max_symlink_hops )); then
-            emit_check "rust_toolchain" "fail" \
-                "doctor script symlink chain exceeds ${max_symlink_hops} hops" \
-                '{"rustc_version":"'"$(json_escape "$rustc_version")"'","msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":false,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
-            return 0
+            return 1
         fi
         doctor_dir=$(cd -P "$(dirname "$doctor_source")" \
             && pwd 2>/dev/null || printf '')
@@ -579,6 +588,64 @@ check_rust_toolchain() {
             doctor_source="$doctor_dir/$doctor_link"
         fi
     done
+    printf '%s\n' "$doctor_source"
+    return 0
+}
+
+_rust_toolchain_details() {
+    local doctor_root="$1"
+    local toolchain_file=""
+
+    if [[ -n "$doctor_root" && -f "$doctor_root/rust-toolchain.toml" ]]; then
+        toolchain_file=$(grep -E '^channel[[:space:]]*=' \
+            "$doctor_root/rust-toolchain.toml" \
+            | head -1 \
+            | sed 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/' \
+            || true)
+        printf 'true\t%s\n' "$toolchain_file"
+    else
+        printf 'false\t\n'
+    fi
+    return 0
+}
+
+check_rust_toolchain() {
+    local msrv_floor="1.97"          # Cargo.toml rust-version (MSRV floor)
+    local expected_msrv="1.97.1"     # rust-toolchain.toml channel (exact pin)
+
+    if ! command -v rustc >/dev/null 2>&1; then
+        emit_check "rust_toolchain" "skip" "rustc not available (install Rust via rustup)" \
+            '{"rustc_version":null,"msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
+        return 0
+    fi
+
+    local rustc_version
+    rustc_version=$(rustc --version 2>/dev/null | awk '{print $2}' || true)
+
+    if [[ -z "$rustc_version" ]]; then
+        # An unreadable version is a warning, not a fail: the verdict is
+        # "cannot verify MSRV", matching the below-MSRV branch severity so
+        # an unreadable rustc does not block a healthy toolchain report.
+        emit_check "rust_toolchain" "warn" \
+            "rustc version could not be determined; MSRV verification skipped" \
+            '{"rustc_version":null,"msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
+        return 0
+    fi
+    local msrv_ok="false"
+    if _rust_msrv_ok "$rustc_version" "$msrv_floor"; then
+        msrv_ok="true"
+    fi
+
+    # Resolve symlinked installations before looking for repository metadata.
+    # A packaged or copied doctor script must not accidentally inspect the
+    # caller's current directory and report a repository toolchain as active.
+    local doctor_source
+    if ! doctor_source=$(_resolve_doctor_source "${BASH_SOURCE[0]:-}"); then
+        emit_check "rust_toolchain" "fail" \
+            "doctor script symlink chain exceeds 40 hops" \
+            '{"rustc_version":"'"$(json_escape "$rustc_version")"'","msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":false,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
+        return 0
+    fi
 
     local doctor_root=""
     if [[ -n "$doctor_source" ]]; then
@@ -622,11 +689,9 @@ check_rust_toolchain() {
     fi
 
     local pinned_ok="false"
-    if [[ -n "$doctor_root" && -f "$doctor_root/rust-toolchain.toml" ]]; then
-        toolchain_file_exists="true"
-        toolchain_file=$(grep -E '^channel[[:space:]]*=' "$doctor_root/rust-toolchain.toml" \
-            | head -1 | sed 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/' || true)
-    fi
+    local toolchain_details
+    toolchain_details=$(_rust_toolchain_details "$doctor_root")
+    IFS=$'\t' read -r toolchain_file_exists toolchain_file <<< "$toolchain_details"
     escaped_toolchain_file=$(json_escape "$toolchain_file")
 
     if [[ -n "$toolchain_file" && "$toolchain_file" == "$expected_msrv" ]]; then
@@ -799,13 +864,8 @@ check_package_type() {
 
     # Check if built from source (nginx -V shows --prefix but no package)
     if [[ -z "$DETECTED_PKG_TYPE" ]]; then
-        local nginx_bin
-        if [[ "$NGINX_BIN" == "__unset__" ]]; then
-            nginx_bin="nginx"
-        else
-            nginx_bin="$NGINX_BIN"
-        fi
-        if [[ -n "$nginx_bin" ]] && command -v "$nginx_bin" >/dev/null 2>&1; then
+        local nginx_bin="$NGINX_BIN_RESOLVED"
+        if [[ -n "$nginx_bin" ]]; then
             local v_out
             v_out=$("$nginx_bin" -V 2>&1 || true)
             if printf '%s\n' "$v_out" | grep -q "configure arguments:"; then
@@ -935,6 +995,8 @@ main() {
                 ;;
         esac
     done
+
+    resolve_nginx_binary
 
     # Run checks
     check_nginx_version

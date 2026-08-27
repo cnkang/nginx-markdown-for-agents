@@ -61,7 +61,6 @@ RUST_OUT_LEN_GUARD = "            if !out_len.is_null() {"
 RUST_TEST_ATTRIBUTE = "    #[test]"
 RUST_ALL_LOOP = "        for rc in &ALL {"
 REASON_KEY_RE = re.compile(r"^[a-z](?:[a-z0-9]|_(?=[a-z0-9]))*$")
-LEGACY_KEY_RE = re.compile(r"^[A-Z](?:[A-Z0-9]|_(?=[A-Z0-9]))*$")
 VALID_STAGES = frozenset({
     "eligibility", "decompression", "parsing", "conversion",
     "precommit", "postcommit", "delivery", "dynconf",
@@ -78,50 +77,6 @@ REASON_REQUIRED_FIELDS = frozenset({
     "discriminant", "key", "default_stage", "allowed_origins",
     "operator_visible", "outcome", "default_origin",
 })
-
-
-def _validate_legacy_keys(index: int, entry: dict) -> list[str]:
-    """Validate optional compatibility aliases on one reason entry."""
-    aliases = entry.get("legacy_keys", [])
-    if not isinstance(aliases, list):
-        return [f"reasons[{index}] legacy_keys must be an array"]
-    invalid = [
-        alias
-        for alias in aliases
-        if not isinstance(alias, str)
-        or LEGACY_KEY_RE.fullmatch(alias) is None
-    ]
-    if invalid:
-        return [
-            f"reasons[{index}] legacy_keys contains invalid values: {invalid!r}"
-        ]
-    if len(set(aliases)) != len(aliases):
-        return [f"reasons[{index}] legacy_keys contains duplicates"]
-    return []
-
-
-def _track_legacy_keys(
-    index: int,
-    entry: object,
-    seen: dict[str, int],
-    errors: list[str],
-) -> None:
-    """Record legacy reason aliases, flagging cross-entry duplicates."""
-    if not isinstance(entry, dict):
-        return
-    legacy_keys = entry.get("legacy_keys")
-    if not isinstance(legacy_keys, list):
-        return  # malformed value already flagged by _validate_legacy_keys
-    for alias in legacy_keys:
-        if not isinstance(alias, str):
-            continue  # malformed alias already flagged
-        if alias in seen:
-            errors.append(
-                f"duplicate legacy reason key {alias!r}: "
-                f"entries {seen[alias]} and {index}"
-            )
-        else:
-            seen[alias] = index
 
 
 def _validate_discriminant(
@@ -241,7 +196,6 @@ def _validate_reason_entry(
     )
     errors.extend(_validate_reason_key(index, key, discriminant, seen_keys))
     errors.extend(_validate_reason_metadata(index, entry))
-    errors.extend(_validate_legacy_keys(index, entry))
     return errors
 
 
@@ -253,15 +207,12 @@ def _validate_reasons(reasons: object) -> list[str]:
     errors: list[str] = []
     seen_discriminants: dict[int, str] = {}
     seen_keys: dict[str, object] = {}
-    seen_legacy_keys: dict[str, int] = {}
     for index, entry in enumerate(reasons):
         errors.extend(
             _validate_reason_entry(
                 index, entry, seen_discriminants, seen_keys
             )
         )
-        _track_legacy_keys(index, entry, seen_legacy_keys, errors)
-
     expected = set(range(len(reasons)))
     actual = set(seen_discriminants)
     if not errors and actual != expected:
@@ -572,7 +523,15 @@ def generate_rust_impl(reasons) -> str:
 
 
 def generate_rust_impl_continued(reasons) -> str:
-    """Generate log_callsite, discriminant, from_discriminant methods."""
+    """
+    Generate Rust implementations for log-callsite descriptions, discriminant conversion, and reverse discriminant lookup.
+    
+    Parameters:
+        reasons: Registry entries used to generate the reason-code mappings and examples.
+    
+    Returns:
+        The generated Rust implementation as a string.
+    """
     lines = []
 
     # log_callsite
@@ -618,6 +577,7 @@ def generate_rust_impl_continued(reasons) -> str:
     timeout_disc = next(
         (r["discriminant"] for r in reasons if r["key"] == "timeout"), 9
     )
+    invalid_disc = max((r["discriminant"] for r in reasons), default=-1) + 1
     lines.append(
         f"    /// assert_eq!(ReasonCode::Converted.discriminant(), {converted_disc});"
     )
@@ -640,8 +600,13 @@ def generate_rust_impl_continued(reasons) -> str:
     lines.append(RUST_DOC_CODE_FENCE)
     lines.append(RUST_DOC_REASON_USE)
     lines.append(RUST_DOC_LINE)
-    lines.append("    /// assert_eq!(ReasonCode::from_discriminant(0), Some(ReasonCode::Converted));")
-    lines.append("    /// assert_eq!(ReasonCode::from_discriminant(255), None);")
+    lines.append(
+        f"    /// assert_eq!(ReasonCode::from_discriminant({converted_disc}), "
+        "Some(ReasonCode::Converted));"
+    )
+    lines.append(
+        f"    /// assert_eq!(ReasonCode::from_discriminant({invalid_disc}), None);"
+    )
     lines.append(RUST_DOC_CODE_FENCE)
     lines.append("    pub fn from_discriminant(value: u32) -> Option<Self> {")
     lines.append("        match value {")
@@ -999,11 +964,6 @@ def check_drift(path: Path, content: str) -> bool:
 
 def generate_c_header(reasons, hash_hex: str) -> str:
     """Generate the C reason metadata header from the registry."""
-    aliases = [
-        (alias, reason["discriminant"])
-        for reason in reasons
-        for alias in reason.get("legacy_keys", [])
-    ]
     lines = [
         "/*",
         " * Generated by tools/reason-codegen/generate.py — DO NOT EDIT.",
@@ -1012,7 +972,7 @@ def generate_c_header(reasons, hash_hex: str) -> str:
         " * This file provides generated reason metadata and stable discriminants",
         " * consumed by the C diagnostics renderer and reason accessors. The TOML",
         " * registry remains the only source; this header replaces former",
-        " * hand-maintained diagnostics reason and compatibility tables.",
+        " * hand-maintained diagnostics reason tables.",
         " */",
         "#ifndef MARKDOWN_REASON_META_H",
         "#define MARKDOWN_REASON_META_H",
@@ -1071,40 +1031,8 @@ def generate_c_header(reasons, hash_hex: str) -> str:
         "    markdown_reason_meta[MARKDOWN_REASON_META_COUNT + 1];",
         "#endif",
         "",
-        "/*",
-        " * Legacy uppercase aliases retained for diagnostics compatibility.",
-        " * This table is generated from each reason's legacy_keys field.",
-        " */",
-        "typedef struct {",
-        "    const char    *key;",
-        "    ngx_int_t      code;",
-        "} markdown_reason_alias_t;",
-        "",
-        f"#define MARKDOWN_REASON_ALIAS_COUNT {len(aliases)}",
-        "",
-        "#ifdef MARKDOWN_REASON_META_DEFINE",
-        "const markdown_reason_alias_t",
-        "    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT > 0 ? MARKDOWN_REASON_ALIAS_COUNT : 1] = {",
     ])
-
-    if aliases:
-        for alias, code in aliases:
-            lines.append(f'    {{ "{alias}", {code} }},')
-    else:
-        # A C99/C11 array of size 1 needs one initializer element; emit a
-        # zero-initialized sentinel for the reserved element.
-        lines.append('    { "", 0 },')
-
     lines.extend([
-        "};",
-        "#else",
-        "extern const markdown_reason_alias_t",
-        (
-            "    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT > 0 ? "
-            + "MARKDOWN_REASON_ALIAS_COUNT : 1];"
-        ),
-        "#endif",
-        "",
         "#endif /* MARKDOWN_REASON_META_H */",
         "",
     ])

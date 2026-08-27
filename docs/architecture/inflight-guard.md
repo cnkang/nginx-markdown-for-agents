@@ -121,5 +121,5 @@ separate `overload_total` metric family.
 | `src/ngx_http_markdown_inflight_impl.h` | Counter module (increment, decrement, cleanup) |
 | `src/ngx_http_markdown_request_impl.h` | Integration point (header filter, after eligibility) |
 | `src/ngx_http_markdown_metrics_impl.h` | Snapshot collection for inflight fields |
-| `src/ngx_http_markdown_prometheus_impl.h` | Prometheus text exposition |
+| `src/ngx_http_markdown_metrics_v1_renderer.h` | Prometheus text exposition |
 | `src/ngx_http_markdown_filter_module.h` | `max_inflight` config field and default |

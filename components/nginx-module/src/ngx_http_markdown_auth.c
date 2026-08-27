@@ -4,11 +4,8 @@
  * This file implements authentication detection and cache control modifications
  * for authenticated content to ensure secure caching behavior.
  *
- * Requirements: FR-08.1, FR-08.2, FR-08.3, FR-08.5, FR-08.6
- * Task: 17.5 Implement authenticated content cache control
- *
  * Security Rationale:
- * 
+ *
  * Authenticated and personalized content must not be cached publicly to prevent
  * exposure of sensitive information. This module detects authenticated requests
  * through:
@@ -774,8 +771,6 @@ ngx_http_markdown_cookie_matches_any_pattern(const ngx_str_t *cookie_name,
  * Detects HTTP authentication via Authorization header (Basic, Bearer, etc.).
  * The presence of this header indicates the request is authenticated.
  *
- * Requirements: FR-08.1
- *
  * @param r  The request structure
  * @return   1 if Authorization header present, 0 otherwise
  */
@@ -869,8 +864,6 @@ ngx_http_markdown_cookie_matches_pattern(const ngx_str_t *cookie_name,
  * - PHPSESSID
  * - wordpress_logged_in_*
  *
- * Requirements: FR-08.2, FR-08.5
- *
  * @param r     The request structure
  * @param conf  Module configuration with auth_cookies patterns
  * @return      1 if authentication cookie found, 0 otherwise
@@ -936,8 +929,6 @@ ngx_http_markdown_has_auth_cookies(const ngx_http_request_t *r,
  * A request is considered authenticated if it has:
  * 1. Authorization header, OR
  * 2. Authentication cookies matching configured patterns
- *
- * Requirements: FR-08.1, FR-08.2
  *
  * @param r     The request structure
  * @param conf  Module configuration
@@ -1386,8 +1377,6 @@ ngx_http_markdown_replace_malformed_cache_control(
  *
  * CRITICAL: Never downgrade "no-store" to "private" - this would weaken
  * security by allowing caching of content that should not be cached at all.
- *
- * Requirements: FR-08.3
  *
  * @param r  The request structure
  * @return   NGX_OK on success, NGX_ERROR on failure

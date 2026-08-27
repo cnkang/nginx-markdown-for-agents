@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Streaming failure semantics, cache behavior, and conditional request E2E tests.
 #
-# Validates sub-spec #15 end-to-end:
+# Validates the streaming failure/cache sub-spec end-to-end:
 #   10.1  Streaming success + cache_validation ims_only: no response ETag
 #   10.1b Streaming strips upstream ETag from proxied response
 #   10.2  Streaming pre-commit failure + error_policy pass: client gets HTML
@@ -23,8 +23,8 @@ set -euo pipefail
 # When NGINX_BIN is not set, exits with code 1 unless --plan is specified.
 
 NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
-PORT="${PORT:-18096}"
-UPSTREAM_PORT="${UPSTREAM_PORT:-19096}"
+PORT="${PORT:-18102}"
+UPSTREAM_PORT="${UPSTREAM_PORT:-19102}"
 KEEP_ARTIFACTS=0
 NGINX_BIN="${NGINX_BIN:-}"
 MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-10m}"
@@ -428,7 +428,7 @@ echo ""
 echo "10.4 Streaming post-commit failure"
 echo "  - markdown_streaming force"
 echo "  - Upstream aborts mid-stream after commit boundary"
-echo "  - Verify: truncated Markdown, STREAMING_FAIL_POSTCOMMIT in log"
+echo "  - Verify: truncated Markdown, streaming_fail_postcommit event in log"
 echo ""
 echo "10.5 cache_validation full + markdown_streaming auto"
 echo "  - Forces full-buffer path"
@@ -465,7 +465,7 @@ echo "  - Trigger pre-commit failure (budget exceeded) with authenticated reques
 echo "  - Verify: Cache-Control has no bare 'public' directive and includes 'private'"
 echo "  - Verify: ETag preserved as upstream value"
 echo "  - Verify: Set-Cookie is preserved"
-echo "  - Verify: decision log contains STREAMING_PRECOMMIT_FAILOPEN (terminal fail-open outcome)"
+echo "  - Verify: decision log contains streaming_precommit_failopen event"
 echo ""
 echo "10.12b Unauthenticated fail-open keeps upstream public policy"
 echo "  - Repeat the same real streaming pre-commit failure without a Cookie header"
@@ -1477,12 +1477,12 @@ fi
 #   - Fail-open MUST still apply the auth Cache-Control rewrite.
 #   - We assert: no bare public directive, private is present, ETag and
 #     Set-Cookie are preserved, and the
-#     decision log contains a streaming fail-open reason code.
+#     decision log contains the streaming fail-open event.
 echo "==> 10.12 Authenticated fail-open applies Cache-Control policy"
 
 # Record error log offset before the 10.12 request so we only inspect
 # newly appended log lines (earlier cases like 10.2/10.9b also emit
-# STREAMING_PRECOMMIT_FAILOPEN to the shared error.log).
+# streaming_precommit_failopen to the shared error.log).
 T12_ERROR_LOG="${RUNTIME}/logs/error.log"
 t12_log_offset=0
 if [[ -f "${T12_ERROR_LOG}" ]]; then
@@ -1522,15 +1522,15 @@ fi
 assert_body_contains "${RAW_DIR}/t12.body" "${OVERSIZE_END_TOKEN}" "10.12" \
     t12_pass "missing end token (possible truncation)"
 
-# Decision log must contain STREAMING_PRECOMMIT_FAILOPEN in the lines
+# Decision log must contain streaming_precommit_failopen in the lines
 # appended by the 10.12 request — this is the terminal fail-open outcome
 # that proves the request went through the streaming -> budget exceeded ->
 # fail-open path (not just a SKIP_AUTH passthrough).
-# STREAMING_BUDGET_EXCEEDED is the upstream classification signal but
-# PRECOMMIT_FAILOPEN is the definitive outcome; we require the latter.
+# streaming_budget_exceeded is the upstream classification signal but
+# streaming_precommit_failopen is the definitive event; we require the latter.
 # We only inspect log lines after the pre-curl offset to avoid false
 # positives from earlier test cases (10.2, 10.9b) that also emit
-# STREAMING_PRECOMMIT_FAILOPEN.
+# streaming_precommit_failopen.
 t12_log_new=""
 if [[ -f "${T12_ERROR_LOG}" ]] && [[ "${t12_log_offset}" -ge 0 ]]; then
     t12_current_size=$(wc -c < "${T12_ERROR_LOG}" 2>/dev/null || echo 0)
@@ -1539,11 +1539,11 @@ if [[ -f "${T12_ERROR_LOG}" ]] && [[ "${t12_log_offset}" -ge 0 ]]; then
     fi
 fi
 if [[ -z "${t12_log_new}" ]]; then
-    mark_case_fail "10.12" "no new bytes in T12_ERROR_LOG; cannot verify STREAMING_PRECOMMIT_FAILOPEN" t12_pass
-elif echo "${t12_log_new}" | grep -q 'reason=STREAMING_PRECOMMIT_FAILOPEN' 2>/dev/null; then
-    : # terminal fail-open outcome found in 10.12 log segment — pass
+    mark_case_fail "10.12" "no new bytes in T12_ERROR_LOG; cannot verify streaming_precommit_failopen" t12_pass
+elif echo "${t12_log_new}" | grep -q 'event=streaming_precommit_failopen' 2>/dev/null; then
+    : # terminal fail-open event found in 10.12 log segment — pass
 else
-    mark_case_fail "10.12" "decision log missing STREAMING_PRECOMMIT_FAILOPEN for /t12/ request (request may not have hit streaming fail-open path)" t12_pass
+    mark_case_fail "10.12" "decision log missing streaming_precommit_failopen for /t12/ request (request may not have hit streaming fail-open path)" t12_pass
 fi
 
 if [[ ${t12_pass} -eq 1 ]]; then

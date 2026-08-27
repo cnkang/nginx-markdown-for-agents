@@ -69,7 +69,7 @@ check_prerequisites
 
 echo "Step 1: Testing Accept: text/markdown..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
     -H "Accept: text/markdown" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
 
@@ -89,7 +89,7 @@ esac
 
 echo "Step 2: Testing Accept: text/html..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
     -H "Accept: text/html" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
 
@@ -109,7 +109,7 @@ esac
 
 echo "Step 3: Testing quality factor preference (HTML wins)..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
     -H "Accept: text/markdown;q=0.9, text/html;q=1.0" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
 
@@ -126,7 +126,7 @@ case "$HTTP_CODE" in
 esac
 
 # Verify content-type indicates no markdown conversion
-CONTENT_TYPE=$(curl -sf -o /dev/null -w "%{content_type}" \
+CONTENT_TYPE=$(curl -sS -o /dev/null -w "%{content_type}" \
     -H "Accept: text/markdown;q=0.9, text/html;q=1.0" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || CONTENT_TYPE=""
 
@@ -148,7 +148,7 @@ fi
 
 echo "Step 4: Testing Accept: */* wildcard..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
     -H "Accept: */*" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
 
@@ -168,7 +168,7 @@ esac
 
 echo "Step 5: Testing explicit reject (q=0)..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
     -H "Accept: text/markdown;q=0" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
 
@@ -185,7 +185,7 @@ case "$HTTP_CODE" in
 esac
 
 # Verify content-type is not markdown when q=0
-CONTENT_TYPE=$(curl -sf -o /dev/null -w "%{content_type}" \
+CONTENT_TYPE=$(curl -sS -o /dev/null -w "%{content_type}" \
     -H "Accept: text/markdown;q=0" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || CONTENT_TYPE=""
 
@@ -204,7 +204,7 @@ fi
 
 echo "Step 6: Testing no Accept header..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
 
 case "$HTTP_CODE" in
@@ -223,7 +223,7 @@ esac
 
 echo "Step 7: Testing malformed Accept header..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
     -H "Accept: ;;;invalid;;;" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
 
@@ -261,7 +261,7 @@ fi
 
 echo "Step 9: Testing equal q-value tie-break..." >&2
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
     -H "Accept: text/markdown, text/html" \
     "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
 

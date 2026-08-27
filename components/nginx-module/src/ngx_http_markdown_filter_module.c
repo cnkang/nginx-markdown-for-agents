@@ -8,9 +8,6 @@
  * and metrics endpoint helpers live in dedicated implementation includes.
  */
 
-#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
-#endif
 #include "ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
 #include "ngx_http_markdown_ffi_layout_check.h"
@@ -31,6 +28,21 @@
 #ifdef MARKDOWN_STREAMING_ENABLED
 #include "ngx_http_markdown_streaming_impl.h"
 #endif
+
+void
+ngx_http_markdown_release_inflight_for_request(const ngx_http_request_t *r)
+{
+    ngx_http_markdown_ctx_t  *ctx;
+
+    if (r == NULL) {
+        return;
+    }
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
+    if (ctx != NULL) {
+        ngx_http_markdown_inflight_release(ctx);
+    }
+}
 
 /*
  * Module context
@@ -63,6 +75,38 @@ ngx_module_t ngx_http_markdown_filter_module = {
     NULL,                                   /* exit thread */
     ngx_http_markdown_exit_worker,          /* exit process */
     NULL,                                   /* exit master */
+    NGX_MODULE_V1_PADDING
+};
+
+/*
+ * Keep the body hook as a separate module entry so NGINX can place it after
+ * copy_filter while placing the representation-selecting header hook before
+ * not_modified.  Both entries share this translation unit and the primary
+ * module remains the owner of configuration and worker lifecycle state.
+ */
+static ngx_http_module_t ngx_http_markdown_body_filter_module_ctx = {
+    NULL,                                   /* preconfiguration */
+    ngx_http_markdown_body_filter_init,     /* postconfiguration */
+    NULL,                                   /* create main configuration */
+    NULL,                                   /* init main configuration */
+    NULL,                                   /* create server configuration */
+    NULL,                                   /* merge server configuration */
+    NULL,                                   /* create location configuration */
+    NULL                                    /* merge location configuration */
+};
+
+ngx_module_t ngx_http_markdown_body_filter_module = {
+    NGX_MODULE_V1,
+    &ngx_http_markdown_body_filter_module_ctx, /* module context */
+    NULL,                                      /* module directives */
+    NGX_HTTP_MODULE,                           /* module type */
+    NULL,                                      /* init master */
+    NULL,                                      /* init module */
+    NULL,                                      /* init process */
+    NULL,                                      /* init thread */
+    NULL,                                      /* exit thread */
+    NULL,                                      /* exit process */
+    NULL,                                      /* exit master */
     NGX_MODULE_V1_PADDING
 };
 

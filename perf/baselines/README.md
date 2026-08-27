@@ -159,10 +159,11 @@ the mechanism that removes the failure class.
 - **Immutability**: a pushed `perf-baseline/*` ref is immutable. Never move
   it and never delete it. Correct a tag message only while the tag stays
   local and unpushed.
-- **Creation trigger**: create a ref only when the finalizer produces a new
-  canonical baseline and no existing ref already anchors its measurement
-  commit. Never add a redundant ref for a commit that a branch or a release
-  tag already reaches.
+- **Creation trigger**: create a ref when the finalizer produces a new
+  canonical baseline and no existing immutable or protected ref already
+  anchors its measurement commit. A mutable branch, including `main`, does
+  not count as a durable anchor; a commit reached only through such a branch
+  still receives the dedicated `perf-baseline/*` ref.
 - **Message contents**: the message must record the baseline stem,
   `source_run`, and `source_artifact_sha256`, so the ref audits itself
   without opening the baseline file. The two live tags carry a superset of
@@ -250,8 +251,9 @@ consistent environment, finalizes the baseline from the retained raw report
 integrity contract (including raw-digest and content-binding verification),
 and uploads both the finalized and raw files as retained artifacts. The
 release-package workflow repeats the generation in its candidate runtime
-before the blocking comparison; verify the policy digest after either
-materialization.
+before the blocking comparison; verify
+`baseline_policy.source_artifact_sha256`, the raw-artifact digest, after
+either materialization.
 
 ## Baseline Files
 

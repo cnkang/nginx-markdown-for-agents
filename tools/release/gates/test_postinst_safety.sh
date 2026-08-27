@@ -100,6 +100,8 @@ TMPDIR_TEST="$(mktemp -d)"
 cat > "$TMPDIR_TEST/safe_postinst.sh" <<'FIXTURE'
 #!/bin/bash
 set -e
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 
 case "$1" in
     configure)
@@ -133,6 +135,8 @@ FIXTURE
 cat > "$TMPDIR_TEST/unsafe_reload.sh" <<'FIXTURE'
 #!/bin/bash
 set -e
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 
 case "$1" in
     configure)
@@ -150,6 +154,8 @@ FIXTURE
 cat > "$TMPDIR_TEST/unsafe_conf_modify.sh" <<'FIXTURE'
 #!/bin/bash
 set -e
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 
 case "$1" in
     configure)
@@ -166,6 +172,8 @@ FIXTURE
 cat > "$TMPDIR_TEST/heredoc_safe.sh" <<'FIXTURE'
 #!/bin/bash
 set -e
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 
 case "$1" in
     configure)

@@ -148,6 +148,21 @@ fn test_metadata_og_url_rejects_dangerous_url() {
 }
 
 #[test]
+fn test_metadata_og_url_survives_without_canonical() {
+    let html = b"<html><head>
+        <meta property=\"og:url\" content=\"https://example.com/article\" />
+    </head></html>";
+    let dom = parse_html(html).unwrap();
+    let extractor = MetadataExtractor::new(Some("https://example.com/page".to_string()), true);
+    let metadata = extractor.extract(&dom).unwrap();
+
+    assert_eq!(
+        metadata.url,
+        Some("https://example.com/article".to_string())
+    );
+}
+
+#[test]
 fn test_metadata_image_rejects_dangerous_url_and_keeps_later_safe_url() {
     let html = b"<html><head>
         <meta property=\"og:image\" content=\"javascript:alert(1)\" />
@@ -333,7 +348,7 @@ fn test_comprehensive_metadata_extraction() {
     );
     assert_eq!(
         metadata.url,
-        Some("https://example.com/canonical-url".to_string())
+        Some("https://example.com/article".to_string())
     );
     assert_eq!(metadata.author, Some("Jane Smith".to_string()));
     assert_eq!(metadata.published, Some("2024-01-15".to_string()));

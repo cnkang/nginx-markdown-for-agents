@@ -132,7 +132,8 @@ fn parse_null_data_nonzero_len_returns_invalid_type() {
 fn parse_empty_data_returns_error() {
     let mut result = parse_dynconf_ffi(&[]);
     assert_ne!(result.error_code, DYNCONF_OK);
-    assert!(result.source_digest.is_null());
+    assert_eq!(result.source_digest_len, 64);
+    assert!(!result.source_digest.is_null());
     assert!(result.active_digest.is_null());
     free_and_verify(&mut result);
 }
@@ -143,7 +144,8 @@ fn parse_invalid_json_returns_error() {
     assert_eq!(result.error_code, DYNCONF_ERR_INVALID_JSON);
     assert!(!result.error_message.is_null());
     assert!(result.error_message_len > 0);
-    assert!(result.source_digest.is_null());
+    assert_eq!(result.source_digest_len, 64);
+    assert!(!result.source_digest.is_null());
     assert!(result.active_digest.is_null());
     free_and_verify(&mut result);
 }
@@ -242,7 +244,8 @@ fn parse_reuses_result_without_leaking_or_retaining_optional_values() {
     }
 
     assert_eq!(result.error_code, DYNCONF_ERR_UNKNOWN_KEY);
-    assert!(result.source_digest.is_null());
+    assert_eq!(result.source_digest_len, 64);
+    assert!(!result.source_digest.is_null());
     assert!(result.active_digest.is_null());
     assert_eq!(result.filter, DYNCONF_NOT_SET_U8);
     free_and_verify(&mut result);

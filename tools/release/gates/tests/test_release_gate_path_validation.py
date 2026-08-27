@@ -10,10 +10,9 @@ import pytest
 from tools.release.gates import validate_artifact_registry as artifact_gate
 from tools.release.gates import validate_config_directives as config_gate
 from tools.release.gates import validate_fuzz_packaging as fuzz_gate
-from tools.release.gates import validate_metrics as metrics_gate
+from tools.release.gates import validate_metrics_registry as metrics_registry_gate
 from tools.release.gates import validate_release_candidate_evidence as candidate_gate
 from tools.release.gates import validate_release_evidence_manifest as evidence_gate
-from tools.release.gates import validate_reason_codes as reason_gate
 
 
 @pytest.mark.parametrize(
@@ -22,6 +21,7 @@ from tools.release.gates import validate_reason_codes as reason_gate
         artifact_gate.load_json,
         candidate_gate.load_json,
         evidence_gate.load_json,
+        metrics_registry_gate._load_json,
     ),
 )
 def test_release_gate_loaders_reject_parent_paths(loader) -> None:
@@ -55,6 +55,36 @@ def test_artifact_digest_does_not_follow_external_symlink(
     )
 
     assert any("escapes repository root" in reason for reason in reasons)
+
+
+def test_artifact_index_rows_bind_to_frozen_candidate_sha(monkeypatch) -> None:
+    """Every candidate artifact row must identify the frozen candidate."""
+    expected_sha = "a" * 40
+    monkeypatch.setattr(artifact_gate, "frozen_feature_digest", lambda: "sha256:" + "b" * 64)
+    monkeypatch.setattr(artifact_gate, "frozen_abi_version", lambda: 2)
+
+    reasons = artifact_gate.validate_index(
+        {
+            "schema_version": artifact_gate.INDEX_SCHEMA_VERSION,
+            "candidate_sha": expected_sha,
+            "artifacts": [
+                {
+                    "artifact_type": "source",
+                    "release_matrix_row_id": "source-1",
+                    "artifact_id": "source.tar.gz",
+                    "candidate_sha": "c" * 40,
+                    "artifact_sha256": "sha256:" + "d" * 64,
+                    "feature_manifest_digest": "sha256:" + "b" * 64,
+                    "abi_version": 2,
+                    "verification_status": "pass",
+                }
+            ],
+        },
+        expected_sha,
+    )
+
+    assert any("candidate_sha" in reason and "frozen candidate" in reason
+               for reason in reasons)
 
 
 def test_candidate_digest_does_not_follow_external_symlink(
@@ -118,7 +148,7 @@ def test_candidate_evidence_schema_null_digest_fails_closed(
 
 @pytest.mark.parametrize(
     "gate",
-    (config_gate, fuzz_gate, metrics_gate, reason_gate),
+    (config_gate, fuzz_gate),
 )
 def test_read_safe_rejects_project_prefix_sibling(
     gate, tmp_path: Path, monkeypatch

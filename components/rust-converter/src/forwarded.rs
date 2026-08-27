@@ -1,8 +1,7 @@
-//! Trusted-proxy forwarded-header trust decision (spec 47, 0.9.0).
+//! Trusted-proxy forwarded-header trust decision.
 //!
-//! This module owns the **pure** decision logic that replaces the legacy
-//! boolean `markdown_trust_forwarded_headers` trust model with a CIDR-based
-//! `markdown_trusted_proxies` model.  All forwarded-header parsing, CIDR
+//! This module owns the **pure** CIDR-based
+//! `markdown_trusted_proxies` decision model.  All forwarded-header parsing, CIDR
 //! matching, host/proto validation, multi-hop chain handling, and base-URL
 //! derivation live here so the NGINX C module stays a thin wrapper that only
 //! marshals request/config fields across the FFI boundary.
@@ -15,7 +14,7 @@
 //! the base URL used to resolve relative links in the Markdown output
 //! (host/header injection, CRLF smuggling, userinfo/path injection).
 //!
-//! # Decision order (mirrors design.md "安全决策流程")
+//! # Decision order (mirrors design.md "security decision flow")
 //!
 //! 1. If trusted proxies are not configured, the forwarded headers are
 //!    ignored and the base URL falls back to the `Host` header (reason
@@ -35,13 +34,13 @@
 //!
 //! # Requirements
 //!
-//! Validates: spec 47 Requirements 1-7.
+//! Validates: the trusted-proxy requirements.
 
 use std::net::{IpAddr, Ipv6Addr};
 
 /// Reason code describing why a particular base URL was chosen.
 ///
-/// The discriminants are the single FFI source of truth for the spec 53
+/// The discriminants are the single FFI source of truth for the reason-code
 /// reason-code names listed in the doc comments; the C side maps them to
 /// lower_snake_case metric keys.  Values are frozen for the 1.0 stability
 /// contract: add new codes, never renumber.
@@ -304,7 +303,7 @@ pub fn is_trusted_source(source_ip: &str, trusted: &[Cidr]) -> bool {
 }
 
 /// Validate a forwarded/host-header host value, covering all known attack
-/// vectors (spec 47 Requirement 6).
+/// vectors (trusted-proxy requirement).
 ///
 /// Returns the normalized host (unchanged on success) when valid, or `None`
 /// when the value is empty, contains control characters (CRLF injection), a
@@ -805,7 +804,7 @@ fn decide_from_forwarded(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecis
 /// The client address comes from the same hop element as the host/proto
 /// (never combined across elements).  When the element carries no host, the
 /// direct request Host is used; when it carries no proto, `https` is used
-/// for elements that declare a host (matching the existing spec 47 default).
+/// for elements that declare a host (matching the existing default).
 fn build_forwarded_decision(element: &ForwardedElement, input: &BaseUrlInput) -> BaseUrlDecision {
     /* Revalidate the selected host as defense-in-depth for future callers. */
     let host = element
@@ -1005,9 +1004,9 @@ fn discard_forwarded_set(input: &BaseUrlInput, reason: BaseUrlReason) -> BaseUrl
 /// `Host` header is absent/invalid.
 ///
 /// Uses `direct_scheme` (from `r->schema`) when provided, defaulting to
-/// "http" for backward compatibility.  This preserves the actual connection
-/// protocol for direct HTTPS requests so relative links are not erroneously
-/// resolved as http://.
+/// "http" when it is absent. This preserves the actual connection protocol
+/// for direct HTTPS requests so relative links are not erroneously resolved
+/// as http://.
 fn host_fallback(
     host: Option<&str>,
     direct_scheme: Option<&str>,

@@ -7,6 +7,7 @@ import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 
 import sys
 
@@ -24,8 +25,12 @@ from validate_workflow_matrix_consumers import (  # noqa: E402  # pylint: disabl
     load_matrix_versions,
     validate_canonical_workflows,
     validate_legacy_workflows,
+    validate_official_docker_matrix_coverage,
     validate_owner_workflow_refs,
     validate_release_blocking_publish_dag,
+)
+from official_docker_matrix import (  # noqa: E402  # pylint: disable=import-error
+    resolve_official_docker_entries,
 )
 
 
@@ -123,22 +128,40 @@ class TestLoadMatrixVersions:
 
     def test_loads_versions_from_file(self, tmp_path: Path) -> None:
         matrix = {
-            "matrix": [
-                {"nginx": "1.24.0", "nginx_version": "1.24.0"},
-                {"nginx": "1.26.3", "nginx_version": "1.26.3"},
+            "entries": [
+                {"nginx_version": "1.24.0"},
+                {"nginx_version": "1.26.3"},
             ]
         }
         versions = self._write_matrix_file_and_load_versions(tmp_path, matrix)
         assert versions == {"1.24.0", "1.26.3"}
 
     def test_empty_matrix(self, tmp_path: Path) -> None:
-        matrix = {"matrix": []}
-        versions = self._write_matrix_file_and_load_versions(tmp_path, matrix)
-        assert versions == set()
+        matrix = {"entries": []}
+        matrix_file = tmp_path / "release-matrix.json"
+        matrix_file.write_text(json.dumps(matrix))
+        with pytest.raises(ValueError, match="non-empty"):
+            load_matrix_versions(matrix_file)
+
+    def test_rejects_legacy_aliases(self, tmp_path: Path) -> None:
+        matrix = {"matrix": [{"nginx_version": "1.26.3"}]}
+        matrix_file = tmp_path / "release-matrix.json"
+        matrix_file.write_text(json.dumps(matrix))
+        with pytest.raises(ValueError, match="legacy"):
+            load_matrix_versions(matrix_file)
 
     def _write_matrix_file_and_load_versions(
         self, tmp_path: Path, matrix: dict
     ) -> set[str]:
+        """Write a release matrix to a temporary file and load its versions.
+        
+        Parameters:
+            tmp_path (Path): Directory for the temporary matrix file.
+            matrix (dict): Release matrix data to serialize.
+        
+        Returns:
+            set[str]: Versions extracted from the release matrix.
+        """
         matrix_file = tmp_path / "release-matrix.json"
         matrix_file.write_text(json.dumps(matrix))
         return load_matrix_versions(matrix_file)
@@ -314,9 +337,28 @@ class TestValidateOwnerWorkflowRefs:
         assert len(errors) == 1
         assert "canonical 'entries'" in errors[0]
 
+    def test_rejects_non_string_version_fields(self, tmp_path: Path) -> None:
+        """Malformed version scalars must become controlled validation errors."""
+        matrix_file = tmp_path / "tools" / "release-matrix.json"
+        matrix_file.parent.mkdir(parents=True)
+        matrix_file.write_text(
+            json.dumps({"entries": [{"nginx_version": {"value": "1.26.3"}}]})
+        )
+        with pytest.raises(ValueError, match="must be a string"):
+            load_matrix_versions(matrix_file)
+
     def _write_matrix_with_owner_workflow(
         self, owner_workflow: str, tmp_path: Path
     ) -> list[str]:
+        """Validate an owner workflow reference against a temporary release matrix.
+        
+        Parameters:
+        	owner_workflow (str): Workflow reference to include in the matrix.
+        	tmp_path (Path): Temporary repository root used for the matrix file.
+        
+        Returns:
+        	list[str]: Validation messages produced for the owner workflow reference.
+        """
         matrix = {
             "entries": [
                 {"nginx": "1.26.3", "owner_workflow": owner_workflow},
@@ -363,6 +405,22 @@ class TestValidateReleaseBlockingPublishDag:
 
         assert errors == []
 
+    def test_rejects_substring_reusable_docker_gate(self, tmp_path: Path) -> None:
+        matrix_file, wf_dir = self._make_fixture(
+            tmp_path,
+            "  official-docker-release-gate:\n"
+            "    uses: ./.github/workflows/official-nginx-docker.yml-untrusted\n"
+            "  publish:\n"
+            "    needs: [official-docker-release-gate]\n",
+        )
+
+        with patch("validate_workflow_matrix_consumers.REPO_ROOT", tmp_path), patch(
+            "validate_workflow_matrix_consumers.WORKFLOWS_DIR", wf_dir
+        ):
+            errors = validate_release_blocking_publish_dag(matrix_file)
+
+        assert any("must use" in error for error in errors)
+
     def test_publish_needs_does_not_cross_job_boundary(self) -> None:
         content = (
             "  publish:\n"
@@ -405,6 +463,16 @@ class TestValidateReleaseBlockingPublishDag:
     def _make_fixture(
         self, tmp_path: Path, release_workflow_body: str
     ) -> tuple[Path, Path]:
+        """
+        Create temporary workflow and release-matrix fixtures for workflow validation tests.
+        
+        Parameters:
+            tmp_path (Path): Root directory for the temporary fixture files.
+            release_workflow_body (str): Workflow content appended to the release workflow trigger.
+        
+        Returns:
+            tuple[Path, Path]: Paths to the release matrix file and workflows directory.
+        """
         wf_dir = tmp_path / ".github" / "workflows"
         wf_dir.mkdir(parents=True)
         (wf_dir / "official-nginx-docker.yml").write_text(
@@ -412,8 +480,7 @@ class TestValidateReleaseBlockingPublishDag:
             "  workflow_call:\n"
         )
         (wf_dir / "release-packages.yml").write_text(
-            "  official-docker-release-gate:\n"
-            "    uses: ./.github/workflows/official-nginx-docker.yml\n"
+            "on:\n"
             + release_workflow_body
         )
         matrix_file = tmp_path / "tools" / "release-matrix.json"
@@ -434,3 +501,137 @@ class TestValidateReleaseBlockingPublishDag:
             )
         )
         return matrix_file, wf_dir
+
+
+class TestOfficialDockerMatrix:
+    """Tests for exact release-matrix Docker row resolution."""
+
+    @staticmethod
+    def _entry() -> dict:
+        return {
+            "nginx_version": "1.31.4",
+            "os": "debian12",
+            "libc": "glibc",
+            "arch": "amd64",
+            "artifact_type": "docker-image",
+            "support_tier": "supported",
+            "release_blocking": True,
+            "owner_workflow": ".github/workflows/official-nginx-docker.yml",
+            "image_ref": "nginx:1.31.4",
+            "image_digest": "sha256:" + "a" * 64,
+        }
+
+    def test_resolves_exact_version_and_row_identity(self) -> None:
+        rows = resolve_official_docker_entries({"entries": [self._entry()]})
+        assert rows == [
+            {
+                "matrix_row_id": "1.31.4/debian12/glibc/amd64",
+                "docker_tag": "1.31.4-debian12-glibc-amd64",
+                "nginx_version": "1.31.4",
+                "os": "debian12",
+                "libc": "glibc",
+                "arch": "amd64",
+                "image_ref": "nginx:1.31.4",
+                "image_digest": "sha256:" + "a" * 64,
+            }
+        ]
+
+    def test_rejects_version_image_mismatch(self) -> None:
+        entry = self._entry()
+        entry["image_ref"] = "nginx:1.31.3"
+        with pytest.raises(ValueError, match="does not match"):
+            resolve_official_docker_entries({"entries": [entry]})
+
+    def test_rejects_owned_release_blocking_unsupported_tier(self) -> None:
+        entry = self._entry()
+        entry["support_tier"] = "experimental"
+        with pytest.raises(ValueError, match="support_tier"):
+            resolve_official_docker_entries({"entries": [entry]})
+
+    def test_rejects_unknown_architecture(self) -> None:
+        entry = self._entry()
+        entry["arch"] = "aarch64"
+        with pytest.raises(ValueError, match="architecture"):
+            resolve_official_docker_entries({"entries": [entry]})
+
+    def test_rejects_path_bearing_operating_system(self) -> None:
+        entry = self._entry()
+        entry["os"] = "../debian12"
+        with pytest.raises(ValueError, match="operating system"):
+            resolve_official_docker_entries({"entries": [entry]})
+
+    def test_rejects_unsupported_os_libc_pair(self) -> None:
+        entry = self._entry()
+        entry["libc"] = "musl"
+        with pytest.raises(ValueError, match="libc"):
+            resolve_official_docker_entries({"entries": [entry]})
+
+
+class TestOfficialDockerWorkflowCoverage:
+    """Tests for structural official Docker workflow validation."""
+
+    def test_reports_missing_row_identity_without_crashing(
+        self, tmp_path: Path
+    ) -> None:
+        workflow_dir = tmp_path / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "official-nginx-docker.yml").write_text("jobs: {}\n")
+
+        with patch(
+            "validate_workflow_matrix_consumers.WORKFLOWS_DIR", workflow_dir
+        ), patch(
+            "validate_workflow_matrix_consumers.load_official_docker_entries",
+            return_value=[{}],
+        ):
+            errors = validate_official_docker_matrix_coverage(
+                tmp_path / "release-matrix.json"
+            )
+
+        assert any("matrix_row_id" in error for error in errors)
+
+    def test_rejects_contract_markers_only_in_comments(self, tmp_path: Path) -> None:
+        matrix_file = tmp_path / "release-matrix.json"
+        matrix_file.write_text(
+            json.dumps(
+                {
+                    "entries": [
+                        {
+                            "nginx_version": "1.31.4",
+                            "os": "debian12",
+                            "libc": "glibc",
+                            "arch": "amd64",
+                            "artifact_type": "docker-image",
+                            "support_tier": "supported",
+                            "release_blocking": True,
+                            "owner_workflow": (
+                                ".github/workflows/official-nginx-docker.yml"
+                            ),
+                            "image_ref": "nginx:1.31.4",
+                            "image_digest": "sha256:" + "a" * 64,
+                        }
+                    ]
+                }
+            )
+        )
+        workflow_dir = tmp_path / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "official-nginx-docker.yml").write_text(
+            "jobs:\n"
+            "  prepare:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    # official_docker_matrix.py\n"
+            "    # load_official_docker_entries\n"
+            "  build-and-verify:\n"
+            "    needs: prepare\n"
+            "    runs-on: ubuntu-latest\n"
+            "    # fromJson(needs.prepare.outputs.matrix)\n"
+            "    # matrix.image_ref matrix.image_digest\n"
+        )
+
+        with patch(
+            "validate_workflow_matrix_consumers.WORKFLOWS_DIR", workflow_dir
+        ):
+            errors = validate_official_docker_matrix_coverage(matrix_file)
+
+        assert any("prepare job" in error for error in errors)
+        assert any("build-and-verify" in error for error in errors)

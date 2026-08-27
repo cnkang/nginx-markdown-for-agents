@@ -3,8 +3,8 @@
  *
  * This file provides accessor functions that map C-side eligibility enums
  * and error categories to canonical reason code strings. Canonical strings
- * are sourced from the registry projections via FFI; C-only streaming event
- * labels remain separate implementation details.
+ * are sourced from the registry projections via FFI. Streaming transition
+ * events remain structured event fields and are not reason codes.
  *
  * The declarative registry in components/rust-converter/reason_registry.toml
  * is the single source. The Rust enum and C metadata are generated
@@ -200,8 +200,8 @@ ngx_http_markdown_reason_from_eligibility(
 /*
  * Map error category enum to failure reason code string (via Rust FFI).
  *
- * LEGACY FUNCTION: This maps the coarse three-category enum to reason
- * codes.  For fine-grained error classification (InvalidDynconf,
+ * This maps the coarse three-category enum to reason codes. For fine-grained
+ * error classification (InvalidDynconf,
  * DegradedSnapshot, HeaderPlanApplyError, etc.), callers should classify raw
  * converter codes with `markdown_classify_error_code()` and log the canonical
  * reason selected by the owning runtime path.
@@ -526,138 +526,3 @@ ngx_http_markdown_reason_encoding_header_invalid(void)
     ngx_http_markdown_reason_init_strs();
     return &reason_str_encoding_header_invalid;
 }
-
-
-/*
- * Compressed responses can be skipped in both full-buffer and streaming
- * builds, so this reason must remain available without the streaming feature.
- */
-static ngx_str_t ngx_http_markdown_reason_streaming_skip_compressed_str =
-    ngx_string("STREAMING_SKIP_COMPRESSED");
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_skip_compressed(void)
-{
-    return &ngx_http_markdown_reason_streaming_skip_compressed_str;
-}
-
-
-#ifdef MARKDOWN_STREAMING_ENABLED
-
-/*
- * Streaming reason codes.
- *
- * These are C-only labels for the streaming path. They do NOT have a
- * corresponding canonical registry entry yet because they describe local
- * engine events rather than operator-visible outcomes. They retain their
- * UPPERCASE format as internal implementation labels.
- *
- * NAMING CONVENTION NOTE: These UPPERCASE codes differ from the
- * lowercase snake_case convention used by the Rust ReasonCode enum.
- * This is a known inconsistency.  It does not affect production
- * behavior because these codes are internal to the C streaming engine
- * and are not emitted through the Rust FFI reason-code accessor path.
- * If a future release promotes these events to operator-visible reasons,
- * add them to reason_registry.toml and regenerate the Rust/C projections;
- * do not add a parallel C mapping table. See
- * docs/harness/rules/observability-metrics.md for the boundary and migration
- * contract.
- */
-
-static ngx_str_t ngx_http_markdown_reason_engine_streaming_str =
-    ngx_string("ENGINE_STREAMING");
-static ngx_str_t ngx_http_markdown_reason_streaming_convert_str =
-    ngx_string("STREAMING_CONVERT");
-static ngx_str_t ngx_http_markdown_reason_streaming_fallback_str =
-    ngx_string("STREAMING_FALLBACK_PREBUFFER");
-static ngx_str_t ngx_http_markdown_reason_streaming_fail_postcommit_str =
-    ngx_string("STREAMING_FAIL_POSTCOMMIT");
-static ngx_str_t ngx_http_markdown_reason_streaming_skip_str =
-    ngx_string("STREAMING_SKIP_UNSUPPORTED");
-static ngx_str_t ngx_http_markdown_reason_streaming_budget_str =
-    ngx_string("STREAMING_BUDGET_EXCEEDED");
-static ngx_str_t ngx_http_markdown_reason_streaming_precommit_failopen_str =
-    ngx_string("STREAMING_PRECOMMIT_FAILOPEN");
-static ngx_str_t ngx_http_markdown_reason_streaming_precommit_reject_str =
-    ngx_string("STREAMING_PRECOMMIT_REJECT");
-#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
-static ngx_str_t ngx_http_markdown_reason_streaming_shadow_str =
-    ngx_string("STREAMING_SHADOW");
-#endif
-
-/* Auto-mode engine selection reason codes */
-static ngx_str_t ngx_http_markdown_reason_eligible_streaming_auto_str =
-    ngx_string("ELIGIBLE_STREAMING_AUTO");
-static ngx_str_t ngx_http_markdown_reason_eligible_fullbuffer_auto_str =
-    ngx_string("ELIGIBLE_FULLBUFFER_AUTO");
-
-
-const ngx_str_t *
-ngx_http_markdown_reason_engine_streaming(void)
-{
-    return &ngx_http_markdown_reason_engine_streaming_str;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_convert(void)
-{
-    return &ngx_http_markdown_reason_streaming_convert_str;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_fallback(void)
-{
-    return &ngx_http_markdown_reason_streaming_fallback_str;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_fail_postcommit(void)
-{
-    return &ngx_http_markdown_reason_streaming_fail_postcommit_str;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_skip_unsupported(void)
-{
-    return &ngx_http_markdown_reason_streaming_skip_str;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_budget_exceeded(void)
-{
-    return &ngx_http_markdown_reason_streaming_budget_str;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_precommit_failopen(void)
-{
-    return &ngx_http_markdown_reason_streaming_precommit_failopen_str;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_precommit_reject(void)
-{
-    return &ngx_http_markdown_reason_streaming_precommit_reject_str;
-}
-
-#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_shadow(void)
-{
-    return &ngx_http_markdown_reason_streaming_shadow_str;
-}
-#endif
-
-const ngx_str_t *
-ngx_http_markdown_reason_eligible_streaming_auto(void)
-{
-    return &ngx_http_markdown_reason_eligible_streaming_auto_str;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_eligible_fullbuffer_auto(void)
-{
-    return &ngx_http_markdown_reason_eligible_fullbuffer_auto_str;
-}
-
-#endif /* MARKDOWN_STREAMING_ENABLED */

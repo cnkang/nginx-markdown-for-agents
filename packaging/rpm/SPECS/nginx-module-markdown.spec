@@ -18,8 +18,8 @@ Built against nginx.org stable %{nginx_version}.
 WARNING: This module is built for nginx.org %{nginx_version} ONLY. NGINX
 dynamic modules require an exact version match — the core loader rejects
 any version difference (including a patch release) before signature
-checks. The RPM dependency pins the exact version, and the preinstall
-script enforces the exact-version guard at install time.
+checks. The RPM dependency and preinstall script both enforce that exact
+version at install time.
 It will NOT work with distro-provided, vendor-patched, OpenResty, Tengine,
 or custom-built NGINX binaries, or with any other NGINX version.
 
@@ -81,6 +81,65 @@ For compatibility information, see:
   /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
 ======================================================================
 EOF
+
+# The pre-uninstall guard refuses final removal while the active NGINX
+# configuration still loads the module, and blocks removal whenever the
+# active configuration cannot be inspected at all. On hosts where such an
+# inspection is impossible, operators who have verified the include graph
+# themselves may acknowledge that explicitly by creating the sentinel file
+# below before running the RPM removal:
+#   sudo touch /etc/nginx/markdown-module-force-remove
+#   sudo rpm -e <package>
+# The file persists until the operator deletes it, so every affected
+# removal transaction stays explicit rather than inheriting unsettable
+# scriptlet environment state.
+%preun
+if [ "$1" -eq 0 ]; then
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH
+    if [ -f /etc/nginx/markdown-module-force-remove ]; then
+        echo "WARNING: forced removal acknowledged (/etc/nginx/markdown-module-force-remove present); skipping active-configuration verification." >&2
+        echo "WARNING: delete /etc/nginx/markdown-module-force-remove after removal to re-enable the guard." >&2
+        exit 0
+    fi
+    nginx_bin="$(command -v nginx 2>/dev/null || true)"
+    module_pattern="^[[:space:]]*load_module[[:space:]]+\\\"?[^;]*ngx_http_markdown_filter_module\\.so\\\"?[[:space:]]*;"
+    nginx_status=0
+    nginx_dump=""
+    config_seen=0
+    grep_status=0
+
+    if [ -n "$nginx_bin" ]; then
+        nginx_dump="$("$nginx_bin" -T 2>&1)" || nginx_status=$?
+        if printf '%s\n' "$nginx_dump" | grep -E -q "$module_pattern"; then
+            echo "ERROR: active NGINX configuration still loads the Markdown module." >&2
+            echo "Remove the load_module directive, run 'nginx -t', and retry RPM removal." >&2
+            exit 1
+        fi
+        if [ "$nginx_status" -ne 0 ]; then
+            echo "ERROR: unable to verify active NGINX configuration; refusing RPM removal." >&2
+            echo "Disable the module explicitly, run 'nginx -t', and retry RPM removal." >&2
+            exit 1
+        fi
+    else
+        for config_path in /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf /etc/nginx/modules-enabled/*.conf; do
+            if [ -f "$config_path" ]; then
+                config_seen=1
+                grep_status=0
+                grep -E -q "$module_pattern" "$config_path" || grep_status=$?
+                if [ "$grep_status" -eq 0 ]; then
+                    echo "ERROR: NGINX configuration still loads the Markdown module: $config_path" >&2
+                    echo "Remove the load_module directive, run 'nginx -t', and retry RPM removal." >&2
+                    exit 1
+                fi
+                if [ "$grep_status" -gt 1 ]; then
+                    echo "ERROR: unable to read NGINX configuration: $config_path" >&2
+                    echo "Disable the module explicitly, run 'nginx -t', and retry RPM removal." >&2
+                    exit 1
+                fi
+            fi
+        done
+    fi
+fi
 
 %files
 /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so

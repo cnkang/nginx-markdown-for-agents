@@ -197,11 +197,11 @@ Use this when debugging Rust-side behavior.
 system `nm`, so archive probing could silently compile out matching C paths.
 Instead, NGINX configuration consumes `NGX_MARKDOWN_RUST_FEATURES`:
 
-- unset or `default`: use the Cargo default features (`streaming`,
-  `incremental`, and `prune_noise_regions`)
+- unset or `default`: use the Cargo default features (`streaming` and
+  `prune_noise_regions`)
 - `none`: match a Cargo build made with `--no-default-features`
 - a comma-separated list: match the final enabled Cargo feature set, for
-  example `streaming,incremental`
+  example `streaming,prune_noise_regions`
 
 Set the variable in the same shell that runs NGINX `./configure` whenever the
 Rust build does not use Cargo defaults:

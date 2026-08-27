@@ -43,6 +43,7 @@ typedef struct ngx_list_part_s ngx_list_part_t;
 #define NGX_HTTP_HEAD 4
 #define NGX_HTTP_GET 2
 #define NGX_LOG_DEBUG_HTTP 0
+#define NGX_LOG_CRIT 2
 #define NGX_LOG_ERR 1
 #define NGX_LOG_WARN 2
 #define NGX_INT32_LEN 11
@@ -268,10 +269,33 @@ ngx_http_markdown_sprintf_token(u_char *buf, ngx_uint_t token_count)
     (str)->len = sizeof(text) - 1; (str)->data = (u_char *) text
 
 #define ngx_memcpy memcpy
-#define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL  "text/markdown; charset=utf-8"
+#define ngx_memzero(dst, n) memset((dst), 0, (n))
+#define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL  "text/markdown"
+#define NGX_HTTP_MARKDOWN_CHARSET_LITERAL      "utf-8"
 #define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN \
     (sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1)
-#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 0
+#define NGX_HTTP_MARKDOWN_CHARSET_LEN \
+    (sizeof(NGX_HTTP_MARKDOWN_CHARSET_LITERAL) - 1)
+
+/*
+ * Test adapter for the unconditional production authentication contract.
+ * This header-only harness does not exercise authenticated cache policy.
+ */
+static ngx_int_t
+ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    return 0;
+}
+
+static ngx_int_t
+ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
+{
+    UNUSED(r);
+    return NGX_OK;
+}
 
 /*
  * FFI header plan types and stub implementations.
@@ -462,7 +486,7 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
 static void
 init_headers_list(ngx_list_t *list, ngx_uint_t capacity)
 {
-    list->last = &list->part;
+    list->last = NULL;
     list->size = sizeof(ngx_table_elt_t);
     list->nalloc = capacity;
     list->pool = NULL;
@@ -947,12 +971,12 @@ test_304_response_properties(void)
 
     /*
      * DIVERGENCE RISK: The following 304 properties cannot be driven
-     * in this unit test because ngx_http_markdown_send_304 calls
-     * ngx_http_finalize_request(r, NGX_HTTP_NOT_MODIFIED) which
-     * requires a full NGINX connection lifecycle. These are verified
-     * by e2e tests instead:
+     * in this unit test because ngx_http_markdown_send_304 sends headers
+     * and returns NGX_DONE; the body-filter caller returns that terminal
+     * status to NGINX, which performs the request finalization. These are
+     * verified by e2e tests instead:
      * - Status: 304 (NGX_HTTP_NOT_MODIFIED)
-     * - Body: absent (send_304 finalizes without body)
+     * - Body: absent (send_304 emits no body and returns NGX_DONE)
      * - Cache-Control: authenticated responses are normalized through the
      *   shared auth helper before send_304 sends headers; no-store remains
      *   preserved. The auth-cache e2e covers this production-only branch.
@@ -1119,8 +1143,10 @@ test_head_response_parity(void)
                 "update_headers should succeed for HEAD");
 
     TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
-                        "text/markdown; charset=utf-8"),
-                "HEAD Content-Type matches GET");
+                        "text/markdown"),
+                "HEAD Content-Type media type matches GET");
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.charset.data, "utf-8"),
+                "HEAD Content-Type charset matches GET");
     TEST_ASSERT(r.headers_out.content_length_n == 1234,
                 "HEAD Content-Length matches GET markdown length");
     TEST_ASSERT(r.headers_out.etag != NULL, "HEAD has ETag");
@@ -1208,8 +1234,10 @@ test_content_type_and_length(void)
     TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
                 "update_headers should succeed");
     TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
-                        "text/markdown; charset=utf-8"),
-                "Content-Type correct");
+                        "text/markdown"),
+                "Content-Type media type correct");
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.charset.data, "utf-8"),
+                "Content-Type charset correct");
     TEST_ASSERT(r.headers_out.content_length_n == 256,
                 "Content-Length matches markdown_len");
 
@@ -1556,8 +1584,13 @@ test_matrix_streaming_exceptions(void)
 static ngx_int_t
 simulate_streaming_update_headers(ngx_http_request_t *r)
 {
-    r->headers_out.content_type.data = (u_char *) "text/markdown; charset=utf-8";
+    r->headers_out.content_type.data =
+        (u_char *) NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
     r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.charset.data =
+        (u_char *) NGX_HTTP_MARKDOWN_CHARSET_LITERAL;
+    r->headers_out.charset.len = NGX_HTTP_MARKDOWN_CHARSET_LEN;
     ngx_http_clear_content_length(r);
     r->headers_out.content_length_n = -1;
 
@@ -1595,10 +1628,12 @@ test_parity_content_type(void)
     TEST_ASSERT(simulate_streaming_update_headers(&r_stream) == NGX_OK,
                 "streaming update_headers simulation should succeed");
 
-    /* Both paths produce text/markdown; charset=utf-8 */
+    /* Both paths produce the same media type and charset. */
     TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
-                        "text/markdown; charset=utf-8"),
-                "Full-buffer Content-Type correct");
+                        "text/markdown"),
+                "Full-buffer Content-Type media type correct");
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.charset.data, "utf-8"),
+                "Full-buffer Content-Type charset correct");
     TEST_ASSERT(r.headers_out.content_type.len == r_stream.headers_out.content_type.len,
                 "Content-Type length parity between FB and streaming");
 
@@ -1659,6 +1694,9 @@ test_parity_exceptions(void)
     TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
                         (char *) r_stream.headers_out.content_type.data),
                 "Content-Type parity between FB and ST");
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.charset.data,
+                        (char *) r_stream.headers_out.charset.data),
+                "Content-Type charset parity between FB and ST");
 
     /* Shared: Vary parity */
     TEST_ASSERT(find_header(&r, "Vary") != NULL, "FB has Vary");

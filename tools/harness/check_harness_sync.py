@@ -1550,7 +1550,8 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         Exit code: 0 for success, 1 for failure.
     """
-    args = parse_args(argv or sys.argv[1:])
+    selected_argv = sys.argv[1:] if argv is None else argv
+    args = parse_args(selected_argv)
     results = collect_results(full=args.full)
     failing_statuses = {FAIL}
     if args.full:
