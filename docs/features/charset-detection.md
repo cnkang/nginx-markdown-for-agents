@@ -161,24 +161,18 @@ Total: 35 unit tests for charset detection
 
 ## Current Limitations
 
-### UTF-8 Only Parsing
+### Transcoding Coverage
 
-The current implementation detects declared charsets but only parses UTF-8
-with html5ever. If the detector finds a non-UTF-8 charset:
-
-1. The module logs a warning to stderr.
-2. The parser receives the bytes as UTF-8 without transcoding. If the bytes
-   are valid UTF-8 despite the non-UTF-8 charset declaration, the parser
-   handles them as UTF-8 and the conversion succeeds.
-3. If the content is not valid UTF-8, the module returns an encoding error.
-
-**Future Enhancement**: Add charset transcoding support using the `encoding_rs` crate to convert non-UTF-8 content to UTF-8 before parsing.
+The detector honors the declared charset and transcodes supported encodings
+to UTF-8 before parsing (`encoding_rs`). Encodings that `encoding_rs` cannot
+map fall back to strict UTF-8 validation: valid UTF-8 content converts
+successfully, while invalid UTF-8 bytes return an encoding error.
 
 ### Performance Considerations
 
 - Meta tag scanning limits to the first 1024 bytes for performance
 - This is sufficient as meta charset tags should appear in the `<head>` section
-- Regex compilation caches using `OnceLock` for efficiency
+- Content-Type parameter scanning is a bounded byte-level walk (no regex)
 
 ## Integration Points
 
@@ -189,9 +183,20 @@ When the NGINX C module calls the Rust converter:
 1. Extract Content-Type header from upstream response
 2. Pass Content-Type to `MarkdownOptions.content_type` field
 3. Rust converter uses charset detection cascade
-4. Detected charset metadata affects **diagnostics only**. The parser always
-   receives UTF-8 bytes, does not transcode, and does not parse according to
-   a non-UTF-8 declaration
+4. The detected charset drives **real transcoding**: the parser decodes the
+   input to UTF-8 according to the declaration (`encoding_rs`), then parses.
+   The parser honors a declared non-UTF-8 charset rather than ignoring it.
+
+### Content-Type Parameter Parsing
+
+The Content-Type charset parameter parser uses a strict parameter-boundary
+scan: it treats a parameter as the charset declaration only when its name
+equals `charset` (case-insensitive, optional whitespace around `=`, quoted or
+bare value). Names that merely contain `charset` as a substring — for example
+`x-charset`, `notcharset`, or a `charset=` sequence inside another parameter's
+quoted value — never hijack detection because the parser ignores them. When
+the parameter name `charset` appears more than once, the first declaration
+wins.
 
 ### Error Handling
 
