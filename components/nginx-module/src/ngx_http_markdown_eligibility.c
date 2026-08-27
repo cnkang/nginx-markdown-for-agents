@@ -118,6 +118,7 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
 {
     FFIEligibilityInput   input;
     const struct FFIStr  *content_types;
+    const struct FFIStr  *stream_types;
     uint8_t               code;
 
     /*
@@ -130,6 +131,7 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
     }
 
     content_types = NULL;
+    stream_types = NULL;
 
     if (conf->routing.content_types != NULL && conf->routing.content_types->nelts > 0) {
         content_types = ngx_http_markdown_marshal_str_array(
@@ -149,8 +151,18 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
     input.content_types = content_types;
     input.content_types_count =
         (content_types != NULL) ? conf->routing.content_types->nelts : 0;
-    input.stream_types = NULL;
-    input.stream_types_count = 0;
+    if (conf->stream.excluded_types != NULL
+        && conf->stream.excluded_types->nelts > 0)
+    {
+        stream_types = ngx_http_markdown_marshal_str_array(
+            r->pool, conf->stream.excluded_types);
+        if (stream_types == NULL) {
+            return NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG;
+        }
+    }
+    input.stream_types = stream_types;
+    input.stream_types_count =
+        (stream_types != NULL) ? conf->stream.excluded_types->nelts : 0;
     input.content_length = (int64_t) r->headers_out.content_length_n;
     input.body_limit =
         ngx_http_markdown_effective_body_buffer_limit(eff, conf);

@@ -1,6 +1,6 @@
 ---
 domain: dynconf-snapshot
-rules: [34, 35, 45]
+rules: [34, 35, 45, 71]
 paths:
   - "components/nginx-module/src/dynconf/**"
   - "components/nginx-module/src/config/**"
@@ -115,7 +115,7 @@ Verification:
   gate on build_effective_conf, applied_mtime guard, and retry logic.
 - `make test-nginx-unit` — effective_conf_test includes
   test_dynconf_snapshot_not_consumed_when_dynconf_disabled,
-  dynconf_impl_test includes
+  dynconf_production_test includes
   test_start_applies_existing_file_on_startup and
   test_start_invalid_file_leaves_applied_mtime_zero.
 - `make harness-check-full` — now includes harness-security-checks.
@@ -158,7 +158,7 @@ Verification:
 
 ---
 
-### 46. Static explicit settings block dynamic overrides and propagate to child levels
+### 71. Static explicit settings block dynamic overrides and propagate to child levels
 
 Historical context: the dynconf precedence question (whether an http-level
 explicit setting locks the field for every location) resolves as follows.

@@ -53,6 +53,11 @@ set -euo pipefail
 # import it through an independently authenticated channel before verifying.
 # See docs/guides/GPG_KEY_MANAGEMENT.md for the authoritative fingerprint.
 TRUSTED_FINGERPRINT="<project-signing-key-fingerprint-from-GPG_KEY_MANAGEMENT.md>"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${EXPECTED_FINGERPRINT}" =~ ^[A-F0-9]{40}$ ]] || {
+  printf 'missing or invalid trusted fingerprint\n' >&2
+  exit 1
+}
 # Import the independently authenticated public key first, then verify the
 # detached signature with status output and extract the fingerprint from its
 # VALIDSIG record (field 3) — not from --import-options show-only on the
@@ -60,9 +65,9 @@ TRUSTED_FINGERPRINT="<project-signing-key-fingerprint-from-GPG_KEY_MANAGEMENT.md
 gpg --import <(curl -fsSL "${SIGNING_KEY_URL:?set to the independently authenticated key URL}") 2>/dev/null
 SIGNER_FINGERPRINT="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
-if [[ -z "$SIGNER_FINGERPRINT" || "$SIGNER_FINGERPRINT" != "$TRUSTED_FINGERPRINT" ]]; then
+if [[ -z "$SIGNER_FINGERPRINT" || "$SIGNER_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]]; then
   printf 'signer fingerprint mismatch: got %s, expected %s\n' \
-      "${SIGNER_FINGERPRINT:-<none>}" "$TRUSTED_FINGERPRINT" >&2
+      "${SIGNER_FINGERPRINT:-<none>}" "$EXPECTED_FINGERPRINT" >&2
   exit 1
 fi
 gpg --verify SHA256SUMS.asc SHA256SUMS
@@ -132,10 +137,15 @@ A 0.9.1 configuration fails `nginx -t` under the 0.9.2 binary (removed
 directives produce errors), so configuration migration must happen before
 the restart in the next step.
 
-### 6. Validate and restart
+### 6. Validate and restart with the active service manager
 
 ```bash
-sudo nginx -t && sudo systemctl restart nginx
+sudo nginx -t
+# systemd-managed host:
+sudo systemctl restart nginx
+# If another supervisor owns NGINX, use its restart/reload operation instead.
+# For a directly managed master process, the equivalent is:
+# sudo nginx -s reload
 ```
 
 ---
@@ -146,10 +156,18 @@ sudo nginx -t && sudo systemctl restart nginx
 
 ```bash
 cd nginx-markdown-for-agents
-git fetch --tags
-# Use this tag only after the 0.9.2 publication evidence exists; for the
-# current candidate, check out the exact reviewed development commit instead.
-git checkout v0.9.2
+RELEASE_TAG=v0.9.2
+git fetch --tags origin "${RELEASE_TAG}"
+# Copy EXPECTED_COMMIT from the independently authenticated release evidence.
+# A signed tag proves tag ownership; this equality binds the source checkout to
+# the exact reviewed commit recorded by the release process.
+EXPECTED_COMMIT="<release-evidence-commit>"
+git verify-tag "${RELEASE_TAG}"
+[[ "$(git rev-parse "${RELEASE_TAG}^{commit}")" == "${EXPECTED_COMMIT}" ]] || {
+    echo "release tag does not resolve to the authenticated expected commit" >&2
+    exit 1
+}
+git checkout --detach "${RELEASE_TAG}"
 ```
 
 ### 2. Update Rust toolchain
@@ -188,7 +206,16 @@ if [[ -z "${MODULES_DIR}" || ! -d "${MODULES_DIR}" ]]; then
     exit 1
 fi
 sudo cp objs/ngx_http_markdown_filter_module.so "${MODULES_DIR}/"
-sudo nginx -t && sudo systemctl restart nginx
+sudo nginx -t
+# Restart through the host's service manager when systemd owns NGINX. For a
+# directly managed master or another service manager, use the executable
+# fallback instead of assuming systemctl exists.
+if command -v systemctl >/dev/null 2>&1 \
+    && sudo systemctl is-active --quiet nginx 2>/dev/null; then
+    sudo systemctl restart nginx
+else
+    sudo nginx -s reload
+fi
 ```
 
 ---

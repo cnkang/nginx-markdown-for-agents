@@ -180,7 +180,7 @@ class ThirdPartyNoticesTests(unittest.TestCase):
                 version = "0.1.0"
 
                 [dependencies]
-                fixture-dep = { path = "../../../fixture-dep" }
+                fixture-dep = { path = "../../fixture-dep" }
 
                 [workspace]
                 """

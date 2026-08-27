@@ -6,7 +6,9 @@ import json
 import re
 from pathlib import Path
 
-from tools.release.gates.generate_schema_artifacts import DEFAULT_VERSION
+from tools.release.gates.generate_schema_artifacts import (
+    generate_metrics_registry,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 METRICS_CONTRACT = json.loads(
@@ -56,16 +58,8 @@ def _histogram_function(source: str) -> str:
 
 
 def _registry_artifact() -> dict:
-    """Load the generated metrics registry artifact once per test call."""
-    registry_path = (
-        REPO_ROOT / "artifacts" / "release" / DEFAULT_VERSION
-        / "metrics-registry.json"
-    )
-    if not registry_path.is_file():
-        raise AssertionError(
-            f"metrics registry artifact missing: {registry_path}"
-        )
-    return json.loads(registry_path.read_text(encoding="utf-8"))
+    """Generate the metrics registry projection from its source contract."""
+    return generate_metrics_registry()
 
 
 def test_renderer_boundaries_match_registry() -> None:

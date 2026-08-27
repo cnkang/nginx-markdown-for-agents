@@ -16,6 +16,7 @@
  */
 
 #include "ngx_http_markdown_stream_postcommit.h"
+#include "markdown_reason_meta.h"
 #ifdef MARKDOWN_STREAMING_ENABLED
 #include "markdown_converter.h"
 #endif
@@ -81,6 +82,16 @@ static ngx_int_t
 ngx_http_markdown_stream_postcommit_handle_send_result(
     ngx_http_request_t *r, ngx_int_t rc, const char *action);
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+static ngx_int_t
+ngx_http_markdown_stream_postcommit_resume_pending(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const char *action,
+    ngx_flag_t safe_finish,
+    ngx_flag_t *terminal_delivered);
+#endif
+
 
 /*
  * Request the Rust finish-mode API to close known Markdown structures.
@@ -102,6 +113,9 @@ ngx_http_markdown_stream_postcommit_safe_finish(
     ngx_http_markdown_ctx_t *ctx)
 {
     ngx_int_t  rc;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    ngx_flag_t pending_terminal_delivered;
+#endif
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
@@ -124,6 +138,20 @@ ngx_http_markdown_stream_postcommit_safe_finish(
     }
 
 #ifdef MARKDOWN_STREAMING_ENABLED
+    if (ctx->streaming.pending_output != NULL) {
+        rc = ngx_http_markdown_stream_postcommit_resume_pending(
+            r, ctx, "safe_finish", 1, &pending_terminal_delivered);
+        if (rc != NGX_OK && rc != NGX_DONE) {
+            return rc;
+        }
+        if (pending_terminal_delivered) {
+            ngx_http_markdown_stream_postcommit_log(
+                r, ctx, "safe_finish",
+                MARKDOWN_REASON_CODE_STREAMING_MID_FLIGHT_ERROR);
+            return NGX_OK;
+        }
+    }
+
     if (ctx->stream_sm.state == NGX_HTTP_MD_STATE_COMMITTED) {
         ngx_http_markdown_metrics_record_postcommit_safe_finish();
     }
@@ -179,7 +207,7 @@ ngx_http_markdown_stream_postcommit_safe_finish(
 
     /* Log the post-commit event */
     ngx_http_markdown_stream_postcommit_log(r, ctx,
-        "safe_finish", NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
+        "safe_finish", MARKDOWN_REASON_CODE_STREAMING_MID_FLIGHT_ERROR);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "markdown: postcommit safe_finish: "
@@ -311,6 +339,7 @@ ngx_http_markdown_stream_postcommit_abort(
     ngx_int_t   rc;
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_flag_t  terminal_already_sent;
+    ngx_flag_t  pending_terminal_delivered;
 #endif
 
     if (r == NULL || ctx == NULL) {
@@ -375,6 +404,22 @@ ngx_http_markdown_stream_postcommit_abort(
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_ABORT;
 #endif
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (ctx->streaming.pending_output != NULL) {
+        rc = ngx_http_markdown_stream_postcommit_resume_pending(
+            r, ctx, "abort", 0, &pending_terminal_delivered);
+        if (rc != NGX_OK && rc != NGX_DONE) {
+            return rc;
+        }
+        if (pending_terminal_delivered) {
+            ngx_http_markdown_stream_postcommit_log(
+                r, ctx, "abort",
+                MARKDOWN_REASON_CODE_STREAMING_MID_FLIGHT_ERROR);
+            return NGX_OK;
+        }
+    }
+#endif
+
     /*
      * Send terminal chain to close the response.
      * No content bytes are sent — just the empty last_buf marker.
@@ -405,7 +450,7 @@ ngx_http_markdown_stream_postcommit_abort(
 
     /* Log the abort event */
     ngx_http_markdown_stream_postcommit_log(r, ctx,
-        "abort", NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
+        "abort", MARKDOWN_REASON_CODE_STREAMING_MID_FLIGHT_ERROR);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "markdown: postcommit abort: "
@@ -516,7 +561,7 @@ ngx_http_markdown_stream_postcommit_log(
     ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx,
     const char *action,
-    ngx_http_markdown_reason_code_e reason)
+    ngx_uint_t reason)
 {
     if (r == NULL || ctx == NULL || action == NULL) {
         return;
@@ -602,6 +647,93 @@ ngx_http_markdown_stream_postcommit_latch_terminal(
         ngx_http_markdown_inflight_release(ctx);
     }
 }
+
+
+/*
+ * Resume a post-commit chain retained by the downstream filter after
+ * NGX_AGAIN.  The downstream filter owns the retained chain, so the retry
+ * must use NULL rather than submit the chain a second time.
+ */
+static ngx_int_t
+ngx_http_markdown_stream_postcommit_resume_pending(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const char *action,
+    ngx_flag_t safe_finish,
+    ngx_flag_t *terminal_delivered)
+{
+    ngx_int_t   rc;
+    ngx_flag_t  has_data;
+    ngx_flag_t  main_terminal;
+    ngx_flag_t  subrequest_terminal;
+    ngx_flag_t  pending_abort_terminal;
+    size_t      bytes;
+
+    *terminal_delivered = 0;
+
+    if (ctx->streaming.pending_output == NULL) {
+        return NGX_OK;
+    }
+
+    has_data = ctx->streaming.pending_meta.has_data;
+    bytes = ctx->streaming.pending_meta.bytes;
+    main_terminal = ctx->streaming.pending_meta.main_terminal;
+    subrequest_terminal = ctx->streaming.pending_meta.subrequest_terminal;
+    pending_abort_terminal =
+        ctx->streaming.pending_meta.pending_abort_terminal;
+
+    rc = ngx_http_markdown_next_body_filter(r, NULL);
+    if (rc == NGX_AGAIN) {
+        return ngx_http_markdown_stream_postcommit_handle_send_result(
+            r, rc, action);
+    }
+
+    ngx_http_markdown_pending_output_set(
+        &ctx->streaming.pending_output, NULL);
+    ctx->streaming.pending_meta.has_data = 0;
+    ctx->streaming.pending_meta.bytes = 0;
+    ctx->streaming.pending_meta.main_terminal = 0;
+    ctx->streaming.pending_meta.subrequest_terminal = 0;
+    ctx->streaming.pending_meta.pending_abort_terminal = 0;
+    r->buffered &= (ngx_uint_t) ~NGX_HTTP_MARKDOWN_BUFFERED;
+
+    rc = ngx_http_markdown_stream_postcommit_handle_send_result(
+        r, rc, action);
+    if (rc != NGX_OK && rc != NGX_DONE) {
+        if (safe_finish) {
+            if (has_data) {
+                ctx->streaming.completion.safe_finish_output_loss = 1;
+            } else {
+                ctx->streaming.completion.safe_finish_terminal_send_failed = 1;
+            }
+        }
+        return rc;
+    }
+
+    if (has_data && bytes > 0) {
+        ngx_http_markdown_metrics_record_postcommit_copied_delivery(bytes);
+    }
+
+    if (r == r->main && main_terminal) {
+        ctx->streaming.main_terminal_sent = 1;
+        ngx_http_markdown_inflight_release(ctx);
+        *terminal_delivered = 1;
+    }
+    if (r != r->main && subrequest_terminal) {
+        ctx->streaming.subrequest_terminal_sent = 1;
+        ngx_http_markdown_inflight_release(ctx);
+        *terminal_delivered = 1;
+    }
+
+    if (pending_abort_terminal
+        && !ctx->streaming.completion.terminal_aborted_recorded)
+    {
+        ngx_http_markdown_metrics_record_terminal_abort();
+        ctx->streaming.completion.terminal_aborted_recorded = 1;
+    }
+
+    return rc;
+}
 #endif
 
 
@@ -618,7 +750,7 @@ ngx_http_markdown_stream_postcommit_send_chain(
      * Reset failure origin at entry so a successful send (which never
      * sets the origin below) cannot leak a stale origin from a prior
      * send.  Each failure branch then overwrites with the precise
-     * provenance (Spec: post-commit sender failure三分法).
+     * provenance (Spec: post-commit sender failurethree-way classification).
      */
     ctx->streaming.classify.last_send_failure_origin =
         NGX_HTTP_MD_SEND_ORIGIN_NONE;

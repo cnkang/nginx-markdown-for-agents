@@ -23,7 +23,8 @@ def _load_module():
         "detect_open_without_path_validation",
         REPO_ROOT / "tools/harness/detect_open_without_path_validation.py",
     )
-    assert spec and spec.loader
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["detect_open_without_path_validation"] = mod
     spec.loader.exec_module(mod)
@@ -191,6 +192,19 @@ def test_method_open_repo_root_div_literal_pass(det):
         pass
     """
     errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert warnings == []
+
+
+def test_urllib_opener_open_is_not_filesystem_path(det):
+    src = """
+    import urllib.request
+    def fetch(request):
+        opener = urllib.request.build_opener()
+        with opener.open(request, timeout=10) as response:
+            return response.read()
+    """
+    errors, warnings = _check_source(det, src, strict=True)
     assert errors == []
     assert warnings == []
 

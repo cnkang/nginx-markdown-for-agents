@@ -40,7 +40,7 @@ def fake_matrix_root(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (root / "artifacts/release/0.9.2/official-build-feature-manifest.json").write_text(
-        json.dumps({"streaming": True, "incremental": True, "prune_noise_regions": True}),
+        json.dumps({"streaming": True, "prune_noise_regions": True}),
         encoding="utf-8",
     )
     (root / "components/rust-converter/include/markdown_converter.h").write_text(
@@ -92,7 +92,7 @@ def write_matrix(root: Path, doc: dict) -> None:
 
 
 def expected_digest() -> str:
-    manifest = {"streaming": True, "incremental": True, "prune_noise_regions": True}
+    manifest = {"streaming": True, "prune_noise_regions": True}
     import hashlib
 
     canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()

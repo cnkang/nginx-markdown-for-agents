@@ -52,6 +52,15 @@ headers unchanged = no-op):
 - X-Markdown-Tokens slot allocation and value formatting
 - Cache-Control auth modification (allocation + rewrite)
 
+**FFI mutation deferral:** the mutations applied by
+`ngx_http_markdown_apply_header_plan()` (the Content-Type stale
+delete-all, Content-Encoding delete-all, and Content-Length delete-all)
+stay effective only while every C-side preparation also succeeds. If any
+ETag, Vary, X-Markdown-Tokens, or Cache-Control preparation fails, the
+header-snapshot restore undoes the already-applied FFI delete-alls.
+Observably, FFI header mutations take effect only after ALL C-side
+preparation succeeds. Otherwise headers return to their original state.
+
 **Commit phase** (pointer/scalar assignment only, zero allocations,
 unconditional success):
 - Content-Type dedicated field assignment

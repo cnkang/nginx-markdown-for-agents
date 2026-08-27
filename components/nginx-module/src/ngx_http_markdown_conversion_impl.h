@@ -13,6 +13,7 @@
  */
 
 #include <limits.h>
+#include "ngx_http_markdown_diagnostics.h"
 
 /*
  * Forward declarations for helpers referenced before their definitions
@@ -71,7 +72,7 @@ ngx_http_markdown_const_strncasecmp(const u_char *s1, const u_char *s2,
 }
 
 /*
- * Construct base URL for resolving relative URLs (spec 47 thin wrapper).
+ * Construct base URL for resolving relative URLs (thin wrapper).
  *
  * The trust decision (CIDR matching, Forwarded/X-Forwarded-* precedence,
  * multi-hop handling, host/proto validation, and safe fallback) is a single
@@ -766,8 +767,9 @@ ngx_http_markdown_record_conversion_latency_for_path(ngx_uint_t path,
 /*
  * Attempt conditional-request shortcut (If-None-Match / 304).
  *
- * On match returns NGX_HTTP_NOT_MODIFIED; on mismatch populates `result`
- * for reuse.
+ * On match sends the terminal 304 headers and returns NGX_DONE; the caller
+ * returns that status to NGINX so the core finalizes the request once.  On
+ * mismatch populates `result` for reuse.
  */
 static ngx_int_t
 ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
@@ -778,6 +780,7 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
                                              ngx_flag_t *has_result)
 {
     struct MarkdownResult *conditional_result;
+    ngx_http_markdown_decision_path_t decision_path;
     ngx_int_t              rc;
 
     conditional_result = NULL;
@@ -796,18 +799,36 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
          * last-modified time on the 304. */
         r->headers_out.last_modified_time = (time_t) -1;
 
+        decision_path.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
+        decision_path.conditional_result = NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED;
+        decision_path.conversion_status = NGX_HTTP_MARKDOWN_CONV_SKIPPED;
+        /* The decision-path logger consumes a NUL-terminated C string;
+         * Rust reason accessors intentionally return length-only slices. */
+        decision_path.reason_code = "skipped_conditional";
+        decision_path.stage = "conversion";
+        decision_path.error_category = NULL;
+        decision_path.duration_ms = *elapsed_ms;
+        ngx_http_markdown_log_decision_path(
+            r, conf, ctx->effective_conf, &decision_path);
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.conditional);
+
+        /* Finalization may release the request immediately.  Release the
+         * conversion slot while the request context is still valid. */
+        ngx_http_markdown_release_inflight_for_request(r);
+
+        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+
         rc = ngx_http_markdown_send_304(r, conditional_result);
         if (conditional_result != NULL) {
             markdown_result_free(conditional_result);
         }
 
-        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
         if (rc != NGX_DONE) {
             ngx_http_markdown_record_system_failure(ctx);
             return rc;
         }
 
-        return NGX_HTTP_NOT_MODIFIED;
+        return NGX_DONE;
     }
 
     if (rc == NGX_ERROR) {
@@ -1204,139 +1225,6 @@ ngx_http_markdown_record_buffered_delivery_failure(
 }
 
 /*
- * Per-path RB-tree helpers removed from production in 0.9.2.
- * Retained under debug guard only.
- */
-#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
-/*
- * Determine which child to follow in the per-path RB tree
- * when the hash key matches but the URI path does not.
- *
- * Returns -1 to descend left, +1 to descend right.
- *
- * @param r    The request providing the URI to compare
- * @param node The tree node whose path is compared against
- */
-static int
-ngx_http_markdown_per_path_cmp(const ngx_http_request_t *r,
-                               const ngx_http_markdown_path_metric_node_t *node)
-{
-    if (r->uri.len < node->path_len) {
-        return -1;
-    }
-
-    if (r->uri.len > node->path_len) {
-        return 1;
-    }
-
-    if (ngx_memcmp(r->uri.data, node->path, node->path_len) < 0) {
-        return -1;
-    }
-
-    return 1;
-}
-
-/*
- * Search the per-path RB tree for an existing entry matching the
- * request URI.  On match, atomically increments per-path and
- * aggregate counters and returns NGX_OK.  On miss, returns
- * NGX_DECLINED so the caller can insert a new node.
- *
- * Must be called with shpool->mutex held.  The mutex is NOT
- * released by this function on either return path.
- *
- * @param r          The request (provides r->uri as the lookup key)
- * @param metrics    Shared metrics structure containing the RB tree
- * @param sentinel   The RB tree sentinel node (read-only)
- * @param key        Precomputed hash key for r->uri
- * @param elapsed_ms Conversion elapsed time to record on match
- */
-static ngx_int_t
-ngx_http_markdown_per_path_lookup_and_update(
-    const ngx_http_request_t *r,
-    ngx_http_markdown_metrics_t *metrics,
-    const ngx_rbtree_node_t *sentinel,
-    ngx_uint_t key,
-    ngx_msec_t elapsed_ms)
-{
-    ngx_rbtree_node_t                    *rbnode;
-    ngx_http_markdown_path_metric_node_t *node;
-    ngx_rbtree_node_t                    *child;
-    int                                   cmp;
-
-    rbnode = metrics->per_path.path_tree.root;
-
-    for ( ;; ) {
-        if (key < rbnode->key) {
-            if (rbnode->left == sentinel) {
-                return NGX_DECLINED;
-            }
-            rbnode = rbnode->left;
-            continue;
-        }
-
-        if (key > rbnode->key) {
-            if (rbnode->right == sentinel) {
-                return NGX_DECLINED;
-            }
-            rbnode = rbnode->right;
-            continue;
-        }
-
-        node = (ngx_http_markdown_path_metric_node_t *) rbnode;
-
-        if (r->uri.len == node->path_len
-            && ngx_memcmp(r->uri.data, node->path,
-                          node->path_len) == 0)
-        {
-            ngx_atomic_fetch_add(&node->conversions, 1);
-            ngx_atomic_fetch_add(&node->entries, 1);
-            ngx_atomic_fetch_add(&node->conversion_time_sum_ms,
-                                 (ngx_atomic_uint_t) elapsed_ms);
-            ngx_atomic_fetch_add(
-                &metrics->per_path.path_conversions, 1);
-            ngx_atomic_fetch_add(
-                &metrics->per_path.path_conversion_time_sum_ms,
-                (ngx_atomic_uint_t) elapsed_ms);
-            return NGX_OK;
-        }
-
-        cmp = ngx_http_markdown_per_path_cmp(r, node);
-        child = (cmp < 0) ? rbnode->left : rbnode->right;
-        if (child == sentinel) {
-            return NGX_DECLINED;
-        }
-        rbnode = child;
-    }
-}
-#endif /* MARKDOWN_METRICS_PER_PATH_DEBUG */
-
-/*
- * Record per-path metrics for a successful conversion.
- *
- * No-op placeholder since 0.9.2 (per-path metrics removed;
- * the directive was deleted).  Retained only to keep the
- * call sites stable across releases.
- *
- * Parameters:
- *   r          - the HTTP request (provides r->uri as the path key)
- *   conf       - module location configuration
- *   elapsed_ms - conversion elapsed time in milliseconds
- */
-static void
-ngx_http_markdown_record_per_path_metrics(
-    const ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf,
-    ngx_msec_t elapsed_ms)
-{
-    /* Per-path metrics removed in 0.9.2 (directive deleted). */
-    (void) r;
-    (void) conf;
-    (void) elapsed_ms;
-    return;
-}
-
-/*
  * Record a system-level conversion failure when the converter
  * handle is not initialized.
  *
@@ -1366,238 +1254,6 @@ ngx_http_markdown_handle_converter_not_initialized(
 }
 
 
-#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
-static ngx_flag_t
-ngx_http_markdown_shadow_output_diff(const struct MarkdownResult *fb_result,
-                                     const uint8_t *feed_data,
-                                     uintptr_t feed_len,
-                                     const struct MarkdownResult *st_result)
-{
-    size_t   total_len;
-    const u_char  *fb_ptr;
-
-    total_len = (size_t) feed_len + (size_t) st_result->markdown_len;
-    if (total_len != fb_result->markdown_len) {
-        return 1;
-    }
-
-    if (total_len == 0) {
-        return 0;
-    }
-
-    fb_ptr = fb_result->markdown;
-    if (feed_data != NULL && feed_len > 0) {
-        if (ngx_memcmp(feed_data, fb_ptr, feed_len) != 0) {
-            return 1;
-        }
-        fb_ptr += feed_len;
-    }
-
-    if (st_result->markdown != NULL
-        && st_result->markdown_len > 0
-        && ngx_memcmp(st_result->markdown,
-                      fb_ptr,
-                      st_result->markdown_len) != 0)
-    {
-        return 1;
-    }
-
-    return 0;
-}
-
-/*
- * Shadow mode: run the streaming engine on the same input that
- * was just converted by the full-buffer engine, compare outputs,
- * and record metrics/logs.  Any streaming error is isolated and
- * does not affect the client response.
- *
- * Parameters:
- *   r      - NGINX request structure
- *   ctx    - per-request module context (contains decompressed HTML)
- *   conf   - module location configuration
- *   fb_result     - full-buffer conversion result for comparison
- *   fb_elapsed_ms - full-buffer conversion elapsed time in milliseconds
- */
-static void
-ngx_http_markdown_shadow_compare(
-    ngx_http_request_t *r,
-    const ngx_http_markdown_ctx_t *ctx,
-    const ngx_http_markdown_conf_t *conf,
-    const struct MarkdownResult *fb_result,
-    ngx_msec_t fb_elapsed_ms)
-{
-    struct StreamingConverterHandle  *handle;
-    struct MarkdownOptions            options;
-    struct MarkdownResult             st_result;
-    uint8_t                          *out_data;
-    uintptr_t                         out_len;
-    ngx_int_t                         opt_rc;
-    uint32_t                          init_rc;
-    uint32_t                          rc;
-    const ngx_time_t                 *tp;
-    ngx_msec_t                        shadow_start;
-    ngx_msec_t                        shadow_elapsed;
-
-    opt_rc = ngx_http_markdown_prepare_conversion_options(
-        r, conf, ctx->effective_conf, &options);
-    if (opt_rc != NGX_OK) {
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-            "markdown: shadow conversion options failed rc=%i",
-            opt_rc);
-        return;
-    }
-
-    /*
-     * Record the shadow attempt after conversion options are
-     * prepared so shadow_total reflects actual shadow runs, not
-     * requests that fail before the streaming engine starts.
-     */
-    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.shadow_total);
-    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-        ngx_http_markdown_reason_streaming_shadow());
-
-    tp = ngx_timeofday();
-    shadow_start = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
-
-    init_rc = markdown_streaming_new_with_code(
-        &options, &handle);
-    if (init_rc != ERROR_SUCCESS || handle == NULL) {
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown: streaming engine "
-            "init failed rc=%ui",
-            (ngx_uint_t) init_rc);
-        return;
-    }
-
-    out_data = NULL;
-    out_len = 0;
-
-    rc = markdown_streaming_feed(handle,
-        ctx->buffer.data, ctx->buffer.size,
-        &out_data, &out_len);
-
-    if (rc != ERROR_SUCCESS) {
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown: streaming feed "
-            "error %ui", (ngx_uint_t) rc);
-        markdown_streaming_abort(handle);
-        if (out_data != NULL) {
-            markdown_streaming_output_free(
-                out_data, out_len);
-        }
-        return;
-    }
-
-    /*
-     * Retain feed output for combined comparison.
-     * Do NOT free out_data here — it is concatenated with
-     * finalize output below to form the complete streaming
-     * result for shadow comparison.
-     */
-
-    markdown_result_init(&st_result);
-    rc = markdown_streaming_finalize(handle, &st_result);
-
-    tp = ngx_timeofday();
-    shadow_elapsed = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
-    if (shadow_elapsed >= shadow_start) {
-        shadow_elapsed = shadow_elapsed - shadow_start;
-    } else {
-        shadow_elapsed = 0;
-    }
-
-    ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
-        r->connection->log, 0,
-        "markdown: "
-        "shadow_streaming_latency_ms=%M "
-        "shadow_fullbuffer_latency_ms=%M",
-        shadow_elapsed, fb_elapsed_ms);
-
-    /* Suppress unused-variable warnings in non-debug builds where
-     * ngx_log_debug2 compiles to nothing. */
-    (void) shadow_elapsed;
-    (void) fb_elapsed_ms;
-
-    if (rc != ERROR_SUCCESS) {
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown: streaming finalize "
-            "error %ui", (ngx_uint_t) rc);
-        if (out_data != NULL) {
-            markdown_streaming_output_free(
-                out_data, out_len);
-        }
-        markdown_result_free(&st_result);
-        return;
-    }
-
-    /*
-     * Log and record peak memory estimate from the streaming
-     * engine before freeing the result (lifecycle ordering:
-     * read FFI struct fields before calling the free function).
-     *
-     * Record streaming engine peak memory
-     * estimate in shadow mode when available.
-     *
-     * Update the last_peak_memory_bytes gauge
-     * unconditionally so the gauge reflects the most recent
-     * streaming conversion, whether from the primary streaming
-     * path or shadow mode.  Skipping the write when the value
-     * is zero would leave a stale value from a previous request
-     * (Rule 23: gauge metrics should be updated unconditionally
-     * on every successful sample).
-     */
-    if (ngx_http_markdown_metrics != NULL) {
-        ngx_http_markdown_metrics->streaming.last_peak_memory_bytes =
-            (ngx_atomic_t) st_result.peak_memory_estimate;
-    }
-
-    if (st_result.peak_memory_estimate > 0) {
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown: peak_memory_bytes=%uz",
-            (size_t) st_result.peak_memory_estimate);
-    }
-
-    /*
-     * Compare streaming output (feed + finalize) against
-     * full-buffer result.  Compare in-place without building
-     * a combined buffer to avoid allocation failure skewing
-     * the shadow_total counter.
-     *
-     * The streaming output is: out_data[0..out_len) followed
-     * by st_result.markdown[0..st_result.markdown_len).
-     * The full-buffer output is: fb_result->markdown[0..fb_result->markdown_len).
-     */
-    {
-        size_t total_len;
-
-        total_len = (size_t) out_len + (size_t) st_result.markdown_len;
-        (void) total_len;  /* used only in debug log below */
-        if (ngx_http_markdown_shadow_output_diff(fb_result, out_data, out_len,
-                                                 &st_result)) {
-            NGX_HTTP_MARKDOWN_METRIC_INC(
-                streaming.shadow_diff_total);
-            ngx_log_debug2(NGX_LOG_DEBUG_HTTP,
-                r->connection->log, 0,
-                "markdown: output diff "
-                "detected, fullbuffer_len=%uz "
-                "streaming_len=%uz",
-                (size_t) fb_result->markdown_len,
-                total_len);
-        }
-    }
-
-    if (out_data != NULL) {
-        markdown_streaming_output_free(
-            out_data, out_len);
-    }
-    markdown_result_free(&st_result);
-}
-#endif /* MARKDOWN_STREAMING_SHADOW_DEBUG */
-
 static void
 ngx_http_markdown_record_token_savings_if_enabled(
     const ngx_http_markdown_ctx_t *ctx,
@@ -1625,73 +1281,12 @@ ngx_http_markdown_record_token_savings_if_enabled(
     }
 }
 
-#ifdef MARKDOWN_INCREMENTAL_ENABLED
-static ngx_int_t
-ngx_http_markdown_execute_incremental_conversion(
-    ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
-    const ngx_http_markdown_conf_t *conf,
-    const struct MarkdownOptions *options,
-    struct MarkdownResult *result,
-    ngx_msec_t start_time,
-    ngx_msec_t *elapsed_ms)
-{
-    struct IncrementalConverterHandle *inc_handle;
-    uint32_t                           init_rc;
-    uint32_t                           feed_rc;
-    uint32_t                           fin_rc;
-    const ngx_time_t                  *tp;
-    ngx_msec_t                         end_time;
-
-    inc_handle = NULL;
-    init_rc = markdown_incremental_new_with_code(
-        options, &inc_handle);
-    if (init_rc != ERROR_SUCCESS || inc_handle == NULL) {
-        tp = ngx_timeofday();
-        end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
-        *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
-
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: "
-                     "markdown_incremental_new_with_code() "
-                     "failed rc=%ud", (ngx_uint_t) init_rc);
-
-        result->error_code = init_rc ? init_rc : ERROR_INVALID_INPUT;
-        result->error_message = NULL;
-        result->error_len = 0;
-        return ngx_http_markdown_handle_conversion_failure(
-            r, ctx, conf, result, *elapsed_ms);
-    }
-
-    feed_rc = markdown_incremental_feed(
-        inc_handle, ctx->buffer.data, ctx->buffer.size);
-    if (feed_rc != ERROR_SUCCESS) {
-        markdown_incremental_free(inc_handle);
-
-        tp = ngx_timeofday();
-        end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
-        *elapsed_ms = (end_time >= start_time) ? end_time - start_time : 0;
-
-        result->error_code = feed_rc;
-        result->error_message = NULL;
-        result->error_len = 0;
-        return ngx_http_markdown_handle_conversion_failure(
-            r, ctx, conf, result, *elapsed_ms);
-    }
-
-    /* finalize consumes the handle — do NOT call free after this */
-    fin_rc = markdown_incremental_finalize(inc_handle, result);
-    (void) fin_rc;  /* error_code is checked via result->error_code below */
-
-    return NGX_OK;
-}
-#endif
 
 
 /**
  * Execute the Markdown conversion via the Rust FFI and handle success or failure outcomes.
  *
- * Performs the configured conversion (incremental if enabled and selected), measures elapsed
+ * Performs the configured full-buffer conversion and measures elapsed
  * time, validates the returned MarkdownResult, records success metrics on success, and routes
  * failures through the module's failure handling which may emit a response or apply the
  * fail-open strategy.
@@ -1739,22 +1334,11 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
 
     markdown_result_init(result);
 
-#ifdef MARKDOWN_INCREMENTAL_ENABLED
-    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
-        rc = ngx_http_markdown_execute_incremental_conversion(
-            r, ctx, conf, &options, result, start_time, elapsed_ms);
-        if (rc != NGX_OK) {
-            return rc;
-        }
-    } else
-#endif
-    {
-        markdown_convert(ngx_http_markdown_converter,
-                        ctx->buffer.data,
-                        ctx->buffer.size,
-                        &options,
-                        result);
-    }
+    markdown_convert(ngx_http_markdown_converter,
+                    ctx->buffer.data,
+                    ctx->buffer.size,
+                    &options,
+                    result);
 
     tp = ngx_timeofday();
     end_time = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
@@ -1775,8 +1359,6 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
     }
 
     ngx_http_markdown_record_conversion_success(ctx, result, *elapsed_ms);
-
-    ngx_http_markdown_record_per_path_metrics(r, conf, *elapsed_ms);
 
     ngx_http_markdown_record_token_savings_if_enabled(ctx, conf, result);
 
@@ -1829,12 +1411,20 @@ ngx_http_markdown_prepare_body_output_buffer(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-/* Update response headers and emit the converted Markdown downstream.
+/**
+ * Updates the response headers and delivers the converted Markdown downstream.
  *
  * Rule: alloc-before-send.  All output resources (body buffer, pool copy,
  * chain link) are allocated BEFORE header forwarding.  If any allocation
  * fails, headers have NOT been sent, so the downstream connection does not
  * receive a partial headers-sent-but-no-body response.
+ *
+ * @param r Request receiving the converted response.
+ * @param ctx Markdown request context.
+ * @param conf Effective Markdown configuration.
+ * @param result Converted Markdown and response metadata.
+ * @param elapsed_ms Conversion elapsed time in milliseconds.
+ * @return The downstream header or body filter status.
  */
 static ngx_int_t
 ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
@@ -1907,6 +1497,23 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
      */
     rc = ngx_http_markdown_update_headers(r, result, conf);
     if (rc != NGX_OK) {
+        if (rc == NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED) {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                         "markdown: header snapshot rollback failed; "
+                         "fail-open disabled, category=system");
+            ngx_http_markdown_record_system_failure(ctx);
+            ngx_http_markdown_log_decision_with_category(
+                r, conf, ctx->effective_conf,
+                ngx_http_markdown_reason_header_plan_apply_err(),
+                ngx_http_markdown_reason_from_error_category(
+                    NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+            markdown_result_free(result);
+            return ngx_http_filter_finalize_request(
+                r, &ngx_http_markdown_filter_module,
+                (ngx_int_t) ngx_http_markdown_effective_error_status(
+                    ctx->effective_conf, conf));
+        }
+
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                      "markdown: failed to update response headers, "
                      "reason=header_plan_apply_error, category=system");
@@ -1940,8 +1547,13 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
 
     /*
      * Step 6: Forward headers downstream (idempotent via headers_forwarded).
+     *
+     * Transformed-representation forwarding: update_headers already
+     * replaced the response validators with Markdown-derived metadata,
+     * so this path never reintroduces the preserved source HTML
+     * Last-Modified value.
      */
-    rc = ngx_http_markdown_forward_headers(r, ctx);
+    rc = ngx_http_markdown_forward_transformed_headers(r, ctx);
     if (rc != NGX_OK && rc != NGX_AGAIN) {
         ngx_http_markdown_record_buffered_delivery_failure(ctx);
         return rc;
@@ -1989,8 +1601,9 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     return rc;
 }
 
-/*
- * Resume a full-buffer response after downstream backpressure.
+/**
+ * Resumes delivery of a buffered full-buffer response after downstream
+ * backpressure.
  *
  * The NGINX copy filter retains the unsent portion after returning NGX_AGAIN.
  * Passing the original chain again would append a duplicate copy of that
@@ -1998,13 +1611,10 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
  * buffered state.  The request-owned chain pointer remains only as a lifetime
  * anchor and pending-state marker until the downstream chain finishes.
  *
- * Parameters:
- *   r   - current request
- *   ctx - request context with a pending full-buffer response
- *
- * Returns:
- *   NGX_AGAIN while downstream remains blocked; otherwise the downstream
- *   return code after clearing the module's pending state.
+ * @param r Current request.
+ * @param ctx Request context containing the pending response.
+ * @return NGX_AGAIN if downstream remains blocked; otherwise the downstream
+ *         return code after the pending state is cleared.
  */
 static ngx_int_t
 ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
@@ -2024,6 +1634,8 @@ ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(results.full_buffer_delivery_count);
         /* Backpressure resume: drain completed successfully */
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_total);
+    } else {
+        ngx_http_markdown_record_buffered_delivery_failure(ctx);
     }
 
     ngx_http_markdown_pending_output_set(

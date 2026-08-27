@@ -54,17 +54,24 @@ ADR-justified exception.
 ### Trusted proxies — http-only CIDR trust
 
 Source IP for the trusted-proxy CIDR evaluation comes from the original
-transport peer: `r->connection->realip` when the NGINX `realip` module
-has preserved it, otherwise `r->connection->addr_text`.  When the
+transport peer: the NGINX `realip_remote_addr` variable, read through the
+NGINX variable API, when the NGINX `realip` module has preserved it. Otherwise
+the module uses `r->connection->addr_text`. `realip` is not a
+generic field of `ngx_connection_t`. The module must not dereference a
+private or non-existent `r->connection->realip` member.  When the
 operator enables the NGINX `realip` module (or PROXY protocol), NGINX
 rewrites `r->connection->addr_text` to the resolved client address
 (X-Forwarded-For-derived or PROXY header address) before the request
-reaches the content phase, while the original connecting peer is kept in
-`r->connection->realip`.  Matching the trusted CIDR against the rewritten
+reaches the content phase, while the original connecting peer remains
+available through the `realip_remote_addr` variable.  Matching the trusted
+CIDR against the rewritten
 `addr_text` would classify the request by the spoofable client address
 instead of the actual proxy, so the module uses the **original transport
-peer** (`realip`, falling back to `addr_text` when realip did not run).
-`markdown_trusted_proxies` is **http context only**, CIDR-based (IPv4 +
+peer** (the value read from `realip_remote_addr`, falling back to
+`addr_text` when realip did not run). `realip_remote_addr` names the public
+NGINX realip contract. The C field is the transport-peer value passed across
+the FFI boundary. `markdown_trusted_proxies`
+is **http context only**, CIDR-based (IPv4 +
 IPv6, parsed at config time). An immediate peer that is **outside**
 `markdown_trusted_proxies` is the client: the module ignores any
 `Forwarded` or `X-Forwarded-*` headers it carries and uses the peer
@@ -130,5 +137,5 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-19 | Hermes | Correct trusted-proxies source-IP semantics: CIDR evaluation uses the original transport peer (`connection->realip` preserved by the realip module, falling back to `addr_text`), never the realip-rewritten client address; unavailable address fails closed to untrusted |
+| 0.9.2 | 2026-08-19 | Hermes | Correct trusted-proxies source-IP semantics: CIDR evaluation uses the public `realip_remote_addr` variable API, falling back to `addr_text`; it never dereferences `r->connection->realip`, and an unavailable address fails closed to untrusted |
 | 0.9.0 | 2026-06-30 | Kang | Initial ADR — small-API decision boundary freeze, trusted-proxies model, C complexity reduction acceptance |

@@ -220,41 +220,46 @@ All `unsafe` blocks in the codebase are:
 
 ### Test Coverage
 
+The listed suite contains 10 XSS/Markdown-injection, 6 SSRF, 7 XXE, 3
+URL-sanitization, and 5 defense-in-depth tests (31 tests total).
+
 **Location**: `tests/security_tests.rs`
 
 **Test Categories**:
 
-1. **XSS / Markdown Injection Prevention**:
+1. **XSS / Markdown Injection Prevention (10 tests)**:
    - Script tag removal
    - Inline script removal
    - Event handler removal
-   - JavaScript URL blocking (case-insensitive)
-   - Data URL blocking
-   - VBScript URL blocking
+   - JavaScript URL blocking in links and images
+   - Case-insensitive JavaScript URL blocking
+   - Data URL blocking in links and images
    - Markdown link-label and image-alt injection blocking
 
-2. **SSRF Prevention** (5 tests):
+2. **SSRF Prevention (6 tests)**:
    - iframe tag stripping with URL extraction and dangerous scheme suppression
    - object tag stripping with URL extraction and dangerous scheme suppression
    - embed tag stripping with URL extraction
    - file: URL blocking
    - Dangerous URL scheme suppression in embedded content
+   - External stylesheet link removal
 
-3. **XXE Prevention** (2 tests):
+3. **XXE Prevention (7 tests)**:
    - DOCTYPE entity handling
-   - External entity handling
+   - External, parameter, internal, and nested entity handling
+   - Standard and PUBLIC DOCTYPE handling without external fetches
 
-4. **URL Sanitization** (2 tests):
-   - Dangerous URL blocking
+4. **URL Sanitization (3 tests)**:
+   - VBScript and `about:` URL blocking
    - Safe URL preservation
 
-5. **Comprehensive Tests** (5 tests):
+5. **Defense-in-Depth Tests (5 tests)**:
    - Multiple XSS vectors
    - Deep nesting
    - GFM mode security
    - Style/link/base tag removal
 
-**Total**: 23 security-specific tests, all passing
+**Total**: 31 security-specific tests, all passing
 
 ### Running Security Tests
 
@@ -296,7 +301,9 @@ The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs th
 - Bypass of one layer does not compromise security
 
 ### 4. Secure Defaults
-- Conservative resource limits (10MB max size, 5s timeout)
+- Conservative resource limits (10MB max size, 5s conversion timeout) and
+  cooperative parser checkpoints. An in-progress parse may overshoot its
+  configured `parser_timeout`
 - Fail-open strategy prevents DoS
 - All dangerous elements/attributes blocked by default
 
@@ -405,8 +412,8 @@ The implementation details in this document feed into a few operator-facing conc
 
 ---
 
-**Last Updated**: 2026-04-21  
-**Version**: 1.0  
+**Last Updated**: 2026-08-24
+**Version**: 1.0
 **Status**: Production Ready
 
 ## Document Updates

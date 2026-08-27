@@ -61,8 +61,8 @@ For detailed installation and configuration instructions, see:
 
 NGINX dynamic modules are **NOT** universal shared libraries. The module is
 compiled against a specific NGINX source version. NGINX validates the binary
-compatibility signature at load time and may refuse to load it if the
-signature does not match.
+compatibility signature at load time and rejects the module when the
+signature does not match, including any patch-version difference.
 
 This package does **NOT** support:
 

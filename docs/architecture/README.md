@@ -26,7 +26,7 @@ Use it when you need more than deployment guidance but less than source-level im
 
 | Topic | Read |
 |-------|------|
-| Large response incremental path (retired) and active bounded streaming engine | [LARGE_RESPONSE_DESIGN.md](LARGE_RESPONSE_DESIGN.md) |
+| Large-response history and active bounded streaming engine | [LARGE_RESPONSE_DESIGN.md](LARGE_RESPONSE_DESIGN.md) |
 | Error policy contract | [error-policy.md](error-policy.md) |
 | Filter chain ordering | [filter-ordering.md](filter-ordering.md) |
 | Header mutation inventory | [header-mutation-inventory.md](header-mutation-inventory.md) |

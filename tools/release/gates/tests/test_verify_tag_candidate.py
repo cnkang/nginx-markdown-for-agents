@@ -47,4 +47,3 @@ def test_tag_not_contained_in_main_is_not_accepted() -> None:
     """An approved-looking tag outside protected main history still blocks."""
     with pytest.raises(ValueError, match="not contained"):
         _verify(branch_relation="behind")
-

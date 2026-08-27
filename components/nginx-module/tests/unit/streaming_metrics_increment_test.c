@@ -42,8 +42,6 @@ typedef struct {
     unsigned long precommit_failopen_total;
     unsigned long precommit_reject_total;
     unsigned long budget_exceeded_total;
-    unsigned long shadow_total;
-    unsigned long shadow_diff_total;
     unsigned long last_ttfb_ms;
     unsigned long last_peak_memory_bytes;
     struct {
@@ -90,8 +88,6 @@ collect_streaming_snapshot(test_streaming_metrics_t *snap)
     snap->precommit_failopen_total = m->precommit_failopen_total;
     snap->precommit_reject_total = m->precommit_reject_total;
     snap->budget_exceeded_total = m->budget_exceeded_total;
-    snap->shadow_total = m->shadow_total;
-    snap->shadow_diff_total = m->shadow_diff_total;
     snap->last_ttfb_ms = m->last_ttfb_ms;
     snap->last_peak_memory_bytes = m->last_peak_memory_bytes;
     snap->engine_choice.streaming = m->engine_choice.streaming;
@@ -333,8 +329,6 @@ test_snapshot_copies_streaming_fields(void)
     live.precommit_failopen_total = 4;
     live.precommit_reject_total = 1;
     live.budget_exceeded_total = 6;
-    live.shadow_total = 7;
-    live.shadow_diff_total = 8;
     live.last_ttfb_ms = 42;
     live.last_peak_memory_bytes = 65536;
     live.engine_choice.streaming = 50;
@@ -370,10 +364,6 @@ test_snapshot_copies_streaming_fields(void)
                 "precommit_reject_total should be copied");
     TEST_ASSERT(snap.budget_exceeded_total == 6,
                 "budget_exceeded_total should be copied");
-    TEST_ASSERT(snap.shadow_total == 7,
-                "shadow_total should be copied");
-    TEST_ASSERT(snap.shadow_diff_total == 8,
-                "shadow_diff_total should be copied");
     TEST_ASSERT(snap.last_ttfb_ms == 42,
                 "last_ttfb_ms should be copied");
     TEST_ASSERT(snap.last_peak_memory_bytes == 65536,

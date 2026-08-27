@@ -17,7 +17,7 @@ generated projections.
 ### Single reason-code source of truth
 
 `components/rust-converter/reason_registry.toml` is the **single source**.
-The generator emits the Rust reason code projection, C metadata and aliases,
+The generator emits the Rust reason code projection, C metadata,
 release artifacts, and reverse lookup data. C consumes the generated metadata.
 There is no hand-maintained C string table or parallel public reason list.
 Naming rules:
@@ -31,8 +31,8 @@ identified, including: `forwarded_header_untrusted`, `forwarded_header_trusted`,
 `trusted_proxies_not_configured`, `streaming_block_full_cache_validation`,
 `streaming_block_small_body`, `streaming_block_inflight_limit`,
 `bypass_range_request`, `bypass_no_transform`, `bypass_content_encoding`, and
-`streaming_mid_flight_error` (post-commit. C internal `STREAMING_FAIL_POSTCOMMIT`
-is an implementation detail mapped to this canonical name).
+`streaming_mid_flight_error` (post-commit). The logger writes streaming
+transition details separately in the structured `event=` field.
 
 ### Metrics label whitelist (no high cardinality)
 
@@ -73,7 +73,8 @@ cover generated and FFI drift.
 
 ### Negative
 
-- C call sites that referenced C-only codes must map to canonical names.
+- C call sites that report outcomes must use canonical names. Streaming
+  transition details belong in the separate `event=` field.
 - Adding a reason code now touches a registry + golden tests + docs (intended
   friction).
 

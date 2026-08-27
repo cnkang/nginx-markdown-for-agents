@@ -43,7 +43,7 @@ every eligible response, see ADR-0023 for the exact contract term).
 **`markdown_cache_validation full` interaction (0.9.2 contract, see
 ADR-0023):** `markdown_cache_validation full` combined with
 `markdown_streaming auto` disables streaming for that request and uses
-full-buffer conversion (config-time warning, runtime reason
+full-buffer conversion (runtime warning, runtime reason
 `streaming_block_full_cache_validation`). `markdown_streaming force`
 combined with `markdown_cache_validation full` is a configuration error
 rejected at `nginx -t`. Only `ims_only` and `off` cache-validation modes
@@ -62,8 +62,11 @@ conversion enter the streaming path targeted by the 0.8.0 release.
   without operator intervention
 - With the default profile, small responses retain the simpler full-buffer
   path, avoiding state machine overhead for trivial conversions
-- Backward-compatible at the configuration level: the directive syntax
-  `markdown_streaming off|auto|force` accepts the same values as before.
+- Only the `off|auto|force` value semantics survive under the renamed
+  `markdown_streaming` directive. This is not a general
+  configuration-level backward-compatibility claim. The project removed the
+  `markdown_streaming_engine` directive. The parser
+  rejects configurations that still reference it.
   Under `markdown_streaming auto`, responses with a known `Content-Length`
   below 1m (including the former 32K-1m range) use the full-buffer path.
   Sizes at or above 1m, chunked responses, and responses without a known

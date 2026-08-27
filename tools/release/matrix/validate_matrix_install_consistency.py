@@ -45,20 +45,18 @@ EXPECTED_ASSET_TEMPLATE = (
 
 def load_matrix(path: Path) -> list[dict]:
     """
-    Load and validate the canonical release matrix JSON and return the
-    dynamic-module entries in the install.sh naming vocabulary.
+    Load and validate the release matrix, returning install-script-compatible entries.
     
-    Validates that the top-level JSON value is an object containing an
-    ``entries`` list. Only supported dynamic-module entries for glibc or musl
-    are projected into the legacy artifact-name fields used by install.sh.
+    Only supported dynamic-module entries for detectable libc and architecture values
+    are included. Architecture aliases are canonicalized before projection.
     
     Returns:
-        list[dict]: Projected install.sh-compatible rows with ``nginx``,
-            ``os_type``, ``arch``, and ``support_tier`` fields.
+        list[dict]: Entries containing ``nginx``, ``os_type``, ``arch``, and
+            ``support_tier`` fields.
     
     Raises:
-        ValueError: If the parsed JSON is not an object, the ``entries`` key is
-        missing, the ``entries`` value is not a list, or any item is not a dict.
+        ValueError: If the matrix cannot be read, parsed, normalized, or does not
+            contain a valid ``entries`` list of dictionaries.
     """
     validated = validate_read_path(path, purpose="install matrix")
     try:
@@ -110,11 +108,11 @@ def load_matrix(path: Path) -> list[dict]:
 def extract_matrix_values(matrix: list[dict]) -> tuple[set[str], set[str]]:
     """
     Collects unique `os_type` and `arch` values from the release matrix.
-    
+
     Parameters:
         matrix (list[dict]): Iterable of matrix entries where each entry may contain
             `"os_type"` and `"arch"` keys.
-    
+
     Returns:
         tuple[set[str], set[str]]: A tuple with two sets: the first is the set of unique
         `os_type` strings found, the second is the set of unique `arch` strings found.
@@ -127,7 +125,7 @@ def extract_matrix_values(matrix: list[dict]) -> tuple[set[str], set[str]]:
 def parse_install_script(path: Path) -> dict:
     """
     Parse an install.sh script to extract supported architectures, the asset naming template, and which OS types and architectures the script can produce.
-    
+
     Returns:
         dict: Mapping with the following keys:
             supported_architectures (set[str]): Architecture identifiers listed in SUPPORTED_ARCHITECTURES in the script.
@@ -192,13 +190,13 @@ def validate(
 ) -> list[str]:
     """
     Validate that the release matrix and install.sh are consistent and collect any mismatch messages.
-    
+
     Performs these checks for entries with "support_tier" == "full":
     - every os_type and arch in the matrix is detectable by the install script,
     - SUPPORTED_ARCHITECTURES in install.sh matches the matrix architectures,
     - the asset name template in install.sh equals the expected template,
     - each matrix entry uses a detectable os_type and arch.
-    
+
     Parameters:
         matrix (list[dict]): The release matrix entries (each entry is a dict).
         install_info (dict): Parsed install.sh information with keys:
@@ -206,7 +204,7 @@ def validate(
             - "asset_name_template" (str)
             - "detectable_os_types" (set[str])
             - "detectable_archs" (set[str])
-    
+
     Returns:
         list[str]: A list of human-readable error messages describing inconsistencies; empty if no issues were found.
     """
@@ -259,7 +257,7 @@ def validate(
 def _collect_architecture_mismatch_errors(install_info, matrix_archs, errors):
     """
     Append a single "SUPPORTED_ARCHITECTURES" mismatch message to the provided errors list describing differences between the install script and the matrix.
-    
+
     Parameters:
         install_info (dict): Parsed install.sh info containing the key "supported_architectures" as a set of architecture strings.
         matrix_archs (set[str]): Set of architecture strings extracted from the release matrix.
@@ -285,11 +283,11 @@ def _collect_architecture_mismatch_errors(install_info, matrix_archs, errors):
 def main() -> int:
     """
     Run consistency checks between release-matrix.json and install.sh and report the result.
-    
+
     Performs file existence checks, loads the release matrix and install script information,
     runs validations, prints a failure report when inconsistencies are found, and prints a
     brief summary on success.
-    
+
     Returns:
         int: 0 if no inconsistencies were found; 1 if files are missing or inconsistencies were detected.
     """

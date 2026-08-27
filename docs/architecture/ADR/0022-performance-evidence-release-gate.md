@@ -33,11 +33,15 @@ relative to a baseline:
   The mock upstream emits bounded 16 KiB HTTP chunks, and the scenario disables
   proxy buffering over HTTP/1.1 so path hits, TTFB, and zero-copy counters
   represent incremental processing rather than a single buffered body.
-- **Compressed streaming decompression evidence**: The `gzip-streaming-first`,
-  `deflate-streaming-first`, and `brotli-streaming-first` scenarios exercise
-  their respective streaming decompression paths. Each uses the large fixture
-  with `streaming_first` profile and chunked transfer, confirming that
-  `decompression_streaming_total > 0` per codec.  The `gzip-large` scenario
+- **Compressed streaming decompression evidence**: The
+  Every artifact must include the `gzip-streaming-first` and
+  `deflate-streaming-first` scenarios. Those scenarios use the large fixture
+  with the `streaming_first` profile and chunked transfer, confirming
+  `decompression_streaming_total > 0` for their codec. Artifacts built with
+  `NGX_HTTP_BROTLI` must also include `brotli-streaming-first` and its
+  corresponding counter assertion.
+  Artifacts without Brotli must record an explicit expected-unavailable result
+  instead of silently omitting the scenario. The `gzip-large` scenario
   separately verifies the full-buffer gzip decompression path
   (`decompression_fullbuffer_total > 0`).
 - **Diagnostics**: `tools/perf/doctor_advice.py` provides operator diagnostics when thresholds get breached.

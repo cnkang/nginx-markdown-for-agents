@@ -1,6 +1,6 @@
 //! Tests for parsing heavy inputs (deep nesting, many nodes).
 //!
-//! Validates: REQ-0700-CORRECTNESS-006 (解析阶段超时和解析器预算)
+//! Validates: (parser timeout and parser budget)
 //!
 //! This test exercises the parser with heavy inputs and verifies:
 //! - Deep nesting (100+ levels of nested divs) doesn't crash

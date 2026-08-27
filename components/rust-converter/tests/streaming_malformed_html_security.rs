@@ -210,11 +210,36 @@ fn unclosed_tags_split_across_chunks() {
         None,
     );
 
-    /* Must not panic; error or success both acceptable */
-    assert!(
-        result.is_ok() || result.is_err(),
-        "should produce a definitive result"
-    );
+    match result {
+        Ok(output) => {
+            assert!(
+                output.markdown.contains("paragraph") || output.markdown.contains("emphasis"),
+                "recovered text should be preserved: {:?}",
+                output.markdown
+            );
+            assert!(
+                output.markdown.len() <= html.len().saturating_mul(8),
+                "recovered output should remain bounded"
+            );
+        }
+        Err(error) => assert!(
+            matches!(
+                error,
+                ConversionError::ParseError(_)
+                    | ConversionError::EncodingError(_)
+                    | ConversionError::MemoryLimit(_)
+                    | ConversionError::InvalidInput(_)
+                    | ConversionError::InternalError(_)
+                    | ConversionError::BudgetExceeded { .. }
+                    | ConversionError::StreamingFallback { .. }
+                    | ConversionError::PostCommitError { .. }
+                    | ConversionError::DecompressionBudgetExceeded { .. }
+                    | ConversionError::ParseTimeout
+                    | ConversionError::ParseBudgetExceeded { .. }
+            ),
+            "unexpected malformed-input error: {error:?}"
+        ),
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════

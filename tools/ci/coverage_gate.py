@@ -2,8 +2,9 @@
 """Coverage gate enforcement for nginx-markdown-for-agents.
 
 Parses lcov summary output to extract aggregate line and function coverage
-percentages, then enforces configurable minimum thresholds. Zero external
-dependencies — uses only the Python 3.10+ stdlib.
+percentages, then enforces configurable minimum thresholds. Critical-path
+line coverage is measured from the source records and is enforced separately.
+Zero external dependencies — uses only the Python 3.10+ stdlib.
 
 Usage:
     python3 tools/ci/coverage_gate.py \\
@@ -11,7 +12,7 @@ Usage:
         --rust-lcov coverage/rust-coverage.lcov \\
         --rust-streaming-lcov coverage/rust-streaming-coverage.lcov \\
         --c-min-line 80 --rust-min-line 80 \\
-        --c-min-func 80 --rust-min-func 80
+        --c-min-func 80 --rust-min-func 80 --critical-path-min 90
 
 Exit codes:
     0  All thresholds met
@@ -24,6 +25,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,8 +60,68 @@ class CoverageSummary:
         return (self.functions_hit / self.functions_found) * 100.0
 
 
-_LCOV_LINE_RE = re.compile(r"lines[.]\s*:\s*(\d+)\s+of\s+(\d+)")
-_LCOV_FUNC_RE = re.compile(r"functions[.]\s*:\s*(\d+)\s+of\s+(\d+)")
+_LCOV_LINE_RE = re.compile(r"lines[.]+\s*:\s*(\d+)\s+of\s+(\d+)")
+_LCOV_FUNC_RE = re.compile(r"functions[.]+\s*:\s*(\d+)\s+of\s+(\d+)")
+
+_SOURCE_SUFFIXES = (".c", ".h", ".rs")
+
+
+def _source_file_matches(path: str, predicate: Callable[[str], bool]) -> bool:
+    """Return whether a direct child of a ``src`` component matches."""
+    parts = path.replace("\\", "/").casefold().split("/")
+    return any(
+        index > 0 and part == "src" and index + 1 < len(parts)
+        and predicate(parts[index + 1])
+        for index, part in enumerate(parts)
+    )
+
+
+def _is_source_file(filename: str) -> bool:
+    """Return whether a path component has a tracked source suffix."""
+    return filename.endswith(_SOURCE_SUFFIXES)
+
+
+def _matches_auth_path(path: str) -> bool:
+    return _source_file_matches(
+        path,
+        lambda filename: "auth" in filename and _is_source_file(filename),
+    )
+
+
+def _matches_error_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").casefold()
+    if "/src/error/" in normalized:
+        return _is_source_file(normalized.split("/src/error/", 1)[1])
+    return normalized.endswith("/src/ngx_http_markdown_error.c")
+
+
+def _matches_ffi_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").casefold()
+    if "/src/ffi/" in normalized:
+        return _is_source_file(normalized.split("/src/ffi/", 1)[1])
+    if normalized.endswith("/src/dynconf/ffi.rs"):
+        return True
+    return _source_file_matches(
+        normalized,
+        lambda filename: "_ffi" in filename and _is_source_file(filename),
+    )
+
+
+def _matches_conditional_path(path: str) -> bool:
+    parts = path.replace("\\", "/").casefold().split("/")
+    return (
+        "/src/" in path.replace("\\", "/").casefold()
+        and "conditional" in parts[-1]
+        and _is_source_file(parts[-1])
+    )
+
+
+_CRITICAL_PATH_PATTERNS: dict[str, Callable[[str], bool]] = {
+    "auth": _matches_auth_path,
+    "error handling": _matches_error_path,
+    "FFI boundary": _matches_ffi_path,
+    "conditional requests": _matches_conditional_path,
+}
 
 
 def parse_lcov_summary(lcov_path: Path) -> CoverageSummary:
@@ -190,6 +252,94 @@ def _compute_from_records(text: str) -> CoverageSummary:
     )
 
 
+def _parse_line_records(text: str) -> dict[str, tuple[set[int], set[int]]]:
+    """Return measured and hit line numbers grouped by source file."""
+    records: dict[str, tuple[set[int], set[int]]] = {}
+    current_file = ""
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("SF:"):
+            current_file = _parse_sf(line)
+            records.setdefault(current_file, (set(), set()))
+            continue
+        if not line.startswith("DA:") or not current_file:
+            continue
+
+        parts = line[3:].split(",", 2)
+        if len(parts) < 2:
+            continue
+        try:
+            line_number = int(parts[0])
+            hit_count = int(parts[1])
+        except ValueError:
+            continue
+        found, hit = records[current_file]
+        found.add(line_number)
+        if hit_count > 0:
+            hit.add(line_number)
+
+    return records
+
+
+def _merge_critical_path_records(
+    lcov_paths: list[Path],
+) -> dict[str, tuple[set[int], set[int]]]:
+    """Merge measured and hit lines from the supplied component reports."""
+    merged: dict[str, tuple[set[int], set[int]]] = {}
+    for lcov_path in lcov_paths:
+        if not lcov_path.exists():
+            raise FileNotFoundError(f"lcov file not found: {lcov_path}")
+        resolved = validate_read_path(lcov_path, purpose="lcov input")
+        for source_file, (found, hit) in _parse_line_records(
+            resolved.read_text(encoding="utf-8", errors="replace")
+        ).items():
+            normalized = source_file.replace("\\", "/")
+            if "/components/" not in normalized or "/src/" not in normalized:
+                continue
+            destination = merged.setdefault(normalized, (set(), set()))
+            destination[0].update(found)
+            destination[1].update(hit)
+    return merged
+
+
+def _critical_path_summary(
+    pattern: Callable[[str], bool],
+    records: dict[str, tuple[set[int], set[int]]],
+) -> CoverageSummary:
+    """Summarize the records selected by one critical-path pattern."""
+    lines_found: set[tuple[str, int]] = set()
+    lines_hit: set[tuple[str, int]] = set()
+    for source_file, (found, hit) in records.items():
+        if not pattern(source_file):
+            continue
+        lines_found.update((source_file, line) for line in found)
+        lines_hit.update((source_file, line) for line in hit)
+    return CoverageSummary(
+        lines_found=len(lines_found),
+        lines_hit=len(lines_hit),
+        functions_found=0,
+        functions_hit=0,
+    )
+
+
+def parse_lcov_critical_paths(
+    lcov_paths: list[Path],
+) -> dict[str, CoverageSummary]:
+    """Measure critical-path line coverage across the supplied lcov reports.
+
+    Reports generated for default and streaming Rust builds contain the same
+    source files.  Merging by ``(source file, line)`` avoids double-counting
+    those records while preserving the union of exercised lines.
+    """
+    records = _merge_critical_path_records(lcov_paths)
+
+    return {
+        label: _critical_path_summary(pattern, records)
+        for label, pattern in _CRITICAL_PATH_PATTERNS.items()
+    }
+
+
 @dataclass(frozen=True)
 class GateResult:
     """Result of a single coverage threshold check."""
@@ -243,11 +393,8 @@ def format_results(results: list[GateResult]) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
-    """CLI entry point: parse coverage data and enforce threshold gates.
-
-    Returns 0 if all coverage thresholds are met, 1 otherwise.
-    """
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser for the coverage gate."""
     parser = argparse.ArgumentParser(
         description="Enforce coverage thresholds for nginx-markdown-for-agents",
     )
@@ -290,64 +437,120 @@ def main() -> int:
         default=80.0,
         help="Minimum Rust function coverage percent (default: 80)",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--critical-path-min",
+        type=float,
+        default=90.0,
+        help="Minimum critical-path line coverage percent (default: 90)",
+    )
+    return parser
 
-    all_results: list[GateResult] = []
-    errors: list[str] = []
 
-    if args.c_lcov:
-        try:
-            c_summary = parse_lcov_summary(args.c_lcov)
-            all_results.extend(
-                check_gate("C module", c_summary, args.c_min_line, args.c_min_func)
-            )
-        except FileNotFoundError as exc:
-            errors.append(str(exc))
+def _append_lcov_results(
+    results: list[GateResult],
+    errors: list[str],
+    label: str,
+    lcov_path: Path | None,
+    min_line: float,
+    min_func: float,
+) -> None:
+    """Append threshold results for one optional lcov report."""
+    if lcov_path is None:
+        return
+    try:
+        summary = parse_lcov_summary(lcov_path)
+    except FileNotFoundError as exc:
+        errors.append(str(exc))
+        return
+    results.extend(check_gate(label, summary, min_line, min_func))
 
-    if args.rust_lcov:
-        try:
-            rust_summary = parse_lcov_summary(args.rust_lcov)
-            all_results.extend(
-                check_gate("Rust (default)", rust_summary, args.rust_min_line, args.rust_min_func)
-            )
-        except FileNotFoundError as exc:
-            errors.append(str(exc))
 
-    if args.rust_streaming_lcov:
-        try:
-            rust_stream_summary = parse_lcov_summary(args.rust_streaming_lcov)
-            all_results.extend(
-                check_gate(
-                    "Rust (streaming)",
-                    rust_stream_summary,
-                    args.rust_min_line,
-                    args.rust_min_func,
+def _append_critical_results(
+    results: list[GateResult],
+    errors: list[str],
+    lcov_paths: list[Path],
+    threshold: float,
+) -> None:
+    """Append critical-path results for the selected lcov reports."""
+    if not lcov_paths:
+        return
+    try:
+        records = _merge_critical_path_records(lcov_paths)
+    except FileNotFoundError as exc:
+        errors.append(str(exc))
+        return
+    summaries = {
+        label: _critical_path_summary(pattern, records)
+        for label, pattern in _CRITICAL_PATH_PATTERNS.items()
+    }
+    for label, summary in summaries.items():
+        if summary.lines_found == 0:
+            pattern = _CRITICAL_PATH_PATTERNS[label]
+            if any(pattern(source_file) for source_file in records):
+                errors.append(
+                    f"critical-path category has no measured lines: {label}"
                 )
+            continue
+        results.append(
+            GateResult(
+                label=f"Critical: {label}",
+                metric="line",
+                actual=summary.line_pct,
+                threshold=threshold,
+                passed=summary.line_pct >= threshold,
             )
-        except FileNotFoundError as exc:
-            errors.append(str(exc))
+        )
 
-    if not all_results and not errors:
+
+def _finish_gate(results: list[GateResult], errors: list[str]) -> int:
+    """Print the coverage report and return its process status."""
+    if not results and not errors:
         print("ERROR: no lcov files specified", file=sys.stderr)
         return 2
 
     for err in errors:
         print(f"ERROR: {err}", file=sys.stderr)
 
-    print(format_results(all_results))
-    print("\n  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (advisory)")
+    print(format_results(results))
+    print("\n  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (blocking)")
     print("  Critical paths: auth, error handling, FFI boundary, conditional requests")
 
     if errors:
         return 2
 
-    any_failed = any(not r.passed for r in all_results)
+    any_failed = any(not r.passed for r in results)
     if any_failed:
         print("\nCOVERAGE GATE: FAIL — one or more thresholds not met", file=sys.stderr)
         return 1
 
     print("\nCOVERAGE GATE: PASS — all thresholds met")
     return 0
+
+
+def main() -> int:
+    """CLI entry point: parse coverage data and enforce threshold gates."""
+    args = _build_parser().parse_args()
+    results: list[GateResult] = []
+    errors: list[str] = []
+    reports = (
+        ("C module", args.c_lcov, args.c_min_line, args.c_min_func),
+        ("Rust (default)", args.rust_lcov, args.rust_min_line, args.rust_min_func),
+        (
+            "Rust (streaming)",
+            args.rust_streaming_lcov,
+            args.rust_min_line,
+            args.rust_min_func,
+        ),
+    )
+    for label, path, min_line, min_func in reports:
+        _append_lcov_results(results, errors, label, path, min_line, min_func)
+    _append_critical_results(
+        results,
+        errors,
+        [path for _, path, _, _ in reports if path is not None],
+        args.critical_path_min,
+    )
+    return _finish_gate(results, errors)
 
 
 if __name__ == "__main__":

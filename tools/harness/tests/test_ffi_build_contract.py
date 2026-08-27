@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
@@ -27,7 +28,9 @@ NON_STREAMING_VERIFY = (
 
 
 def _run_module_config(
-    tmp_path: Path, feature_contract: str | None
+    tmp_path: Path,
+    feature_contract: str | None,
+    identity: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     addon_dir = tmp_path / "components/nginx-module"
     archive = (
@@ -68,6 +71,8 @@ def _run_module_config(
         env.pop("NGX_MARKDOWN_RUST_FEATURES", None)
     else:
         env["NGX_MARKDOWN_RUST_FEATURES"] = feature_contract
+    if identity is not None:
+        env.update(identity)
 
     command = (
         '. "$MODULE_CONFIG"\n'
@@ -93,7 +98,8 @@ def test_default_feature_contract_is_deterministic_without_nm(
 
     assert result.returncode == 0, result.stderr
     assert "-DMARKDOWN_STREAMING_ENABLED" in result.stdout
-    assert "-DMARKDOWN_INCREMENTAL_ENABLED" in result.stdout
+    assert "-DMARKDOWN_PRUNE_NOISE_ENABLED" in result.stdout
+    assert '-DNGX_HTTP_MARKDOWN_BUILD_KIND=\\"development\\"' in result.stdout
     assert "NM_CALLED=1" not in result.stdout
 
 
@@ -101,7 +107,6 @@ def test_default_feature_contract_matches_cargo_manifest() -> None:
     manifest = tomllib.loads(CARGO_MANIFEST.read_text(encoding="utf-8"))
 
     assert set(manifest["features"]["default"]) == {
-        "incremental",
         "prune_noise_regions",
         "streaming",
     }
@@ -115,6 +120,7 @@ def test_none_feature_contract_disables_optional_c_paths_without_nm(
     assert result.returncode == 0, result.stderr
     assert "MARKDOWN_STREAMING_ENABLED" not in result.stdout
     assert "MARKDOWN_INCREMENTAL_ENABLED" not in result.stdout
+    assert "MARKDOWN_PRUNE_NOISE_ENABLED" not in result.stdout
     assert "NM_CALLED=1" not in result.stdout
 
 
@@ -125,12 +131,44 @@ def test_explicit_feature_contract_enables_only_matching_c_paths(
 
     assert result.returncode == 0, result.stderr
     assert "-DMARKDOWN_STREAMING_ENABLED" in result.stdout
+    assert "-DMARKDOWN_PRUNE_NOISE_ENABLED" in result.stdout
     assert "MARKDOWN_INCREMENTAL_ENABLED" not in result.stdout
     assert "NM_CALLED=1" not in result.stdout
 
 
+def test_release_build_identity_is_embedded_and_matches_rustc(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("rustc") is None:
+        pytest.skip("rustc is required for release identity validation")
+
+    rust_version = subprocess.check_output(
+        ["rustc", "-Vv"], text=True
+    ).split("release: ", 1)[1].splitlines()[0]
+    source_sha = "a" * 40
+    manifest_digest = f"sha256:{'b' * 64}"
+    result = _run_module_config(
+        tmp_path,
+        "streaming,prune_noise_regions",
+        {
+            "NGX_MARKDOWN_BUILD_KIND": "release",
+            "NGX_MARKDOWN_SOURCE_SHA": source_sha,
+            "NGX_MARKDOWN_RUST_VERSION": rust_version,
+            "NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST": manifest_digest,
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f'-DNGX_HTTP_MARKDOWN_SOURCE_SHA=\\"{source_sha}\\"' in result.stdout
+    assert f'-DNGX_HTTP_MARKDOWN_RUST_VERSION=\\"{rust_version}\\"' in result.stdout
+    assert (
+        f'-DNGX_HTTP_MARKDOWN_FEATURE_MANIFEST_DIGEST=\\"{manifest_digest}\\"'
+        in result.stdout
+    )
+
+
 @pytest.mark.parametrize(
-    "feature_contract", ["", "bogus", "none,streaming", "default,incremental"]
+    "feature_contract", ["", "bogus", "none,streaming", "default,streaming"]
 )
 def test_invalid_or_ambiguous_feature_contract_fails_closed(
     tmp_path: Path, feature_contract: str
@@ -155,7 +193,7 @@ def test_no_default_features_build_declares_none_to_nginx_configure() -> None:
 
 def _function_body(source: str, function_name: str) -> str:
     match = re.search(
-        rf"\n{re.escape(function_name)}\([^)]*\)\n\{{(?P<body>.*?)\n\}}",
+        rf"\n{re.escape(function_name)}\([^)]*\)(?:\s*/\*.*?\*/)?\n\{{(?P<body>.*?)\n\}}",
         source,
         flags=re.DOTALL,
     )
@@ -169,17 +207,30 @@ def test_abi_validation_precedes_configuration_and_filter_registration() -> None
     preconfiguration = _function_body(
         lifecycle, "ngx_http_markdown_preconfiguration"
     )
-    postconfiguration = _function_body(
+    header_filter_init = _function_body(
         lifecycle, "ngx_http_markdown_filter_init"
+    )
+    body_filter_init = _function_body(
+        lifecycle, "ngx_http_markdown_body_filter_init"
     )
 
     assert "markdown_abi_version()" in preconfiguration
     assert "ngx_http_markdown_ffi_abi_matches" in preconfiguration
-    assert "markdown_abi_version()" not in postconfiguration
-    assert "ngx_http_top_header_filter" in postconfiguration
-    assert "ngx_http_top_body_filter" in postconfiguration
+    assert "markdown_abi_version()" not in header_filter_init
+    assert "markdown_abi_version()" not in body_filter_init
+    assert "ngx_http_top_header_filter" in header_filter_init
+    assert "ngx_http_top_body_filter" not in header_filter_init
+    assert "ngx_http_top_body_filter" in body_filter_init
+    assert "ngx_http_top_header_filter" not in body_filter_init
     assert re.search(
         r"ngx_http_markdown_preconfiguration,\s*/\* preconfiguration \*/"
         r"\s*ngx_http_markdown_filter_init,\s*/\* postconfiguration \*/",
         module_source,
+    )
+    assert re.search(
+        r"ngx_http_markdown_body_filter_module_ctx\s*=\s*\{\s*"
+        r"NULL,\s*/\* preconfiguration \*/\s*"
+        r"ngx_http_markdown_body_filter_init,\s*/\* postconfiguration \*/",
+        module_source,
+        flags=re.DOTALL,
     )

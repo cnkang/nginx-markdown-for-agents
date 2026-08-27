@@ -22,8 +22,8 @@
  * arbitrary input chunks. Brotli uses its incremental decoder when the
  * optional Brotli build support is enabled.
  *
- * PUBLIC CONTRACT NOTE (0.9.2): Raw RFC 1951 deflate is supported as a
- * compatibility fallback for legacy servers. The sniffing decision above is
+ * PUBLIC CONTRACT NOTE: Raw RFC 1951 deflate is supported as a fallback for
+ * servers that provide raw deflate. The sniffing decision above is
  * the contract: a valid zlib header selects MAX_WBITS, otherwise -MAX_WBITS.
  * The C streaming, C full-buffer, and Rust chain decoder apply the same rule.
  */
@@ -2064,6 +2064,7 @@ ngx_http_markdown_streaming_decomp_feed(
      */
     *out_data = NULL;
     *out_len = 0;
+    buf = NULL;
 
     rc = ngx_http_markdown_streaming_decomp_finished_input(
         decomp, in_len, log);
@@ -2506,6 +2507,7 @@ ngx_http_markdown_streaming_decomp_finish(
 
     *out_data = NULL;
     *out_len = 0;
+    buf = NULL;
 
     /*
      * A deflate stream can still be waiting for the second format-sniffing
@@ -2523,15 +2525,24 @@ ngx_http_markdown_streaming_decomp_finish(
         return NGX_ERROR;
     }
 
-    if (decomp->finished) {
-        return NGX_OK;
-    }
-
-    if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
-        && decomp->at_gzip_member_boundary)
+    /* A completed member may have deferred the cumulative ratio check while
+     * its output was below the representative-prefix floor.  EOF makes the
+     * result final, so run the same limit transaction even when no tail bytes
+     * remain.  apply_limits() also owns cleanup on its error paths. */
+    if (decomp->finished
+        || (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+            && decomp->at_gzip_member_boundary))
     {
-        /* EOF immediately after a complete gzip member is valid. */
         decomp->finished = 1;
+        {
+            ngx_int_t  limit_rc;
+
+            limit_rc = ngx_http_markdown_streaming_decomp_apply_limits(
+                decomp, 0, &buf, log);
+            if (limit_rc != NGX_OK) {
+                return limit_rc;
+            }
+        }
         return NGX_OK;
     }
 

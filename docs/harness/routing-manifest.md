@@ -19,14 +19,12 @@ This page is the readable overlay, not the machine-owned truth.
 | `observability-metrics` | focused semantic | `make docs-check`, `make release-gates-check` |
 | `v070-gates` | focused semantic | `make release-gates-check-070`, `make test-rust`, `make check-headers` |
 | `v080-gates` | focused semantic | `make release-gates-check-080` |
-| `v090-gates` | focused semantic | `make release-gates-check-090` |
-| `v091-gates` | focused semantic | `make release-gates-check-091`, `make perf-evidence-check` |
-| `v092-gates` | focused semantic | `make release-gates-check-092` |
+| `v092-gates` | focused semantic | `make release-gates-check-092` (consolidated 0.9.x regression/compatibility and blocking 091/092 evidence) |
 | `public-surface-drift` | focused semantic | `make public-surface-drift-check` |
 | `schema-drift` | focused semantic | `make schema-drift-check` |
 | `reason-codegen` | focused semantic | `make reason-codegen-check` |
 | `observation` | report-oriented | `nightly-observation.yml`, `weekly-observation.yml` (release evidence and matrix drift, pinned SHAs) |
-| `release-governance` | focused semantic | `make release-gates-check-080`, `make release-gates-check-092`, `make release-gates-check`, `make release-gates-check-strict` |
+| `release-governance` | focused semantic | `make workflow-context-check`, `make release-gates-check-080`, `make release-gates-check-092`, `make release-gates-check`, `make release-gates-check-strict` |
 | `release-manifest` | focused semantic | `python3 packaging/scripts/test_release_manifest.py`, `make release-gates-check` |
 | `release-matrix` | focused semantic | `make release-matrix-check` |
 | `release-candidate-evidence` | focused semantic | `make release-candidate-evidence-check` |
@@ -39,7 +37,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `e2e-streaming-config` | cheap blocker | `make e2e-streaming-config-check` |
 | `sonar-encoding` | cheap blocker | `make sonar-encoding-check` |
 | `diagnostics-access-phase` | focused semantic | `make verify-diagnostics-access-phase-e2e` (requires `NGINX_BIN` and `NGINX_MODULE_SO`; emits `SKIP` when unavailable) |
-| `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e` |
+| `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e`, `make verify-dynconf-convergence-e2e` |
 | `release-quality` | umbrella | `make harness-check-full` |
 | `coverage-gate` | focused semantic | `make coverage-gate` |
 | `packaging-e2e` | umbrella | `dpkg-deb --info`, `rpm -qip`, `helm lint` |
@@ -59,7 +57,7 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | `nginx-protocol-safety` | auth/cache-control, conditional requests, status and header semantics | observability, docs-tooling | [risk-packs/nginx-protocol-safety.md](risk-packs/nginx-protocol-safety.md) |
 | `tooling-path-security` | tooling path validation, safe path I/O, subprocess argument safety, shell hygiene, const correctness | docs-tooling, release-governance | [risk-packs/tooling-path-security.md](risk-packs/tooling-path-security.md) |
 | `security-static-supply-chain` | workflow static security, secret scanning, Rust dependency policy, supply-chain visibility | ci-gating, docs-tooling | [risk-packs/security-static-supply-chain.md](risk-packs/security-static-supply-chain.md) |
-| `release-governance` | release gates, scope governance, source-build CI | docs-tooling, harness-remediation | [risk-packs/release-governance.md](risk-packs/release-governance.md) |
+| `release-governance` | release gates, scope governance, source-build CI | docs-tooling, harness-rules, harness-remediation | [risk-packs/release-governance.md](risk-packs/release-governance.md) |
 | `harness-remediation` | harness rules, steering adapters, post-analysis closeout | docs-tooling, observability | [risk-packs/harness-remediation.md](risk-packs/harness-remediation.md) |
 | `packaging-distribution` | APT/YUM repos, Homebrew tap, Helm chart, K8s Ingress | docs-tooling, release-governance | [risk-packs/packaging-distribution.md](risk-packs/packaging-distribution.md) |
 | `dynamic-config-hot-reload` | dynamic config parser, reload lifecycle, runtime apply | nginx-protocol, observability, docs-tooling | [risk-packs/dynamic-config-hot-reload.md](risk-packs/dynamic-config-hot-reload.md) |

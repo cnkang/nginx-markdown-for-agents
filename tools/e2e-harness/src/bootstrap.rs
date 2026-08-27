@@ -48,9 +48,21 @@ fn try_direct_prepare() -> Result<Option<BootstrapResult>> {
     let candidates = ["nginx", "nginx-debug"];
     for name in candidates {
         if let Some(nginx_bin) = find_on_path(name) {
+            let version_output = std::process::Command::new(&nginx_bin).arg("-V").output();
+            let module_enabled = version_output
+                .as_ref()
+                .map(|output| {
+                    let mut combined = output.stdout.clone();
+                    combined.extend_from_slice(&output.stderr);
+                    String::from_utf8_lossy(&combined).contains("ngx_http_markdown_filter_module")
+                })
+                .unwrap_or(false);
+            if !module_enabled {
+                continue;
+            }
             let module_path = nginx_bin
                 .parent()
-                .and_then(|p| p.parent())
+                .and_then(Path::parent)
                 .map(|p| p.join("modules"))
                 .unwrap_or_else(|| PathBuf::from(""));
             return Ok(Some(BootstrapResult {
@@ -88,7 +100,7 @@ fn bridge_to_native_build(base_dir: &Path) -> Result<BootstrapResult> {
     let harness_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace = harness_root
         .parent()
-        .and_then(|p| p.parent())
+        .and_then(Path::parent)
         .map(PathBuf::from)
         .ok_or_else(|| {
             anyhow::anyhow!("failed to resolve workspace root from CARGO_MANIFEST_DIR")

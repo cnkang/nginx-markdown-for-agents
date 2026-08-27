@@ -1,7 +1,7 @@
 # C Test Boundary
 
-**Status:** Phase 1 deliverable — authoritative boundary definition  
-**Spec:** 0.6.3 Rust-first test migration requirements/design/tasks package  
+**Status:** Phase 1 deliverable — authoritative boundary definition
+**Spec:** 0.6.3 Rust-first test migration requirements/design/tasks package
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 5.5
 
 ---
@@ -46,7 +46,7 @@ available in C.
 | `unit/fast_path_test.c` | Fast-path eligibility short-circuit within the NGINX filter entry point |
 | `unit/head_request_test.c` | HEAD request handling in the filter, body suppression semantics |
 | `unit/passthrough_test.c` | Pass-through (non-conversion) path, `NGX_DECLINED` semantics in the filter chain |
-| `unit/decision_log_test.c` | Decision log formatting and reason code emission via `ngx_log_error` |
+| `unit/reason_code_ffi_test.c` | Generated reason-code lookup and canonical FFI boundary behavior |
 | `unit/protocol_correctness_test.c` | HTTP protocol correctness in filter responses (status, headers, body ordering) |
 | `unit/reason_code_test.c` | Reason code string definitions and accessor functions used by `ngx_http_markdown_log_decision()` |
 | `integration/nginx_runtime_integration_test.c` | Module load, config apply, and request lifecycle against a real NGINX stub runtime |
@@ -71,7 +71,7 @@ memory, so its tests must run at the C level.
 | `unit/config_handlers_impl_test.c` | Configuration directive handler implementations (`ngx_conf_set_*` callbacks) |
 | `unit/config_merge_test.c` | Configuration merge across `location`/`server`/`http` blocks |
 | `unit/config_parsing_test.c` | Directive value parsing (sizes, flags, strings, enums) |
-| `unit/dynconf_impl_test.c` | Dynamic configuration snapshot construction, apply, and reload logic |
+| `unit/dynconf_production_test.c` | Rust-backed dynamic configuration parsing, snapshot construction, and reload logic |
 | `unit/effective_conf_test.c` | Effective configuration view construction and snapshot isolation |
 
 ---
@@ -91,8 +91,8 @@ structures in C.
 |---|---|
 | `unit/body_filter_test.c` | NGINX body filter chain and buffer handling, `ngx_chain_t` accumulation |
 | `unit/headers_test.c` | Response header manipulation via `ngx_http_headers_out_t` |
-| `unit/conditional_requests_test.c` | Conditional request (ETag/IMS) logic in the C filter, `ngx_http_headers_in_t` field access |
-| `unit/auth_cache_control_test.c` | Cache-Control header handling in the auth path, header table traversal |
+| `unit/conditional_production_test.c` | Conditional request (ETag/IMS) behavior through the production C filter, `ngx_http_headers_in_t` field access |
+| `unit/auth_production_test.c` | Production authentication and Cache-Control header handling, including header table traversal |
 | `unit/auth_cookie_pattern_test.c` | Auth cookie detection pattern matching against `ngx_http_headers_in_t` |
 | `unit/decompression_detect_test.c` | Content-Encoding detection logic from response headers |
 | `unit/decompression_logging_test.c` | Decompression event logging through NGINX log infrastructure |
@@ -100,10 +100,9 @@ structures in C.
 | `unit/error_impl_test.c` | Error handling implementation paths in the filter |
 | `unit/failure_strategies_test.c` | Fail-open / fail-closed strategy dispatch in the filter |
 | `unit/input_validation_test.c` | Input validation guards at the filter entry point |
-| `unit/threshold_router_test.c` | Threshold-based path router (full-buffer vs incremental) |
 | `unit/unsupported_format_fallback_test.c` | Unsupported format fallback behavior in the filter |
 | `unit/conversion_impl_base_url_test.c` | Base URL construction in the conversion implementation |
-| `unit/accept_parser_test.c` | Accept-header parsing logic in C (NGINX module glue) |
+| `unit/accept_negotiation_test.c` | Accept-header parsing logic in C (NGINX module glue) |
 
 ---
 
@@ -164,12 +163,7 @@ APIs.
 | `unit/metrics_collection_test.c` | Metrics counter increment paths via `NGX_HTTP_MARKDOWN_METRIC_INC` |
 | `unit/metrics_decompression_test.c` | Decompression metrics accounting in the metrics struct |
 | `unit/metrics_endpoint_test.c` | Metrics endpoint handler, response rendering, content-length correctness |
-| `unit/metrics_format_select_test.c` | Frozen Prometheus-only metrics format selection |
-| `unit/metrics_output_test.c` | Bounded internal renderer output and Prometheus response rendering |
-| `unit/metrics_snapshot_new_fields_test.c` | Metrics snapshot field coverage for new fields — guards against snapshot drift |
-| `unit/prometheus_format_test.c` | Prometheus text format rendering in C |
-| `unit/prometheus_per_path_test.c` | Per-path Prometheus metric labeling |
-| `unit/prometheus_renderer_test.c` | Prometheus renderer correctness |
+| `unit/metrics_v1_renderer_test.c` | Frozen Prometheus v1 metric-family rendering and escaping |
 | `unit/skip_counter_test.c` | Skip counter increment logic |
 | `unit/streaming_prometheus_metric_family_test.c` | Streaming-specific Prometheus metric families |
 
@@ -180,9 +174,10 @@ APIs.
 **Why C:** Some behaviors are sensitive to the C compiler, optimization level,
 or sanitizer instrumentation. AddressSanitizer (ASan) and UndefinedBehaviorSanitizer
 (UBSan) operate at the C/C++ level and cannot apply to Rust code in the
-same way. The `make test-nginx-unit-sanitize-smoke` target compiles the C
-module with sanitizers enabled and runs the unit suite under them. Similarly,
-the clang smoke target (`make test-nginx-unit-clang-smoke`) validates that the
+same way. The `make test-nginx-unit-sanitize-smoke` target compiles the C/C++
+target with sanitizers enabled and runs the C unit suite under them. It does
+not instrument the Rust crate or `test-rust`. Similarly, the clang smoke
+target (`make test-nginx-unit-clang-smoke`) validates that the
 module compiles cleanly under a different compiler toolchain. These are
 inherently C-level concerns.
 

@@ -44,8 +44,8 @@
 //!
 //! **Panic Safety:**
 //! - FFI exports that invoke fallible or third-party logic guard against
-//!   panics crossing the C boundary. `markdown_convert` and the streaming /
-//!   incremental converters convert caught panics into error codes and
+//!   panics crossing the C boundary. `markdown_convert` and the streaming
+//!   converter convert caught panics into error codes and
 //!   messages; `markdown_decompress_bounded` (which runs attacker-controlled
 //!   bytes through flate2/brotli) and conditional-decision exports wrap their
 //!   fallible core in `catch_unwind` and fall back to a safe result on panic.
@@ -77,9 +77,6 @@ mod options;
 #[cfg(feature = "streaming")]
 pub(crate) use options::clamp_chars_per_token;
 
-#[cfg(feature = "incremental")]
-mod incremental;
-
 #[cfg(feature = "streaming")]
 mod streaming;
 
@@ -90,13 +87,15 @@ pub use abi::{
     ENCODING_CHAIN_UNKNOWN_TOKEN, ENCODING_CHAIN_VALID, ERROR_DECOMPRESSION_BUDGET_EXCEEDED,
     ERROR_ENCODING, ERROR_INTERNAL, ERROR_INVALID_INPUT, ERROR_MEMORY_LIMIT, ERROR_PARSE,
     ERROR_PARSE_BUDGET_EXCEEDED, ERROR_PARSE_TIMEOUT, ERROR_SUCCESS, ERROR_TIMEOUT,
-    FFIAcceptResult, FFIBaseUrlDecision, FFIBaseUrlInput, FFIChainDecodeResult, FFIDecompResult,
-    FFIEncodingChainResult, FFIErrorClass, MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH,
-    MARKDOWN_LAYOUT_FINGERPRINT, MARKDOWN_SYMBOL_SET_HASH, MarkdownConverterHandle,
-    MarkdownOptions, MarkdownResult, MarkdownTrustedProxies, NEGOTIATE_REASON_CONVERT,
-    NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_INTERNAL_ERROR, NEGOTIATE_REASON_LOWER_Q,
-    NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT, NEGOTIATE_WILDCARD_ALLOW,
-    NEGOTIATE_WILDCARD_STRICT,
+    FFIAcceptResult, FFIBaseUrlDecision, FFIBaseUrlInput, FFIChainDecodeResult,
+    FFIConditionalDecision, FFIConditionalInput, FFIDecompResult, FFIEligibilityInput,
+    FFIEncodingChainResult, FFIErrorClass, FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle,
+    FFIStr, MARKDOWN_ABI_VERSION, MARKDOWN_FORMAT_BROTLI, MARKDOWN_FORMAT_DEFLATE,
+    MARKDOWN_FORMAT_GZIP, MARKDOWN_HEADER_HASH, MARKDOWN_LAYOUT_FINGERPRINT,
+    MARKDOWN_SYMBOL_SET_HASH, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
+    MarkdownTrustedProxies, NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT,
+    NEGOTIATE_REASON_INTERNAL_ERROR, NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED,
+    NEGOTIATE_REASON_NO_ACCEPT, NEGOTIATE_WILDCARD_ALLOW, NEGOTIATE_WILDCARD_STRICT,
 };
 
 #[cfg(feature = "streaming")]
@@ -117,15 +116,9 @@ pub use exports::{
     markdown_trusted_proxies_push,
 };
 
-#[cfg(feature = "incremental")]
-pub use incremental::{
-    IncrementalConverterHandle, markdown_incremental_feed, markdown_incremental_finalize,
-    markdown_incremental_free, markdown_incremental_new_with_code,
-};
-
 #[cfg(feature = "streaming")]
 pub use streaming::{
-    StreamingConverterHandle, StreamingOptions, markdown_streaming_abort, markdown_streaming_feed,
+    StreamingConverterHandle, markdown_streaming_abort, markdown_streaming_feed,
     markdown_streaming_finalize, markdown_streaming_new_with_code, markdown_streaming_output_free,
     markdown_streaming_safe_finish,
 };

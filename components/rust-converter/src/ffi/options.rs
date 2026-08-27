@@ -75,8 +75,8 @@ pub(crate) struct DecodedOptions<'a> {
     #[allow(dead_code)]
     pub(crate) prune_protection_selectors: Option<&'a str>,
     /// Unified memory budget (bytes). The full-buffer path applies it to
-    /// generated Markdown output, and streaming/incremental paths apply it
-    /// to their working-set budgets.
+    /// generated Markdown output, and the true streaming path combines it
+    /// with `streaming_budget` as the lower non-zero working-set cap.
     pub(crate) memory_budget: u64,
     /// Raw chars-per-token from FFI options (before normalization).
     /// Retained for diagnostics/logging; all estimation paths use
@@ -84,7 +84,7 @@ pub(crate) struct DecodedOptions<'a> {
     #[allow(dead_code)]
     pub(crate) chars_per_token: f32,
     /// Normalized chars-per-token clamped to a sane range [1.0, 100.0].
-    /// All token estimation paths (full-buffer, streaming, incremental)
+    /// All token estimation paths (full-buffer and streaming)
     /// must use this value to avoid divergent behavior when the raw
     /// FFI `chars_per_token_fixed` decodes to a non-positive or
     /// pathological value.
@@ -253,8 +253,7 @@ pub(crate) fn decode_options(
         "prune_protection_selectors",
     )?;
 
-    /* Token estimation uses the fixed deterministic built-in ratio.
-     * The obsolete FFI field was removed in the current ABI freeze. */
+    /* Token estimation uses the fixed deterministic built-in ratio. */
     let raw_cpt = DEFAULT_CHARS_PER_TOKEN;
 
     /* Resolve parse_timeout: prefer parse_timeout_ms, fall back to timeout_ms */
@@ -335,8 +334,7 @@ mod tests {
 
     #[test]
     fn test_chars_per_token_default() {
-        /* The obsolete FFI field was removed in 0.9.2; token estimation
-         * always uses the fixed 4.0 ratio. */
+        /* Token estimation uses the fixed 4.0 ratio. */
         let options = test_options();
         let decoded = decode_options(&options).unwrap();
         assert_f32_eq(decoded.chars_per_token, 4.0);

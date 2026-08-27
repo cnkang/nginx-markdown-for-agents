@@ -109,6 +109,10 @@ Required:
 - New Python tooling scripts that accept file paths as CLI arguments must
   import and use `path_validation` helpers.  Scripts that intentionally accept
   arbitrary paths must document "trusted input only" in their `--help` text.
+- Startup of the path-validation module is fail-closed: an `ImportError` for
+  `path_validation` is fatal and must terminate the process before the process
+  opens any path. There is no startup fallback that permits reads without
+  `validate_read_path()`.
 - Subprocess calls with executable paths from CLI must use list form (not
   string interpolation with `shell=True`), resolve symlinks, and require the
   canonical executable to match a fixed allowlist. Checking only that a path

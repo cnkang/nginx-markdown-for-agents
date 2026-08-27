@@ -72,7 +72,7 @@ get_dependency_version() {
     [[ -f "$cargo_file" ]] || { echo ""; return; }
     grep -E "^${dep_name}[[:space:]]*=" "$cargo_file" \
         | sed -n 's/.*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-        | head -1
+        | head -1 || true
 }
 
 main() {
@@ -146,7 +146,7 @@ main() {
     local formula_file="${PROJECT_ROOT}/packaging/homebrew/nginx-markdown-module.rb"
     if [[ -f "$formula_file" ]]; then
         local formula_ver
-        formula_ver=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' "$formula_file" | head -1 | sed 's/^v//')
+        formula_ver=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' "$formula_file" | head -1 | sed 's/^v//') || true
         if [[ -n "$formula_ver" ]]; then
             log_info "Homebrew formula: $formula_ver (intentionally previous; updated by publish workflow)"
         fi

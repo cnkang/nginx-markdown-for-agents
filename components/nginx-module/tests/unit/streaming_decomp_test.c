@@ -863,8 +863,8 @@ test_ratio_limit_applies_to_small_stream(void)
                           NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
                           &compressed, &compressed_len);
     TEST_ASSERT(rc == NGX_OK, "ratio fixture compression should succeed");
-    TEST_ASSERT(compressed_len < 256,
-        "ratio fixture should remain below the historical threshold");
+    TEST_ASSERT(compressed_len > 0,
+        "ratio fixture compression should produce encoded bytes");
 
     origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
     decomp = ngx_http_markdown_streaming_decomp_create_with_origin(
@@ -890,6 +890,68 @@ test_ratio_limit_applies_to_small_stream(void)
     free(decomp);
     free(compressed);
     TEST_PASS("small streaming input enforces ratio limit");
+}
+
+
+/* A complete small gzip member can defer ratio validation during feed().
+ * EOF must make that deferred decision before the caller accepts the body. */
+static void
+test_ratio_limit_applies_at_completed_gzip_finish(void)
+{
+    u_char                              text[1024];
+    u_char                             *compressed;
+    size_t                              compressed_len;
+    test_pool_t                         tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    ngx_http_markdown_decomp_failure_origin_e origin;
+    u_char                             *out;
+    size_t                              out_len;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("completed small gzip members enforce ratio at EOF");
+
+    memset(text, 'A', sizeof(text));
+    compressed = NULL;
+    test_pool_reset(&tp);
+    origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
+    rc = compress_payload(text, sizeof(text),
+                          NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+                          &compressed, &compressed_len);
+    TEST_ASSERT(rc == NGX_OK, "EOF ratio fixture compression should succeed");
+    TEST_ASSERT(compressed_len < sizeof(text),
+        "EOF ratio fixture should expand beyond its wire size");
+
+    decomp = ngx_http_markdown_streaming_decomp_create_with_origin(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        sizeof(text) * 10, 1, NULL, &test_log, &origin);
+    TEST_ASSERT(decomp != NULL, "EOF ratio decompressor should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "small completed member should defer ratio until EOF");
+    TEST_ASSERT(out_len == sizeof(text),
+        "deferred ratio fixture should emit the complete member");
+    TEST_ASSERT(decomp->at_gzip_member_boundary == 1
+                && decomp->finished == 0,
+        "complete gzip member should await HTTP EOF at its member boundary");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_finish(
+        decomp, &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED,
+        "EOF must enforce the cumulative ratio for a small member");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "EOF ratio rejection must not expose tail output");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(compressed);
+    TEST_PASS("completed small gzip member enforces ratio at EOF");
 }
 
 
@@ -1007,9 +1069,9 @@ test_truncated_brotli_finish_errors(void)
  * error classifier correctly categorizes BrotliDecoderErrorCode values
  * into FORMAT, ALLOCATION, and INTERNAL classes.
  *
- * Uses integer casts exclusively (not named enum constants) to match
- * the production code's range-based approach and ensure compatibility
- * with Brotli 1.0.9 (Ubuntu 22.04).
+ * Uses integer casts exclusively (not named enum constants) to pin the
+ * documented Brotli 1.0.9 (Ubuntu 22.04) error-code mapping, including
+ * reserved gaps that must remain internal.
  */
 static void
 test_brotli_error_classification(void)
@@ -1024,11 +1086,11 @@ test_brotli_error_classification(void)
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
         "code -1 should classify as FORMAT");
 
-    /* FORMAT boundary: -17 (last FORMAT code) */
+    /* FORMAT boundary: -16 (last documented FORMAT code) */
     cls = ngx_http_markdown_brotli_error_classify(
-        (BrotliDecoderErrorCode)(-17));
+        (BrotliDecoderErrorCode)(-16));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
-        "code -17 should classify as FORMAT");
+        "code -16 should classify as FORMAT");
 
     /* FORMAT mid-range: -10 */
     cls = ngx_http_markdown_brotli_error_classify(
@@ -1054,7 +1116,13 @@ test_brotli_error_classification(void)
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
         "code -25 should classify as ALLOCATION");
 
-    /* INTERNAL: -18 (COMPOUND_DICTIONARY) */
+    /* INTERNAL: -17 (reserved) */
+    cls = ngx_http_markdown_brotli_error_classify(
+        (BrotliDecoderErrorCode)(-17));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "code -17 should classify as INTERNAL");
+
+    /* INTERNAL: -18 (reserved) */
     cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-18));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
@@ -5870,6 +5938,7 @@ main(void)
 #endif
     test_tiny_chunks_do_not_amplify_request_pool();
     test_ratio_limit_applies_to_small_stream();
+    test_ratio_limit_applies_at_completed_gzip_finish();
     test_ratio_limit_defers_small_prefix();
     test_budget_and_invalid_type_branches();
     test_truncated_finish_errors();

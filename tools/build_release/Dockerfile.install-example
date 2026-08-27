@@ -13,6 +13,8 @@ ARG INSTALL_SHA256
 RUN apk add --no-cache \
     bash \
     curl \
+    gawk \
+    gnupg \
     gzip \
     python3 \
     tar \

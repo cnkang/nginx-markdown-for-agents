@@ -418,7 +418,7 @@ test_streaming_config_field_names(void)
         "policy_source field present");
     TEST_ASSERT(json_contains(buf, "\"on_error\":"),
         "on_error field present");
-    /* threshold, flush_min, precommit_buffer, threshold_explicit removed in 0.9.2 */
+    /* Internal threshold fields are not exposed in the diagnostics response. */
     TEST_ASSERT(!json_contains(buf, "\"threshold\":"),
         "threshold field absent (internalized)");
     TEST_ASSERT(!json_contains(buf, "\"flush_min\":"),

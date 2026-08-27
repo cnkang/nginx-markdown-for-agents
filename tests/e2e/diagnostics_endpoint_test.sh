@@ -39,6 +39,15 @@ NGINX_URL="${NGINX_URL:-http://localhost:8080}"
 DIAGNOSTICS_PATH="/nginx-markdown/diagnostics"
 PASS_COUNT=0
 FAIL_COUNT=0
+HEAD_BODY_FILE=""
+
+cleanup() {
+    if [[ -n "$HEAD_BODY_FILE" ]]; then
+        rm -f "$HEAD_BODY_FILE"
+    fi
+    return 0
+}
+trap cleanup EXIT
 
 pass() {
     local msg="$1"
@@ -223,16 +232,22 @@ case "$HEAD_CODE" in
         ;;
 esac
 
-# HEAD response should have no body; verify by checking content-length
-# or that curl -I output does not contain JSON keys
-HEAD_BODY=$(curl -sf -D - -o /dev/null -I \
-    "${NGINX_URL}${DIAGNOSTICS_PATH}" 2>/dev/null) || HEAD_BODY=""
+HEAD_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/diagnostics-head.XXXXXX")"
+HEAD_BODY_SIZE="-1"
+HEAD_REQUEST_RC=0
+curl -sf -o "$HEAD_BODY_FILE" -X HEAD \
+    "${NGINX_URL}${DIAGNOSTICS_PATH}" >/dev/null 2>&1 \
+    || HEAD_REQUEST_RC=$?
+if [[ "$HEAD_REQUEST_RC" -eq 0 ]]; then
+    HEAD_BODY_SIZE="$(wc -c < "$HEAD_BODY_FILE" | tr -d '[:space:]')"
+fi
 
-# curl -I only returns headers; verify no JSON body leaked
-if echo "$HEAD_BODY" | grep -q '"config_snapshot"'; then
-    fail "HEAD response contains body content (should be headers only)"
+if [[ "$HEAD_BODY_SIZE" -gt 0 ]]; then
+    fail "HEAD response contains ${HEAD_BODY_SIZE} body bytes (should be empty)"
+elif [[ "$HEAD_BODY_SIZE" -lt 0 ]]; then
+    fail "HEAD response body size could not be measured"
 else
-    pass "HEAD response has no body content"
+    pass "HEAD response has no body content (${HEAD_BODY_SIZE} bytes downloaded)"
 fi
 
 # --- Summary ---

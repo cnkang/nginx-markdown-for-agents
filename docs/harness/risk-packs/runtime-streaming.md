@@ -8,10 +8,8 @@ chains, fail-open flow, or deferred output ordering.
 - primary surface identifiers: `streaming`, `pending-chain`, `fail-open`
 - touched files under `components/nginx-module/**`
 - touched files under
-  `components/rust-converter/src/incremental.rs`
-- touched files under
   `components/rust-converter/src/charset.rs`
-- touched files under `tools/e2e/**`
+- touched files under `tools/e2e-harness/**`
 - keywords like `NGX_AGAIN`, `last_buf`, `pending chain`, `streaming`
 
 ## Common Supporting Packs
@@ -41,6 +39,7 @@ make harness-check
 make test-rust-streaming
 make test-nginx-unit-streaming
 make verify-chunked-native-e2e-smoke
+make test-e2e-rust
 ```
 
 ## Canonical References

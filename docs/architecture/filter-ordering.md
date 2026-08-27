@@ -105,8 +105,11 @@ Upstream response (HTML, possibly Content-Encoding: gzip/br)
 Client response (Markdown, possibly gzip/br compressed)
 ```
 
-When operators enable an external decompressor and the effective chain places
-it before Markdown, the body path is instead:
+An external decompressor is not a generic preprocessor contract. Only enable
+one when a targeted test of the effective filter chain confirms that it runs
+before Markdown. Otherwise leave the external decompressor disabled and use
+the module's built-in decoder. When the targeted test confirms that order, the
+body path is instead:
 
 ```text
 Upstream response (gzip HTML)
@@ -128,7 +131,10 @@ Client response (Markdown)
 
 This external path is separate from the normal chain above. Operators must
 verify the effective order for their NGINX build and set
-`markdown_auto_decompress off` to prevent double decompression.
+`markdown_auto_decompress off` to prevent double decompression. An external
+`gunzip` that runs after Markdown is not a supported replacement for the
+built-in path: it cannot supply plain HTML to the converter and may compress
+or decompress the wrong representation.
 
 ---
 
@@ -156,25 +162,27 @@ target NGINX build. Otherwise, gzip can see the original HTML.
 | Upstream sends | `Content-Encoding: gzip` (HTML bytes compressed) |
 | markdown auto-decompresses | gzip → HTML (default built-in path) |
 | markdown converts | HTML → Markdown |
-| Client receives | `Content-Type: text/markdown; charset=utf-8`, no `Content-Encoding` |
+| Client receives | With `Accept-Encoding: identity`, `Content-Type: text/markdown; charset=utf-8`, no `Content-Encoding`; clients that advertise a supported encoding may receive that encoding after conversion |
 
 **Two decompression paths:**
 
-1. **gunzip filter** (`gunzip on` in nginx.conf): Use this only when the
-   effective filter chain places gunzip before markdown.  In that arrangement
-   gunzip decompresses upstream gzip before markdown sees the body.  Markdown
-   receives plain HTML and converts it.  Set
-   `markdown_auto_decompress off` to avoid double-decompression.
+1. **gunzip filter** (`gunzip on` in nginx.conf): Use this only after a
+   targeted test proves that the effective filter chain places gunzip before
+   markdown. In that arrangement gunzip decompresses upstream gzip before
+   markdown sees the body. Markdown receives plain HTML and converts it. Set
+   `markdown_auto_decompress off` to avoid double-decompression. If a targeted
+   test cannot prove the order, do not enable this path.
 
 2. **markdown built-in auto-decompress** (`markdown_auto_decompress on`,
    default): Markdown's own body filter decompresses gzip/deflate/Brotli
    from upstream.  No `gunzip` directive needed.  This is the preferred
    path for Brotli and for zero-config deployments.
 
-**Conflict prevention:** When `gunzip on` is active, set
-`markdown_auto_decompress off` to avoid double-decompression.  The module
-detects already-decompressed content via `Content-Encoding` header absence
-after gunzip has stripped it.
+**Conflict prevention:** When `gunzip on` is active on a verified
+pre-Markdown path, set `markdown_auto_decompress off` to avoid
+double-decompression. The absence of `Content-Encoding` is only a signal that
+the external filter stripped the upstream header. It does not prove filter
+ordering.
 
 ### 2.3 markdown + Brotli (client requests Brotli output)
 
@@ -240,7 +248,9 @@ varies on it (see
 
 ## 4. E2E Test Coverage
 
-E2E test script: `tests/e2e/filter_ordering_test.sh`
+E2E test script: `tests/e2e/filter_ordering_test.sh`. This scenario remains in
+the retained shell E2E surface because it is not one of the scenarios migrated
+to `tools/e2e-harness/`.
 
 | Test | Interaction | Verifies |
 |------|-------------|----------|

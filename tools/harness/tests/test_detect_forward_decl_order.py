@@ -22,7 +22,8 @@ def _load_module():
         "detect_forward_decl_order",
         REPO_ROOT / "tools/harness/detect_forward_decl_order.py",
     )
-    assert spec and spec.loader
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["detect_forward_decl_order"] = mod
     spec.loader.exec_module(mod)

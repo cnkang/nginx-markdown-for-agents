@@ -38,13 +38,16 @@ jobs:
 
       - name: Select representative matrix entries
         id: resolve
+        env:
+          REQUESTED_VERSION: ${{ github.event.inputs.version || '' }}
+          RELEASES_API_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
           import json
           import os
           import re
           import sys
-          from urllib.request import urlopen
+          from urllib.request import Request, urlopen
 
           with open("tools/release-matrix.json", "r") as f:
               data = json.load(f)
@@ -71,7 +74,84 @@ jobs:
               raise SystemExit(
                   "No supported dynamic-module entries found in release-matrix.json"
               )
-          full_nginx_versions = {e["nginx"] for e in full_entries}
+
+          requested_version = os.environ.get("REQUESTED_VERSION", "").strip()
+          if requested_version and not re.fullmatch(
+              r"v[0-9]+\.[0-9]+\.[0-9]+", requested_version
+          ):
+              raise SystemExit(
+                  "The version input must be a published tag such as v0.9.1"
+              )
+
+          release_url = (
+              "https://api.github.com/repos/cnkang/nginx-markdown-for-agents/"
+              f"releases/tags/{requested_version}"
+              if requested_version
+              else "https://api.github.com/repos/cnkang/nginx-markdown-for-agents/releases/latest"
+          )
+          try:
+              request = Request(
+                  release_url,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      # Unauthenticated API calls drain the shared IP quota
+                      # and rate-limit on hosted runners; identify them with
+                      # the ephemeral workflow token instead.
+                      "Authorization": f"Bearer {os.environ['RELEASES_API_TOKEN']}",
+                  },
+              )
+              with urlopen(request, timeout=30) as response:
+                  release_data = json.load(response)
+          except Exception as exc:
+              raise SystemExit(
+                  f"Unable to resolve published release assets from {release_url}: {exc}"
+              ) from exc
+
+          release_asset_records = [
+              asset
+              for asset in release_data.get("assets", [])
+              if isinstance(asset, dict)
+          ]
+          release_assets = {
+              asset.get("name", "") for asset in release_asset_records
+          }
+          if not release_assets:
+              raise SystemExit(
+                  f"Published release at {release_url} has no downloadable assets"
+              )
+          has_signed_manifest = {
+              "SHA256SUMS",
+              "SHA256SUMS.asc",
+          }.issubset(release_assets)
+
+          manifest_url = next(
+              (
+                  asset.get("browser_download_url", "")
+                  for asset in release_asset_records
+                  if asset.get("name") == "SHA256SUMS"
+              ),
+              "",
+          )
+          signed_asset_names = set()
+          if manifest_url:
+              try:
+                  request = Request(
+                      manifest_url,
+                      headers={
+                          "Accept": "application/octet-stream",
+                          "Authorization": f"Bearer {os.environ['RELEASES_API_TOKEN']}",
+                      },
+                  )
+                  with urlopen(request, timeout=30) as response:
+                      manifest_text = response.read().decode("utf-8")
+              except Exception as exc:
+                  raise SystemExit(
+                      f"Unable to resolve signed release manifest from {manifest_url}: {exc}"
+                  ) from exc
+              for line in manifest_text.splitlines():
+                  digest, separator, filename = line.partition("  ")
+                  if separator and re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+                      signed_asset_names.add(filename.lstrip("*"))
 
           def version_tuple(version: str) -> tuple[int, ...]:
               return tuple(int(part) for part in version.split("."))
@@ -119,7 +199,6 @@ jobs:
                   "os_type": os_type,
                   "arch": arch,
                   "variant": "lower-bound",
-                  "expected_install_success": True,
               })
 
               if stable_versions:
@@ -128,26 +207,17 @@ jobs:
                       "os_type": os_type,
                       "arch": arch,
                       "variant": "stable-upper",
-                      "expected_install_success": True,
                   })
               upstream_upper = (
                   sorted(set(upstream_versions), key=version_tuple)[-1]
                   if upstream_versions
                   else sorted_v[-1]
               )
-              upstream_in_matrix = upstream_upper in full_nginx_versions
               selected.append({
                   "nginx": upstream_upper,
                   "os_type": os_type,
                   "arch": arch,
                   "variant": "upstream-upper",
-                  # When the latest upstream release is already covered
-                  # by the release-matrix.json full tier, the matching
-                  # binary exists and install should succeed.  Only
-                  # expect failure when upstream has moved ahead of the
-                  # published binary-module matrix (version_mismatch
-                  # error path).
-                  "expected_install_success": upstream_in_matrix,
               })
 
           # Spec-required distro environments: Ubuntu 22.04, Ubuntu 24.04,
@@ -254,6 +324,18 @@ jobs:
                       "stable-upper": "latest stable",
                       "upstream-upper": "latest upstream",
                   }[item["variant"]]
+                  asset_name = (
+                      f"ngx_http_markdown_filter_module-{nginx}-{os_type}-{arch}.tar.gz"
+                  )
+                  if asset_name not in release_assets:
+                      expected_error_category = "version_mismatch"
+                  elif (
+                      not has_signed_manifest
+                      or asset_name not in signed_asset_names
+                  ):
+                      expected_error_category = "checksum"
+                  else:
+                      expected_error_category = ""
                   targets.append({
                       "nginx": nginx,
                       "os_type": os_type,
@@ -266,7 +348,8 @@ jobs:
                       "environment_slug": env["env_slug"],
                       "artifact_name": f"install-verify-{env['env_slug']}-{item['variant']}-{nginx}",
                       "variant": item["variant"],
-                      "expected_install_success": item["expected_install_success"],
+                      "expected_error_category": expected_error_category,
+                      "expected_install_success": expected_error_category == "",
                   })
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
@@ -300,20 +383,20 @@ jobs:
         if: matrix.target.pkg_manager == 'apk'
         run: |
           apk update
-          apk add --no-cache bash curl python3 tar coreutils git ca-certificates
+          apk add --no-cache bash curl gawk gnupg python3 tar coreutils git ca-certificates
 
       - name: Install prerequisites (apt — container)
         if: matrix.target.pkg_manager == 'apt' && matrix.target.container != ''
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
-          apt-get install -y -qq curl gnupg2 python3 ca-certificates > /dev/null 2>&1
+          apt-get install -y -qq curl gawk gnupg2 python3 ca-certificates > /dev/null 2>&1
 
       - name: Install prerequisites (apt — bare runner)
         if: matrix.target.pkg_manager == 'apt' && matrix.target.container == ''
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq curl gnupg2 ca-certificates > /dev/null 2>&1
+          sudo apt-get install -y -qq curl gawk gnupg2 ca-certificates > /dev/null 2>&1
 
       # Pin Python 3.14.6 on bare runners (no container).
       # Container jobs (Debian 12, official nginx, Alpine) use their
@@ -473,15 +556,16 @@ jobs:
           set +e
 
           ${SUDO} env SKIP_ROOT_CHECK=1 VERSION="${VERSION}" bash tools/install.sh --json \
-            2> "${RESULTS_DIR}/install-stderr.log" \
-            | tee "${RESULTS_DIR}/install-stdout.json"
-          INSTALL_EXIT=${PIPESTATUS[0]}
+            > "${RESULTS_DIR}/install-stdout.json" \
+            2> "${RESULTS_DIR}/install-stderr.log"
+          INSTALL_EXIT=$?
 
           set -e
 
           echo "install_exit=${INSTALL_EXIT}" >> "$GITHUB_OUTPUT"
 
           echo "--- Install script exit code: ${INSTALL_EXIT} ---"
+          cat "${RESULTS_DIR}/install-stdout.json"
           echo "--- stderr output ---"
           cat "${RESULTS_DIR}/install-stderr.log"
 
@@ -493,6 +577,7 @@ jobs:
         id: validate_outcome
         env:
           EXPECTED_INSTALL_SUCCESS: ${{ matrix.target.expected_install_success && 'true' || 'false' }}
+          EXPECTED_ERROR_CATEGORY: ${{ matrix.target.expected_error_category }}
           TARGET_NGINX: ${{ matrix.target.nginx }}
           TARGET_VARIANT: ${{ matrix.target.variant }}
           INSTALL_EXIT: ${{ steps.install.outputs.install_exit }}
@@ -507,9 +592,11 @@ jobs:
             ERROR_CATEGORY=$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get("error") or {}).get("category",""))' "${JSON_PATH}" 2>/dev/null || true)
           fi
 
-          echo "expected_install_success=${EXPECTED_INSTALL_SUCCESS}" >> "$GITHUB_OUTPUT"
-          echo "reported_success=${SUCCESS}" >> "$GITHUB_OUTPUT"
-          echo "error_category=${ERROR_CATEGORY}" >> "$GITHUB_OUTPUT"
+          {
+            echo "expected_install_success=${EXPECTED_INSTALL_SUCCESS}"
+            echo "reported_success=${SUCCESS}"
+            echo "error_category=${ERROR_CATEGORY}"
+          } >> "$GITHUB_OUTPUT"
 
           if [ "${EXPECTED_INSTALL_SUCCESS}" = "true" ]; then
             if [ "${INSTALL_EXIT}" != "0" ] || { [ "${SUCCESS}" != "True" ] && [ "${SUCCESS}" != "true" ]; }; then
@@ -522,11 +609,11 @@ jobs:
               echo "::error::Expected install failure for ${TARGET_VARIANT} (${TARGET_NGINX}), but install succeeded."
               exit 1
             fi
-            if [ "${ERROR_CATEGORY}" != "version_mismatch" ]; then
-              echo "::error::Expected version_mismatch for ${TARGET_VARIANT} (${TARGET_NGINX}), got '${ERROR_CATEGORY:-<empty>}' instead."
+            if [ "${ERROR_CATEGORY}" != "${EXPECTED_ERROR_CATEGORY}" ]; then
+              echo "::error::Expected ${EXPECTED_ERROR_CATEGORY} for ${TARGET_VARIANT} (${TARGET_NGINX}), got '${ERROR_CATEGORY:-<empty>}' instead."
               exit 1
             fi
-            echo "Install failed with version_mismatch as expected."
+            echo "Install failed with ${EXPECTED_ERROR_CATEGORY} as expected."
           fi
 
       - name: Verify installed asset matches target
@@ -606,7 +693,7 @@ jobs:
           if [ -n "${MODULES_PATH}" ] && [ -f "${MODULES_PATH}/${MODULE_SO}" ]; then
             echo "module_found=true" >> "$GITHUB_OUTPUT"
             echo "Module found: ${MODULES_PATH}/${MODULE_SO}"
-            ls -la "${MODULES_PATH}/${MODULE_SO}" | tee -a "${RESULTS_DIR}/module-check.log"
+            stat "${MODULES_PATH}/${MODULE_SO}" | tee -a "${RESULTS_DIR}/module-check.log"
           else
             echo "module_found=false" >> "$GITHUB_OUTPUT"
             echo "::error::Module .so not found in ${MODULES_PATH:-<unknown>}"

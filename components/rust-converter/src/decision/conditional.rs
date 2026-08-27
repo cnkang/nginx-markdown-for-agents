@@ -1,4 +1,4 @@
-//! Conditional-request decision (RFC 7232 / 7234, spec 49, 0.9.0).
+//! Conditional-request decision (RFC 7232 / 7234, 0.9.0).
 //!
 //! This module is the Rust **single source of truth** for the conditional
 //! request decision. It wraps the lower-level RFC 7232 primitive in
@@ -29,11 +29,11 @@
 //! exists on the full-buffer path under `cache_validation = full`. On the
 //! streaming path no ETag is generated (headers are committed before the
 //! transformed body is known), so the caller passes `None` and
-//! `If-None-Match` can never match — see spec 49 Requirement 1.5.
+//! `If-None-Match` can never match — see the cache-validation requirements.
 //!
-//! Validates: spec 49 Requirements 1.1, 1.8, 1.9, 2.1, 3.x.
+//! Validates: the conditional-request requirements.
 
-/// Effective `markdown_cache_validation` mode (Config V2, spec 45/49).
+/// Effective `markdown_cache_validation` mode (Config V2).
 ///
 /// Discriminants are the FFI source of truth and are frozen for the 1.0
 /// stability contract: add new modes, never renumber.
@@ -106,9 +106,9 @@ impl ConditionalOutcome {
     }
 }
 
-/// Reason code for the conditional decision (spec 53 registry alignment).
+/// Reason code for the conditional decision (reason-code registry alignment).
 ///
-/// String forms are lower_snake_case and match the spec 53 reason-code
+/// String forms are lower_snake_case and match the reason-code
 /// names. Discriminants are frozen for the 1.0 stability contract.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,7 +128,7 @@ pub enum ConditionalReason {
 }
 
 impl ConditionalReason {
-    /// Stable lower_snake_case reason string (spec 53 alignment).
+    /// Stable lower_snake_case reason string (reason-code registry alignment).
     pub fn as_str(self) -> &'static str {
         match self {
             ConditionalReason::NoHeaders => "conditional_no_headers",
@@ -150,7 +150,7 @@ impl ConditionalReason {
 pub struct ConditionalDecision {
     /// Top-level outcome.
     pub outcome: ConditionalOutcome,
-    /// Reason code (spec 53 alignment).
+    /// Reason code (reason-code registry alignment).
     pub reason: ConditionalReason,
     /// Which conditional header was evaluated (if any).
     pub evaluated_header: ConditionalHeader,

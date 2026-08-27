@@ -136,7 +136,14 @@ def validate_report(report: dict) -> list[str]:
 
 
 def validate_module_benchmark(report: dict) -> list[str]:
-    """Validate a 0.9.1 module benchmark report against the schema."""
+    """Validate a 0.9.1 module benchmark report against the required schema.
+    
+    Parameters:
+        report (dict): Module benchmark report to validate.
+    
+    Returns:
+        list[str]: Validation errors found in the report, or an empty list when it is valid.
+    """
     errors = []
     if "module_benchmark" not in report:
         return ["missing top-level key: 'module_benchmark'"]
@@ -145,7 +152,7 @@ def validate_module_benchmark(report: dict) -> list[str]:
     if not isinstance(mb, dict):
         return ["'module_benchmark' must be a dict"]
 
-    required_top = {"version", "timestamp", "scenarios", "memory_slope"}
+    required_top = {"version", "timestamp", "git_commit", "scenarios", "memory_slope"}
     errors.extend(validate_required_fields(mb, required_top, "module_benchmark"))
 
     scenarios = mb.get("scenarios", [])
@@ -165,7 +172,20 @@ def validate_module_benchmark(report: dict) -> list[str]:
 
 
 def _validate_module_scenarios(scenarios: list, errors: list[str]) -> None:
-    required_sc = {"name", "profile", "compression", "transfer_encoding", "concurrency", "status"}
+    """Validate required fields and metrics for module benchmark scenarios.
+    
+    Parameters:
+    	scenarios (list): Scenario entries to validate.
+    	errors (list[str]): Collection to which validation errors are appended.
+    """
+    required_sc = {
+        "name",
+        "scenario_config",
+        "compression",
+        "transfer_encoding",
+        "concurrency",
+        "status",
+    }
     for i, sc in enumerate(scenarios):
         if not isinstance(sc, dict):
             errors.append(f"scenarios[{i}] must be a dict")

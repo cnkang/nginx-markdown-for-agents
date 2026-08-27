@@ -15,7 +15,7 @@ distinguishes runtime verification targets from static verification targets.
 |---------------|---------------------|------|-------------------|
 | Rust converter structural accuracy | `make test-rust` | Runtime | `ffi-boundary` |
 | Rust converter semantic accuracy | `make test-rust` | Runtime | `ffi-boundary` |
-| Conversion output correctness | `make build` | Runtime | `ffi-boundary` |
+| Conversion output correctness | `make test-rust` | Runtime | `ffi-boundary` |
 | Harness alignment | `make harness-check` | Static | `harness-sync` |
 
 ### Protocol Correctness
@@ -45,7 +45,7 @@ distinguishes runtime verification targets from static verification targets.
 | Streaming C module integration | `make test-nginx-unit-streaming` | Runtime | `nginx-streaming` |
 | Streaming e2e behavior | `make verify-chunked-native-e2e-smoke` | Runtime | `runtime-e2e` |
 | Streaming failure/cache behavior | `make verify-streaming-failure-cache-e2e` | Runtime | `runtime-e2e` |
-| Streaming parity evidence | `tests/streaming/evidence/summary.json` | Static | `release-governance` |
+| Streaming parity evidence | `make release-evidence-manifest-check` | Static | `release-governance` |
 | Streaming reason codes | `make test-nginx-unit-streaming` | Runtime | `nginx-streaming` |
 | Streaming metrics fields | `make docs-check` | Static | `observability-metrics` |
 | FFI boundary (streaming stats) | `make build`, `make test-rust` | Runtime | `ffi-boundary` |

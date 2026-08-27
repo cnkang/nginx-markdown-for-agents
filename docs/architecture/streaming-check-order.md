@@ -44,7 +44,7 @@ header_filter entry
   |      +-- range header
   |      +-- unbounded streaming (text/event-stream + stream_types)
   |      +-- content_type (allowlist check)
-  |      +-- size_limit (Content-Length vs conversion_memory)
+  |      +-- max_size (historical 0.7.x name; maps to 0.9.2 conversion_memory)
   +-- 5. auth_policy check -> passthrough if deny+authenticated
   +-- 6. Accept negotiation (ngx_http_markdown_should_convert) -> passthrough if no MD preference
   +-- 7. Context allocation

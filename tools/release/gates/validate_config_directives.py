@@ -51,6 +51,13 @@ CONFIG_CORE_H = (
     / "src"
     / "ngx_http_markdown_config_core_impl.h"
 )
+CONFIG_MERGE_H = (
+    PROJECT_ROOT
+    / "components"
+    / "nginx-module"
+    / "src"
+    / "ngx_http_markdown_config_merge_impl.h"
+)
 FILTER_MODULE_H = (
     PROJECT_ROOT
     / "components"
@@ -104,6 +111,117 @@ CURRENT_LIMIT_KEYS = [
     "decompression_ratio",
     "max_inflight",
 ]
+
+# Each location-scoped directive must be represented by the shared merge
+# implementation.  Keep the patterns tied to the actual config fields so a
+# new command cannot silently become non-inheritable while still passing the
+# command-table and documentation checks.
+DIRECTIVE_MERGE_CONTRACTS: dict[str, tuple[str, str]] = {
+    "markdown_filter": (
+        r"ngx_http_markdown_merge_enabled\s*\(",
+        r"conf->enabled_source\s*==\s*NGX_HTTP_MARKDOWN_ENABLED_UNSET",
+    ),
+    "markdown_limits": (
+        r"ngx_http_markdown_merge_inherited_values\s*\(",
+        r"ngx_conf_merge_(?:msec|size|uint)_value\(\s*conf->limits\.",
+    ),
+    "markdown_error_policy": (
+        r"conf->on_error",
+        r"ngx_conf_merge_uint_value\(\s*conf->on_error",
+    ),
+    "markdown_flavor": (
+        r"conf->flavor",
+        r"ngx_conf_merge_uint_value\(\s*conf->flavor",
+    ),
+    "markdown_token_estimate": (
+        r"conf->token_estimate",
+        r"ngx_conf_merge_value\(\s*conf->token_estimate",
+    ),
+    "markdown_front_matter": (
+        r"conf->front_matter",
+        r"ngx_conf_merge_value\(\s*conf->front_matter",
+    ),
+    "markdown_accept": (
+        r"conf->accept_policy",
+        r"ngx_conf_merge_uint_value\(\s*conf->accept_policy",
+    ),
+    "markdown_auth_policy": (
+        r"conf->policy\.auth_policy",
+        r"ngx_conf_merge_uint_value\(\s*conf->policy\.auth_policy",
+    ),
+    "markdown_auth_cookies": (
+        r"conf->policy\.auth_cookies",
+        r"ngx_conf_merge_ptr_value\(\s*conf->policy\.auth_cookies",
+    ),
+    "markdown_cache_validation": (
+        r"conf->policy\.conditional_requests",
+        r"ngx_conf_merge_uint_value\(\s*conf->policy\.conditional_requests",
+    ),
+    "markdown_streaming": (
+        r"NGX_MD_MERGE_STREAM\(policy,",
+        r"NGX_MD_MERGE_STREAM\(policy,",
+    ),
+    "markdown_log_verbosity": (
+        r"conf->policy\.log_verbosity",
+        r"ngx_conf_merge_uint_value\(\s*conf->policy\.log_verbosity",
+    ),
+    "markdown_content_types": (
+        r"conf->routing\.content_types",
+        r"ngx_conf_merge_ptr_value\(\s*conf->routing\.content_types",
+    ),
+    "markdown_metrics": (
+        r"conf->ops\.metrics_enabled",
+        r"ngx_conf_merge_value\(\s*conf->ops\.metrics_enabled",
+    ),
+    "markdown_prune_noise": (
+        r"conf->advanced\.prune_noise",
+        r"ngx_conf_merge_value\(\s*conf->advanced\.prune_noise",
+    ),
+    "markdown_prune_selectors": (
+        r"conf->advanced\.prune_selectors",
+        r"ngx_conf_merge_ptr_value\(\s*conf->advanced\.prune_selectors",
+    ),
+    "markdown_prune_protection_selectors": (
+        r"conf->advanced\.prune_protection_selectors",
+        r"ngx_conf_merge_ptr_value\(\s*conf->advanced\.prune_protection_selectors",
+    ),
+    "markdown_auto_decompress": (
+        r"conf->decompress\.auto_decompress",
+        r"ngx_conf_merge_value\(\s*conf->decompress\.auto_decompress",
+    ),
+    "markdown_dynamic_config": (
+        r"conf->advanced\.dynconf_enabled",
+        r"ngx_conf_merge_value\(\s*conf->advanced\.dynconf_enabled",
+    ),
+    "markdown_dynamic_config_path": (
+        r"ngx_http_markdown_merge_str_if_unset\s*\(",
+        r"ngx_http_markdown_merge_str_if_unset\s*\(",
+    ),
+    "markdown_dynconf_dry_run": (
+        r"conf->advanced\.dynconf_dry_run",
+        r"ngx_conf_merge_value\(\s*conf->advanced\.dynconf_dry_run",
+    ),
+    "markdown_diagnostics": (
+        r"conf->ops\.diagnostics_enabled",
+        r"ngx_conf_merge_value\(\s*conf->ops\.diagnostics_enabled",
+    ),
+    "markdown_stream_excluded_types": (
+        r"conf->stream\.excluded_types",
+        r"conf->stream\.excluded_types\s*==",
+    ),
+}
+
+# Main-context directives do not inherit through a location merge function,
+# but their initialization still needs an explicit default contract.
+DIRECTIVE_DEFAULT_CONTRACTS: dict[str, str] = {
+    "markdown_trusted_proxies": (
+        r"conf->trusted_proxies\s*=\s*NULL"
+        r"|conf->trusted_proxies_configured\s*=\s*0"
+    ),
+    "markdown_metrics_shm_size": (
+        r"ngx_conf_init_size_value\(\s*mcf->metrics_shm_size"
+    ),
+}
 
 # ── Removed directives (0.9.2 public-surface freeze) ───────────────────────
 
@@ -277,10 +395,10 @@ def check_removed_directive_in_docs(
 def check_directive_merge(
     directive_name: str, merge_pattern: str, core_src: str, result: ValidationResult
 ) -> None:
-    """Verify the merge function references the directive\'s config field."""
+    """Verify the shared merge implementation references the config field."""
     check_id = f"merge:{directive_name}"
     if not core_src:
-        result.fail(check_id, "config_core_impl.h not found")
+        result.fail(check_id, "configuration merge source not found")
         return
     if re.search(merge_pattern, core_src):
         result.pass_(check_id, "merge function found")
@@ -337,7 +455,7 @@ def check_directive_default_merge(
     """
     check_id = f"default:{directive_name}"
     if not core_src:
-        result.fail(check_id, "config_core_impl.h not found")
+        result.fail(check_id, "configuration merge source not found")
         return
     if re.search(merge_pattern, core_src):
         result.pass_(check_id, "default value defined via merge macro")
@@ -387,7 +505,9 @@ def check_conf_field_not_in_source(
         result.pass_(check_id, "removed field pattern absent from all sources")
 
 
-def _read_directive_validation_sources() -> tuple[str, str, str, str, str, str]:
+def _read_directive_validation_sources() -> tuple[
+    str, str, str, str, str, str, str
+]:
     """Read the source surfaces used by the directive contract checks."""
     handler_path = (
         PROJECT_ROOT
@@ -400,6 +520,7 @@ def _read_directive_validation_sources() -> tuple[str, str, str, str, str, str]:
         read_safe(CONFIG_DIRECTIVES_H),
         read_safe(DIRECTIVE_NAMES_H),
         read_safe(CONFIG_CORE_H),
+        read_safe(CONFIG_MERGE_H),
         read_safe(FILTER_MODULE_H),
         read_safe(CONFIGURATION_MD),
         read_safe(handler_path),
@@ -411,6 +532,7 @@ def _record_directive_prerequisite_failures(
     directives_src: str,
     directive_names_src: str,
     core_src: str,
+    merge_src: str,
     filter_h: str,
 ) -> dict[str, str]:
     """Record missing source prerequisites and return the directive macros."""
@@ -436,6 +558,11 @@ def _record_directive_prerequisite_failures(
             "prereq:config_core_impl.h",
             "source file not found — cannot validate merge functions",
         )
+    if not merge_src:
+        result.fail(
+            "prereq:config_merge_impl.h",
+            "source file not found — cannot validate merge contracts",
+        )
     if not filter_h:
         result.fail(
             "prereq:filter_module.h",
@@ -447,6 +574,9 @@ def _record_directive_prerequisite_failures(
 def _check_directive_contract(
     directives_src: str,
     directive_macros: dict[str, str],
+    core_src: str,
+    merge_src: str,
+    filter_h: str,
     docs: str,
     handler_src: str,
     result: ValidationResult,
@@ -462,9 +592,33 @@ def _check_directive_contract(
             "limits-prerequisite:docs",
             "configuration documentation not found; cannot validate markdown_limits keys",
         )
+    merge_contract_src = "\n".join((merge_src, filter_h))
     for name in CURRENT_DIRECTIVES:
         check_directive_in_source(name, directives_src, directive_macros, result)
         check_directive_in_docs(name, name, docs, result)
+        merge_contract = DIRECTIVE_MERGE_CONTRACTS.get(name)
+        if merge_contract is not None:
+            merge_pattern, default_pattern = merge_contract
+            check_directive_merge(
+                name, merge_pattern, merge_contract_src, result
+            )
+            check_directive_default_merge(
+                name, default_pattern, merge_contract_src, result
+            )
+        else:
+            default_pattern = DIRECTIVE_DEFAULT_CONTRACTS.get(name)
+            if default_pattern is None:
+                result.fail(
+                    f"contract:{name}",
+                    "directive has no configured merge or default contract",
+                )
+            else:
+                default_src = "\n".join(
+                    (core_src, merge_src, filter_h, handler_src)
+                )
+                check_directive_default(
+                    name, default_pattern, default_src, result
+                )
     for key in CURRENT_LIMIT_KEYS:
         check_limit_key(key, handler_src, docs, result)
     for directive in REMOVED_DIRECTIVES:
@@ -495,6 +649,7 @@ def validate_all(result: ValidationResult) -> None:
         directives_src,
         directive_names_src,
         core_src,
+        merge_src,
         filter_h,
         docs,
         handler_src,
@@ -502,15 +657,32 @@ def validate_all(result: ValidationResult) -> None:
 
     if not directives_src:
         _record_directive_prerequisite_failures(
-            result, directives_src, directive_names_src, core_src, filter_h
+            result,
+            directives_src,
+            directive_names_src,
+            core_src,
+            merge_src,
+            filter_h,
         )
         return
 
     directive_macros = _record_directive_prerequisite_failures(
-        result, directives_src, directive_names_src, core_src, filter_h
+        result,
+        directives_src,
+        directive_names_src,
+        core_src,
+        merge_src,
+        filter_h,
     )
     _check_directive_contract(
-        directives_src, directive_macros, docs, handler_src, result
+        directives_src,
+        directive_macros,
+        core_src,
+        merge_src,
+        filter_h,
+        docs,
+        handler_src,
+        result,
     )
 
     # Removed constants: absent from filter_module.h

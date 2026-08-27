@@ -3,7 +3,7 @@
  *
  * Implements atomic application of Rust-built header plans to NGINX
  * response headers using an explicit two-phase prepare/commit model
- * (spec 48):
+ * Header plan:
  *
  *   prepare  - performs every fallible step (pool allocation, string
  *              copies, header lookups, list-capacity and operation
@@ -25,8 +25,8 @@
  * failure leaves r->headers_out unchanged and the partially allocated
  * pool memory is reclaimed when the request pool is destroyed.
  *
- * REQ-0700-RUST-004: Header plan atomicity.
- * spec 48: prepare/commit two-phase, allocation-free commit, no partial
+ * Header plan atomicity.
+ * prepare/commit two-phase, allocation-free commit, no partial
  * mutation.
  * Rule 28: full ngx_list_part_t chain iteration.
  * Rule 29: clear/free flags after a gated op succeeds, not before.
@@ -711,7 +711,7 @@ ngx_http_markdown_plan_prepare_entry(ngx_http_request_t *r,
  *
  * Performs ONLY assignments using memory allocated during prepare.  This
  * function has no allocation, lookup, validation, or failure path
- * (spec 48 commit invariant).
+ * (commit invariant).
  */
 static void
 ngx_http_markdown_plan_commit_one(

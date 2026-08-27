@@ -8,7 +8,7 @@ Covers:
   - Parity dual-threshold evaluation (with/without parity report)
   - Evidence pack generation and schema conformity
   - Release gates evaluation and GO/NO_GO verdict logic
-  - P1 status independence from verdict
+  - status independence from verdict
   - Human-readable summary output
   - CLI entry point
 
@@ -50,11 +50,11 @@ from evidence_pack_generator import (  # noqa: E402
 def _write_tmp_json(data: dict, suffix: str = ".json") -> str:
     """
     Write a dictionary as JSON to a temporary file and return the file path.
-    
+
     Parameters:
         data (dict): JSON-serializable mapping to write to the temporary file.
         suffix (str): Filename suffix for the temporary file (defaults to ".json").
-    
+
     Returns:
         path (str): Filesystem path to the created temporary file.
     """
@@ -66,13 +66,13 @@ def _write_tmp_json(data: dict, suffix: str = ".json") -> str:
 
 def _make_fullbuffer_report(tiers: dict | None = None) -> dict:
     """
-    Create a minimal full-buffer measurement report, optionally overriding the default tiers.
+    Create a full-buffer measurement report with default or supplied tier metrics.
     
     Parameters:
-    	tiers (dict | None): Optional mapping of tier names to metric dicts; when provided, this value is used as the report's `tiers` field. If `None`, a default set of small/medium/large tiers with example latency and input sizes is returned.
+    	tiers (dict | None): Tier metrics to include in the report. If `None` or empty, default small, medium, and large tiers are used.
     
     Returns:
-    	report (dict): A report containing `schema_version`, `timestamp`, `git_commit`, `platform`, and `tiers`.
+    	dict: A report containing schema metadata and tier metrics.
     """
     return {
         "schema_version": "1.0.0",
@@ -112,12 +112,12 @@ def _make_fullbuffer_report(tiers: dict | None = None) -> dict:
 def _make_streaming_report(tiers: dict | None = None) -> dict:
     """
     Create a minimal streaming measurement report for tests.
-    
+
     Parameters:
         tiers (dict | None): Optional dictionary of tier measurements to include; if omitted, a default set of tiers
             ("small", "medium", "large-100k", "large-1m") with representative latency, TTFB, input size, and peak memory
             values is used.
-    
+
     Returns:
         dict: A report dictionary containing `schema_version`, `timestamp`, `git_commit`, `platform`, and `tiers`.
     """
@@ -167,10 +167,10 @@ def _make_streaming_report(tiers: dict | None = None) -> dict:
 def _make_evidence_targets(overrides: dict | None = None) -> dict:
     """
     Create a default evidence targets configuration, optionally merged with user overrides.
-    
+
     Parameters:
         overrides (dict | None): Optional mapping whose keys will replace or extend the default targets.
-    
+
     Returns:
         dict: Evidence targets including:
             - "bounded_memory": {"max_slope": float, "min_data_points": int}
@@ -203,11 +203,11 @@ def _make_parity_report(
 ) -> dict:
     """
     Constructs a minimal parity report dictionary with the specified pass and correctness rates.
-    
+
     Parameters:
         pass_rate (float): Pass rate in the range 0.0–1.0 (default 1.0).
         correctness_rate (float): Correctness rate in the range 0.0–1.0 (default 1.0).
-    
+
     Returns:
         dict: Parity report containing `schema_version`, `timestamp`, a `summary` with
         `pass_rate` and `correctness_rate`, and an empty `tiers` mapping.
@@ -727,19 +727,6 @@ class TestGenerateEvidencePack:
         )
         assert pack["streaming_evidence_verdict"] == "NO_GO"
 
-    def test_p1_status_does_not_affect_verdict(self):
-        """P1 status fields should NOT affect the verdict (Property 5)."""
-        # Even with P1 checks not available, if gates pass, verdict is GO
-        targets = _make_evidence_targets()
-        pack = generate_evidence_pack(
-            _make_fullbuffer_report(),
-            _make_streaming_report(),
-            targets,
-        )
-        assert pack["p1_status"]["if_none_match_streaming"] == "NOT_AVAILABLE"
-        assert pack["p1_status"]["otel_integration"] == "NOT_AVAILABLE"
-        assert pack["p1_status"]["extra_formats"] == "NOT_AVAILABLE"
-
     def test_parity_unknown_causes_no_go(self):
         """No parity report -> parity gates UNKNOWN -> verdict NO_GO."""
         pack = generate_evidence_pack(
@@ -807,7 +794,6 @@ class TestGenerateEvidencePack:
         assert pack_first["evidence_targets"] == pack_second["evidence_targets"]
         assert pack_first["release_gates"] == pack_second["release_gates"]
         assert pack_first["streaming_evidence_verdict"] == pack_second["streaming_evidence_verdict"]
-        assert pack_first["p1_status"] == pack_second["p1_status"]
 
 
 # ---------------------------------------------------------------------------

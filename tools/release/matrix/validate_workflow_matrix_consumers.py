@@ -21,13 +21,17 @@ Part of release matrix source of truth (Requirement 5).
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sys
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from lib.path_validation import validate_read_path
+from official_docker_matrix import load_official_docker_entries
 
 # Paths relative to the repository root
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -51,6 +55,7 @@ LEGACY_WORKFLOWS = {
 
 RELEASE_PACKAGES_WORKFLOW = "release-packages.yml"
 OFFICIAL_DOCKER_WORKFLOW = ".github/workflows/official-nginx-docker.yml"
+OFFICIAL_DOCKER_WORKFLOW_REF = "./.github/workflows/official-nginx-docker.yml"
 
 # Candidate semantic versions are classified as NGINX versions only when the
 # same workflow line explicitly associates them with NGINX. This avoids numeric
@@ -78,20 +83,54 @@ EXCLUDE_CONTEXT_PATTERNS = [
 ]
 
 
+def _canonical_entries(data: object) -> tuple[list[dict], str | None]:
+    """
+    Validate and return the matrix document's canonical entries.
+    
+    Parameters:
+    	data (object): Matrix data to validate.
+    
+    Returns:
+    	tuple[list[dict], str | None]: The non-empty canonical entries list and
+    	`None` when valid; otherwise, an empty list and a validation error message.
+    """
+    if not isinstance(data, dict):
+        return [], "Matrix document root must be an object"
+    aliases = [key for key in ("matrix", "additional_artifacts") if key in data]
+    if aliases:
+        return [], (
+            "Matrix document must carry the canonical 'entries' list; "
+            "legacy keys are not accepted: "
+            + ", ".join(aliases)
+        )
+    entries = data.get("entries")
+    if not isinstance(entries, list) or not entries:
+        return [], "Matrix file must carry a non-empty canonical 'entries' list"
+    if not all(isinstance(entry, dict) for entry in entries):
+        return [], "Matrix canonical 'entries' must contain only objects"
+    for index, entry in enumerate(entries):
+        for field in ("nginx", "nginx_version"):
+            if field in entry and not isinstance(entry[field], str):
+                return [], (
+                    f"Matrix entry {index} field {field!r} must be a string"
+                )
+    return entries, None
+
+
 def load_matrix_versions(path: Path) -> set[str]:
     """Load all NGINX versions from release-matrix.json.
 
-    Returns the set of all nginx version strings across both the main matrix
-    and additional_artifacts entries.
+    Returns the set of all NGINX version strings in canonical ``entries``.
     """
     validated = validate_read_path(path, purpose="workflow matrix validation")
     with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    versions: set[str] = set()
+    entries, error = _canonical_entries(data)
+    if error is not None:
+        raise ValueError(error)
 
-    # Support both canonical 'entries' (release matrix canonical format) and legacy 'matrix' arrays
-    entries = data.get("entries", []) or data.get("matrix", [])
+    versions: set[str] = set()
     for entry in entries:
         if v := entry.get("nginx"):
             versions.add(v)
@@ -260,25 +299,24 @@ def validate_other_workflows(
 
 
 def validate_owner_workflow_refs(matrix_path: Path) -> list[str]:
-    """Verify that owner_workflow references in the matrix point to existing files."""
+    """
+    Verify that matrix `owner_workflow` references point to existing files.
+    
+    Parameters:
+    	matrix_path (Path): Path to the release matrix file.
+    
+    Returns:
+    	list[str]: Validation errors for missing referenced workflows.
+    """
     errors: list[str] = []
 
     validated = validate_read_path(matrix_path, purpose="owner workflow check")
     with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Rule 62: consumers must read ONLY the canonical 'entries' key.
-    # The legacy 'matrix'/'additional_artifacts' aliases are fail-closed in
-    # the normalizer; a validator accepting them would be more permissive
-    # than the contract it defends.  Missing/empty entries is an error here.
-    all_entries = data.get("entries")
-    if not isinstance(all_entries, list) or not all(
-        isinstance(entry, dict) for entry in all_entries
-    ):
-        errors.append(
-            "Matrix file must carry the canonical 'entries' list of objects "
-            "(legacy 'matrix'/'additional_artifacts' keys are not accepted)"
-        )
+    all_entries, error = _canonical_entries(data)
+    if error is not None:
+        errors.append(error)
         return errors
 
     for i, entry in enumerate(all_entries):
@@ -295,62 +333,72 @@ def validate_owner_workflow_refs(matrix_path: Path) -> list[str]:
     return errors
 
 
-def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
-    """Ensure release-blocking Docker artifacts gate canonical publication."""
-    errors: list[str] = []
-
-    validated = validate_read_path(
-        matrix_path, purpose="release-blocking publish DAG check"
-    )
-    with open(validated, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    entries = data.get("entries")
-    if not isinstance(entries, list) or not all(
-        isinstance(entry, dict) for entry in entries
-    ):
-        errors.append(
-            "Matrix file must carry the canonical 'entries' list of objects "
-            "(legacy 'matrix'/'additional_artifacts' keys are not accepted)"
-        )
-        return errors
-
-    docker_owners = {
+def _release_blocking_docker_owners(entries: list[dict]) -> set[str]:
+    """Return the owner workflows for release-blocking Docker image entries.
+    
+    Parameters:
+    	entries (list[dict]): Matrix entries to inspect.
+    
+    Returns:
+    	set[str]: Owner workflow paths referenced by release-blocking Docker image entries.
+    """
+    return {
         entry.get("owner_workflow", "")
         for entry in entries
         if entry.get("artifact_type") == "docker-image"
         and entry.get("release_blocking") is True
+        and entry.get("owner_workflow", "")
     }
-    docker_owners.discard("")
-    if not docker_owners:
-        return errors
 
-    canonical_path = WORKFLOWS_DIR / RELEASE_PACKAGES_WORKFLOW
-    if not canonical_path.exists():
-        return [
-            "Release-blocking Docker entries exist but the canonical "
-            f"workflow is missing: {canonical_path}"
-        ]
-    canonical_content = canonical_path.read_text(encoding="utf-8")
-    publish_needs = _publish_job_needs(canonical_content)
 
-    if "official-docker-release-gate:" not in canonical_content:
+def _validate_official_docker_gate(
+    canonical_content: str, publish_needs: set[str]
+) -> list[str]:
+    """
+    Validate the release package workflow's official Docker release gate and publish dependency.
+    
+    Parameters:
+    	canonical_content (str): Contents of the canonical release package workflow.
+    	publish_needs (set[str]): Job identifiers that the publish job depends on.
+    
+    Returns:
+    	list[str]: Validation error messages.
+    """
+    errors: list[str] = []
+    official_job = _workflow_job_block(
+        canonical_content, "official-docker-release-gate"
+    )
+    if official_job is None:
         errors.append(
             "release-packages.yml does not define "
             "official-docker-release-gate for release-blocking Docker artifacts"
         )
-    if "./" + OFFICIAL_DOCKER_WORKFLOW not in canonical_content:
+    elif _job_uses(official_job) != OFFICIAL_DOCKER_WORKFLOW_REF:
         errors.append(
-            "release-packages.yml does not call the official Docker workflow "
-            "as a reusable release gate"
+            "release-packages.yml official-docker-release-gate must use "
+            f"{OFFICIAL_DOCKER_WORKFLOW_REF!r}, got "
+            f"{_job_uses(official_job)!r}"
         )
     if "official-docker-release-gate" not in publish_needs:
         errors.append(
             "release-packages.yml publish job does not depend on "
             "official-docker-release-gate"
         )
+    return errors
 
-    for owner in sorted(docker_owners):
+
+def _validate_docker_owner_workflows(owners: set[str]) -> list[str]:
+    """
+    Validate that referenced Docker owner workflows expose a top-level workflow_call trigger.
+    
+    Parameters:
+    	owners (set[str]): Repository-relative paths to Docker owner workflow files.
+    
+    Returns:
+    	list[str]: Error messages for existing owner workflows that do not expose workflow_call.
+    """
+    errors: list[str] = []
+    for owner in sorted(owners):
         owner_path = REPO_ROOT / owner
         if not owner_path.exists():
             continue
@@ -360,7 +408,355 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
                 f"{owner} must expose workflow_call before it can be a "
                 "release-blocking reusable Docker gate"
             )
+    return errors
 
+
+def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
+    """
+    Validate that release-blocking Docker artifacts are gated before canonical publication.
+    
+    Parameters:
+        matrix_path (Path): Path to the release matrix file.
+    
+    Returns:
+        list[str]: Validation errors, or an empty list when the publication DAG is valid.
+    """
+    validated = validate_read_path(
+        matrix_path, purpose="release-blocking publish DAG check"
+    )
+    with open(validated, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    entries, error = _canonical_entries(data)
+    if error is not None:
+        return [error]
+
+    docker_owners = _release_blocking_docker_owners(entries)
+    if not docker_owners:
+        return []
+
+    canonical_path = WORKFLOWS_DIR / RELEASE_PACKAGES_WORKFLOW
+    if not canonical_path.exists():
+        return [
+            "Release-blocking Docker entries exist but the canonical "
+            f"workflow is missing: {canonical_path}"
+        ]
+    canonical_content = canonical_path.read_text(encoding="utf-8")
+    errors = _validate_official_docker_gate(
+        canonical_content, _publish_job_needs(canonical_content)
+    )
+    errors.extend(_validate_docker_owner_workflows(docker_owners))
+    return errors
+
+
+def _workflow_job_block(content: str, job_name: str) -> list[str] | None:
+    """Return one top-level job block using bounded indentation parsing."""
+    lines = content.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if len(line) - len(line.lstrip(" ")) == 2 and line.strip() == f"{job_name}:":
+            start = index
+            break
+    if start is None:
+        return None
+
+    block = [lines[start]]
+    for line in lines[start + 1 :]:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            indent = len(line) - len(line.lstrip(" "))
+            if indent <= 2:
+                break
+        block.append(line)
+    return block
+
+
+def _job_uses(job_block: list[str]) -> str | None:
+    """Return the exact reusable-workflow reference from a job block."""
+    for line in job_block[1:]:
+        if len(line) - len(line.lstrip(" ")) != 4:
+            continue
+        key, separator, value = line.strip().partition(":")
+        if key == "uses" and separator:
+            return value.strip().strip("'\"")
+    return None
+
+
+OFFICIAL_DOCKER_RUNNER = (
+    "${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}"
+)
+OFFICIAL_DOCKER_MATRIX_INCLUDE = "${{ fromJson(needs.prepare.outputs.matrix) }}"
+
+
+def _workflow_document(content: str) -> tuple[dict[str, object] | None, str | None]:
+    """Parse a workflow and return its mapping root or a validation error."""
+    try:
+        document = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        return None, f"official Docker workflow is not valid YAML: {exc}"
+    if not isinstance(document, dict):
+        return None, "official Docker workflow root must be a mapping"
+    if not isinstance(document.get("jobs"), dict):
+        return None, "official Docker workflow must define a jobs mapping"
+    return document, None
+
+
+def _workflow_step(job: object, name: str | None = None, step_id: str | None = None) -> dict[str, object] | None:
+    """Find a named or identified executable step in a parsed job."""
+    if not isinstance(job, dict) or not isinstance(job.get("steps"), list):
+        return None
+    for step in job["steps"]:
+        if not isinstance(step, dict):
+            continue
+        if name is not None and step.get("name") == name:
+            return step
+        if step_id is not None and step.get("id") == step_id:
+            return step
+    return None
+
+
+def _python_heredoc(run: object) -> str | None:
+    """Return the Python body from the resolver step's quoted heredoc."""
+    if not isinstance(run, str):
+        return None
+    lines = run.splitlines()
+    try:
+        start = next(
+            index for index, line in enumerate(lines)
+            if line.strip() == "python3 - <<'PY'"
+        )
+        end = next(
+            index for index in range(start + 1, len(lines))
+            if lines[index].strip() == "PY"
+        )
+    except StopIteration:
+        return None
+    return "\n".join(lines[start + 1 : end])
+
+
+def _has_matrix_loader_code(run: object) -> bool:
+    """Require the executable resolver script to load the canonical matrix."""
+    source = _python_heredoc(run)
+    if source is None:
+        return False
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    return _has_matrix_loader_import(tree) and _has_matrix_loader_call(tree)
+
+
+def _has_matrix_loader_import(tree: ast.AST) -> bool:
+    """Return whether the resolver imports the canonical loader."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.module != "official_docker_matrix":
+            continue
+        return any(
+            alias.name == "load_official_docker_entries" for alias in node.names
+        )
+    return False
+
+
+def _is_matrix_path_call(node: ast.AST) -> bool:
+    """Return whether an AST call points to the canonical matrix file."""
+    if not isinstance(node, ast.Call):
+        return False
+    if not isinstance(node.func, ast.Name) or node.func.id != "Path":
+        return False
+    if len(node.args) != 1:
+        return False
+    argument = node.args[0]
+    return isinstance(argument, ast.Constant) and argument.value == (
+        "tools/release-matrix.json"
+    )
+
+
+def _has_matrix_loader_call(tree: ast.AST) -> bool:
+    """Return whether the resolver loads the canonical matrix path."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name):
+            continue
+        if node.func.id != "load_official_docker_entries" or len(node.args) != 1:
+            continue
+        return _is_matrix_path_call(node.args[0])
+    return False
+
+
+def _build_args(value: object) -> dict[str, str]:
+    """Parse the bounded key/value build-argument block."""
+    if not isinstance(value, str):
+        return {}
+    result: dict[str, str] = {}
+    for line in value.splitlines():
+        key, separator, argument = line.partition("=")
+        if separator:
+            result[key] = argument
+    return result
+
+
+def _validate_prepare_job(jobs: dict[str, object]) -> list[str]:
+    """Validate the executable matrix resolver job."""
+    errors: list[str] = []
+    prepare = jobs.get("prepare")
+    if not isinstance(prepare, dict):
+        return ["official Docker workflow is missing the prepare job"]
+    outputs = prepare.get("outputs")
+    if not isinstance(outputs, dict) or outputs.get("matrix") != "${{ steps.resolve.outputs.matrix }}":
+        errors.append("prepare job must expose the resolve matrix output")
+    resolve_step = _workflow_step(prepare, step_id="resolve")
+    if resolve_step is None or not _has_matrix_loader_code(resolve_step.get("run")):
+        errors.append("prepare job must execute the canonical Docker matrix resolver")
+    return errors
+
+
+def _validate_build_step(build: dict[str, object]) -> list[str]:
+    """Validate that the official Docker build step uses matrix-bound tags and required build arguments.
+    
+    Parameters:
+    	build (dict[str, object]): The parsed `build-and-verify` job definition.
+    
+    Returns:
+    	list[str]: Validation error messages, or an empty list when the build step is valid.
+    """
+    build_step = _workflow_step(
+        build, name="Build from source on official nginx base"
+    )
+    if build_step is None:
+        return ["build-and-verify is missing the official Docker build step"]
+    with_values = build_step.get("with")
+    if not isinstance(with_values, dict):
+        return ["official Docker build step must define its inputs"]
+    errors: list[str] = []
+    if with_values.get("tags") != "nginx-markdown-official-check:${{ matrix.docker_tag }}":
+        errors.append("official Docker build tag must use matrix.docker_tag")
+    build_args = _build_args(with_values.get("build-args"))
+    required_args = {
+        "NGINX_IMAGE": "${{ matrix.image_ref }}@${{ matrix.image_digest }}",
+        "MODULE_REPO": "${{ steps.source.outputs.repo }}",
+        "MODULE_REF": "${{ steps.source.outputs.ref }}",
+        "MODULE_SHA": "${{ steps.source.outputs.sha }}",
+    }
+    for key, expected in required_args.items():
+        if build_args.get(key) != expected:
+            errors.append(f"official Docker build args must preserve {key}")
+    return errors
+
+
+def _validate_verify_step(build: dict[str, object]) -> list[str]:
+    """Validate the matrix-bound runtime verification step."""
+    verify_step = _workflow_step(build, name="Verify runtime behavior")
+    if verify_step is None:
+        return ["build-and-verify is missing the runtime verification step"]
+    errors: list[str] = []
+    run = verify_step.get("run")
+    if not isinstance(run, str) or not run.lstrip().startswith(
+        "bash ./tools/ci/verify_official_nginx_docker.sh"
+    ):
+        errors.append("runtime verification must execute the official Docker verifier")
+    expected_env = {
+        "IMAGE_NAME": "nginx-markdown-official-check:${{ matrix.docker_tag }}",
+        "JOB_NGINX_TAG": "${{ matrix.image_ref }}",
+        "EXPECTED_NGINX_VERSION": "${{ matrix.nginx_version }}",
+        "IMAGE_REFERENCE": "${{ matrix.image_ref }}",
+        "IMAGE_DIGEST": "${{ matrix.image_digest }}",
+        "MATRIX_ROW_ID": "${{ matrix.matrix_row_id }}",
+        "MATRIX_OS": "${{ matrix.os }}",
+        "MATRIX_LIBC": "${{ matrix.libc }}",
+        "MATRIX_ARCH": "${{ matrix.arch }}",
+    }
+    env = verify_step.get("env")
+    for key, expected in expected_env.items():
+        if not isinstance(env, dict) or env.get(key) != expected:
+            errors.append(f"runtime verification must bind {key} from the matrix")
+    return errors
+
+
+def _validate_build_job(jobs: dict[str, object]) -> list[str]:
+    """
+    Validate the official Docker workflow's build and verification job configuration.
+    
+    Parameters:
+    	jobs (dict[str, object]): Parsed workflow jobs keyed by job name.
+    
+    Returns:
+    	list[str]: Validation errors found in the build-and-verify job.
+    """
+    errors: list[str] = []
+    build = jobs.get("build-and-verify")
+    if not isinstance(build, dict):
+        return ["official Docker workflow is missing the build-and-verify job"]
+    if build.get("runs-on") != OFFICIAL_DOCKER_RUNNER:
+        errors.append("build-and-verify must select runners from matrix.arch")
+    strategy = build.get("strategy")
+    matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+    if not isinstance(matrix, dict) or matrix.get("include") != OFFICIAL_DOCKER_MATRIX_INCLUDE:
+        errors.append("build-and-verify must consume prepare.outputs.matrix")
+    errors.extend(_validate_build_step(build))
+    errors.extend(_validate_verify_step(build))
+    return errors
+
+
+def _validate_official_docker_workflow(document: dict[str, object]) -> list[str]:
+    """Validate the official Docker workflow's required jobs and their matrix, build, and verification configuration.
+    
+    Parameters:
+    	document (dict[str, object]): Parsed official Docker workflow document.
+    
+    Returns:
+    	list[str]: Validation error messages, or an empty list when the workflow is valid.
+    """
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return ["official Docker workflow must define a jobs mapping"]
+    errors = _validate_prepare_job(jobs)
+    errors.extend(_validate_build_job(jobs))
+    return errors
+
+
+def validate_official_docker_matrix_coverage(matrix_path: Path) -> list[str]:
+    """
+    Ensure the official Docker workflow covers all configured release-blocking Docker matrix rows.
+    
+    Parameters:
+        matrix_path (Path): Path to the Docker release matrix.
+    
+    Returns:
+        list[str]: Validation errors, or an empty list when the matrix and workflow are valid.
+    """
+    errors: list[str] = []
+    try:
+        entries = load_official_docker_entries(matrix_path)
+    except (OSError, ValueError) as exc:
+        return [f"official Docker matrix cannot be resolved: {exc}"]
+
+    workflow_path = WORKFLOWS_DIR / Path(OFFICIAL_DOCKER_WORKFLOW).name
+    if not workflow_path.exists():
+        return [f"official Docker workflow is missing: {workflow_path}"]
+    content = workflow_path.read_text(encoding="utf-8")
+    document, parse_error = _workflow_document(content)
+    if parse_error is not None:
+        errors.append(parse_error)
+    elif document is not None:
+        errors.extend(_validate_official_docker_workflow(document))
+
+    expected_ids: set[str] = set()
+    for index, entry in enumerate(entries):
+        row_id = entry.get("matrix_row_id")
+        if not isinstance(row_id, str) or not row_id:
+            errors.append(
+                "official Docker matrix row "
+                f"{index} is missing a non-empty matrix_row_id"
+            )
+            continue
+        expected_ids.add(row_id)
+    if len(expected_ids) != len(entries):
+        errors.append("official Docker matrix contains duplicate execution rows")
+    if not expected_ids:
+        errors.append("official Docker matrix contains no release-blocking rows")
     return errors
 
 
@@ -484,7 +880,11 @@ def main() -> int:
         )
         return 1
 
-    matrix_versions = load_matrix_versions(MATRIX_PATH)
+    try:
+        matrix_versions = load_matrix_versions(MATRIX_PATH)
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: Invalid release-matrix.json: {exc}", file=sys.stderr)
+        return 1
     if not matrix_versions:
         print(
             "ERROR: No NGINX versions found in release-matrix.json",
@@ -517,6 +917,11 @@ def main() -> int:
     # 5. release-blocking Docker artifacts must be in the publish DAG
     docker_dag_errors = validate_release_blocking_publish_dag(MATRIX_PATH)
     all_errors.extend(docker_dag_errors)
+
+    # 6. Every blocking Docker row must be represented by the reusable gate's
+    # generated execution contract.
+    docker_matrix_errors = validate_official_docker_matrix_coverage(MATRIX_PATH)
+    all_errors.extend(docker_matrix_errors)
 
     # Report results
     if all_warnings:

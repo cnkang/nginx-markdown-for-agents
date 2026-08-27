@@ -29,7 +29,7 @@ Allowed status codes: `429`, `503` (`502` is the `fail_closed` default. Use `fai
 | `decompression_error` | pre-commit | Yes | Decompression failed |
 | `overload` | pre-commit | Yes | Inflight limit exceeded |
 | `invalid_dynconf` | pre-commit | Yes | Dynamic config invalid |
-| `degraded_snapshot` | pre-commit | Yes | Using last-known-good snapshot |
+| `degraded_snapshot` | pre-commit | No | Telemetry-only state: the last-known-good snapshot continues processing the request; no separate status or pass-through behavior is selected |
 | `header_plan_apply_error` | pre-commit | Yes | HeaderPlan prepare/apply failed before headers were sent |
 | `streaming_mid_flight_error` | post-commit | **No** | Streaming failed mid-body |
 

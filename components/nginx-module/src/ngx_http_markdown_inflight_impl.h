@@ -1,10 +1,10 @@
 /*
- * Per-worker inflight counter (spec 52).
+ * Per-worker inflight counter (per-worker).
  *
  * Provides a per-worker atomic counter that tracks the number of
  * markdown conversions currently in-flight.  When the counter reaches
  * max_inflight, new conversions are rejected via the unified error
- * policy (spec 51).
+ * policy (error policy).
  *
  * WARNING: This header is an implementation detail of the main
  * translation unit (ngx_http_markdown_filter_module.c) and its
@@ -29,7 +29,7 @@
 #define NGX_HTTP_MARKDOWN_INFLIGHT_IMPL_H
 
 /*
- * Error class discriminant for Overload (from spec 51 FFI).
+ * Error class discriminant for Overload (from the FFI error classification).
  * Must match ErrorClass::Overload in Rust (value = 5).
  */
 #define NGX_HTTP_MARKDOWN_ERROR_CLASS_OVERLOAD  5
@@ -231,6 +231,10 @@ static ngx_inline void
 ngx_http_markdown_inflight_release(ngx_http_markdown_ctx_t *ctx)
 {
     ngx_http_markdown_inflight_cleanup_t  *cd;
+
+    if (ctx == NULL) {
+        return;
+    }
 
     cd = ctx->lifecycle.inflight_cleanup;
     if (cd == NULL) {

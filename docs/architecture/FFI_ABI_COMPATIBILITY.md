@@ -23,7 +23,9 @@ advances the bundled boundary to ABI version **2**. The earlier reset:
 - removes `FFIConditionalResult`, its reserved `matched_etag_len` field, and
   the superseded `markdown_check_conditional` API,
 - removes the superseded `markdown_build_base_url` helper, and
-- removes 15 zero-production-consumer exports: the accept/decision init
+- removes 18 zero-production-consumer exports: `markdown_check_conditional`,
+  `markdown_conditional_result_init`, and `markdown_build_base_url`, plus the
+  accept/decision init
   helpers, Rust decision/error-policy wrappers, standalone URL checks,
   diagnostics-schema accessors, convenience constructors, and redundant
   streaming finish/free/reason helpers, and

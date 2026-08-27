@@ -135,7 +135,14 @@ def _read_json_pointer(path: Path) -> tuple[str | None, str | None]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None, None
-    return data.get("spec"), _display_for(path)
+    if not isinstance(data, dict):
+        # A non-object pointer file carries no spec field; fall through to
+        # the text-pointer source instead of raising AttributeError.
+        return None, None
+    value = data.get("spec")
+    if not isinstance(value, str) or not value.strip():
+        return None, None
+    return value, _display_for(path)
 
 
 def _read_text_pointer(path: Path) -> tuple[str | None, str | None]:

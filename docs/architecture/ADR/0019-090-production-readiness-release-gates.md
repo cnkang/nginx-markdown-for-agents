@@ -18,8 +18,10 @@ release-gates wave (final wave).
 
 - Make target: `make release-gates-check-090` (new at the time of writing
   and implemented since).
-- Validators: `tools/release/gates/validate_release_gates_090.py`,
-  `validate_config_directives.py` (merged validator covering v0.7.0–v0.8.0 directives).
+- Validators: the historical 0.9.0 validator chain, plus
+  `validate_config_directives.py` (the merged validator covering v0.7.0–v0.8.0
+  directives). The project retired the 0.9.0-specific chain. This ADR
+  preserves its release-time contract for historical reference.
 - Production-examples smoke: `make test-production-examples-nginx-t` and
   `make test-production-examples-e2e-smoke` (**new**).
 
@@ -34,6 +36,8 @@ gate directly invokes prior-version validators, which remain
 **caller-parameterized**
 for the active version
 (`RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.0`), per AGENTS.md Rule 13.
+The gate also invokes `release-matrix-check` so it validates the checked-in
+release matrix before this capstone gate succeeds.
 
 ### Blocking semantics (frozen)
 

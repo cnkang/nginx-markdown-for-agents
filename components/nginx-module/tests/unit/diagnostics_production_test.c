@@ -15,6 +15,10 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+#ifndef NGX_HAVE_UNIX_DOMAIN
+#define NGX_HAVE_UNIX_DOMAIN 1
+#endif
+
 #define NGX_HTTP_GET                 0x0002
 #define NGX_HTTP_HEAD                0x0004
 #define NGX_HTTP_POST                0x0008
@@ -294,7 +298,7 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
             remaining -= 2;
             continue;
         }
-        if (*src == '%' && src[1] == 'M') {
+        if (remaining >= 4 && *src == '%' && src[1] == 'M') {
             *dst++ = '%';
             *dst++ = 'l';
             *dst++ = 'u';
@@ -302,7 +306,7 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
             remaining -= 3;
             continue;
         }
-        if (*src == '%' && src[1] == 'u' && src[2] == 'A') {
+        if (remaining >= 4 && *src == '%' && src[1] == 'u' && src[2] == 'A') {
             *dst++ = '%';
             *dst++ = 'l';
             *dst++ = 'u';
@@ -310,7 +314,7 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
             remaining -= 3;
             continue;
         }
-        if (*src == '%' && src[1] == 'u' && src[2] == 'i') {
+        if (remaining >= 4 && *src == '%' && src[1] == 'u' && src[2] == 'i') {
             *dst++ = '%';
             *dst++ = 'l';
             *dst++ = 'u';
@@ -318,7 +322,7 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
             remaining -= 3;
             continue;
         }
-        if (*src == '%' && src[1] == 'T') {
+        if (remaining >= 4 && *src == '%' && src[1] == 'T') {
             *dst++ = '%';
             *dst++ = 'l';
             *dst++ = 'd';
@@ -351,19 +355,6 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
     return buf + n;
 }
 
-ngx_int_t
-ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
-    const ngx_http_markdown_conf_t *conf, u_char **out_buf, size_t *out_len)
-{
-    static u_char snapshot[] = "    \"diagnostics_enabled\": \"on\"\n";
-
-    UNUSED(pool);
-    UNUSED(conf);
-    *out_buf = snapshot;
-    *out_len = sizeof(snapshot) - 1;
-    return NGX_OK;
-}
-
 #define NGX_HTTP_MARKDOWN_FILTER_MODULE_H
 
 /* Constants needed by diagnostics.c streaming_config formatter */
@@ -375,6 +366,10 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
 #endif
 #ifndef NGX_HTTP_MARKDOWN_PRODUCT_VERSION
 #define NGX_HTTP_MARKDOWN_PRODUCT_VERSION "0.9.2"
+#endif
+
+#ifndef MARKDOWN_PRUNE_NOISE_ENABLED
+#define MARKDOWN_PRUNE_NOISE_ENABLED 1
 #endif
 
 #include "../src/ngx_http_markdown_diagnostics.c"
@@ -505,6 +500,8 @@ reset_test_state(void)
            sizeof(ngx_http_markdown_g_diag_state));
     ngx_http_markdown_g_diag_initialized = 0;
     ngx_http_markdown_g_diag_recording_requested = 0;
+    ngx_http_markdown_g_diag_recording_state =
+        NGX_HTTP_MARKDOWN_DIAG_RECORDING_DISABLED;
 }
 
 static void
@@ -620,6 +617,9 @@ test_lifecycle_failure_branches(void)
 static void
 test_recording_request_resets_between_config_cycles(void)
 {
+    struct ngx_cycle_s cycle;
+    ngx_pool_t         pool;
+    ngx_log_t          log;
     ngx_int_t rc;
 
     TEST_SUBSECTION("diagnostics recording request resets per config cycle");
@@ -634,11 +634,30 @@ test_recording_request_resets_between_config_cycles(void)
     rc = ngx_http_markdown_diagnostics_init_worker(NULL);
     TEST_ASSERT(rc == NGX_ERROR,
                 "requested diagnostics should validate worker cycle");
+    TEST_ASSERT(ngx_http_markdown_diagnostics_recording_state()
+                == NGX_HTTP_MARKDOWN_DIAG_RECORDING_DEGRADED,
+                "invalid worker cycle should report degraded recording");
 
     ngx_http_markdown_diagnostics_reset_recording_request();
     rc = ngx_http_markdown_diagnostics_init_worker(NULL);
     TEST_ASSERT(rc == NGX_OK,
                 "reset request should prevent stale worker init");
+
+    memset(&cycle, 0, sizeof(cycle));
+    memset(&pool, 0, sizeof(pool));
+    memset(&log, 0, sizeof(log));
+    cycle.pool = &pool;
+    cycle.log = &log;
+    ngx_http_markdown_diagnostics_enable_recording();
+    g_alloc_fail_after = 0;
+    rc = ngx_http_markdown_diagnostics_init_worker(&cycle);
+    TEST_ASSERT(rc == NGX_OK,
+                "ring allocation failure should keep the worker running");
+    TEST_ASSERT(ngx_http_markdown_diagnostics_recording_state()
+                == NGX_HTTP_MARKDOWN_DIAG_RECORDING_DEGRADED,
+                "ring allocation failure should report degraded recording");
+    TEST_ASSERT(ngx_http_markdown_diagnostics_recording_active() == 0,
+                "degraded recording must not record decisions");
 
     TEST_PASS("Recording request resets between config cycles");
 }
@@ -661,6 +680,9 @@ test_decision_path_records_once_with_explicit_duration(void)
         &ngx_http_markdown_g_diag_state, r.pool, 4);
     TEST_ASSERT(rc == NGX_OK, "global init should succeed");
     ngx_http_markdown_g_diag_state.enabled = 1;
+    ngx_http_markdown_g_diag_initialized = 1;
+    ngx_http_markdown_g_diag_recording_state =
+        NGX_HTTP_MARKDOWN_DIAG_RECORDING_ACTIVE;
 
     memset(&path, 0, sizeof(path));
     path.accept_result = "CONVERT";
@@ -707,6 +729,9 @@ test_access_and_json_builder(void)
         &ngx_http_markdown_g_diag_state, r.pool, 2);
     TEST_ASSERT(rc == NGX_OK, "global init should succeed");
     ngx_http_markdown_g_diag_state.enabled = 1;
+    ngx_http_markdown_g_diag_initialized = 1;
+    ngx_http_markdown_g_diag_recording_state =
+        NGX_HTTP_MARKDOWN_DIAG_RECORDING_ACTIVE;
     ngx_current_msec = 2001;
     ngx_http_markdown_diagnostics_record(&ngx_http_markdown_g_diag_state,
                                          11, 33);
@@ -730,6 +755,21 @@ test_access_and_json_builder(void)
                 "JSON should expose diagnostics schema v2");
     TEST_ASSERT(strstr(json, "\"worker\":{\"pid\":1234") != NULL,
                 "JSON should expose worker identity");
+    TEST_ASSERT(strstr(json, "\"build_kind\":\"development\"") != NULL,
+                "JSON should expose the development build kind");
+    TEST_ASSERT(strstr(json, "\"source_sha\":\"development\"") != NULL,
+                "JSON should expose the development source marker");
+    TEST_ASSERT(strstr(json,
+                       "\"feature_manifest_digest\":\"development\"")
+                != NULL,
+                "JSON should expose the development feature marker");
+    TEST_ASSERT(strstr(json,
+                       "\"features\":[\"streaming\","
+                       "\"prune_noise_regions\"]") != NULL,
+                "JSON should encode compiled feature names as strings");
+    TEST_ASSERT(strstr(json, "\"diagnostics_recording\":\"active\"")
+                != NULL,
+                "JSON should expose active diagnostics recording");
     TEST_ASSERT(strstr(json, "\"configuration\":") != NULL,
                 "JSON should include configuration");
     TEST_ASSERT(strstr(json, "\"masked_keys\":[\"filter\",\"error_policy\"]")
@@ -740,7 +780,9 @@ test_access_and_json_builder(void)
     TEST_ASSERT(strstr(json, "\"recent_decisions\"") != NULL,
                 "JSON should include recent decisions");
     TEST_ASSERT(strstr(json, "\"module_metrics\":") != NULL
-                && strstr(json, "\"copied_output_total\":1") != NULL,
+                && strstr(json, "\"copied_output_total\":1") != NULL
+                && strstr(json, "\"diagnostics_recording_state\":1")
+                   != NULL,
                 "JSON should include exact module evidence counters");
     TEST_ASSERT(strstr(json, "\"profile\"") == NULL
                 && strstr(json, "\"streaming_config\"") == NULL
@@ -944,7 +986,7 @@ test_json_preserves_effective_streaming_buffer(void)
 
 
 static void
-test_diagnostics_has_no_legacy_profile_surface(void)
+test_diagnostics_has_no_removed_profile_surface(void)
 {
     ngx_http_request_t       r;
     ngx_connection_t         c;
@@ -954,7 +996,7 @@ test_diagnostics_has_no_legacy_profile_surface(void)
     ngx_int_t                rc;
     const char              *json;
 
-    TEST_SUBSECTION("diagnostics has no legacy profile surface");
+    TEST_SUBSECTION("diagnostics has no removed profile surface");
 
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
@@ -1294,7 +1336,7 @@ main(void)
     test_json_preserves_unified_error_policy();
     test_json_dynconf_state_branches();
     test_json_preserves_effective_streaming_buffer();
-    test_diagnostics_has_no_legacy_profile_surface();
+    test_diagnostics_has_no_removed_profile_surface();
     test_json_buffer_scales_with_ring_count();
     test_json_builder_rejects_invalid_ring_state();
     test_access_json_and_logging_failure_branches();

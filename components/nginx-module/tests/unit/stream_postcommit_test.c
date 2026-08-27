@@ -2,19 +2,7 @@
  * Test: stream_postcommit
  *
  * Validates the post-commit safety property for the streaming
- * fallback state machine (streaming fallback state machine, post-commit safety).
- *
- * Property test: exercises the decision engine from COMMITTED state
- * with every possible event and verifies:
- *   - Decision action is NEVER PASS_HTML
- *   - Decision action is NEVER REJECT_STATUS
- *   - Decision action is always SAFE_FINISH, ABORT, or CONTINUE_STREAMING
- *   - New state is always COMMITTED, POST_COMMIT_SAFE_FINISH,
- *     or POST_COMMIT_ABORT
- *
- * Also tests the postcommit guard function.
- *
- * Validates: post-commit never produces PASS_HTML, post-commit never produces REJECT_STATUS
+ * fallback state machine and the postcommit guard/delivery paths.
  */
 
 #include "../include/test_common.h"
@@ -167,10 +155,6 @@ ngx_http_markdown_metrics_record_terminal_abort(void)
 {
     test_terminal_abort_metric_count++;
 }
-
-/* Include the decision engine source directly */
-#include "../../src/ngx_http_markdown_stream_state.h"
-#include "../../src/ngx_http_markdown_stream_state.c"
 
 /* Include the postcommit header for guard function */
 #include "../../src/ngx_http_markdown_stream_postcommit.h"
@@ -410,133 +394,6 @@ static void test_setup(void)
     test_terminal_abort_metric_count = 0;
 }
 
-
-/*
- * Property test: from COMMITTED state, iterate over every event
- * and both on_error policies.  Verify the post-commit safety
- * invariant holds for all combinations.
- */
-static void test_committed_never_produces_html(void)
-{
-    ngx_http_markdown_stream_ctx_t ctx;
-    ngx_http_markdown_decision_t   d;
-    ngx_http_markdown_stream_event_e event;
-    ngx_uint_t policy;
-    int tested = 0;
-
-    ngx_http_markdown_stream_event_e all_events[] = {
-        NGX_HTTP_MD_EVENT_ELIGIBLE,
-        NGX_HTTP_MD_EVENT_NOT_ELIGIBLE,
-        NGX_HTTP_MD_EVENT_STREAMING_START,
-        NGX_HTTP_MD_EVENT_PARSER_UNSUITABLE,
-        NGX_HTTP_MD_EVENT_HARD_EXCLUDED,
-        NGX_HTTP_MD_EVENT_FULL_DOC_FEATURE,
-        NGX_HTTP_MD_EVENT_BUDGET_INIT_FAILURE,
-        NGX_HTTP_MD_EVENT_REPLAY_OVERFLOW,
-        NGX_HTTP_MD_EVENT_RESOURCE_LIMIT,
-        NGX_HTTP_MD_EVENT_STRICT_ETAG,
-        NGX_HTTP_MD_EVENT_LOOK_BEHIND_OVERFLOW,
-        NGX_HTTP_MD_EVENT_AUTO_RISK,
-        NGX_HTTP_MD_EVENT_COMMIT,
-        NGX_HTTP_MD_EVENT_ERROR,
-        NGX_HTTP_MD_EVENT_ON_ERROR_PASS,
-        NGX_HTTP_MD_EVENT_ON_ERROR_REJECT
-    };
-    size_t num_events = ARRAY_SIZE(all_events);
-    size_t i;
-
-    for (policy = 0; policy <= 1; policy++) {
-        for (i = 0; i < num_events; i++) {
-            event = all_events[i];
-
-            memset(&ctx, 0, sizeof(ctx));
-            ctx.current_state = NGX_HTTP_MD_STATE_COMMITTED;
-            ctx.on_error_policy = policy;
-            ctx.replay_available = 1;
-            ctx.headers_committed = 1;
-            ctx.within_resource_limits = 1;
-
-            d = ngx_http_markdown_stream_decide(&ctx, event);
-
-            /* Safety invariant: NEVER PASS_HTML */
-            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_PASS_HTML,
-                        "COMMITTED: action != PASS_HTML");
-
-            /* Safety invariant: NEVER REJECT_STATUS */
-            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_REJECT_STATUS,
-                        "COMMITTED: action != REJECT_STATUS");
-
-            /* Action must be one of valid post-commit actions */
-            TEST_ASSERT(
-                d.action == NGX_HTTP_MD_ACTION_SAFE_FINISH
-                || d.action == NGX_HTTP_MD_ACTION_ABORT
-                || d.action == NGX_HTTP_MD_ACTION_CONTINUE_STREAMING,
-                "COMMITTED: valid post-commit action");
-
-            /* State must remain in post-commit domain */
-            TEST_ASSERT(
-                d.new_state == NGX_HTTP_MD_STATE_COMMITTED
-                || d.new_state
-                   == NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH
-                || d.new_state
-                   == NGX_HTTP_MD_STATE_POST_COMMIT_ABORT,
-                "COMMITTED: state stays in post-commit domain");
-
-            tested++;
-        }
-    }
-
-    TEST_ASSERT(tested == (int)(num_events * 2),
-                "all event/policy combinations tested");
-    TEST_PASS("Post-commit never produces HTML (all events)");
-}
-
-/*
- * Same property test from POST_COMMIT_SAFE_FINISH and
- * POST_COMMIT_ABORT terminal states.
- */
-static void test_post_commit_terminals_never_produce_html(void)
-{
-    ngx_http_markdown_stream_ctx_t ctx;
-    ngx_http_markdown_decision_t   d;
-    ngx_http_markdown_stream_state_e terminal_states[] = {
-        NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH,
-        NGX_HTTP_MD_STATE_POST_COMMIT_ABORT
-    };
-    ngx_http_markdown_stream_event_e all_events[] = {
-        NGX_HTTP_MD_EVENT_ELIGIBLE,
-        NGX_HTTP_MD_EVENT_NOT_ELIGIBLE,
-        NGX_HTTP_MD_EVENT_STREAMING_START,
-        NGX_HTTP_MD_EVENT_PARSER_UNSUITABLE,
-        NGX_HTTP_MD_EVENT_ERROR,
-        NGX_HTTP_MD_EVENT_COMMIT,
-        NGX_HTTP_MD_EVENT_ON_ERROR_PASS,
-        NGX_HTTP_MD_EVENT_ON_ERROR_REJECT
-    };
-    size_t num_events = ARRAY_SIZE(all_events);
-    size_t num_states = ARRAY_SIZE(terminal_states);
-    size_t s, i;
-
-    for (s = 0; s < num_states; s++) {
-        for (i = 0; i < num_events; i++) {
-            memset(&ctx, 0, sizeof(ctx));
-            ctx.current_state = terminal_states[s];
-            ctx.on_error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-
-            d = ngx_http_markdown_stream_decide(
-                &ctx, all_events[i]);
-
-            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_PASS_HTML,
-                        "terminal: action != PASS_HTML");
-            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_REJECT_STATUS,
-                        "terminal: action != REJECT_STATUS");
-            TEST_ASSERT(d.new_state == terminal_states[s],
-                        "terminal state stays unchanged");
-        }
-    }
-
-    TEST_PASS("Post-commit terminal states never produce HTML");
-}
 
 /* --- Postcommit guard function tests --- */
 
@@ -898,10 +755,26 @@ static void test_safe_finish_backpressure_preserves_pending_chain(void)
                 "pending-output counter should increment on backpressure");
     TEST_ASSERT(test_streaming_abort_called == 0,
                 "streaming abort must not be called on backpressure");
-    ngx_http_markdown_pending_output_set(
-        &ctx.streaming.pending_output, NULL);
+
+    /* Re-enter through the production safe-finish path to drain the
+     * downstream-owned chain with NULL after backpressure clears. */
+    test_output_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+    TEST_ASSERT(rc == NGX_OK,
+                "safe_finish re-entry should drain pending output");
+    TEST_ASSERT(test_output_filter_called == 2,
+                "safe_finish re-entry should call downstream with NULL");
+    TEST_ASSERT(test_output_filter_chain == NULL,
+                "pending output must be resumed with NULL");
+    TEST_ASSERT(ctx.streaming.pending_output == NULL,
+                "pending chain should clear after successful re-entry");
     TEST_ASSERT(ngx_http_markdown_pending_output_current() == 0,
-                "pending-output counter should decrement when released");
+                "pending-output counter should decrement after re-entry");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+                "re-entry should latch the delivered main terminal");
+    TEST_ASSERT((test_request.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
+                "successful re-entry should clear module buffering");
     TEST_PASS("safe_finish backpressure preserves pending chain");
 }
 
@@ -1212,9 +1085,9 @@ static void test_postcommit_log_null_params(void)
 
     /* Should not crash with NULL params */
     ngx_http_markdown_stream_postcommit_log(NULL, NULL, NULL,
-        NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
+        MARKDOWN_REASON_CODE_STREAMING_MID_FLIGHT_ERROR);
     ngx_http_markdown_stream_postcommit_log(&test_request, NULL, "abort",
-        NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
+        MARKDOWN_REASON_CODE_STREAMING_MID_FLIGHT_ERROR);
     TEST_PASS("postcommit_log NULL params handled safely");
 }
 
@@ -1229,11 +1102,11 @@ static void test_postcommit_log_happy_path(void)
     /* Should not crash */
     ngx_http_markdown_stream_postcommit_log(
         &test_request, &ctx, "safe_finish",
-        NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
+        MARKDOWN_REASON_CODE_STREAMING_MID_FLIGHT_ERROR);
 
     ngx_http_markdown_stream_postcommit_log(
         &test_request, &ctx, "abort",
-        NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
+        MARKDOWN_REASON_CODE_STREAMING_MID_FLIGHT_ERROR);
 
     TEST_PASS("postcommit_log emits log without crashing");
 }
@@ -1559,8 +1432,6 @@ int main(void)
 {
     TEST_SECTION("Post-commit Safety Property (streaming fallback state machine, post-commit safety)");
 
-    test_committed_never_produces_html();
-    test_post_commit_terminals_never_produce_html();
     test_guard_passes_non_html();
     test_guard_fails_doctype();
     test_guard_fails_html_tag();

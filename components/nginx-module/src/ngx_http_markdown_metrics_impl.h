@@ -1,15 +1,9 @@
 #ifndef NGX_HTTP_MARKDOWN_METRICS_IMPL_H
 #define NGX_HTTP_MARKDOWN_METRICS_IMPL_H
 
-#include "ngx_http_markdown_metrics_json_perf_impl.h"
-#include "ngx_http_markdown_metrics_format.h"
-#include "ngx_http_markdown_metrics_config.h"
+#include "ngx_http_markdown_metrics_v1_renderer.h"
 
 #include <stdint.h>
-
-#ifndef NGX_MAX_SIZE_T_VALUE
-#define NGX_MAX_SIZE_T_VALUE ((size_t) -1)
-#endif
 
 /*
  * Metrics endpoint implementation.
@@ -29,10 +23,9 @@
  * ngx_atomic_uint_t values instead of ngx_atomic_t, since the snapshot
  * is only read from a single thread after collection.
  *
- * The latency histogram, decompression counters, path-hit counters, skip
- * counters, and debug per-path counters are each grouped into anonymous
- * sub-structs to keep the top-level field count within SonarCloud's 20-field
- * limit while preserving the bounded internal test renderers.
+ * The latency histogram, decompression counters, path-hit counters, and skip
+ * counters are grouped into anonymous sub-structs to keep the top-level field
+ * count within SonarCloud's 20-field limit.
  */
 typedef struct {
     ngx_atomic_uint_t le_1ms;
@@ -48,6 +41,18 @@ typedef struct {
     ngx_atomic_uint_t sum_ms;
     ngx_atomic_uint_t count;
 } ngx_http_markdown_metrics_v1_source_histogram_t;
+
+/*
+ * Auxiliary counters needed by the v1 renderer after the shared metrics
+ * values have been copied into a request-local snapshot.
+ */
+typedef struct {
+    struct {
+        ngx_atomic_uint_t current;
+    } inflight;
+    ngx_atomic_uint_t backpressure_resume_total;
+    ngx_atomic_uint_t backpressure_resume_failure_total;
+} ngx_http_markdown_metrics_performance_snapshot_t;
 
 typedef struct {
     /* Conversion attempt tracking */
@@ -112,10 +117,9 @@ typedef struct {
         } brotli_failures;
     } decompressions;
 
-    /* Path hit metrics (threshold router, grouped to keep field count <= 20) */
+    /* Path hit metrics, grouped to keep the snapshot compact. */
     struct {
         ngx_atomic_uint_t fullbuffer;
-        ngx_atomic_uint_t incremental;
 #ifdef MARKDOWN_STREAMING_ENABLED
         ngx_atomic_uint_t streaming;
 #endif
@@ -162,7 +166,7 @@ typedef struct {
             ngx_atomic_uint_t failure_file_error;
         } dynconf_reloads;
 
-        /* Parse interrupt metrics (v0.7.0) */
+        /* Parse interrupt metrics */
         struct {
             ngx_atomic_uint_t parse_timeouts_total;
             ngx_atomic_uint_t parse_budget_exceeded_total;
@@ -181,10 +185,6 @@ typedef struct {
         ngx_atomic_uint_t precommit_failopen_total;
         ngx_atomic_uint_t precommit_reject_total;
         ngx_atomic_uint_t budget_exceeded_total;
-#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
-        ngx_atomic_uint_t shadow_total;
-        ngx_atomic_uint_t shadow_diff_total;
-#endif
         ngx_atomic_uint_t last_ttfb_ms;
         ngx_atomic_uint_t last_peak_memory_bytes;
 
@@ -195,7 +195,7 @@ typedef struct {
         ngx_atomic_uint_t streaming_failure_postcommit_safe_finish;
         ngx_atomic_uint_t terminal_aborted_total;
 
-        /* Engine choice counters (v0.8.0 observability) */
+        /* Engine choice counters */
         struct {
             ngx_atomic_uint_t streaming;
             ngx_atomic_uint_t full_buffer;
@@ -213,20 +213,8 @@ typedef struct {
     } streaming;
 #endif
 
-    /* Per-path metrics (removed from production in 0.9.2) */
-#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
-    struct {
-        ngx_atomic_uint_t path_entries;
-        ngx_atomic_uint_t path_conversions;
-        ngx_atomic_uint_t path_conversion_time_sum_ms;
-        ngx_atomic_uint_t overflow_count;
-        ngx_atomic_uint_t unretained_conversions;
-        ngx_atomic_uint_t unretained_conversion_time_sum_ms;
-    } per_path;
-#endif
-
-    /* Performance metrics (backpressure, decompression path, output mode) */
-    ngx_http_markdown_metrics_perf_snapshot_t perf;
+    /* Auxiliary counters consumed by the current v1 renderer. */
+    ngx_http_markdown_metrics_performance_snapshot_t perf;
 } ngx_http_markdown_metrics_snapshot_t;
 
 static ngx_atomic_uint_t
@@ -242,12 +230,12 @@ ngx_http_markdown_metrics_ms_to_us(ngx_atomic_uint_t milliseconds)
     return (ngx_atomic_uint_t) ((uint64_t) milliseconds * 1000U);
 }
 
-typedef struct {
-    ngx_atomic_uint_t conversions_completed;
-    ngx_atomic_uint_t conversion_time_avg_ms;
-    ngx_atomic_uint_t input_bytes_avg;
-    ngx_atomic_uint_t output_bytes_avg;
-} ngx_http_markdown_metrics_derived_t;
+/* C99 declaration visibility for standalone static analysis of this impl header. */
+#ifndef ngx_memzero
+void ngx_memzero(void *buf, size_t n);
+#endif
+u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...);
+ngx_int_t ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *out);
 
 #ifndef ngx_str_set
 #define ngx_str_set(str, text)                                                    \
@@ -257,30 +245,11 @@ typedef struct {
     } while (0)
 #endif
 
-/* C99 declaration visibility for standalone static analysis of this impl header. */
-#ifndef ngx_memzero
-void ngx_memzero(void *buf, size_t n);
-#endif
-u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...);
-ngx_int_t ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *out);
-
 /*
  * Response buffer size for the metrics endpoint.
  *
- * Estimated current Prometheus output (without debug per-path entries):
+ * Estimated current Prometheus output:
  *   ~3.8 KiB (most verbose due to HELP/TYPE lines)
- *
- * Per-path entries add variable output depending on the number of
- * tracked paths and their URI lengths.  Each path entry is roughly
- * 80-120 bytes.  With a default cardinality limit
- * of 100 paths at ~100 bytes each, per-path output can reach
- * ~10 KiB.
- *
- * The 128 KiB buffer accommodates aggregate output plus debug per-path
- * entries for typical test deployments. If the buffer is exhausted
- * during per-path detail rendering, paths that do not fit are
- * aggregated into an "__other__" entry so the response remains
- * syntactically complete and the endpoint always returns HTTP 200.
  */
 #define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  131072
 
@@ -288,173 +257,12 @@ static u_char *
 ngx_http_markdown_metrics_render_response_body(
     ngx_http_request_t *r,
     ngx_buf_t *b,
-    ngx_uint_t format,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot,
-    const ngx_http_markdown_metrics_derived_t *derived);
+    const ngx_http_markdown_metrics_snapshot_t *snapshot);
 static ngx_int_t
 ngx_http_markdown_metrics_send_response(
     ngx_http_request_t *r,
     ngx_buf_t *b,
     u_char *response_end);
-
-static u_char *
-ngx_http_markdown_metrics_write_json_conversion(
-    u_char *p,
-    u_char *end,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot,
-    ngx_atomic_uint_t conversions_completed,
-    ngx_atomic_uint_t conversion_time_avg_ms,
-    ngx_atomic_uint_t input_bytes_avg,
-    ngx_atomic_uint_t output_bytes_avg)
-{
-    return ngx_slprintf(p, end,
-        "{\n"
-        "  \"conversions_attempted\": %uA,\n"
-        "  \"conversions_succeeded\": %uA,\n"
-        "  \"conversions_failed\": %uA,\n"
-        "  \"conversions_bypassed\": %uA,\n"
-        "  \"failures_conversion\": %uA,\n"
-        "  \"failures_resource_limit\": %uA,\n"
-        "  \"failures_system\": %uA,\n"
-        "  \"conversion_time_sum_ms\": %uA,\n"
-        "  \"conversion_completed\": %uA,\n"
-        "  \"conversion_time_avg_ms\": %uA,\n"
-        "  \"input_bytes\": %uA,\n"
-        "  \"input_bytes_avg\": %uA,\n"
-        "  \"output_bytes\": %uA,\n"
-        "  \"output_bytes_avg\": %uA,\n"
-        "  \"conversion_latency_buckets\": {\n"
-        "    \"le_10ms\": %uA,\n"
-        "    \"le_100ms\": %uA,\n"
-        "    \"le_1000ms\": %uA,\n"
-        "    \"gt_1000ms\": %uA\n"
-        "  },\n"
-        "  \"decompressions_attempted\": %uA,\n"
-        "  \"decompressions_succeeded\": %uA,\n"
-        "  \"decompressions_failed\": %uA,\n"
-        "  \"decompressions_gzip\": %uA,\n"
-        "  \"decompressions_deflate\": %uA,\n"
-        "  \"decompressions_brotli\": %uA,\n"
-        "  \"decompression_budget_exceeded_total\": %uA,\n"
-        "  \"decompression_format_error_total\": %uA,\n"
-        "  \"decompression_truncated_input_total\": %uA,\n"
-        "  \"decompression_io_error_total\": %uA,\n"
-        "  \"replay_buffer_errors_total\": %uA,\n",
-        snapshot->conversions_attempted,
-        snapshot->conversions_succeeded,
-        snapshot->conversions_failed,
-        snapshot->conversions_bypassed,
-        snapshot->failures_conversion,
-        snapshot->failures_resource_limit,
-        snapshot->failures_system,
-        snapshot->conversion_time_sum_ms,
-        conversions_completed,
-        conversion_time_avg_ms,
-        snapshot->input_bytes,
-        input_bytes_avg,
-        snapshot->output_bytes,
-        output_bytes_avg,
-        snapshot->conversion_latency.le_10ms,
-        snapshot->conversion_latency.le_100ms,
-        snapshot->conversion_latency.le_1000ms,
-        snapshot->conversion_latency.gt_1000ms,
-        snapshot->decompressions.attempted,
-        snapshot->decompressions.succeeded,
-        snapshot->decompressions.failed,
-        snapshot->decompressions.gzip,
-        snapshot->decompressions.deflate,
-        snapshot->decompressions.brotli,
-        snapshot->decompressions.budget_exceeded_total,
-        snapshot->decompressions.format_error_total,
-        snapshot->decompressions.truncated_input_total,
-        snapshot->decompressions.io_error_total,
-        snapshot->results.replay_buffer_errors_total);
-}
-
-static u_char *
-ngx_http_markdown_metrics_write_json_routing(
-    u_char *p,
-    u_char *end,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot)
-{
-    return ngx_slprintf(p, end,
-        "  \"fullbuffer_path_hits\": %uA,\n"
-        "  \"incremental_path_hits\": %uA,\n"
-#ifdef MARKDOWN_STREAMING_ENABLED
-        "  \"streaming_path_hits\": %uA,\n"
-        "  \"streaming\": {\n"
-        "    \"requests_total\": %uA,\n"
-        "    \"fallback_total\": %uA,\n"
-        "    \"succeeded_total\": %uA,\n"
-        "    \"failed_total\": %uA,\n"
-        "    \"postcommit_error_total\": %uA,\n"
-        "    \"precommit_failopen_total\": %uA,\n"
-        "    \"precommit_reject_total\": %uA,\n"
-        "    \"budget_exceeded_total\": %uA,\n"
-        "    \"last_ttfb_ms\": %uA,\n"
-        "    \"last_peak_memory_bytes\": %uA\n"
-        "  },\n"
-#endif
-        "  \"requests_entered\": %uA,\n"
-        "  \"skips\": {\n"
-        "    \"config\": %uA,\n"
-        "    \"method\": %uA,\n"
-        "    \"status\": %uA,\n"
-        "    \"content_type\": %uA,\n"
-        "    \"size\": %uA,\n"
-        "    \"streaming\": %uA,\n"
-        "    \"auth\": %uA,\n"
-        "    \"range\": %uA,\n"
-        "    \"accept\": %uA,\n"
-        "    \"no_accept\": %uA,\n"
-        "    \"conditional\": %uA,\n"
-        "    \"compression_passthrough\": %uA,\n"
-        "    \"no_transform\": %uA\n"
-        "  },\n"
-        "  \"failopen_count\": %uA,\n"
-        "  \"delivery_count\": %uA,\n"
-        "  \"decision_count\": %uA,\n"
-        "  \"estimated_token_savings\": %uA,\n"
-        "  \"parse_timeouts_total\": %uA,\n"
-        "  \"parse_budget_exceeded_total\": %uA,\n"
-        "  \"per_path\": {\n"
-        "    \"paths\": [\n",
-        snapshot->path_hits.fullbuffer,
-        snapshot->path_hits.incremental,
-#ifdef MARKDOWN_STREAMING_ENABLED
-        snapshot->path_hits.streaming,
-        snapshot->streaming.requests_total,
-        snapshot->streaming.fallback_total,
-        snapshot->streaming.succeeded_total,
-        snapshot->streaming.failed_total,
-        snapshot->streaming.postcommit_error_total,
-        snapshot->streaming.precommit_failopen_total,
-        snapshot->streaming.precommit_reject_total,
-        snapshot->streaming.budget_exceeded_total,
-        snapshot->streaming.last_ttfb_ms,
-        snapshot->streaming.last_peak_memory_bytes,
-#endif
-        snapshot->requests_entered,
-        snapshot->skips.config,
-        snapshot->skips.method,
-        snapshot->skips.status,
-        snapshot->skips.content_type,
-        snapshot->skips.size,
-        snapshot->skips.streaming,
-        snapshot->skips.auth,
-        snapshot->skips.range,
-        snapshot->skips.accept,
-        snapshot->skips.no_accept,
-        snapshot->skips.conditional,
-        snapshot->skips.compression_passthrough,
-        snapshot->skips.no_transform,
-        snapshot->results.failopen_count,
-        snapshot->results.delivery_count,
-        snapshot->results.decision_count,
-        snapshot->results.estimated_token_savings,
-        snapshot->results.parse_interrupts.parse_timeouts_total,
-        snapshot->results.parse_interrupts.parse_budget_exceeded_total);
-}
 
 static void
 ngx_http_markdown_collect_v1_latency_snapshot(
@@ -581,7 +389,6 @@ ngx_http_markdown_collect_core_snapshot(
     ngx_http_markdown_collect_v1_latency_snapshot(snapshot, metrics);
     ngx_http_markdown_collect_decompression_snapshot(snapshot, metrics);
     snapshot->path_hits.fullbuffer = metrics->path_hits.fullbuffer;
-    snapshot->path_hits.incremental = metrics->path_hits.incremental;
 #ifdef MARKDOWN_STREAMING_ENABLED
     snapshot->path_hits.streaming = metrics->path_hits.streaming;
 #endif
@@ -621,11 +428,6 @@ ngx_http_markdown_collect_streaming_snapshot(
         metrics->streaming.precommit_reject_total;
     snapshot->streaming.budget_exceeded_total =
         metrics->streaming.budget_exceeded_total;
-#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
-    snapshot->streaming.shadow_total = metrics->streaming.shadow_total;
-    snapshot->streaming.shadow_diff_total =
-        metrics->streaming.shadow_diff_total;
-#endif
     snapshot->streaming.last_ttfb_ms = metrics->streaming.last_ttfb_ms;
     snapshot->streaming.last_peak_memory_bytes =
         metrics->streaming.last_peak_memory_bytes;
@@ -694,17 +496,6 @@ ngx_http_markdown_collect_result_snapshot(
         metrics->results.dynconf_reloads.failure_parse_error;
     snapshot->results.dynconf_reloads.failure_file_error =
         metrics->results.dynconf_reloads.failure_file_error;
-#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
-    snapshot->per_path.path_entries = metrics->per_path.path_entries;
-    snapshot->per_path.path_conversions = metrics->per_path.path_conversions;
-    snapshot->per_path.path_conversion_time_sum_ms =
-        metrics->per_path.path_conversion_time_sum_ms;
-    snapshot->per_path.overflow_count = metrics->per_path.overflow_count;
-    snapshot->per_path.unretained_conversions =
-        metrics->per_path.unretained_conversions;
-    snapshot->per_path.unretained_conversion_time_sum_ms =
-        metrics->per_path.unretained_conversion_time_sum_ms;
-#endif
 }
 
 static void
@@ -714,24 +505,10 @@ ngx_http_markdown_collect_performance_snapshot(
 {
     snapshot->perf.inflight.current =
         (ngx_atomic_uint_t) ngx_http_markdown_inflight_current();
-    snapshot->perf.inflight.high_watermark =
-        (ngx_atomic_uint_t) ngx_http_markdown_inflight_high_watermark();
-    snapshot->perf.inflight.overload_total =
-        (ngx_atomic_uint_t) ngx_http_markdown_inflight_overload_total();
-    snapshot->perf.backpressure_total = metrics->perf.backpressure_total;
     snapshot->perf.backpressure_resume_total =
         metrics->perf.backpressure_resume_total;
     snapshot->perf.backpressure_resume_failure_total =
         metrics->perf.backpressure_resume_failure_total;
-    snapshot->perf.pending_output_high_watermark_bytes =
-        metrics->perf.pending_output_high_watermark_bytes;
-    snapshot->perf.decompression_streaming_total =
-        metrics->perf.decompression_streaming_total;
-    snapshot->perf.decompression_fullbuffer_total =
-        metrics->perf.decompression_fullbuffer_total;
-    snapshot->perf.decompression_budget_exceeded_total =
-        metrics->perf.decompression_budget_exceeded_total;
-    snapshot->perf.copied_output_total = metrics->perf.copied_output_total;
 }
 
 /**
@@ -800,7 +577,7 @@ ngx_http_markdown_metrics_map_v1_histogram(
 }
 
 /*
- * Translate the legacy storage snapshot into the frozen v1 metric contract.
+ * Translate the collected storage snapshot into the v1 metric contract.
  * The mapping keeps public counters stable while preserving streaming-only
  * fields behind their feature guard and leaves absent snapshots zeroed.
  */
@@ -857,8 +634,7 @@ ngx_http_markdown_metrics_to_v1(
     v1->requests.failed_closed = failed_closed;
 
     /* Attempts and deliveries use the frozen engine-specific counters. */
-    v1->attempts.full_buffer = snapshot->path_hits.fullbuffer
-        + snapshot->path_hits.incremental;
+    v1->attempts.full_buffer = snapshot->path_hits.fullbuffer;
 #ifdef MARKDOWN_STREAMING_ENABLED
     v1->attempts.streaming = snapshot->path_hits.streaming;
 #endif
@@ -1048,1129 +824,29 @@ ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
     return NGX_OK;
 }
 
-/*
- * Derive averages from the raw counters after taking the best-effort snapshot.
- * Division only occurs when the relevant denominator is non-zero.
- */
-static void
-ngx_http_markdown_metrics_derive_values(
-    const ngx_http_markdown_metrics_snapshot_t *snapshot,
-    ngx_http_markdown_metrics_derived_t *derived)
-{
-    derived->conversions_completed =
-        snapshot->conversions_succeeded + snapshot->conversions_failed;
-    derived->conversion_time_avg_ms = (derived->conversions_completed > 0)
-        ? (snapshot->conversion_time_sum_ms / derived->conversions_completed)
-        : 0;
-    derived->input_bytes_avg = (snapshot->conversions_succeeded > 0)
-        ? (snapshot->input_bytes / snapshot->conversions_succeeded)
-        : 0;
-    derived->output_bytes_avg = (snapshot->conversions_succeeded > 0)
-        ? (snapshot->output_bytes / snapshot->conversions_succeeded)
-        : 0;
-}
-
-/*
- * Per-path RB-tree walk enable macro and forward declarations.
- *
- * These must be at file scope because C rejects block-scope
- * function declarations with static storage class.  Unit tests
- * that lack full NGINX type definitions define the macro to 0
- * before including this header.
- */
-#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-typedef struct {
-    u_char             *pos;
-    u_char             *end;
-    size_t              tail_reserve;
-    ngx_atomic_uint_t   omitted_conversions;
-    ngx_atomic_uint_t   omitted_entries;
-    ngx_atomic_uint_t   omitted_time_ms;
-    ngx_uint_t          omitted_nodes;
-    ngx_uint_t          entries_written;
-    ngx_flag_t          failed;
-} ngx_http_markdown_path_detail_render_ctx_t;
-
-static u_char *
-ngx_http_markdown_json_walk_path_tree_bounded(
-    ngx_rbtree_node_t *node,
-    ngx_rbtree_node_t *sentinel,
-    ngx_http_markdown_path_detail_render_ctx_t *render);
-
-static u_char *
-ngx_http_markdown_text_walk_path_tree_bounded(
-    ngx_rbtree_node_t *node,
-    ngx_rbtree_node_t *sentinel,
-    ngx_http_markdown_path_detail_render_ctx_t *render);
-
-static u_char *
-ngx_http_markdown_json_write_path_details(
-    u_char *p,
-    u_char *end,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot);
-
-static u_char *
-ngx_http_markdown_text_write_path_details(
-    u_char *p,
-    u_char *end,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot);
-
-static size_t ngx_http_markdown_json_path_entry_size(size_t path_len);
-static size_t ngx_http_markdown_text_path_entry_size(size_t path_len);
-static size_t ngx_http_markdown_json_other_entry_size(void);
-static size_t ngx_http_markdown_text_other_entry_size(void);
-static size_t ngx_http_markdown_json_tail_reserve(void);
-static size_t ngx_http_markdown_text_tail_reserve(void);
-#endif
-
-
-#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-static ngx_atomic_uint_t
-ngx_http_markdown_metrics_saturating_add(
-    ngx_atomic_uint_t left, ngx_atomic_uint_t right)
-{
-    if (((ngx_atomic_uint_t) -1) - left < right) {
-        return (ngx_atomic_uint_t) -1;
-    }
-
-    return left + right;
-}
-
-static size_t
-ngx_http_markdown_metrics_saturating_size_add(size_t left, size_t right)
-{
-    if (((size_t) -1) - left < right) {
-        return (size_t) -1;
-    }
-
-    return left + right;
-}
-#endif
-
-/**
- * Render the collected metrics snapshot as a JSON object into the provided buffer.
- *
- * Formats all metric counters, derived aggregates (conversion counts, average times,
- * average I/O), conversion latency buckets, decompression stats, and path-routing hits
- * as a JSON object written starting at `p` and not past `end`.
- *
- * When per-path tracking is active, walks the SHM RB-tree under the slab pool
- * mutex to emit individual per-path entries in a "paths" array inside the
- * "per_path" object.
- *
- * @param p Pointer to the start position in the buffer where JSON will be written.
- * @param end Pointer to one past the end of the buffer; writing will not exceed this.
- * @param snapshot Pointer to the metrics snapshot containing raw counters to emit.
- * @param conversions_completed Derived total of completed conversions (succeeded + failed).
- * @param conversion_time_avg_ms Derived average conversion time in milliseconds.
- * @param input_bytes_avg Derived average input bytes per successful conversion.
- * @param output_bytes_avg Derived average output bytes per successful conversion.
- * @returns Pointer to the buffer position immediately after the last byte written.
- */
-static u_char *
-ngx_http_markdown_metrics_write_json(
-    u_char *p,
-    u_char *end,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot,
-    ngx_atomic_uint_t conversions_completed,
-    ngx_atomic_uint_t conversion_time_avg_ms,
-    ngx_atomic_uint_t input_bytes_avg,
-    ngx_atomic_uint_t output_bytes_avg)
-{
-    /*
-     * Emit the metrics payload as a JSON object.
-     *
-     * The format string covers everything up to and including the
-     * per_path aggregate counters.  After the aggregate section,
-     * if per-path tracking is active, we walk the SHM RB-tree
-     * to emit individual path entries, then close the object.
-     *
-     * The caller is responsible for detecting truncation (p >= end)
-     * after this function returns.
-     */
-    p = ngx_http_markdown_metrics_write_json_conversion(
-        p, end, snapshot, conversions_completed,
-        conversion_time_avg_ms, input_bytes_avg, output_bytes_avg);
-    p = ngx_http_markdown_metrics_write_json_routing(p, end, snapshot);
-
-#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-    p = ngx_http_markdown_json_write_path_details(p, end, snapshot);
-    if (p == NULL) {
-        return NULL;
-    }
-#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
-
-    p = ngx_slprintf(p, end, "\n    ]\n  },\n");
-    p = ngx_http_markdown_metrics_write_json_perf(
-        p, end, &snapshot->perf);
-    return ngx_slprintf(p, end, "}");
-}
-
-
-/**
- * Format a metrics snapshot as a human-readable plain-text report into the provided buffer.
- *
- * When per-path tracking is active, walks the SHM RB-tree under the slab
- * pool mutex to emit individual per-path entries after the aggregate section.
- *
- * @param p Pointer to the current write position in the buffer.
- * @param end Pointer to the end of the buffer (one past the last writable byte).
- * @param snapshot Snapshot of atomic metrics to render.
- * @param conversions_completed Total conversions completed (succeeded + failed).
- * @param conversion_time_avg_ms Average conversion time in milliseconds.
- * @param input_bytes_avg Average input size in bytes per successful conversion.
- * @param output_bytes_avg Average output size in bytes per successful conversion.
- * @returns Pointer to the buffer position immediately after the written data; if the buffer was too small the pointer will be equal to `end`.
- */
-static u_char *
-ngx_http_markdown_metrics_write_text_perf(
-    u_char *p,
-    u_char *end,
-    const ngx_http_markdown_metrics_perf_snapshot_t *perf)
-{
-    return ngx_slprintf(p, end,
-        "\n"
-        "Performance Metrics:\n"
-        "- Backpressure Total: %uA\n"
-        "- Backpressure Resume Total: %uA\n"
-        "- Pending Output High Watermark (bytes): %uA\n"
-        "- Decompression Streaming Total: %uA\n"
-        "- Decompression Full-Buffer Total: %uA\n"
-        "- Decompression Budget Exceeded Total: %uA\n"
-        "- Copied Output Total: %uA\n",
-        perf->backpressure_total,
-        perf->backpressure_resume_total,
-        perf->pending_output_high_watermark_bytes,
-        perf->decompression_streaming_total,
-        perf->decompression_fullbuffer_total,
-        perf->decompression_budget_exceeded_total,
-        perf->copied_output_total);
-}
-
-
-static u_char *
-ngx_http_markdown_metrics_write_text_summary(
-    u_char *p,
-    u_char *end,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot,
-    ngx_atomic_uint_t conversions_completed,
-    ngx_atomic_uint_t conversion_time_avg_ms,
-    ngx_atomic_uint_t input_bytes_avg,
-    ngx_atomic_uint_t output_bytes_avg)
-{
-    /*
-     * Keep the text schema aligned with the snapshot fields and the JSON
-     * renderer.  The callers reserve the complete response buffer before
-     * entering this formatter, so ngx_slprintf may only advance to `end`.
-     */
-    return ngx_slprintf(p, end,
-        "Markdown Filter Metrics\n"
-        "=======================\n"
-        "Conversions Attempted: %uA\n"
-        "Conversions Succeeded: %uA\n"
-        "Conversions Failed: %uA\n"
-        "Conversions Bypassed: %uA\n"
-        "Conversions Completed: %uA\n\n"
-        "Failure Breakdown:\n"
-        "- Conversion Errors: %uA\n"
-        "- Resource Limit Exceeded: %uA\n"
-        "- System Errors: %uA\n\n"
-        "Performance:\n"
-        "- Total Conversion Time: %uA ms\n"
-        "- Average Conversion Time: %uA ms\n"
-        "- Total Input Bytes: %uA\n"
-        "- Average Input Bytes: %uA\n"
-        "- Total Output Bytes: %uA\n"
-        "- Average Output Bytes: %uA\n"
-        "- Latency <= 10ms: %uA\n"
-        "- Latency <= 100ms: %uA\n"
-        "- Latency <= 1000ms: %uA\n"
-        "- Latency > 1000ms: %uA\n\n"
-        "Decompression Statistics:\n"
-        "- Decompressions Attempted: %uA\n"
-        "- Decompressions Succeeded: %uA\n"
-        "- Decompressions Failed: %uA\n"
-        "- Gzip Decompressions: %uA\n"
-        "- Deflate Decompressions: %uA\n"
-        "- Brotli Decompressions: %uA\n"
-        "- Decompression Budget Exceeded: %uA\n"
-        "- Decompression Format Errors: %uA\n"
-        "- Decompression Truncated Input: %uA\n"
-        "- Decompression I/O Errors: %uA\n"
-        "- Replay Buffer Errors: %uA\n\n"
-        "Path Routing:\n"
-        "- Full-Buffer Path Hits: %uA\n"
-        "- Incremental Path Hits: %uA\n"
-#ifdef MARKDOWN_STREAMING_ENABLED
-        "- Streaming Path Hits: %uA\n\n"
-        "Streaming:\n"
-        "- Streaming Requests Total: %uA\n"
-        "- Streaming Fallback Total: %uA\n"
-        "- Streaming Succeeded Total: %uA\n"
-        "- Streaming Failed Total: %uA\n"
-        "- Streaming Post-Commit Errors: %uA\n"
-        "- Streaming Pre-Commit Fail-Open: %uA\n"
-        "- Streaming Pre-Commit Reject: %uA\n"
-        "- Streaming Budget Exceeded: %uA\n"
-        "- Streaming Last TTFB (ms): %uA\n"
-        "- Streaming Peak Memory (bytes): %uA\n"
-#endif
-        "\n",
-        snapshot->conversions_attempted,
-        snapshot->conversions_succeeded,
-        snapshot->conversions_failed,
-        snapshot->conversions_bypassed,
-        conversions_completed,
-        snapshot->failures_conversion,
-        snapshot->failures_resource_limit,
-        snapshot->failures_system,
-        snapshot->conversion_time_sum_ms,
-        conversion_time_avg_ms,
-        snapshot->input_bytes,
-        input_bytes_avg,
-        snapshot->output_bytes,
-        output_bytes_avg,
-        snapshot->conversion_latency.le_10ms,
-        snapshot->conversion_latency.le_100ms,
-        snapshot->conversion_latency.le_1000ms,
-        snapshot->conversion_latency.gt_1000ms,
-        snapshot->decompressions.attempted,
-        snapshot->decompressions.succeeded,
-        snapshot->decompressions.failed,
-        snapshot->decompressions.gzip,
-        snapshot->decompressions.deflate,
-        snapshot->decompressions.brotli,
-        snapshot->decompressions.budget_exceeded_total,
-        snapshot->decompressions.format_error_total,
-        snapshot->decompressions.truncated_input_total,
-        snapshot->decompressions.io_error_total,
-        snapshot->results.replay_buffer_errors_total,
-        snapshot->path_hits.fullbuffer,
-        snapshot->path_hits.incremental
-#ifdef MARKDOWN_STREAMING_ENABLED
-        ,
-        snapshot->path_hits.streaming,
-        snapshot->streaming.requests_total,
-        snapshot->streaming.fallback_total,
-        snapshot->streaming.succeeded_total,
-        snapshot->streaming.failed_total,
-        snapshot->streaming.postcommit_error_total,
-        snapshot->streaming.precommit_failopen_total,
-        snapshot->streaming.precommit_reject_total,
-        snapshot->streaming.budget_exceeded_total,
-        snapshot->streaming.last_ttfb_ms,
-        snapshot->streaming.last_peak_memory_bytes
-#endif
-        );
-}
-
-static u_char *
-ngx_http_markdown_metrics_write_text_decision(
-    u_char *p,
-    u_char *end,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot)
-{
-    return ngx_slprintf(p, end,
-        "Decision Chain:\n"
-        "- Requests Entered: %uA\n"
-        "- Skips (Config): %uA\n"
-        "- Skips (Method): %uA\n"
-        "- Skips (Status): %uA\n"
-        "- Skips (Content-Type): %uA\n"
-        "- Skips (Size): %uA\n"
-        "- Skips (Streaming): %uA\n"
-        "- Skips (Auth): %uA\n"
-        "- Skips (Range): %uA\n"
-        "- Skips (Accept): %uA\n"
-        "- Skips (No Accept): %uA\n"
-        "- Skips (Conditional): %uA\n"
-        "- Skips (Compression Passthrough): %uA\n"
-        "- Skips (No Transform): %uA\n"
-        "- Fail-Open Count: %uA\n"
-        "- Delivery Count: %uA\n"
-        "- Decision Count: %uA\n"
-        "- Estimated Token Savings: %uA\n"
-        "- Parse Timeouts Total: %uA\n"
-        "- Parse Budget Exceeded Total: %uA\n",
-        snapshot->requests_entered,
-        snapshot->skips.config,
-        snapshot->skips.method,
-        snapshot->skips.status,
-        snapshot->skips.content_type,
-        snapshot->skips.size,
-        snapshot->skips.streaming,
-        snapshot->skips.auth,
-        snapshot->skips.range,
-        snapshot->skips.accept,
-        snapshot->skips.no_accept,
-        snapshot->skips.conditional,
-        snapshot->skips.compression_passthrough,
-        snapshot->skips.no_transform,
-        snapshot->results.failopen_count,
-        snapshot->results.delivery_count,
-        snapshot->results.decision_count,
-        snapshot->results.estimated_token_savings,
-        snapshot->results.parse_interrupts.parse_timeouts_total,
-        snapshot->results.parse_interrupts.parse_budget_exceeded_total);
-}
-
-static u_char *
-ngx_http_markdown_metrics_write_text(
-    u_char *p,
-    u_char *end,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot,
-    ngx_atomic_uint_t conversions_completed,
-    ngx_atomic_uint_t conversion_time_avg_ms,
-    ngx_atomic_uint_t input_bytes_avg,
-    ngx_atomic_uint_t output_bytes_avg)
-{
-    /*
-     * Emit the full metrics payload as a human-readable plain-text
-     * report.  Sections mirror the JSON renderer: conversion counters,
-     * failure breakdown, performance aggregates with latency histogram,
-     * decompression stats, path routing, streaming counters, and
-     * decision-chain skip reasons.
-     *
-     * After the aggregate per-path section, if per-path tracking is
-     * active, walk the SHM RB-tree to emit individual per-path entries.
-     *
-     * The caller is responsible for detecting truncation (p >= end)
-     * after this function returns.
-     */
-    p = ngx_http_markdown_metrics_write_text_summary(
-        p, end, snapshot, conversions_completed,
-        conversion_time_avg_ms, input_bytes_avg, output_bytes_avg);
-    p = ngx_http_markdown_metrics_write_text_decision(p, end, snapshot);
-
-    p = ngx_http_markdown_metrics_write_text_perf(p, end, &snapshot->perf);
-#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-    p = ngx_http_markdown_text_write_path_details(p, end, snapshot);
-    if (p == NULL) {
-        return NULL;
-    }
-#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
-
-    return p;
-}
-
-
-#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-/*
- * Write a two-character escape sequence (backslash + second char)
- * into the destination buffer.
- *
- * Returns the updated write position, or last if the buffer
- * cannot accommodate two more bytes.
- */
-static u_char *
-ngx_http_markdown_escape_json_two_char(u_char *dst, u_char *last,
-                                       u_char second)
-{
-    if (dst + 2 > last) {
-        return last;
-    }
-
-    *dst++ = '\\';
-    *dst++ = second;
-
-    return dst;
-}
-
-
-/*
- * Escape a byte string for use inside a JSON string value.
- *
- * JSON requires escaping: " -> \", \ -> \\, control chars (< 0x20) -> \uXXXX.
- *
- * Parameters:
- *   dst  - destination buffer start
- *   last - one past end of destination buffer
- *   src  - source bytes
- *   len  - source length
- *
- * Returns:
- *   Updated write position (clamped to last on overflow).
- */
-static u_char *
-ngx_http_markdown_escape_json_string(u_char *dst, u_char *last,
-                                     const u_char *src, size_t len)
-{
-    size_t   i;
-    u_char   ch;
-
-    i = 0;
-    while (i < len && dst < last) {
-        ch = src[i];
-        i++;
-
-        switch (ch) {
-        case '"':
-            dst = ngx_http_markdown_escape_json_two_char(dst, last, '"');
-            break;
-        case '\\':
-            dst = ngx_http_markdown_escape_json_two_char(dst, last, '\\');
-            break;
-        case '\n':
-            dst = ngx_http_markdown_escape_json_two_char(dst, last, 'n');
-            break;
-        case '\r':
-            dst = ngx_http_markdown_escape_json_two_char(dst, last, 'r');
-            break;
-        case '\t':
-            dst = ngx_http_markdown_escape_json_two_char(dst, last, 't');
-            break;
-        default:
-            if (ch >= 0x20) {
-                *dst++ = ch;
-                break;
-            }
-
-            /* Control character: emit as \uXXXX */
-            if (dst + 6 > last) {
-                return last;
-            }
-            dst = ngx_snprintf(dst, 6, "\\u%04X", (unsigned) ch);
-            break;
-        }
-    }
-
-    return dst;
-}
-
-
-/*
- * Bounded rendering context for per-path detail output.
- *
- * Shared by the bounded Prometheus renderer to implement graceful
- * degradation when the output buffer cannot accommodate all
- * per-path entries.  Omitted entries are aggregated into an
- * __other__ pseudo-entry so the response always remains
- * syntactically complete and the endpoint returns HTTP 200.
- *
- * The typedef is placed at file scope (before the write functions)
- * so it is visible to both the forward-declaration block and the
- * bounded walk function definitions below.
- */
-
-
-/*
- * Estimate the maximum encoded size of one JSON per-path entry,
- * including the trailing comma, for a path of the given length.
- * Uses a conservative upper bound that accounts for JSON escaping
- * (each byte may expand to \uXXXX = 6 bytes) and the maximum
- * decimal digit count for ngx_atomic_uint_t counters.
- */
-static size_t
-ngx_http_markdown_json_path_entry_size(size_t path_len)
-{
-    size_t  fixed_size;
-    size_t  max_escaped;
-    size_t  max_digits;
-
-    if (path_len > ((size_t) -1) / 6) {
-        return (size_t) -1;
-    }
-
-    max_escaped = path_len * 6;
-    max_digits = 20 * 3;
-    fixed_size = sizeof("\n      {\"path\": \"\", \"conversions\": , "
-                        "\"entries\": , \"conversion_time_sum_ms\": },") - 1;
-
-    if (max_escaped > ((size_t) -1) - fixed_size - max_digits) {
-        return (size_t) -1;
-    }
-
-    return fixed_size + max_escaped + max_digits;
-}
-
-
-/*
- * Estimate the maximum encoded size of one plain-text per-path line
- * for a path of the given length.
- */
-static size_t
-ngx_http_markdown_text_path_entry_size(size_t path_len)
-{
-    size_t  fixed_size;
-    size_t  max_escaped;
-    size_t  max_digits;
-
-    if (path_len > ((size_t) -1) / 6) {
-        return (size_t) -1;
-    }
-
-    max_escaped = path_len * 6;
-    max_digits = 20 * 3;
-    fixed_size = sizeof("- Path[]: conversions= entries= time_ms=\n") - 1;
-
-    if (max_escaped > ((size_t) -1) - fixed_size - max_digits) {
-        return (size_t) -1;
-    }
-
-    return fixed_size + max_escaped + max_digits;
-}
-
-static ngx_int_t
-ngx_http_markdown_path_len_to_size(
-    const ngx_http_markdown_path_metric_node_t *node,
-    size_t *path_len)
-{
-    if (node == NULL || path_len == NULL
-        || node->path_len > NGX_MAX_SIZE_T_VALUE)
-    {
-        return NGX_ERROR;
-    }
-
-    *path_len = (size_t) node->path_len;
-    return NGX_OK;
-}
-
-
-/*
- * Estimate the maximum encoded size of the __other__ JSON entry.
- */
-static size_t
-ngx_http_markdown_json_other_entry_size(void)
-{
-    return sizeof("\n      {\"path\":\"__other__\","
-                  "\"conversions\":,"
-                  "\"conversion_time_sum_ms\":,"
-                  "\"entries\":}") - 1
-        + 3 * 20;
-}
-
-
-/*
- * Estimate the maximum encoded size of the __other__ plain-text line.
- */
-static size_t
-ngx_http_markdown_text_other_entry_size(void)
-{
-    return sizeof("- Path[__other__]: conversions= entries= time_ms=\n") - 1
-        + 3 * 20;
-}
-
-
-static size_t
-ngx_http_markdown_json_perf_section_size(void)
-{
-    return NGX_HTTP_MARKDOWN_JSON_PERF_MAX_SIZE;
-}
-
-static size_t
-ngx_http_markdown_json_closing_brace_size(void)
-{
-    return sizeof("}\n") - 1;
-}
-
-/*
- * Estimate the tail reserve needed for JSON: closing the paths array,
- * the per_path object, the perf section, and the outer closing brace.
- */
-static size_t
-ngx_http_markdown_json_tail_reserve(void)
-{
-    return sizeof("\n    ]\n  },\n") - 1
-           + ngx_http_markdown_json_other_entry_size()
-           + ngx_http_markdown_json_perf_section_size()
-           + ngx_http_markdown_json_closing_brace_size();
-}
-
-/*
- * Estimate the tail reserve needed for plain-text: the __other__ line
- * plus exact perf section and trailing newline.
- */
-static size_t
-ngx_http_markdown_text_tail_reserve(void)
-{
-    return ngx_http_markdown_text_other_entry_size()
-           + sizeof("\nPerformance Metrics:\n"
-                    "- Backpressure Total: \n"
-                    "- Backpressure Resume Total: \n"
-                    "- Pending Output High Watermark (bytes): \n"
-                    "- Decompression Streaming Total: \n"
-                    "- Decompression Full-Buffer Total: \n"
-                    "- Decompression Budget Exceeded Total: \n"
-                    "- Zero-Copy Output Total: \n"
-                    "- Copied Output Total: \n") - 1
-           + 8 * 20;
-}
-
-
-static u_char *
-ngx_http_markdown_json_walk_path_tree_bounded(
-    ngx_rbtree_node_t *node,
-    ngx_rbtree_node_t *sentinel,
-    ngx_http_markdown_path_detail_render_ctx_t *render)
-{
-    const ngx_http_markdown_path_metric_node_t  *pnode;
-    size_t                                       path_len;
-    size_t                                       needed;
-    size_t                                       remaining;
-
-    /*
-     * In-order traversal preserves deterministic path output.  Every node
-     * either fits before the reserved tail or is folded into __other__;
-     * `render->failed` records malformed lengths for the caller.
-     */
-    if (node == sentinel || render->pos >= render->end) {
-        return render->pos;
-    }
-
-    render->pos = ngx_http_markdown_json_walk_path_tree_bounded(
-            node->left, sentinel, render);
-
-    if (render->failed) {
-        return render->pos;
-    }
-
-    remaining = (size_t) (render->end - render->pos);
-    if (remaining > render->tail_reserve) {
-        pnode = (const ngx_http_markdown_path_metric_node_t *) node;
-        if (ngx_http_markdown_path_len_to_size(pnode, &path_len)
-            != NGX_OK)
-        {
-            render->failed = 1;
-            return render->pos;
-        }
-        needed = ngx_http_markdown_json_path_entry_size(path_len);
-
-        if (needed <= remaining - render->tail_reserve) {
-            u_char  *entry_start = render->pos;
-
-            if (render->entries_written > 0) {
-                render->pos = ngx_slprintf(render->pos, render->end, ",");
-            }
-
-            render->pos = ngx_slprintf(render->pos, render->end,
-                "\n      {\"path\": \"");
-            render->pos = ngx_http_markdown_escape_json_string(
-                render->pos, render->end,
-                pnode->path, pnode->path_len);
-            render->pos = ngx_slprintf(render->pos, render->end,
-                "\", \"conversions\": %uA, "
-                "\"entries\": %uA, "
-                "\"conversion_time_sum_ms\": %uA}",
-                pnode->conversions,
-                pnode->entries,
-                pnode->conversion_time_sum_ms);
-
-            if (render->pos < render->end) {
-                render->entries_written++;
-            } else {
-                render->pos = entry_start;
-                render->omitted_conversions =
-                    ngx_http_markdown_metrics_saturating_add(
-                        render->omitted_conversions,
-                        pnode->conversions);
-                render->omitted_entries =
-                    ngx_http_markdown_metrics_saturating_add(
-                        render->omitted_entries, pnode->entries);
-                render->omitted_time_ms =
-                    ngx_http_markdown_metrics_saturating_add(
-                        render->omitted_time_ms,
-                        pnode->conversion_time_sum_ms);
-                render->omitted_nodes =
-                    ngx_http_markdown_metrics_saturating_size_add(
-                        render->omitted_nodes, 1);
-            }
-        } else {
-            render->omitted_conversions =
-                ngx_http_markdown_metrics_saturating_add(
-                    render->omitted_conversions,
-                    pnode->conversions);
-            render->omitted_entries =
-                ngx_http_markdown_metrics_saturating_add(
-                    render->omitted_entries, pnode->entries);
-            render->omitted_time_ms =
-                ngx_http_markdown_metrics_saturating_add(
-                    render->omitted_time_ms,
-                    pnode->conversion_time_sum_ms);
-            render->omitted_nodes =
-                ngx_http_markdown_metrics_saturating_size_add(
-                    render->omitted_nodes, 1);
-        }
-    } else {
-        const ngx_http_markdown_path_metric_node_t  *pnode2;
-        pnode2 = (const ngx_http_markdown_path_metric_node_t *) node;
-        render->omitted_conversions = ngx_http_markdown_metrics_saturating_add(
-            render->omitted_conversions, pnode2->conversions);
-        render->omitted_entries = ngx_http_markdown_metrics_saturating_add(
-            render->omitted_entries, pnode2->entries);
-        render->omitted_time_ms = ngx_http_markdown_metrics_saturating_add(
-            render->omitted_time_ms,
-            pnode2->conversion_time_sum_ms);
-        render->omitted_nodes = ngx_http_markdown_metrics_saturating_size_add(
-            render->omitted_nodes, 1);
-    }
-
-    if (render->failed) {
-        return render->pos;
-    }
-
-    render->pos = ngx_http_markdown_json_walk_path_tree_bounded(
-            node->right, sentinel, render);
-
-    return render->pos;
-}
-
-
-/*
- * Render per-path metrics in sorted order into the bounded text response.
- *
- * The in-order traversal preserves the tree's path ordering.  Each entry is
- * emitted only when it fits before the reserved summary tail; otherwise its
- * counters are accumulated in the omitted totals.  A failed write or a
- * recursive child failure stops the walk without advancing the output.
- *
- * Parameters:
- *   node      Current red-black tree node.
- *   sentinel  Tree sentinel that terminates the traversal.
- *   render    Bounded output state and omitted-entry accumulators.
- *
- * Returns:
- *   The current output position, or the unchanged position after failure.
- */
-static u_char *
-ngx_http_markdown_text_walk_path_tree_bounded(
-    ngx_rbtree_node_t *node,
-    ngx_rbtree_node_t *sentinel,
-    ngx_http_markdown_path_detail_render_ctx_t *render)
-{
-    const ngx_http_markdown_path_metric_node_t  *pnode;
-    size_t                                       path_len;
-    size_t                                       needed;
-    size_t                                       remaining;
-
-    if (node == sentinel || render->pos >= render->end) {
-        return render->pos;
-    }
-
-    /* Visit the left subtree first so text paths remain sorted. */
-    render->pos = ngx_http_markdown_text_walk_path_tree_bounded(
-            node->left, sentinel, render);
-
-    if (render->failed) {
-        return render->pos;
-    }
-
-    /* Keep the mandatory summary tail available for the final response. */
-    remaining = (size_t) (render->end - render->pos);
-    if (remaining > render->tail_reserve) {
-        pnode = (const ngx_http_markdown_path_metric_node_t *) node;
-        if (ngx_http_markdown_path_len_to_size(pnode, &path_len)
-            != NGX_OK)
-        {
-            render->failed = 1;
-            return render->pos;
-        }
-        needed = ngx_http_markdown_text_path_entry_size(path_len);
-
-        /* Emit complete entries only; otherwise conserve their counters. */
-        if (needed <= remaining - render->tail_reserve) {
-            u_char  *entry_start = render->pos;
-
-            render->pos = ngx_slprintf(render->pos, render->end,
-                "- Path[");
-            render->pos = ngx_http_markdown_escape_json_string(
-                render->pos, render->end,
-                pnode->path, pnode->path_len);
-            render->pos = ngx_slprintf(render->pos, render->end,
-                "]: conversions=%uA entries=%uA "
-                "time_ms=%uA\n",
-                pnode->conversions,
-                pnode->entries,
-                pnode->conversion_time_sum_ms);
-
-            if (render->pos >= render->end) {
-                render->pos = entry_start;
-                render->omitted_conversions =
-                    ngx_http_markdown_metrics_saturating_add(
-                        render->omitted_conversions,
-                        pnode->conversions);
-                render->omitted_entries =
-                    ngx_http_markdown_metrics_saturating_add(
-                        render->omitted_entries, pnode->entries);
-                render->omitted_time_ms =
-                    ngx_http_markdown_metrics_saturating_add(
-                        render->omitted_time_ms,
-                        pnode->conversion_time_sum_ms);
-                render->omitted_nodes =
-                    ngx_http_markdown_metrics_saturating_size_add(
-                        render->omitted_nodes, 1);
-            } else {
-                render->entries_written++;
-            }
-        } else {
-            render->omitted_conversions =
-                ngx_http_markdown_metrics_saturating_add(
-                    render->omitted_conversions,
-                    pnode->conversions);
-            render->omitted_entries =
-                ngx_http_markdown_metrics_saturating_add(
-                    render->omitted_entries, pnode->entries);
-            render->omitted_time_ms =
-                ngx_http_markdown_metrics_saturating_add(
-                    render->omitted_time_ms,
-                    pnode->conversion_time_sum_ms);
-            render->omitted_nodes =
-                ngx_http_markdown_metrics_saturating_size_add(
-                    render->omitted_nodes, 1);
-        }
-    } else {
-        const ngx_http_markdown_path_metric_node_t  *pnode2;
-        pnode2 = (const ngx_http_markdown_path_metric_node_t *) node;
-        render->omitted_conversions = ngx_http_markdown_metrics_saturating_add(
-            render->omitted_conversions, pnode2->conversions);
-        render->omitted_entries = ngx_http_markdown_metrics_saturating_add(
-            render->omitted_entries, pnode2->entries);
-        render->omitted_time_ms = ngx_http_markdown_metrics_saturating_add(
-            render->omitted_time_ms,
-            pnode2->conversion_time_sum_ms);
-        render->omitted_nodes = ngx_http_markdown_metrics_saturating_size_add(
-            render->omitted_nodes, 1);
-    }
-
-    /* A failed child leaves no safe output position for the right subtree. */
-    if (render->failed) {
-        return render->pos;
-    }
-
-    render->pos = ngx_http_markdown_text_walk_path_tree_bounded(
-            node->right, sentinel, render);
-
-    return render->pos;
-}
-
-
-static u_char *
-ngx_http_markdown_json_write_path_details(
-    u_char *p,
-    u_char *end,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot)
-{
-    ngx_shm_zone_t                                *zone;
-    ngx_slab_pool_t                               *shpool;
-    ngx_http_markdown_metrics_t                   *live_metrics;
-    ngx_http_markdown_path_detail_render_ctx_t    render;
-    ngx_atomic_uint_t                              other_conversions;
-    ngx_atomic_uint_t                              other_entries;
-    ngx_atomic_uint_t                              other_time_ms;
-
-    render.pos = p;
-    render.end = end;
-    render.tail_reserve = ngx_http_markdown_json_tail_reserve();
-    render.omitted_conversions = 0;
-    render.omitted_entries = 0;
-    render.omitted_time_ms = 0;
-    render.omitted_nodes = 0;
-    render.entries_written = 0;
-    render.failed = 0;
-
-    if (snapshot->per_path.path_entries > 0
-        && ngx_http_markdown_metrics_shm_zone != NULL
-        && ngx_http_markdown_metrics_shm_zone->data != NULL)
-    {
-        zone = ngx_http_markdown_metrics_shm_zone;
-        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
-        shpool = (ngx_slab_pool_t *) zone->shm.addr;
-
-        ngx_shmtx_lock(&shpool->mutex);
-        p = ngx_http_markdown_json_walk_path_tree_bounded(
-                live_metrics->per_path.path_tree.root,
-                &live_metrics->per_path.sentinel, &render);
-        ngx_shmtx_unlock(&shpool->mutex);
-    }
-
-    if (render.failed) {
-        return NULL;
-    }
-
-    if ((snapshot->per_path.unretained_conversions == 0
-         && render.omitted_nodes == 0) || p >= end)
-    {
-        return p;
-    }
-
-    other_conversions = ngx_http_markdown_metrics_saturating_add(
-        snapshot->per_path.unretained_conversions,
-        render.omitted_conversions);
-    other_time_ms = ngx_http_markdown_metrics_saturating_add(
-        snapshot->per_path.unretained_conversion_time_sum_ms,
-        render.omitted_time_ms);
-    other_entries = ngx_http_markdown_metrics_saturating_add(
-        snapshot->per_path.unretained_conversions,
-        render.omitted_entries);
-
-    if (render.entries_written > 0) {
-        p = ngx_slprintf(p, end, ",");
-    }
-
-    return ngx_slprintf(p, end,
-        "\n"
-        "      {\"path\":\"__other__\","
-        "\"conversions\":%uA,"
-        "\"conversion_time_sum_ms\":%uA,"
-        "\"entries\":%uA}",
-        other_conversions, other_time_ms, other_entries);
-}
-
-
-static u_char *
-ngx_http_markdown_text_write_path_details(
-    u_char *p,
-    u_char *end,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot)
-{
-    ngx_shm_zone_t                                *zone;
-    ngx_slab_pool_t                               *shpool;
-    ngx_http_markdown_metrics_t                   *live_metrics;
-    ngx_http_markdown_path_detail_render_ctx_t    render;
-    ngx_atomic_uint_t                              other_conversions;
-    ngx_atomic_uint_t                              other_entries;
-    ngx_atomic_uint_t                              other_time_ms;
-
-    render.pos = p;
-    render.end = end;
-    render.tail_reserve = ngx_http_markdown_text_tail_reserve();
-    render.omitted_conversions = 0;
-    render.omitted_entries = 0;
-    render.omitted_time_ms = 0;
-    render.omitted_nodes = 0;
-    render.entries_written = 0;
-    render.failed = 0;
-
-    if (snapshot->per_path.path_entries > 0
-        && ngx_http_markdown_metrics_shm_zone != NULL
-        && ngx_http_markdown_metrics_shm_zone->data != NULL)
-    {
-        zone = ngx_http_markdown_metrics_shm_zone;
-        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
-        shpool = (ngx_slab_pool_t *) zone->shm.addr;
-
-        p = ngx_slprintf(p, end, "\nPer-Path Details:\n");
-        render.pos = p;
-        ngx_shmtx_lock(&shpool->mutex);
-        p = ngx_http_markdown_text_walk_path_tree_bounded(
-                live_metrics->per_path.path_tree.root,
-                &live_metrics->per_path.sentinel, &render);
-        ngx_shmtx_unlock(&shpool->mutex);
-    } else if (snapshot->per_path.unretained_conversions > 0) {
-        p = ngx_slprintf(p, end, "\nPer-Path Details:\n");
-        render.pos = p;
-    } else {
-        return p;
-    }
-
-    if (render.failed) {
-        return NULL;
-    }
-
-    if ((snapshot->per_path.unretained_conversions == 0
-         && render.omitted_nodes == 0) || p >= end)
-    {
-        return p;
-    }
-
-    other_conversions = ngx_http_markdown_metrics_saturating_add(
-        snapshot->per_path.unretained_conversions,
-        render.omitted_conversions);
-    other_time_ms = ngx_http_markdown_metrics_saturating_add(
-        snapshot->per_path.unretained_conversion_time_sum_ms,
-        render.omitted_time_ms);
-    other_entries = ngx_http_markdown_metrics_saturating_add(
-        snapshot->per_path.unretained_conversions,
-        render.omitted_entries);
-
-    return ngx_slprintf(p, end,
-        "- Path[__other__]: conversions=%uA entries=%uA "
-        "time_ms=%uA\n",
-        other_conversions, other_entries, other_time_ms);
-}
-#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
-
-
-/*
- * Render the metrics response body and set the matching Content-Type header.
- *
- * Returns the end pointer for the rendered body on success.
- * The public handler passes the frozen Prometheus format. The JSON and
- * human-readable branches remain only for bounded internal renderer tests;
- * they are not reachable through the 0.9.2 endpoint.
- *
- * NULL is returned only when the aggregate section itself does not fit
- * (indicating the buffer is far too small for any useful output).
- */
+/* Render the frozen Prometheus v1 response and set its Content-Type header. */
 static u_char *
 ngx_http_markdown_metrics_render_response_body(
     ngx_http_request_t *r,
     ngx_buf_t *b,
-    ngx_uint_t format,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot,
-    const ngx_http_markdown_metrics_derived_t *derived)
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
 {
-    u_char  *p;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+    u_char                                  *p;
 
-    p = b->pos;
-
-    switch (format) {
-
-    case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON:
-        p = ngx_http_markdown_metrics_write_json(
-                p, b->end, snapshot,
-                derived->conversions_completed,
-                derived->conversion_time_avg_ms,
-                derived->input_bytes_avg,
-                derived->output_bytes_avg);
-        if (p == NULL || p >= b->end) {
-            ngx_log_error(NGX_LOG_ERR,
-                r->connection->log, 0,
-                "markdown: JSON output "
-                "truncated, buffer too small");
-            return NULL;
-        }
-        ngx_str_set(&r->headers_out.content_type,
-                     "application/json");
-        return p;
-
-    case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS:
-        {
-            ngx_http_markdown_metrics_v1_snapshot_t  v1;
-
-            ngx_http_markdown_metrics_to_v1(snapshot, &v1);
-            p = ngx_http_markdown_metrics_v1_render(p, b->end, &v1);
-        }
-        if (p == NULL) {
-            ngx_log_error(NGX_LOG_ERR,
-                r->connection->log, 0,
-                "markdown: Prometheus output "
-                "truncated, buffer too small");
-            return NULL;
-        }
-
-        ngx_str_set(&r->headers_out.content_type,
-                     "text/plain; version=0.0.4; "
-                     "charset=utf-8");
-        return p;
-
-    default:
-        p = ngx_http_markdown_metrics_write_text(
-                p, b->end, snapshot,
-                derived->conversions_completed,
-                derived->conversion_time_avg_ms,
-                derived->input_bytes_avg,
-                derived->output_bytes_avg);
-        if (p == NULL || p >= b->end) {
-            ngx_log_error(NGX_LOG_ERR,
-                r->connection->log, 0,
-                "markdown: plain-text output "
-                "truncated, buffer too small");
-            return NULL;
-        }
-        ngx_str_set(&r->headers_out.content_type,
-                     "text/plain");
-        return p;
+    ngx_http_markdown_metrics_to_v1(snapshot, &v1);
+    p = ngx_http_markdown_metrics_v1_render(b->pos, b->end, &v1);
+    if (p == NULL) {
+        ngx_log_error(NGX_LOG_ERR,
+            r->connection->log, 0,
+            "markdown: Prometheus output "
+            "truncated, buffer too small");
+        return NULL;
     }
+
+    ngx_str_set(&r->headers_out.content_type,
+                "text/plain; version=0.0.4; charset=utf-8");
+    return p;
 }
 
 /*
@@ -2232,26 +908,20 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     ngx_int_t                             rc;
     ngx_buf_t                            *b;
     u_char                               *response_end;
-    ngx_uint_t                            format;
     ngx_http_markdown_metrics_snapshot_t  snapshot;
-    ngx_http_markdown_metrics_derived_t   derived;
 
     rc = ngx_http_markdown_metrics_validate_request(r);
     if (rc != NGX_OK) {
         return rc;
     }
 
-    /* Select the frozen response format before discarding any request body. */
-    format = ngx_http_markdown_metrics_select_format(r);
-
     rc = ngx_http_discard_request_body(r);
     if (rc != NGX_OK) {
         return rc;
     }
 
-    /* Take one best-effort snapshot and derive all aggregate values from it. */
+    /* Take one best-effort snapshot before rendering the response. */
     ngx_http_markdown_collect_metrics_snapshot(&snapshot);
-    ngx_http_markdown_metrics_derive_values(&snapshot, &derived);
 
     /* Render into a fixed-size temporary buffer before sending headers. */
     b = ngx_create_temp_buf(r->pool,
@@ -2264,7 +934,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     }
 
     response_end = ngx_http_markdown_metrics_render_response_body(
-        r, b, format, &snapshot, &derived);
+        r, b, &snapshot);
     if (response_end == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }

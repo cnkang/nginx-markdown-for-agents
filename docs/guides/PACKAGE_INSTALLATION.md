@@ -1,7 +1,7 @@
 # Package Installation Guide
 
-This guide covers installing DEB and RPM artifacts produced by the v0.7.0 and
-later release workflows. These are community-maintained dynamic-module packages, not
+This guide covers installing DEB and RPM artifacts produced by the release
+workflows. These are community-maintained dynamic-module packages, not
 official NGINX repository packages.
 
 ## Repository Publishing Status
@@ -76,17 +76,17 @@ ARCH=amd64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
 PKG="nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 
-curl -fsSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
-curl -fsSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
-curl -fsSLo "${PKG}" "${BASE_URL}/${PKG}"
-# Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
+curl -fsSL -o SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fsSL -o SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+curl -fsSL -o "${PKG}" "${BASE_URL}/${PKG}"
+# Supply both values through an independently authenticated channel. Do not
+# import a key from this repository or from the same release asset set.
+: "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to an independently authenticated public-key file}"
 : "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
-# Import the checked-in project public key into an isolated keyring first,
-# so gpg verifies the signature against the project key only.
 GNUPGDIR="$(mktemp -d)"
 trap 'rm -rf "${GNUPGDIR}"' EXIT
-gpg --batch --homedir "${GNUPGDIR}" --import packaging/nginx-markdown-for-agents-release.asc
+gpg --batch --homedir "${GNUPGDIR}" --import "${RELEASE_KEY_PATH}"
 VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
     --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
@@ -109,17 +109,17 @@ ARCH=x86_64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
 PKG="nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 
-curl -fsSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
-curl -fsSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
-curl -fsSLo "${PKG}" "${BASE_URL}/${PKG}"
-# Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
+curl -fsSL -o SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fsSL -o SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+curl -fsSL -o "${PKG}" "${BASE_URL}/${PKG}"
+# Supply both values through an independently authenticated channel. Do not
+# import a key from this repository or from the same release asset set.
+: "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to an independently authenticated public-key file}"
 : "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
-# Import the checked-in project public key into an isolated keyring first,
-# so gpg verifies the signature against the project key only.
 GNUPGDIR="$(mktemp -d)"
 trap 'rm -rf "${GNUPGDIR}"' EXIT
-gpg --batch --homedir "${GNUPGDIR}" --import packaging/nginx-markdown-for-agents-release.asc
+gpg --batch --homedir "${GNUPGDIR}" --import "${RELEASE_KEY_PATH}"
 VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
     --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
@@ -132,8 +132,9 @@ sudo rpm -Uvh "./${PKG}"
 ## Verify Installation
 
 ```bash
-nginx -V 2>&1 | grep markdown
-nginx -t
+sudo nginx -t
+# Confirm the active configuration loads the canonical module path.
+sudo nginx -T 2>&1 | grep 'ngx_http_markdown_filter_module.so'
 ```
 
 Install the module binary using the canonical NGINX dynamic-module name:
@@ -175,14 +176,18 @@ sudo nginx -t && sudo nginx -s reload
 ## Upgrade
 
 Download the new artifact and matching `SHA256SUMS` file from the target
-release, verify the checksum, then reinstall the package with the same local
-artifact flow.
+release. Before installing, repeat the detached-signature verification in the
+DEB or RPM section above with an independently authenticated
+`TRUSTED_FINGERPRINT`, then verify the selected package against that release's
+`SHA256SUMS`. Reinstall the package only after both checks pass.
 
 ## Rollback
 
 Download the previous release artifact that matches the installed NGINX
-version and architecture, verify it against that release's `SHA256SUMS`, then
-install it locally.
+version and architecture. Repeat the detached-signature verification in the
+DEB or RPM section above with the independently authenticated fingerprint,
+then verify the artifact against that release's `SHA256SUMS` before installing
+it locally.
 
 ## Troubleshooting
 

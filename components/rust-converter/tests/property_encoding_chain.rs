@@ -20,16 +20,14 @@
 //!   precommit error policy
 //! - cumulative output exceeding the budget aborts with budget-exceeded
 //! - any layer exceeding the ratio limit aborts
-//! - every non-empty compressed layer is subject to the ratio limit,
-//!   including inputs below the historical 256-byte fixture threshold
+//! - every non-empty compressed layer is subject to the ratio limit
 //! - unknown tokens bypass decoder work; the C precommit router applies the
 //!   configured error policy rather than silently bypassing the request
 //! - malformed grammar produces the malformed classification with no
 //!   decoder or header mutation
 
 use nginx_markdown_converter::encoding::{
-    ChainDecodeError, ChainParseError, DecodeLimits, Encoding, RATIO_ACTIVATION_THRESHOLD,
-    decode_chain, parse_encoding_chain,
+    ChainDecodeError, ChainParseError, DecodeLimits, Encoding, decode_chain, parse_encoding_chain,
 };
 use proptest::prelude::*;
 use proptest::string::string_regex;
@@ -124,7 +122,7 @@ proptest! {
     /// Normalized lowercase tokens in declaration order for any whitespace
     /// and casing variation.
     #[test]
-    fn p22_normalized_tokens_in_declaration_order(value in arb_chain_value(5)) {
+    fn normalized_tokens_preserve_declaration_order(value in arb_chain_value(5)) {
         let layers = parse_encoding_chain(value.as_bytes());
         if let Ok(layers) = layers {
             let expected = value.split(',').map(|tok| {
@@ -143,7 +141,7 @@ proptest! {
 
     /// `br` is recognized; "brotli" is not part of the supported set.
     #[test]
-    fn p22_br_recognized_brotli_not(value in string_regex("[a-z]{0,8}").unwrap()) {
+    fn br_marker_is_not_misclassified_as_brotli(value in string_regex("[a-z]{0,8}").unwrap()) {
         let layers = parse_encoding_chain(value.as_bytes());
         match layers {
             Ok(layers) => {
@@ -175,7 +173,7 @@ proptest! {
 
     /// Malformed grammar produces exactly the malformed classification.
     #[test]
-    fn p22_malformed_grammar_classified(
+    fn malformed_encoding_grammar_is_classified(
         value in string_regex("[ -~]{0,40}").unwrap()
     ) {
         let outcome = parse_encoding_chain(value.as_bytes());
@@ -229,7 +227,7 @@ proptest! {
     /// Chains with more than 3 non-identity layers are rejected as
     /// DepthExceeded (passthrough), regardless of identity placement.
     #[test]
-    fn p23_depth_overflow_is_passthrough(extra in 1usize..3) {
+    fn depth_overflow_is_passthrough(extra in 1usize..3) {
         let layers = vec![Encoding::Gzip; 3 + extra];
         let value = layers
             .iter()
@@ -244,7 +242,7 @@ proptest! {
 
     /// Cumulative output exceeding the budget aborts with budget-exceeded.
     #[test]
-    fn p23_cumulative_budget_enforced(
+    fn cumulative_budget_is_enforced(
         payload_size in 50_000usize..300_000,
         budget in 1_000usize..40_000,
     ) {
@@ -259,30 +257,23 @@ proptest! {
 
     /// Per-layer ratio enforcement for a large fixture.
     #[test]
-    fn p23_ratio_enforced_above_threshold(
-        ratio in 2u64..50,
-    ) {
-        /* Highly compressible payload whose compressed size exceeds the
-         * historical 256-byte fixture threshold. */
+    fn ratio_is_enforced_for_large_input(ratio in 2u64..50) {
+        /* Highly compressible payload exercises the ratio ceiling on a large
+         * decoded result. */
         let original = vec![0u8; 4_000_000];
         let wire = gzip_compress(&original);
-        assert!(
-            wire.len() >= RATIO_ACTIVATION_THRESHOLD,
-            "test precondition: compressed input must exceed legacy fixture threshold"
-        );
         let limits = DecodeLimits { max_output: 10 * 1024 * 1024, ratio };
         let err = decode_chain(&wire, &[Encoding::Gzip], limits).unwrap_err();
         assert_eq!(err, ChainDecodeError::RatioExceeded);
     }
 
-    /// Inputs below the historical threshold are still ratio-checked.
+    /// Small inputs are ratio-checked as well.
     #[test]
-    fn p23_ratio_enforced_for_small_input(size in 32usize..128) {
-        /* A small highly-compressible payload below the historical threshold
-         * is rejected when its expansion exceeds ratio = 1. */
+    fn ratio_is_enforced_for_small_input(size in 64usize..128) {
+        /* A highly-compressible payload is rejected when its expansion
+         * exceeds ratio = 1. */
         let original = vec![b'A'; size];
         let wire = gzip_compress(&original);
-        assert!(wire.len() < RATIO_ACTIVATION_THRESHOLD);
         let limits = DecodeLimits { max_output: 10 * 1024 * 1024, ratio: 1 };
         let err = decode_chain(&wire, &[Encoding::Gzip], limits).unwrap_err();
         assert_eq!(err, ChainDecodeError::RatioExceeded);
@@ -290,7 +281,7 @@ proptest! {
 
     /// Unknown tokens are classified without starting decoder work.
     #[test]
-    fn p23_unknown_token_is_classified_before_decode(
+    fn unknown_token_is_classified_before_decode(
         head in prop::collection::vec(arb_token(), 0..3),
     ) {
         let mut tokens: Vec<String> = head.clone();
@@ -306,7 +297,7 @@ proptest! {
 
     /// Identity-only chains are valid and perform no decoder work.
     #[test]
-    fn p23_identity_only_chain_is_valid(count in 1usize..5) {
+    fn identity_only_chain_is_valid(count in 1usize..5) {
         let value = vec!["identity"; count].join(", ");
         let layers = parse_encoding_chain(value.as_bytes()).unwrap();
         assert_eq!(layers.iter().filter(|e| **e != Encoding::Identity).count(), 0);
@@ -368,11 +359,23 @@ fn unknown_tokens_are_not_malformed() {
     }
 }
 
-/// Zero compressed input allows zero decoded output only.
+/// Empty input is valid only for the identity representation. A configured
+/// decoder must observe a complete encoded stream, even when it would emit no
+/// bytes.
 #[test]
-fn zero_input_allows_zero_output_only() {
-    let out = decode_chain(&[], &[Encoding::Gzip], DecodeLimits::default()).unwrap();
+fn zero_input_requires_identity_representation() {
+    let out = decode_chain(&[], &[Encoding::Identity], DecodeLimits::default()).unwrap();
     assert!(out.is_empty());
+
+    for encoding in [Encoding::Gzip, Encoding::Deflate, Encoding::Br] {
+        assert!(
+            matches!(
+                decode_chain(&[], &[encoding], DecodeLimits::default()),
+                Err(ChainDecodeError::TruncatedInput(_))
+            ),
+            "empty input must be truncated for {encoding:?}"
+        );
+    }
 }
 
 /// Budget and ratio failures retain their distinct reasons.

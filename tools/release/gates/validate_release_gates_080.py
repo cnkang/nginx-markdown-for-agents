@@ -150,14 +150,14 @@ def check_release_package_workflow_version(
         result.fail(RELEASE_VERSION_GATE, "release-packages.yml missing")
         return
     match = re.search(
-        r'^\s*RELEASE_GATE_EXPECTED_CARGO_VERSION:\s*["\']([^"\']+)["\']\s*$',
+        r'^\s*RELEASE_VERSION:\s*["\']([^"\']+)["\']\s*$',
         workflow,
         re.MULTILINE,
     )
     if match is None:
         result.fail(
             RELEASE_VERSION_GATE,
-            "release-packages.yml does not set the expected Cargo version",
+            "release-packages.yml does not set the canonical release version",
         )
         return
     version = match.group(1)
@@ -165,12 +165,12 @@ def check_release_package_workflow_version(
     if version == expected:
         result.pass_(
             RELEASE_VERSION_GATE,
-            f"release-packages.yml expects Cargo version {expected}",
+            f"release-packages.yml declares release version {expected}",
         )
     else:
         result.fail(
             RELEASE_VERSION_GATE,
-            f"release-packages.yml expects {version}, active version is {expected}",
+            f"release-packages.yml declares {version}, active version is {expected}",
         )
 
 

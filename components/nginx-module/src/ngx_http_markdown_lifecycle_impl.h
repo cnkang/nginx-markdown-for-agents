@@ -82,7 +82,7 @@ ngx_http_markdown_preconfiguration(ngx_conf_t *cf)
 }
 
 
-/* Wire this module into the header and body filter chains. */
+/* Wire the representation-selecting header filter into the header chain. */
 static ngx_int_t
 ngx_http_markdown_filter_init(ngx_conf_t *cf)
 {
@@ -90,6 +90,16 @@ ngx_http_markdown_filter_init(ngx_conf_t *cf)
 
     ngx_http_next_header_filter = ngx_http_top_header_filter;
     ngx_http_top_header_filter = ngx_http_markdown_header_filter;
+
+    return NGX_OK;
+}
+
+
+/* Wire the body filter after NGINX's copy filter has materialized file data. */
+static ngx_int_t
+ngx_http_markdown_body_filter_init(ngx_conf_t *cf) /* NOSONAR: c:S995; NGINX callback type is fixed (Rule 24). */
+{
+    (void) cf;
 
     ngx_http_next_body_filter = ngx_http_top_body_filter;
     ngx_http_top_body_filter = ngx_http_markdown_body_filter;
@@ -172,7 +182,7 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
         dynconf_conf = ngx_http_markdown_dynconf_owner(mcf);
 
         if (dynconf_conf != NULL
-            && dynconf_conf->advanced.dynconf_enabled
+            && dynconf_conf->advanced.dynconf_enabled == 1
             && dynconf_conf->advanced.dynconf_path.len > 0)
         {
             ngx_http_markdown_dynconf_watcher.validation_summary =
@@ -192,16 +202,6 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
             }
         }
 
-        /*
-         * Per-path metrics removed from production in 0.9.2
-         * (unbounded cardinality risk).
-         */
-#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
-        if (ngx_http_markdown_metrics != NULL) {
-            ngx_http_markdown_metrics->per_path.cardinality_limit =
-                NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT;
-        }
-#endif
     }
 
     return NGX_OK;

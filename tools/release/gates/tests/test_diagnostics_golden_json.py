@@ -108,18 +108,18 @@ def redact_last_error(error_text):
         # the scrub so replacements can never push the final value above the
         # byte limit.
         redacted = encoded[:512].decode("utf-8", errors="ignore")
+    redacted = redacted.encode("utf-8")[:512].decode("utf-8", errors="ignore")
+    for pattern in patterns:
+        redacted = pattern.sub("<redacted>", redacted)
     return redacted.encode("utf-8")[:512].decode("utf-8", errors="ignore")
 
 
 def _redact_error_for_test(error_text):
-    """Redact error text through the redaction model under test.
+    """Redact error text through the Python model used by this test suite.
 
-    ``redact_last_error`` is a model / Python reimplementation of the
-    production last_error redaction contract, not a binding to the C
-    implementation.  It is kept aligned with the production C redactor
-    (ngx_http_markdown_diagnostics.c) by asserting the same forbidden
-    patterns and 512-byte clamp here, so a drift in either side fails the
-    golden-JSON suite instead of silently diverging.
+    The model checks the golden JSON shape and the fixture's expected
+    redaction behavior; it is intentionally not presented as a line-for-line
+    implementation of the production C redactor.
     """
     return redact_last_error(error_text)
 
@@ -145,9 +145,11 @@ def _make_doc_with_dynconf(dynconf):
         "product_version": "0.9.2",
         "worker": {"pid": 1234, "scope": "worker-local"},
         "build": {
+            "build_kind": "release",
             "source_sha": "a" * 40,
             "nginx_version": "1.27.0",
             "rust_version": "1.91.0",
+            "feature_manifest_digest": "sha256:" + "c" * 64,
             "features": ["streaming"],
         },
         "configuration": {
@@ -169,12 +171,14 @@ def _make_doc_with_dynconf(dynconf):
             },
         },
         "runtime": {
+            "diagnostics_recording": "active",
             "inflight": 0,
             "pending_output": 0,
             "module_metrics": {
                 "streaming_requests_total": 0,
                 "precommit_failopen_total": 0,
                 "copied_output_total": 0,
+                "diagnostics_recording_state": 1,
             },
         },
         "recent_decisions": [],
@@ -681,4 +685,9 @@ class TestHeadResponseBehavior:
         """
         body = json.dumps(doc, separators=(",", ":"), ensure_ascii=False)
         content_length = len(body.encode("utf-8"))
-        assert content_length > 0
+        expected_length = len(
+            json.dumps(
+                doc, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        )
+        assert content_length == expected_length

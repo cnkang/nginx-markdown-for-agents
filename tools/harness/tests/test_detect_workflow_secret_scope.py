@@ -106,10 +106,10 @@ class TestFindBroadEnvSecrets:
 # ---------------------------------------------------------------------------
 
 class TestSonarTokenSteps:
-    """check_sonar_token_steps: sonarcloud.yml must gate SONAR_TOKEN before checkout."""
+    """check_sonar_token_steps: sonarcloud.yml scopes all Sonar tokens."""
 
     def test_valid_structure_passes(self):
-        """Token check → checkout → scan with step-scoped tokens passes."""
+        """Token check before checkout and both scans pass."""
         text = (
             "name: SonarCloud\n"
             "on: push\n"
@@ -125,6 +125,11 @@ class TestSonarTokenSteps:
             "      - name: Checkout repository\n"
             "        uses: actions/checkout@abc123\n"
             "      - name: SonarCloud Scan\n"
+            "        uses: SonarSource/sonarcloud-github-action@abc123\n"
+            "        env:\n"
+            "          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}\n"
+            "          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n"
+            "      - name: SonarCloud Branch Scan\n"
             "        uses: SonarSource/sonarcloud-github-action@abc123\n"
             "        env:\n"
             "          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}\n"

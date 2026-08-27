@@ -7,13 +7,15 @@ tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/doctor-config-test.XXXXXX")
 cleanup() {
     rm -f "$tmpdir/nginx" "$tmpdir/uname" "$tmpdir/ldd" "$tmpdir/nm" "$tmpdir/rustc"
     rm -f "$tmpdir/ngx_http_markdown_filter_module.so"
-    rm -f "$tmpdir/captured.conf" "$tmpdir/output.json"
+    rm -f "$tmpdir/captured.conf" "$tmpdir/output.json" \
+        "$tmpdir/invalid.json"
     rmdir "$tmpdir"
     return 0
 }
 trap cleanup EXIT
 
 capture_path="$tmpdir/captured.conf"
+expected_nginx_path="$(cd -P "$tmpdir" && pwd -P)/nginx"
 cat > "$tmpdir/nginx" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -87,6 +89,8 @@ http_line=$(grep -n '^http ' "$capture_path" | cut -d: -f1)
 grep -Fq "load_module \"$tmpdir/ngx_http_markdown_filter_module.so\";" \
     "$capture_path"
 grep -Fq 'markdown_filter on;' "$capture_path"
+grep -Fq '"name":"nginx_version","status":"pass"' "$tmpdir/output.json"
+grep -Fq "\"path\":\"$expected_nginx_path\"" "$tmpdir/output.json"
 grep -Fq '"artifact":"ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz"' \
     "$tmpdir/output.json"
 grep -Fq '"name":"rust_linkage","status":"pass"' "$tmpdir/output.json"
@@ -106,5 +110,17 @@ else
     grep -Fq '"name":"rust_toolchain","status":"warn"' "$tmpdir/output.json"
     grep -Fq '"repository_checkout":false' "$tmpdir/output.json"
 fi
+
+if PATH="$tmpdir:$PATH" DOCTOR_CAPTURE_PATH="$capture_path" \
+    bash "$repo_root/tools/doctor/nginx-markdown-doctor.sh" \
+    --json --nginx-bin "$tmpdir/not-an-nginx" --module-path "$tmpdir" \
+    > "$tmpdir/invalid.json"; then
+    printf '%s\n' 'explicit invalid nginx path unexpectedly passed' >&2
+    exit 1
+fi
+grep -Fq '"name":"nginx_version","status":"fail"' \
+    "$tmpdir/invalid.json"
+grep -Fq 'explicit nginx executable is missing or not executable' \
+    "$tmpdir/invalid.json"
 
 printf '%s\n' 'doctor config test passed'

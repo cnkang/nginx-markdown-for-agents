@@ -98,7 +98,7 @@ flowchart LR
 | Behavior | Selects the Markdown flavor emitted by the Rust converter |
 | Lifecycle impact | Rust conversion options preparation before FFI call |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/converter.rs` |
-| Practical note | `commonmark` and `gfm` are the supported values. The former `mdx` and `org-mode` selectors are rejected in 0.9.2 because they never provided distinct conversion semantics. |
+| Practical note | `commonmark` and `gfm` are the supported values. The former `mdx` and `org-mode` selectors were rejected in 0.9.1 because they never provided distinct conversion semantics. |
 
 ### `markdown_token_estimate`
 
@@ -137,6 +137,89 @@ flowchart LR
 | Lifecycle impact | Auth detection during eligibility checks and authenticated-response handling |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_auth.c` |
 | Practical note | If authenticated traffic is unexpectedly converted or bypassed, inspect this mapping first. |
+
+## Content, Noise, and Dynamic Configuration
+
+### `markdown_content_types`
+
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Limits conversion eligibility to the configured response media types |
+| Lifecycle impact | Content-Type eligibility check before buffering or streaming |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_eligibility.c`, `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h` |
+| Practical note | Use media-type tokens such as `text/html`; responses outside the list remain upstream representations. |
+
+### `markdown_prune_noise`
+
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Enables removal of known navigation, layout, and other page noise during conversion |
+| Lifecycle impact | Rust converter options and HTML traversal/output shaping |
+| Implementation areas | `components/rust-converter/src/converter.rs`, `components/rust-converter/src/pruning.rs` |
+| Practical note | Disable it when the page's structural content is more important than compact agent-oriented output. |
+
+### `markdown_prune_selectors`
+
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Adds CSS selectors whose matching subtrees are eligible for noise pruning |
+| Lifecycle impact | Rust DOM traversal before Markdown emission |
+| Implementation areas | `components/rust-converter/src/pruning.rs`, `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h` |
+| Practical note | Keep selectors narrow and validate representative pages because matching removes content from the Markdown representation. |
+
+### `markdown_prune_protection_selectors`
+
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Protects matching subtrees from noise-pruning removal |
+| Lifecycle impact | Rust pruning decision after selector matching |
+| Implementation areas | `components/rust-converter/src/pruning.rs` |
+| Practical note | Use this to retain content nested inside a broad noise selector. |
+
+### `markdown_metrics_shm_size`
+
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Sets the shared-memory region used for bounded module metrics |
+| Lifecycle impact | HTTP configuration merge and worker metrics initialization |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_metrics.c`, `components/nginx-module/src/ngx_http_markdown_config_core_impl.h` |
+| Practical note | Configure it in `http`; too small a region fails configuration or metrics initialization rather than silently growing. |
+
+### `markdown_dynamic_config`
+
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Enables atomic runtime reloads for the supported dynconf-mutable fields |
+| Lifecycle impact | Worker startup, reload timer, and effective request configuration binding |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_dynconf_impl.h`, `components/nginx-module/src/ngx_http_markdown_diagnostics_accessors_impl.h` |
+| Practical note | A malformed or unknown-key update is rejected atomically; the last-known-good snapshot remains active. |
+
+### `markdown_dynamic_config_path`
+
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Selects the bounded file path watched for dynamic configuration |
+| Lifecycle impact | Worker startup/reload file I/O and snapshot update |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h`, `components/nginx-module/src/ngx_http_markdown_dynconf_impl.h` |
+| Practical note | Keep the path local to the deployment and ensure the NGINX worker can read it. |
+
+### `markdown_dynconf_dry_run`
+
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Validates a dynamic configuration update without applying it |
+| Lifecycle impact | Reload validation path and diagnostics state; active effective values remain unchanged on dry-run |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_dynconf_impl.h` |
+| Practical note | Use it as a preflight before enabling an update; inspect validation diagnostics before switching it off. |
+
+### `markdown_diagnostics`
+
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Enables the loopback-only diagnostics endpoint for configuration and runtime state |
+| Lifecycle impact | Dedicated diagnostics handler, independent of normal Markdown conversion |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_diagnostics.c`, `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h` |
+| Practical note | The endpoint remains access-controlled and exposes bounded, redacted state intended for operator troubleshooting. |
 
 ## Cache and Conditional Request Behavior
 

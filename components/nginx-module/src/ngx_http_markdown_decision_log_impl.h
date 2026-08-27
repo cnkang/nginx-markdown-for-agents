@@ -1,6 +1,8 @@
 #ifndef NGX_HTTP_MARKDOWN_DECISION_LOG_IMPL_H
 #define NGX_HTTP_MARKDOWN_DECISION_LOG_IMPL_H
 
+#include "markdown_reason_meta.h"
+
 /*
  * Decision log emission helper.
  *
@@ -11,7 +13,6 @@
  * Emits a structured "markdown:" log entry once per request,
  * gated by the configured markdown_log_verbosity level.
  *
- * Requirements: FR-03.1, FR-03.2, FR-03.3, FR-03.4, FR-03.5, FR-03.6
  */
 
 #ifndef ngx_str_set
@@ -40,6 +41,16 @@ static void ngx_http_markdown_log_decision_with_category(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code,
     const ngx_str_t *error_category);
+#ifdef MARKDOWN_STREAMING_ENABLED
+static void ngx_http_markdown_log_decision_event(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code, const char *event);
+#endif
+static void ngx_http_markdown_log_event(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const char *stage, const char *event);
 
 /*
  * Resolved request metadata for decision log emission.
@@ -49,19 +60,9 @@ static void ngx_http_markdown_log_decision_with_category(
 typedef struct {
     ngx_str_t *method_name;
     ngx_str_t *content_type;
+    const markdown_reason_meta_t *reason_meta;
+    const char *event;
 } ngx_http_markdown_decision_meta_t;
-
-typedef struct {
-    const u_char  *data;
-    size_t         len;
-} ngx_http_markdown_literal_t;
-
-#define ngx_http_markdown_literal(text)                                          \
-    { (const u_char *) text, sizeof(text) - 1 }
-
-#define ngx_http_markdown_reason_has_prefix_literal(reason, text)                \
-    ngx_http_markdown_reason_has_prefix(                                         \
-        reason, (const u_char *) (text), sizeof(text) - 1)
 
 static void ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
@@ -70,52 +71,39 @@ static void ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
     const ngx_str_t *error_category, ngx_uint_t log_level,
     ngx_http_markdown_decision_meta_t *meta);
 
-static ngx_int_t
-ngx_http_markdown_reason_has_prefix(const ngx_str_t *reason_code,
-    const u_char *prefix, size_t prefix_len)
+static const markdown_reason_meta_t *
+ngx_http_markdown_reason_meta_for(const ngx_str_t *reason_code)
 {
-    return (reason_code->len >= prefix_len
-            && ngx_strncmp(reason_code->data, prefix, prefix_len) == 0);
-}
+    size_t      key_len;
 
-static ngx_int_t
-ngx_http_markdown_reason_is_exact(const ngx_str_t *reason_code,
-    const ngx_http_markdown_literal_t *codes, ngx_uint_t code_count)
-{
-    for (ngx_uint_t i = 0; i < code_count; i++) {
-        if (reason_code->len == codes[i].len
-            && ngx_strncmp(reason_code->data, codes[i].data,
-                           codes[i].len) == 0)
+    if (reason_code == NULL || reason_code->data == NULL
+        || reason_code->len == 0)
+    {
+        return NULL;
+    }
+
+    for (ngx_uint_t i = 0; i < MARKDOWN_REASON_META_COUNT; i++) {
+        key_len = ngx_strlen(markdown_reason_meta[i].key);
+        if (reason_code->len == key_len
+            && ngx_strncmp(reason_code->data,
+                           (const u_char *) markdown_reason_meta[i].key,
+                           key_len) == 0)
         {
-            return 1;
+            return &markdown_reason_meta[i];
         }
     }
 
-    return 0;
+    return NULL;
 }
 
 
 /*
  * Determine whether a reason code represents a failure outcome.
  *
- * Failure outcomes are reason codes matching any of:
- *   - "failed_open" or "failed_closed" (schema v1 fail-open/closed)
- *   - "conversion_error", "memory_budget_exceeded", "ffi_panic",
- *     "decompression_error", "decompression_budget_exceeded",
- *     "decompression_format_error", "decompression_truncated_input",
- *     "decompression_io_error", "timeout", "budget_exceeded",
- *     "replay_error", "invalid_dynconf",
- *     "degraded_snapshot", "header_plan_apply_error",
- *     "streaming_mid_flight_error" (schema v1 error codes)
- *   - Legacy: "ELIGIBLE_FAILED" prefix, "FAIL_" prefix
- *   - "STREAMING_FAIL_" substring (streaming post-commit failures)
- *   - "STREAMING_PRECOMMIT_" prefix (streaming pre-commit failures)
- *   - "STREAMING_BUDGET_" prefix (streaming budget exceeded)
- *   - "STREAMING_FALLBACK_" prefix (streaming degraded to fallback path)
- *
- * All other codes (skipped_*, converted, disabled, not_eligible,
- * ENGINE_*, STREAMING_CONVERT, STREAMING_SKIP_*)
- * are non-failure outcomes.
+ * Failure classification comes from the generated registry metadata.  This
+ * keeps the log gate aligned with the same canonical outcome used by the
+ * diagnostics and metrics projections; implementation event names never
+ * participate in outcome classification.
  *
  * Parameters:
  *   reason_code - pointer to the reason code ngx_str_t
@@ -127,56 +115,21 @@ ngx_http_markdown_reason_is_exact(const ngx_str_t *reason_code,
 static ngx_int_t
 ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
 {
-    static const ngx_http_markdown_literal_t failure_codes[] = {
-        ngx_http_markdown_literal("decompression_error"),
-        ngx_http_markdown_literal("decompression_budget_exceeded"),
-        ngx_http_markdown_literal("decompression_format_error"),
-        ngx_http_markdown_literal("decompression_truncated_input"),
-        ngx_http_markdown_literal("decompression_io_error"),
-        ngx_http_markdown_literal("conversion_error"),
-        ngx_http_markdown_literal("memory_budget_exceeded"),
-        ngx_http_markdown_literal("ffi_panic"),
-        ngx_http_markdown_literal("timeout"),
-        ngx_http_markdown_literal("budget_exceeded"),
-        ngx_http_markdown_literal("replay_error"),
-        /* Production failure outcomes for reason codes 21-26 */
-        ngx_http_markdown_literal("invalid_dynconf"),
-        ngx_http_markdown_literal("degraded_snapshot"),
-        ngx_http_markdown_literal("header_plan_apply_error"),
-        ngx_http_markdown_literal("streaming_mid_flight_error"),
-        ngx_http_markdown_literal("encoding_header_invalid")
-    };
+    const markdown_reason_meta_t  *meta;
 
-    if (reason_code == NULL || reason_code->len == 0) {
+    meta = ngx_http_markdown_reason_meta_for(reason_code);
+    if (meta == NULL) {
         return 0;
     }
 
-    if (ngx_http_markdown_reason_has_prefix_literal(
-            reason_code, "failed_")
-        || ngx_http_markdown_reason_has_prefix_literal(
-            reason_code, "ELIGIBLE_FAILED")
-        || ngx_http_markdown_reason_has_prefix_literal(
-            reason_code, "FAIL_")
-        || ngx_http_markdown_reason_has_prefix_literal(
-            reason_code, "STREAMING_FAIL_")
-        || ngx_http_markdown_reason_has_prefix_literal(
-            reason_code, "STREAMING_PRECOMMIT_")
-        || ngx_http_markdown_reason_has_prefix_literal(
-            reason_code, "STREAMING_BUDGET_")
-        || ngx_http_markdown_reason_has_prefix_literal(
-            reason_code, "STREAMING_FALLBACK_"))
-    {
-        return 1;
-    }
-
-    return ngx_http_markdown_reason_is_exact(
-        reason_code, failure_codes,
-        sizeof(failure_codes) / sizeof(failure_codes[0]));
+    return ngx_strcmp(meta->outcome, "failed_open") == 0
+        || ngx_strcmp(meta->outcome, "failed_closed") == 0
+        || ngx_strcmp(meta->outcome, "aborted") == 0;
 }
 
 
 /*
- * Emit the debug-level extended decision log entry (FR-03.3).
+ * Emit the debug-level extended decision log entry.
  *
  * Adds filter_value, accept, and status fields to the base format.
  *
@@ -269,21 +222,27 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
         && error_category->len > 0)
     {
         ngx_log_error(log_level, r->connection->log, 0,
-            "markdown: reason=%V "
+            "markdown: outcome=%s stage=%s reason=%V event=%s "
             "category=%V "
             "method=%V uri=%V content_type=%V "
             "filter_value=%V accept=%V status=%ui",
-            reason_code, error_category,
+            meta->reason_meta != NULL ? meta->reason_meta->outcome : "-",
+            meta->reason_meta != NULL ? meta->reason_meta->stage : "-",
+            reason_code, meta->event,
+            error_category,
             meta->method_name, &r->uri,
             meta->content_type, &filter_value,
             &accept_value,
             r->headers_out.status);
     } else {
         ngx_log_error(log_level, r->connection->log, 0,
-            "markdown: reason=%V "
+            "markdown: outcome=%s stage=%s reason=%V event=%s "
             "method=%V uri=%V content_type=%V "
             "filter_value=%V accept=%V status=%ui",
-            reason_code, meta->method_name, &r->uri,
+            meta->reason_meta != NULL ? meta->reason_meta->outcome : "-",
+            meta->reason_meta != NULL ? meta->reason_meta->stage : "-",
+            reason_code, meta->event,
+            meta->method_name, &r->uri,
             meta->content_type, &filter_value,
             &accept_value,
             r->headers_out.status);
@@ -295,11 +254,13 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
  * Emit a structured decision log entry for the current request.
  *
  * Format (info level):
- *   markdown decision: reason=<CODE> method=<METHOD>
+ *   markdown: outcome=<OUTCOME> stage=<STAGE>
+ *       reason=<CODE> event=<EVENT> method=<METHOD>
  *       uri=<URI> content_type=<TYPE>
  *
  * Format with error category (failure outcomes):
- *   markdown decision: reason=<CODE> category=<FAIL_*>
+ *   markdown: outcome=<OUTCOME> stage=<STAGE>
+ *       reason=<CODE> event=<EVENT> category=<FAIL_*>
  *       method=<METHOD> uri=<URI> content_type=<TYPE>
  *
  * Extended format (debug verbosity adds):
@@ -321,27 +282,32 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
  *   conf           - module location configuration
  *   eff            - effective configuration view for per-request log_verbosity
  *   reason_code    - the reason code string for this decision
- *   error_category - optional FAIL_* sub-classification (NULL if none)
+ *   error_category - optional failure sub-classification (NULL if none)
  */
 static void
-ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
+ngx_http_markdown_log_decision_emit(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code,
-    const ngx_str_t *error_category)
+    const ngx_str_t *error_category,
+    const char *event)
 {
-    ngx_uint_t       log_level;
-    ngx_int_t        is_failure;
-    ngx_uint_t       effective_verbosity;
-    ngx_str_t        method_name;
-    ngx_str_t        content_type;
-    ngx_str_t        empty = ngx_string("-");
+    ngx_uint_t                    log_level;
+    ngx_int_t                     is_failure;
+    ngx_uint_t                    effective_verbosity;
+    ngx_str_t                     method_name;
+    ngx_str_t                     content_type;
+    ngx_str_t                     empty = ngx_string("-");
+    const markdown_reason_meta_t *reason_meta;
+    const char                   *event_name;
 
     if (r == NULL || conf == NULL || reason_code == NULL) {
         return;
     }
 
     is_failure = ngx_http_markdown_is_failure_outcome(reason_code);
+    reason_meta = ngx_http_markdown_reason_meta_for(reason_code);
+    event_name = event != NULL ? event : "-";
 
     effective_verbosity = ngx_http_markdown_effective_log_verbosity(
         eff, conf);
@@ -362,7 +328,7 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
         return;
     }
 
-    /* Select NGINX log level based on outcome type (FR-03.5) */
+    /* Select NGINX log level based on outcome type. */
     log_level = is_failure ? NGX_LOG_WARN : NGX_LOG_INFO;
 
     /* Resolve request method name */
@@ -372,41 +338,112 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
         method_name = empty;
     }
 
-    /* Resolve upstream content-type (FR-03.2) */
+    /* Resolve upstream content-type. */
     if (r->headers_out.content_type.len > 0) {
         content_type = r->headers_out.content_type;
     } else {
         content_type = empty;
     }
 
-    /* Debug extended format (FR-03.3) — delegated to helper */
+    /* Debug extended format — delegated to helper. */
     if (effective_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG) {
         ngx_http_markdown_decision_meta_t  meta;
 
         meta.method_name = &method_name;
         meta.content_type = &content_type;
+        meta.reason_meta = reason_meta;
+        meta.event = event_name;
         ngx_http_markdown_log_decision_debug(r, conf, eff,
             reason_code, error_category, log_level,
             &meta);
         return;
     }
 
-    /* Base format (FR-03.2, FR-03.6) */
+    /* Base format. */
     if (error_category != NULL && error_category->len > 0) {
         ngx_log_error(log_level, r->connection->log, 0,
-            "markdown: reason=%V "
+            "markdown: outcome=%s stage=%s reason=%V event=%s "
             "category=%V "
             "method=%V uri=%V content_type=%V",
-            reason_code, error_category,
+            reason_meta != NULL ? reason_meta->outcome : "-",
+            reason_meta != NULL ? reason_meta->stage : "-",
+            reason_code, event_name, error_category,
             &method_name, &r->uri,
             &content_type);
     } else {
         ngx_log_error(log_level, r->connection->log, 0,
-            "markdown: reason=%V "
+            "markdown: outcome=%s stage=%s reason=%V event=%s "
             "method=%V uri=%V content_type=%V",
-            reason_code, &method_name, &r->uri,
+            reason_meta != NULL ? reason_meta->outcome : "-",
+            reason_meta != NULL ? reason_meta->stage : "-",
+            reason_code, event_name, &method_name, &r->uri,
             &content_type);
     }
+}
+
+
+static void
+ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code,
+    const ngx_str_t *error_category)
+{
+    ngx_http_markdown_log_decision_emit(
+        r, conf, eff, reason_code, error_category, NULL);
+}
+
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+static void
+ngx_http_markdown_log_decision_event(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code, const char *event)
+{
+    ngx_http_markdown_log_decision_emit(
+        r, conf, eff, reason_code, NULL, event);
+}
+#endif
+
+
+/* Emit a non-terminal implementation event without inventing a reason code. */
+static void
+ngx_http_markdown_log_event(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const char *stage, const char *event)
+{
+    ngx_uint_t  effective_verbosity;
+    ngx_uint_t  log_level;
+    ngx_str_t   method_name;
+    ngx_str_t   content_type;
+    ngx_str_t   empty = ngx_string("-");
+
+    if (r == NULL || conf == NULL || event == NULL) {
+        return;
+    }
+
+    effective_verbosity = ngx_http_markdown_effective_log_verbosity(
+        eff, conf);
+    if (effective_verbosity > NGX_HTTP_MARKDOWN_LOG_DEBUG) {
+        effective_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+    }
+    if (effective_verbosity <= NGX_HTTP_MARKDOWN_LOG_WARN) {
+        return;
+    }
+
+    log_level = effective_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG
+        ? NGX_LOG_DEBUG : NGX_LOG_INFO;
+    method_name = r->method_name.len > 0 ? r->method_name : empty;
+    content_type = r->headers_out.content_type.len > 0
+        ? r->headers_out.content_type : empty;
+
+    ngx_log_error(log_level, r->connection->log, 0,
+        "markdown: outcome=- stage=%s reason=- event=%s "
+        "method=%V uri=%V content_type=%V",
+        stage != NULL ? stage : "-", event,
+        &method_name, &r->uri, &content_type);
 }
 
 

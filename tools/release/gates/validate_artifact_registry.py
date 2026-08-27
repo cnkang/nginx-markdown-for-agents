@@ -184,16 +184,24 @@ def validate_index(index: dict, candidate_sha: str | None) -> list[str]:
         if not isinstance(artifact, dict):
             reasons.append(f"malformed: artifacts[{index_pos}] must be an object")
             continue
-        _check_index_artifact(artifact, index_pos, seen_ids, expected_digest,
-                              expected_abi, reasons)
+        _check_index_artifact(
+            artifact,
+            index_pos,
+            seen_ids,
+            expected_digest,
+            expected_abi,
+            candidate_sha,
+            reasons,
+        )
 
     return reasons
 
 
-def _check_index_artifact(artifact: dict, index_pos: int, seen_ids: set,
-                          expected_digest: str, expected_abi: int,
-                          reasons: list) -> None:
-    """Validate one candidate artifact index row."""
+def _check_artifact_identity(
+    artifact: dict, index_pos: int, seen_ids: set,
+    candidate_sha: str | None, reasons: list
+) -> None:
+    """Validate required fields, identifiers, and candidate binding."""
     for field in INDEX_REQUIRED_ARTIFACT_FIELDS:
         if artifact.get(field) is None:
             reasons.append(
@@ -207,6 +215,28 @@ def _check_index_artifact(artifact: dict, index_pos: int, seen_ids: set,
                 f"blocking-pending: duplicate artifact id {artifact_id!r}")
         seen_ids.add(artifact_id)
 
+    row_candidate_sha = artifact.get("candidate_sha")
+    if row_candidate_sha is not None:
+        if (
+            not isinstance(row_candidate_sha, str)
+            or not CANDIDATE_SHA_PATTERN.fullmatch(row_candidate_sha)
+        ):
+            reasons.append(
+                f"malformed: artifacts[{index_pos}] candidate_sha must be "
+                "40 lowercase hex"
+            )
+        elif candidate_sha is not None and row_candidate_sha != candidate_sha:
+            reasons.append(
+                f"stale-digest: artifacts[{index_pos}] candidate_sha "
+                f"{row_candidate_sha} != frozen candidate {candidate_sha}"
+            )
+
+
+def _check_artifact_bindings(
+    artifact: dict, index_pos: int, expected_digest: str,
+    expected_abi: int, reasons: list
+) -> None:
+    """Validate feature-manifest and ABI bindings in one row."""
     artifact_sha = artifact.get("artifact_sha256")
     if artifact_sha is not None and (
         not isinstance(artifact_sha, str)
@@ -229,6 +259,14 @@ def _check_index_artifact(artifact: dict, index_pos: int, seen_ids: set,
             f"stale-digest: artifacts[{index_pos}] abi_version {abi} "
             f"!= frozen ABI {expected_abi}")
 
+
+def _check_index_artifact(artifact: dict, index_pos: int, seen_ids: set,
+                          expected_digest: str, expected_abi: int,
+                          candidate_sha: str | None, reasons: list) -> None:
+    """Validate one candidate artifact index row."""
+    _check_artifact_identity(artifact, index_pos, seen_ids, candidate_sha, reasons)
+    _check_artifact_bindings(artifact, index_pos, expected_digest, expected_abi,
+                             reasons)
     status = artifact.get("verification_status")
     _check_verification_status(status, index_pos, reasons)
 

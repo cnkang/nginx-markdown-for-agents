@@ -2678,18 +2678,6 @@ def _shell_option_sets(cmd_base: str) -> _ShellOptionSets:
     )
 
 
-def _shell_option_sets(cmd_base: str) -> _ShellOptionSets:
-    """Build one complete option classification for ``cmd_base``."""
-    return _ShellOptionSets(
-        pcre_flags=_PCRE_FLAGS[cmd_base],
-        pattern=_PATTERN_OPTIONS.get(cmd_base, set()),
-        pattern_file=_PATTERN_FILE_OPTIONS.get(cmd_base, set()),
-        required_value=_REQUIRED_VALUE_OPTIONS.get(cmd_base, set()),
-        optional_value=_OPTIONAL_VALUE_OPTIONS.get(cmd_base, set()),
-        boolean_flags=_BOOLEAN_FLAGS.get(cmd_base, set()),
-    )
-
-
 def _split_shell_pipeline(line: str) -> list[list[str]]:
     """Tokenize a shell command line into per-segment token lists.
 

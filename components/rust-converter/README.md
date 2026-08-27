@@ -2,7 +2,7 @@
 
 This directory contains the HTML-to-Markdown conversion engine used by the NGINX module.
 
-It focuses on predictable output, memory safety, and a stable C FFI
+It focuses on predictable output, memory safety, and an exported bundled/internal C ABI
 boundary. The NGINX module can call into it without re-implementing
 parsing or sanitization logic in C.
 
@@ -36,70 +36,13 @@ make test-rust-fuzz-smoke
 cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
 ```
 
-## Incremental Processing API
+## Streaming Conversion
 
-The crate includes an optional incremental processing API behind a feature gate.
-
-### Enabling
-
-The crate's default feature set includes the `incremental` feature. To
-select it explicitly in a no-default-features build:
-
-```bash
-cargo build --no-default-features --features incremental
-cargo test --no-default-features --features incremental
-```
-
-The incremental C ABI reuses the existing `MarkdownOptions` layout, so
-enabling the `incremental` feature does not change the legacy
-`markdown_convert()` call signature for external callers. The incremental
-converter enforces its own 64 MiB hard ceiling to keep the chunk-oriented
-API bounded.
-
-### Rust API
-
-`IncrementalConverter` in `src/incremental.rs` provides a chunk-oriented interface:
-
-```rust
-use nginx_markdown_converter::converter::ConversionOptions;
-use nginx_markdown_converter::incremental::IncrementalConverter;
-
-let mut conv = IncrementalConverter::new(ConversionOptions::default());
-conv.feed_chunk(b"<h1>Hello</h1>").unwrap();
-conv.feed_chunk(b"<p>world</p>").unwrap();
-let markdown = conv.finalize().unwrap();
-```
-
-| Method | Description |
-|--------|-------------|
-| `new(options)` | Create a converter with the given `ConversionOptions` |
-| `feed_chunk(data)` | Append a byte slice to the internal buffer |
-| `finalize(self)` | Parse the accumulated buffer and return Markdown |
-
-### FFI Functions
-
-The feature exports four C-callable functions when enabled:
-
-| Function | Purpose |
-|----------|---------|
-| `markdown_incremental_new_with_code` | Create a handle and return an explicit status code |
-| `markdown_incremental_feed` | Feed a chunk of input data |
-| `markdown_incremental_finalize` | Finalize conversion and write the result |
-| `markdown_incremental_free` | Free the handle without finalizing |
-
-The pre-v1 ABI reset removed the redundant pointer-only constructor. Bundled C
-callers use `_new_with_code` so construction failures remain classifiable.
-
-### Limitations
-
-This API buffers all fed data internally and performs a single full
-parse-and-convert pass during `finalize`. The separate `streaming`
-module owns the true streaming engine path used since the 0.6.3 release
-line and is the default streaming path in the current 0.9.x line.
-
-### Equivalence Guarantee
-
-A single `feed_chunk` containing the complete input followed by `finalize` produces byte-identical output to the standard `markdown_convert` full-buffer path.
+The optional `streaming` feature provides the bounded-memory streaming engine
+used by the NGINX module. It is enabled in the default feature set together
+with `prune_noise_regions`. The streaming FFI lifecycle and ownership rules
+are documented in the generated `include/markdown_converter.h` contract and
+the repository [FFI ABI compatibility guide](../../docs/architecture/FFI_ABI_COMPATIBILITY.md).
 
 ## Source Layout
 

@@ -75,7 +75,7 @@ make test-rust-fuzz-smoke
 - **Target**: 90% aggregate line coverage
 - **Critical paths** (auth, error handling, FFI boundary, conditional requests): 90% line coverage for new code
 - The project collects coverage via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`)
-- The coverage script logs advisory per-file thresholds but they are not CI-blocking gates
+- `tools/ci/coverage_gate.py` blocks below 80% aggregate line coverage and below 90% critical-path line coverage
 - The lcov report is always produced regardless of coverage level, ensuring SonarCloud trends remain visible
 
 ## Terminology

@@ -14,12 +14,17 @@ Content-Encoding header
   -> Markdown headers/body are emitted
 ```
 
-Gzip uses zlib gzip framing, and deflate uses the zlib-wrapped RFC 1950 format
-required by HTTP. Raw RFC 1951 deflate is additionally accepted as a
-compatibility fallback for legacy servers (RFC 2616-era implementations),
-matching the C streaming and full-buffer decompressors. Deflate rejects trailing
-bytes. Gzip validates trailers and supports concatenated members while
-retaining one response-wide budget. Brotli build control
+Gzip uses zlib gzip framing, and deflate first uses the zlib-wrapped RFC 1950
+format required by HTTP. If the full-buffer zlib-wrapped attempt produces a
+format error before producing output, the C and Rust full-buffer paths retry
+the same bytes as raw RFC 1951 deflate for compatibility with legacy servers
+(RFC 2616-era implementations). The streaming C path cannot replay consumed
+chunks: it sniffs the first two bytes, selects zlib framing for a valid header
+and raw framing otherwise. A raw stream whose prefix happens to look like a
+zlib header is therefore reported as a format error in streaming mode rather
+than replayed. Deflate rejects trailing bytes. Gzip validates trailers and
+supports concatenated members while retaining one response-wide budget. Brotli
+build control
 `NGX_MARKDOWN_BROTLI_STREAMING` (default `auto`) manages the compile-time
 probe. A successful probe defines `NGX_HTTP_BROTLI` and enables the native
 streaming decoder. Builds without it use the bounded full-buffer path.
@@ -79,7 +84,7 @@ decompression family is:
 nginx_markdown_decompression_events_total{
   encoding="gzip|deflate|brotli",
   outcome="success|failure",
-  reason="ok|budget_exceeded|format_error|truncated_input|io_error"
+  reason="budget_exceeded|format_error|io_error|ok|truncated_input"
 }
 ```
 

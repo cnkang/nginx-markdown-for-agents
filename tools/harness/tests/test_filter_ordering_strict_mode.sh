@@ -5,6 +5,7 @@ set -e
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 FILTER_ORDERING_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/filter_ordering_test.sh"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/filter-ordering-strict.XXXXXX")"
+trap 'rm -rf "$TEST_ROOT"' EXIT
 FAKE_CURL_DIR="${TEST_ROOT}/bin"
 FAKE_CURL="${FAKE_CURL_DIR}/curl"
 PLAIN_STATE="${TEST_ROOT}/plain-cache-state"

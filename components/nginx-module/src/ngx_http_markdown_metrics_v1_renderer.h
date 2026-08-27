@@ -7,8 +7,7 @@
  * Emits exactly the 12 frozen metric families defined in the checked-in
  * 0.9.2 metrics registry.
  *
- * This renderer replaces ngx_http_markdown_prometheus_impl.h for the
- * 0.9.2 release. JSON and multi-format support are removed; the only
+ * JSON and multi-format support are not part of the 0.9.2 boundary; the only
  * output format is Prometheus text exposition format 0.0.4.
  *
  * WARNING: This header is an implementation detail of the main

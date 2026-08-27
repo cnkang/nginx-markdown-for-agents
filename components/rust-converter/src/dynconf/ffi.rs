@@ -147,9 +147,11 @@ pub struct FFIDynconfResult {
     /// Error message byte length (0 on success).
     pub error_message_len: usize,
 
-    /// Source digest (SHA-256 hex, 64 bytes). NULL on error.
+    /// Source digest (SHA-256 hex, 64 bytes). Validation errors retain this
+    /// digest when the input bytes are readable; it is NULL for FFI input
+    /// errors and parser failures that occur before a digest can be computed.
     pub source_digest: *const u8,
-    /// Source digest length (64 on success, 0 on error).
+    /// Source digest length (64 when a digest was computed, otherwise 0).
     pub source_digest_len: usize,
 
     /// Active digest (SHA-256 hex, 64 bytes). NULL on error.
@@ -269,12 +271,14 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
                 unsafe { write_success(result, &dynconf_result) };
             }
             Err(e) => {
+                let source_digest = super::digest::compute_source_digest(raw_bytes);
                 // SAFETY: result was validated non-NULL above.
                 unsafe {
                     write_error_with_message(
                         result,
                         map_error_kind(&e.kind),
                         Some(e.message.as_str()),
+                        Some(source_digest.as_str()),
                     );
                 }
             }
@@ -448,14 +452,19 @@ unsafe fn write_success(result: *mut FFIDynconfResult, dynconf: &DynconfResult) 
 /// `result` must point to a valid, initialized `FFIDynconfResult`.
 unsafe fn write_error(result: *mut FFIDynconfResult, code: u32) {
     unsafe {
-        write_error_with_message(result, code, None);
+        write_error_with_message(result, code, None, None);
     }
 }
 
 /// Write an error result, optionally carrying the parser's detailed
 /// diagnostic message (previously only the generic per-code text
 /// crossed the FFI, losing "unknown key 'foo'"-style operator detail).
-unsafe fn write_error_with_message(result: *mut FFIDynconfResult, code: u32, detail: Option<&str>) {
+unsafe fn write_error_with_message(
+    result: *mut FFIDynconfResult,
+    code: u32,
+    detail: Option<&str>,
+    source_digest: Option<&str>,
+) {
     // Phase 1: Allocate the error message into a local Box.
     // If this panics (OOM), result retains its safe init state.
     let text = match detail {
@@ -463,6 +472,7 @@ unsafe fn write_error_with_message(result: *mut FFIDynconfResult, code: u32, det
         None => error_message_for_code(code).to_string(),
     };
     let msg_bytes = text.as_bytes().to_vec().into_boxed_slice();
+    let source_bytes = source_digest.map(|digest| digest.as_bytes().to_vec().into_boxed_slice());
 
     // Phase 2: Commit -- transfer ownership and write all fields.
     // SAFETY: result was validated non-NULL by the caller.
@@ -473,9 +483,16 @@ unsafe fn write_error_with_message(result: *mut FFIDynconfResult, code: u32, det
     r.error_message_len = msg_len;
     r.error_message = msg_ptr;
 
+    if let Some(source_bytes) = source_bytes {
+        let (source_ptr, source_len) = crate::ffi::memory::leak_boxed_slice_to_raw(source_bytes);
+        r.source_digest_len = source_len;
+        r.source_digest = source_ptr;
+    } else {
+        r.source_digest = ptr::null();
+        r.source_digest_len = 0;
+    }
+
     // Clear success fields
-    r.source_digest = ptr::null();
-    r.source_digest_len = 0;
     r.active_digest = ptr::null();
     r.active_digest_len = 0;
     r.filter = DYNCONF_NOT_SET_U8;
@@ -508,7 +525,7 @@ fn error_message_for_code(code: u32) -> &'static str {
 
 #[cfg(test)]
 mod layout_tests {
-    use super::FFIDynconfResult;
+    use super::{FFIDynconfResult, default_dynconf_result};
     use std::mem::{align_of, offset_of, size_of};
 
     #[test]
@@ -527,5 +544,26 @@ mod layout_tests {
         assert_eq!(offset_of!(FFIDynconfResult, log_verbosity), 58);
         assert_eq!(offset_of!(FFIDynconfResult, error_policy), 59);
         assert_eq!(offset_of!(FFIDynconfResult, streaming_buffer), 64);
+    }
+
+    #[test]
+    fn rejected_document_retains_source_digest() {
+        let input = br#"{"schema_version": 1, "unknown": true}"#;
+        let expected = super::super::digest::compute_source_digest(input);
+        let mut result = default_dynconf_result();
+
+        unsafe {
+            super::markdown_dynconf_parse(input.as_ptr(), input.len(), &mut result);
+        }
+
+        assert_ne!(result.error_code, super::DYNCONF_OK);
+        assert_eq!(result.source_digest_len, 64);
+        let actual =
+            unsafe { std::slice::from_raw_parts(result.source_digest, result.source_digest_len) };
+        assert_eq!(actual, expected.as_bytes());
+
+        unsafe {
+            super::markdown_dynconf_result_free(&mut result);
+        }
     }
 }

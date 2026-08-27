@@ -6,10 +6,9 @@
   "properties": {
     "markdown": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "enabled": { "type": "boolean" },
-        "maxSize": { "type": "string" },
-        "timeout": { "type": "string" },
         "onError": { "type": "string" },
         "flavor": {
           "type": "string",
@@ -17,7 +16,6 @@
           "description": "Markdown dialect; see the markdown_flavor directive values."
         },
         "tokenEstimate": { "type": "boolean" },
-        "etag": { "type": "boolean" },
         "conditionalRequests": {
           "type": "string",
           "enum": ["off", "ims_only", "full"],
@@ -35,13 +33,13 @@
         "loadModule": { "type": "string" },
         "streaming": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "mode": {
               "type": "string",
               "enum": ["off", "auto", "force"],
               "description": "Processing-path policy; see the markdown_streaming directive values."
-            },
-            "budget": { "type": "string" }
+            }
           }
         },
         "prune": {
@@ -55,6 +53,7 @@
         "contentTypes": { "type": "array", "items": { "type": "string" } },
         "limits": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "conversionMemory": { "type": "string" },
             "conversionTimeout": { "type": "string" },
@@ -65,6 +64,23 @@
             "decompressionRatio": { "type": "integer", "minimum": 1 },
             "maxInflight": { "type": "integer", "minimum": 1 }
           }
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string" },
+        "tag": { "type": "string" },
+        "digest": {
+          "type": "string",
+          "pattern": "^$|^sha256:[0-9a-fA-F]{64}$",
+          "description": "Immutable image digest; takes precedence over tag."
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
         }
       }
     },
@@ -97,7 +113,13 @@
                 }
               }
             },
-            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "not": { "const": 8080 },
+              "description": "Sidecar port; 8080 is reserved for the module HTTP listener."
+            },
             "resources": {
               "type": "object",
               "description": "Kubernetes container resource requests and limits.",

@@ -36,12 +36,3 @@ paths = [
   '''^out/''',
   '''^coverage/''',
 ]
-
-[[allowlists]]
-description = "Legacy naming tests use token benchmark field names, not credentials"
-paths = [
-  '''^tools/release/legacy/tests/test_naming_conventions\.py$''',
-]
-regexes = [
-  '''(?i)token-reduction''',
-]

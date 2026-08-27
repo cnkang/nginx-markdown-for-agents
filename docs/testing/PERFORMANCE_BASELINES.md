@@ -2,7 +2,7 @@
 
 **Original Measurement Date:** 2026-02-26
 
-**Latest Canonical Module Measurement:** 2026-07-28 (eight scenarios,
+**Latest Canonical Module Measurement:** 2026-07-31 (eight scenarios,
 including Brotli streaming, on native Linux x86_64 with NGINX 1.24.0)
 
 **Historical Scenario Measurement:** 2026-07-19 (Brotli streaming on NGINX
@@ -254,7 +254,9 @@ The historical latency tables below predate the extra front-matter sample added 
 
 ## FFI Baselines — Large Tiers (Pending Measurement)
 
-The large-response optimization work added the following tiers to `perf/metrics-schema.json`. The team will populate baseline data once the incremental processing path turns on and gets profiled end-to-end. The team populates these tables after the profiling pass.
+The large-response work added the following tiers to `perf/metrics-schema.json`.
+The team will populate baseline data after it profiles the bounded streaming
+path end-to-end. The team populates these tables after the profiling pass.
 These rows are regression-comparison targets, not release-blocking
 thresholds. They are no longer tied to the 0.8.0 release line. See the
 current release checklist for blocking performance evidence.
@@ -302,7 +304,7 @@ On macOS, the script polls `ps -o rss` at a configurable interval (for example `
 ### Cross-Platform Comparison Caveat
 
 Memory values collected on Linux (`os_reported_peak`) and macOS (`sampled_peak`) use fundamentally different collection methods.
-**Do not compare absolute memory values across platforms.** Instead, compare relative changes (for example incremental versus full-buffer path) within the same platform and collection method. Absolute values differ across platforms.
+**Do not compare absolute memory values across platforms.** Instead, compare relative changes (for example streaming versus full-buffer path) within the same platform and collection method. Absolute values differ across platforms.
 
 ### Usage
 
@@ -318,9 +320,9 @@ The output JSON includes a `memory_peak_method` field (`os_reported_peak` or `sa
 | Tier | Variant | Path | Peak RSS (bytes) | Peak RSS (MiB) | Method | Platform | Notes |
 |------|---------|------|------------------|----------------|--------|----------|-------|
 | large-100k | plain-html | full-buffer | — | — | — | — | Pending measurement |
-| large-100k | plain-html | incremental | — | — | — | — | Pending measurement |
+| large-100k | plain-html | streaming | — | — | — | — | Pending measurement |
 | large-5m | plain-html | full-buffer | — | — | — | — | Pending measurement |
-| large-5m | plain-html | incremental | — | — | — | — | Pending measurement |
+| large-5m | plain-html | streaming | — | — | — | — | Pending measurement |
 
 ## Brotli Streaming Decompression — Performance Evidence
 
@@ -370,7 +372,7 @@ do not claim a measured relative speedup.
 2. Keep `if_modified_since_only` as a documented performance tradeoff for deployments that can accept weaker Markdown-variant conditional semantics.
 3. Evaluate zero-copy C/Rust buffer handoff only when profiling shows a material copy cost. The cost must be a significant share of end-to-end latency on target workloads.
 4. Add a separate full NGINX HTTP E2E baseline report (real server, real client load) when validating production rollout capacity.
-5. Populate large-100k and large-5m baseline tables once incremental path profiling is complete.
+5. Populate large-100k and large-5m baseline tables once streaming-path profiling is complete.
 6. Collect memory peak baselines for large tiers using `tools/perf/memory_observer.sh`.
 
 ## Real NGINX HTTP E2E Baselines (Local, NGINX 1.28.2 Stable)

@@ -443,10 +443,16 @@ The following files MUST NOT contain hand-maintained support matrices:
 These files MUST come from `tools/release-matrix.json` or validate against
 it via CI.
 
-**Recommended commands**:
+**Validation command (CI and release checks)**:
 
 ```sh
 python3 tools/render_release_matrix_docs.py --check
+```
+
+Maintainers regenerate the checked-in documents only after changing the source
+matrix:
+
+```sh
 python3 tools/render_release_matrix_docs.py --write
 ```
 

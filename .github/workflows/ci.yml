@@ -625,6 +625,9 @@ jobs:
         run: make test-nginx-unit-sanitize-smoke
 
   runtime-regressions:
+    # Keep this job name byte-for-byte aligned with the protected-main
+    # required-check context.  The additional SSI/filter-ordering coverage is
+    # implemented by steps below and must not change the required context.
     name: Runtime Regressions (IMS + Chunked + Large)
     needs: [changes, rust-quality]
     if: needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
@@ -710,6 +713,18 @@ jobs:
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
         run: ./tools/e2e/verify_brotli_streaming_e2e.sh
+
+      - name: Run native SSI and filter-ordering qualification
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
+        run: |
+          REQUIRE_FILTER_ORDERING_ALL=1 REQUIRE_AUTH_SUBREQUEST=1 \
+            ./tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh
+
+      - name: Run dynamic configuration convergence E2E
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
+        run: ./tools/e2e/verify_dynconf_convergence_e2e.sh
 
       - name: Remove retained IMS build artifacts
         if: always()
@@ -1120,40 +1135,3 @@ jobs:
         with:
           name: corpus-examples
           path: perf/reports/examples/
-
-  # ─── Release Regression Gates (Non-blocking) ─────────────────────────────────
-  # Validates that release-gated features from 0.9.x have not regressed.
-  # Runs validate_release_gates_090.py which covers 0.9.x deliverables including
-  # production examples, doctor tool, config V2, conditional requests, and
-  # observability schema.
-  # Informational only; the blocking 0.9.2 contract checks (public-surface
-  # drift, version consistency, and reason code registry) run in
-  # the independent release-092-contract-gates job.  Full module/performance
-  # blocking evidence
-  # runs at tag/RC time via release-packages.yml (baseline 092).
-  release-regression-gates:
-    name: "Release Gates: 0.9.x Regression Validator"
-    needs: [changes, rust-quality, nginx-c-tests]
-    if: >-
-      always() &&
-      (needs.changes.outputs.rust == 'true' || needs.changes.outputs.nginx == 'true' ||
-       needs.changes.outputs.docs == 'true' || needs.changes.outputs.workflows == 'true' ||
-       needs.changes.outputs.perf == 'true' || needs.changes.outputs.matrix_release == 'true')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    continue-on-error: true
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.14.6'
-
-      - name: Run release regression gates
-        run: python3 tools/release/gates/validate_release_gates_090.py

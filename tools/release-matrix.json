@@ -12,7 +12,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -26,7 +26,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -40,7 +40,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -54,7 +54,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -68,7 +68,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -82,7 +82,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -96,7 +96,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -110,7 +110,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -124,7 +124,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -138,7 +138,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -152,7 +152,9 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "image_ref": "nginx:1.26.3",
+      "image_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -166,7 +168,9 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "image_ref": "nginx:1.26.3-alpine3.20",
+      "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -180,7 +184,9 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "image_ref": "nginx:1.26.3",
+      "image_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -194,7 +200,9 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "image_ref": "nginx:1.26.3-alpine3.20",
+      "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -208,7 +216,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -222,7 +230,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -236,7 +244,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -250,7 +258,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -264,7 +272,7 @@
       "support_tier": "experimental",
       "release_blocking": false,
       "owner_workflow": ".github/workflows/homebrew-formula-gate.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -278,7 +286,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -292,7 +300,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -306,7 +314,7 @@
       "support_tier": "best-effort",
       "release_blocking": false,
       "owner_workflow": ".github/workflows/ci.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -320,7 +328,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -334,7 +342,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -348,7 +356,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -362,7 +370,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -376,7 +384,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -390,7 +398,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -404,7 +412,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -418,7 +426,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -432,7 +440,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -446,7 +454,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -460,7 +468,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -474,7 +482,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -488,7 +496,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -502,7 +510,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -516,7 +524,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -530,7 +538,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -544,7 +552,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -558,7 +566,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -572,13 +580,15 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "image_ref": "nginx:1.31.4",
+      "image_digest": "sha256:8f029c543423e3eac6b08254718bc31eb75633b1e448026b6616927baa7d4bfe",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
       "nginx_version": "1.31.4",
       "nginx_channel": "mainline",
-      "os": "alpine3.20",
+      "os": "alpine3.24",
       "libc": "musl",
       "arch": "amd64",
       "artifact_type": "docker-image",
@@ -586,7 +596,9 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "image_ref": "nginx:1.31.4-alpine3.24",
+      "image_digest": "sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -600,13 +612,15 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "image_ref": "nginx:1.31.4",
+      "image_digest": "sha256:8f029c543423e3eac6b08254718bc31eb75633b1e448026b6616927baa7d4bfe",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
       "nginx_version": "1.31.4",
       "nginx_channel": "mainline",
-      "os": "alpine3.20",
+      "os": "alpine3.24",
       "libc": "musl",
       "arch": "arm64",
       "artifact_type": "docker-image",
@@ -614,7 +628,9 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/official-nginx-docker.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "image_ref": "nginx:1.31.4-alpine3.24",
+      "image_digest": "sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -628,7 +644,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -642,7 +658,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -656,7 +672,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -670,7 +686,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -684,7 +700,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
     {
@@ -698,7 +714,7 @@
       "support_tier": "supported",
       "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     }
   ]

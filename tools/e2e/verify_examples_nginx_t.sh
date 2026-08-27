@@ -103,6 +103,10 @@ if [[ -n "${MODULE_SO}" && ! -f "${MODULE_SO}" ]]; then
   echo "ERROR: MODULE_SO does not exist: ${MODULE_SO}" >&2
   exit 2
 fi
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 is required to extract migration examples" >&2
+  exit 2
+fi
 
 # GNU sed and BSD sed use different in-place-edit arguments. Keep the
 # verification wrapper runnable on both the Linux CI runner and macOS hosts.

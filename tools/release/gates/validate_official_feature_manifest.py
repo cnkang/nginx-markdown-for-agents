@@ -2,7 +2,7 @@
 """Validate the official build feature manifest.
 
 Checks that `artifacts/release/0.9.2/official-build-feature-manifest.json`
-is exactly the three-key object `{"incremental": true, "streaming": true,
+is exactly the two-key object `{"streaming": true,
 "prune_noise_regions": true}`, that the Cargo default features agree with
 the manifest, and that no consumer uses the forbidden Cargo feature names
 `pruning` or `brotli`.
@@ -62,7 +62,7 @@ def _manifest_path() -> pathlib.Path:
 def _cargo_toml_path() -> pathlib.Path:
     return REPO_ROOT / "components" / "rust-converter" / "Cargo.toml"
 
-EXPECTED = {"incremental": True, "streaming": True, "prune_noise_regions": True}
+EXPECTED = {"streaming": True, "prune_noise_regions": True}
 FORBIDDEN_FEATURE_NAMES = {"pruning", "brotli"}
 
 

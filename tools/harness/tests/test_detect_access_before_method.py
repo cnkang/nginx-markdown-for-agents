@@ -63,6 +63,63 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
 }
 """
 
+CONDITIONAL_ACCESS_HANDLER = """\
+ngx_int_t
+ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
+{
+    if (r->headers_in.authorization != NULL) {
+        ngx_http_markdown_diagnostics_check_access(r);
+    }
+    if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
+        return NGX_HTTP_NOT_ALLOWED;
+    }
+    return NGX_OK;
+}
+"""
+
+NESTED_BRACELESS_ACCESS_HANDLER = """\
+ngx_int_t
+ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
+{
+    if (enabled)
+        if (ngx_http_markdown_diagnostics_check_access(r) != NGX_OK)
+            return NGX_ERROR;
+    if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
+        return NGX_HTTP_NOT_ALLOWED;
+    }
+    return NGX_OK;
+}
+"""
+
+SHORT_CIRCUITED_ACCESS_HANDLER = """\
+ngx_int_t
+ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
+{
+    if (enabled
+        && ngx_http_markdown_diagnostics_check_access(r) != NGX_OK) {
+        return NGX_ERROR;
+    }
+    if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
+        return NGX_HTTP_NOT_ALLOWED;
+    }
+    return NGX_OK;
+}
+"""
+
+NESTED_PARENTHESIZED_ACCESS_HANDLER = """\
+ngx_int_t
+ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
+{
+    if ((enabled))
+        if (ngx_http_markdown_diagnostics_check_access(r) != NGX_OK)
+            return NGX_ERROR;
+    if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
+        return NGX_HTTP_NOT_ALLOWED;
+    }
+    return NGX_OK;
+}
+"""
+
 NO_REJECT_HANDLER = """\
 ngx_int_t
 ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
@@ -156,6 +213,30 @@ def test_metrics_access_helper_passes(tmp_path) -> None:
 def test_bad_order_is_violation(tmp_path) -> None:
     violations, _ = _audit_text(BAD_ORDER_HANDLER, tmp_path)
     assert any("BEFORE access" in v for v in violations)
+
+
+def test_conditional_access_before_rejection_is_violation(tmp_path) -> None:
+    violations, _ = _audit_text(CONDITIONAL_ACCESS_HANDLER, tmp_path)
+    assert any("unconditionally" in v for v in violations)
+
+
+def test_nested_braceless_access_before_rejection_is_violation(
+    tmp_path,
+) -> None:
+    violations, _ = _audit_text(NESTED_BRACELESS_ACCESS_HANDLER, tmp_path)
+    assert any("unconditionally" in v for v in violations)
+
+
+def test_short_circuited_access_before_rejection_is_violation(tmp_path) -> None:
+    violations, _ = _audit_text(SHORT_CIRCUITED_ACCESS_HANDLER, tmp_path)
+    assert any("unconditionally" in v for v in violations)
+
+
+def test_nested_parenthesized_access_before_rejection_is_violation(
+    tmp_path,
+) -> None:
+    violations, _ = _audit_text(NESTED_PARENTHESIZED_ACCESS_HANDLER, tmp_path)
+    assert any("unconditionally" in v for v in violations)
 
 
 def test_no_reject_handler_exempt(tmp_path) -> None:

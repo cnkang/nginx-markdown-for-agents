@@ -766,7 +766,6 @@ test_property9_part_c_truncated_input_propagation(void)
                 "finish on truncated brotli must return "
                 "TRUNCATED_INPUT or NGX_OK (valid prefix)");
 
-            free(out);
         } else if (rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
             /*
              * Also acceptable: truncation mid-block caused a decode
@@ -810,24 +809,46 @@ test_brotli_error_classification_ranges(void)
 
     TEST_SUBSECTION("Brotli error classification ranges");
 
-    for (code = -30; code <= -21; code++) {
+    for (code = -21; code >= -22; code--) {
         TEST_ASSERT(
             ngx_http_markdown_brotli_error_classify(code)
                 == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
-            "allocation codes must remain allocation-classified");
+            "documented allocation codes must remain allocation-classified");
     }
-
-    for (code = -17; code <= -1; code++) {
+    for (code = -25; code >= -27; code--) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+            "documented allocation codes must remain allocation-classified");
+    }
+    TEST_ASSERT(
+        ngx_http_markdown_brotli_error_classify(-30)
+            == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+        "-30 must be allocation-classified");
+    for (code = -16; code <= -1; code++) {
         TEST_ASSERT(
             ngx_http_markdown_brotli_error_classify(code)
                 == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
-            "format codes must remain format-classified");
+            "documented format codes must remain format-classified");
     }
-
-    TEST_ASSERT(
-        ngx_http_markdown_brotli_error_classify(-18)
-            == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-        "internal codes must remain system-classified");
+    for (code = -17; code >= -20; code--) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+            "reserved/control codes must remain system-classified");
+    }
+    for (code = -23; code >= -24; code--) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+            "reserved allocation codes must remain system-classified");
+    }
+    for (code = -28; code >= -29; code--) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+            "reserved allocation codes must remain system-classified");
+    }
     TEST_PASS("Brotli error classification ranges are stable");
 }
 

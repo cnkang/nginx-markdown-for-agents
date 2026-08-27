@@ -80,7 +80,7 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ```bash
 # Check module is loaded
-nginx -V 2>&1 | grep -o 'markdown'
+sudo nginx -t
 
 # Test conversion
 curl -H "Accept: text/markdown" http://localhost/
@@ -198,7 +198,7 @@ If you encounter dependency errors:
    ```bash
    rpm -qpR nginx-module-markdown-for-agents-*.rpm | grep nginx-abi
    ```
-3. See the [troubleshooting guide](../../docs/guides/PACKAGE_INSTALLATION.md)
+3. See the [troubleshooting guide](../../../docs/guides/PACKAGE_INSTALLATION.md)
 
 ---
 

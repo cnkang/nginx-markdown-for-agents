@@ -1,8 +1,7 @@
 //! Internal smoke scenario — harness self-validation.
 //!
-//! Verifies that the harness can start NGINX, confirm readiness, and
-//! stop cleanly. This is an internal validation scenario, not a
-//! 0.6.3-specification business scenario.
+//! Verifies that reuse-mode preflight can locate the configured NGINX binary.
+//! This is an internal validation scenario, not a business scenario.
 
 use crate::scenarios::common;
 use crate::scenarios::{AssertionResult, ScenarioContext, ScenarioReport};
@@ -10,8 +9,8 @@ use anyhow::Result;
 
 /// Run the smoke scenario.
 ///
-/// Starts NGINX, verifies readiness, and stops. Produces a passing
-/// report if all steps succeed.
+/// Checks that the configured NGINX binary is available and produces a
+/// report with the result.
 pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     const SCENARIO: &str = "smoke";
     let start = std::time::Instant::now();

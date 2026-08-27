@@ -53,6 +53,10 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN update-ca-certificates
 
 ARG NGINX_VERSION=1.26.3
+ARG NGX_MARKDOWN_BUILD_KIND=release
+ARG NGX_MARKDOWN_SOURCE_SHA
+ARG NGX_MARKDOWN_RUST_VERSION
+ARG NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST
 
 # Pin the Rust toolchain to the repository's rust-toolchain.toml so release
 # binaries are built with the same compiler as the package artifacts
@@ -117,7 +121,11 @@ RUN rm -rf components/rust-converter/target \
     && make build
 
 WORKDIR /build/nginx-${NGINX_VERSION}
-ENV NGX_MARKDOWN_BROTLI_STREAMING=on
+ENV NGX_MARKDOWN_BROTLI_STREAMING=on \
+    NGX_MARKDOWN_BUILD_KIND=${NGX_MARKDOWN_BUILD_KIND} \
+    NGX_MARKDOWN_SOURCE_SHA=${NGX_MARKDOWN_SOURCE_SHA} \
+    NGX_MARKDOWN_RUST_VERSION=${NGX_MARKDOWN_RUST_VERSION} \
+    NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST=${NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST}
 RUN ./configure --with-compat --add-dynamic-module=/src/components/nginx-module \
     && make modules \
     && mkdir /out \

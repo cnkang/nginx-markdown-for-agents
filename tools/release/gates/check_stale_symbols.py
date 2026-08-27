@@ -33,23 +33,15 @@ STALE_FIELDS = {
     "docs/harness/rules/": ["memory_budget", "streaming_budget"],
 }
 
-# Paths allowed to contain stale symbols (migration docs, changelogs, ADRs, and rollout guides)
+# Paths allowed to contain stale symbols (historical migration material only).
 WHITELIST_PATH_PREFIXES = (
     "docs/guides/MIGRATION-",
     "docs/guides/0.9.2-breaking-changes.md",
-    "docs/guides/CONFIGURATION.md",
-    "docs/guides/ROLLOUT_COOKBOOK.md",
-    "docs/guides/LARGE_RESPONSE_ROLLOUT.md",
-    "docs/guides/streaming-default-migration.md",
-    "docs/guides/NGINX_COMPATIBILITY.md",
-    "docs/guides/OPERATIONS.md",
-    "docs/guides/ROLLBACK_GUIDE.md",
-    "docs/guides/prometheus-metrics.md",
-    "docs/guides/streaming-troubleshooting.md",
     # The public-surface inventory records retired directives as migration data.
     "docs/harness/public-surface-inventory.json",
     "CHANGELOG.md",
     "docs/architecture/ADR/",
+    "docs/archive/",
 )
 
 SCAN_PATH_PREFIXES = (

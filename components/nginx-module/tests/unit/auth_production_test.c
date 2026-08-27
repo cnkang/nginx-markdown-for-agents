@@ -244,7 +244,8 @@ make_req(void)
 static void
 test_is_cache_control_header_match(void)
 {
-    ngx_table_elt_t h;
+    ngx_table_elt_t h = { 0 };
+    h.hash = 1;
     h.key.data = (u_char *) "Cache-Control";
     h.key.len = 13;
     ngx_flag_t rc = ngx_http_markdown_is_cache_control_header(&h);
@@ -317,6 +318,18 @@ test_cc_has_directive_empty_value(void)
         &value, &directive);
     TEST_ASSERT(rc == 0, "empty value");
     TEST_PASS("empty value handled");
+}
+
+static void
+test_cc_has_directive_rejects_malformed_name(void)
+{
+    ngx_str_t value = ngx_string("@invalid");
+    ngx_str_t directive = ngx_string("public");
+    ngx_int_t rc = ngx_http_markdown_cache_control_has_directive(
+        &value, &directive);
+
+    TEST_ASSERT(rc == 0, "malformed directive is rejected");
+    TEST_PASS("malformed Cache-Control directive rejected");
 }
 
 static void
@@ -742,7 +755,7 @@ test_is_authenticated_auth_cookie(void)
     }
     r->headers_in.cookie->hash = 1;
     r->headers_in.cookie->value.data = (u_char *) "session_id=abc123";
-    r->headers_in.cookie->value.len = 19;
+    r->headers_in.cookie->value.len = sizeof("session_id=abc123") - 1;
     ngx_int_t rc = ngx_http_markdown_is_authenticated(r, NULL);
     TEST_ASSERT(rc == 1, "Auth cookie detected");
     TEST_PASS("auth cookie detected");
@@ -850,6 +863,30 @@ test_modify_cc_public_mixed(void)
 }
 
 static void
+test_modify_cc_public_with_multiple_retained_directives(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *entry;
+    const char         expected[] = "max-age=60, no-cache, private";
+    ngx_int_t           rc;
+
+    reset_pool();
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    entry = add_header(&r->headers_out.headers, "Cache-Control",
+                       "public, max-age=60, no-cache", 1);
+    rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+
+    TEST_ASSERT(rc == NGX_OK, "multiple retained directives rewrite");
+    TEST_ASSERT(entry != NULL && entry->value.len == sizeof(expected) - 1
+                && memcmp(entry->value.data, expected,
+                          sizeof(expected) - 1) == 0,
+                "public directive is removed while retained directives stay ordered");
+    TEST_PASS("multiple Cache-Control directives retain their separators");
+}
+
+static void
 test_modify_cc_public_allocation_failure_is_atomic(void)
 {
     ngx_http_request_t *r;
@@ -920,6 +957,38 @@ test_modify_cc_append_private(void)
     ngx_int_t rc = ngx_http_markdown_modify_cache_control_for_auth(r);
     TEST_ASSERT(rc == NGX_OK, "private appended");
     TEST_PASS("private appended to no-cache");
+}
+
+static void
+test_modify_cc_is_idempotent(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *entry;
+    u_char             *value_data;
+    size_t              value_len;
+    ngx_int_t           rc;
+
+    reset_pool();
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    entry = add_header(&r->headers_out.headers, "Cache-Control",
+                       "no-cache", 1);
+    rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+    TEST_ASSERT(rc == NGX_OK, "first auth Cache-Control update succeeds");
+    TEST_ASSERT(entry != NULL, "Cache-Control entry exists");
+
+    value_data = entry->value.data;
+    value_len = entry->value.len;
+
+    rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+    TEST_ASSERT(rc == NGX_OK, "second auth Cache-Control update succeeds");
+    TEST_ASSERT(entry->value.data == value_data
+                && entry->value.len == value_len
+                && memcmp(entry->value.data, "no-cache, private",
+                          sizeof("no-cache, private") - 1) == 0,
+                "repeated auth update must not append private twice");
+    TEST_PASS("auth Cache-Control update is idempotent");
 }
 
 static void
@@ -1104,6 +1173,7 @@ main(void)
     test_cc_has_directive_null_value();
     test_cc_has_directive_empty_value();
     test_cc_has_directive_null_directive();
+    test_cc_has_directive_rejects_malformed_name();
     test_cc_has_directive_ignores_qualified_private();
     test_cc_has_directive_ignores_quoted_directive_text();
 
@@ -1154,9 +1224,11 @@ main(void)
     test_modify_cc_no_store_preserved();
     test_modify_cc_public_upgraded();
     test_modify_cc_public_mixed();
+    test_modify_cc_public_with_multiple_retained_directives();
     test_modify_cc_public_allocation_failure_is_atomic();
     test_modify_cc_already_private();
     test_modify_cc_append_private();
+    test_modify_cc_is_idempotent();
     test_modify_cc_ignores_invalidated_no_store();
     test_modify_cc_no_store_and_public_normalizes_public();
     test_modify_cc_qualified_private_adds_bare_private();

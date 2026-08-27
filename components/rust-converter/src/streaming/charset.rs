@@ -575,7 +575,7 @@ impl CharsetState {
                 ..
             } => sniff_buffer
                 .capacity()
-                .saturating_add(header_charset.as_ref().map_or(0, |s| s.capacity())),
+                .saturating_add(header_charset.as_ref().map_or(0, String::capacity)),
             CharsetState::Resolved { .. } => 0,
             CharsetState::Failed(reason) => reason.capacity(),
         }

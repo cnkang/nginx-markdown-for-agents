@@ -50,7 +50,20 @@ set -e
 # Constants
 # ---------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")"
-PROJECT_VERSION="0.9.1"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+VERSION_FILE="$REPO_ROOT/components/rust-converter/Cargo.toml"
+PROJECT_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$VERSION_FILE" | head -n 1)"
+
+if [[ -z "$PROJECT_VERSION" ]]; then
+    printf '[ERROR] Unable to read project version from %s\n' "$VERSION_FILE" >&2
+    exit 2
+fi
+
+if [[ ! "$PROJECT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+    printf '[ERROR] Invalid project version in %s: %s\n' "$VERSION_FILE" "$PROJECT_VERSION" >&2
+    exit 2
+fi
 
 # Supported NGINX versions (nginx.org stable)
 SUPPORTED_NGINX_VERSIONS="1.26.3"

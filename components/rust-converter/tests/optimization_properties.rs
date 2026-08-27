@@ -779,13 +779,13 @@ fn arb_html_with_dangerous_content() -> impl Strategy<Value = (String, Vec<Strin
         js_payload,
     )
         .prop_map(|(script_body, evt_attr, evt_val, safe, js_pay)| {
-            let mut dangerous_markers = Vec::new();
-
             // Track what dangerous content we're inserting
-            dangerous_markers.push(format!("script:{}", script_body));
-            dangerous_markers.push(format!("event:{}={}", evt_attr, evt_val));
-            dangerous_markers.push("jsurl:javascript:".to_string());
-            dangerous_markers.push("dataurl:data:".to_string());
+            let dangerous_markers = vec![
+                format!("script:{}", script_body),
+                format!("event:{}={}", evt_attr, evt_val),
+                "jsurl:javascript:".to_string(),
+                "dataurl:data:".to_string(),
+            ];
 
             let html = format!(
                 "<html><body>\
@@ -1397,31 +1397,50 @@ fn reference_normalize(input: &str) -> String {
         if line.trim_start().starts_with("```") {
             in_code_block = !in_code_block;
         }
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            if !prev_blank {
-                result.push('\n');
-                prev_blank = true;
-            }
-        } else {
-            if in_code_block {
-                result.push_str(trimmed);
-            } else {
-                result.push_str(&reference_normalize_line_whitespace(trimmed));
-            }
-            result.push('\n');
-            prev_blank = false;
-        }
+        prev_blank = append_reference_body_line(&mut result, line, in_code_block, prev_blank);
     }
 
-    if !result.ends_with('\n') {
-        result.push('\n');
+    finalize_reference_normalization(result)
+}
+
+/// Append one body line to a reference-normalized buffer and return the new
+/// blank-run state.
+///
+/// Blank lines collapse to a single newline; content lines are normalized
+/// unless the line sits inside a fenced code block, where only trailing
+/// whitespace is stripped.
+fn append_reference_body_line(
+    output: &mut String,
+    line: &str,
+    in_code_block: bool,
+    prev_blank: bool,
+) -> bool {
+    let trimmed = line.trim_end();
+    if trimmed.is_empty() {
+        if !prev_blank {
+            output.push('\n');
+        }
+        return true;
+    }
+    if in_code_block {
+        output.push_str(trimmed);
     } else {
-        while result.ends_with("\n\n") {
-            result.pop();
+        output.push_str(&reference_normalize_line_whitespace(trimmed));
+    }
+    output.push('\n');
+    false
+}
+
+/// Ensure a reference-normalized buffer ends with exactly one newline.
+fn finalize_reference_normalization(mut output: String) -> String {
+    if !output.ends_with('\n') {
+        output.push('\n');
+    } else {
+        while output.ends_with("\n\n") {
+            output.pop();
         }
     }
-    result
+    output
 }
 
 /// Reference line-whitespace normalization matching `MarkdownConverter::normalize_line_whitespace`.
@@ -1469,32 +1488,10 @@ fn fused_normalize(input: &str) -> String {
             in_code_block = !in_code_block;
         }
 
-        let trimmed = line.trim_end();
-
-        if trimmed.is_empty() {
-            if !prev_blank {
-                output.push('\n');
-                prev_blank = true;
-            }
-        } else {
-            if in_code_block {
-                output.push_str(trimmed);
-            } else {
-                output.push_str(&reference_normalize_line_whitespace(trimmed));
-            }
-            output.push('\n');
-            prev_blank = false;
-        }
+        prev_blank = append_reference_body_line(&mut output, line, in_code_block, prev_blank);
     }
 
-    if !output.ends_with('\n') {
-        output.push('\n');
-    } else {
-        while output.ends_with("\n\n") {
-            output.pop();
-        }
-    }
-    output
+    finalize_reference_normalization(output)
 }
 
 proptest! {

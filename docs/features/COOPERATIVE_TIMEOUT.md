@@ -13,7 +13,7 @@ flowchart TD
     Fail --> OnError{"markdown_error_policy?"}
     OnError -->|pass| FailOpen["Return Original HTML"]
     OnError -->|fail_closed| FailClosed["Return 502 Error"]
-    
+
     style Success fill:#090,color:#fff
     style FailOpen fill:#f90,color:#000
     style FailClosed fill:#c00,color:#fff
@@ -116,12 +116,12 @@ let mut ctx = ConversionContext::new(Duration::ZERO);
 let markdown = converter.convert_with_context(&dom, &mut ctx)?;
 ```
 
-### Backward Compatibility
+### Direct Conversion Without a Timeout Context
 
 The original `convert()` method is still available and uses no timeout:
 
 ```rust
-// Old method - no timeout
+// Direct conversion - no timeout context
 let markdown = converter.convert(&dom)?;
 ```
 
@@ -132,6 +132,11 @@ The FFI layer automatically creates a `ConversionContext` from the overall
 deadline when configuration sets `markdown_limits parser_timeout=`. The
 module checks it at parser or traversal checkpoints. It does not interrupt an
 in-progress parse and is not a second independent conversion timer.
+
+The two deadlines map to distinct error codes. `ERROR_TIMEOUT` (code 3)
+reports only the overall conversion deadline. `ERROR_PARSE_TIMEOUT`
+(code 10) reports the parser checkpoint deadline. Do not treat code 10
+as a second conversion timer. It is a distinct parser deadline signal.
 
 ```c
 markdown_options_t options = {
@@ -209,13 +214,19 @@ match converter.convert_with_context(&dom, &mut ctx) {
 
 ### FFI Error Code
 
-In the FFI layer, the module maps timeout errors to `ERROR_TIMEOUT` (code 3):
+In the FFI layer, the module maps the overall conversion deadline to
+`ERROR_TIMEOUT` (code 3). It maps the parser checkpoint deadline to
+`ERROR_PARSE_TIMEOUT` (code 10):
 
 ```c
 if (result.error_code == ERROR_TIMEOUT) {
-    // Handle timeout
+    // Handle overall conversion deadline exceeded
     ngx_log_error(NGX_LOG_WARN, log, 0,
                   "markdown conversion timeout exceeded");
+} else if (result.error_code == ERROR_PARSE_TIMEOUT) {
+    // Handle parser checkpoint deadline exceeded
+    ngx_log_error(NGX_LOG_WARN, log, 0,
+                  "markdown parser timeout exceeded");
 }
 ```
 
@@ -230,7 +241,7 @@ Tests cover the timeout mechanism with:
 - **Short timeout**: Verify the timeout triggers with a very short value
 - **Node count tracking**: Verify the node count increments
 - **Elapsed time tracking**: Verify the converter tracks elapsed time
-- **Backward compatibility**: Verify old `convert()` method still works
+- **Direct conversion API**: Verify conversion without a timeout context
 
 ### Integration Tests
 

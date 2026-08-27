@@ -7,7 +7,7 @@ This directory contains project-level status and maintenance-oriented documentat
 - [PROJECT_STATUS.md](PROJECT_STATUS.md) - current implementation and validation status (aligned to code and recent verification)
 - [HARNESS_HISTORY.md](HARNESS_HISTORY.md) - why the repo-owned harness exists, which failures it is meant to prevent, and what remains intentionally out of scope
 - [VERSION_PLANNING.md](VERSION_PLANNING.md) - active v0.9.2 development release-line planning and the v1.0 frozen compatibility contract that follows it
-- 0.5.0 release-gate working set (canonical `release-gates-check` inputs):
+- 0.5.0 release-gate working set (historical gate records):
   - [release-gates-0-5-0.md](release-gates-0-5-0.md)
   - [release-checklist-0-5-0.md](release-checklist-0-5-0.md)
   - [compatibility-matrix-0-5-0.md](compatibility-matrix-0-5-0.md)
@@ -24,9 +24,10 @@ This directory contains project-level status and maintenance-oriented documentat
 
 ### Subdirectories
 
-- `release-gates/` — release-gate governance templates and 0.7.0 gate definitions
-  (the four `*-0-5-0` markdown templates are now colocated here with the rest of
-  the gate artifacts).
+- `release-gates/` — reusable release-gate governance templates and historical
+  0.7.0 gate definitions. The 0.5.x working sets listed above remain at this
+  directory's top level as historical records. Current release validation uses
+  the feature-oriented targets in the repository Makefile.
 - `../archive/project-history/` — local historical notes only (gitignored,
   per `docs/DOCUMENTATION_DUPLICATION_POLICY.md`: not source-of-truth and not
   referenced as current guidance). Contains release-past working drafts such as

@@ -74,6 +74,11 @@ while IFS= read -r -d '' shell_file; do
     fi
 done < "$SHELL_FILES"
 
+if [[ ! -s "$SHELL_EXISTING_FILES" ]]; then
+    echo "ERROR: shell-script discovery produced no files" >&2
+    exit 1
+fi
+
 # ── Tool checks ─────────────────────────────────────────────────────
 MISSING_TOOLS=()
 
@@ -239,21 +244,16 @@ echo ""
 # ── Shell: shellcheck ───────────────────────────────────────────────
 SHELLCHECK_OUT="$OUTDIR/shellcheck.txt"
 echo "--- Shell (shellcheck) ---"
-if [[ -s "$SHELL_EXISTING_FILES" ]]; then
-    set +e
-    xargs -0 shellcheck --severity=error -x -P tools/e2e -P tools/lib < "$SHELL_EXISTING_FILES" > "$SHELLCHECK_OUT" 2>&1
-    shellcheck_rc=$?
-    set -e
-    if [[ $shellcheck_rc -eq 0 ]]; then
-        echo "  Shell: PASS (no shellcheck errors)"
-    else
-        shellcheck_issues=$(grep -c ":" "$SHELLCHECK_OUT" 2>/dev/null || echo "?")
-        echo "  Shell: $shellcheck_issues shellcheck issue(s) found"
-        echo "  Output: $SHELLCHECK_OUT"
-    fi
+set +e
+xargs -0 shellcheck --severity=error -x -P tools/e2e -P tools/lib < "$SHELL_EXISTING_FILES" > "$SHELLCHECK_OUT" 2>&1
+shellcheck_rc=$?
+set -e
+if [[ $shellcheck_rc -eq 0 ]]; then
+    echo "  Shell: PASS (no shellcheck errors)"
 else
-    echo "  SKIP: no tracked shell scripts found"
-    echo "" > "$SHELLCHECK_OUT"
+    shellcheck_issues=$(grep -c ":" "$SHELLCHECK_OUT" 2>/dev/null || echo "?")
+    echo "  Shell: $shellcheck_issues shellcheck issue(s) found"
+    echo "  Output: $SHELLCHECK_OUT"
 fi
 echo ""
 

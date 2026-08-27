@@ -53,7 +53,7 @@ retry state, or worker lifecycle integration changes.
   Detection script: `tools/harness/detect_live_conf_reads.sh`.
 - **effective_conf**: request-path code must read dynconf-mutable fields
   (`enabled`, `enabled_source`, `prune_noise`, `log_verbosity`,
-  `memory_budget`, `streaming_budget`) through
+  `memory_budget`, `streaming_budget`, `error_policy`) through
   `ngx_http_markdown_effective_*()` helpers via `ctx->effective_conf`,
   not directly from live `conf->`.  Detection script:
   `tools/harness/detect_live_conf_reads.sh`.

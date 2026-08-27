@@ -30,13 +30,23 @@ def _load_and_validate_builder_digests(path: Path) -> dict:
     """
     validated = validate_read_path(path, purpose="builder digests")
     data = json.loads(validated.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("builder_digests.json must contain an object")
     for key, entry in data.items():
-        _name, _, digest_part = entry["image"].partition("@")
-        if digest_part != entry["digest"]:
+        if not isinstance(entry, dict):
+            raise ValueError(f"builder_digests.json {key}: entry must be an object")
+        image = entry.get("image")
+        digest = entry.get("digest")
+        if not isinstance(image, str) or not isinstance(digest, str):
+            raise ValueError(
+                f"builder_digests.json {key}: image and digest must be strings"
+            )
+        _name, separator, digest_part = image.partition("@")
+        if not separator or not digest_part or digest_part != digest:
             raise ValueError(
                 f"builder_digests.json {key}: image references "
                 f"{digest_part!r} which does not match the digest "
-                f"field {entry['digest']!r}"
+                f"field {digest!r}"
             )
     return data
 
@@ -312,7 +322,7 @@ def _read_files(root: Path, paths: tuple[str, ...]) -> tuple[dict[str, str], lis
                 purpose="release supply-chain input",
             )
             files[relative] = resolved.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
+        except (OSError, ValueError) as exc:
             findings.append(Finding(relative, f"cannot read required file: {exc}"))
     return files, findings
 

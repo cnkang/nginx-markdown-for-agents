@@ -455,7 +455,7 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
 grep "markdown decision:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 
-# Per-path failure check
+# Path-specific failure check
 grep "markdown decision:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open\|reason=failed_closed" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c
@@ -1150,11 +1150,11 @@ request-based failure rate from the conversion-attempt-based failure rate:
 conversion_delivery_rate = sum(rate(nginx_markdown_conversion_deliveries_total[5m]))
                             / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)
 # Conversion-attempt-based failure rate: failed outcomes per conversion attempt.
-conversion_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
+conversion_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}[5m]))
                           / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)
 # Request-based failure rate: failed outcomes per request that entered the
 # decision chain (includes skipped and disabled requests in the denominator).
-request_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
+request_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}[5m]))
                        / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-9)
 ```
 
@@ -1202,9 +1202,9 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 #### Check for unexpected skip reasons
 
 ```bash
-# Show skip reasons excluding disabled (expected for disabled scopes)
+# Show all eligibility and Accept skip reasons; disabled is intentionally excluded.
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=not_eligible" | grep -v "reason=disabled" | \
+  grep -E "reason=(not_eligible|skipped_[a-z_]+)" | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 ```
 
@@ -1287,7 +1287,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 # Show failure outcomes from the metrics endpoint
 curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics | \
-  grep -E 'nginx_markdown_requests_total\{[^}]*outcome="failed_[^"}]*"'
+  grep -E 'nginx_markdown_requests_total\{[^}]*outcome="(failed_[^"}]*|aborted)"'
 ```
 
 #### Check latency histogram samples
@@ -1334,9 +1334,9 @@ A rollout is healthy when all of the following hold true during the observation 
 | Indicator | Threshold | How to Check |
 |-----------|-----------|--------------|
 | Conversion delivery rate | Stable vs baseline | `sum(rate(nginx_markdown_conversion_deliveries_total[5m])) / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)` from Prometheus |
-| Failed request rate | Within baseline | `sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m])) / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-9)` from Prometheus |
+| Failed request rate | Within baseline | `sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}[5m])) / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-9)` from Prometheus |
 | Conversion latency | Within configured `markdown_limits` | Latency buckets show the vast majority of conversions completing before the timeout threshold |
-| Failed request trend | Stable or decreasing | Compare `requests_total{outcome=~"failed_.*"}` snapshots over the observation period |
+| Failed request trend | Stable or decreasing | Compare `requests_total{outcome=~"failed_.*|aborted"}` snapshots over the observation period |
 | Upstream error rate | No increase correlated with enablement | Compare upstream 5xx rates before and after enabling the module |
 | Unexpected skip reasons | None for traffic you expect to convert | Check decision log `reason=not_eligible` — no unexpected `not_eligible` (content-type/size) for enabled paths |
 
@@ -1371,6 +1371,6 @@ When a trigger fires:
 |---------|------|--------|---------|
 | 0.9.2 | 2026-08-15 | Kang | Failure-rate formulas split conversion-attempt vs request based; error-policy pass scoped to pre-commit |
 | 0.9.2 | 2026-08-15 | Hermes | Update failure reason values and point internal-failure triggers to decision logs |
-| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire the large-response threshold directive) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

@@ -136,7 +136,7 @@ check_prerequisites() {
         printf '╚══════════════════════════════════════════════════════════════╝\n' >&2
         printf '\n' >&2
         printf 'Missing tools:\n' >&2
-        printf '%s' "$MISSING_TOOLS" >&2
+        printf '%b' "$MISSING_TOOLS" >&2
         printf '\n' >&2
         printf 'Quick install (macOS with Homebrew):\n' >&2
         printf '  brew install --cask docker && brew install kind kubectl helm\n' >&2
@@ -233,12 +233,13 @@ validate_helm_lint() {
     return 1
 }
 
+# validate_helm_template renders the Helm chart and verifies required image values, security settings, port configuration, and emptyDir volumes, returning success only when all checks pass.
 validate_helm_template() {
     info "Running helm template (dry-run render)..."
 
     # Zero-override render MUST fail: the chart has no default runtime
     # image and Helm refuses to render the Deployment until both
-    # image.repository and image.tag are set (P1-4 Helm image contract).
+    # image.repository and image.tag are set (Helm image contract).
     local zero_override_out
     if zero_override_out="$(helm template "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
         --namespace "${HELM_NAMESPACE}" 2>&1)"; then
@@ -293,7 +294,7 @@ validate_helm_template() {
         checks_failed=$((checks_failed + 1))
     fi
 
-    if printf '%s' "$rendered" | grep -q "image: nginx:1.26.3"; then
+    if printf '%s' "$rendered" | grep -Eq "image:[[:space:]]*(\"nginx:1\\.26\\.3\"|'nginx:1\\.26\\.3'|nginx:1\\.26\\.3)[[:space:]]*$"; then
         checks_passed=$((checks_passed + 1))
     else
         fail "Rendered template missing explicit image nginx:1.26.3"

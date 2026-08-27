@@ -21,14 +21,15 @@ flowchart TD
     A["New proposal"] --> B{"On the non-goals list?"}
     B -->|Yes| C["Reject — record as 0.6.x+ candidate"]
     B -->|No| D{"Covered by existing sub-spec?"}
-    D -->|Yes| E["Evaluate within sub-spec scope — record affected streaming path, streaming test, and rollback boundary before approval"]
+    D -->|Yes| E["Evaluate within sub-spec scope"]
+    E --> F
     D -->|No| F{"Clearly in scope?"}
-    F -->|Yes| G["Accept — record affected streaming path, streaming test, and rollback boundary; update affected sub-spec docs"]
+    F -->|Yes| I["Record streaming path, test, and rollback boundary"]
     F -->|No| H["Evaluate using Boundary Description template"]
-    H --> I["Review boundary description"]
-    I --> J{"Accept?"}
-    J -->|Yes| G
+    H --> J["Review boundary description"]
+    J -->|Yes| I
     J -->|No| C
+    I --> G["Accept and update affected sub-spec docs"]
     G --> K["Record scope expansion and rationale"]
 ```
 

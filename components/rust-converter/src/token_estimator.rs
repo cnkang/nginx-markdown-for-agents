@@ -50,6 +50,10 @@ impl TokenEstimator {
     /// non-finite value makes the estimate undefined (division by zero or
     /// NaN propagation); callers must validate the value before calling.
     pub fn with_chars_per_token(chars_per_token: f32) -> Self {
+        assert!(
+            chars_per_token.is_finite() && chars_per_token > 0.0,
+            "chars_per_token must be finite and greater than zero"
+        );
         Self { chars_per_token }
     }
 
@@ -119,6 +123,18 @@ mod tests {
         let estimator = TokenEstimator::with_chars_per_token(5.0);
         assert_eq!(estimator.estimate("12345"), 1); // 5 chars / 5 = 1 token
         assert_eq!(estimator.estimate("123456"), 2); // 6 chars / 5 = 1.2 -> ceil = 2 tokens
+    }
+
+    #[test]
+    #[should_panic(expected = "chars_per_token must be finite and greater than zero")]
+    fn test_zero_chars_per_token_is_rejected() {
+        TokenEstimator::with_chars_per_token(0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "chars_per_token must be finite and greater than zero")]
+    fn test_nonfinite_chars_per_token_is_rejected() {
+        TokenEstimator::with_chars_per_token(f32::NAN);
     }
 
     #[test]

@@ -14,8 +14,10 @@ Accepted — Brotli full-buffer section superseded by [ADR-0024](0024-brotli-str
 0.9.1 routes compressed responses through streaming decompression when the
 module selects the streaming engine, `markdown_auto_decompress` turns on, and cache validation is
 not `full`. Deflate already supports both RFC 1950 zlib-wrapped and RFC 1951
-raw framing through deferred header sniffing. Gzip uses zlib's gzip wrapper
-mode (`MAX_WBITS + 16`), including header and trailer validation.
+raw framing through a replay-safe trial decode at decoder initialization.
+The trial consumes no upstream bytes until the selected framing is known.
+Gzip uses zlib's gzip wrapper mode (`MAX_WBITS + 16`), including header and
+trailer validation.
 
 > **Naming note**: `auto_decompress` in this ADR refers to the
 > `markdown_auto_decompress` public configuration identifier. The shorter

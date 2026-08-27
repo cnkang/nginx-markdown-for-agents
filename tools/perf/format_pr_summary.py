@@ -27,6 +27,7 @@ from lib.path_validation import (
     validate_write_path_within_root,
 )
 from report_utils import load_json  # type: ignore[attr-defined]
+from report_schema import validate_report  # type: ignore[attr-defined]
 # pylint: enable=import-error,wrong-import-position
 
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]  # type: ignore[assignment]
@@ -106,8 +107,12 @@ def format_bytes(n: int) -> str:
 
 def _extract_report_values(report: dict[str, Any]) -> dict[str, Any]:
     """Extract and type-convert values from report dictionary."""
-    meta: dict[str, Any] = report.get("metadata", {})
-    summary_data: dict[str, Any] = report.get("summary", {})
+    meta = report["metadata"]
+    summary_data = report["summary"]
+    if not isinstance(meta, dict):
+        raise ValueError("unified report metadata must be a JSON object")
+    if not isinstance(summary_data, dict):
+        raise ValueError("unified report summary must be a JSON object")
 
     return {
         "corpus_version": str(meta.get("corpus-version", "unknown")),
@@ -124,7 +129,7 @@ def _extract_report_values(report: dict[str, Any]) -> dict[str, Any]:
         "p99": float(summary_data.get("p99-latency-ms", 0.0)),
         "input_total": int(summary_data.get("input-bytes-total", 0)),
         "output_total": int(summary_data.get("output-bytes-total", 0)),
-        "fixtures": report.get("fixtures", []),
+        "fixtures": report["fixtures"],
     }
 
 
@@ -207,7 +212,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         report_path = validate_read_path(args.report, purpose="unified report")
         report = load_json(str(report_path))  # type: ignore[assignment]
-    except (IOError, ValueError) as e:
+        if not isinstance(report, dict):
+            raise ValueError("unified report must be a JSON object")
+        validation_errors = validate_report(report)
+        if validation_errors:
+            raise ValueError(
+                "unified report schema validation failed: "
+                + "; ".join(validation_errors)
+            )
+    except (IOError, TypeError, ValueError) as e:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
         return 1
 

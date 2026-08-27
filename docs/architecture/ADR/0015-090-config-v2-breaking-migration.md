@@ -28,7 +28,7 @@ New consolidating directives (additive-only after 1.0):
 
 | Directive | Replaces | Grammar |
 |-----------|----------|---------|
-| `markdown_limits` | `markdown_max_size`, `markdown_memory_budget`, `markdown_timeout`, `markdown_streaming_budget`, `markdown_large_body_threshold` | `memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>` (space-separated keys; duplicate/unknown key → error; zero is rejected, including `max_inflight=0`; per-key inheritance) |
+| `markdown_limits` | `markdown_max_size`, `markdown_memory_budget`, `markdown_timeout`, `markdown_streaming_budget`, `markdown_stream_threshold`, `markdown_large_body_threshold` | `memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>` (space-separated keys; duplicate/unknown key → error; zero is rejected, including `max_inflight=0`; per-key inheritance) |
 | `markdown_accept` | `markdown_on_wildcard` | `strict\|wildcard\|force` |
 | `markdown_cache_validation` | `markdown_conditional_requests`, `markdown_etag` | `off\|ims_only\|full` |
 | `markdown_streaming` | (policy split from engine) | `off\|auto\|force` |
@@ -43,11 +43,14 @@ Retained EXISTING stable directives keep their names and semantics, notably:
 metrics/diagnostics/otel/parser-budget families.
 
 The 0.9.1 contract treated `markdown_streaming_engine` as reject-only. Version
-0.9.2 removed it, so it is not a stable 1.0 configuration directive.
+0.9.2 removed it, so it is not a stable 1.0 configuration directive. The
+reject-only parser entry described below applies only to directives retained
+by the 0.9.0 migration contract.
 
 ### Reject-only legacy stubs (no aliases)
 
-Every removed directive keeps a parser entry whose **only** behavior is
+Every directive removed as part of the 0.9.0 migration contract keeps a parser
+entry whose **only** behavior is
 `NGX_CONF_ERROR` + a migration hint pointing at the replacement and the 0.9.0
 migration guide (`docs/guides/MIGRATION-0.9.md`). There are **no transition
 aliases** in 0.9.0. Canonical error shape:
@@ -63,7 +66,7 @@ Stub set: `markdown_on_wildcard`, `markdown_etag`,
 `markdown_streaming_on_error`, `markdown_trust_forwarded_headers`,
 `markdown_forwarded_headers`, `markdown_etag_policy`, `markdown_max_size`,
 `markdown_memory_budget`, `markdown_timeout`, `markdown_streaming_budget`,
-`markdown_large_body_threshold`.
+`markdown_stream_threshold`, `markdown_large_body_threshold`.
 
 ### Cross-directive conflict rules (validated at `nginx -t`)
 

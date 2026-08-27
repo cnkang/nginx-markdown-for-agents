@@ -14,7 +14,7 @@
 # Exit codes:
 #   0  Success
 
-set -e
+set -euo pipefail
 
 ##############################################################################
 # Executable-trust invariant: establish trusted PATH before any command

@@ -28,7 +28,6 @@
 //! - `ffi`: C-compatible FFI interface for NGINX integration
 //!
 //! **Feature-gated:**
-//! - `incremental`: Incremental processing API (enabled by default)
 //! - `streaming`: Bounded-memory streaming conversion (enabled by default)
 //!
 //! # Safety
@@ -51,23 +50,14 @@ pub mod ffi;
 pub mod forwarded;
 pub mod header_plan;
 pub mod metadata;
-pub mod metrics;
 pub mod negotiator;
 pub mod parser;
 pub mod security;
 pub mod token_estimator;
 
-// Incremental processing API (feature-gated, enabled by default)
-#[cfg(feature = "incremental")]
-pub mod incremental;
-
 // Streaming conversion API (feature-gated, enabled by default)
 #[cfg(feature = "streaming")]
 pub mod streaming;
-
-// Streaming lifecycle state machine (formal model)
-#[cfg(feature = "streaming")]
-pub mod streaming_lifecycle;
 
 // Re-export main types for convenience
 pub use converter::MarkdownConverter;

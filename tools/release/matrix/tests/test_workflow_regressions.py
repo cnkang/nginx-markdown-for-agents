@@ -61,14 +61,15 @@ def test_release_binaries_resolves_current_schema_without_mutating_matrix() -> N
 
 
 def test_release_binaries_workflow_dispatch_can_publish_tag_assets() -> None:
-    """Manual recovery runs publish only after prepare resolves a stable tag."""
+    """Manual recovery runs package-artifacts only after integrity checks pass."""
     workflow = _workflow_data("release-binaries.yml")
     assert "workflow_dispatch" in workflow["on"]
-    publish = workflow["jobs"]["publish-release"]
-    upload = _step_by_name(publish["steps"], "Upload Assets")
+    package = workflow["jobs"]["package-artifacts"]
+    upload = _step_by_name(package["steps"], "Upload workflow artifacts")
 
-    assert "needs.prepare.outputs.publication_tag != ''" in publish["if"]
-    assert upload["with"]["tag_name"] == "${{ needs.prepare.outputs.publication_tag }}"
+    assert "needs.completeness-check.result == 'success'" in package["if"]
+    assert "needs.integrity-checksums.result == 'success'" in package["if"]
+    assert upload["with"]["if-no-files-found"] == "error"
 
 
 def test_release_binaries_publishes_signed_checksum_chain() -> None:
@@ -77,7 +78,7 @@ def test_release_binaries_publishes_signed_checksum_chain() -> None:
     jobs = workflow["jobs"]
     checksum_job = jobs["integrity-checksums"]
     signing_job = jobs["integrity-signing"]
-    publish = jobs["publish-release"]
+    publish = jobs["package-artifacts"]
     workflow_text = _workflow_text("release-binaries.yml")
 
     assert set(checksum_job["needs"]) == {"prepare", "completeness-check"}
@@ -177,8 +178,44 @@ def test_release_packages_publish_waits_for_official_docker_gate() -> None:
     assert "CALLER_MODULE_SHA" in _workflow_text("official-nginx-docker.yml")
 
 
+def test_official_docker_failure_artifacts_use_safe_matrix_tags() -> None:
+    """Failure artifact names must not contain slash-delimited row IDs."""
+    workflow_text = _workflow_text("official-nginx-docker.yml")
+
+    assert (
+        "name: official-nginx-docker-${{ matrix.docker_tag }}-failure"
+        in workflow_text
+    )
+    assert (
+        "name: official-nginx-docker-${{ matrix.matrix_row_id }}-failure"
+        not in workflow_text
+    )
+
+
+def test_official_docker_verifier_sanitizes_container_names() -> None:
+    """Container names must not inherit the colon from an image reference."""
+    repo_root = Path(__file__).resolve().parents[4]
+    verifier = (repo_root / "tools" / "ci" / "verify_official_nginx_docker.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "tr -c '[:alnum:]._-' '-'" in verifier
+    assert "tr -c '[:alnum:].:_-' '-'" not in verifier
+
+
+def test_official_docker_runtime_installs_module_runtime_libraries() -> None:
+    """The runtime image must carry libraries needed by the built module."""
+    repo_root = Path(__file__).resolve().parents[4]
+    dockerfile = (
+        repo_root / "examples" / "docker" / "Dockerfile.official-nginx-source-build"
+    ).read_text(encoding="utf-8")
+
+    assert "libgcc-s1" in dockerfile
+    assert "apk add --no-cache libgcc" in dockerfile
+
+
 def test_macos_smoke_retries_once_and_blocks_a_second_failure() -> None:
-    """Darwin transport retries must not make repeated E2E failures advisory."""
+    """Ensure macOS native smoke validation retries once and fails after a second unsuccessful attempt."""
     workflow = _workflow_data("macos-smoke.yml")
     job = workflow["jobs"]["darwin-native-smoke"]
     step = _step_by_name(
@@ -217,6 +254,9 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
         workflow["jobs"]["resolve-matrix"]["steps"],
         "Select representative matrix entries",
     )
+    assert resolve_step["env"]["REQUESTED_VERSION"] == (
+        "${{ github.event.inputs.version || '' }}"
+    )
     resolve_run = resolve_step["run"]
     assert 'data.get("entries", [])' in resolve_run
     assert '"nginx": e["nginx_version"]' in resolve_run
@@ -224,11 +264,19 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
     assert '"amd64": "x86_64"' in resolve_run
     assert '"arm64": "aarch64"' in resolve_run
     assert 'data.get("matrix", [])' not in resolve_run
+    assert "from urllib.request import Request, urlopen" in resolve_run
+    assert "releases/latest" in resolve_run
+    assert "release_assets" in resolve_run
+    assert "has_signed_manifest" in resolve_run
+    assert "signed_asset_names" in resolve_run
+    assert 'filename.lstrip("*")' in resolve_run
+    assert '"expected_error_category": expected_error_category' in resolve_run
+    assert 'in release_assets' in resolve_run
     assert "nginx.org/en/download.html" in resolve_run
     assert "sorted(set(upstream_versions), key=version_tuple)[-1]" in resolve_run
     assert '"variant": "upstream-upper"' in resolve_run
-    assert "upstream_in_matrix = upstream_upper in full_nginx_versions" in resolve_run
-    assert '"expected_install_success": upstream_in_matrix,' in resolve_run
+    assert "upstream_in_matrix" not in resolve_run
+    assert '"expected_install_success": upstream_in_matrix,' not in resolve_run
     assert '"latest upstream"' in resolve_run
 
     assert steps["Checkout repository"]["if"] == (
@@ -241,6 +289,14 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
         "Checkout repository (Alpine arm64 fallback)"
     ]["run"]
     assert steps["Run install script"]["shell"] == "bash"
+    validate_step = _step_by_name(
+        workflow["jobs"]["install-verify"]["steps"],
+        "Validate install outcome against target expectation",
+    )
+    assert "EXPECTED_ERROR_CATEGORY" in validate_step["env"]
+    assert '"${ERROR_CATEGORY}" != "${EXPECTED_ERROR_CATEGORY}"' in validate_step[
+        "run"
+    ]
     assert steps["Upload verification artifacts"]["if"] == (
         "${{ always() && steps.js_actions_support.outputs.supported == 'true' }}"
     )
@@ -252,3 +308,48 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
     assert step_names.index("Upload verification artifacts") < step_names.index(
         "Dump verification artifacts"
     )
+
+
+def test_install_paths_provide_installer_runtime_dependencies() -> None:
+    """Installer execution paths must provide awk and release-signature tools."""
+    workflow_text = _workflow_text("install-verify.yml")
+    assert "apk add --no-cache bash curl gawk gnupg python3" in workflow_text
+    assert "apt-get install -y -qq curl gawk gnupg2 python3" in workflow_text
+
+    repo_root = Path(__file__).resolve().parents[4]
+    installer = (repo_root / "tools" / "install.sh").read_text(encoding="utf-8")
+    assert "bootstrap_system_tool()" in installer
+    assert '"/bin/${name}"' in installer
+    assert "printf '%s\\n' \"$candidate\"" in installer
+    assert '"$stat_bin" -L -f' in installer
+    assert '"$stat_bin" -L -c' in installer
+    assert 'write_embedded_release_key "$TMP_DIR/release-key.asc"' in installer
+    assert 'releases/download/${RELEASE_TAG}/nginx-markdown-for-agents-release.asc' not in installer
+    assert 'validate_privileged_destination "$NGINX_PREFIX" "NGINX prefix"' not in installer
+    assert (
+        'validate_privileged_destination "$NGINX_MODULES_PATH" "NGINX modules path"'
+        in installer
+    )
+    assert (
+        'validate_privileged_destination "$NGINX_CONF_PATH" "NGINX configuration"'
+        in installer
+    )
+
+    key_start = installer.index("-----BEGIN PGP PUBLIC KEY BLOCK-----")
+    key_end = installer.index("-----END PGP PUBLIC KEY BLOCK-----", key_start)
+    embedded_key = installer[key_start : key_end + len("-----END PGP PUBLIC KEY BLOCK-----")]
+    packaging_key = (
+        repo_root / "packaging" / "nginx-markdown-for-agents-release.asc"
+    ).read_text(encoding="utf-8").rstrip("\n")
+    assert embedded_key == packaging_key
+
+    example = (
+        repo_root / "tools" / "build_release" / "Dockerfile.install-example"
+    ).read_text(encoding="utf-8")
+    assert "    gawk \\\n" in example
+    assert "    gnupg \\\n" in example
+
+    workflow_test = (repo_root / "tools" / "test_install_workflow.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "apt-get install -y --no-install-recommends curl gawk python3" in workflow_test

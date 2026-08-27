@@ -7,6 +7,15 @@
 use nginx_markdown_converter::converter::{ConversionOptions, MarkdownConverter};
 use nginx_markdown_converter::parser::parse_html;
 
+/// Demonstrates converting HTML content to Markdown with optional YAML front matter.
+///
+/// # Examples
+///
+/// Run the example to print the converted Markdown with and without front matter:
+///
+/// ```text
+/// cargo run --example yaml_front_matter_demo
+/// ```
 fn main() {
     // Sample HTML with rich metadata
     let html = br#"
@@ -22,10 +31,10 @@ fn main() {
     <body>
         <h1>Understanding YAML Front Matter</h1>
         <p>YAML front matter is a powerful feature for adding metadata to Markdown documents.</p>
-        
+
         <h2>What is YAML Front Matter?</h2>
         <p>It's a block of YAML at the beginning of a file, enclosed in triple dashes.</p>
-        
+
         <h2>Why Use It?</h2>
         <ul>
             <li>Provides structured metadata</li>

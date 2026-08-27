@@ -20,9 +20,6 @@ Release gates (all must PASS for GO verdict):
     - diff_testing_complete
     - rollout_docs_complete
 
-P1 status fields (if_none_match_streaming, otel_integration, extra_formats) are
-tracked but do NOT affect the release verdict.
-
 Usage:
     python3 tools/perf/evidence_pack_generator.py \\
         --fullbuffer-report perf/reports/fullbuffer.json \\
@@ -43,8 +40,9 @@ Output:
     the evaluated release-gate summary to stderr for CI logs.
 
 Exit codes:
-    0 when the evidence pack can be generated and evaluated.
-    1 when required inputs are missing, malformed, or fail validation.
+    0 when the evidence pack is valid and the verdict is GO.
+    1 when the evidence pack is valid and the verdict is NO_GO.
+    2 when required inputs are missing, malformed, or fail validation.
 """
 
 from __future__ import annotations
@@ -76,7 +74,7 @@ _SMALL_MEDIUM_TIER_PREFIXES = ("small", "medium")
 def _is_large_tier(tier_name: str) -> bool:
     """
     Determine whether a tier name is classified as large (includes prefixes "large", "extra-large", or "xlarge").
-    
+
     Returns:
         `True` if `tier_name` starts with one of the large-tier prefixes, `False` otherwise.
     """
@@ -86,7 +84,7 @@ def _is_large_tier(tier_name: str) -> bool:
 def _is_small_medium_tier(tier_name: str) -> bool:
     """
     Determine whether a tier is classified as small or medium.
-    
+
     Returns:
         `True` if the `tier_name` starts with "small" or "medium", `False` otherwise.
     """
@@ -101,14 +99,14 @@ def _is_small_medium_tier(tier_name: str) -> bool:
 def linear_regression_slope(x: list[float], y: list[float]) -> float:
     """
     Compute the least-squares slope of y with respect to x.
-    
+
     Parameters:
         x (list[float]): Independent variable values; must contain at least 2 elements.
         y (list[float]): Dependent variable values; must be the same length as `x`.
-    
+
     Returns:
         float: Slope of the best-fit line. Returns 0.0 when all `x` values are identical.
-    
+
     Raises:
         ValueError: If `x` and `y` have different lengths or contain fewer than 2 points.
     """
@@ -591,61 +589,6 @@ def _build_streaming_report_subset(streaming_report: dict) -> dict:
     }
 
 
-def _check_if_none_match_streaming(streaming_report: dict) -> str:
-    """Check if streaming path supports If-None-Match / ETag.
-
-    Streaming ETag is computed incrementally during chunk processing
-    and emitted on finalize.  This is operational when the streaming
-    report contains an etag field or etag-related statistics.
-    """
-    streaming_metrics = streaming_report.get("streaming_metrics", {})
-    for tier_stats in streaming_metrics.values():
-        if not isinstance(tier_stats, dict):
-            continue
-        if (tier_stats.get("etag_computed") is not None
-                or tier_stats.get("etag_hits") is not None):
-            return "PASS"
-    if streaming_report.get("etag_supported") is True:
-        return "PASS"
-    return "NOT_AVAILABLE"
-
-
-def _check_otel_integration(streaming_report: dict) -> str:
-    """Check if OTel integration is functional.
-
-    OTel is functional when spans include trace_id and span_id fields,
-    indicating that trace-context propagation and span lifecycle
-    are wired into the conversion paths.
-    """
-    streaming_metrics = streaming_report.get("streaming_metrics", {})
-    for tier_stats in streaming_metrics.values():
-        if not isinstance(tier_stats, dict):
-            continue
-        if tier_stats.get("otel_spans_exported", 0) > 0:
-            return "PASS"
-        if tier_stats.get("otel_trace_id_present") is True:
-            return "PASS"
-    return "NOT_AVAILABLE"
-
-
-def _check_extra_formats(streaming_report: dict) -> str:
-    """Check if extra output formats (JSON, plain text) are supported.
-
-    The metrics endpoint supports JSON, plain text, and Prometheus
-    formats.  This is operational when the streaming report indicates
-    that the metrics renderer was exercised.
-    """
-    streaming_metrics = streaming_report.get("streaming_metrics", {})
-    for tier_stats in streaming_metrics.values():
-        if not isinstance(tier_stats, dict):
-            continue
-        if tier_stats.get("metrics_formats_tested") is not None:
-            return "PASS"
-    if streaming_report.get("extra_formats_supported") is True:
-        return "PASS"
-    return "NOT_AVAILABLE"
-
-
 def generate_evidence_pack(
     fullbuffer_report: dict,
     streaming_report: dict,
@@ -680,7 +623,6 @@ def generate_evidence_pack(
             - "evidence_targets": Evaluation results for each evidence goal
             - "release_gates": Gate statuses (PASS/FAIL)
             - "streaming_evidence_verdict": "GO" or "NO_GO"
-            - "p1_status": P1 status fields (do NOT affect verdict)
     """
     # --- Evaluate evidence goals ---
     # Evidence targets JSON may have a nested "targets" key (as in
@@ -790,11 +732,6 @@ def generate_evidence_pack(
         "evidence_targets": evidence_target_results,
         "release_gates": release_gates,
         "streaming_evidence_verdict": verdict,
-        "p1_status": {
-            "if_none_match_streaming": _check_if_none_match_streaming(streaming_report),
-            "otel_integration": _check_otel_integration(streaming_report),
-            "extra_formats": _check_extra_formats(streaming_report),
-        },
     }
 
     # Include parity report subset if available
@@ -921,7 +858,6 @@ def print_human_summary(evidence_pack: dict, file: Any = sys.stderr) -> None:
     evidence_targets = evidence_pack.get("evidence_targets", {})
     release_gates = evidence_pack.get("release_gates", {})
     verdict = evidence_pack.get("streaming_evidence_verdict", "NO_GO")
-    p1_status = evidence_pack.get("p1_status", {})
 
     print("", file=file)
     _print_section_heading("=", "  Streaming Performance Evidence Summary", file)
@@ -946,14 +882,6 @@ def print_human_summary(evidence_pack: dict, file: Any = sys.stderr) -> None:
         print(f"  {gate_name}: [{gate_status}]", file=file)
 
     print("", file=file)
-
-    if p1_status:
-        _print_section_heading(
-            "-", "  P1 Status (informational, does not affect verdict)", file,
-        )
-        for p1_name, p1_value in p1_status.items():
-            print(f"  {p1_name}: {p1_value}", file=file)
-        print("", file=file)
 
     print("=" * 60, file=file)
     print(f"  Streaming Evidence Verdict: [{verdict}]", file=file)
