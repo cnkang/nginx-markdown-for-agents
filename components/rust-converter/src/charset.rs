@@ -30,17 +30,11 @@
 //! assert_eq!(charset, "UTF-8");
 //! ```
 
-use regex::Regex;
-use std::sync::LazyLock;
-
 /// Default charset when detection fails
 const DEFAULT_CHARSET: &str = "UTF-8";
 
 /// Maximum bytes to scan for meta charset tags (first 1024 bytes)
 const META_SCAN_LIMIT: usize = 1024;
-
-static CHARSET_REGEX: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r#"(?i)charset\s*=\s*"?([^";,\s]+)"?"#).ok());
 
 /// Detect character encoding using the three-level cascade
 ///
@@ -146,9 +140,7 @@ pub fn detect_charset(content_type: Option<&str>, html: &[u8]) -> String {
 /// );
 /// ```
 pub fn extract_charset_from_content_type(content_type: &str) -> Option<String> {
-    let captures = CHARSET_REGEX.as_ref()?.captures(content_type)?;
-    let value = captures.get(1)?;
-    Some(value.as_str().to_string())
+    charset_from_content_value(content_type.as_bytes())
 }
 
 /// Extract charset from HTML meta tags
@@ -648,6 +640,91 @@ mod tests {
     #[test]
     fn test_extract_charset_from_content_type_empty() {
         assert_eq!(extract_charset_from_content_type(""), None);
+    }
+
+    // Negative cases: a parameter only counts as the charset declaration when
+    // its name is exactly "charset" (parameter-boundary anchored).  Names that
+    // merely contain "charset" as a substring must not hijack detection.
+    #[test]
+    fn test_extract_charset_from_content_type_ignores_x_charset_param() {
+        assert_eq!(
+            extract_charset_from_content_type("text/html; x-charset=windows-1252"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_content_type_ignores_notcharset_param() {
+        assert_eq!(
+            extract_charset_from_content_type("text/html; notcharset=iso-8859-1"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_content_type_ignores_charset_inside_quoted_value() {
+        assert_eq!(
+            extract_charset_from_content_type("text/html; foo=\"charset=windows-1252\""),
+            None
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_content_type_ignores_charsetx_prefix_param() {
+        assert_eq!(
+            extract_charset_from_content_type("text/html; charsetx=utf-8"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_content_type_ignores_empty_charset_value() {
+        assert_eq!(extract_charset_from_content_type("text/html; charset="), None);
+        assert_eq!(
+            extract_charset_from_content_type("text/html; charset=\"\""),
+            None
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_content_type_ows_around_parameter() {
+        assert_eq!(
+            extract_charset_from_content_type("text/html ;\tcharset =  UTF-8 "),
+            Some("UTF-8".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_content_type_duplicate_param_first_wins() {
+        assert_eq!(
+            extract_charset_from_content_type(
+                "text/html; charset=ISO-8859-1; charset=UTF-8"
+            ),
+            Some("ISO-8859-1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_content_type_negative_param_then_real_charset() {
+        assert_eq!(
+            extract_charset_from_content_type(
+                "text/html; x-charset=windows-1252; charset=utf-8"
+            ),
+            Some("utf-8".to_string())
+        );
+    }
+
+    #[test]
+    fn test_detect_charset_rejects_non_charset_parameter_names() {
+        // The hijacking negative cases must fall through to the meta/default
+        // levels instead of misreading the forged parameter.
+        assert_eq!(
+            detect_charset(
+                Some("text/html; x-charset=windows-1252"),
+                b"<html><head><meta charset=\"UTF-8\"></head></html>"
+            ),
+            "UTF-8"
+        );
     }
 
     // ============================================================================
