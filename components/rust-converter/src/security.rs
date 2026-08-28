@@ -209,13 +209,7 @@ pub(crate) fn escape_markdown_text_with_state(
     let mut out = String::with_capacity(s.len().saturating_add(8));
 
     for ch in s.chars() {
-        let block_marker = state.line_prefix
-            && state.indent <= 3
-            && (matches!(ch, '#' | '>' | '+' | '-' | '!' | '|' | '=')
-                || (matches!(ch, '.' | ')') && state.ordered_digits));
-        let inline_delimiter = matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~');
-
-        if block_marker || inline_delimiter {
+        if requires_escape(ch, state) {
             out.push('\\');
         }
         out.push(ch);

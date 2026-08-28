@@ -213,6 +213,10 @@ impl CharsetState {
                     );
                 }
 
+                if *sniff_limit == 0 {
+                    return Ok(0);
+                }
+
                 let sniff_bytes = input_len.min(sniff_limit.saturating_sub(buffered_len));
                 let sniff_allocation = Self::sniff_append_allocation_upper_bound(
                     buffered_len,
@@ -220,9 +224,6 @@ impl CharsetState {
                     sniff_bytes,
                 )?;
                 let total_len = Self::checked_allocation_add(buffered_len, input_len)?;
-                if *sniff_limit == 0 {
-                    return Ok(0);
-                }
                 if total_len < *sniff_limit {
                     return Ok(sniff_allocation);
                 }
