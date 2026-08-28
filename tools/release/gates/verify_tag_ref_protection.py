@@ -185,6 +185,9 @@ def main() -> int:
             else:
                 repository = _repository_from_origin()
         rulesets = _list_rulesets(repository)
+    except json.JSONDecodeError as exc:
+        print(f"FAIL: malformed ruleset payload: {exc}", file=sys.stderr)
+        return 1
     except ValueError as exc:
         print(f"FAIL: invalid repository argument: {exc}", file=sys.stderr)
         return 1
@@ -200,10 +203,6 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    except json.JSONDecodeError as exc:
-        print(f"FAIL: malformed ruleset payload: {exc}", file=sys.stderr)
-        return 1
-
     matching = [
         ruleset
         for ruleset in rulesets

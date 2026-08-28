@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import sys
+
+import pytest
+
+from tools.release.gates import verify_tag_ref_protection as gate
 from tools.release.gates.verify_tag_ref_protection import (
     REQUIRED_INCLUDE_PATTERN,
     _flatten_pages,
@@ -127,3 +133,24 @@ def test_origin_url_rejects_non_github_or_ambiguous_paths() -> None:
             pass
         else:
             raise AssertionError(f"accepted unsafe origin URL: {remote_url}")
+
+
+def test_main_distinguishes_malformed_ruleset_payload(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """JSON payload errors must not be swallowed by the ValueError branch."""
+    monkeypatch.setattr(
+        gate,
+        "_list_rulesets",
+        lambda _repo: (_ for _ in ()).throw(
+            json.JSONDecodeError("malformed", "payload", 0)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["verify_tag_ref_protection.py", "--repo", "cnkang/example"],
+    )
+
+    assert gate.main() == 1
+    assert "malformed ruleset payload" in capsys.readouterr().err
