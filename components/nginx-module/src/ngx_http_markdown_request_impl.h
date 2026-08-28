@@ -48,6 +48,9 @@ static ngx_int_t ngx_http_markdown_streaming_handle_postcommit_error(
 static ngx_int_t ngx_http_markdown_streaming_precommit_error(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf, uint32_t error_code);
+static ngx_int_t ngx_http_markdown_streaming_handle_header_snapshot_failure(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf);
 static ngx_int_t ngx_http_markdown_streaming_failopen_passthrough(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *in);
 
@@ -156,6 +159,43 @@ ngx_http_markdown_next_header_filter_with_auth(
 
     return ngx_http_next_header_filter(r);
 }
+
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+/*
+ * A streaming header rollback failure leaves the response representation
+ * uncertain.  It must bypass the configured fail-open policy and terminate
+ * through NGINX's finalizer, just like the full-buffer and HEAD paths.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_handle_header_snapshot_failure(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (ctx->streaming.handle != NULL) {
+        markdown_streaming_abort(ctx->streaming.handle);
+        ctx->streaming.handle = NULL;
+    }
+
+    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                  "markdown: stream header snapshot rollback failed; "
+                  "fail-open disabled, category=system");
+    ngx_http_markdown_record_system_failure(ctx);
+    ngx_http_markdown_log_decision_with_category(
+        r, conf, ctx->effective_conf,
+        ngx_http_markdown_reason_header_plan_apply_err(),
+        ngx_http_markdown_reason_from_error_category(
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+
+    ngx_http_markdown_inflight_release(ctx);
+
+    return ngx_http_filter_finalize_request(
+        r, &ngx_http_markdown_filter_module,
+        (ngx_int_t) ngx_http_markdown_effective_error_status(
+            ctx->effective_conf, conf));
+}
+#endif
 
 #define NGX_HTTP_MARKDOWN_NEXT_HEADER_FILTER_WITH_AUTH_DEFINED 1
 
@@ -931,13 +971,16 @@ ngx_http_markdown_log_buffered_decision_path(
 }
 
 /**
- * Handles a malformed Content-Encoding chain according to the configured error policy.
+ * Handles a malformed Content-Encoding chain according to the configured
+ * error policy.
  *
  * @param r Request being processed.
  * @param ctx Per-request module context.
  * @param conf Module location configuration.
- * @param reason Decision reason to log, or the canonical encoding-header-invalid reason when NULL.
- * @returns The filter-finalize result for fail-closed handling; otherwise, the downstream header-filter result.
+ * @param reason Decision reason to log, or the canonical
+ *               encoding-header-invalid reason when NULL.
+ * @returns The filter-finalize result for fail-closed handling; otherwise, the
+ *          downstream header-filter result.
  */
 static ngx_int_t
 ngx_http_markdown_handle_encoding_header_invalid(
@@ -1599,13 +1642,30 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
  */
 static ngx_int_t
 ngx_http_markdown_body_filter_handle_head(ngx_http_request_t *r,
-                                           ngx_http_markdown_ctx_t *ctx)
+                                           ngx_http_markdown_ctx_t *ctx,
+                                           const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t rc;
 
     if (r->method == NGX_HTTP_HEAD && ctx->eligible) {
         rc = ngx_http_markdown_head_representation_headers(r);
         if (rc != NGX_OK) {
+            if (rc == NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED) {
+                ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                              "markdown: HEAD header snapshot rollback "
+                              "failed; fail-open disabled, category=system");
+                ngx_http_markdown_record_system_failure(ctx);
+                ngx_http_markdown_log_decision_with_category(
+                    r, conf, ctx->effective_conf,
+                    ngx_http_markdown_reason_header_plan_apply_err(),
+                    ngx_http_markdown_reason_from_error_category(
+                        NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+                ngx_http_markdown_inflight_release(ctx);
+                return ngx_http_filter_finalize_request(
+                    r, &ngx_http_markdown_filter_module,
+                    (ngx_int_t) ngx_http_markdown_effective_error_status(
+                        ctx->effective_conf, conf));
+            }
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "markdown: HEAD representation header "
                           "rewrite failed");
@@ -1786,7 +1846,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     }
 
     /* Handle HEAD request representation rewriting */
-    rc = ngx_http_markdown_body_filter_handle_head(r, ctx);
+    rc = ngx_http_markdown_body_filter_handle_head(r, ctx, conf);
     if (rc != NGX_DECLINED) {
         return rc;
     }

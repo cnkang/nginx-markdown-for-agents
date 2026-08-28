@@ -273,6 +273,14 @@ def test_state_store_real_file_pass(det):
     assert warnings == []
 
 
+def test_c_extractor_resolved_source_path_pass(det):
+    """The extractor's workspace-bound resolver is a validation boundary."""
+    path = REPO_ROOT / "tools/c-extract/extract_c_function.py"
+    errors, warnings = det.check_file(path, strict=True)
+    assert errors == []
+    assert warnings == []
+
+
 def test_state_validator_name_not_global(det, tmp_path):
     """A function named validate_user_local_state_path() in a non-state_store
     file must NOT be treated as a trusted validator.  FILE_SCOPED_VALIDATORS

@@ -17,7 +17,7 @@ fail() {
     local message="$1"
 
     printf 'FAIL: %s\n' "$message" >&2
-    return 1
+    exit 1
 }
 
 run_detector() {

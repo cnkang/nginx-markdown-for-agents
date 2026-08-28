@@ -295,12 +295,12 @@ test_defaults_both_unset(void)
     /* ── Verify resolved defaults ── */
 
     /*
-     * decompressed_size: after merge, should equal max_size (10MB default).
-     * This ensures decompression budget tracks the conversion size limit,
-     * preventing zip bombs without requiring explicit configuration.
+     * decompressed_size: after merge, should use its independent 10MB
+     * default.  This ensures the decompression budget is bounded without
+     * coupling it to the conversion-memory setting.
      */
     TEST_ASSERT(child->decompress.max_size == 10 * 1024 * 1024,
-        "decompressed_size should default to max_size (10MB)");
+        "decompressed_size should use its independent 10MB default");
 
     /*
      * parser_timeout: 10000ms (10 seconds).

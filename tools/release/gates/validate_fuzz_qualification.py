@@ -276,8 +276,13 @@ def _validate_seed_digest(entry: dict, target: str) -> str | None:
         return (f"malformed: seed digest for {target} must use the "
                 "sha256: prefix")
     try:
-        raw = (REPO_ROOT / seed_path).read_bytes()
-    except OSError as exc:
+        validated_seed_path = validate_read_path(
+            REPO_ROOT / seed_path,
+            purpose=f"seed corpus for {target}",
+        )
+        validated_seed_path.relative_to(CORPUS_ROOT.resolve())
+        raw = validated_seed_path.read_bytes()
+    except (OSError, ValueError) as exc:
         return f"seed corpus for {target} is unreadable: {exc}"
     actual = "sha256:" + hashlib.sha256(raw).hexdigest()
     if actual != manifest_digest:

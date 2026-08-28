@@ -163,6 +163,39 @@ fn test_metadata_og_url_survives_without_canonical() {
 }
 
 #[test]
+fn test_metadata_og_url_resolves_relative_url() {
+    let html = b"<html><head>
+        <meta property=\"og:url\" content=\"article\" />
+    </head></html>";
+    let dom = parse_html(html).unwrap();
+    let extractor = MetadataExtractor::new(
+        Some("https://example.com/docs/index.html".to_string()),
+        true,
+    );
+    let metadata = extractor.extract(&dom).unwrap();
+
+    assert_eq!(
+        metadata.url,
+        Some("https://example.com/docs/article".to_string())
+    );
+}
+
+#[test]
+fn test_metadata_og_url_resolves_against_directory_base() {
+    let html = b"<html><head>
+        <meta property=\"og:url\" content=\"article\" />
+    </head></html>";
+    let dom = parse_html(html).unwrap();
+    let extractor = MetadataExtractor::new(Some("https://example.com/docs/".to_string()), true);
+    let metadata = extractor.extract(&dom).unwrap();
+
+    assert_eq!(
+        metadata.url,
+        Some("https://example.com/docs/article".to_string())
+    );
+}
+
+#[test]
 fn test_metadata_image_rejects_dangerous_url_and_keeps_later_safe_url() {
     let html = b"<html><head>
         <meta property=\"og:image\" content=\"javascript:alert(1)\" />

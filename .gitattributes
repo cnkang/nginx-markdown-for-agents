@@ -52,3 +52,6 @@ tests/corpus/encoding/latin1.html -text
 # Fuzz corpus entries are byte-exact inputs, including files named *.txt.
 # Keep this path-specific rule last so it overrides every extension rule above.
 components/rust-converter/fuzz/corpus/** binary !eol
+
+# This fixture intentionally preserves indentation-only lines inside <pre>.
+tests/corpus/edge-cases/whitespace-heavy.html -whitespace

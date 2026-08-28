@@ -108,7 +108,8 @@ not describe current implementation work or a supported configuration surface.
 - Engine selection logic: `components/nginx-module/src/ngx_http_markdown_streaming_impl.h`
 - Streaming mode constants: `components/nginx-module/src/ngx_http_markdown_filter_module.h`
 - Config merge: `components/nginx-module/src/ngx_http_markdown_config_core_impl.h`
-- Archived migration guide: `docs/archive/streaming-default-migration.md`
+- Current migration guidance: [MIGRATION-0.9.2](../../guides/MIGRATION-0.9.2.md).
+  The earlier temporary archive guide is not part of the tracked documentation.
 
 ## Document Updates
 

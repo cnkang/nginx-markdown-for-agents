@@ -15,13 +15,20 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from typing import List, Set, Tuple
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "tools"))
 from lib.path_validation import validate_read_path
+from tools.release.matrix.normalize_matrix import (  # noqa: E402
+    MatrixNormalizationError,
+    canonical_arch,
+    normalize_compatibility_document,
+    normalize_compatibility_entry,
+)
 
 
 # Artifact naming convention:
@@ -35,14 +42,7 @@ RELEASE_BINARIES_WORKFLOW = ".github/workflows/release-binaries.yml"
 
 def _normalize_arch(arch: str) -> str:
     """Normalize release-matrix architecture names to binary artifact names."""
-    if arch.startswith("x86_64-"):
-        return "amd64"
-    if arch.startswith("aarch64-"):
-        return "arm64"
-    return {
-        "amd64": "amd64",
-        "arm64": "arm64",
-    }.get(arch, arch)
+    return canonical_arch(arch)
 
 
 def _require_entry_keys(entry: dict, *, context: str) -> None:
@@ -62,6 +62,70 @@ def _require_entry_keys(entry: dict, *, context: str) -> None:
         raise KeyError(f"{context} missing required keys: {', '.join(missing_keys)}")
 
 
+def _load_current_matrix_entries(entries: list[object]) -> List[dict]:
+    """Select supported dynamic-module entries from the current schema."""
+    qualifying: List[dict] = []
+    for raw_entry in entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        entry = normalize_compatibility_entry(raw_entry, require_fields=False)
+        if raw_entry.get("owner_workflow") != RELEASE_BINARIES_WORKFLOW:
+            continue
+        if entry.get("support_tier") != "supported":
+            continue
+        if entry.get("artifact_type") != "dynamic-module":
+            continue
+        if entry.get("libc") not in {"glibc", "musl"}:
+            continue
+
+        nginx = entry.get("nginx_version")
+        raw_arch = entry.get("target")
+        arch = entry.get("target")
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (nginx, entry.get("libc"), raw_arch, arch)
+        ):
+            continue
+        qualifying.append(
+            {
+                "nginx": nginx,
+                "os_type": entry["libc"],
+                "arch": _normalize_arch(raw_arch),
+                "support_tier": entry["support_tier"],
+            }
+        )
+    return qualifying
+
+
+def _load_legacy_matrix_entries(entries: list[object]) -> List[dict]:
+    """Select full-tier entries from the legacy matrix schema."""
+    qualifying: List[dict] = []
+    for raw_entry in entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        entry = normalize_compatibility_entry(raw_entry, require_fields=False)
+        if entry.get("support_tier") != "supported":
+            continue
+        nginx = entry.get("nginx_version")
+        os_type = entry.get("libc")
+        raw_arch = entry.get("target", "")
+        arch = entry.get("target", "")
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (nginx, os_type, raw_arch, arch)
+        ):
+            continue
+        qualifying.append(
+            {
+                "nginx": nginx,
+                "os_type": os_type,
+                "arch": _normalize_arch(raw_arch),
+                "support_tier": entry["support_tier"],
+            }
+        )
+    return qualifying
+
+
 def load_matrix(matrix_path: str) -> List[dict]:
     """
     Load qualifying release-binary entries from a release matrix JSON file.
@@ -77,36 +141,14 @@ def load_matrix(matrix_path: str) -> List[dict]:
     data = json.loads(resolved.read_text(encoding="utf-8"))
 
     if not isinstance(data, dict):
-        return []
+        raise MatrixNormalizationError("matrix document must be an object")
 
-    if isinstance(data.get("entries"), list):
-        return [
-            {
-                "nginx": entry["nginx_version"],
-                "os_type": entry["libc"],
-                "arch": _normalize_arch(entry["arch"]),
-                "support_tier": entry["support_tier"],
-            }
-            for entry in data["entries"]
-            if entry.get("owner_workflow") == RELEASE_BINARIES_WORKFLOW
-            and entry.get("support_tier") == "supported"
-            and entry.get("artifact_type") == "dynamic-module"
-            and entry.get("libc") in {"glibc", "musl"}
-        ]
-
-    if not isinstance(data.get("matrix"), list):
-        return []
-
-    return [
-        {
-            "nginx": entry.get("nginx", entry.get("nginx_version")),
-            "os_type": entry.get("os_type", entry.get("libc")),
-            "arch": _normalize_arch(entry.get("arch", entry.get("target", ""))),
-            "support_tier": entry.get("support_tier"),
-        }
-        for entry in data["matrix"]
-        if entry.get("support_tier") == "full"
-    ]
+    current_schema = "entries" in data
+    normalized = normalize_compatibility_document(data)
+    entries = normalized["entries"]
+    if current_schema:
+        return _load_current_matrix_entries(entries)
+    return _load_legacy_matrix_entries(entries)
 
 
 def expected_artifact_name(entry: dict) -> str:
@@ -229,7 +271,12 @@ def main(argv: List[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    matrix_entries = load_matrix(args.matrix)
+    try:
+        matrix_entries = load_matrix(args.matrix)
+    except (OSError, UnicodeError, json.JSONDecodeError,
+            MatrixNormalizationError) as exc:
+        print(f"ERROR: invalid release matrix: {exc}", file=sys.stderr)
+        return 1
     if not matrix_entries:
         print(
             "ERROR: No release-binaries entries found in matrix. The matrix "

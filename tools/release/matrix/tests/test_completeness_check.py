@@ -9,6 +9,7 @@ matrices and artifact lists, verify that missing-detection is precise.
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+import json
 from pathlib import Path
 import sys
 
@@ -21,6 +22,7 @@ if str(_repo_root) not in sys.path:
 from tools.release.matrix.completeness_check import (  # noqa: E402 - path bootstrap
     check_completeness,
     expected_artifact_name,
+    load_matrix,
 )
 
 
@@ -132,3 +134,30 @@ def test_missing_count_bounded_by_matrix_size(entries):
     # Use an empty artifact set (worst case)
     missing = check_completeness(entries, set())
     assert len(missing) <= len(entries)
+
+
+def test_load_matrix_uses_shared_alias_and_tier_normalization(tmp_path):
+    """Legacy rows use the same canonical identity and tier as current rows."""
+    matrix_path = tmp_path / "legacy-matrix.json"
+    matrix_path.write_text(
+        json.dumps({
+            "matrix": [
+                {
+                    "nginx_version": "1.26.3",
+                    "os_type": "glibc",
+                    "arch": "amd64",
+                    "support_tier": "full",
+                }
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+    entries = load_matrix(str(matrix_path))
+
+    assert entries == [{
+        "nginx": "1.26.3",
+        "os_type": "glibc",
+        "arch": "x86_64",
+        "support_tier": "supported",
+    }]

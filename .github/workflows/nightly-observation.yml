@@ -34,6 +34,10 @@ jobs:
         run: cargo +nightly install cargo-fuzz --locked
         shell: bash
 
+      - name: Install cargo-llvm-cov for coverage gates
+        run: cargo +nightly install cargo-llvm-cov --locked --version 0.6.13
+        shell: bash
+
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -113,7 +117,8 @@ jobs:
               "job": "sanitizer",
               "matrix_key": "row_id",
           }
-          if row.get("ci") != expected_ci:
+          # Only enforce CI binding for blocking rows (non-blocking rows may have ci: null)
+          if row.get("blocking") is True and row.get("ci") != expected_ci:
               raise SystemExit(f"sanitizer row {row_id!r} has invalid CI binding")
           expected_commands = {
               "asan-ubsan": "make test-nginx-unit-sanitize-smoke",

@@ -79,11 +79,12 @@ module logs the `header_plan_apply_error` reason code and applies the
 configured `markdown_error_policy` while the original response is still
 recoverable.
 
-**Atomicity guarantee:** either the module applies every prepared mutation
-(commit) or none are (prepare aborted before commit). There is no partial
-mutation on any failure path. This replaces the prior 0.9.0 "pragmatic
-contract" where post-plan operations were "pre-send best-effort with hard
-abort" — all operations are now in the prepare phase.
+**Prepared-plan atomicity guarantee:** either the module applies every
+prepared mutation (commit) or none are (prepare aborted before commit). The
+module applies the prepared plan atomically, so no partial mutation occurs. This replaces
+the prior 0.9.0 "pragmatic contract" where post-plan operations were
+"pre-send best-effort with hard abort". Unrelated work after the plan commit
+is outside this rollback guarantee.
 
 ### Operations modeled by the FFI plan
 

@@ -4,6 +4,11 @@ This guide covers installing DEB and RPM artifacts produced by the release
 workflows. These are community-maintained dynamic-module packages, not
 official NGINX repository packages.
 
+This is the canonical operator procedure for package installation. For the
+release-engineering contract behind the artifacts, see
+[PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md). For source builds and
+other installation methods, see [INSTALLATION.md](INSTALLATION.md).
+
 ## Repository Publishing Status
 
 GitHub Releases are the current distribution channel for DEB and RPM package

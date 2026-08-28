@@ -259,7 +259,12 @@ def _fold_compatibility_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
     canonical: Dict[str, Any] = {}
     for key, value in entry.items():
         canonical_key = COMPATIBILITY_ALIASES.get(key, key)
-        if canonical_key in canonical and canonical[canonical_key] != value:
+        if (
+            canonical_key in canonical
+            and not _compatibility_values_equal(
+                canonical_key, canonical[canonical_key], value
+            )
+        ):
             raise MatrixNormalizationError(
                 f"alias {key!r} disagrees with canonical key "
                 f"{canonical_key!r}"
@@ -269,6 +274,19 @@ def _fold_compatibility_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
             continue
         raise MatrixNormalizationError(f"unknown matrix entry key: {key!r}")
     return canonical
+
+
+def _compatibility_values_equal(
+    canonical_key: str, left: Any, right: Any
+) -> bool:
+    """Compare values after applying identity-level compatibility aliases."""
+    if (
+        canonical_key == "target"
+        and isinstance(left, str)
+        and isinstance(right, str)
+    ):
+        return canonical_arch(left) == canonical_arch(right)
+    return left == right
 
 
 def _normalize_compatibility_tier(value: Any) -> Any:

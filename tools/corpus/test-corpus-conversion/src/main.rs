@@ -9,11 +9,16 @@
 //!
 //! Corpus validators use it as a small full-buffer runtime smoke test.
 
-use nginx_markdown_converter::converter::MarkdownConverter;
+use nginx_markdown_converter::converter::{ConversionContext, MarkdownConverter};
 use nginx_markdown_converter::parser::parse_html;
 use std::env;
 use std::fs;
 use std::process;
+use std::time::Duration;
+
+// The offline corpus includes a 64 MiB fixture and permits its bounded
+// normalization working set to exceed the request conversion default.
+const CORPUS_CONVERSION_BUDGET: usize = 256 * 1024 * 1024;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -42,7 +47,9 @@ fn main() {
     };
 
     let converter = MarkdownConverter::new();
-    let markdown = match converter.convert(&dom) {
+    let mut context =
+        ConversionContext::with_output_budget(Duration::ZERO, CORPUS_CONVERSION_BUDGET);
+    let markdown = match converter.convert_with_context(&dom, &mut context) {
         Ok(md) => md,
         Err(e) => {
             eprintln!("Error converting to Markdown: {}", e);

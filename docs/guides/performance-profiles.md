@@ -74,7 +74,8 @@ Monitor these frozen families while tuning:
 Streaming keeps bounded buffers and honors downstream backpressure. `NGX_AGAIN`
 means that pending output remains owned by the module or the downstream chain.
 It is not a delivery success. Delivery counters advance only after the
-module accepts the terminal converted buffer.
+downstream filter accepts the terminal converted buffer. An internal handoff
+is not delivery.
 
 If the inflight gauge does not return to zero after traffic drains, stop the
 rollout and collect diagnostics before changing limits. Never solve an

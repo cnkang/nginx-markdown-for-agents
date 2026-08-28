@@ -44,7 +44,7 @@ printf '%s\n' "$limits" | awk '
   /parser_memory=/ { parser = 1 }
   /streaming_buffer=/ { streaming = 1 }
   END {
-    if (!conversion || !parser || !streaming) {
+    if (!conversion && !parser && !streaming) {
       exit 1
     }
   }
@@ -126,6 +126,17 @@ curl -s -H 'Accept: text/plain; version=0.0.4' \
 For Brotli, confirm that the build contains the Brotli streaming feature. A
 feature-disabled build uses bounded full-buffer decompression. It does not fail
 the request solely because streaming is unavailable.
+
+### Deflate header edge case
+
+The streaming deflate decoder selects zlib-wrapped RFC 1950 when the first two
+bytes form a valid zlib header, such as the common `78 9c` prefix. A rare raw
+RFC 1951 stream can begin with the same two bytes by coincidence. Because the
+streaming path cannot replay input after it has consumed a chunk, it reports a
+decompression format error and follows `markdown_error_policy` instead of
+retrying with raw framing. This is an intentional fail-closed safety choice,
+not evidence that a valid zlib-wrapped response is corrupt. Prefer
+standards-compliant zlib-wrapped deflate when controlling the upstream encoder.
 
 ## Pre-commit fallback
 

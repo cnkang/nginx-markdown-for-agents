@@ -182,7 +182,7 @@ fn normalize_output(&self, output: String) -> String {
     // 2-6. Process line by line
     let mut result = String::with_capacity(output.len());
     let mut prev_blank = false;
-    let mut active_fence_len: Option<usize> = None;
+    let mut active_fence: Option<(u8, usize)> = None;
 
     for line in output.lines() {
         // Only an indentation-only prefix may precede a fence.  The
@@ -200,18 +200,22 @@ fn normalize_output(&self, output: String) -> String {
         };
         let fence_char = fence_line.as_bytes().first().copied();
         let fence_info = fence_line.get(fence_len..).unwrap_or("");
-        let is_opening_fence = active_fence_len.is_none()
+        let is_opening_fence = active_fence.is_none()
             && fence_len >= 3
             && fence_char.is_some()
             && !fence_info.contains('`');
-        let is_closing_fence = active_fence_len
-            .map(|len| fence_len >= len && fence_info.trim().is_empty())
+        let is_closing_fence = active_fence
+            .map(|(active_char, active_len)| {
+                fence_char == Some(active_char)
+                    && fence_len >= active_len
+                    && fence_info.trim().is_empty()
+            })
             .unwrap_or(false);
         let is_fence = is_opening_fence || is_closing_fence;
 
         if is_fence {
-            active_fence_len = if is_opening_fence {
-                Some(fence_len)
+            active_fence = if is_opening_fence {
+                fence_char.map(|character| (character, fence_len))
             } else {
                 None
             };
@@ -222,7 +226,7 @@ fn normalize_output(&self, output: String) -> String {
             continue;
         }
 
-        if active_fence_len.is_some() {
+        if active_fence.is_some() {
             // Fenced code is raw: preserve trailing spaces and blank lines.
             result.push_str(line);
             result.push('\n');
@@ -240,7 +244,7 @@ fn normalize_output(&self, output: String) -> String {
             }
         } else {
             // Normalize whitespace (skip inside code blocks)
-            if active_fence_len.is_some() {
+            if active_fence.is_some() {
                 result.push_str(trimmed);
             } else {
                 let normalized = self.normalize_line_whitespace(trimmed);

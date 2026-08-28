@@ -336,7 +336,8 @@ Y
 ${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]] \
-    && grep -q 'multiple-outputs.yml' "${output_file}"; then
+    && grep -q 'multiple-outputs.yml' "${output_file}" \
+    && grep -Fq 'steps.resolve.outputs.command' "${output_file}"; then
     pass "all step-output interpolations on one line are audited"
 else
     fail "all step-output interpolations on one line are audited" \

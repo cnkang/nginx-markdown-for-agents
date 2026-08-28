@@ -383,13 +383,56 @@ class TestContainsMakeBuildCommand:
 class TestReleaseGateSnippetExpectations:
     """Validate regression guard snippets for release/package review findings."""
 
-    def test_nfpm_dependency_uses_debian_compatible_floor(self) -> None:
-        """Use a portable Debian floor; preinstall enforces the exact version."""
-        assert 'nginx (>= ${NGINX_VERSION})' in validator.NFPM_REQUIRED_SNIPPETS
+    def test_nfpm_deb_dependency_preserves_exact_nginx_abi(self) -> None:
+        """DEB dependency pins the exact upstream version as a closed interval.
+
+        NGINX dynamic modules require an exact version match.  The DEB
+        dependency must keep the `>= floor` (distro revisions of the pinned
+        version stay installable) and add the exclusive `<<` ceiling, so a
+        plain NGINX patch upgrade can no longer satisfy the dependency and
+        strand the module.  The gate enforces this semantically (parsed
+        constraints probed with dpkg-compatible comparisons), not via literal
+        snippet matching.
+        """
+        assert 'nginx (>= ${NGINX_VERSION})' not in validator.NFPM_REQUIRED_SNIPPETS
         assert "nginx = ${RPM_NGINX_EVR}" in validator.NFPM_REQUIRED_SNIPPETS
-        assert 'nginx (<< ${NGINX_VERSION_CEIL})' not in validator.NFPM_REQUIRED_SNIPPETS
+
+        nfpm_content = validator.NFPM_CONFIG.read_text(encoding="utf-8")
+        contract_ok, contract_errors = validator.validate_nfpm_deb_dependency_contract(
+            nfpm_content
+        )
+        assert contract_ok, contract_errors
+
+        # The contract must fail an interval-less dependency (the historical
+        # floor-only shape that let `apt upgrade` strand the module).
+        floor_only = nfpm_content.replace('      - "nginx (<< ${NGINX_VERSION_CEIL})"\n', "")
+        assert not validator.validate_nfpm_deb_dependency_contract(floor_only)[0]
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.NFPM_REQUIRED_SNIPPETS
         assert "packager: deb" in validator.NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN
+
+    def test_dpkg_version_ordering_matches_debian_semantics(self) -> None:
+        """dpkg-compatible ordering: distro suffixes and numeric segments."""
+        satisfies = validator._dpkg_version_satisfies
+        assert satisfies("1.28.3-1~bookworm", ">=", "1.28.3")
+        assert satisfies("1.28.3-2~bookworm", ">=", "1.28.3-1~bookworm")
+        assert satisfies("1.28.3-1~bookworm", "<", "1.28.3-1")
+        assert satisfies("1.28.3-1", ">", "1.28.3")
+        assert satisfies("1.28.3~rc1", "<", "1.28.3")
+        assert not satisfies("1.28.4", "<<", "1.28.4")
+        assert satisfies("1.28.3", "<<", "1.28.4")
+        assert satisfies("1.28.10", ">>", "1.28.9")
+        assert satisfies("1:1.28.3", ">=", "1.28.3")
+
+    def test_deb_dependency_contract_uses_each_matrix_version(self) -> None:
+        """Probe the interval for versions beyond the historical fixture."""
+        nfpm_content = validator.NFPM_CONFIG.read_text(encoding="utf-8")
+
+        contract_ok, errors = validator.validate_nfpm_deb_dependency_contract(
+            nfpm_content,
+            nginx_versions={"1.28.9", "1.28.10"},
+        )
+
+        assert contract_ok, errors
 
     def test_rpm_spec_dependency_uses_exact_nginx_version(self) -> None:
         """Ensure RPM spec pins the EXACT NGINX version (epoch-aware) and correct module path.
@@ -403,6 +446,14 @@ class TestReleaseGateSnippetExpectations:
         assert "Requires:       nginx = 1:%{nginx_version}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
         assert "Requires:       nginx = %{nginx_version}" in validator.FORBIDDEN_NAKED_EXACT_NGINX_DEPS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+
+    def test_preremove_regex_is_shell_ere_safe(self) -> None:
+        """Keep the module-load regex free of invalid ERE quote escapes."""
+        content = validator.NFPM_PREREMOVE.read_text(encoding="utf-8")
+
+        assert "MODULE_REFERENCE_PATTERN='" in content
+        assert r"ngx_http_markdown_filter_module\.so" in content
+        assert r"ngx_http_markdown_filter_module\\.so" not in content
 
     def test_standalone_rpm_workflow_validate_input_version(self) -> None:
         """Ensure workflow expressions are isolated from shell evaluation."""
@@ -482,6 +533,11 @@ class TestReleaseGateSnippetExpectations:
             "/usr/share/doc/nginx-module-markdown-for-agents/README.md"
             in validator.NFPM_POSTINSTALL_FORBIDDEN_SNIPPETS
         )
+
+    def test_installation_index_is_not_treated_as_package_surface(self) -> None:
+        """Keep the short legacy index out of the canonical package checks."""
+        assert validator.PROJECT_ROOT / "docs" / "guides" / "INSTALL.md" not in validator.MODULE_NAME_SURFACES
+        assert validator.PACKAGE_INSTALLATION_DOC in validator.MODULE_NAME_SURFACES
 
     def test_gate3_local_smoke_selects_arch_specific_packages(self) -> None:
         """Ensure gate3 local smoke uses architecture-specific package patterns."""

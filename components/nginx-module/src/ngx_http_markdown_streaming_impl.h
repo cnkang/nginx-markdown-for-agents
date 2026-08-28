@@ -20,39 +20,6 @@
 #include "ngx_http_markdown_stream_postcommit.h"
 #include "ngx_http_markdown_stream_commit.h"
 
-#ifndef NGX_HTTP_MARKDOWN_NEXT_HEADER_FILTER_WITH_AUTH_DEFINED
-#define NGX_HTTP_MARKDOWN_NEXT_HEADER_FILTER_WITH_AUTH_DEFINED 1
-
-/*
- * Standalone streaming harnesses include this implementation without the
- * request orchestrator.  Keep their header emission on the same auth policy
- * while avoiding a second definition in the production translation unit.
- */
-static ngx_int_t
-ngx_http_markdown_next_header_filter_with_auth(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
-{
-    ngx_flag_t  auth_cache_control_required;
-    ngx_int_t   rc;
-
-    auth_cache_control_required = 0;
-    rc = ngx_http_markdown_auth_cache_control_required(
-        r, conf, &auth_cache_control_required);
-    if (rc != NGX_OK) {
-        return rc;
-    }
-
-    if (auth_cache_control_required) {
-        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
-        if (rc != NGX_OK) {
-            return rc;
-        }
-    }
-    return ngx_http_next_header_filter(r);
-}
-
-#endif /* NGX_HTTP_MARKDOWN_NEXT_HEADER_FILTER_WITH_AUTH_DEFINED */
-
 typedef struct {
     ngx_flag_t  main_terminal;
     ngx_flag_t  subrequest_terminal;
@@ -68,6 +35,10 @@ static void ngx_http_markdown_streaming_record_send_delivery(
 static void ngx_http_markdown_streaming_release_pending_header_output(
     ngx_http_markdown_ctx_t *ctx);
 static ngx_int_t ngx_http_markdown_streaming_handle_output_loss(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf);
+static ngx_int_t
+ngx_http_markdown_streaming_handle_header_snapshot_failure(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
 
@@ -2565,6 +2536,10 @@ ngx_http_markdown_streaming_commit(
     rc = ngx_http_markdown_streaming_update_headers(
         r, ctx, conf);
     if (rc != NGX_OK) {
+        if (rc == NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED) {
+            return ngx_http_markdown_streaming_handle_header_snapshot_failure(
+                r, ctx, conf);
+        }
         return ngx_http_markdown_streaming_precommit_error(
             r, ctx, conf, ERROR_STREAMING_FALLBACK);
     }

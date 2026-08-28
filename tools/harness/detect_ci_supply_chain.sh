@@ -68,6 +68,7 @@ check_network_to_shell() {
         count="$(printf '%s\n' "$output" | wc -l | tr -d '[:space:]')"
         VIOLATIONS=$((VIOLATIONS + count))
     fi
+    return 0
 }
 
 # Match 'uses: owner/repo@ref' lines where ref is NOT a 40-char hex SHA

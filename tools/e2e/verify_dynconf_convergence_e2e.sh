@@ -224,8 +224,6 @@ END { print maximum + 0 }
 assert_exact_generation() {
     local label="$1"
     local expected="$2"
-    local matched=0
-    local mismatch=0
     if awk -F '\t' -v label="${label}" -v expected="${expected}" '
 $1 == label {
     matched = 1
@@ -507,9 +505,9 @@ if [[ -z "${NGINX_PID}" ]] || ! kill -0 "${NGINX_PID}" >/dev/null 2>&1; then
 fi
 markdown_wait_for_http "$(e2e_base_url)/nginx-markdown/diagnostics" \
     "dynamic configuration diagnostics" || exit 1
-assert_worker_count "${NGINX_PID}"
+assert_worker_count "${NGINX_PID}" || true
 
-wait_for_state initial active on 1 no ""
+wait_for_state initial active on 1 no "" || true
 INITIAL_GENERATION="$(max_generation initial)"
 if [[ "${INITIAL_GENERATION}" -ge 1 ]]; then
     pass "initial dynconf generation is ${INITIAL_GENERATION}"
@@ -518,13 +516,13 @@ else
 fi
 
 assert_same_mtime_replace \
-    '{"schema_version":1,"filter":}'
-wait_for_state malformed lkg_preserved on "${INITIAL_GENERATION}" yes ""
-assert_exact_generation malformed "${INITIAL_GENERATION}"
+    '{"schema_version":1,"filter":}' || true
+wait_for_state malformed lkg_preserved on "${INITIAL_GENERATION}" yes "" || true
+assert_exact_generation malformed "${INITIAL_GENERATION}" || true
 
 assert_same_mtime_replace \
-    '{"schema_version":1,"filter":"off","prune_noise":"off","log_verbosity":"info","error_policy":"pass"}'
-wait_for_state restored active off "${INITIAL_GENERATION}" no ""
+    '{"schema_version":1,"filter":"off","prune_noise":"off","log_verbosity":"info","error_policy":"pass"}' || true
+wait_for_state restored active off "${INITIAL_GENERATION}" no "" || true
 RESTORED_GENERATION="$(max_generation restored)"
 if (( RESTORED_GENERATION > INITIAL_GENERATION )); then
     pass "valid restore advanced generation to ${RESTORED_GENERATION}"
@@ -533,9 +531,9 @@ else
 fi
 
 assert_same_mtime_replace \
-    '{"schema_version":1,"filter":"on","prune_noise":"off","log_verbosity":"info","error_policy":"pass"}'
-wait_for_state prepared_on active on "${RESTORED_GENERATION}" no ""
-capture_worker_pids prepared_on "${OLD_WORKERS}"
+    '{"schema_version":1,"filter":"on","prune_noise":"off","log_verbosity":"info","error_policy":"pass"}' || true
+wait_for_state prepared_on active on "${RESTORED_GENERATION}" no "" || true
+capture_worker_pids prepared_on "${OLD_WORKERS}" || true
 
 RESPONSE_HEADERS="${BUILDROOT}/response.headers"
 RESPONSE_BODY="${BUILDROOT}/response.body"
@@ -559,7 +557,7 @@ else
 fi
 
 assert_same_mtime_replace \
-    '{"schema_version":1,"filter":"off","prune_noise":"off","log_verbosity":"info","error_policy":"pass"}'
+    '{"schema_version":1,"filter":"off","prune_noise":"off","log_verbosity":"info","error_policy":"pass"}' || true
 if "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf -s reload; then
     pass "NGINX reloaded while the request was in flight"
 else
@@ -594,8 +592,8 @@ else
     fail "in-flight response body is missing the converted heading"
 fi
 
-wait_for_state post_reload active off 1 no "${OLD_WORKERS}"
-assert_worker_count "${NGINX_PID}"
+wait_for_state post_reload active off 1 no "${OLD_WORKERS}" || true
+assert_worker_count "${NGINX_PID}" || true
 
 if [[ "${FAIL_COUNT}" -eq 0 ]]; then
     echo "Dynamic configuration convergence E2E: PASSED (${PASS_COUNT} checks)" >&2

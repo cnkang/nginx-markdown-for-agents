@@ -64,6 +64,10 @@ VALIDATION_FUNCS = {
 #       HARNESS_STATE_DIR); rejects ".." traversal and resolves to an
 #       absolute path before any file operation.
 FILE_SCOPED_VALIDATORS: dict[str, set[str]] = {
+    # The extractor resolves an untrusted source argument against the
+    # workspace root, rejects traversal/symlink escapes, and requires a
+    # regular file before returning the path.
+    "tools/c-extract/extract_c_function.py": {"resolve_source_path"},
     "tools/harness/state_store.py": {"validate_user_local_state_path"},
 }
 

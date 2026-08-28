@@ -296,9 +296,10 @@ def test_migration_removed_table_requires_row_with_replacement(tmp_path: Path) -
         encoding="utf-8",
     )
     errors = detector.check_public_config_contract(tmp_path)
-    assert not any("MIGRATION-0.9.2.md" in error for error in errors), (
+    migration_name = Path(detector.MIGRATION_GUIDE_PATH).name
+    assert not any(migration_name in error for error in errors), (
         "complete table row must satisfy the removed-table check: "
-        + str([e for e in errors if "MIGRATION-0.9.2.md" in e])
+        + str([e for e in errors if migration_name in e])
     )
 
 

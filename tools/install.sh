@@ -204,6 +204,7 @@ json_output() {
   if [[ "${#_json_suggestions[@]}" -gt 0 ]]; then
     suggestions_json="["
     local first=1
+    local escaped=""
     for s in "${_json_suggestions[@]}"; do
       if [[ "$first" -eq 1 ]]; then
         first=0
@@ -1973,6 +1974,35 @@ fi
 cd "$TMP_DIR"
 # --no-same-owner: the archive may carry root ownership from the build
 # container; extracting as root would otherwise honor embedded ownership.
+# Preflight the tar member list: reject absolute paths, path traversal, and
+# unexpected members.  The asset must contain exactly the expected module .so.
+echo "[+] Preflight tar member list for ${ASSET_NAME}"
+TAR_MEMBERS="$("$TAR_BIN" -tzf "$ASSET_NAME" 2>/dev/null | sort)"
+if [[ -z "$TAR_MEMBERS" ]]; then
+    die_with_error "extraction" \
+        "Archive appears empty or unreadable." \
+        "Re-download and try again."
+fi
+EXPECTED_MEMBER="ngx_http_markdown_filter_module.so"
+MEMBER_COUNT=$(echo "$TAR_MEMBERS" | wc -l | tr -d ' ')
+if [[ "$MEMBER_COUNT" -ne 1 ]]; then
+    die_with_error "extraction" \
+        "Archive contains $MEMBER_COUNT member(s), expected exactly 1 ($EXPECTED_MEMBER)." \
+        "Found: $TAR_MEMBERS"
+fi
+if [[ "$TAR_MEMBERS" != "$EXPECTED_MEMBER" ]]; then
+    die_with_error "extraction" \
+        "Archive member mismatch: expected \"$EXPECTED_MEMBER\", got \"$TAR_MEMBERS\"." \
+        "The archive may be corrupted or built for a different purpose."
+fi
+# Check for absolute paths or path traversal in member names (defense-in-depth)
+if echo "$TAR_MEMBERS" | grep -qE '^/|(^|/)\.\./'; then
+    die_with_error "extraction" \
+        "Archive member name contains absolute path or '..' traversal." \
+        "Members: $TAR_MEMBERS"
+fi
+echo "[+] Tar member list preflight passed: $TAR_MEMBERS"
+
 if ! "$TAR_BIN" --no-same-owner -xzf "$ASSET_NAME"; then
   die_with_error "extraction" \
     "Failed to extract ${ASSET_NAME}." \

@@ -50,6 +50,12 @@ typedef enum {
     NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN = MARKDOWN_FORMAT_BROTLI + 2
 } ngx_http_markdown_compression_type_e;
 
+_Static_assert(MARKDOWN_FORMAT_GZIP == 0,
+               "Rust gzip format code must remain zero");
+_Static_assert(MARKDOWN_FORMAT_DEFLATE == 1,
+               "Rust deflate format code must remain one");
+_Static_assert(MARKDOWN_FORMAT_BROTLI == 2,
+               "Rust Brotli format code must remain two");
 _Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
                    == MARKDOWN_FORMAT_GZIP + 1,
                "gzip C/R format mapping drifted");

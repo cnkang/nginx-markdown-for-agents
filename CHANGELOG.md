@@ -90,8 +90,10 @@ before/after examples.
   trailer list (`ngx_http_markdown_clear_trailers`).
 - DEB/RPM packages now require the EXACT NGINX version that builds them. The
   `preinstall.sh` script rejects any full-version difference
-  (including a patch release) as fatal, the DEB/RPM dependency metadata
-  pins the exact version (`nginx (= X.Y.Z)` / `nginx = 1:X.Y.Z`), and the
+  (including a patch release) as fatal, the DEB dependency metadata keeps the
+  pinned version installable across distro revisions while refusing any
+  next-patch NGINX upgrade (`nginx (>= X.Y.Z)` plus `nginx (<< X.Y.Z+1)`),
+  the RPM dependency pins the exact version (`nginx = 1:X.Y.Z`), and the
   project no longer makes the misleading "--with-compat same-minor
   compatibility" claim.
   NGINX's dynamic module loader rejects a version mismatch before
@@ -1193,8 +1195,8 @@ budget.
   `prune_protection_selectors`/`len`, `memory_budget` in `MarkdownOptions`.
 - ADR-0007: Streaming Engine as Default (auto mode).
 - ADR-0008: Noise Pruning Enabled by Default.
-- Migration guide: `docs/archive/streaming-default-migration.md` with rollback
-  instructions for both default changes.
+- Migration notes documented rollback instructions for both default changes.
+  The temporary archive guide is no longer part of the tracked documentation.
 - Release gate validator: `tools/release/gates/validate_release_gates_060.py`
   (12 gates covering spec docs, ADRs, migration guide, directives, reason
   codes, Cargo features, and harness manifest).
@@ -1305,9 +1307,9 @@ release-gate/documentation synchronization.
   HEAD routing/header parity, 206 handling, and fail-open header preservation.
 - Auth/cache-safety coverage for cookie pattern matching and authenticated
   response cache-control behavior across full-buffer and streaming paths.
-- Streaming parity evidence artifact at
-  `tests/streaming/evidence/summary.json`, plus stricter known-difference
-  metadata (`drift_type`, `severity`, and fixture/global-scope discipline).
+- Candidate-bound streaming parity evidence generated from the Rust harness,
+  plus stricter known-difference metadata (`drift_type`, `severity`, and
+  fixture/global-scope discipline).
 - Streaming reason-code lifecycle audit tooling
   (`tools/harness/audit_reason_codes.sh`) and decision-log tests covering
   failure/degradation classification and verbosity gating.
@@ -1550,7 +1552,8 @@ agent content preservation.
 - Equivalence guarantee: single `feed` + `finalize` produces identical output to the full-buffer path
 - `max_buffer_size` field in `MarkdownOptions` C ABI struct, wired through from the NGINX `markdown_max_size` directive to control the incremental converter's memory ceiling
 - Path hit metrics (`fullbuffer_path_hits`, `incremental_path_hits`) exposed via the metrics endpoint
-- Large response design document (`LARGE_RESPONSE_DESIGN.md`) and archived rollout guide (`docs/archive/LARGE_RESPONSE_ROLLOUT.md`)
+- Large response design document (`LARGE_RESPONSE_DESIGN.md`). The historical
+  rollout guide is no longer part of the tracked documentation.
 - `large-100k` and `large-5m` performance tiers in `metrics-schema.json`
 - `generate_large_samples.sh` for creating large response test corpus with `--tier` filter and option validation
 - `memory_observer.sh` for cross-platform memory peak sampling with process fingerprinting to prevent PID reuse corruption

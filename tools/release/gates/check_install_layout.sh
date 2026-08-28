@@ -11,6 +11,7 @@
 #   RPM: /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so
 #   /usr/share/doc/nginx-markdown-for-agents/README.md
 #   /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
+#   /usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
 #   /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
 #   /usr/share/licenses/nginx-markdown-for-agents/LICENSE
 #
@@ -55,6 +56,7 @@ FAIL_COUNT=0
 # ---------------------------------------------------------------------------
 COMMON_REQUIRED_PATHS="/usr/share/doc/nginx-markdown-for-agents/README.md
 /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
+/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
 /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
 /usr/share/licenses/nginx-markdown-for-agents/LICENSE"
 
@@ -80,21 +82,25 @@ usage() {
 log_info() {
     local msg="$1"
     printf '[INFO]  %s\n' "$msg" >&2
+    return 0
 }
 
 log_pass() {
     local msg="$1"
     printf '[PASS]  %s\n' "$msg" >&2
+    return 0
 }
 
 log_fail() {
     local msg="$1"
     printf '[FAIL]  %s\n' "$msg" >&2
+    return 0
 }
 
 log_error() {
     local msg="$1"
     printf '[ERROR] %s\n' "$msg" >&2
+    return 0
 }
 
 # ---------------------------------------------------------------------------

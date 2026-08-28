@@ -41,7 +41,7 @@ def test_fixture_skip_record_is_accepted_before_threshold_checks(
             encoding="utf-8"
         )
     )
-    record["candidate_sha"] = "f" * 40
+    record["candidate_sha"] = manifest["candidate_sha"]
     record["status"] = "skip"
     record["skip_reason"] = "module binary unavailable in fixture environment"
 

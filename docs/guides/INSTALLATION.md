@@ -1,6 +1,7 @@
 # NGINX Markdown Filter Module — Installation Guide
 
-> For a quick package-only install, see [INSTALL.md](INSTALL.md).
+> For a quick package-only install, see
+> [PACKAGE_INSTALLATION.md](PACKAGE_INSTALLATION.md).
 
 ## Table of Contents
 
@@ -199,97 +200,17 @@ If you need deterministic control over compiler flags or local patching, use [Ma
 
 **Tier: Secondary** (release gate)
 
-Release workflows can build DEB and RPM artifacts for
-supported Linux distributions. Public GitHub Release asset availability is
-tag-specific: confirm that the target release contains the exact package,
-`SHA256SUMS`, and `SHA256SUMS.asc` before running these commands. `SHA256SUMS`
-detects transfer corruption but is not an authenticated trust anchor. A release candidate or a
-compatibility-matrix entry is not a downloadable package. If the release does not publish a matching asset, use [Manual Source Build](#6-secondary-manual-source-build).
-The project plans APT/YUM repository publishing. Public APT/YUM repository
-publishing is not part of the current GA channel. Do not use `apt-get install
-nginx-module-markdown` or `yum install nginx-module-markdown` unless you
-operate your own package repository.
+For DEB/RPM availability, exact artifact naming, authenticated checksum and
+signature verification, supported distributions, installation, upgrade, and
+rollback, use the [Package Installation Guide](PACKAGE_INSTALLATION.md).
 
-### DEB Artifacts (Ubuntu / Debian)
+The strategy in [PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md) serves
+release and packaging maintainers. It describes the release matrix, manifest,
+signing, and repository-publishing contract. It is not a second operator
+installation procedure.
 
-Replace `VERSION` below with a published release version. `NGINX_VERSION` must
-match the NGINX ABI you run.
-
-```bash
-set -euo pipefail
-VERSION="<published-version>"
-NGINX_VERSION=1.26.3
-ARCH=amd64
-
-curl -fsSL -o SHA256SUMS "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
-curl -fsSL -o SHA256SUMS.asc "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
-curl -fsSL -o "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb" "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
-# Import the release signing key through an independently authenticated channel before GPG verification.
-# Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
-# Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
-: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated and the key is imported}"
-[[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
-VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
-    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
-EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
-[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
-grep "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb" SHA256SUMS | sha256sum -c -
-dpkg-sig --verify "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
-sudo apt install "./nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
-```
-
-### RPM Artifacts (AlmaLinux / Amazon Linux / RHEL)
-
-Replace `VERSION` below with a published release version. `NGINX_VERSION` must
-match the NGINX ABI you run.
-
-```bash
-set -euo pipefail
-VERSION="<published-version>"
-NGINX_VERSION=1.26.3
-ARCH=x86_64
-
-curl -fsSL -o SHA256SUMS "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
-curl -fsSL -o SHA256SUMS.asc "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
-curl -fsSL -o "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm" "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
-# Import the release signing key through an independently authenticated channel before GPG verification.
-# Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
-# Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
-: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated and the key is imported}"
-[[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
-VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
-    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
-EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
-[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
-grep "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm" SHA256SUMS | sha256sum -c -
-rpm -Kv "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
-sudo rpm -Uvh "./nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
-```
-
-### After Installation
-
-After installing a package artifact, reload NGINX:
-
-```bash
-sudo nginx -t && sudo nginx -s reload
-```
-
-### Supported Distributions
-
-- Ubuntu 22.04, 24.04
-- Debian 12
-- AlmaLinux 9
-- Amazon Linux 2023
-
-Package artifacts are built for both `amd64`/`arm64` DEB architectures and
-`x86_64`/`aarch64` RPM architectures, targeting NGINX stable and mainline
-channels. Package filenames include the target NGINX version because NGINX
-dynamic module packages are ABI-sensitive.
-
-For full details on artifact naming, checksum verification, upgrade, rollback,
-and repository-publishing prerequisites, see [Package Installation
-Guide](PACKAGE_INSTALLATION.md) and [Package Distribution
-Strategy](PACKAGE_DISTRIBUTION.md).
+If the target release does not publish an artifact for the exact NGINX version
+and architecture, use [Manual Source Build](#6-secondary-manual-source-build).
 
 ---
 

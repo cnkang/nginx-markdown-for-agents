@@ -113,17 +113,18 @@ fn build_payload(kind: u8, src: &[u8], layers: &[Encoding]) -> (Vec<u8>, Option<
         }
     };
 
-    /* Multi-layer chains: wrap the source with EVERY layer in application
-     * order (layers[0] innermost, last layer outermost), matching how
-     * decode_chain unwinds from the outermost encoding inward.  The
-     * single-layer oracle is only meaningful for the single-layer success
-     * kinds, so it is dropped for multi-layer wires. */
+    /* Multi-layer chains use the payload-kind result as the innermost wire
+     * value, then wrap it with the remaining declared layers.  This keeps
+     * kind-driven raw, bomb, and truncation cases active in multi-layer
+     * inputs; a kind/layer mismatch intentionally exercises a format error.
+     * The single-layer oracle is only meaningful for the single-layer
+     * success kinds, so it is dropped for multi-layer wires. */
     if layers.len() <= 1 {
         return single;
     }
 
-    let mut wire = src.to_vec();
-    for enc in layers {
+    let mut wire = single.0;
+    for enc in layers.iter().skip(1) {
         wire = match enc {
             Encoding::Gzip => gzip_compress(&wire),
             Encoding::Deflate => deflate_compress(&wire),

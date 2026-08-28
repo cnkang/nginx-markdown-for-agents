@@ -22,7 +22,6 @@ import sys
 from pathlib import Path
 
 from _packaging_constants import (
-    INSTALL_SHORTEST_PATH_PATTERN,
     README_QUICK_START_HEADING,
 )
 
@@ -442,7 +441,7 @@ def _extract_install_shortest_path(text: str) -> str:
     collecting = False
     parts: list[str] = []
     for line in lines:
-        if re.match(INSTALL_SHORTEST_PATH_PATTERN, line):
+        if line.startswith("## 2.") and "Shortest Success Path" in line:
             collecting = True
         elif collecting and line.startswith("## "):
             break

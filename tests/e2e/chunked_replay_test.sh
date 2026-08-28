@@ -79,15 +79,19 @@ echo "Step 1: Testing chunked transfer encoding handling..." >&2
 
 RESPONSE_HEADERS="$(mktemp)"
 CURL_EXIT=0
-curl -sS \
+HTTP_CODE="000"
+HTTP_CODE="$(curl -sS \
     -H "$ACCEPT_MARKDOWN" \
     -H "Transfer-Encoding: chunked" \
     -D "$RESPONSE_HEADERS" \
     -o /dev/null \
-    "${NGINX_URL}${TEST_PATH}" 2>/dev/null || CURL_EXIT=$?
+    -w '%{http_code}' \
+    "${NGINX_URL}${TEST_PATH}" 2>/dev/null)" || CURL_EXIT=$?
 
 if [[ "$CURL_EXIT" -ne 0 ]]; then
     fail "chunked request failed (curl exit $CURL_EXIT)"
+elif [[ "$HTTP_CODE" != "200" ]]; then
+    fail "chunked request returned unexpected HTTP status $HTTP_CODE"
 elif grep -qi '^Transfer-Encoding:[[:space:]]*chunked[[:space:]]*$' \
     "$RESPONSE_HEADERS"; then
     pass "received a response with Transfer-Encoding: chunked"

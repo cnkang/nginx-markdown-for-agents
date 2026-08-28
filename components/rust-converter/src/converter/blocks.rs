@@ -93,22 +93,37 @@ impl MarkdownConverter {
         }
     }
 
-    /// Append one list-item payload line, adding the continuation indent when
-    /// the line is non-empty and does not already carry its own indentation.
+    /// Append one list-item payload line, aligning it with the item's own
+    /// indentation.
     ///
-    /// Shared by the first-line nested-item branch and usable for any single
-    /// line so marker/indent behavior stays consistent across call sites.
+    /// A line that already starts with whitespace is not simply dropped: that
+    /// whitespace usually comes from a nested list rendered at a deeper depth
+    /// inside this item's content.  Re-indent it relative to this item so the
+    /// payload stays attached to the item marker (a bare early return silently
+    /// discarded the whole first-child nested list).  Empty lines still emit
+    /// nothing.
     fn append_list_item_line(
         output: &mut String,
         line: &str,
         base_indent: &str,
         continuation_indent: &str,
     ) {
-        if line.is_empty() || Self::list_line_is_indented(line, base_indent) {
+        if line.is_empty() {
             return;
         }
-        output.push_str(continuation_indent);
-        output.push_str(line);
+        if Self::list_line_is_indented(line, base_indent) {
+            // Strip exactly the nested render's leading whitespace, then
+            // re-anchor the line under this item's continuation indent.
+            let stripped = line.trim_start_matches([' ', '\t']);
+            if stripped.is_empty() {
+                return;
+            }
+            output.push_str(continuation_indent);
+            output.push_str(stripped);
+        } else {
+            output.push_str(continuation_indent);
+            output.push_str(line);
+        }
         output.push('\n');
     }
 
@@ -219,10 +234,14 @@ impl MarkdownConverter {
 
     fn list_line_continuation_indent(
         line: &str,
-        base_indent: &str,
+        _base_indent: &str,
         continuation_indent_len: usize,
     ) -> usize {
-        if line.is_empty() || Self::list_line_is_indented(line, base_indent) {
+        // Mirrors append_list_item_line: an indented line is stripped of its
+        // leading whitespace and re-anchored under the continuation indent,
+        // so the rendered length always includes that indent (never 0 for a
+        // non-empty line).
+        if line.is_empty() {
             0
         } else {
             continuation_indent_len

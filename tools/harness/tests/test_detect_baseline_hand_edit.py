@@ -275,7 +275,6 @@ def test_shallow_clone_missing_commit_is_explicit_skip(capsys):
     # provenance a full clone would reject (verdicts agree: both reject
     # unverifiable metadata).
     import detect_baseline_hand_edit as m
-    assert m.repo_commit_exists("0" * 40) is None or True  # env-dependent
     # Directly verify the SKIP + finding contract:
     findings = []
     doc = {"module_benchmark": {"git_commit": "0" * 40}, "baseline_policy": {

@@ -19,6 +19,10 @@
 #define NGX_LOG_DEBUG_HTTP 0
 #endif
 
+#ifndef NGX_LOG_CRIT
+#define NGX_LOG_CRIT 2
+#endif
+
 #define ngx_log_debug0(level, log, err, fmt) \
     do { (void)(level); (void)(log); (void)(err); (void)(fmt); } while (0)
 
@@ -142,6 +146,7 @@ static int test_vary_accept_called;
 static int test_vary_accept_rc;
 static int test_set_etag_called;
 static int test_set_etag_rc;
+static int test_truncate_header_list_on_etag_failure;
 static int test_is_authenticated;
 static int test_auth_cache_control_called;
 static int test_auth_cache_control_rc;
@@ -276,6 +281,9 @@ ngx_http_markdown_set_etag(ngx_http_request_t *r,
 {
     test_set_etag_called = 1;
     if (test_set_etag_rc != NGX_OK) {
+        if (test_truncate_header_list_on_etag_failure) {
+            r->headers_out.headers.part.nelts = 0;
+        }
         return test_set_etag_rc;
     }
 
@@ -512,6 +520,7 @@ static void test_setup(void)
     test_vary_accept_rc = NGX_OK;
     test_set_etag_called = 0;
     test_set_etag_rc = NGX_OK;
+    test_truncate_header_list_on_etag_failure = 0;
     test_is_authenticated = 0;
     test_auth_cache_control_called = 0;
     test_auth_cache_control_rc = NGX_OK;
@@ -1128,6 +1137,67 @@ static void test_rollback_etag_failure_restores_etag(void)
     TEST_PASS("Rollback: ETag failure restores pre-existing ETag header");
 }
 
+/* --- Rollback validation failure returns the terminal sentinel --- */
+
+static void test_rollback_failure_returns_terminal_sentinel(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t        *orig_vary;
+    ngx_int_t               rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    orig_vary = test_push_header("Vary", "Cookie");
+    TEST_ASSERT(orig_vary != NULL, "pre-existing Vary pushed");
+
+    /* Simulate a list implementation that loses the original entry while
+     * the fallible ETag operation reports its own failure. */
+    test_set_etag_rc = NGX_ERROR;
+    test_truncate_header_list_on_etag_failure = 1;
+
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED,
+                "unverifiable rollback returns the terminal sentinel");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 0,
+                "headers_committed stays clear after rollback failure");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PRE_COMMIT,
+                "state stays PRE_COMMIT after rollback failure");
+    TEST_ASSERT(test_request.headers_out.content_type.data == NULL,
+                "phase 2 Content-Type mutation is not reached");
+    TEST_ASSERT(test_request.headers_out.headers.part.nelts == 0,
+                "test corruption leaves the original entry unreachable");
+
+    TEST_PASS("Rollback failure returns a terminal restore sentinel");
+}
+
+static void test_malformed_header_list_returns_error_before_snapshot(void)
+{
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_int_t                rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+
+    test_request.headers_out.headers.part.nelts = 1;
+    test_request.headers_out.headers.nalloc = 0;
+
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "malformed list capacity returns NGX_ERROR");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 0,
+                "malformed list does not commit headers");
+    TEST_ASSERT(test_request.headers_out.content_type.data == NULL,
+                "malformed list does not reach phase 2 mutation");
+
+    TEST_PASS("Malformed header list fails before snapshot indexing");
+}
+
 /* --- Rollback: Cache-Control failure restores pre-existing CC header --- */
 
 static void test_rollback_cc_failure_restores_cc(void)
@@ -1418,6 +1488,7 @@ static void test_setup_multipart(void)
     test_vary_accept_rc = NGX_OK;
     test_set_etag_called = 0;
     test_set_etag_rc = NGX_OK;
+    test_truncate_header_list_on_etag_failure = 0;
     test_is_authenticated = 0;
     test_auth_cache_control_called = 0;
     test_auth_cache_control_rc = NGX_OK;
@@ -1757,6 +1828,8 @@ int main(void)
     test_commit_auth_cache_control_success();
     test_rollback_vary_failure_restores_vary();
     test_rollback_etag_failure_restores_etag();
+    test_rollback_failure_returns_terminal_sentinel();
+    test_malformed_header_list_returns_error_before_snapshot();
     test_rollback_cc_failure_restores_cc();
     test_rollback_etag_failure_rolls_back_vary();
     test_rollback_restores_typed_etag_pointer();

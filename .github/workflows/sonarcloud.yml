@@ -191,10 +191,15 @@ jobs:
           PR_NUMBER: ${{ inputs.pull_request_number }}
           PR_BRANCH: ${{ inputs.pull_request_branch }}
           PR_BASE: ${{ inputs.pull_request_base }}
+          CURRENT_BRANCH: ${{ github.ref_name }}
         shell: bash
         run: |
           if [[ -z "${PR_BRANCH}" || -z "${PR_BASE}" ]]; then
             echo "pull_request_branch and pull_request_base are required when pull_request_number is set" >&2
+            exit 1
+          fi
+          if [[ "${CURRENT_BRANCH}" != "${PR_BRANCH}" ]]; then
+            echo "pull_request_branch must match the checked-out workflow ref" >&2
             exit 1
           fi
 

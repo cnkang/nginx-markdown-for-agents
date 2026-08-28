@@ -156,7 +156,7 @@
     },
     "observation": {
       "phase": "report-oriented",
-      "commands": [
+      "workflow_paths": [
         ".github/workflows/nightly-observation.yml",
         ".github/workflows/weekly-observation.yml"
       ],
@@ -359,6 +359,8 @@
       ],
       "paths": [
         "components/rust-converter/include/**",
+        "components/rust-converter/cbindgen.toml",
+        "components/rust-converter/reason_registry.toml",
         "components/rust-converter/src/ffi.rs",
         "components/rust-converter/src/ffi/**",
         "components/nginx-module/src/markdown_converter.h",
@@ -377,6 +379,10 @@
       "verification_families": [
         "harness-sync",
         "ffi-boundary",
+        "public-surface-drift",
+        "schema-drift",
+        "reason-codegen",
+        "diagnostics-access-phase",
         "release-quality"
       ]
     },
