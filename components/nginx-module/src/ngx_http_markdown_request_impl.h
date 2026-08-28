@@ -161,6 +161,7 @@ ngx_http_markdown_next_header_filter_with_auth(
 }
 
 
+#ifdef MARKDOWN_STREAMING_ENABLED
 /*
  * A streaming header rollback failure leaves the response representation
  * uncertain.  It must bypass the configured fail-open policy and terminate
@@ -194,6 +195,7 @@ ngx_http_markdown_streaming_handle_header_snapshot_failure(
         (ngx_int_t) ngx_http_markdown_effective_error_status(
             ctx->effective_conf, conf));
 }
+#endif
 
 #define NGX_HTTP_MARKDOWN_NEXT_HEADER_FILTER_WITH_AUTH_DEFINED 1
 

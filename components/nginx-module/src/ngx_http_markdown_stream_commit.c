@@ -198,39 +198,44 @@ ngx_http_markdown_stream_commit_snapshot_header(
     return NGX_OK;
 }
 
-/*
- * Roll back a single header: first prove that every snapshotted entry is
- * still reachable in the original portion of the live list, then restore
- * original value/hash and invalidate entries pushed after the snapshot.
- * orig_nelts is the total linear entry count across all list parts; rollback
- * uses the same linear traversal index.  Returning an error is essential:
- * callers must not use fail-open when the response-header representation is
- * no longer known to be restorable.
- */
+
 static ngx_int_t
-ngx_http_markdown_stream_commit_rollback_header(
-    ngx_http_request_t *r,
-    const u_char *name, size_t name_len,
-    ngx_http_markdown_hdr_snap_t *snap)
+ngx_http_markdown_stream_commit_validate_snapshot_entries(
+    const ngx_http_markdown_hdr_snap_t *snap)
 {
-    ngx_list_part_t  *part;
-    ngx_table_elt_t  *elts;
-    ngx_uint_t        idx;
-    ngx_uint_t        matched;
-
-    if (r == NULL || snap == NULL
-        || snap->count > NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX)
-    {
-        return NGX_ERROR;
-    }
-
     for (ngx_uint_t i = 0; i < snap->count; i++) {
         if (snap->entries[i].entry == NULL) {
             return NGX_ERROR;
         }
     }
 
-    /* Validate list shape and prove every original pointer is still live. */
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_stream_commit_snapshot_entry_matches(
+    const ngx_http_markdown_hdr_snap_t *snap, const ngx_table_elt_t *entry)
+{
+    for (ngx_uint_t i = 0; i < snap->count; i++) {
+        if (snap->entries[i].entry == entry) {
+            return NGX_OK;
+        }
+    }
+
+    return NGX_DECLINED;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_stream_commit_validate_live_snapshot(
+    ngx_http_request_t *r, const ngx_http_markdown_hdr_snap_t *snap)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+    ngx_uint_t        idx;
+    ngx_uint_t        matched;
+
     idx = 0;
     matched = 0;
     for (part = &r->headers_out.headers.part;
@@ -245,13 +250,11 @@ ngx_http_markdown_stream_commit_rollback_header(
 
         elts = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (idx < snap->orig_nelts) {
-                for (ngx_uint_t j = 0; j < snap->count; j++) {
-                    if (snap->entries[j].entry == &elts[i]) {
-                        matched++;
-                        break;
-                    }
-                }
+            if (idx < snap->orig_nelts
+                && ngx_http_markdown_stream_commit_snapshot_entry_matches(
+                       snap, &elts[i]) == NGX_OK)
+            {
+                matched++;
             }
             idx++;
         }
@@ -261,13 +264,20 @@ ngx_http_markdown_stream_commit_rollback_header(
         return NGX_ERROR;
     }
 
-    /* Restore snapshotted entries */
-    for (ngx_uint_t i = 0; i < snap->count; i++) {
-        snap->entries[i].entry->value = snap->entries[i].orig_value;
-        snap->entries[i].entry->hash = snap->entries[i].orig_hash;
-    }
+    return NGX_OK;
+}
 
-    /* Invalidate newly-pushed entries (hash=0 per Rule 40) */
+
+static ngx_int_t
+ngx_http_markdown_stream_commit_invalidate_new_header_entries(
+    ngx_http_request_t *r,
+    const u_char *name, size_t name_len,
+    const ngx_http_markdown_hdr_snap_t *snap)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+    ngx_uint_t        idx;
+
     part = &r->headers_out.headers.part;
     idx = 0;
 
@@ -283,7 +293,7 @@ ngx_http_markdown_stream_commit_rollback_header(
             if (idx >= snap->orig_nelts
                 && elts[i].hash != 0
                 && ngx_http_markdown_stream_commit_header_matches(
-                    &elts[i], name, name_len))
+                       &elts[i], name, name_len))
             {
                 elts[i].hash = 0;
             }
@@ -293,6 +303,52 @@ ngx_http_markdown_stream_commit_rollback_header(
     }
 
     return NGX_OK;
+}
+
+
+/*
+ * Roll back a single header: first prove that every snapshotted entry is
+ * still reachable in the original portion of the live list, then restore
+ * original value/hash and invalidate entries pushed after the snapshot.
+ * orig_nelts is the total linear entry count across all list parts; rollback
+ * uses the same linear traversal index.  Returning an error is essential:
+ * callers must not use fail-open when the response-header representation is
+ * no longer known to be restorable.
+ */
+static ngx_int_t
+ngx_http_markdown_stream_commit_rollback_header(
+    ngx_http_request_t *r,
+    const u_char *name, size_t name_len,
+    ngx_http_markdown_hdr_snap_t *snap)
+{
+    if (r == NULL || snap == NULL
+        || snap->count > NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX)
+    {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_stream_commit_validate_snapshot_entries(snap)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    /* Validate list shape and prove every original pointer is still live. */
+    if (ngx_http_markdown_stream_commit_validate_live_snapshot(r, snap)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    /* Restore snapshotted entries */
+    for (ngx_uint_t i = 0; i < snap->count; i++) {
+        snap->entries[i].entry->value = snap->entries[i].orig_value;
+        snap->entries[i].entry->hash = snap->entries[i].orig_hash;
+    }
+
+    /* Invalidate newly-pushed entries (hash=0 per Rule 40) */
+    return ngx_http_markdown_stream_commit_invalidate_new_header_entries(
+        r, name, name_len, snap);
 }
 
 /*

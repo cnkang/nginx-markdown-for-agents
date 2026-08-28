@@ -325,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         parity = _run_parity()
         summary = build_summary(parity, allow_dirty=args.allow_dirty)
         _write_summary(output, summary)
-    except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     print(f"PASS: generated streaming evidence at {output}")
