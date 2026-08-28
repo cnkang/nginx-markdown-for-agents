@@ -269,7 +269,7 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
     assert "release_assets" in resolve_run
     assert "has_signed_manifest" in resolve_run
     assert "signed_asset_names" in resolve_run
-    assert 'filename.lstrip("*")' in resolve_run
+    assert 'parts[1].lstrip("*")' in resolve_run
     assert '"expected_error_category": expected_error_category' in resolve_run
     assert 'in release_assets' in resolve_run
     assert "nginx.org/en/download.html" in resolve_run
