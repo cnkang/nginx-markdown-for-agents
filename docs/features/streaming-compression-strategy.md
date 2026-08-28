@@ -166,7 +166,7 @@ route to bounded full-buffer decompression regardless of streaming preference.
 
 ## Related Documentation
 
-- [AUTOMATIC_DECOMPRESSION.md](AUTOMATIC_DECOMPRESSION.md) — decompression behavior and error handling
+- [DECOMPRESSION.md](DECOMPRESSION.md) — decompression behavior and error handling
 - [DECOMPRESSION.md](DECOMPRESSION.md) — Budget enforcement and error categories
 - [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md) — Directive syntax and defaults
 - [../guides/streaming-rollout-cookbook.md](../guides/streaming-rollout-cookbook.md) — Streaming rollout guidance

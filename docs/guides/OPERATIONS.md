@@ -1078,7 +1078,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 
 - [Decision Chain Model](../features/DECISION_CHAIN.md) — full check order, flowchart, outcome determination, and implementation details
 - [Rollout Cookbook](ROLLOUT_COOKBOOK.md) — staged rollout procedures with observation checkpoints
-- [Rollback Guide](ROLLBACK_GUIDE.md) — how to disable or narrow conversion scope
+- [Rollback Guide](OPERATIONAL_ROLLBACK.md) — how to disable or narrow conversion scope
 
 ---
 
@@ -1277,7 +1277,7 @@ tail -f /var/log/nginx/error.log | grep "markdown:"
 - [Decision Chain Model](../features/DECISION_CHAIN.md) — check order, reason code definitions, and outcome determination
 - [Reason Code Reference](#reason-code-reference-for-operators) — complete reason code table with operator actions
 - [Rollout Cookbook](ROLLOUT_COOKBOOK.md) — observation checkpoints that use decision log patterns
-- [Rollback Guide](ROLLBACK_GUIDE.md) — verification steps that check decision log entries after rollback
+- [Rollback Guide](OPERATIONAL_ROLLBACK.md) — verification steps that check decision log entries after rollback
 
 ---
 
@@ -1288,7 +1288,7 @@ tail -f /var/log/nginx/error.log | grep "markdown:"
 - **Documentation Index:** [../README.md](../README.md)
 - **Performance Baselines:** [../testing/PERFORMANCE_BASELINES.md](../testing/PERFORMANCE_BASELINES.md)
 - **Integration Tests:** [../testing/INTEGRATION_TESTS.md](../testing/INTEGRATION_TESTS.md)
-- **Automatic Decompression:** [../features/AUTOMATIC_DECOMPRESSION.md](../features/AUTOMATIC_DECOMPRESSION.md)
+- **Decompression:** [../features/DECOMPRESSION.md](../features/DECOMPRESSION.md)
 - **E2E Tests:** [../testing/E2E_TESTS.md](../testing/E2E_TESTS.md)
 - **Requirements Traceability:** [../project/PROJECT_STATUS.md](../project/PROJECT_STATUS.md)
 - **Architecture Index:** [../architecture/README.md](../architecture/README.md)

@@ -22,7 +22,7 @@ and mirrors them in [Observability Schema v2](../architecture/observability-sche
 This document describes the check order, what each check evaluates, and how the
 module determines outcomes.
 Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md).
-Rollback procedures are in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
+Rollback procedures are in the [Rollback Guide](../guides/OPERATIONAL_ROLLBACK.md).
 
 ## Decision Chain Flowchart
 
@@ -150,7 +150,7 @@ When conversion fails (either `failed_open` or `failed_closed`), the module reco
 | `timeout` | The request exceeded the authoritative overall conversion deadline `markdown_limits conversion_timeout=`; `parser_timeout=` triggers an earlier parser checkpoint when nonzero and smaller than `conversion_timeout`, while `conversion_timeout=` remains the overall upper bound and is never extended by `parser_timeout=` |
 | `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from `memory_budget_exceeded` and takes precedence for parser allocations |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
-| `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Automatic Decompression](../features/AUTOMATIC_DECOMPRESSION.md)) |
+| `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Decompression](../features/DECOMPRESSION.md)) |
 | `replay_error` | Fail-open replay buffer init/append failure |
 | `overload` | Inflight guard rejected the request |
 | `invalid_dynconf` / `degraded_snapshot` / `header_plan_apply_error` | Dynamic configuration or header-plan errors |
@@ -254,7 +254,7 @@ for the full registry and FFI accessor list.
 ## Related Documentation
 
 - [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md) — staged rollout procedures with observation checkpoints
-- [Rollback Guide](../guides/ROLLBACK_GUIDE.md) — how to disable or narrow conversion scope
+- [Rollback Guide](../guides/OPERATIONAL_ROLLBACK.md) — how to disable or narrow conversion scope
 - [Configuration Guide](../guides/CONFIGURATION.md) — directive reference and configuration examples
 - [Content Negotiation](CONTENT_NEGOTIATION.md) — Accept header parsing and wildcard behavior
 - [Observability Schema v2](../architecture/observability-schema-v2.md) — authoritative reason code registry, metric families, label whitelist
