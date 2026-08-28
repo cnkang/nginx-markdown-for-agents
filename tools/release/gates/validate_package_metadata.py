@@ -116,7 +116,7 @@ MODULE_NAME_SURFACES = [
     PROJECT_ROOT / "tools" / "release" / "gates" / "check_install_layout.sh",
     PROJECT_ROOT / "README.md",
     PROJECT_ROOT / "README_zh-CN.md",
-    PROJECT_ROOT / "docs" / "COMPATIBILITY.md",
+    PROJECT_ROOT / "docs" / "guides" / "PACKAGE_COMPATIBILITY.md",
     PACKAGE_INSTALLATION_DOC,
     RELEASE_PACKAGES_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
@@ -148,7 +148,7 @@ STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "docs/guides/INSTALL.md",
     "docs/guides/PACKAGE_INSTALLATION.md",
-    "docs/COMPATIBILITY.md",
+    "docs/guides/PACKAGE_COMPATIBILITY.md",
     '--define "nginx_version ${NGINX_VERSION}"',
     "tools/release/gates/check_install_layout.sh dist/*.rpm",
 ]

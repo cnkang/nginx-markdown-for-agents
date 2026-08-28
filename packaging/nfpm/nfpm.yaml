@@ -77,7 +77,7 @@ contents:
   - src: "./docs/guides/PACKAGE_INSTALLATION.md"
     dst: "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md"
 
-  - src: "./docs/COMPATIBILITY.md"
+  - src: "./docs/guides/PACKAGE_COMPATIBILITY.md"
     dst: "/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md"
 
 scripts:
