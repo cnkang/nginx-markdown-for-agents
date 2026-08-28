@@ -33,7 +33,7 @@ CURRENT_SCHEMA_ENTRY = {
     "owner_workflow": ".github/workflows/release-binaries.yml",
 }
 SAMPLE_FILENAME = "ngx_http_markdown_filter_module-1.24.0-glibc-x86_64.tar.gz"
-CURRENT_SCHEMA_FILENAME = "ngx_http_markdown_filter_module-1.24.0-musl-arm64.tar.gz"
+CURRENT_SCHEMA_FILENAME = "ngx_http_markdown_filter_module-1.24.0-musl-aarch64.tar.gz"
 
 
 def _write_matrix(tmp: Path, entries: list[dict], *, schema_version: str = "1.0.0") -> Path:
@@ -95,7 +95,7 @@ def test_load_matrix_filters_full_tier(tmp_path):
     p = _write_matrix(tmp_path, entries)
     result = load_matrix(str(p))
     assert len(result) == 1
-    assert result[0]["support_tier"] == "full"
+    assert result[0]["support_tier"] == "supported"
 
 
 def test_load_matrix_empty(tmp_path):
@@ -103,7 +103,15 @@ def test_load_matrix_empty(tmp_path):
     assert load_matrix(str(p)) == []
 
 
-def test_load_matrix_ignores_malformed_legacy_rows(tmp_path):
+def test_load_matrix_rejects_ambiguous_top_level_aliases(tmp_path):
+    p = tmp_path / "release-matrix.json"
+    p.write_text(json.dumps({"entries": [], "matrix": []}))
+
+    with pytest.raises(ValueError, match="both 'entries' and legacy 'matrix'"):
+        load_matrix(str(p))
+
+
+def test_load_matrix_rejects_malformed_legacy_rows(tmp_path):
     entries = [
         None,
         {"support_tier": "full", "nginx": "", "os_type": "glibc"},
@@ -111,16 +119,25 @@ def test_load_matrix_ignores_malformed_legacy_rows(tmp_path):
     ]
     p = _write_matrix(tmp_path, entries)
 
-    assert load_matrix(str(p)) == [SAMPLE_ENTRY]
+    with pytest.raises(ValueError, match="matrix entry must be an object"):
+        load_matrix(str(p))
+
+
+def test_load_matrix_rejects_unknown_top_level_keys(tmp_path):
+    p = tmp_path / "release-matrix.json"
+    p.write_text(json.dumps({"matrix": [], "unexpected": True}))
+
+    with pytest.raises(ValueError, match="unknown compatibility top-level keys"):
+        load_matrix(str(p))
 
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("amd64", "amd64"),
-        ("arm64", "arm64"),
-        ("x86_64-unknown-linux-gnu", "amd64"),
-        ("aarch64-unknown-linux-gnu", "arm64"),
+        ("amd64", "x86_64"),
+        ("arm64", "aarch64"),
+        ("x86_64-unknown-linux-gnu", "x86_64"),
+        ("aarch64-unknown-linux-gnu", "aarch64"),
         ("wasm32-unknown-unknown", "wasm32-unknown-unknown"),
     ],
 )
@@ -148,7 +165,7 @@ def test_load_matrix_current_schema_selects_release_binaries_entries(tmp_path):
         {
             "nginx": "1.24.0",
             "os_type": "musl",
-            "arch": "arm64",
+            "arch": "aarch64",
             "support_tier": "supported",
         }
     ]

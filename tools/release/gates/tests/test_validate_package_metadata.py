@@ -447,6 +447,14 @@ class TestReleaseGateSnippetExpectations:
         assert "Requires:       nginx = %{nginx_version}" in validator.FORBIDDEN_NAKED_EXACT_NGINX_DEPS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.STANDALONE_RPM_SPEC_SNIPPETS
 
+    def test_preremove_regex_is_shell_ere_safe(self) -> None:
+        """Keep the module-load regex free of invalid ERE quote escapes."""
+        content = validator.NFPM_PREREMOVE.read_text(encoding="utf-8")
+
+        assert "MODULE_REFERENCE_PATTERN='" in content
+        assert r"ngx_http_markdown_filter_module\.so" in content
+        assert r"ngx_http_markdown_filter_module\\.so" not in content
+
     def test_standalone_rpm_workflow_validate_input_version(self) -> None:
         """Ensure workflow expressions are isolated from shell evaluation."""
         env_binding = "INPUT_VERSION: ${{ inputs.version }}"

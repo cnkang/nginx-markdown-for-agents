@@ -49,9 +49,11 @@ jobs:
           else
             tap_name="${owner}/${name}"
           fi
-          echo "owner=${owner}" >> "$GITHUB_OUTPUT"
-          echo "repo=${name}" >> "$GITHUB_OUTPUT"
-          echo "tap_name=${tap_name}" >> "$GITHUB_OUTPUT"
+          {
+            echo "owner=${owner}"
+            echo "repo=${name}"
+            echo "tap_name=${tap_name}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Homebrew environment
         shell: bash

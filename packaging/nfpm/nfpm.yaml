@@ -18,9 +18,9 @@
 #   version they were compiled against; the core loader rejects any
 #   version difference (including patch) before signature checks.
 #   RPM dependency metadata pins the exact NGINX version. Debian package
-#   revisions are distribution-specific, so its dependency supplies a
-#   compatible lower bound while the preinstall script enforces the exact
-#   version at install time.
+#   revisions are distribution-specific, so its dependency uses a closed
+#   interval (the pinned lower bound plus an exclusive next-patch ceiling),
+#   while the preinstall script enforces the exact version at install time.
 
 name: "nginx-module-markdown-for-agents"
 arch: "${NFPM_ARCH}"

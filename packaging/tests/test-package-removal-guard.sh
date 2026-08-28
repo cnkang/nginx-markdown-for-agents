@@ -7,10 +7,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_SCRIPT="${SCRIPT_DIR}/../nfpm/scripts/preremove.sh"
 FAKE_ROOT="$(mktemp -d)"
 RUN_SCRIPT="${FAKE_ROOT}/preremove.sh"
+FORCE_REMOVE_SENTINEL="${FAKE_ROOT}/etc/nginx/markdown-module-force-remove"
 trap 'rm -rf "${FAKE_ROOT}"' EXIT
 
 mkdir -p "${FAKE_ROOT}/usr/sbin" "${FAKE_ROOT}/usr/bin" \
-    "${FAKE_ROOT}/sbin" "${FAKE_ROOT}/bin"
+    "${FAKE_ROOT}/sbin" "${FAKE_ROOT}/bin" "${FAKE_ROOT}/etc/nginx"
 
 # Link the fixed utility manifest the guard needs for its trusted-path
 # security checks (path canonicalization plus ownership/mode inspection).
@@ -38,6 +39,24 @@ write_fake_nginx() {
 #!/bin/bash
 printf 'load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;\n'
 exit 0
+EOF
+            ;;
+        reference-large)
+            cat > "${FAKE_ROOT}/usr/sbin/nginx" <<'EOF'
+#!/bin/bash
+printf 'load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;\n'
+for ((i = 0; i < 20000; i++)); do
+    printf 'include /etc/nginx/conf.d/generated-%05d.conf;\n' "$i"
+done
+exit 0
+EOF
+            ;;
+        reference-failed)
+            cat > "${FAKE_ROOT}/usr/sbin/nginx" <<'EOF'
+#!/bin/bash
+printf 'load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;\n'
+printf 'nginx: configuration could not be tested\n' >&2
+exit 1
 EOF
             ;;
         clear)
@@ -93,29 +112,32 @@ fi
 run_case reference upgrade 0 >/dev/null
 run_case reference deconfigure 0 >/dev/null
 run_case reference failed-upgrade 0 >/dev/null
+run_case reference-large remove 1 >/dev/null
+run_case reference-failed remove 1 >/dev/null
 run_case clear remove 0 >/dev/null
 run_case unreadable remove 1 >/dev/null
 
-override_status=0
-NGINX_MARKDOWN_ALLOW_UNVERIFIED_REMOVE=1 "${RUN_SCRIPT}" remove >/dev/null 2>&1 \
-    || override_status=$?
-if [[ "${override_status}" -ne 0 ]]; then
-    printf 'FAIL: explicit unverified-removal override returned %s\n' \
-        "${override_status}" >&2
-    exit 1
-fi
-printf 'PASS: explicit unverified-removal override permits removal\n' >&2
+touch "${FORCE_REMOVE_SENTINEL}"
+run_case unreadable remove 0 >/dev/null
+rm -f "${FORCE_REMOVE_SENTINEL}"
+printf 'PASS: persistent force-removal sentinel permits removal\n' >&2
 
 rm -f "${FAKE_ROOT}/usr/sbin/nginx"
 mkdir -p "${FAKE_ROOT}/etc/nginx/conf.d"
 printf 'events {}\n' > "${FAKE_ROOT}/etc/nginx/nginx.conf"
 run_case_output="$(${RUN_SCRIPT} remove 2>&1)" || run_case_status=$?
 run_case_status="${run_case_status:-0}"
-if [[ "${run_case_status}" -ne 0 ]]; then
-    printf 'FAIL: no-nginx fallback rejected a readable config without module\n%s\n' \
+if [[ "${run_case_status}" -ne 1 ]]; then
+    printf 'FAIL: no-nginx fallback returned %s, expected unverifiable removal block\n%s\n' \
+        "${run_case_status}" "${run_case_output}" >&2
+    exit 1
+fi
+if ! printf '%s\n' "${run_case_output}" \
+    | grep -F -q "could not be verified"; then
+    printf 'FAIL: no-nginx fallback did not explain the verification block\n%s\n' \
         "${run_case_output}" >&2
     exit 1
 fi
-printf 'PASS: no-nginx fallback allows a readable config without module\n' >&2
+printf 'PASS: no-nginx fallback blocks unverifiable configuration\n' >&2
 
 printf 'PASS: package removal guard lifecycle scenarios\n' >&2

@@ -36,6 +36,7 @@ path_is_trusted_root() {
     local path="$1"
     local root
     local phys_root
+    local root_prefix
 
     # Prefix matching must use the SAME physical spelling that
     # canonicalize_path() produces: cd -P/pwd -P rewrite symlinked
@@ -43,14 +44,22 @@ path_is_trusted_root() {
     # logical trusted-root prefix would never match the resolved target.
     # If the root itself cannot be entered nothing beneath it can be a
     # usable executable; fall back to the literal spelling.
-    phys_root="$(cd -P -- "${TRUSTED_PATH_ROOT}" 2>/dev/null && pwd -P)" \
-        || phys_root="${TRUSTED_PATH_ROOT}"
+    if [[ -n "${TRUSTED_PATH_ROOT}" ]]; then
+        phys_root="$(cd -P -- "${TRUSTED_PATH_ROOT}" 2>/dev/null && pwd -P)" \
+            || phys_root="${TRUSTED_PATH_ROOT}"
+    else
+        # An empty prefix denotes the real filesystem root.  `cd ""` enters
+        # HOME in Bash, which would make every normal /usr/bin/nginx path
+        # appear outside the trusted package-maintainer boundary.
+        phys_root="/"
+    fi
 
+    root_prefix="${phys_root%/}"
     for root in \
-        "${phys_root}/usr/sbin" \
-        "${phys_root}/usr/bin" \
-        "${phys_root}/sbin" \
-        "${phys_root}/bin"; do
+        "${root_prefix}/usr/sbin" \
+        "${root_prefix}/usr/bin" \
+        "${root_prefix}/sbin" \
+        "${root_prefix}/bin"; do
         case "$path" in
             "$root"/*)
                 return 0
@@ -172,7 +181,9 @@ resolve_trusted_nginx() {
     # resolved form, while trust and every safety property must hold for
     # the exact executable that will be executed.
     path_is_trusted_root "$resolved" || return 1
-    is_secure_path "$candidate" || return 1
+    # The candidate may traverse a standard system symlink such as
+    # /usr/sbin -> /usr/bin.  Validate the canonical physical path instead
+    # of rejecting the symlink's mode bits (which are conventionally 0777).
     is_secure_path "$resolved" || return 1
     printf '%s\n' "$resolved"
     return 0
@@ -182,7 +193,8 @@ resolve_trusted_nginx() {
 # Constants
 ##############################################################################
 
-MODULE_REFERENCE_PATTERN="^[[:space:]]*load_module[[:space:]]+\\\"?[^;]*ngx_http_markdown_filter_module\\.so\\\"?[[:space:]]*;"
+MODULE_REFERENCE_PATTERN='^[[:space:]]*load_module[[:space:]]+"?[^;]*ngx_http_markdown_filter_module\.so"?[[:space:]]*;'
+FORCE_REMOVE_SENTINEL="/etc/nginx/markdown-module-force-remove"
 
 ##############################################################################
 # Helpers
@@ -221,20 +233,26 @@ check_active_configuration() {
             return 2
         fi
         nginx_dump="$("$nginx_bin" -T 2>&1)" || nginx_status=$?
-        if printf '%s\n' "$nginx_dump" \
-            | grep -E -q "$MODULE_REFERENCE_PATTERN"; then
-            return 0
-        fi
+        # Do not use grep -q here: with pipefail, grep can exit after the
+        # matching line and make printf report SIGPIPE, turning a real match
+        # into a false negative for sufficiently large nginx -T output.
         if [[ "$nginx_status" -ne 0 ]]; then
-            info "Unable to inspect the active NGINX configuration with '${nginx_bin} -T'."
+            info "Unable to inspect the active NGINX configuration with the trusted binary."
             return 2
+        fi
+        if printf '%s\n' "$nginx_dump" \
+            | grep -E "$MODULE_REFERENCE_PATTERN" >/dev/null; then
+            return 0
         fi
         return 1
     fi
 
-    # A stopped or not-yet-installed NGINX has no active configuration to
-    # protect.  When standard files exist, inspect them as a conservative
-    # fallback; an include outside this fixed set still requires nginx -T.
+    # Without a trusted NGINX executable there is no reliable way to identify
+    # the active configuration or expand its include graph.  Inspect the
+    # fixed standard files for an immediate positive match, but do not treat
+    # a clean result as proof that a custom executable/configuration is safe.
+    # The persistent force-removal sentinel is the explicit operator path for
+    # hosts where the include graph was verified out of band.
     for config_path in /etc/nginx/nginx.conf \
         /etc/nginx/conf.d/*.conf /etc/nginx/modules-enabled/*.conf; do
         if [[ -f "$config_path" ]]; then
@@ -250,12 +268,9 @@ check_active_configuration() {
         fi
     done
 
-    # Every scanned standard entry point was readable and none of them
-    # references the module, or none existed at all: treat the package as
-    # not actively configured, consistent with the stated not-installed
-    # behavior. A genuinely unverifiable include graph is only claimed
-    # when a binary existed but could not be inspected above.
-    return 1
+    # A missing executable, an absent standard file, or an unobserved include
+    # path is unverifiable rather than evidence that no module is loaded.
+    return 2
 }
 
 ##############################################################################
@@ -269,6 +284,11 @@ main() {
             return 0
             ;;
         remove|0)
+            if [[ -f "$FORCE_REMOVE_SENTINEL" ]]; then
+                info "WARNING: forced removal acknowledged (${FORCE_REMOVE_SENTINEL} present); skipping active-configuration verification."
+                info "WARNING: delete $FORCE_REMOVE_SENTINEL after removal to re-enable the guard."
+                return 0
+            fi
             ;;
         *)
             info "Unknown lifecycle action '${action}'; refusing final removal until it is explicit."
@@ -286,10 +306,6 @@ main() {
         return 1
     fi
     if [[ "$check_status" -eq 2 ]]; then
-        if [[ "${NGINX_MARKDOWN_ALLOW_UNVERIFIED_REMOVE:-0}" == "1" ]]; then
-            info "WARNING: allowing removal because NGINX configuration could not be verified; explicit NGINX_MARKDOWN_ALLOW_UNVERIFIED_REMOVE=1 was supplied."
-            return 0
-        fi
         info "Refusing removal because active NGINX configuration could not be verified."
         info "Disable the module explicitly, run 'nginx -t', then retry package removal."
         return 1

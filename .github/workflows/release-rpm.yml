@@ -195,10 +195,11 @@ jobs:
           cp docs/guides/INSTALL.md "/tmp/${TARBALL_DIR}/docs/guides/"
           cp docs/guides/PACKAGE_INSTALLATION.md "/tmp/${TARBALL_DIR}/docs/guides/"
           cp docs/COMPATIBILITY.md "/tmp/${TARBALL_DIR}/docs/"
+          cp packaging/nfpm/scripts/preremove.sh "/tmp/${TARBALL_DIR}/"
           cp LICENSE "/tmp/${TARBALL_DIR}/"
 
           cd /tmp
-          tar czf ~/rpmbuild/SOURCES/${PKG_NAME}-${PKG_VERSION}.tar.gz "${TARBALL_DIR}"
+          tar czf "$HOME/rpmbuild/SOURCES/${PKG_NAME}-${PKG_VERSION}.tar.gz" "${TARBALL_DIR}"
 
           # Copy SPEC file
           cp "$GITHUB_WORKSPACE/packaging/rpm/SPECS/nginx-module-markdown.spec" \

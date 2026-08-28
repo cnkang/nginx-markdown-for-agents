@@ -230,17 +230,18 @@ NFPM_PREREMOVE_SNIPPETS = [
     "upgrade|1|deconfigure|failed-upgrade|abort-upgrade|abort-remove|abort-deconfigure)",
     "nginx_candidate=\"$(command -v nginx",
     "-T 2>&1",
-    r"ngx_http_markdown_filter_module\\.so",
+    r"ngx_http_markdown_filter_module\.so",
     "Remove that directive, run 'nginx -t', then retry package removal.",
     "No NGINX configuration was modified automatically.",
+    'FORCE_REMOVE_SENTINEL="/etc/nginx/markdown-module-force-remove"',
+    "forced removal acknowledged",
 ]
 RPM_PREUN_SNIPPETS = [
     "%preun",
     "if [ \"$1\" -eq 0 ]; then",
-    "-T 2>&1",
-    r"ngx_http_markdown_filter_module\\.so",
-    "run 'nginx -t', and retry RPM removal.",
-    "exit 1",
+    "/bin/bash /usr/libexec/nginx-markdown-for-agents/preremove.sh remove",
+    "install -m 0755 preremove.sh",
+    "/usr/libexec/nginx-markdown-for-agents/preremove.sh",
 ]
 RELEASE_BUILD_GLIBC_SNIPPETS = {
     RELEASE_PACKAGES_WORKFLOW: ["container: almalinux@sha256:"],
@@ -1393,6 +1394,7 @@ def validate_nfpm_preremove_lifecycle(result: ValidationResult) -> None:
             "run_case reference upgrade 0",
             "run_case clear remove 0",
             "run_case unreadable remove 1",
+            "persistent force-removal sentinel",
             "No NGINX configuration was modified automatically",
         ],
         "nfpm-preremove:test",

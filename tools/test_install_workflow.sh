@@ -101,11 +101,18 @@ if ! command -v openssl >/dev/null 2>&1; then
 fi
 MOCK_CERT_FILE="${MOCK_DIR}/server.crt"
 MOCK_KEY_FILE="${MOCK_DIR}/server.key"
-openssl req -x509 -newkey rsa:2048 -nodes \
+if ! openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout "$MOCK_KEY_FILE" -out "$MOCK_CERT_FILE" -days 1 \
   -subj "/CN=host.docker.internal" \
   -addext "subjectAltName=DNS:host.docker.internal" \
-  >/dev/null 2>&1
+  >/dev/null 2>&1; then
+  echo "ERROR: failed to generate mock HTTPS certificate" >&2
+  exit 1
+fi
+if [[ ! -s "$MOCK_CERT_FILE" || ! -s "$MOCK_KEY_FILE" ]]; then
+  echo "ERROR: mock HTTPS certificate generation produced empty files" >&2
+  exit 1
+fi
 
 ASSET_NAME="$(basename "$ARTIFACT")"
 ASSET_SHA256="$(sha256_file "$ARTIFACT")"

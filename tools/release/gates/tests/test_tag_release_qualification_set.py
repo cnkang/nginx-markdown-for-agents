@@ -2,7 +2,7 @@
 
 The tag release path (``.github/workflows/release-packages.yml``) must run the
 same candidate-bound qualification stages as the Makefile
-``release-gates-check-092`` target's [8/13]-[12/13] stages.  These tests pin
+``release-gates-check-092`` target's [9/14]-[13/14] stages.  These tests pin
 the two surfaces together so they cannot drift.
 """
 
@@ -16,7 +16,7 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-packages.yml"
 MAKEFILE = REPO_ROOT / "Makefile"
 
 # Makefile stage name -> validator module that the stage invokes.  Must stay
-# in lockstep with release-gates-check-092 stages [8/13]-[12/13].
+# in lockstep with release-gates-check-092 stages [9/14]-[13/14].
 QUALIFICATION_STAGES = {
     "release-candidate-evidence-check": "validate_release_candidate_evidence.py",
     "artifact-registry-check": "validate_artifact_registry.py",
@@ -24,6 +24,9 @@ QUALIFICATION_STAGES = {
     "test-rust-fuzz-qualification": "validate_fuzz_qualification.py",
     "test-e2e-rust-soak": "validate_soak_qualification.py",
 }
+
+STREAMING_EVIDENCE_VALIDATOR = "validate_streaming_evidence.py"
+TAG_RULESET_VALIDATOR = "verify_tag_ref_protection.py"
 
 
 def _workflow_release_gate_body() -> str:
@@ -92,6 +95,21 @@ def test_makefile_092_runs_all_qualification_stages() -> None:
         assert f"$(MAKE) {stage}" in target, (
             f"release-gates-check-092 must invoke '{stage}' as a blocking stage"
         )
+
+
+def test_release_gate_runs_the_shared_contract_validators() -> None:
+    """Tag CI must enforce the tag and streaming contracts directly."""
+    body = _workflow_release_gate_body()
+    assert TAG_RULESET_VALIDATOR in body
+    assert '--repo "${GITHUB_REPOSITORY}"' in body
+    assert STREAMING_EVIDENCE_VALIDATOR in body
+
+
+def test_makefile_092_runs_the_shared_contract_validators() -> None:
+    """The local blocking target must not omit either contract validator."""
+    target = _makefile_092_target()
+    assert TAG_RULESET_VALIDATOR in target
+    assert "$(MAKE) streaming-evidence-check" in target
 
 
 def test_publish_hard_depends_on_release_gate() -> None:
