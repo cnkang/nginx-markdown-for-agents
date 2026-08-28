@@ -58,7 +58,7 @@ validation.
 
 - [Dynamic Configuration Guide](../../guides/DYNAMIC_CONFIG.md)
 - [0.9.2 Migration Guide](../../guides/MIGRATION-0.9.2.md)
-- [0.9.2 Rollback Guide](../../guides/ROLLBACK-0.9.2.md)
+- [0.9.2 Rollback Guide](../../guides/VERSION_ROLLBACK-0.9.2.md)
 - [Dynconf file restore implementation plan](../../development/0.9.2-implementation-plan.md)
 - [Dynconf implementation](../../../components/nginx-module/src/ngx_http_markdown_dynconf_impl.h)
 - [ADR-0015: Config V2 Breaking Migration](0015-090-config-v2-breaking-migration.md)

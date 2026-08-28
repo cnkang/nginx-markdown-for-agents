@@ -1363,7 +1363,7 @@ When a trigger fires:
 1. Do not expand to the next rollout stage.
 2. Check the decision logs and metrics to understand the scope of the issue.
 3. If the issue appears on a single path only, consider narrowing your rollout scope to exclude that path. Isolated issues point to path-specific causes. Scope narrowing targets the affected path only. A single-path issue usually has a single cause. Exclude the path and observe.
-4. If the issue is widespread, consider rolling back — see the Rollback Guide (`ROLLBACK_GUIDE.md`) for procedures.
+4. If the issue is widespread, consider rolling back — see the Rollback Guide (`OPERATIONAL_ROLLBACK.md`) for procedures.
 5. Resolve the underlying issue before resuming rollout expansion.
 
 

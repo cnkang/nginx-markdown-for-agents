@@ -50,7 +50,7 @@ does not have an operator toggle:
 
 ### Related Documents
 
-- [ROLLBACK_GUIDE.md](ROLLBACK_GUIDE.md) — general module rollback procedures
+- [OPERATIONAL_ROLLBACK.md](OPERATIONAL_ROLLBACK.md) — general module rollback procedures
 - [streaming-rollout-cookbook.md](streaming-rollout-cookbook.md) — streaming engine rollout
 - [CONFIGURATION.md](CONFIGURATION.md) — full directive reference
 - [OPERATIONS.md](OPERATIONS.md) — metrics reference
