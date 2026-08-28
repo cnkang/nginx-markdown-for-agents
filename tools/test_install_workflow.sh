@@ -162,7 +162,9 @@ PY
     server_ready=1
     break
   fi
-  sleep 1
+  if [[ "$attempt" -lt 10 ]]; then
+    sleep 1
+  fi
 done
 if [[ "$server_ready" -ne 1 ]]; then
   echo "ERROR: mock GitHub server did not become ready on port ${MOCK_PORT}" >&2
