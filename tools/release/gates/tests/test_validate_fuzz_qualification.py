@@ -183,6 +183,24 @@ def test_record_output_path_cannot_change_artifact_name() -> None:
         validator._write_record({}, args)
 
 
+def test_seed_digest_rejects_escape_when_called_directly(
+        tmp_path: Path, monkeypatch) -> None:
+    """Digest verification must repeat the corpus-root boundary check."""
+    corpus_root = tmp_path / "corpus"
+    corpus_root.mkdir()
+    (tmp_path / "outside-seed").write_bytes(b"outside")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "CORPUS_ROOT", corpus_root)
+
+    error = validator._validate_seed_digest(
+        {"seed_path": "../outside-seed", "digest": "sha256:" + "0" * 64},
+        "parser_html",
+    )
+
+    assert error is not None
+    assert "unreadable" in error
+
+
 def test_skipped_target_record_keeps_seed_path_field() -> None:
     entry = {"name": "convert_html", "seed": 7}
 

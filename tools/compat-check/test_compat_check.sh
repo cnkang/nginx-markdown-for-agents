@@ -25,6 +25,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 HELPER_SCRIPT="$SCRIPT_DIR/nginx-markdown-compat-check.sh"
 VERSION_FILE="${REPO_ROOT}/components/rust-converter/Cargo.toml"
+if [[ ! -f "${VERSION_FILE}" ]]; then
+    printf '[ERROR] version file is missing: %s\n' "${VERSION_FILE}" >&2
+    exit 1
+fi
 PROJECT_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${VERSION_FILE}" | head -1)"
 if [[ -z "${PROJECT_VERSION}" ]]; then
     printf '[ERROR] unable to resolve project version from %s\n' "${VERSION_FILE}" >&2
@@ -48,6 +52,7 @@ MOCK_DIR=""
 
 setup_mock_dir() {
     MOCK_DIR="$(mktemp -d)"
+    return 0
 }
 
 cleanup_mock_dir() {
@@ -55,6 +60,7 @@ cleanup_mock_dir() {
         rm -rf "$MOCK_DIR"
     fi
     MOCK_DIR=""
+    return 0
 }
 
 # create_mock_nginx — create a mock nginx binary
@@ -81,6 +87,7 @@ esac
 exit 0
 MOCKEOF
     chmod +x "$MOCK_DIR/nginx"
+    return 0
 }
 
 # create_mock_uname — create a mock uname binary
@@ -103,6 +110,7 @@ esac
 exit 0
 MOCKEOF
     chmod +x "$MOCK_DIR/uname"
+    return 0
 }
 
 # run_helper — run the compat-check helper with mocked PATH
@@ -136,6 +144,7 @@ run_helper() {
     # Restore PATH
     PATH="$old_path"
     export PATH
+    return 0
 }
 
 # assert_exit_code — check exit code
@@ -202,6 +211,7 @@ run_test() {
         TESTS_FAILED=$((TESTS_FAILED + 1))
         printf 'FAIL\n' >&2
     fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------

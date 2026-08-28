@@ -19,7 +19,6 @@ No user-supplied patterns are compiled at runtime.
 
 from __future__ import annotations
 
-import itertools
 import json
 import re
 import sys
@@ -82,6 +81,7 @@ NFPM_REQUIRED_SNIPPETS = [
     "packager: rpm",
     "/usr/share/doc/nginx-markdown-for-agents/README.md",
     "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md",
+    "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md",
     "/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md",
     "/usr/share/licenses/nginx-markdown-for-agents/LICENSE",
 ]
@@ -117,7 +117,7 @@ MODULE_NAME_SURFACES = [
     PROJECT_ROOT / "README.md",
     PROJECT_ROOT / "README_zh-CN.md",
     PROJECT_ROOT / "docs" / "COMPATIBILITY.md",
-    PROJECT_ROOT / "docs" / "guides" / "INSTALL.md",
+    PACKAGE_INSTALLATION_DOC,
     RELEASE_PACKAGES_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
 ]
@@ -147,6 +147,7 @@ STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     './packaging/scripts/validate-version.sh "$INPUT_VERSION"',
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "docs/guides/INSTALL.md",
+    "docs/guides/PACKAGE_INSTALLATION.md",
     "docs/COMPATIBILITY.md",
     '--define "nginx_version ${NGINX_VERSION}"',
     "tools/release/gates/check_install_layout.sh dist/*.rpm",
@@ -291,8 +292,7 @@ PACKAGE_DOC_REQUIRED_SNIPPETS = {
     INSTALLATION_DOC: [
         "## 4.2 Linux Package Artifacts",
         "**Tier: Secondary** (release gate)",
-        "The project plans APT/YUM repository publishing",
-        CANONICAL_PACKAGE_NAME,
+        "Package Installation Guide](PACKAGE_INSTALLATION.md)",
         CANONICAL_MODULE_SO,
     ],
     PACKAGE_INSTALLATION_DOC: [
@@ -411,22 +411,6 @@ def _split_deb_epoch(version: str) -> tuple[int, str]:
     return 0, version
 
 
-def _deb_part_key(part: str) -> tuple:
-    """Order one Debian version part segment-wise.
-
-    Alternating non-digit and digit segments; digit runs compare numerically
-    (missing digit segments compare as zero), non-digit prefixes lexically.
-    """
-    segments: list[tuple[int, str, int]] = []
-    for is_digit_group, group_iter in itertools.groupby(part, key=str.isdigit):
-        group = "".join(group_iter)
-        if is_digit_group:
-            segments.append((1, "", int(group)))
-        else:
-            segments.append((0, group, 0))
-    return (0, tuple(segments), 0)
-
-
 def _split_deb_revision(version: str) -> tuple[str, str]:
     """Split an upstream part into (upstream, debian-revision)."""
     if "-" in version:
@@ -435,33 +419,135 @@ def _split_deb_revision(version: str) -> tuple[str, str]:
     return version, ""
 
 
-def _dpkg_version_key(version: str) -> tuple:
-    """Return a sort key that orders Debian versions like dpkg does.
+def _debian_char_order(char: str | None) -> tuple[int, int]:
+    """Return the ordering of one non-digit Debian version character.
 
-    Debian version comparison splits the version into an optional epoch, an
-    upstream part, and a revision (the part after the last hyphen).  The
-    upstream and revision parts compare segment-wise: maximal non-digit
-    prefixes compare lexically, digit runs compare numerically, and the
-    shorter part loses against one that continues with a newer segment.
-    This key only needs to order the version shapes that appear in the
-    nginx.org repository (`X.Y.Z`, `X.Y.Z-R~distro`), which the full dpkg
-    algorithm covers for these inputs.
+    Debian puts ``~`` before every other character, then the end of a part,
+    then ASCII letters, and finally other characters in ASCII order.  The
+    end marker is needed while comparing a non-digit run against a digit run.
     """
-    epoch, upstream = _split_deb_epoch(version)
-    upstream_part, debian_part = _split_deb_revision(upstream)
-    return (epoch, _deb_part_key(upstream_part), _deb_part_key(debian_part))
+    if char == "~":
+        return (0, 0)
+    if char is None:
+        return (1, 0)
+    if ("A" <= char <= "Z") or ("a" <= char <= "z"):
+        return (2, ord(char))
+    return (3, ord(char))
+
+
+def _compare_debian_non_digit_runs(
+    left: str,
+    right: str,
+    left_index: int,
+    right_index: int,
+) -> tuple[int, int, int]:
+    """Compare non-digit runs and return the updated positions."""
+    while True:
+        left_char = _debian_non_digit_at(left, left_index)
+        right_char = _debian_non_digit_at(right, right_index)
+        if left_char is None and right_char is None:
+            return 0, left_index, right_index
+
+        comparison = _compare_debian_non_digit_chars(left_char, right_char)
+        if comparison:
+            return comparison, left_index, right_index
+        if left_char is not None:
+            left_index += 1
+        if right_char is not None:
+            right_index += 1
+
+
+def _debian_non_digit_at(value: str, index: int) -> str | None:
+    """Return a non-digit character at an index, or the run boundary."""
+    if index >= len(value) or value[index].isdigit():
+        return None
+    return value[index]
+
+
+def _compare_debian_non_digit_chars(
+    left_char: str | None,
+    right_char: str | None,
+) -> int:
+    """Compare one pair of non-digit characters."""
+    left_order = _debian_char_order(left_char)
+    right_order = _debian_char_order(right_char)
+    return (left_order > right_order) - (left_order < right_order)
+
+
+def _consume_debian_digits(value: str, index: int) -> int:
+    """Return the position immediately after a digit run."""
+    while index < len(value) and value[index].isdigit():
+        index += 1
+    return index
+
+
+def _compare_debian_digit_runs(
+    left: str,
+    right: str,
+    left_index: int,
+    right_index: int,
+) -> tuple[int, int, int]:
+    """Compare digit runs, ignoring leading zeroes, and return positions."""
+    left_start = left_index
+    right_start = right_index
+    left_index = _consume_debian_digits(left, left_index)
+    right_index = _consume_debian_digits(right, right_index)
+
+    left_digits = left[left_start:left_index].lstrip("0")
+    right_digits = right[right_start:right_index].lstrip("0")
+    if len(left_digits) < len(right_digits):
+        return -1, left_index, right_index
+    if len(left_digits) > len(right_digits):
+        return 1, left_index, right_index
+    if left_digits < right_digits:
+        return -1, left_index, right_index
+    if left_digits > right_digits:
+        return 1, left_index, right_index
+    return 0, left_index, right_index
+
+
+def _compare_debian_part(left: str, right: str) -> int:
+    """Compare an upstream or Debian revision part per Debian policy."""
+    left_index = 0
+    right_index = 0
+
+    while True:
+        comparison, left_index, right_index = _compare_debian_non_digit_runs(
+            left, right, left_index, right_index
+        )
+        if comparison:
+            return comparison
+
+        comparison, left_index, right_index = _compare_debian_digit_runs(
+            left, right, left_index, right_index
+        )
+        if comparison:
+            return comparison
+
+        if left_index == len(left) and right_index == len(right):
+            return 0
+
+
+def _compare_debian_versions(left: str, right: str) -> int:
+    """Compare complete Debian versions, including epoch and revision."""
+    left_epoch, left_rest = _split_deb_epoch(left)
+    right_epoch, right_rest = _split_deb_epoch(right)
+    if left_epoch < right_epoch:
+        return -1
+    if left_epoch > right_epoch:
+        return 1
+
+    left_upstream, left_revision = _split_deb_revision(left_rest)
+    right_upstream, right_revision = _split_deb_revision(right_rest)
+    upstream_order = _compare_debian_part(left_upstream, right_upstream)
+    if upstream_order:
+        return upstream_order
+    return _compare_debian_part(left_revision, right_revision)
 
 
 def _dpkg_version_satisfies(candidate: str, relation: str, target: str) -> bool:
     """Evaluate a Debian dependency relation with dpkg-compatible ordering."""
-    key_c = _dpkg_version_key(candidate)
-    key_t = _dpkg_version_key(target)
-    if key_c > key_t:
-        cmp = 1
-    elif key_c < key_t:
-        cmp = -1
-    else:
-        cmp = 0
+    cmp = _compare_debian_versions(candidate, target)
     return {
         "<=": cmp <= 0,
         ">=": cmp >= 0,
@@ -471,6 +557,63 @@ def _dpkg_version_satisfies(candidate: str, relation: str, target: str) -> bool:
         "<": cmp < 0,
         ">": cmp > 0,
     }[relation]
+
+
+def _validate_nfpm_deb_interval_version(
+    version: str,
+    floor_value: str,
+    ceil_value: str,
+) -> list[str]:
+    """Validate the dependency interval and probes for one matrix version."""
+    if not _NGINX_UPSTREAM_VERSION_RE.match(version):
+        return [f"release-matrix version {version!r} is not an upstream X.Y.Z version"]
+
+    pinned = floor_value.replace("${NGINX_VERSION}", version)
+    ceil = ceil_value.replace("${NGINX_VERSION_CEIL}", _next_patch_version(version))
+    if not _NGINX_UPSTREAM_VERSION_RE.match(pinned):
+        return [
+            f"floor version {floor_value!r} for {version} is not an upstream X.Y.Z version"
+        ]
+
+    expected_ceil = _next_patch_version(pinned)
+    if ceil != expected_ceil:
+        return [
+            f"ceiling {ceil_value!r} for {version} does not equal the pinned "
+            f"version's next patch ({expected_ceil})"
+        ]
+
+    major, minor, patch = (int(part) for part in version.split("."))
+    if patch:
+        previous = f"{major}.{minor}.{patch - 1}"
+    elif minor:
+        previous = f"{major}.{minor - 1}.999"
+    else:
+        previous = f"{max(major - 1, 0)}.999.999"
+    next_minor = f"{major}.{minor + 1}.0"
+    probes = [
+        (version, True, "pinned upstream version satisfies"),
+        (f"{version}-1~bookworm", True, "distro revision satisfies"),
+        (ceil, False, "next patch must not satisfy"),
+        (
+            f"{ceil}-1~bookworm",
+            False,
+            "next patch with distro revision must not satisfy",
+        ),
+        (next_minor, False, "newer minor must not satisfy"),
+        (previous, False, "previous release must not satisfy"),
+    ]
+
+    errors: list[str] = []
+    for candidate, expected, label in probes:
+        in_interval = _dpkg_version_satisfies_interval(candidate, pinned, ceil)
+        if in_interval != expected:
+            errors.append(
+                f"version {candidate} unexpectedly "
+                f"{'satisfies' if in_interval else 'does not satisfy'} the "
+                f"interval [{pinned}, {ceil}) for {version} "
+                f"(expected {expected}: {label})"
+            )
+    return errors
 
 
 def _parse_nfpm_deb_depends(content: str) -> list[str]:
@@ -504,21 +647,22 @@ def _parse_nginx_dep_constraints(depends: list[str]) -> dict[str, str]:
 
 def validate_nfpm_deb_dependency_contract(
     content: str,
+    nginx_versions: Iterable[str] | None = None,
 ) -> tuple[bool, list[str]]:
     """Prove the DEB nginx dependency interval preserves the exact-ABI
     invariant.
 
-    The nFPM DEB overrides must express the pinned upstream version as
+    The nFPM DEB overrides must express each release-matrix version as
     `nginx (>= X.Y.Z)` plus `nginx (<< X.Y.Z+1)`.  The check resolves the
-    `${NGINX_VERSION}`/`${NGINX_VERSION_CEIL}` placeholders by simulating the
-    release substitution (CEIL = next patch), then probes the interval the way
-    a package solver would:
+    `${NGINX_VERSION}`/`${NGINX_VERSION_CEIL}` placeholders for every
+    release-blocking version, then probes each interval the way a package
+    solver would:
 
     * `X.Y.Z` satisfies the interval (the pinned install works);
     * `X.Y.Z-1~distro` satisfies the interval (distro revisions work);
     * `X.Y.Z+1` does NOT satisfy the interval (a plain NGINX patch upgrade
       must force a matching module upgrade);
-    * `X.Y.(Z-1)` does not satisfy the interval (downgrades refuse).
+    * the preceding release does not satisfy the interval (downgrades refuse).
     """
     errors: list[str] = []
     depends = _parse_nfpm_deb_depends(content)
@@ -540,36 +684,16 @@ def validate_nfpm_deb_dependency_contract(
             ],
         )
 
-    pinned = floor_value.replace("${NGINX_VERSION}", "1.28.3")
-    ceil = ceil_value.replace("${NGINX_VERSION_CEIL}", "1.28.4")
-    if not _NGINX_UPSTREAM_VERSION_RE.match(pinned):
-        errors.append(f"floor version {floor_value!r} is not an upstream X.Y.Z version")
-        return False, errors
-    expected_ceil = _next_patch_version(pinned)
-    if ceil != expected_ceil:
-        errors.append(
-            f"ceiling {ceil_value!r} does not equal the pinned version's next "
-            f"patch ({expected_ceil})"
-        )
-        return False, errors
+    versions = sorted(
+        set(_extract_matrix_versions() if nginx_versions is None else nginx_versions)
+    )
+    if not versions:
+        return False, ["no release-blocking NGINX versions found in release matrix"]
 
-    probes = [
-        ("1.28.3", True, "pinned upstream version satisfies"),
-        ("1.28.3-1~bookworm", True, "distro revision satisfies"),
-        ("1.28.4", False, "next patch must not satisfy"),
-        ("1.28.4-1~bookworm", False, "next patch with distro revision must not satisfy"),
-        ("1.30.0", False, "newer major must not satisfy"),
-        ("1.28.2", False, "previous patch must not satisfy"),
-        ("1.26.3", False, "older release must not satisfy"),
-    ]
-    for candidate, expected, label in probes:
-        in_interval = _dpkg_version_satisfies_interval(candidate, pinned, ceil)
-        if in_interval != expected:
-            errors.append(
-                f"version {candidate} unexpectedly "
-                f"{'satisfies' if in_interval else 'does not satisfy'} the "
-                f"interval [{pinned}, {ceil}) (expected {expected}: {label})"
-            )
+    for version in versions:
+        errors.extend(
+            _validate_nfpm_deb_interval_version(version, floor_value, ceil_value)
+        )
     return (not errors), errors
 
 
@@ -1094,7 +1218,12 @@ def _validate_release_binary_signing_security(result: ValidationResult) -> None:
     preflight_pos = job.find("name: Preflight - validate GPG secrets")
     checkout_pos = job.find("name: Checkout repository")
     sign_pos = job.find("name: Sign SHA256SUMS")
-    if preflight_pos < checkout_pos < sign_pos:
+    if (
+        preflight_pos >= 0
+        and checkout_pos >= 0
+        and sign_pos >= 0
+        and preflight_pos < checkout_pos < sign_pos
+    ):
         result.pass_(
             "release-signing-security:secret-order",
             "GPG preflight and trusted checkout precede checksum signing",

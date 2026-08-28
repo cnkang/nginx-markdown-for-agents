@@ -272,13 +272,17 @@ nginx -t -c /tmp/markdown-negative.conf
 test_markdown_http() {
     log_info "Test: HTTP Accept: text/markdown conversion"
 
-    local http_port="18089"
+    local http_port
     local response
     local response_rc=0
+    local run_rc=0
+    local port_output
+    local port_rc=0
 
     RUNTIME_CONTAINER="nginx-markdown-k8s-test-${RANDOM}"
+    # Let Docker choose an unused host port so parallel jobs do not collide.
     docker run -d --name "$RUNTIME_CONTAINER" \
-        -p "127.0.0.1:${http_port}:8080" \
+        -p "127.0.0.1::8080" \
         --entrypoint sh "$IMAGE_TAG" -c '
 mkdir -p /tmp/markdown-html
 printf "%s\n" "<html><body><h1>Kubernetes module test</h1><p>active module</p></body></html>" > /tmp/markdown-html/index.html
@@ -300,7 +304,25 @@ http {
 }
 EOF
 nginx -c /tmp/markdown-http.conf -g "daemon off;"
-' >/dev/null 2>&1
+' >/dev/null 2>&1 || run_rc=$?
+
+    if [[ "$run_rc" -ne 0 ]]; then
+        log_fail "HTTP test container failed to start (exit code $run_rc)"
+        return 1
+    fi
+
+    port_output="$(docker port "$RUNTIME_CONTAINER" 8080/tcp 2>/dev/null)" \
+        || port_rc=$?
+    if [[ "$port_rc" -ne 0 ]]; then
+        log_fail "HTTP test container port mapping could not be read"
+        return 1
+    fi
+    http_port="$(printf '%s\n' "$port_output" \
+        | awk -F: 'NR == 1 { print $NF }')"
+    if ! [[ "$http_port" =~ ^[0-9]+$ ]]; then
+        log_fail "HTTP test container did not publish a valid host port"
+        return 1
+    fi
 
     for _ in $(seq 1 20); do
         if curl -fsS -o /dev/null "http://127.0.0.1:${http_port}/"; then
@@ -308,6 +330,11 @@ nginx -c /tmp/markdown-http.conf -g "daemon off;"
         fi
         sleep 1
     done
+
+    if ! curl -fsS -o /dev/null "http://127.0.0.1:${http_port}/"; then
+        log_fail "HTTP test container did not become ready"
+        return 1
+    fi
 
     response="$(curl -sS -D - -H 'Accept: text/markdown' \
         "http://127.0.0.1:${http_port}/" 2>&1)" || response_rc=$?

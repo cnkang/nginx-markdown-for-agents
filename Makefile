@@ -130,6 +130,7 @@ install:
 	install -m 0644 packaging/nfpm/modules-available/mod-markdown.conf "$(DESTDIR)$(NGINX_MODULES_AVAILABLE_DIR)/mod-markdown.conf"
 	install -m 0644 README.md "$(DESTDIR)$(DOC_INSTALL_DIR)/README.md"
 	install -m 0644 docs/guides/INSTALL.md "$(DESTDIR)$(DOC_INSTALL_DIR)/INSTALL.md"
+	install -m 0644 docs/guides/PACKAGE_INSTALLATION.md "$(DESTDIR)$(DOC_INSTALL_DIR)/PACKAGE_INSTALLATION.md"
 	install -m 0644 docs/COMPATIBILITY.md "$(DESTDIR)$(DOC_INSTALL_DIR)/COMPATIBILITY.md"
 	install -m 0644 LICENSE "$(DESTDIR)$(LICENSE_INSTALL_DIR)/LICENSE"
 
@@ -196,17 +197,23 @@ test-nginx-unit:
 test-c-unit-gcc:
 	@command -v docker >/dev/null 2>&1 || { echo "FAIL: docker is required for test-c-unit-gcc" >&2; exit 1; }
 	@echo "=== C unit suite under Ubuntu GCC (Docker) ==="
-	@docker run --rm -e HOST_UID="$(shell id -u)" -e HOST_GID="$(shell id -g)" \
+	@docker_rc=0; \
+	docker run --rm -e HOST_UID="$(shell id -u)" -e HOST_GID="$(shell id -g)" \
 	    -v "$(CURDIR)":/repo -w /repo/components/nginx-module/tests \
-	    ubuntu:24.04@sha256:019e8eb29a85e74d64925745884f2ec79aa27e3feab36353d24656f4d6b89467 bash -c 'set -e; trap "chown -R $$HOST_UID:$$HOST_GID /repo/components/nginx-module/tests/build 2>/dev/null || true" EXIT; apt-get update -qq && apt-get install -y -qq gcc make libz-dev libbrotli-dev python3 valgrind && make clean && make unit'
-	@echo "=== Cleaning container artifacts from local build dir ==="
-	@if $(MAKE) -C $(NGINX_TEST_DIR) clean; then \
-		echo "Clean OK"; \
-	else \
-		echo "WARNING: container artifact cleanup failed; root-owned Linux ELF binaries may remain in build/ (container artifact cleanup)" >&2; \
-		exit 1; \
-	fi
-	@echo "OK: C unit suite passed under Ubuntu GCC"
+	    ubuntu:24.04@sha256:019e8eb29a85e74d64925745884f2ec79aa27e3feab36353d24656f4d6b89467 bash -c 'set -e; trap "chown -R $$HOST_UID:$$HOST_GID /repo/components/nginx-module/tests/build 2>/dev/null || true" EXIT; apt-get update -qq && apt-get install -y -qq gcc make libz-dev libbrotli-dev python3 valgrind && make clean && make unit' || docker_rc=$$?; \
+	echo "=== Cleaning container artifacts from local build dir ==="; \
+	cleanup_rc=0; \
+	$(MAKE) -C $(NGINX_TEST_DIR) clean || cleanup_rc=$$?; \
+	if [ "$$docker_rc" -ne 0 ]; then \
+		echo "FAIL: C unit suite under Ubuntu GCC (exit $$docker_rc)" >&2; \
+		exit "$$docker_rc"; \
+	fi; \
+	if [ "$$cleanup_rc" -ne 0 ]; then \
+		echo "FAIL: container artifact cleanup (exit $$cleanup_rc)" >&2; \
+		exit "$$cleanup_rc"; \
+	fi; \
+	echo "Clean OK"; \
+	echo "OK: C unit suite passed under Ubuntu GCC"
 
 test-nginx-unit-streaming:
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming
@@ -933,29 +940,34 @@ release-gates-check-080:
 	$(MAKE) test-e2e-rust
 	@echo "  [7/17] coverage-c (C coverage gate — Req 4)"
 	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (blocking)"
-	@if command -v lcov >/dev/null 2>&1 && [ -d "$(NGINX_TEST_DIR)" ]; then \
+	@set -e; \
+	coverage_skipped=0; \
+	if command -v lcov >/dev/null 2>&1 && [ -d "$(NGINX_TEST_DIR)" ]; then \
 	$(MAKE) coverage-c; \
 	else \
 	if [ "$${RELEASE_GATE_ALLOW_SKIP_COVERAGE:-0}" = "1" ]; then \
 	echo "  ==> SKIP (non-release): coverage-c (lcov or NGINX test dir not available; RELEASE_GATE_ALLOW_SKIP_COVERAGE=1)"; \
+	coverage_skipped=1; \
 	else \
 	echo "FAIL: coverage-c requires lcov and NGINX test dir; set RELEASE_GATE_ALLOW_SKIP_COVERAGE=1 to skip for non-release validation" >&2; exit 1; \
 	fi; \
-	fi
-	@echo "  [8/17] coverage-rust (Rust coverage gate — Req 4)"
-	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (blocking)"
-	@if cargo llvm-cov --version >/dev/null 2>&1; then \
+	fi; \
+	echo "  [8/17] coverage-rust (Rust coverage gate — Req 4)"; \
+	echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (blocking)"; \
+	if cargo llvm-cov --version >/dev/null 2>&1; then \
 	$(MAKE) coverage-rust; \
 	else \
 	if [ "$${RELEASE_GATE_ALLOW_SKIP_COVERAGE:-0}" = "1" ]; then \
 	echo "  ==> SKIP (non-release): coverage-rust (cargo-llvm-cov not available; RELEASE_GATE_ALLOW_SKIP_COVERAGE=1)"; \
+	coverage_skipped=1; \
 	else \
 	echo "FAIL: coverage-rust requires cargo-llvm-cov; set RELEASE_GATE_ALLOW_SKIP_COVERAGE=1 to skip for non-release validation" >&2; exit 1; \
 	fi; \
-	fi
-	@echo "  [coverage-policy] Thresholds: C line=$(COVERAGE_C_MIN_LINE)% func=$(COVERAGE_C_MIN_FUNC)% | Rust line=$(COVERAGE_RUST_MIN_LINE)% func=$(COVERAGE_RUST_MIN_FUNC)%"
-	@echo "  [critical-path-coverage] 90% target for auth, error handling, FFI boundary, conditional requests"
-	@echo "  [critical-path-coverage] 90% critical-path coverage is enforced by coverage_gate.py."
+	fi; \
+	echo "  [coverage-policy] Thresholds: C line=$(COVERAGE_C_MIN_LINE)% func=$(COVERAGE_C_MIN_FUNC)% | Rust line=$(COVERAGE_RUST_MIN_LINE)% func=$(COVERAGE_RUST_MIN_FUNC)%"; \
+	echo "  [critical-path-coverage] 90% target for auth, error handling, FFI boundary, conditional requests"; \
+	if [ "$$coverage_skipped" -eq 0 ]; then \
+	echo "  [critical-path-coverage] 90% critical-path coverage is enforced by coverage_gate.py."; \
 	python3 tools/ci/coverage_gate.py \
 	--c-lcov $(COVERAGE_DIR)/c-coverage.lcov \
 	--rust-lcov $(COVERAGE_DIR)/rust-coverage.lcov \
@@ -964,7 +976,10 @@ release-gates-check-080:
 	--c-min-func $(COVERAGE_C_MIN_FUNC) \
 	--rust-min-line $(COVERAGE_RUST_MIN_LINE) \
 	--rust-min-func $(COVERAGE_RUST_MIN_FUNC) \
-	--critical-path-min $(COVERAGE_CRITICAL_MIN)
+	--critical-path-min $(COVERAGE_CRITICAL_MIN); \
+	else \
+	echo "  ==> SKIP (non-release): aggregate coverage gate (component coverage was skipped; RELEASE_GATE_ALLOW_SKIP_COVERAGE=1)"; \
+	fi
 	@echo "  [9/17] docs-check (documentation consistency — Req 3)"
 	$(MAKE) docs-check
 	@echo "  [10/17] matrix validate_workflow_matrix_consumers (Req 5)"

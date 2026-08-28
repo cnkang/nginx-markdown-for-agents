@@ -103,6 +103,17 @@ def test_load_matrix_empty(tmp_path):
     assert load_matrix(str(p)) == []
 
 
+def test_load_matrix_ignores_malformed_legacy_rows(tmp_path):
+    entries = [
+        None,
+        {"support_tier": "full", "nginx": "", "os_type": "glibc"},
+        SAMPLE_ENTRY,
+    ]
+    p = _write_matrix(tmp_path, entries)
+
+    assert load_matrix(str(p)) == [SAMPLE_ENTRY]
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

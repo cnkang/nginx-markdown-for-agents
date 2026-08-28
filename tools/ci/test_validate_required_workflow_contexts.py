@@ -54,13 +54,29 @@ def test_unconditionally_skipped_required_context_fails() -> None:
     assert any("unconditionally skipped" in item for item in violations)
 
 
+def test_braced_always_false_required_context_fails() -> None:
+    workflow = deepcopy(BASE_WORKFLOW)
+    workflow["jobs"]["runtime"]["if"] = "${{ always() && false }}"
+    violations = validate_workflow_contract(workflow, CONTRACT)
+    assert any("unconditionally skipped" in item for item in violations)
+
+
+def test_job_id_is_used_when_job_name_is_omitted() -> None:
+    workflow = deepcopy(BASE_WORKFLOW)
+    workflow["jobs"]["runtime"].pop("name")
+    contract = {"required_contexts": ["runtime"]}
+    assert validate_workflow_contract(workflow, contract) == []
+
+
 @pytest.mark.parametrize("loader", (_load_yaml, _load_json))
 def test_loaders_contain_paths_within_declared_root(loader, tmp_path) -> None:
     """A realpath-resolved location outside the declared root is refused."""
+    allowed_root = tmp_path / "allowed"
+    allowed_root.mkdir()
     outside = tmp_path / "outside.yaml"
     outside.write_text("jobs: {}\n", encoding="utf-8")
     with pytest.raises(ValueError, match="outside the allowed root"):
-        loader(outside)
+        loader(outside, root=allowed_root)
 
 
 @pytest.mark.parametrize("loader", (_load_yaml, _load_json))
@@ -83,3 +99,14 @@ def test_loaders_reject_parent_paths(loader) -> None:
     """CLI input paths must not contain traversal components."""
     with pytest.raises(ValueError, match="Refusing path"):
         loader(Path("../outside-input"))
+
+
+@pytest.mark.parametrize("loader", (_load_yaml, _load_json))
+def test_loaders_reject_symlink_escape(loader, tmp_path) -> None:
+    """A link beneath the root must not redirect a read outside it."""
+    outside = tmp_path.parent / "outside-input"
+    outside.write_text("{}\n", encoding="utf-8")
+    link = tmp_path / "linked-input"
+    link.symlink_to(outside)
+    with pytest.raises(ValueError, match="outside the allowed root"):
+        loader(link, root=tmp_path)

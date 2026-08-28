@@ -83,16 +83,19 @@ usage() {
 log_info() {
     local msg="$1"
     printf '[INFO]  %s\n' "$msg" >&2
+    return 0
 }
 
 log_warn() {
     local msg="$1"
     printf '[WARN]  %s\n' "$msg" >&2
+    return 0
 }
 
 log_error() {
     local msg="$1"
     printf '[ERROR] %s\n' "$msg" >&2
+    return 0
 }
 
 log_violation() {
@@ -100,6 +103,7 @@ log_violation() {
     local line="$2"
     local desc="$3"
     printf '[VIOLATION] %s:%s: %s\n' "$file" "$line" "$desc" >&2
+    return 0
 }
 
 # ---------------------------------------------------------------------------
