@@ -62,10 +62,7 @@ impl MarkdownConverter {
     /// YAML escaping can expand a value (quotes, control characters), so the
     /// estimate charges the worst case: every character escaped to a full
     /// `\\uXXXX` form plus the double quotes, on top of the key framing.
-    fn front_matter_rendered_len(
-        &self,
-        metadata: &crate::metadata::PageMetadata,
-    ) -> usize {
+    fn front_matter_rendered_len(&self, metadata: &crate::metadata::PageMetadata) -> usize {
         let mut bound = 8usize; // "---\n" + "---\n\n"
         let field = |value: &Option<String>| -> usize {
             match value {

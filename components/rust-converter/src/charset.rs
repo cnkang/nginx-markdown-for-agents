@@ -679,7 +679,10 @@ mod tests {
 
     #[test]
     fn test_extract_charset_from_content_type_ignores_empty_charset_value() {
-        assert_eq!(extract_charset_from_content_type("text/html; charset="), None);
+        assert_eq!(
+            extract_charset_from_content_type("text/html; charset="),
+            None
+        );
         assert_eq!(
             extract_charset_from_content_type("text/html; charset=\"\""),
             None
@@ -697,9 +700,7 @@ mod tests {
     #[test]
     fn test_extract_charset_from_content_type_duplicate_param_first_wins() {
         assert_eq!(
-            extract_charset_from_content_type(
-                "text/html; charset=ISO-8859-1; charset=UTF-8"
-            ),
+            extract_charset_from_content_type("text/html; charset=ISO-8859-1; charset=UTF-8"),
             Some("ISO-8859-1".to_string())
         );
     }
@@ -707,9 +708,7 @@ mod tests {
     #[test]
     fn test_extract_charset_from_content_type_negative_param_then_real_charset() {
         assert_eq!(
-            extract_charset_from_content_type(
-                "text/html; x-charset=windows-1252; charset=utf-8"
-            ),
+            extract_charset_from_content_type("text/html; x-charset=windows-1252; charset=utf-8"),
             Some("utf-8".to_string())
         );
     }
