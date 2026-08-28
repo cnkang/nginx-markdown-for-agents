@@ -120,6 +120,35 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
 }
 """
 
+BRACELESS_ELSE_ACCESS_HANDLER = """\
+ngx_int_t
+ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
+{
+    if (enabled)
+        return NGX_OK;
+    else
+        ngx_http_markdown_diagnostics_check_access(r);
+    if (!(r->method & NGX_HTTP_GET)) {
+        return NGX_HTTP_NOT_ALLOWED;
+    }
+    return NGX_OK;
+}
+"""
+
+BRACELESS_DO_ACCESS_HANDLER = """\
+ngx_int_t
+ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
+{
+    do
+        ngx_http_markdown_diagnostics_check_access(r);
+    while (enabled);
+    if (!(r->method & NGX_HTTP_GET)) {
+        return NGX_HTTP_NOT_ALLOWED;
+    }
+    return NGX_OK;
+}
+"""
+
 NO_REJECT_HANDLER = """\
 ngx_int_t
 ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
@@ -236,6 +265,16 @@ def test_nested_parenthesized_access_before_rejection_is_violation(
     tmp_path,
 ) -> None:
     violations, _ = _audit_text(NESTED_PARENTHESIZED_ACCESS_HANDLER, tmp_path)
+    assert any("unconditionally" in v for v in violations)
+
+
+def test_braceless_else_access_before_rejection_is_violation(tmp_path) -> None:
+    violations, _ = _audit_text(BRACELESS_ELSE_ACCESS_HANDLER, tmp_path)
+    assert any("unconditionally" in v for v in violations)
+
+
+def test_braceless_do_access_before_rejection_is_violation(tmp_path) -> None:
+    violations, _ = _audit_text(BRACELESS_DO_ACCESS_HANDLER, tmp_path)
     assert any("unconditionally" in v for v in violations)
 
 

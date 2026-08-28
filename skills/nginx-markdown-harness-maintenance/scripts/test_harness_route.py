@@ -272,6 +272,31 @@ def test_parse_status_output_nul_preserves_special_path_text() -> None:
     assert _parse_status_output(output) == ["fixture->name.md"]
 
 
+def test_parse_status_output_nul_consumes_deleted_rename_records() -> None:
+    """Do not parse a rename/copy old path as a new status record after DR/DC."""
+    output = (
+        b"DR renamed-in-worktree.md\0old-renamed.md\0"
+        b"DC copied-in-worktree.md\0old-copied.md\0"
+        b" M keep.md\0"
+    )
+    assert _parse_status_output(output) == ["keep.md"]
+
+
+def test_git_status_error_decodes_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Status failures should display text, not Python's bytes repr."""
+    def fail_check_output(*_args, **_kwargs):
+        raise _hr_subprocess.CalledProcessError(
+            128, ["git", "status"], output=b"status failed"
+        )
+
+    monkeypatch.setattr(_hr_subprocess, "check_output", fail_check_output)
+    with pytest.raises(SystemExit) as exc_info:
+        _git_status_files()
+    message = str(exc_info.value)
+    assert "status failed" in message
+    assert "b'" not in message
+
+
 def test_git_diff_files_uses_delete_filter(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _git_diff_files passes --diff-filter=d to exclude deleted files."""
     captured: dict[str, list[str]] = {}

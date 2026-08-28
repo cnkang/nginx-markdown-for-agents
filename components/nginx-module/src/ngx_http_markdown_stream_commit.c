@@ -10,9 +10,10 @@
  *     Before Phase 1 begins, the original state of every header that
  *     Phase 1 may touch is snapshotted.  If any Phase 1 step fails,
  *     the snapshot is used to roll back all prior Phase 1 mutations
- *     so headers_out is restored to its pre-commit state.  This
- *     guarantees that the caller's fallback / fail-open path sees
- *     the original upstream headers, not a partially-mutated set.
+ *     so headers_out is restored to its pre-commit state.  If the
+ *     live list cannot be proven to contain the snapshotted entries,
+ *     rollback reports a terminal error instead of allowing the
+ *     caller's fallback / fail-open path to see an uncertain state.
  *   Phase 2 (infallible): Content-Type, Content-Length, Content-Encoding.
  *     These are pointer/integer writes that cannot fail.
  *   Only after both phases complete are headers_committed and state set.
@@ -21,6 +22,8 @@
  *   The snapshot/rollback covers Vary, ETag, and Cache-Control.
  *   Modified entries have value/hash restored; newly-pushed entries
  *   are invalidated via hash=0 (Rule 40); typed ETag pointer restored.
+ *   A missing original entry or malformed live list returns the
+ *   header-snapshot restore sentinel so callers fail closed.
  *   No use-after-free/double-free/dangling pointer under pool model.
  *
  * Header commit safety invariant:
@@ -82,11 +85,39 @@ typedef struct {
 /*  Snapshot helpers                                                   */
 /* ------------------------------------------------------------------ */
 
+static ngx_int_t
+ngx_http_markdown_stream_commit_list_part_valid(
+    const ngx_list_t *list, const ngx_list_part_t *part)
+{
+    if (list == NULL || part == NULL
+        || list->size < sizeof(ngx_table_elt_t)
+        || part->nelts > list->nalloc
+        || (part->nelts != 0 && part->elts == NULL))
+    {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
 static ngx_flag_t
 ngx_http_markdown_stream_commit_header_matches(
     const ngx_table_elt_t *entry, const u_char *name, size_t name_len)
 {
+    if (entry == NULL || name == NULL)
+    {
+        return 0;
+    }
+
     if (entry->key.len != name_len) {
+        return 0;
+    }
+
+    if (name_len == 0) {
+        return 1;
+    }
+
+    if (entry->key.data == NULL) {
         return 0;
     }
 
@@ -135,6 +166,12 @@ ngx_http_markdown_stream_commit_snapshot_header(
     part = &r->headers_out.headers.part;
 
     while (part != NULL) {
+        if (ngx_http_markdown_stream_commit_list_part_valid(
+                &r->headers_out.headers, part) != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+
         elts = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             snap->orig_nelts++;
@@ -161,42 +198,100 @@ ngx_http_markdown_stream_commit_snapshot_header(
     return NGX_OK;
 }
 
-/*
- * Roll back a single header: restore original value/hash on snapshotted
- * entries, then invalidate any entries that were pushed after the snapshot
- * (i.e. entries with index >= orig_nelts that match the header name).
- * orig_nelts is the total linear entry count across all list parts; rollback
- * uses the same linear traversal index.
- */
-static void
-ngx_http_markdown_stream_commit_rollback_header(
+
+static ngx_int_t
+ngx_http_markdown_stream_commit_validate_snapshot_entries(
+    const ngx_http_markdown_hdr_snap_t *snap)
+{
+    for (ngx_uint_t i = 0; i < snap->count; i++) {
+        if (snap->entries[i].entry == NULL) {
+            return NGX_ERROR;
+        }
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_stream_commit_snapshot_entry_matches(
+    const ngx_http_markdown_hdr_snap_t *snap, const ngx_table_elt_t *entry)
+{
+    for (ngx_uint_t i = 0; i < snap->count; i++) {
+        if (snap->entries[i].entry == entry) {
+            return NGX_OK;
+        }
+    }
+
+    return NGX_DECLINED;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_stream_commit_validate_live_snapshot(
+    ngx_http_request_t *r, const ngx_http_markdown_hdr_snap_t *snap)
+{
+    ngx_uint_t  idx;
+    ngx_uint_t  matched;
+
+    idx = 0;
+    matched = 0;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        if (ngx_http_markdown_stream_commit_list_part_valid(
+                &r->headers_out.headers, part) != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+
+        const ngx_table_elt_t  *elts = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (idx < snap->orig_nelts
+                && ngx_http_markdown_stream_commit_snapshot_entry_matches(
+                       snap, &elts[i]) == NGX_OK)
+            {
+                matched++;
+            }
+            idx++;
+        }
+    }
+
+    if (idx < snap->orig_nelts || matched != snap->count) {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_stream_commit_invalidate_new_header_entries(
     ngx_http_request_t *r,
     const u_char *name, size_t name_len,
-    ngx_http_markdown_hdr_snap_t *snap)
+    const ngx_http_markdown_hdr_snap_t *snap)
 {
     ngx_list_part_t  *part;
     ngx_table_elt_t  *elts;
     ngx_uint_t        idx;
 
-    /* Restore snapshotted entries */
-    for (ngx_uint_t i = 0; i < snap->count; i++) {
-        if (snap->entries[i].entry != NULL) {
-            snap->entries[i].entry->value = snap->entries[i].orig_value;
-            snap->entries[i].entry->hash = snap->entries[i].orig_hash;
-        }
-    }
-
-    /* Invalidate newly-pushed entries (hash=0 per Rule 40) */
     part = &r->headers_out.headers.part;
     idx = 0;
 
     while (part != NULL) {
+        if (ngx_http_markdown_stream_commit_list_part_valid(
+                &r->headers_out.headers, part) != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+
         elts = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (idx >= snap->orig_nelts
                 && elts[i].hash != 0
                 && ngx_http_markdown_stream_commit_header_matches(
-                    &elts[i], name, name_len))
+                       &elts[i], name, name_len))
             {
                 elts[i].hash = 0;
             }
@@ -204,6 +299,54 @@ ngx_http_markdown_stream_commit_rollback_header(
         }
         part = part->next;
     }
+
+    return NGX_OK;
+}
+
+
+/*
+ * Roll back a single header: first prove that every snapshotted entry is
+ * still reachable in the original portion of the live list, then restore
+ * original value/hash and invalidate entries pushed after the snapshot.
+ * orig_nelts is the total linear entry count across all list parts; rollback
+ * uses the same linear traversal index.  Returning an error is essential:
+ * callers must not use fail-open when the response-header representation is
+ * no longer known to be restorable.
+ */
+static ngx_int_t
+ngx_http_markdown_stream_commit_rollback_header(
+    ngx_http_request_t *r,
+    const u_char *name, size_t name_len,
+    ngx_http_markdown_hdr_snap_t *snap)
+{
+    if (r == NULL || snap == NULL
+        || snap->count > NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX)
+    {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_stream_commit_validate_snapshot_entries(snap)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    /* Validate list shape and prove every original pointer is still live. */
+    if (ngx_http_markdown_stream_commit_validate_live_snapshot(r, snap)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    /* Restore snapshotted entries */
+    for (ngx_uint_t i = 0; i < snap->count; i++) {
+        snap->entries[i].entry->value = snap->entries[i].orig_value;
+        snap->entries[i].entry->hash = snap->entries[i].orig_hash;
+    }
+
+    /* Invalidate newly-pushed entries (hash=0 per Rule 40) */
+    return ngx_http_markdown_stream_commit_invalidate_new_header_entries(
+        r, name, name_len, snap);
 }
 
 /*
@@ -241,21 +384,55 @@ ngx_http_markdown_stream_commit_take_snapshot(
 /*
  * Roll back all Phase 1 mutations using the snapshot.
  */
-static void
+static ngx_int_t
 ngx_http_markdown_stream_commit_rollback(
     ngx_http_request_t *r, ngx_http_markdown_commit_snap_t *snap)
 {
-    ngx_http_markdown_stream_commit_rollback_header(
-        r, (const u_char *) "Vary", 4, &snap->vary);
+    ngx_int_t  rc;
 
-    ngx_http_markdown_stream_commit_rollback_header(
-        r, (const u_char *) "ETag", 4, &snap->etag);
+    rc = NGX_OK;
+    if (ngx_http_markdown_stream_commit_rollback_header(
+            r, (const u_char *) "Vary", 4, &snap->vary) != NGX_OK)
+    {
+        rc = NGX_ERROR;
+    }
 
-    ngx_http_markdown_stream_commit_rollback_header(
-        r, (const u_char *) "Cache-Control", 13, &snap->cache_control);
+    if (ngx_http_markdown_stream_commit_rollback_header(
+            r, (const u_char *) "ETag", 4, &snap->etag) != NGX_OK)
+    {
+        rc = NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_stream_commit_rollback_header(
+            r, (const u_char *) "Cache-Control", 13,
+            &snap->cache_control) != NGX_OK)
+    {
+        rc = NGX_ERROR;
+    }
 
     /* Restore typed ETag pointer */
     r->headers_out.etag = snap->orig_etag_ptr;
+
+    return rc;
+}
+
+
+/*
+ * Complete a fallible Phase 1 failure.  A normal rollback permits the
+ * configured fallback path; an unverifiable rollback must be terminal.
+ */
+static ngx_int_t
+ngx_http_markdown_stream_commit_phase1_failure(
+    ngx_http_request_t *r, ngx_http_markdown_commit_snap_t *snap)
+{
+    if (ngx_http_markdown_stream_commit_rollback(r, snap) != NGX_OK) {
+        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                      "markdown: stream commit: header snapshot rollback "
+                      "failed; fail-open disabled, category=system");
+        return NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
+    }
+
+    return NGX_ERROR;
 }
 
 
@@ -294,6 +471,8 @@ ngx_http_markdown_stream_commit_remove_representation_metadata(
  * Phase 1 (fallible): Vary, ETag, auth Cache-Control.
  *   If any fails, no mutations are visible, NGX_ERROR returned.
  *   The caller can safely fall back to upstream HTML passthrough.
+ *   If rollback cannot be verified, the restore-failure sentinel is returned
+ *   and the caller must fail closed.
  *
  * Phase 2 (infallible): Content-Type, Content-Length, Content-Encoding.
  *   These are pointer/integer assignments that cannot fail.
@@ -305,7 +484,10 @@ ngx_http_markdown_stream_commit_remove_representation_metadata(
  *
  * Returns:
  *   NGX_OK    - All mutations applied, committed flag set
- *   NGX_ERROR - Precondition failure or fallible-mutation error
+ *   NGX_ERROR - Precondition failure or fallible-mutation error with a
+ *               verified rollback
+ *   NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED - rollback could not
+ *               prove that the original headers were restored
  */
 ngx_int_t
 ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
@@ -361,8 +543,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: stream commit: "
                       "failed to set Vary header");
-        ngx_http_markdown_stream_commit_rollback(r, &snap);
-        return NGX_ERROR;
+        return ngx_http_markdown_stream_commit_phase1_failure(r, &snap);
     }
 
     rc = ngx_http_markdown_stream_commit_remove_etag(r);
@@ -370,8 +551,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: stream commit: "
                       "failed to remove ETag");
-        ngx_http_markdown_stream_commit_rollback(r, &snap);
-        return NGX_ERROR;
+        return ngx_http_markdown_stream_commit_phase1_failure(r, &snap);
     }
 
     rc = ngx_http_markdown_auth_cache_control_required(
@@ -383,8 +563,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: stream commit: "
                       "failed to apply auth Cache-Control");
-        ngx_http_markdown_stream_commit_rollback(r, &snap);
-        return NGX_ERROR;
+        return ngx_http_markdown_stream_commit_phase1_failure(r, &snap);
     }
 
     /*

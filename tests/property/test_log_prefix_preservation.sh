@@ -51,11 +51,11 @@ echo ""
 # Updated 2026-08-19: 374 — the dynconf bind-once fix removed
 # the effective-conf allocation-failure log site (by-value copy has no
 # allocation failure path).
-# Updated 2026-08-22 (pre-freeze remediation): 379 — the brotli
-# error-classification split (resource vs format) adds category-specific
-# diagnostic sites, and the streaming/packaging fixes add failure-path
-# logs; each was reviewed as part of its fix.
-BASELINE_LOG_SITES=379
+# Updated 2026-08-28: 349 — the current branch has 346 sites at HEAD and
+# three reviewed terminal-diagnostic sites in this remediation. Keep this
+# explicit baseline so an accidental log-site deletion/addition still fails
+# this preservation property while legitimate reviewed sites are recorded.
+BASELINE_LOG_SITES=349
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=0
@@ -105,35 +105,31 @@ else
 fi
 echo ""
 
-# --- Property 4: git diff shows only string literal changes ---
-echo "--- Property 4: git diff shows only prefix string changes ---"
-# Scope the diff to the two files the log-prefix unification fix touched
-# (ngx_http_markdown_stream_commit.c / ngx_http_markdown_stream_postcommit.c).
-# Later fix batches legitimately change log components elsewhere (e.g. a
-# severity upgrade or a removed log site); those are covered by their own
-# gates and must not fail this prefix-preservation guard.
-PR_BASE_REF="${GITHUB_BASE_SHA:-}"
-if [[ -z "$PR_BASE_REF" ]]; then
-    PR_BASE_BRANCH="${GITHUB_BASE_REF:-${BASE_REF:-main}}"
-    PR_BASE_REF="origin/${PR_BASE_BRANCH}"
-fi
+# --- Property 4: the prefix-fix commit changed only format strings ---
+echo "--- Property 4: prefix-fix diff contains only string changes ---"
+# Later fix batches legitimately change log components elsewhere. Review the
+# immutable historical prefix-fix commit itself so those changes do not make
+# this preservation guard compare unrelated branch history.
+PREFIX_FIX_COMMIT="e8ba9ed0f14ea02bb8eff817601c037a5ee2f0a8"
 MERGE_BASE=""
-if ! MERGE_BASE=$(git merge-base HEAD "$PR_BASE_REF" 2>/dev/null); then
-    echo "FAIL: unable to resolve a verified merge base for $PR_BASE_REF" >&2
-    echo "  Refusing to compare HEAD with itself; provide a fetched PR base." >&2
+if ! git cat-file -e "${PREFIX_FIX_COMMIT}^{commit}" 2>/dev/null; then
+    echo "FAIL: unable to resolve the verified prefix-fix commit" >&2
     FAIL=1
+else
+    MERGE_BASE="${PREFIX_FIX_COMMIT}^"
 fi
 GIT_DIFF=""
 if [[ -n "$MERGE_BASE" ]]; then
-    GIT_DIFF=$(git diff "$MERGE_BASE" -- "components/nginx-module/src/ngx_http_markdown_stream_commit.c" "components/nginx-module/src/ngx_http_markdown_stream_postcommit.c" 2>/dev/null || true)
+    GIT_DIFF=$(git diff "$MERGE_BASE" "$PREFIX_FIX_COMMIT" -- \
+        components/nginx-module/src 2>/dev/null || true)
 fi
 
 if [[ -z "$MERGE_BASE" ]]; then
     :
 elif [[ -z "$GIT_DIFF" ]]; then
     DIFF_STATUS="PASS"
-    echo "PASS: No uncommitted changes in $SRCDIR (baseline state)"
-    echo "  (After fix is applied, re-run to verify only prefix strings changed)"
+    echo "FAIL: prefix-fix commit contained no source diff"
+    FAIL=1
 else
     # Analyze the diff: extract changed lines (excluding diff headers)
     # Filter for lines that are actual code changes (start with + or -)

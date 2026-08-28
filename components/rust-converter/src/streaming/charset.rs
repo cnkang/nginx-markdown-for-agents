@@ -213,10 +213,15 @@ impl CharsetState {
                     );
                 }
 
+                if *sniff_limit == 0 {
+                    return Ok(0);
+                }
+
+                let sniff_bytes = input_len.min(sniff_limit.saturating_sub(buffered_len));
                 let sniff_allocation = Self::sniff_append_allocation_upper_bound(
                     buffered_len,
                     sniff_buffer.capacity(),
-                    input_len,
+                    sniff_bytes,
                 )?;
                 let total_len = Self::checked_allocation_add(buffered_len, input_len)?;
                 if total_len < *sniff_limit {
@@ -391,14 +396,22 @@ impl CharsetState {
             return Ok(Cow::Owned(result));
         }
 
+        if sniff_limit == 0 && sniff_buffer.is_empty() {
+            let detected = detect_charset(None, &[]);
+            let mut state = self.resolve_for_feed(&detected)?;
+            if matches!(&state, CharsetState::Resolved { decoder: None }) {
+                *self = state;
+                return Ok(Cow::Borrowed(data));
+            }
+            let result = self.transcode_for_feed(&mut state, data)?;
+            *self = state;
+            return Ok(Cow::Owned(result));
+        }
+
         let sniff_bytes = data
             .len()
             .min(sniff_limit.saturating_sub(sniff_buffer.len()));
-        if sniff_bytes < data.len() {
-            Self::append_to_sniff_buffer(&mut sniff_buffer, data)?;
-        } else {
-            Self::append_to_sniff_buffer(&mut sniff_buffer, &data[..sniff_bytes])?;
-        }
+        Self::append_to_sniff_buffer(&mut sniff_buffer, &data[..sniff_bytes])?;
         if sniff_buffer.len() < sniff_limit {
             *self = CharsetState::Pending {
                 header_charset,
@@ -410,11 +423,24 @@ impl CharsetState {
 
         let detected = detect_charset(None, &sniff_buffer[..sniff_limit]);
         let mut state = self.resolve_for_feed(&detected)?;
+        let remainder = &data[sniff_bytes..];
         if matches!(&state, CharsetState::Resolved { decoder: None }) {
+            Self::append_to_sniff_buffer(&mut sniff_buffer, remainder)?;
             *self = state;
             return Ok(Cow::Owned(sniff_buffer));
         }
-        let result = self.transcode_for_feed(&mut state, &sniff_buffer)?;
+        let mut result = self.transcode_for_feed(&mut state, &sniff_buffer)?;
+        if !remainder.is_empty() {
+            let remainder_output = self.transcode_for_feed(&mut state, remainder)?;
+            result
+                .try_reserve_exact(remainder_output.len())
+                .map_err(|_| {
+                    ConversionError::MemoryLimit(
+                        "charset transcoded output allocation failed".to_string(),
+                    )
+                })?;
+            result.extend_from_slice(&remainder_output);
+        }
         *self = state;
         Ok(Cow::Owned(result))
     }
@@ -799,6 +825,43 @@ mod tests {
             "second chunk should resolve once sniff limit is reached"
         );
         assert!(state.is_resolved());
+    }
+
+    #[test]
+    fn test_oversized_chunk_preserves_bytes_after_sniff_limit() {
+        let mut state = CharsetState::with_sniff_limit(8);
+        let input = b"0123456789abcdef";
+
+        let result = state.feed(input).unwrap();
+
+        assert!(state.is_resolved());
+        assert_eq!(&*result, input);
+    }
+
+    #[test]
+    fn test_oversized_chunk_preserves_non_utf8_bytes_after_sniff_limit() {
+        let mut state = CharsetState::with_sniff_limit(64);
+        let mut input = b"<meta charset=\"ISO-8859-1\">".to_vec();
+        input.resize(64, b' ');
+        input.extend_from_slice(b"caf\xe9 tail");
+
+        let result = state.feed(&input).unwrap();
+
+        assert!(state.is_resolved());
+        assert_eq!(&result[..64], &input[..64]);
+        assert_eq!(&result[64..], "café tail".as_bytes());
+    }
+
+    #[test]
+    fn test_zero_sniff_limit_is_zero_copy_and_preserves_input() {
+        let mut state = CharsetState::with_sniff_limit(0);
+        let input = b"<p>zero-copy</p>";
+
+        let result = state.feed(input).unwrap();
+
+        assert!(state.is_resolved());
+        assert!(matches!(result, Cow::Borrowed(_)));
+        assert_eq!(&*result, input);
     }
 
     // --- HTML meta charset detection ---

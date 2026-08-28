@@ -101,14 +101,17 @@ prepare_sandboxed_script() {
     script_dir="${WORK_DIR}/${label}/script"
     SCRIPT_UNDER_TEST="${script_dir}/${source_script##*/}"
 
-    mkdir -p "${SANDBOX_ROOT}/usr/sbin" \
-        "${SANDBOX_ROOT}/usr/bin" \
+    mkdir -p "${SANDBOX_ROOT}/usr/bin" \
         "${SANDBOX_ROOT}/sbin" \
         "${SANDBOX_ROOT}/bin" \
         "${SANDBOX_ROOT}/etc/nginx/modules-enabled" \
         "${SANDBOX_ROOT}/etc/nginx/modules-available" \
         "${SANDBOX_ROOT}/usr/share/nginx/modules-available" \
         "${script_dir}"
+    # Match common Linux layouts where /usr/sbin is a symlink to /usr/bin.
+    # The trust check must validate the canonical target, not the symlink's
+    # conventional 0777 mode bits.
+    ln -s "${SANDBOX_ROOT}/usr/bin" "${SANDBOX_ROOT}/usr/sbin"
 
     for command_name in cat grep readlink rm rmdir sed stat; do
         link_trusted_command "${command_name}" || return 1
@@ -116,12 +119,19 @@ prepare_sandboxed_script() {
 
     case "${script_family}" in
         nfpm)
-            sed \
+            local rewritten_script
+            rewritten_script="$(sed \
                 -e "s|TRUSTED_PATH_ROOT=\"\"|TRUSTED_PATH_ROOT=\"${SANDBOX_ROOT}\"|" \
                 -e "s|/etc/nginx|${SANDBOX_ROOT}/etc/nginx|g" \
                 -e "s|/usr/share/nginx|${SANDBOX_ROOT}/usr/share/nginx|g" \
                 -e 's|%%NGINX_VERSION%%|1.26.3|g' \
-                "${source_script}" > "${SCRIPT_UNDER_TEST}"
+                "${source_script}")"
+            if ! printf '%s\n' "$rewritten_script" | grep -Fq \
+                "TRUSTED_PATH_ROOT=\"${SANDBOX_ROOT}\""; then
+                fail "sandbox: TRUSTED_PATH_ROOT substitution did not match"
+                return 1
+            fi
+            printf '%s\n' "$rewritten_script" > "${SCRIPT_UNDER_TEST}"
             ;;
         *)
             fail "sandbox: unknown script family: ${script_family}"
@@ -195,9 +205,55 @@ assert_path_present() {
     return 0
 }
 
+# assert_default_trusted_root — Verify that an empty prefix denotes the real
+# filesystem root rather than the caller's HOME directory.  Production
+# maintainer scripts use the empty prefix on installed hosts; this contract is
+# intentionally checked separately from the temporary-root PATH-injection
+# fixtures below.
+# Arguments: $1 = maintainer script containing path_is_trusted_root
+assert_default_trusted_root() {
+    local source_script="$1"
+    local function_source=""
+
+    if [[ ! -f "${source_script}" ]]; then
+        fail "default trusted root: script not found: ${source_script}"
+        return 0
+    fi
+
+    function_source="$(sed -n '/^path_is_trusted_root()/,/^}/p' \
+        "${source_script}")"
+    if [[ -z "${function_source}" ]]; then
+        fail "default trusted root: helper not found in ${source_script}"
+        return 0
+    fi
+
+    if TRUSTED_PATH_ROOT="" bash -c \
+        "${function_source}
+path_is_trusted_root /usr/sbin/nginx"; then
+        pass "default trusted root: ${source_script##*/} accepts /usr/sbin"
+    else
+        fail "default trusted root: ${source_script##*/} rejected /usr/sbin"
+    fi
+
+    if TRUSTED_PATH_ROOT="" bash -c \
+        "${function_source}
+path_is_trusted_root /home/evil/nginx"; then
+        fail "default trusted root: ${source_script##*/} accepted /home/evil"
+    else
+        pass "default trusted root: ${source_script##*/} rejects /home/evil"
+    fi
+    return 0
+}
+
 echo "========================================" >&2
 echo "Negative Control: Executable Trust" >&2
 echo "========================================" >&2
+echo "" >&2
+
+assert_default_trusted_root \
+    "${REPO_ROOT}/packaging/nfpm/scripts/preinstall.sh"
+assert_default_trusted_root \
+    "${REPO_ROOT}/packaging/nfpm/scripts/preremove.sh"
 echo "" >&2
 
 ##############################################################################
@@ -244,10 +300,14 @@ if [[ -f "${SOURCE_SCRIPT}" ]]; then
     assert_path_present "preremove.sh symlink" \
         "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
 
-    if [[ "${RC}" -eq 0 ]]; then
-        pass "preremove.sh: exit code 0 (remove)"
+    # The sandbox deliberately has no trusted nginx binary.  A clean scan of
+    # the fixed paths cannot prove that an unobserved include graph is safe,
+    # so the fail-closed removal guard must refuse the transaction while
+    # leaving the operator-managed symlink untouched.
+    if [[ "${RC}" -eq 1 ]]; then
+        pass "preremove.sh: exit code 1 (unverifiable removal blocked)"
     else
-        fail "preremove.sh: exit code ${RC} (expected 0)"
+        fail "preremove.sh: exit code ${RC} (expected 1)"
     fi
 
     echo "--- NC-2b: preremove.sh preserves an operator path ---" >&2

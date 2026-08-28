@@ -108,10 +108,10 @@ def redact_last_error(error_text):
         # the scrub so replacements can never push the final value above the
         # byte limit.
         redacted = encoded[:512].decode("utf-8", errors="ignore")
-    redacted = redacted.encode("utf-8")[:512].decode("utf-8", errors="ignore")
-    for pattern in patterns:
-        redacted = pattern.sub("<redacted>", redacted)
-    return redacted.encode("utf-8")[:512].decode("utf-8", errors="ignore")
+    # Reaching this point means repeated scrubbing and clamping could not
+    # prove a bounded safe value.  Use a fixed redacted value rather than
+    # making one more substitution on a possibly truncated token.
+    return "<redacted>"
 
 
 def _redact_error_for_test(error_text):
@@ -685,9 +685,8 @@ class TestHeadResponseBehavior:
         """
         body = json.dumps(doc, separators=(",", ":"), ensure_ascii=False)
         content_length = len(body.encode("utf-8"))
-        expected_length = len(
-            json.dumps(
-                doc, separators=(",", ":"), ensure_ascii=False
-            ).encode("utf-8")
+        encoder = json.JSONEncoder(separators=(",", ":"), ensure_ascii=False)
+        expected_length = sum(
+            len(fragment.encode("utf-8")) for fragment in encoder.iterencode(doc)
         )
         assert content_length == expected_length

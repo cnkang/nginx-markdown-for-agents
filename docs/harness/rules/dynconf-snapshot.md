@@ -44,7 +44,7 @@ Snapshot race elimination (v0.6.2):
 - In `ngx_http_markdown_header_filter()`, the global
   `ngx_http_markdown_dynconf_watcher.active_snapshot` must be read exactly
   once, at function entry, into a function-lifetime `snap_copy` variable.
-  the module derives `early_eff` from that `snap_copy` once via
+  The module derives `early_eff` from that `snap_copy` once via
   `ngx_http_markdown_build_effective_conf()`, also at function entry.
 - Both `snap_copy` and `early_eff` must have function-lifetime scope (not
   block scope), so they remain valid through ctx binding.
@@ -101,8 +101,8 @@ Required:
   the reload on the next poll cycle, regardless of whether
   `dynconf_check()` detects a new mtime change.
 - Unknown dynconf keys must cause `NGX_ERROR` (atomic reload
-  rejection), not `NGX_DECLINED` (silent ignore).  The entire file
-  the module rejects the file on any unrecognized key.
+  rejection), not `NGX_DECLINED` (silent ignore).  The module must
+  reject the entire file when it encounters any unrecognized key.
 - `dynconf_start` must parse and apply the existing dynconf file
   immediately at startup if it exists.  If the initial parse fails,
   `applied_mtime` must be set to 0 so the timer retries on the

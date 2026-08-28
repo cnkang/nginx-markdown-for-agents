@@ -172,12 +172,17 @@ def validate_manifest(
 
     # packages
     manifest_filenames: set[str] = set()
+    package_entries: list[dict[str, object]] = []
     packages = manifest.get("packages", [])
     if not isinstance(packages, list) or len(packages) == 0:
         errors.append("packages must be a non-empty list")
     else:
         for i, pkg in enumerate(packages):
             prefix = f"packages[{i}]"
+            if not isinstance(pkg, dict):
+                errors.append(f"{prefix}: package must be an object")
+                continue
+            package_entries.append(pkg)
             # dynamic-module tarballs carry nginx_version/libc/arch instead of
             # a project version (their name encodes the NGINX version, not the
             # release version).  Require the version key for deb/rpm only, and
@@ -342,7 +347,7 @@ def validate_manifest(
 
         allowed_sha256_names.update(bootstrap_filenames)
 
-        for pkg in packages:
+        for pkg in package_entries:
             if "filename" not in pkg:
                 continue
             fname = pkg["filename"]
@@ -403,8 +408,8 @@ def validate_manifest(
         )
 
     # Check packages are sorted deterministically
-    if packages:
-        filenames = [p.get("filename", "") for p in packages]
+    if package_entries:
+        filenames = [p.get("filename", "") for p in package_entries]
         if filenames != sorted(filenames):
             errors.append("Packages are not sorted by filename")
 

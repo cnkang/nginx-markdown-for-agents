@@ -1345,12 +1345,12 @@ fn test_parser_memory_budget_allows_small_input() {
 /// Regression (TEST-2): a parse that overruns `parse_timeout` must fail with
 /// `ERROR_PARSE_TIMEOUT` rather than returning partial output.
 ///
-/// Uses a 1 ms deadline against a 500 KiB document to make timeout
-/// detection reliable on CI hardware.  To hedge against unusually fast
-/// machines, the timeout
-/// assertion is only made when the call genuinely took longer than the
-/// deadline; otherwise the conversion legitimately completed in time
-/// and must report success.
+/// Uses a 1 ms parser deadline against a 500 KiB document.  The parser timer
+/// starts after FFI option decoding and input-budget setup, so total FFI call
+/// time can exceed the parser budget even when parsing itself finishes in
+/// time.  Allow a small setup/teardown margin when interpreting a successful
+/// call; a reported parser timeout must still be at least as old as its
+/// configured deadline.
 #[test]
 fn test_parse_timeout_enforced_when_overrun() {
     use std::time::{Duration, Instant};
@@ -1383,15 +1383,21 @@ fn test_parse_timeout_enforced_when_overrun() {
     );
     let elapsed = start.elapsed();
 
-    if elapsed > Duration::from_millis(1) {
-        assert_eq!(
-            result.error_code, ERROR_PARSE_TIMEOUT,
-            "conversion exceeding parse_timeout must fail with ERROR_PARSE_TIMEOUT"
+    let parser_deadline = Duration::from_millis(u64::from(options.parse_timeout_ms));
+    let total_call_margin = Duration::from_millis(100);
+    if result.error_code == ERROR_PARSE_TIMEOUT {
+        assert!(
+            elapsed >= parser_deadline,
+            "parser timeout reported before its configured deadline"
         );
     } else {
         assert_eq!(
             result.error_code, ERROR_SUCCESS,
-            "conversion completed within the deadline must report success"
+            "conversion must either time out in parsing or complete successfully"
+        );
+        assert!(
+            elapsed < parser_deadline + total_call_margin,
+            "successful conversion exceeded parser deadline plus setup margin"
         );
     }
 

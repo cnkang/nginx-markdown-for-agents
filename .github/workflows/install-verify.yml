@@ -149,9 +149,11 @@ jobs:
                       f"Unable to resolve signed release manifest from {manifest_url}: {exc}"
                   ) from exc
               for line in manifest_text.splitlines():
-                  digest, separator, filename = line.partition("  ")
-                  if separator and re.fullmatch(r"[0-9a-fA-F]{64}", digest):
-                      signed_asset_names.add(filename.lstrip("*"))
+                  parts = line.split()
+                  if len(parts) >= 2 and re.fullmatch(
+                      r"[0-9a-fA-F]{64}", parts[0]
+                  ):
+                      signed_asset_names.add(parts[1].lstrip("*"))
 
           def version_tuple(version: str) -> tuple[int, ...]:
               return tuple(int(part) for part in version.split("."))

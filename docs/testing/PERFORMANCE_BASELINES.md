@@ -1,13 +1,21 @@
-# Performance Baselines (Local FFI + Conditional Microbench + NGINX E2E)
+# Performance Baselines (Canonical Linux Module + Local FFI/Conditional Microbench)
 
 **Original Measurement Date:** 2026-02-26
 
 **Latest Canonical Module Measurement:** 2026-07-31 (eight scenarios,
-including Brotli streaming, on native Linux x86_64 with NGINX 1.24.0)
+including Brotli streaming, on native Linux x86_64 with NGINX 1.24.0. This is
+the record used for real-NGINX HTTP baseline claims.)
+
+**Local FFI/Conditional Measurement:** 2026-02-26 (Rust FFI and standalone
+conditional-request checks on macOS Apple M4 Pro. This record has no NGINX HTTP
+benchmark.)
 
 **Historical Scenario Measurement:** 2026-07-19 (Brotli streaming on NGINX
 1.30.4, archival only)
-**Scope:** Local release-build microbenchmarks for the Rust converter FFI path. They also cover the C conditional-request handler (`If-None-Match`) using the standalone test harness with real Rust FFI. They include local real-NGINX HTTP E2E baselines.
+**Scope:** The local record covers release-build microbenchmarks for the Rust
+converter FFI path and the C conditional-request handler (`If-None-Match`)
+using the standalone test harness with real Rust FFI. Real-NGINX HTTP E2E
+Only the canonical native Linux record reports real-NGINX HTTP E2E baselines.
 
 ## Summary
 

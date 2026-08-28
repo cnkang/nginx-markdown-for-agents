@@ -57,9 +57,10 @@ reload. Helm values move from `markdown.streaming.engine` to
 `markdown.streaming.mode`. Diagnostics, examples, and tests now describe one
 policy and one inheritance chain.
 
-Metrics such as `nginx_markdown_streaming_engine_choice_total` retain their
-names because they report the processing engine actually selected at runtime.
-They are not configuration selectors.
+Metrics such as `nginx_markdown_conversion_attempts_total{engine=...}` and
+`nginx_markdown_conversion_deliveries_total{engine=...}` retain their names
+because they report the processing engine actually selected at runtime. They
+are not configuration selectors.
 
 Historical ADRs 0007 and 0013 remain accurate records of their release-time
 decisions. This ADR supersedes only their active directive recommendation.

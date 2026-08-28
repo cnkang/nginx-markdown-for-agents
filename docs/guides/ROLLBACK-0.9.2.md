@@ -1,5 +1,10 @@
 # Rollback Guide: 0.9.2
 
+This document covers version downgrade from 0.9.2 to an older binary and its
+matching configuration. For the faster operational response that disables or
+narrowly scopes conversion without replacing the binary, see
+[ROLLBACK_GUIDE.md](ROLLBACK_GUIDE.md).
+
 ## Overview
 
 This guide covers rolling back the 0.9.2 development candidate to a prior

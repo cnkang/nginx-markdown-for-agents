@@ -133,7 +133,8 @@ pub struct PruneConfig {
 - Pruning implementation: `components/rust-converter/src/converter/pruning.rs`
 - FFI ABI: `components/rust-converter/src/ffi/abi.rs`
 - FFI options: `components/rust-converter/src/ffi/options.rs`
-- Archived migration guide: `docs/archive/streaming-default-migration.md`
+- Current migration guidance: [MIGRATION-0.9.2](../../guides/MIGRATION-0.9.2.md).
+  The earlier temporary archive guide is not part of the tracked documentation.
 
 ## Document Updates
 

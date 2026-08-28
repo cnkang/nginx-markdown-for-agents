@@ -77,6 +77,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         complexity-check \
         docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline decompression-metric-contract-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-092-canonical release-gates-check-092 release-gates-check-all release-gates-check-strict \
         release-matrix-check \
+        streaming-evidence-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
         test-rust-fuzz-qualification test-e2e-rust-soak \
         perf-evidence-check \
@@ -130,6 +131,7 @@ install:
 	install -m 0644 packaging/nfpm/modules-available/mod-markdown.conf "$(DESTDIR)$(NGINX_MODULES_AVAILABLE_DIR)/mod-markdown.conf"
 	install -m 0644 README.md "$(DESTDIR)$(DOC_INSTALL_DIR)/README.md"
 	install -m 0644 docs/guides/INSTALL.md "$(DESTDIR)$(DOC_INSTALL_DIR)/INSTALL.md"
+	install -m 0644 docs/guides/PACKAGE_INSTALLATION.md "$(DESTDIR)$(DOC_INSTALL_DIR)/PACKAGE_INSTALLATION.md"
 	install -m 0644 docs/COMPATIBILITY.md "$(DESTDIR)$(DOC_INSTALL_DIR)/COMPATIBILITY.md"
 	install -m 0644 LICENSE "$(DESTDIR)$(LICENSE_INSTALL_DIR)/LICENSE"
 
@@ -196,17 +198,23 @@ test-nginx-unit:
 test-c-unit-gcc:
 	@command -v docker >/dev/null 2>&1 || { echo "FAIL: docker is required for test-c-unit-gcc" >&2; exit 1; }
 	@echo "=== C unit suite under Ubuntu GCC (Docker) ==="
-	@docker run --rm -e HOST_UID="$(shell id -u)" -e HOST_GID="$(shell id -g)" \
+	@docker_rc=0; \
+	docker run --rm -e HOST_UID="$(shell id -u)" -e HOST_GID="$(shell id -g)" \
 	    -v "$(CURDIR)":/repo -w /repo/components/nginx-module/tests \
-	    ubuntu:24.04@sha256:019e8eb29a85e74d64925745884f2ec79aa27e3feab36353d24656f4d6b89467 bash -c 'set -e; trap "chown -R $$HOST_UID:$$HOST_GID /repo/components/nginx-module/tests/build 2>/dev/null || true" EXIT; apt-get update -qq && apt-get install -y -qq gcc make libz-dev libbrotli-dev python3 valgrind && make clean && make unit'
-	@echo "=== Cleaning container artifacts from local build dir ==="
-	@if $(MAKE) -C $(NGINX_TEST_DIR) clean; then \
-		echo "Clean OK"; \
-	else \
-		echo "WARNING: container artifact cleanup failed; root-owned Linux ELF binaries may remain in build/ (container artifact cleanup)" >&2; \
-		exit 1; \
-	fi
-	@echo "OK: C unit suite passed under Ubuntu GCC"
+	    ubuntu:24.04@sha256:019e8eb29a85e74d64925745884f2ec79aa27e3feab36353d24656f4d6b89467 bash -c 'set -e; trap "chown -R $$HOST_UID:$$HOST_GID /repo/components/nginx-module/tests/build 2>/dev/null || true" EXIT; apt-get update -qq && apt-get install -y -qq gcc make libz-dev libbrotli-dev python3 valgrind && make clean && make unit' || docker_rc=$$?; \
+	echo "=== Cleaning container artifacts from local build dir ==="; \
+	cleanup_rc=0; \
+	$(MAKE) -C $(NGINX_TEST_DIR) clean || cleanup_rc=$$?; \
+	if [ "$$docker_rc" -ne 0 ]; then \
+		echo "FAIL: C unit suite under Ubuntu GCC (exit $$docker_rc)" >&2; \
+		exit "$$docker_rc"; \
+	fi; \
+	if [ "$$cleanup_rc" -ne 0 ]; then \
+		echo "FAIL: container artifact cleanup (exit $$cleanup_rc)" >&2; \
+		exit "$$cleanup_rc"; \
+	fi; \
+	echo "Clean OK"; \
+	echo "OK: C unit suite passed under Ubuntu GCC"
 
 test-nginx-unit-streaming:
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming
@@ -223,7 +231,7 @@ test-nginx-unit-sanitize-smoke:
 .PHONY: test-package-compatibility
 test-package-compatibility:
 	@echo "=== Package Compatibility Suites ==="
-	@for t in test-preinstall-version-policy.sh test-package-removal-guard.sh test-maintainer-script-executable-trust.sh; do \
+	@for t in test-preinstall-version-policy.sh test-package-removal-guard.sh test-maintainer-script-executable-trust.sh test-deb-upgrade-invariant.sh; do \
 	  echo "  [$$t]"; \
 	  bash packaging/tests/$$t || { echo "FAIL: $$t" >&2; exit 1; }; \
 	done
@@ -721,6 +729,7 @@ release-gates-check-070:
 				mkdir -p dist; \
 				pkg_version="$${PKG_VERSION:-0.9.2}"; \
 				nginx_version="$${NGINX_VERSION:-1.26.3}"; \
+				nginx_version_ceil="$$(awk 'BEGIN { split(ARGV[1], p, "."); printf "%d.%d.%d", p[1], p[2], p[3] + 1 }' "$$nginx_version")"; \
 				rpm_nginx_evr="$${RPM_NGINX_EVR:-1:$$nginx_version}"; \
 				nfpm_preinstall="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preinstall.XXXXXX")"; \
 				nfpm_config="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-nfpm.XXXXXX")"; \
@@ -730,10 +739,12 @@ release-gates-check-070:
 				sed "s|./packaging/nfpm/scripts/preinstall.sh|$$nfpm_preinstall|" \
 					packaging/nfpm/nfpm.yaml > "$$nfpm_config"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
+					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
 					RPM_NGINX_EVR="$$rpm_nginx_evr" NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager deb \
 					--target "dist/nginx-module-markdown-for-agents_$${pkg_version}_nginx-$${nginx_version}_$${nfpm_arch}.deb"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
+					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
 					RPM_NGINX_EVR="$$rpm_nginx_evr" NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager rpm \
 					--target "dist/nginx-module-markdown-for-agents-$${pkg_version}-nginx$${nginx_version}-1.$${rpm_arch}.rpm"; \
@@ -930,29 +941,34 @@ release-gates-check-080:
 	$(MAKE) test-e2e-rust
 	@echo "  [7/17] coverage-c (C coverage gate — Req 4)"
 	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (blocking)"
-	@if command -v lcov >/dev/null 2>&1 && [ -d "$(NGINX_TEST_DIR)" ]; then \
+	@set -e; \
+	coverage_skipped=0; \
+	if command -v lcov >/dev/null 2>&1 && [ -d "$(NGINX_TEST_DIR)" ]; then \
 	$(MAKE) coverage-c; \
 	else \
 	if [ "$${RELEASE_GATE_ALLOW_SKIP_COVERAGE:-0}" = "1" ]; then \
 	echo "  ==> SKIP (non-release): coverage-c (lcov or NGINX test dir not available; RELEASE_GATE_ALLOW_SKIP_COVERAGE=1)"; \
+	coverage_skipped=1; \
 	else \
 	echo "FAIL: coverage-c requires lcov and NGINX test dir; set RELEASE_GATE_ALLOW_SKIP_COVERAGE=1 to skip for non-release validation" >&2; exit 1; \
 	fi; \
-	fi
-	@echo "  [8/17] coverage-rust (Rust coverage gate — Req 4)"
-	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (blocking)"
-	@if cargo llvm-cov --version >/dev/null 2>&1; then \
+	fi; \
+	echo "  [8/17] coverage-rust (Rust coverage gate — Req 4)"; \
+	echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (blocking)"; \
+	if cargo llvm-cov --version >/dev/null 2>&1; then \
 	$(MAKE) coverage-rust; \
 	else \
 	if [ "$${RELEASE_GATE_ALLOW_SKIP_COVERAGE:-0}" = "1" ]; then \
 	echo "  ==> SKIP (non-release): coverage-rust (cargo-llvm-cov not available; RELEASE_GATE_ALLOW_SKIP_COVERAGE=1)"; \
+	coverage_skipped=1; \
 	else \
 	echo "FAIL: coverage-rust requires cargo-llvm-cov; set RELEASE_GATE_ALLOW_SKIP_COVERAGE=1 to skip for non-release validation" >&2; exit 1; \
 	fi; \
-	fi
-	@echo "  [coverage-policy] Thresholds: C line=$(COVERAGE_C_MIN_LINE)% func=$(COVERAGE_C_MIN_FUNC)% | Rust line=$(COVERAGE_RUST_MIN_LINE)% func=$(COVERAGE_RUST_MIN_FUNC)%"
-	@echo "  [critical-path-coverage] 90% target for auth, error handling, FFI boundary, conditional requests"
-	@echo "  [critical-path-coverage] 90% critical-path coverage is enforced by coverage_gate.py."
+	fi; \
+	echo "  [coverage-policy] Thresholds: C line=$(COVERAGE_C_MIN_LINE)% func=$(COVERAGE_C_MIN_FUNC)% | Rust line=$(COVERAGE_RUST_MIN_LINE)% func=$(COVERAGE_RUST_MIN_FUNC)%"; \
+	echo "  [critical-path-coverage] 90% target for auth, error handling, FFI boundary, conditional requests"; \
+	if [ "$$coverage_skipped" -eq 0 ]; then \
+	echo "  [critical-path-coverage] 90% critical-path coverage is enforced by coverage_gate.py."; \
 	python3 tools/ci/coverage_gate.py \
 	--c-lcov $(COVERAGE_DIR)/c-coverage.lcov \
 	--rust-lcov $(COVERAGE_DIR)/rust-coverage.lcov \
@@ -961,7 +977,10 @@ release-gates-check-080:
 	--c-min-func $(COVERAGE_C_MIN_FUNC) \
 	--rust-min-line $(COVERAGE_RUST_MIN_LINE) \
 	--rust-min-func $(COVERAGE_RUST_MIN_FUNC) \
-	--critical-path-min $(COVERAGE_CRITICAL_MIN)
+	--critical-path-min $(COVERAGE_CRITICAL_MIN); \
+	else \
+	echo "  ==> SKIP (non-release): aggregate coverage gate (component coverage was skipped; RELEASE_GATE_ALLOW_SKIP_COVERAGE=1)"; \
+	fi
 	@echo "  [9/17] docs-check (documentation consistency — Req 3)"
 	$(MAKE) docs-check
 	@echo "  [10/17] matrix validate_workflow_matrix_consumers (Req 5)"
@@ -1158,7 +1177,15 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 # performance-only workflow's partial evidence.
 release-gates-check-092: release-gates-check-092-canonical
 	@echo "=== 0.9.2 Release Gates (blocking) ==="
-	@echo "  [8/13] Release candidate evidence bound to HEAD"
+	@echo "  [extended 1/9] Release tag ref protection (immutable v* tags)"
+	# A published tag anchors source archives, provenance, and signatures to
+	# the approved candidate; an unprotected tag can be moved or deleted after
+	# publication, splitting provenance.  Fails closed when the API is
+	# unreachable.  See tools/release/gates/verify_tag_ref_protection.py.
+	python3 tools/release/gates/verify_tag_ref_protection.py
+	@echo "  [extended 2/9] Streaming parity evidence"
+	$(MAKE) streaming-evidence-check
+	@echo "  [extended 3/9] Release candidate evidence bound to HEAD"
 	# The candidate-bound manifests are workflow outputs (generated from
 	# tracked policy/scope inputs at release time), not tracked working-tree
 	# state.  Generate the inputs phase locally so this gate can close from a
@@ -1167,19 +1194,30 @@ release-gates-check-092: release-gates-check-092-canonical
 	python3 tools/release/gates/generate_release_gate_manifests.py \
 		--phase inputs --candidate-sha "$$(git rev-parse HEAD)"
 	$(MAKE) release-candidate-evidence-check
-	@echo "  [9/13] Artifact registry evidence"
+	@echo "  [extended 4/9] Artifact registry evidence"
 	$(MAKE) artifact-registry-check
-	@echo "  [10/13] Release evidence manifest"
+	@echo "  [extended 5/9] Release evidence manifest"
 	$(MAKE) release-evidence-manifest-check
-	@echo "  [11/13] Fuzz qualification evidence"
+	@echo "  [extended 6/9] Fuzz qualification evidence"
 	$(MAKE) test-rust-fuzz-qualification
-	@echo "  [12/13] Soak qualification evidence"
+	@echo "  [extended 7/9] Soak qualification evidence"
 	$(MAKE) test-e2e-rust-soak
-	@echo "  [13/13] Repository docs style baseline"
+	@echo "  [extended 8/9] Repository docs style baseline"
 	$(MAKE) docs-style-check-baseline
-	@echo "  Property-based test suites (Rust proptest + Python Hypothesis)"
+	@echo "  [extended 9/9] Property-based test suites (Rust proptest + Python Hypothesis)"
 	$(MAKE) test-property
 	@echo "=== 0.9.2 Release Gates: PASS ==="
+
+# streaming-evidence-check: Blocking parity evidence and registry contract.
+streaming-evidence-check:
+	@echo "=== Streaming Evidence Check ==="
+	@set -e; \
+		summary_path="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-streaming-evidence.XXXXXX")"; \
+		trap 'rm -f "$$summary_path"' EXIT HUP INT TERM; \
+		python3 tools/release/gates/generate_streaming_evidence.py \
+			--output "$$summary_path"; \
+		python3 tools/release/gates/validate_streaming_evidence.py \
+			"$$summary_path" --git-head
 
 # release-matrix-check: Release matrix source/projection gate.
 # Checks that docs/releases/release-matrix.json is the deterministic

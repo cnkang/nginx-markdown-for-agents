@@ -589,8 +589,16 @@ pub fn check_conversion_errors(
     }
 }
 
+/// Counts the two streaming outputs compared for one fixture.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct OutputComparisonStats {
+    pub identical_count: usize,
+    pub known_difference_ids: Vec<String>,
+}
+
 /// Check that both streaming outputs match full-buffer output, returning
-/// Ok(()) if identical or known, or Err(message) on divergence.
+/// comparison counts if they are identical or known, or Err(message) on
+/// divergence.
 pub fn check_output_comparison(
     fixture_name: &str,
     full_buffer: &str,
@@ -598,10 +606,11 @@ pub fn check_output_comparison(
     chunked: &str,
     meta: &FixtureMeta,
     known_diffs: &known_differences::KnownDifferences,
-) -> Result<(), String> {
+) -> Result<OutputComparisonStats, String> {
+    let mut stats = OutputComparisonStats::default();
     for (label, streaming_output) in [("single", single), ("chunked", chunked)] {
         match compare_outputs(fixture_name, full_buffer, streaming_output, known_diffs) {
-            ComparisonResult::Identical => {}
+            ComparisonResult::Identical => stats.identical_count += 1,
             ComparisonResult::KnownDifference {
                 diff_id,
                 description,
@@ -611,6 +620,7 @@ pub fn check_output_comparison(
                         "{fixture_name}: matched known diff {diff_id} ({description}) but fixture metadata does not list it"
                     ));
                 }
+                stats.known_difference_ids.push(diff_id);
             }
             ComparisonResult::Divergence {
                 full_buffer_output,
@@ -623,5 +633,5 @@ pub fn check_output_comparison(
             }
         }
     }
-    Ok(())
+    Ok(stats)
 }

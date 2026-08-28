@@ -67,46 +67,12 @@ warnings=0
 # test helpers where the implicit return of echo/printf >&2 is always 0.
 # They are tracked for future remediation but do not block CI.
 readonly WARNING_ALLOWLIST=(
-    # ── tools/compat-check/nginx-markdown-compat-check.sh ──
-    # Trivial single-statement logging functions; echo return is always 0
-    "tools/compat-check/nginx-markdown-compat-check.sh:return:log_info:trivial echo-only logger; implicit return is always 0"
-    "tools/compat-check/nginx-markdown-compat-check.sh:return:log_warn:trivial echo-only logger; implicit return is always 0"
-    "tools/compat-check/nginx-markdown-compat-check.sh:return:log_error:trivial echo-only logger; implicit return is always 0"
-    # ── tools/compat-check/test_compat_check.sh ──
-    # Test helper functions under set -e; implicit return safe for test harness
-    "tools/compat-check/test_compat_check.sh:return:setup_mock_dir:test setup helper under set -e; mkdir return is meaningful"
-    "tools/compat-check/test_compat_check.sh:return:cleanup_mock_dir:test cleanup helper under set -e; rm return is meaningful"
-    "tools/compat-check/test_compat_check.sh:return:create_mock_nginx:test fixture creator under set -e; last statement is redirect"
-    "tools/compat-check/test_compat_check.sh:return:create_mock_uname:test fixture creator under set -e; last statement is redirect"
-    "tools/compat-check/test_compat_check.sh:return:run_helper:test runner under set -e; captures exit code explicitly"
-    "tools/compat-check/test_compat_check.sh:return:run_test:test runner under set -e; orchestrates test assertions"
-    # ── tools/release/gates/check_artifact_naming.sh ──
-    # Single-statement logging functions; echo >&2 always returns 0
-    "tools/release/gates/check_artifact_naming.sh:return:log_info:trivial echo-only logger; implicit return is always 0"
-    "tools/release/gates/check_artifact_naming.sh:return:log_pass:trivial echo-only logger; implicit return is always 0"
-    "tools/release/gates/check_artifact_naming.sh:return:log_fail:trivial echo-only logger; implicit return is always 0"
-    "tools/release/gates/check_artifact_naming.sh:return:log_error:trivial echo-only logger; implicit return is always 0"
-    # ── tools/release/gates/check_install_layout.sh ──
-    # Single-statement logging functions; echo >&2 always returns 0
-    "tools/release/gates/check_install_layout.sh:return:log_info:trivial echo-only logger; implicit return is always 0"
-    "tools/release/gates/check_install_layout.sh:return:log_pass:trivial echo-only logger; implicit return is always 0"
-    "tools/release/gates/check_install_layout.sh:return:log_fail:trivial echo-only logger; implicit return is always 0"
-    "tools/release/gates/check_install_layout.sh:return:log_error:trivial echo-only logger; implicit return is always 0"
-    # ── tools/release/gates/check_postinst_safety.sh ──
-    # Single-statement logging functions; echo >&2 always returns 0
-    "tools/release/gates/check_postinst_safety.sh:return:log_info:trivial echo-only logger; implicit return is always 0"
-    "tools/release/gates/check_postinst_safety.sh:return:log_warn:trivial echo-only logger; implicit return is always 0"
-    "tools/release/gates/check_postinst_safety.sh:return:log_error:trivial echo-only logger; implicit return is always 0"
-    "tools/release/gates/check_postinst_safety.sh:return:log_violation:trivial echo-only logger; implicit return is always 0"
     # ── tools/release/gates/gate3_local_package_smoke.sh ──
     # die() calls exit 1 — never actually returns; implicit return is unreachable
     "tools/release/gates/gate3_local_package_smoke.sh:return:die:function calls exit 1; return is unreachable"
     # ── tools/release/gates/gate4_local_k8s_smoke.sh ──
     # die() calls exit 1 — never actually returns; implicit return is unreachable
     "tools/release/gates/gate4_local_k8s_smoke.sh:return:die:function calls exit 1; return is unreachable"
-    # ── tools/harness/detect_ci_supply_chain.sh ──
-    # awk-based scanner; awk exit code is the meaningful return
-    "tools/harness/detect_ci_supply_chain.sh:return:check_network_to_shell:awk-based scanner; awk exit code is the meaningful return"
     # ── tools/perf/run_module_benchmark.sh ──
     # Terminal helpers deliberately exit the entire benchmark process.
     "tools/perf/run_module_benchmark.sh:return:usage:function exits with caller-selected status; return is unreachable"
@@ -257,9 +223,9 @@ readonly WARNING_ALLOWLIST=(
     # ── packaging/ scripts and tests (Rule 18 sweep of packaging/ scope) ──
     "packaging/scripts/smoke-test-basic.sh:return:run_diagnostics:diagnostic dump helper; last statement is a command whose return is the function result"
     "packaging/tests/test-gpg-verify.sh:return:check_prerequisites:prereq check helper under set -e; command returns are meaningful"
-    # ── tools/perf/memory_observer.sh ──
-    # usage() calls exit 1 — never actually returns; implicit return is unreachable
-    "tools/perf/memory_observer.sh:return:usage:function calls exit 1; return is unreachable"
+    # ── tools/harness/tests/test_detect_decompression_budget.sh ──
+    # The fixture helper terminates the test immediately after reporting failure.
+    "tools/harness/tests/test_detect_decompression_budget.sh:return:fail:function calls exit 1; return is unreachable"
 )
 
 # Files where specific violations are known and accepted.

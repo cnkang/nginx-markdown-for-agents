@@ -5,12 +5,12 @@
 This document describes the charset detection cascade implementation for the
 NGINX Markdown for Agents module. It follows Requirements FR-05.1, FR-05.2,
 and FR-05.3. Detection records the declared charset for policy and
-diagnostics. The current parser still accepts UTF-8 only and does not
-transcode non-UTF-8 bytes.
+diagnostics. The current parser accepts UTF-8 only and does not transcode
+non-UTF-8 bytes.
 
 ## Requirements
 
-- **FR-05.1**: WHEN the Upstream_Response Content-Type includes a charset parameter, THE Module SHALL use that charset for HTML parsing
+- **FR-05.1**: WHEN the Upstream_Response Content-Type includes a charset parameter, THE Module SHALL record that charset for diagnostics and policy. The module passes the original bytes to the UTF-8-only parser and defers non-UTF-8 transcoding.
 - **FR-05.2**: WHEN the Upstream_Response Content-Type does not include a charset parameter, THE Module SHALL attempt to detect charset from HTML meta tags
 - **FR-05.3**: WHEN charset detection fails, THE Module SHALL use a default charset (UTF-8 recommended)
 
@@ -161,24 +161,19 @@ Total: 35 unit tests for charset detection
 
 ## Current Limitations
 
-### UTF-8 Only Parsing
+### Transcoding Coverage
 
-The current implementation detects declared charsets but only parses UTF-8
-with html5ever. If the detector finds a non-UTF-8 charset:
-
-1. The module logs a warning to stderr.
-2. The parser receives the bytes as UTF-8 without transcoding. If the bytes
-   are valid UTF-8 despite the non-UTF-8 charset declaration, the parser
-   handles them as UTF-8 and the conversion succeeds.
-3. If the content is not valid UTF-8, the module returns an encoding error.
-
-**Future Enhancement**: Add charset transcoding support using the `encoding_rs` crate to convert non-UTF-8 content to UTF-8 before parsing.
+The detector records the declared charset but does not transcode it. The
+parser receives the original bytes and validates UTF-8, so a response declared
+as a non-UTF-8 charset is not converted by the current contract. Invalid UTF-8
+bytes return an encoding error. The current release defers support for non-UTF-8
+decoding.
 
 ### Performance Considerations
 
 - Meta tag scanning limits to the first 1024 bytes for performance
 - This is sufficient as meta charset tags should appear in the `<head>` section
-- Regex compilation caches using `OnceLock` for efficiency
+- Content-Type parameter scanning is a bounded byte-level walk (no regex)
 
 ## Integration Points
 
@@ -189,9 +184,20 @@ When the NGINX C module calls the Rust converter:
 1. Extract Content-Type header from upstream response
 2. Pass Content-Type to `MarkdownOptions.content_type` field
 3. Rust converter uses charset detection cascade
-4. Detected charset metadata affects **diagnostics only**. The parser always
-   receives UTF-8 bytes, does not transcode, and does not parse according to
-   a non-UTF-8 declaration
+4. The converter retains the detected charset for diagnostics and policy. It
+   passes the original bytes to the UTF-8-only parser without transcoding. A
+   declared non-UTF-8 charset does not change parser decoding in this release.
+
+### Content-Type Parameter Parsing
+
+The Content-Type charset parameter parser uses a strict parameter-boundary
+scan: it treats a parameter as the charset declaration only when its name
+equals `charset` (case-insensitive, optional whitespace around `=`, quoted or
+bare value). Names that merely contain `charset` as a substring — for example
+`x-charset`, `notcharset`, or a `charset=` sequence inside another parameter's
+quoted value — never hijack detection because the parser ignores them. When
+the parameter name `charset` appears more than once, the first declaration
+wins.
 
 ### Error Handling
 
@@ -206,7 +212,7 @@ When the NGINX C module calls the Rust converter:
 ## Dependencies
 
 - `regex = "1.10"` - For Content-Type and HTML meta tag parsing
-- `html5ever = "0.26"` - For HTML parsing (UTF-8 only)
+- `html5ever = "0.39"` - For HTML parsing (UTF-8 only)
 
 ## Future Enhancements
 

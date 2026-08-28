@@ -212,7 +212,20 @@ else
     pass "failed 'nginx -v' execution aborts with exit 1"
 fi
 
-# Scenario 9: negative control (T-B4) — simultaneous PATH injection AND
+# Scenario 9: an unrendered package template must never compare against the
+# literal placeholder and proceed.
+fake_nginx "1.26.3"
+unresolved_script="$(sed -e "s|^TRUSTED_PATH_ROOT=\"\"$|TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\"|" \
+    "${PREINSTALL}")"
+rc=0
+bash -c "${unresolved_script}" preinstall.sh install 2>/dev/null || rc=$?
+if [[ "${rc}" -eq 1 ]]; then
+    pass "unresolved package target is rejected"
+else
+    fail "unresolved package target returned unexpected status ${rc}"
+fi
+
+# Scenario 10: negative control — simultaneous PATH injection AND
 # TRUSTED_PATH_ROOT environment variable injection must both be ineffective.
 #
 # The script contains a literal `TRUSTED_PATH_ROOT=""` assignment that
@@ -251,14 +264,14 @@ chmod +x "${EVIL_DIR}/nginx"
 evil_script="$(sed "s|%%NGINX_VERSION%%|1.26.3|g" "${PREINSTALL}")"
 if ! PATH="${EVIL_DIR}:${PATH}" TRUSTED_PATH_ROOT="${EVIL_DIR}" \
     bash -c "${evil_script}" preinstall.sh install 2>/dev/null; then
-    echo "Scenario 9: preinstall returned nonzero; continuing with the " \
+    echo "Scenario 10: preinstall returned nonzero; continuing with the " \
         "marker assertion" >&2
 fi
 
 if [[ -f "${MARKER}" ]]; then
-    fail "Scenario 9: MARKER exists — evil nginx was executed despite trusted PATH"
+    fail "Scenario 10: MARKER exists — evil nginx was executed despite trusted PATH"
 else
-    pass "Scenario 9: MARKER does not exist — evil nginx was NOT executed"
+    pass "Scenario 10: MARKER does not exist — evil nginx was NOT executed"
 fi
 
 rm -rf "${EVIL_DIR}"

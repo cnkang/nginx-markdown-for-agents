@@ -1528,16 +1528,6 @@ fn run_single_mode(
                     "warning: streaming engine requested but streaming feature is not enabled"
                 );
                 std::process::exit(1);
-                if let Some(path) = json_output {
-                    let report = build_measurement_report(
-                        &[(sample, ffi_result, cfg)],
-                        &None,
-                        &[],
-                        platform,
-                        engine,
-                    );
-                    write_json_report(path, &report);
-                }
             }
         }
     }
@@ -1651,6 +1641,7 @@ fn main() {
                 eprintln!(
                     "warning: streaming engine requested but streaming feature is not enabled"
                 );
+                std::process::exit(1);
             }
         }
         BenchmarkEngine::Both => {

@@ -209,8 +209,11 @@ def _git_status_files() -> list[str]:
             text=False,
         )
     except subprocess.CalledProcessError as exc:
+        detail = exc.output
+        if isinstance(detail, bytes):
+            detail = detail.decode("utf-8", errors="replace")
         raise SystemExit(
-            f"git status failed with exit {exc.returncode}: {exc.output.strip()}"
+            f"git status failed with exit {exc.returncode}: {detail.strip()}"
         ) from exc
 
     files: list[str] = []
@@ -288,7 +291,9 @@ def _parse_status_output(output: str | bytes) -> list[str]:
             index_status = record[0]
             worktree_status = record[1]
             if index_status == "D" or worktree_status == "D":
-                if index_status in "RC" and record_index < len(records):
+                if (
+                    index_status in "RC" or worktree_status in "RC"
+                ) and record_index < len(records):
                     record_index += 1
                 continue
             entry = record[3:]

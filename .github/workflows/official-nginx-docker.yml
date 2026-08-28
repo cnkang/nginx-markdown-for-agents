@@ -171,8 +171,8 @@ jobs:
             MODULE_REPO=${{ steps.source.outputs.repo }}
             MODULE_REF=${{ steps.source.outputs.ref }}
             MODULE_SHA=${{ steps.source.outputs.sha }}
-          cache-from: type=gha,scope=official-nginx-docker-${{ matrix.docker_tag }}
-          cache-to: type=gha,mode=max,scope=official-nginx-docker-${{ matrix.docker_tag }}
+          cache-from: type=gha,scope=official-nginx-docker-${{ matrix.matrix_row_id }}
+          cache-to: type=gha,mode=max,scope=official-nginx-docker-${{ matrix.matrix_row_id }}
 
       - name: Verify runtime behavior
         env:

@@ -36,7 +36,12 @@
 //! - Empty tables (no rows) produce no output.
 //! - Cell content is recursively converted, allowing inline Markdown within cells.
 
-use super::*;
+use super::{
+    ConversionContext, ConversionError, Handle, MarkdownConverter, MarkdownFlavor, NodeData,
+    TableAlignment,
+};
+use html5ever::Attribute;
+use std::cell::Ref;
 
 impl MarkdownConverter {
     fn extract_table_body(

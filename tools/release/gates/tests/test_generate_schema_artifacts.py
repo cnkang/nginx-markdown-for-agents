@@ -298,5 +298,6 @@ def test_generated_artifacts_pass_schema_drift_validator(tmp_path, monkeypatch):
 @pytest.mark.parametrize("version", ["../escape", "/tmp/escape"])
 def test_generator_rejects_path_escaping_version(version):
     """CLI version input cannot escape the release artifact directory."""
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as exc_info:
         gen.main(["--version", version])
+    assert exc_info.value.code not in (None, 0)

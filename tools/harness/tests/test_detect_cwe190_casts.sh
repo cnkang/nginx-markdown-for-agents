@@ -240,6 +240,40 @@ else
         "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
+# ── Fixture: adversarial-wide-and-multiple (do not hide a risky cast) ──
+# A line may contain both a signed and a safe cast.  The detector must inspect
+# every cast rather than letting the final safe cast suppress the warning.
+# uint64_t and uintptr_t also remain fail-closed for narrower size_t targets.
+
+fixture_adv_multi_dir="${tmp_dir}/fixture-adv-multi/components/nginx-module/src"
+mkdir -p "${fixture_adv_multi_dir}"
+
+cat >"${fixture_adv_multi_dir}/test_adv_multi.c" <<'C'
+typedef int ngx_int_t;
+typedef unsigned int ngx_uint_t;
+typedef unsigned long long uint64_t;
+typedef unsigned long uintptr_t;
+
+static size_t
+multiple_casts(ngx_int_t signed_value, ngx_uint_t safe_value,
+               uint64_t wide_value, uintptr_t pointer_value)
+{
+    return (size_t) signed_value + (size_t) safe_value
+        + (size_t) wide_value + (size_t) pointer_value;
+}
+C
+
+output_file="${tmp_dir}/adv-multi.out"
+exit_code=0
+(cd "${tmp_dir}/fixture-adv-multi" && bash "${DETECTOR}" "${fixture_adv_multi_dir}") >"${output_file}" 2>&1 || exit_code=$?
+if [[ "${exit_code}" -eq 0 ]] \
+    && grep -q 'WARNING' "${output_file}"; then
+    pass "adversarial-wide-and-multiple: every cast is audited fail-closed"
+else
+    fail "adversarial-wide-and-multiple: risky cast was hidden by a later safe cast" \
+        "got exit ${exit_code}: $(cat "${output_file}")"
+fi
+
 # ── Fixture: adversarial-1 (true positive — signed without guard) ──
 # ngx_int_t n without any guard → must produce WARNING.
 

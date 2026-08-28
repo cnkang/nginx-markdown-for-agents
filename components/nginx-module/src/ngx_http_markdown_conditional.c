@@ -709,7 +709,6 @@ ngx_int_t
 ngx_http_markdown_send_304(ngx_http_request_t *r,
                            const struct MarkdownResult *result)
 {
-    ngx_table_elt_t                    *h;
     ngx_int_t                           rc;
     ngx_flag_t                          auth_cache_control_required;
     const ngx_http_markdown_conf_t     *conf = NULL;
@@ -813,15 +812,15 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
                       &r->headers_out.etag->value);
     }
 
-    h = ngx_list_push(&r->headers_out.headers);
-    if (h == NULL) {
+    /* Reuse the shared Vary: Accept helper (same contract as the 200/HEAD
+     * paths): it deduplicates against an upstream-provided Vary header
+     * instead of pushing a second Vary entry, and appends with overflow
+     * checks.  Any failure restores the exact upstream representation. */
+    rc = ngx_http_markdown_add_vary_accept(r);
+    if (rc != NGX_OK) {
         ngx_http_markdown_304_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
-
-    h->hash = 1;
-    ngx_str_set(&h->key, "Vary");
-    ngx_str_set(&h->value, "Accept");
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: 304 response with Vary: Accept");

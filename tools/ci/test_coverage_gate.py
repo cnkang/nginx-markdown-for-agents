@@ -6,8 +6,10 @@ Zero external dependencies — uses only the Python 3.10+ stdlib unittest.
 
 from __future__ import annotations
 
+import io
 import textwrap
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -20,6 +22,7 @@ from coverage_gate import (
     format_results,
     parse_lcov_critical_paths,
     parse_lcov_summary,
+    _finish_gate,
 )
 
 
@@ -299,6 +302,32 @@ class TestFormatResults(unittest.TestCase):
         output = format_results(results)
         self.assertIn("FAIL", output)
         self.assertIn("75.0%", output)
+
+
+class TestFinishGate(unittest.TestCase):
+    """Tests for the policy details printed by the command-line gate."""
+
+    def test_reports_selected_thresholds(self) -> None:
+        """Verify output reflects parsed thresholds rather than fixed values."""
+        output = io.StringIO()
+        reports = (("C module", None, 73.0, 74.0),)
+        results = [
+            GateResult(
+                label="C module",
+                metric="line",
+                actual=100.0,
+                threshold=73.0,
+                passed=True,
+            )
+        ]
+
+        with redirect_stdout(output):
+            status = _finish_gate(results, [], 87.5, reports)
+
+        assert status == 0
+        rendered = output.getvalue()
+        self.assertIn("critical paths: 87.5%", rendered)
+        self.assertIn("C module: 73.0% line/74.0% function", rendered)
 
 
 if __name__ == "__main__":

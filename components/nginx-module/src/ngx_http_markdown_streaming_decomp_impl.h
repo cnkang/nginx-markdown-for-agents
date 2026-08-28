@@ -168,6 +168,8 @@ typedef struct ngx_http_markdown_streaming_decomp_s {
     ngx_flag_t                            initialized;
     /* Set only when the complete compressed HTTP response is finalized. */
     ngx_flag_t                            finished;
+    /* Set after the terminal limit transaction completes successfully. */
+    ngx_flag_t                            finish_limits_checked;
 
     /*
      * Per-call failure origin for bare NGX_ERROR returns.
@@ -568,6 +570,7 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
     decomp->total_decompressed = 0;
     decomp->initialized = 0;
     decomp->finished = 0;
+    decomp->finish_limits_checked = 0;
     decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
     decomp->at_gzip_member_boundary = 0;
     decomp->zlib_header_pending = 0;
@@ -2529,6 +2532,10 @@ ngx_http_markdown_streaming_decomp_finish(
      * its output was below the representative-prefix floor.  EOF makes the
      * result final, so run the same limit transaction even when no tail bytes
      * remain.  apply_limits() also owns cleanup on its error paths. */
+    if (decomp->finished && decomp->finish_limits_checked) {
+        return NGX_OK;
+    }
+
     if (decomp->finished
         || (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
             && decomp->at_gzip_member_boundary))
@@ -2543,6 +2550,7 @@ ngx_http_markdown_streaming_decomp_finish(
                 return limit_rc;
             }
         }
+        decomp->finish_limits_checked = 1;
         return NGX_OK;
     }
 
@@ -2612,6 +2620,8 @@ ngx_http_markdown_streaming_decomp_finish(
             return limit_rc;
         }
     }
+
+    decomp->finish_limits_checked = 1;
 
     *out_data = buf;
     *out_len = produced;

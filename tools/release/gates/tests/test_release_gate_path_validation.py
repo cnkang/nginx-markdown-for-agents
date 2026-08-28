@@ -180,3 +180,10 @@ def test_config_directive_checks_expand_name_macros():
 
     assert result.results[0][0] == "PASS"
     assert result.results[1][0] == "FAIL"
+
+
+def test_fuzz_packaging_uses_canonical_compatibility_document() -> None:
+    """The packaging gate must not depend on retired duplicate paths."""
+    assert fuzz_gate.COMPAT_DOCS == [
+        fuzz_gate.PROJECT_ROOT / "docs" / "COMPATIBILITY.md"
+    ]

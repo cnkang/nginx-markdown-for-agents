@@ -22,6 +22,9 @@ LIFECYCLE_IMPL = (
 MODULE_SOURCE = (
     REPO_ROOT / "components/nginx-module/src/ngx_http_markdown_filter_module.c"
 )
+REQUEST_IMPL = (
+    REPO_ROOT / "components/nginx-module/src/ngx_http_markdown_request_impl.h"
+)
 NON_STREAMING_VERIFY = (
     REPO_ROOT / "tools/ci/verify_non_streaming_nginx_module.sh"
 )
@@ -189,6 +192,22 @@ def test_no_default_features_build_declares_none_to_nginx_configure() -> None:
         flags=re.DOTALL,
     )
     assert not re.search(r"^\s*nm\s+", script, flags=re.MULTILINE)
+
+
+def test_streaming_header_failure_helper_is_feature_guarded() -> None:
+    source = REQUEST_IMPL.read_text(encoding="utf-8")
+    helper = (
+        "static ngx_int_t\n"
+        "ngx_http_markdown_streaming_handle_header_snapshot_failure"
+    )
+    helper_start = source.index(helper)
+    guard_start = source.rfind(
+        "#ifdef MARKDOWN_STREAMING_ENABLED", 0, helper_start
+    )
+    guard_end = source.find("#endif", helper_start)
+
+    assert guard_start != -1
+    assert guard_end > helper_start
 
 
 def _function_body(source: str, function_name: str) -> str:

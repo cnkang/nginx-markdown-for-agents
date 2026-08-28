@@ -253,6 +253,12 @@ def _access_prefix_is_conditional(prefix: str) -> bool:
     Returns:
     	bool: `True` if control flow can skip the access call, `False` otherwise.
     """
+    stripped_prefix = prefix.lstrip()
+    if re.match(r"(?:else|do)\b", stripped_prefix):
+        # A brace-less else/do body is conditional even though it has no
+        # nested brace for the structural scanner to observe.
+        return True
+
     control_prefixes = list(
         re.finditer(r"\b(if|for|while|switch)\s*\(", prefix)
     )

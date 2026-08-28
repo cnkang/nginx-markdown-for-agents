@@ -101,11 +101,18 @@ if ! command -v openssl >/dev/null 2>&1; then
 fi
 MOCK_CERT_FILE="${MOCK_DIR}/server.crt"
 MOCK_KEY_FILE="${MOCK_DIR}/server.key"
-openssl req -x509 -newkey rsa:2048 -nodes \
+if ! openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout "$MOCK_KEY_FILE" -out "$MOCK_CERT_FILE" -days 1 \
   -subj "/CN=host.docker.internal" \
   -addext "subjectAltName=DNS:host.docker.internal" \
-  >/dev/null 2>&1
+  >/dev/null 2>&1; then
+  echo "ERROR: failed to generate mock HTTPS certificate" >&2
+  exit 1
+fi
+if [[ ! -s "$MOCK_CERT_FILE" || ! -s "$MOCK_KEY_FILE" ]]; then
+  echo "ERROR: mock HTTPS certificate generation produced empty files" >&2
+  exit 1
+fi
 
 ASSET_NAME="$(basename "$ARTIFACT")"
 ASSET_SHA256="$(sha256_file "$ARTIFACT")"
@@ -124,7 +131,7 @@ port_file = Path(sys.argv[2])
 cert_file = sys.argv[3]
 key_file = sys.argv[4]
 handler = partial(SimpleHTTPRequestHandler, directory=directory)
-server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+server = ThreadingHTTPServer(("", 0), handler)
 tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 tls_context.load_cert_chain(certfile=cert_file, keyfile=key_file)
 server.socket = tls_context.wrap_socket(server.socket, server_side=True)
@@ -162,7 +169,9 @@ PY
     server_ready=1
     break
   fi
-  sleep 1
+  if [[ "$attempt" -lt 10 ]]; then
+    sleep 1
+  fi
 done
 if [[ "$server_ready" -ne 1 ]]; then
   echo "ERROR: mock GitHub server did not become ready on port ${MOCK_PORT}" >&2

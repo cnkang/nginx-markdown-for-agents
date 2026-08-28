@@ -32,32 +32,33 @@ PID=""
 INTERVAL_MS=""
 OUTPUT=""
 
-# usage prints a usage message to stderr and exits with status 1.
+# usage prints a usage message to stderr. Callers choose the resulting status.
 usage() {
   echo >&2 "usage: $0 --pid <pid> --interval <ms> --output <path>"
-  exit 1
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pid)
-      [[ $# -ge 2 ]] || usage
+      [[ $# -ge 2 ]] || { usage; exit 1; }
       PID="$2"
       shift 2
       ;;
     --interval)
-      [[ $# -ge 2 ]] || usage
+      [[ $# -ge 2 ]] || { usage; exit 1; }
       INTERVAL_MS="$2"
       shift 2
       ;;
     --output)
-      [[ $# -ge 2 ]] || usage
+      [[ $# -ge 2 ]] || { usage; exit 1; }
       OUTPUT="$2"
       shift 2
       ;;
     *)
       echo >&2 "error: unknown argument: $1"
       usage
+      exit 1
       ;;
   esac
 done
@@ -65,6 +66,7 @@ done
 if [[ -z "$PID" || -z "$INTERVAL_MS" || -z "$OUTPUT" ]]; then
   echo >&2 "error: --pid, --interval, and --output are all required"
   usage
+  exit 1
 fi
 
 # Validate PID is a positive integer.

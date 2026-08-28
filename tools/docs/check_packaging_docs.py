@@ -120,9 +120,16 @@ def _validate_single_sop(heading: str, sop: str) -> list[str]:
     sop_lower = sop.lower()
 
     def has_label(label: str) -> bool:
+        # Accept the plain label (**Resolution:**) and extended label variants
+        # that start with the required word (**Resolution Steps:**); the word
+        # must begin a bold label so unrelated prose never matches.
         return bool(
-            re.search(rf"\*\*{re.escape(label)}(?::)?\*\*", sop_lower)
-            or re.search(rf"\b{re.escape(label)}\s*:", sop_lower)
+            re.search(
+                rf"\*\*{re.escape(label)}(?:[ \t]+[A-Za-z0-9_]+){{0,4}}"
+                rf"[ \t]*:?\*\*",
+                sop_lower,
+            )
+            or re.search(rf"(?<!\w){re.escape(label)}[ \t]*:", sop_lower)
         )
 
     if not has_label("symptom"):

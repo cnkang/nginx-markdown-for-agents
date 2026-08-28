@@ -13,8 +13,9 @@ from typing import Any
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
-from tools.lib.path_validation import validate_read_path
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+
+from lib.path_validation import validate_read_path  # noqa: E402
 
 
 _FALSE_EXPRESSION = re.compile(
@@ -33,6 +34,8 @@ def _is_unconditional_skip(value: Any) -> bool:
     if not isinstance(value, str):
         return False
     expression = value.strip().lower()
+    if expression.startswith("${{") and expression.endswith("}}"):
+        expression = expression[3:-2].strip()
     return bool(
         _FALSE_EXPRESSION.fullmatch(expression)
         or _ALWAYS_FALSE_EXPRESSION.fullmatch(expression)
@@ -59,7 +62,7 @@ def _collect_job_names(
             return {}, [f"job {job_id!r} must be a mapping"]
         name = job.get("name")
         if not isinstance(name, str) or not name.strip():
-            return {}, [f"job {job_id!r} must define a non-empty name"]
+            name = str(job_id)
         names.setdefault(name, []).append(str(job_id))
     return names, []
 
@@ -117,42 +120,73 @@ def validate_workflow_contract(
     ) + _skipped_context_violations(required, names, jobs)
 
 
-def _contain_within_root(path: Path, root: Path) -> Path:
-    """Refuse locations that resolve outside an explicit allowed root.
-
-    validate_read_path already performed realpath resolution and rejected
-    traversal components; this second gate keeps CLI-supplied paths inside
-    a declared boundary so symlinks pointing at host files cannot redirect
-    the read after canonicalization.
-    """
-    if not path.is_relative_to(root):
-        raise ValueError(
-            f"Read path resolves outside the allowed root {root}: {path}"
-        )
-    return path
-
-
 def _load_yaml(
     path: Path, *, root: Path = REPO_ROOT
 ) -> dict[str, Any]:
-    path = validate_read_path(path, purpose="workflow")
-    path = _contain_within_root(path, root)
-    with path.open(encoding="utf-8") as stream:
+    raw_path = str(path)
+    if ".." in raw_path.replace("\\", "/").split("/"):
+        raise ValueError(
+            "Refusing path with '..' traversal component (purpose: workflow)"
+        )
+    resolved_root = root.resolve(strict=True)
+    absolute_path = path.absolute()
+    try:
+        absolute_path.relative_to(resolved_root)
+    except ValueError as error:
+        raise ValueError(
+            f"Read workflow path resolves outside the allowed root "
+            f"{resolved_root}: {absolute_path}"
+        ) from error
+    resolved_path = absolute_path.resolve(strict=True)
+    try:
+        relative_path = resolved_path.relative_to(resolved_root)
+    except ValueError as error:
+        raise ValueError(
+            f"Read workflow path resolves outside the allowed root "
+            f"{resolved_root}: {resolved_path}"
+        ) from error
+    safe_path = validate_read_path(
+        resolved_root / relative_path, purpose="workflow"
+    )
+    with safe_path.open(encoding="utf-8") as stream:
         data = yaml.load(stream, Loader=yaml.BaseLoader)  # noqa: S506
     if not isinstance(data, dict):
-        raise ValueError(f"workflow must be a mapping: {path}")
+        raise ValueError(f"workflow must be a mapping: {safe_path}")
     return data
 
 
 def _load_json(
     path: Path, *, root: Path = REPO_ROOT
 ) -> dict[str, Any]:
-    path = validate_read_path(path, purpose="contract")
-    path = _contain_within_root(path, root)
-    with path.open(encoding="utf-8") as stream:
+    raw_path = str(path)
+    if ".." in raw_path.replace("\\", "/").split("/"):
+        raise ValueError(
+            "Refusing path with '..' traversal component (purpose: contract)"
+        )
+    resolved_root = root.resolve(strict=True)
+    absolute_path = path.absolute()
+    try:
+        absolute_path.relative_to(resolved_root)
+    except ValueError as error:
+        raise ValueError(
+            f"Read contract path resolves outside the allowed root "
+            f"{resolved_root}: {absolute_path}"
+        ) from error
+    resolved_path = absolute_path.resolve(strict=True)
+    try:
+        relative_path = resolved_path.relative_to(resolved_root)
+    except ValueError as error:
+        raise ValueError(
+            f"Read contract path resolves outside the allowed root "
+            f"{resolved_root}: {resolved_path}"
+        ) from error
+    safe_path = validate_read_path(
+        resolved_root / relative_path, purpose="contract"
+    )
+    with safe_path.open(encoding="utf-8") as stream:
         data = json.load(stream)
     if not isinstance(data, dict):
-        raise ValueError(f"contract must be a mapping: {path}")
+        raise ValueError(f"contract must be a mapping: {safe_path}")
     return data
 
 

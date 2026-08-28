@@ -171,6 +171,7 @@ pub struct ConversionOptions {
 
 impl ConversionOptions {
     /// Estimate the physical heap retained by converter-owned options.
+    #[cfg(any(feature = "streaming", test))]
     pub(crate) fn resident_bytes(&self) -> usize {
         self.base_url
             .as_ref()
@@ -263,6 +264,97 @@ pub struct ConversionContext {
     input_size_hint: usize,
     /// Maximum generated Markdown size for the full-buffer path.
     output_budget: usize,
+    /// Bytes of transient working-set memory currently charged to temporary
+    /// allocations that are not part of the output buffer itself (escape
+    /// scratch buffers, the fused-normalizer's second full-size buffer, ...).
+    ///
+    /// The budget check historically covered only the final output length;
+    /// transient allocations could push peak RSS past the configured
+    /// `conversion_memory` long before the final length check fired.  Charging
+    /// scratch allocations here keeps the sum of retained output and live
+    /// temporary buffers under the same budget, so allocation failures surface
+    /// as a controlled `MemoryLimit` error instead of an allocator abort.
+    working_set_bytes: usize,
+}
+
+/// Fallible Markdown output writer bound to one conversion budget.
+///
+/// The converter has several output-producing helpers, so checking the final
+/// length only after a helper returns is too late: `String` may already have
+/// grown its backing allocation.  This writer checks the logical output and
+/// retained working set first, then reserves exactly the required additional
+/// capacity before mutating the destination.
+pub(crate) struct BudgetedMarkdownWriter<'a> {
+    output: &'a mut String,
+    ctx: &'a mut ConversionContext,
+}
+
+impl<'a> BudgetedMarkdownWriter<'a> {
+    fn try_reserve(&mut self, additional: usize) -> Result<(), ConversionError> {
+        let required_len = self
+            .output
+            .len()
+            .checked_add(additional)
+            .ok_or_else(|| ConversionError::MemoryLimit("output length overflow".into()))?;
+        let projected = required_len
+            .checked_add(self.ctx.working_set_bytes)
+            .ok_or_else(|| ConversionError::MemoryLimit("working-set size overflow".into()))?;
+        if projected > self.ctx.output_budget {
+            return Err(ConversionError::MemoryLimit(format!(
+                "generated Markdown output and working set {} bytes would exceed budget {} bytes",
+                projected, self.ctx.output_budget
+            )));
+        }
+
+        // String::try_reserve_exact() takes additional bytes beyond the
+        // current length, not beyond the current capacity.  Reserving the
+        // capacity shortfall can leave the following push infallible only by
+        // accident when len < capacity < required_len.
+        let additional_capacity = required_len.saturating_sub(self.output.len());
+        if additional_capacity > 0 {
+            self.output
+                .try_reserve_exact(additional_capacity)
+                .map_err(|error| {
+                    ConversionError::MemoryLimit(format!(
+                        "unable to reserve {} bytes for generated Markdown: {}",
+                        additional_capacity, error
+                    ))
+                })?;
+        }
+        Ok(())
+    }
+
+    fn remaining(&self) -> usize {
+        self.ctx
+            .output_budget
+            .saturating_sub(self.ctx.working_set_bytes)
+            .saturating_sub(self.output.len())
+    }
+
+    fn push_str(&mut self, value: &str) -> Result<(), ConversionError> {
+        self.try_reserve(value.len())?;
+        self.output.push_str(value);
+        Ok(())
+    }
+
+    fn push(&mut self, value: char) -> Result<(), ConversionError> {
+        self.try_reserve(value.len_utf8())?;
+        self.output.push(value);
+        Ok(())
+    }
+
+    fn push_escaped(
+        &mut self,
+        text: &str,
+        state: &mut crate::security::MarkdownTextEscapeState,
+    ) -> Result<(), ConversionError> {
+        for ch in text.chars() {
+            let escaped_len = crate::security::escaped_char_len(ch, state);
+            self.try_reserve(escaped_len)?;
+            crate::security::push_escaped_char(self.output, ch, state);
+        }
+        Ok(())
+    }
 }
 
 /// Fallback full-buffer output cap used only when the FFI caller leaves the
@@ -298,7 +390,22 @@ impl ConversionContext {
             is_fast_path: false,
             input_size_hint: 0,
             output_budget: DEFAULT_FULL_BUFFER_OUTPUT_BUDGET,
+            working_set_bytes: 0,
         }
+    }
+
+    /// Create a conversion context with an explicit full-buffer budget.
+    ///
+    /// This is intended for trusted offline tools that process deliberately
+    /// large fixtures. A zero budget keeps the standard 64 MiB default used
+    /// by [`Self::new`]. NGINX request conversions continue to receive their
+    /// configured budget through the FFI boundary.
+    pub fn with_output_budget(timeout: Duration, output_budget: usize) -> Self {
+        let mut context = Self::new(timeout);
+        if output_budget != 0 {
+            context.output_budget = output_budget;
+        }
+        context
     }
 
     /// Set a hint about the input HTML size in bytes.
@@ -337,6 +444,83 @@ impl ConversionContext {
             )));
         }
         Ok(())
+    }
+
+    /// Reserve transient working-set memory for a scratch allocation.
+    ///
+    /// The charge counts toward the same conversion budget as the output, so
+    /// the peak footprint (retained output + live scratch buffers) stays under
+    /// the configured limit.  Call `release_working_set` when the scratch
+    /// buffer is dropped.  A reservation that would push the total past the
+    /// budget fails with a controlled `MemoryLimit` error **before** the
+    /// allocation happens.
+    pub(crate) fn reserve_working_set(&mut self, bytes: usize) -> Result<(), ConversionError> {
+        let projected = self
+            .working_set_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| ConversionError::MemoryLimit("working-set size overflow".into()))?;
+        if projected > self.output_budget {
+            return Err(ConversionError::MemoryLimit(format!(
+                "temporary working set {} bytes would exceed budget {} bytes",
+                projected, self.output_budget
+            )));
+        }
+        self.working_set_bytes = projected;
+        Ok(())
+    }
+
+    /// Release a previously reserved transient working-set charge.
+    ///
+    /// The release saturates at zero: a caller that reserves and frees in
+    /// mismatched amounts still cannot drive the counter negative.
+    pub(crate) fn release_working_set(&mut self, bytes: usize) {
+        self.working_set_bytes = self.working_set_bytes.saturating_sub(bytes);
+    }
+
+    /// Reserve scratch memory while an existing output allocation remains live.
+    ///
+    /// The full-buffer converter keeps the traversal output alive while it
+    /// builds normalized output.  Account for that retained capacity before
+    /// allocating the second buffer so a large response cannot temporarily
+    /// exceed the configured conversion budget.
+    pub(crate) fn reserve_working_set_with_output(
+        &mut self,
+        output_capacity: usize,
+        scratch_bytes: usize,
+    ) -> Result<(), ConversionError> {
+        let retained = output_capacity
+            .checked_add(scratch_bytes)
+            .ok_or_else(|| ConversionError::MemoryLimit("working-set size overflow".into()))?;
+        self.reserve_working_set(retained)
+    }
+
+    /// Create a writer that enforces the full-buffer output budget before each
+    /// append and uses fallible capacity reservation.
+    pub(crate) fn budgeted_writer<'a>(
+        &'a mut self,
+        output: &'a mut String,
+    ) -> BudgetedMarkdownWriter<'a> {
+        BudgetedMarkdownWriter { output, ctx: self }
+    }
+
+    /// Append Markdown-escaped text to `output` without materializing the
+    /// whole escaped string first.
+    ///
+    /// Escaping can roughly double a text node, and building the full escaped
+    /// `String` before the budget check let transient allocations exceed the
+    /// conversion budget.  This walks the source once, pushing escaped bytes
+    /// in bounded segments and re-checking the budget as the output grows, so
+    /// an over-budget node fails before its allocation happens.  The escape
+    /// state machine is threaded through so multi-node escaping behavior stays
+    /// identical to [`crate::security::escape_markdown_text`].
+    pub(crate) fn append_escaped_text(
+        &mut self,
+        output: &mut String,
+        text: &str,
+        state: &mut crate::security::MarkdownTextEscapeState,
+    ) -> Result<(), ConversionError> {
+        let mut writer = self.budgeted_writer(output);
+        writer.push_escaped(text, state)
     }
 
     /// Check if timeout has been exceeded
@@ -608,6 +792,12 @@ impl MarkdownConverter {
         dom: &RcDom,
         ctx: &mut ConversionContext,
     ) -> Result<String, ConversionError> {
+        // Validate the complete DOM shape iteratively before entering the
+        // recursive renderer.  This keeps over-limit input on the controlled
+        // error path instead of allowing the renderer's call stack to grow
+        // past the configured nesting ceiling first.
+        self.validate_dom_depth(dom)?;
+
         // Fast path qualification: check if the document is structurally simple
         // enough for optimized traversal. When the document qualifies, the
         // traversal skips unreachable branches (form controls, embedded content,
@@ -624,7 +814,12 @@ impl MarkdownConverter {
         } else {
             1024
         };
-        let mut output = String::with_capacity(initial_capacity);
+        let mut output = String::new();
+        {
+            let mut writer = ctx.budgeted_writer(&mut output);
+            let initial_capacity = initial_capacity.min(writer.remaining());
+            writer.try_reserve(initial_capacity)?;
+        }
 
         // Extract metadata and add YAML front matter if enabled
         if self.options.include_front_matter && self.options.extract_metadata {
@@ -648,12 +843,19 @@ impl MarkdownConverter {
         // CRLF normalization is handled inside FusedNormalizer::push_line,
         // so no separate replace("\r\n", "\n") allocation is needed.
         let markdown = if output.len() > LARGE_BODY_THRESHOLD {
-            let capacity = output.len();
-            let mut normalizer = large_response::FusedNormalizer::new(capacity);
+            // The fused normalizer pre-allocates a second buffer the size of
+            // the traversal output while that output is still alive; charge
+            // the working set so the transient peak stays inside the budget
+            // and fails with a controlled error instead of an allocator abort.
+            let capacity = output.capacity();
+            ctx.reserve_working_set_with_output(capacity, capacity)?;
+            let mut normalizer = large_response::FusedNormalizer::try_new(capacity)?;
             for line in output.split('\n') {
                 normalizer.push_line(line);
             }
-            normalizer.finalize()
+            let normalized = normalizer.finalize();
+            ctx.release_working_set(capacity.saturating_mul(2));
+            normalized
         } else {
             self.normalize_output(output)
         };
@@ -788,6 +990,15 @@ mod tests {
             options.resident_bytes() >= base_url.capacity() + options.prune_config.resident_bytes()
         );
         assert!(options.resident_bytes() >= 8192);
+    }
+
+    #[test]
+    fn custom_output_budget_is_applied_without_changing_default() {
+        let custom = ConversionContext::with_output_budget(Duration::ZERO, 128 * 1024);
+        assert_eq!(custom.output_budget, 128 * 1024);
+
+        let default = ConversionContext::with_output_budget(Duration::ZERO, 0);
+        assert_eq!(default.output_budget, DEFAULT_FULL_BUFFER_OUTPUT_BUDGET);
     }
 
     /// Escape characters that would otherwise be interpreted as HTML markup.
@@ -2333,6 +2544,51 @@ mod tests {
         assert!(result.contains("- Item 2"));
     }
 
+    /// A list item whose first child is a nested list must keep the nested
+    /// content attached to the item marker.  The pre-fix renderer dropped the
+    /// first line of already-indented content, so the item rendered as a bare
+    /// marker ("-") and the whole nested subtree vanished.
+    #[test]
+    fn test_first_child_nested_list_content_is_kept() {
+        let dom = parse_html(b"<ul><li><ul><li>sub</li></ul></li></ul>").expect("Parse failed");
+        let result = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("Conversion failed");
+        assert!(result.contains("sub"), "nested payload lost: {result:?}");
+    }
+
+    #[test]
+    fn test_first_child_nested_list_three_levels_keeps_all_levels() {
+        let html = b"<ul><li><ul><li>lvl2<ul><li>lvl3</li></ul></li></ul></li></ul>";
+        let dom = parse_html(html).expect("Parse failed");
+        let result = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("Conversion failed");
+        assert!(result.contains("lvl2"), "second level lost: {result:?}");
+        assert!(result.contains("lvl3"), "third level lost: {result:?}");
+    }
+
+    #[test]
+    fn test_first_child_nested_ordered_list_content_is_kept() {
+        let dom = parse_html(b"<ol><li><ol><li>deep</li></ol></li></ol>").expect("Parse failed");
+        let result = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("Conversion failed");
+        assert!(result.contains("deep"), "nested payload lost: {result:?}");
+    }
+
+    #[test]
+    fn test_first_child_nested_list_with_sibling_item() {
+        let html = b"<ul><li><ul><li>n1</li><li>n2</li></ul></li><li>Item 2</li></ul>";
+        let dom = parse_html(html).expect("Parse failed");
+        let result = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("Conversion failed");
+        assert!(result.contains("n1"), "nested item 1 lost: {result:?}");
+        assert!(result.contains("n2"), "nested item 2 lost: {result:?}");
+        assert!(result.contains("Item 2"), "sibling item lost: {result:?}");
+    }
+
     #[test]
     fn test_nested_ordered_list() {
         let html = b"<ol><li>First<ol><li>Sub 1</li><li>Sub 2</li></ol></li><li>Second</li></ol>";
@@ -2413,6 +2669,27 @@ mod tests {
     }
 
     #[test]
+    fn test_budgeted_writer_reserves_from_current_length() {
+        let mut output = String::with_capacity(128);
+        output.push_str(&"x".repeat(100));
+        let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
+        ctx.set_output_budget(1024);
+        let mut writer = BudgetedMarkdownWriter {
+            output: &mut output,
+            ctx: &mut ctx,
+        };
+
+        writer
+            .try_reserve(200)
+            .expect("the requested output capacity should fit the budget");
+
+        assert!(
+            writer.output.capacity() >= 300,
+            "fallible reservation must cover len + additional bytes"
+        );
+    }
+
+    #[test]
     fn test_nested_list_budget_counts_actual_newlines() {
         let dom =
             parse_html(b"<ul><li>outer<ul><li>nested one</li><li>nested two</li></ul></li></ul>")
@@ -2426,6 +2703,67 @@ mod tests {
             result.is_ok(),
             "nested list unexpectedly exceeded budget: {result:?}"
         );
+    }
+
+    /// High-escape-amplification input under a tight budget must fail with a
+    /// controlled MemoryLimit error instead of panicking or aborting.  The
+    /// incremental escaper rejects the node before the escaped expansion is
+    /// fully materialized.
+    #[test]
+    fn test_low_budget_high_escape_amplification_fails_controlled() {
+        // Each `_` doubles to `\_`; the escaped expansion approaches 2x.
+        let html = b"<p>__________________________</p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
+        ctx.set_output_budget(16);
+
+        let result = converter.convert_with_context(&dom, &mut ctx);
+        assert!(
+            matches!(result, Err(ConversionError::MemoryLimit(_))),
+            "expected controlled MemoryLimit, got {result:?}"
+        );
+    }
+
+    /// The front matter render must respect the budget: an oversized
+    /// title/description under a tiny budget fails with MemoryLimit instead
+    /// of allocating the full expansion first.
+    #[test]
+    fn test_front_matter_render_respects_budget() {
+        let html = b"<html><head><title>a very long page title that keeps going</title>\
+<meta name=\"description\" content=\"another fairly long description value\"></head>\
+<body><p>x</p></body></html>";
+        let dom = parse_html(html).expect("Parse failed");
+        let options = ConversionOptions {
+            include_front_matter: true,
+            extract_metadata: true,
+            ..Default::default()
+        };
+        let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
+        ctx.set_output_budget(64);
+
+        let result = MarkdownConverter::with_options(options).convert_with_context(&dom, &mut ctx);
+        assert!(
+            matches!(result, Err(ConversionError::MemoryLimit(_))),
+            "front matter unexpectedly fit the budget: {result:?}"
+        );
+    }
+
+    /// A front matter that fits must render byte-identically to the legacy
+    /// behavior (the working-set charge is invisible to the output).
+    #[test]
+    fn test_front_matter_output_unchanged_with_budget() {
+        let html = b"<html><head><title>T</title></head><body><p>body text</p></body></html>";
+        let dom = parse_html(html).expect("Parse failed");
+        let without_budget = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("conversion failed");
+        let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
+        ctx.set_output_budget(4096);
+        let with_budget = MarkdownConverter::new()
+            .convert_with_context(&dom, &mut ctx)
+            .expect("conversion failed");
+        assert_eq!(without_budget, with_budget);
     }
 
     // Tests for combined elements

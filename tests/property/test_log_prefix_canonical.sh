@@ -34,6 +34,30 @@ echo "=== Regression Test: Non-Canonical Log Prefix Detection ==="
 echo "Source directory: $SRCDIR"
 echo ""
 
+grep_space_prefixes() {
+    local source_file="$1"
+    grep -nH -E '"markdown [a-z]' "$source_file" || true
+    return 0
+}
+
+grep_space_prefix_count() {
+    local source_file="$1"
+    grep -c -E '"markdown [a-z]' "$source_file" || true
+    return 0
+}
+
+grep_underscore_prefixes() {
+    local source_file="$1"
+    grep -nH -E '"markdown_metrics:|"markdown_dynamic_config_path:|"markdown_stream_types:|"markdown_content_types:|"markdown_auth_cookies:' "$source_file" || true
+    return 0
+}
+
+grep_underscore_prefix_count() {
+    local source_file="$1"
+    grep -c -E '"markdown_metrics:|"markdown_dynamic_config_path:|"markdown_stream_types:|"markdown_content_types:|"markdown_auth_cookies:' "$source_file" || true
+    return 0
+}
+
 # --- Check 1: Space-separated non-canonical prefixes ---
 # Pattern: "markdown <word>" where <word> is NOT followed by ":"
 # This catches "markdown filter:", "markdown streaming:", etc.
@@ -41,13 +65,13 @@ echo "--- Check 1: Space-separated non-canonical prefixes ---"
 SPACE_PREFIXES=""
 SPACE_COUNT=0
 while IFS= read -r -d '' source_file; do
-    file_matches="$(grep -nH '"markdown [a-z]' "$source_file" || true)"
+    file_matches="$(grep_space_prefixes "$source_file")"
     if [[ -n "$file_matches" ]]; then
         if [[ -n "$SPACE_PREFIXES" ]]; then
             SPACE_PREFIXES+=$'\n'
         fi
         SPACE_PREFIXES+="$file_matches"
-        file_count="$(grep -c '"markdown [a-z]' "$source_file" || true)"
+        file_count="$(grep_space_prefix_count "$source_file")"
         SPACE_COUNT=$((SPACE_COUNT + file_count))
     fi
 done < <(find "$SRCDIR" -type f -print0)
@@ -75,17 +99,13 @@ echo "--- Check 2: Underscore-separated log prefixes ---"
 UNDERSCORE_PREFIXES=""
 UNDERSCORE_COUNT=0
 while IFS= read -r -d '' source_file; do
-    file_matches="$(grep -nH \
-        '"markdown_metrics:\|"markdown_dynamic_config_path:\|"markdown_stream_types:\|"markdown_content_types:\|"markdown_auth_cookies:' \
-        "$source_file" || true)"
+    file_matches="$(grep_underscore_prefixes "$source_file")"
     if [[ -n "$file_matches" ]]; then
         if [[ -n "$UNDERSCORE_PREFIXES" ]]; then
             UNDERSCORE_PREFIXES+=$'\n'
         fi
         UNDERSCORE_PREFIXES+="$file_matches"
-        file_count="$(grep -c \
-            '"markdown_metrics:\|"markdown_dynamic_config_path:\|"markdown_stream_types:\|"markdown_content_types:\|"markdown_auth_cookies:' \
-            "$source_file" || true)"
+        file_count="$(grep_underscore_prefix_count "$source_file")"
         UNDERSCORE_COUNT=$((UNDERSCORE_COUNT + file_count))
     fi
 done < <(find "$SRCDIR" -type f -print0)
@@ -117,8 +137,8 @@ if [[ "$FAIL" -eq 1 ]]; then
     echo "File distribution of non-canonical prefixes:"
     {
         while IFS= read -r -d '' source_file; do
-            grep -nH '"markdown [a-z]' "$source_file" | grep -v '"markdown:"' || true
-            grep -nH '"markdown_metrics:\|"markdown_dynamic_config_path:\|"markdown_stream_types:\|"markdown_content_types:\|"markdown_auth_cookies:' "$source_file" || true
+            grep_space_prefixes "$source_file" | grep -v '"markdown:"' || true
+            grep_underscore_prefixes "$source_file" || true
         done < <(find "$SRCDIR" -type f -print0)
     } | cut -d: -f1 | sort | uniq -c | sort -rn
     exit 1
