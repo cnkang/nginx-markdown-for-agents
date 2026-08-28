@@ -58,6 +58,8 @@ All patterns in this cookbook use existing NGINX configuration primitives (`map`
 - [CONFIGURATION.md](CONFIGURATION.md) — full directive reference
 - [DEPLOYMENT_EXAMPLES.md](DEPLOYMENT_EXAMPLES.md) — deployment patterns and verification
 - [OPERATIONS.md](OPERATIONS.md) — operational guide and metrics reference
+- [streaming-rollout-cookbook.md](streaming-rollout-cookbook.md) — streaming-specific
+  rollout and compressed-response verification
 
 ---
 
@@ -460,9 +462,9 @@ grep "markdown decision:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open\|reason=failed_closed" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c
 
-# Verify no FAIL_SYSTEM codes
+# Verify no internal system-failure categories
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -c "category=FAIL_SYSTEM"
+  grep -c "category=system"
 ```
 
 #### Safe to Continue
@@ -1186,9 +1188,9 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 #### Check for system-level failures
 
 ```bash
-# FAIL_SYSTEM indicates internal errors — these should never appear
+# category=system indicates internal errors — these should never appear
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -c "category=FAIL_SYSTEM"
+  grep -c "category=system"
 ```
 
 #### Check reason code distribution
@@ -1211,10 +1213,10 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 #### Check failure sub-classification
 
 ```bash
-# Break down failures by category (FAIL_CONVERSION, FAIL_RESOURCE_LIMIT, FAIL_SYSTEM)
+# Break down failures by category (conversion, resource_limit, system)
 # The category= field appears in decision log entries for failure outcomes
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -oP 'category=\K[A-Z_]+' | sort | uniq -c
+  grep -oP 'category=\K[a-z_]+' | sort | uniq -c
 ```
 
 #### Check per-URI failure patterns

@@ -44,7 +44,7 @@ Snapshot race elimination (v0.6.2):
 - In `ngx_http_markdown_header_filter()`, the global
   `ngx_http_markdown_dynconf_watcher.active_snapshot` must be read exactly
   once, at function entry, into a function-lifetime `snap_copy` variable.
-  the module derives `early_eff` from that `snap_copy` once via
+  The module derives `early_eff` from that `snap_copy` once via
   `ngx_http_markdown_build_effective_conf()`, also at function entry.
 - Both `snap_copy` and `early_eff` must have function-lifetime scope (not
   block scope), so they remain valid through ctx binding.

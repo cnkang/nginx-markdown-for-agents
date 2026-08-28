@@ -5,7 +5,7 @@ This page is the readable overlay, not the machine-owned truth.
 
 ## Verification Families
 
-| Family | Phase | Main commands |
+| Family | Phase | Main commands or workflow paths |
 |--------|-------|---------------|
 | `harness-sync` | cheap blocker | `make harness-check` |
 | `docs-tooling` | cheap blocker | `make docs-check` |
@@ -23,7 +23,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `public-surface-drift` | focused semantic | `make public-surface-drift-check` |
 | `schema-drift` | focused semantic | `make schema-drift-check` |
 | `reason-codegen` | focused semantic | `make reason-codegen-check` |
-| `observation` | report-oriented | `nightly-observation.yml`, `weekly-observation.yml` (release evidence and matrix drift, pinned SHAs) |
+| `observation` | report-oriented | workflow paths: `nightly-observation.yml`, `weekly-observation.yml` (release evidence and matrix drift, pinned SHAs) |
 | `release-governance` | focused semantic | `make workflow-context-check`, `make release-gates-check-080`, `make release-gates-check-092`, `make release-gates-check`, `make release-gates-check-strict` |
 | `release-manifest` | focused semantic | `python3 packaging/scripts/test_release_manifest.py`, `make release-gates-check` |
 | `release-matrix` | focused semantic | `make release-matrix-check` |
@@ -57,7 +57,7 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | `nginx-protocol-safety` | auth/cache-control, conditional requests, status and header semantics | observability, docs-tooling | [risk-packs/nginx-protocol-safety.md](risk-packs/nginx-protocol-safety.md) |
 | `tooling-path-security` | tooling path validation, safe path I/O, subprocess argument safety, shell hygiene, const correctness | docs-tooling, release-governance | [risk-packs/tooling-path-security.md](risk-packs/tooling-path-security.md) |
 | `security-static-supply-chain` | workflow static security, secret scanning, Rust dependency policy, supply-chain visibility | ci-gating, docs-tooling | [risk-packs/security-static-supply-chain.md](risk-packs/security-static-supply-chain.md) |
-| `release-governance` | release gates, scope governance, source-build CI | docs-tooling, harness-rules, harness-remediation | [risk-packs/release-governance.md](risk-packs/release-governance.md) |
+| `release-governance` | release gates, scope governance, source-build CI | docs-tooling, harness-rules | [risk-packs/release-governance.md](risk-packs/release-governance.md) |
 | `harness-remediation` | harness rules, steering adapters, post-analysis closeout | docs-tooling, observability | [risk-packs/harness-remediation.md](risk-packs/harness-remediation.md) |
 | `packaging-distribution` | APT/YUM repos, Homebrew tap, Helm chart, K8s Ingress | docs-tooling, release-governance | [risk-packs/packaging-distribution.md](risk-packs/packaging-distribution.md) |
 | `dynamic-config-hot-reload` | dynamic config parser, reload lifecycle, runtime apply | nginx-protocol, observability, docs-tooling | [risk-packs/dynamic-config-hot-reload.md](risk-packs/dynamic-config-hot-reload.md) |
@@ -98,7 +98,7 @@ Safety/engineering invariants always win. User-task controls scope and approach.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-11 | Kang | Recorded v090-gates, v091-gates, v092-gates, public-surface-drift, schema-drift, reason-codegen, and observation families |
+| 0.9.2 | 2026-08-11 | Kang | Recorded v092-gates, public-surface-drift, schema-drift, reason-codegen, and observation families |
 | 0.9.2 | 2026-08-06 | Kang | Added release-candidate-evidence, artifact-registry, release-evidence-manifest, fuzz-qualification, and soak-qualification verification families (five generic pre-freeze release gates) |
 | 0.9.2 | 2026-08-05 | Kang | Added release-matrix verification family (release-matrix-check gate) |
 | 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency verification families |

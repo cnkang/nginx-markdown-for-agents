@@ -77,7 +77,8 @@ Required:
   within the `catch_unwind` closure.  If the function panics after
   acquiring the resource, the Drop guard must release it so the caller
   does not leak or double-free.  Do not rely on the C caller to clean up
-  after a failed FFI call — the C side may not know which resources the C side acquired before the failure.
+  after a failed FFI call — the C side may not know which resources the Rust
+  side acquired before the failure.
   When ownership is successfully transferred to C, disarm the corresponding
   Drop guard immediately. Keep it armed through panic and error paths; it must
   never release a resource after C has taken ownership.

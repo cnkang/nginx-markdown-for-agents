@@ -39,7 +39,10 @@ the OTel subsystem entirely because:
 
 Remove all OTel implementation from the 0.9.2 release:
 
-- Delete `markdown_otel` and `markdown_otel_endpoint` from the command table
+- Delete `markdown_otel`, `markdown_otel_endpoint`, `tracing`, `metrics`,
+  `service_name`, `span_buffer_size`, and `export_timeout` from the command
+  table. The five latter names remain reject-only migration stubs where the
+  frozen command registry requires them
 - Delete all OTel implementation code (span creation, export, W3C parsing)
 - Remove `otel_enabled` and `otel_endpoint` from the configuration structure
 - Remove `otel_span` from the per-request context

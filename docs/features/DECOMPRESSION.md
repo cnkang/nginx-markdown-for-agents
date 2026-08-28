@@ -54,9 +54,10 @@ nginx_markdown_decompression_events_total{
 }
 ```
 
-The module counts the `ok` reason once with the `success` outcome after a decoder has completely
-finalized. It counts failures at the error classification point, before
-fail-open or fail-closed response handling. This makes event totals
+The `ok` label is a metric-only success sentinel. The failure labels are the
+canonical reason-code registry keys. The module counts them after the decoder
+classifies the error and before it handles fail-open or fail-closed responses.
+This makes event totals
 independent of whether the original body is ultimately delivered.
 
 ## Fail-open sequence

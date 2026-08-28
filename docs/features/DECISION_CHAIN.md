@@ -177,7 +177,7 @@ Operators can determine request state counts from metrics and logs:
 
 ## Reason Code Reference
 
-The registry declares the complete set of 27 reason codes in
+The registry declares the complete set of 28 reason codes in
 `components/rust-converter/reason_registry.toml`. The generator projects it
 into `reason_code.rs`, C metadata, diagnostics lookup, and release artifacts.
 The projections mirror [Observability Schema v2](../architecture/observability-schema-v2.md).
@@ -191,7 +191,7 @@ are not registry entries.
 |---|---|---|---|
 | Module disabled | `disabled` | NOT_ENABLED | Module disabled by configuration for this scope |
 | Not eligible (method/status/range/content-type/auth) | `not_eligible` | SKIPPED | Response not eligible for conversion |
-| Size gate blocked (`markdown_limits conversion_memory=` exceeded) | `memory_budget_exceeded` | FAILED | Hard cumulative input-size cap blocks conversion before the FFI attempt. The input is never truncated, and the primary outcome follows `markdown_error_policy` |
+| Size gate blocked (`markdown_limits conversion_memory=` exceeded) | `memory_budget_exceeded` | SKIPPED (not eligible) | Hard cumulative input-size cap makes the request ineligible before the FFI attempt. The input is never truncated, and the primary outcome follows `markdown_error_policy` |
 | Accept negotiation — no match | `skipped_accept` | SKIPPED | Accept header present but does not request Markdown |
 | Accept negotiation — no header (strict) | `skipped_no_accept` | SKIPPED | No Accept header present and `markdown_accept` is `strict` |
 | Accept negotiation — explicit reject | `skipped_accept_reject` | SKIPPED | `Accept` explicitly rejects Markdown (`q=0`) |

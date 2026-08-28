@@ -150,16 +150,17 @@ parser readiness, and resource policy still gate true streaming.
 
 The pre-commit replay window is internal in 0.9.2. The removed
 `markdown_stream_precommit_buffer` directive (256k default) is gone.
-`markdown_limits streaming_buffer=<size>` (2 MiB default, 64k-1g)
-bounds the replay window.
+`markdown_limits streaming_buffer=<size>` (2 MiB default, 64k-1g) is the
+shared total per-request budget for the Rust streaming working set and the
+pre-commit replay window. Neither component receives a separate budget.
 
 The replay window holds raw upstream HTML bytes before the module
 commits to Markdown output. If the streaming parser determines during
 the pre-commit phase that the response is not convertible, the module
 replays these raw bytes and continues as a passthrough.
 
-This is NOT a full-response buffer. It is the window within which the
-module can still safely fall back to original HTML.
+This is NOT a full-response buffer. It is the replay portion of the shared
+budget within which the module can still safely fall back to original HTML.
 
 ### 2.4 Output Flush Policy
 
@@ -302,7 +303,9 @@ Exceeding the limits triggers the fallback path. The module then applies the con
 
 Full-buffer fallback is **not** an error. It is a normal `auto`-mode decision.
 
-Metric: `engine_choice{engine="full_buffer",reason="<reason_code>"}`
+Metric: `nginx_markdown_conversion_attempts_total{engine="full_buffer"}`.
+The frozen family has no reason label. The selected engine is the observable
+classification for this normal `auto`-mode decision.
 
 ### 3.3 Passthrough Fallback
 
@@ -343,8 +346,8 @@ When an error occurs post-commit:
 
 **Metrics**:
 
-- `streaming_failure_total{phase="postcommit",action="abort"}`
-- `streaming_failure_total{phase="postcommit",action="safe_finish"}`
+- `nginx_markdown_streaming_events_total{transition="abort_start",reason="streaming_mid_flight_error"}`
+- `nginx_markdown_streaming_events_total{transition="safe_finish_start",reason="converted"}`
 
 **Suggested error log fields**:
 

@@ -50,7 +50,8 @@ After installing this package:
 For detailed installation and configuration instructions, see:
 
 - **Full documentation**: <https://github.com/cnkang/nginx-markdown-for-agents>
-- **Installation guide**: `INSTALL.md` (included in this package)
+- **Installation guide**: `PACKAGE_INSTALLATION.md` (included in this package)
+- **Documentation index**: `INSTALL.md` (included in this package)
 - **Compatibility info**: `COMPATIBILITY.md` (included in this package)
 
 ## Compatibility Warning

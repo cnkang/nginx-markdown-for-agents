@@ -57,7 +57,7 @@ verifiable gate items:
 
 | Gate Category | Verification Scope | Verification Method |
 |---------------|-------------------|---------------------|
-| Documentation | Sub-spec docs, operator docs, config guide, rollout cookbook, compatibility matrix | Document existence check + `make docs-check` |
+| Documentation | Sub-spec docs, operator docs, config guide, rollout cookbook, compatibility matrix | Document existence and accuracy/completeness review + `make docs-check` |
 | Testing | CI pass, diff tests, chunk-boundary fuzzing, failure-path tests, bounded-memory evidence | CI artifacts + test reports |
 | Compatibility | Full-buffer default behavior unchanged, streaming default off, matrix verified, new directive defaults | e2e tests + compatibility review |
 | Operations | Operator can enable/rollback/observe/shadow-verify streaming path | Documentation + operational verification |

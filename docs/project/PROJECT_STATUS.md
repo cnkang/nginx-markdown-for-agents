@@ -407,7 +407,8 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 ### Current Release Line (0.9.x)
 
 The 0.9.x release line is the current maintained line. The current
-release is 0.9.2 (development line). 0.9.1 is the previous release — a
+development version is 0.9.2. 0.9.1 remains the latest released patch until
+the 0.9.2 release tag and release gates are complete. It is a
 baseline-consolidation and compatibility-reset release that adds
 hybrid zero-copy streaming output, gzip/deflate/Brotli streaming decompression,
 performance evidence gates, and a doctor advice tool, on top of the 0.9.0

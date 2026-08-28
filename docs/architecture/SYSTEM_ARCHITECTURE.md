@@ -188,7 +188,8 @@ The architecture supports two conversion engines:
 - **Full-buffer engine** (default for small responses): buffers the full eligible response before conversion. This makes correctness, deterministic output, and header handling simpler. Tradeoffs:
   - larger responses consume more memory
   - conversion cannot start streaming output immediately
-  - you should usually bypass very large or streaming-style content
+  - very large or streaming-style content should use streaming when eligible,
+    or passthrough when ineligible
 
 - **Streaming engine** (since v0.8.0, enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline. The pipeline runs charset detection, tokenization, sanitization, a state machine, and emission. Tradeoffs:
   - bounded per-request working-set memory (configurable via

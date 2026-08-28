@@ -5,6 +5,10 @@ surface. It uses the module's current explicit directives and Prometheus
 families. Profiles, threshold directives, and zero-copy switches are not part
 of the active configuration contract.
 
+This is the streaming-specific supplement to the broader
+[Rollout Cookbook](ROLLOUT_COOKBOOK.md), which covers general staged rollout,
+selective enablement, and non-streaming operational patterns.
+
 ## Before rollout
 
 Validate the binary and configuration:
@@ -97,8 +101,22 @@ curl -sD - -o "$SNAPSHOT_DIR/markdown-gzip.out" \
 ```
 
 The expected converted response has `Content-Type: text/markdown` and valid
-Markdown output. Compare body length and terminal delivery metrics, a
-downstream `NGX_AGAIN` is a suspension, not a successful delivery.
+Markdown output. Capture isolated metric snapshots before and after the
+request, for example:
+
+```bash
+curl -s http://staging.example.com/markdown-metrics \
+  > "$SNAPSHOT_DIR/metrics.before"
+# Send the request shown above, then capture the after snapshot.
+curl -s http://staging.example.com/markdown-metrics \
+  > "$SNAPSHOT_DIR/metrics.after"
+```
+
+Assert that `nginx_markdown_conversion_deliveries_total{engine="streaming"}`
+increases by exactly one. If you need byte accounting, compare the delta of
+`nginx_markdown_output_bytes_total`. Never use a delivery count as a byte
+measurement. A downstream `NGX_AGAIN` is a suspension, not a successful
+delivery.
 
 ## Go/no-go signals
 
