@@ -887,10 +887,68 @@ ngx_http_markdown_metrics_send_response(
 }
 
 /*
+ * Send the metrics endpoint's 405 response and Allow header, mirroring the
+ * diagnostics endpoint's transactional pattern: allocate the body buffer
+ * first, then the Allow header, so an allocation failure never leaves a live
+ * Allow header on a 500.  NGINX does not add the Allow header for 405
+ * responses from content handlers; RFC 9110 Section 15.5.6 requires it.
+ */
+static ngx_int_t
+ngx_http_markdown_metrics_method_not_allowed(ngx_http_request_t *r)
+{
+    static u_char body[] = "Method Not Allowed. Use GET or HEAD.\n";
+    ngx_table_elt_t  *allow_hdr;
+    ngx_buf_t    *b;
+    ngx_chain_t   out;
+    ngx_int_t     rc;
+
+    rc = ngx_http_discard_request_body(r);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    if (b == NULL) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    allow_hdr = ngx_list_push(&r->headers_out.headers);
+    if (allow_hdr == NULL) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+    allow_hdr->hash = 1;
+    ngx_str_set(&allow_hdr->key, "Allow");
+    ngx_str_set(&allow_hdr->value, "GET, HEAD");
+
+    b->pos = body;
+    b->last = body + sizeof(body) - 1;
+    b->memory = 1;
+    b->last_in_chain = 1;
+    b->last_buf = (r == r->main) ? 1 : 0;
+
+    r->headers_out.status = NGX_HTTP_NOT_ALLOWED;
+    r->headers_out.content_type_len = sizeof("text/plain") - 1;
+    ngx_str_set(&r->headers_out.content_type, "text/plain");
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
+    r->headers_out.content_length_n = b->last - b->pos;
+
+    rc = ngx_http_send_header(r);
+    if (rc == NGX_ERROR || rc > NGX_OK) {
+        return rc;
+    }
+
+    out.buf = b;
+    out.next = NULL;
+    return ngx_http_output_filter(r, &out);
+}
+
+/*
  * HTTP handler for the /markdown_metrics endpoint.
  *
  * - Only responds to GET and HEAD requests; other methods are rejected with
- *   NGX_HTTP_NOT_ALLOWED.
+ *   NGX_HTTP_NOT_ALLOWED and an Allow: GET, HEAD header per RFC 9110
+ *   Section 15.5.6.
  * - Access is restricted to localhost: IPv4 and (when enabled) IPv6 source
  *   addresses are checked and non-local clients receive NGX_HTTP_FORBIDDEN.
  * - Collects a best-effort snapshot of the shared markdown metrics counters
@@ -912,6 +970,9 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
 
     rc = ngx_http_markdown_metrics_validate_request(r);
     if (rc != NGX_OK) {
+        if (rc == NGX_HTTP_NOT_ALLOWED) {
+            return ngx_http_markdown_metrics_method_not_allowed(r);
+        }
         return rc;
     }
 
