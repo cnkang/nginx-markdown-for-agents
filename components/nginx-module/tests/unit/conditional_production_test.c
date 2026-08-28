@@ -557,6 +557,85 @@ ngx_http_markdown_clear_trailers(ngx_http_request_t *r)
     }
 }
 
+/* Test-local mirror of the production Vary helper (headers_impl.h): find an
+ * existing Vary header, add "Accept" when absent, append the Accept token to
+ * an existing value, and treat an existing Accept token as a no-op.  The
+ * dedup behavior is the contract under test for the 304 path; keeping it
+ * beside the other mirrors keeps the conditional suite self-contained. */
+static u_char test_hdr_vary[] = "Vary";
+static u_char test_hdr_accept[] = "Accept";
+static u_char test_vary_suffix[] = ", Accept";
+
+static ngx_table_elt_t *
+test_find_header_ci(ngx_http_request_t *r, const u_char *name, size_t name_len)
+{
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash != 0
+                && headers[i].key.len == name_len
+                && strncasecmp((const char *) headers[i].key.data,
+                               (const char *) name, name_len) == 0)
+            {
+                return &headers[i];
+            }
+        }
+    }
+    return NULL;
+}
+
+ngx_int_t
+ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
+{
+    ngx_table_elt_t *vary = test_find_header_ci(
+        r, test_hdr_vary, sizeof(test_hdr_vary) - 1);
+
+    if (vary == NULL) {
+        ngx_table_elt_t *h = ngx_list_push(&r->headers_out.headers);
+        if (h == NULL) {
+            return NGX_ERROR;
+        }
+        h->hash = 1;
+        h->key.data = test_hdr_vary;
+        h->key.len = sizeof(test_hdr_vary) - 1;
+        h->value.data = test_hdr_accept;
+        h->value.len = sizeof(test_hdr_accept) - 1;
+        return NGX_OK;
+    }
+
+    /* Already carries the Accept token: dedup no-op. */
+    if (vary->value.len == sizeof(test_hdr_accept) - 1
+        && strncasecmp((const char *) vary->value.data,
+                       (const char *) test_hdr_accept,
+                       sizeof(test_hdr_accept) - 1) == 0)
+    {
+        return NGX_OK;
+    }
+
+    if (vary->value.len
+        > ((size_t) -1) - (sizeof(test_vary_suffix) - 1))
+    {
+        return NGX_ERROR;
+    }
+
+    size_t  len = vary->value.len + sizeof(test_vary_suffix) - 1;
+    u_char *p = ngx_pnalloc(r->pool, len);
+    if (p == NULL) {
+        return NGX_ERROR;
+    }
+
+    u_char *tail = ngx_cpymem(p, vary->value.data, vary->value.len);
+    tail = ngx_cpymem(tail, test_vary_suffix, sizeof(test_vary_suffix) - 1);
+    (void) tail;
+
+    vary->value.data = p;
+    vary->value.len = len;
+    return NGX_OK;
+}
+
 static ngx_list_t *
 create_header_list(void)
 {
@@ -637,6 +716,90 @@ fill_response_headers(ngx_http_request_t *r)
     }
 
     return original_etag;
+}
+
+/* Count live Vary headers in the response header list. */
+static ngx_uint_t
+count_vary_headers(ngx_http_request_t *r)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *headers;
+    ngx_uint_t        count = 0;
+
+    for (part = &r->headers_out.headers.part; part != NULL;
+         part = part->next)
+    {
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash != 0 && headers[i].key.len == 4
+                && strncasecmp((const char *) headers[i].key.data,
+                               "Vary", 4)
+                   == 0)
+            {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+/* A 304 for an upstream response that already carries Vary: Accept must
+ * reuse that header (the shared dedup helper) rather than pushing a second
+ * Vary entry — HTTP combiners would fold the duplicate, but a doubled Vary
+ * leaks the module's mutation and complicates downstream caches. */
+static void
+test_send_304_does_not_duplicate_upstream_vary(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *upstream_vary;
+    struct MarkdownResult result;
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    r->headers_out.trailers = *create_header_list();
+    upstream_vary = add_header(&r->headers_out.headers, "Vary", "Accept");
+    memset(&result, 0, sizeof(result));
+
+    TEST_ASSERT(ngx_http_markdown_send_304(r, &result) == NGX_DONE,
+                "send_304 succeeds with an upstream Vary header");
+    TEST_ASSERT(count_vary_headers(r) == 1,
+                "no second Vary header is added for the 304");
+    TEST_ASSERT(upstream_vary->hash != 0,
+                "the upstream Vary header stays in place");
+
+    TEST_PASS("304 with an upstream Vary: Accept does not add a second Vary");
+}
+
+/* A 304 for an upstream response carrying a different Vary token must
+ * append Accept to the existing header, not emit a second Vary entry. */
+static void
+test_send_304_appends_accept_to_upstream_vary(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *upstream_vary;
+    struct MarkdownResult result;
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    r->headers_out.trailers = *create_header_list();
+    upstream_vary = add_header(&r->headers_out.headers,
+                               "Vary", "Accept-Encoding");
+    memset(&result, 0, sizeof(result));
+
+    TEST_ASSERT(ngx_http_markdown_send_304(r, &result) == NGX_DONE,
+                "send_304 succeeds with a foreign Vary token");
+    TEST_ASSERT(count_vary_headers(r) == 1,
+                "no second Vary header is added");
+    TEST_ASSERT(upstream_vary->value.len > sizeof("Accept-Encoding") - 1,
+                "Accept appended to the upstream Vary value");
+
+    TEST_PASS("304 appends Accept to an existing foreign Vary header");
 }
 
 static void
@@ -1599,6 +1762,8 @@ main(void)
     printf("========================================\n");
 
     test_send_304_with_etag();
+    test_send_304_does_not_duplicate_upstream_vary();
+    test_send_304_appends_accept_to_upstream_vary();
     test_send_304_replaces_existing_etag();
     test_auth_ignores_invalidated_authorization();
     test_send_304_null_result();
