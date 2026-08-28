@@ -966,6 +966,26 @@ pub fn escape_markdown_text(s: &str) -> String {
     escape_markdown_text_with_state(s, &mut state)
 }
 
+/// Escape one character into `out`, advancing `state`.
+///
+/// Incremental companion to [`escape_markdown_text_with_state`]: the escape
+/// decisions are identical, but the caller controls the destination buffer so
+/// budget-aware writers can append without materializing a full escaped copy
+/// of the source text first.
+pub(crate) fn push_escaped_char(out: &mut String, ch: char, state: &mut MarkdownTextEscapeState) {
+    let block_marker = state.line_prefix
+        && state.indent <= 3
+        && (matches!(ch, '#' | '>' | '+' | '-' | '!' | '|' | '=')
+            || (matches!(ch, '.' | ')') && state.ordered_digits));
+    let inline_delimiter = matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~');
+
+    if block_marker || inline_delimiter {
+        out.push('\\');
+    }
+    out.push(ch);
+    state.advance(ch);
+}
+
 #[cfg(test)]
 mod url_validation_tests {
     use super::*;
