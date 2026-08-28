@@ -201,7 +201,11 @@ docker rmi nginx-markdown-builder
 # Compress it as a tar.gz for distribution
 cd "$OUT_DIR"
 TAR_NAME="ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz"
-tar -czf "$TAR_NAME" ngx_http_markdown_filter_module.so
+# macOS can attach extended attributes to files copied out of Docker.  BSD
+# tar otherwise serializes those attributes as AppleDouble members (._*),
+# which turns the single-module release archive into an invalid multi-member
+# artifact for the installer's strict archive contract.
+COPYFILE_DISABLE=1 tar --no-xattrs -czf "$TAR_NAME" ngx_http_markdown_filter_module.so
 cd - > /dev/null
 
 echo "==> Successfully built: $OUT_DIR/$TAR_NAME"

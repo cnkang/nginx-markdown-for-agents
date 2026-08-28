@@ -204,6 +204,7 @@ json_output() {
   if [[ "${#_json_suggestions[@]}" -gt 0 ]]; then
     suggestions_json="["
     local first=1
+    local escaped=""
     for s in "${_json_suggestions[@]}"; do
       if [[ "$first" -eq 1 ]]; then
         first=0

@@ -19,6 +19,7 @@ INSTALL_SCRIPT="$REPO_ROOT/tools/install.sh"
 PASS_COUNT=0
 FAIL_COUNT=0
 SKIP_COUNT=0
+_PYTHON3_HIDDEN_SKIPPED=0
 
 # Track temporary shim directories for cleanup on interruption
 _SHIM_DIRS=()
@@ -238,6 +239,7 @@ EOF
 
 run_hiding_python3_with_fake_nginx() {
   shift
+  _PYTHON3_HIDDEN_SKIPPED=0
 
   local stderr_file stdout_file shim_info trusted_nginx candidate
   stderr_file="$(mktemp)"
@@ -262,6 +264,7 @@ run_hiding_python3_with_fake_nginx() {
   if [[ -z "$trusted_nginx" ]]; then
     rm -f "$stderr_file" "$stdout_file"
     rm -rf "$shim_dir"
+    _PYTHON3_HIDDEN_SKIPPED=1
     skip "python3 hidden — no trusted system nginx executable available"
     return 0
   fi
@@ -380,33 +383,35 @@ echo ""
 echo "Test 4: --json with python3 hidden produces one config error" >&2
 run_hiding_python3_with_fake_nginx "python3 hidden" --json
 
-JSON_OUT="$_LAST_STDOUT"
-JSON_LINES="$(printf '%s\n' "$JSON_OUT" | grep '^{' || true)"
-JSON_LINE_COUNT="$(printf '%s\n' "$JSON_LINES" | sed '/^$/d' | wc -l | tr -d ' ')"
+if [[ "$_PYTHON3_HIDDEN_SKIPPED" -ne 1 ]]; then
+  JSON_OUT="$_LAST_STDOUT"
+  JSON_LINES="$(printf '%s\n' "$JSON_OUT" | grep '^{' || true)"
+  JSON_LINE_COUNT="$(printf '%s\n' "$JSON_LINES" | sed '/^$/d' | wc -l | tr -d ' ')"
 
-if [[ "$JSON_LINE_COUNT" = "1" ]]; then
-  pass "python3 hidden — stdout contains exactly one JSON document"
-else
-  fail "python3 hidden — expected exactly one JSON document" \
-       "stdout: $(printf '%s' "$JSON_OUT" | tr '\n' ' ' | head -c 240)"
-fi
+  if [[ "$JSON_LINE_COUNT" = "1" ]]; then
+    pass "python3 hidden — stdout contains exactly one JSON document"
+  else
+    fail "python3 hidden — expected exactly one JSON document" \
+         "stdout: $(printf '%s' "$JSON_OUT" | tr '\n' ' ' | head -c 240)"
+  fi
 
-JSON_LINE="$(printf '%s\n' "$JSON_LINES" | tail -1)"
-if [[ -z "$JSON_LINE" ]]; then
-  fail "python3 hidden — no JSON line found in stdout"
-elif ! command -v python3 >/dev/null 2>&1; then
-  skip "python3 hidden — JSON schema validation skipped (python3 unavailable)"
-elif echo "$JSON_LINE" | python3 -c "
+  JSON_LINE="$(printf '%s\n' "$JSON_LINES" | tail -1)"
+  if [[ -z "$JSON_LINE" ]]; then
+    fail "python3 hidden — no JSON line found in stdout"
+  elif ! command -v python3 >/dev/null 2>&1; then
+    skip "python3 hidden — JSON schema validation skipped (python3 unavailable)"
+  elif echo "$JSON_LINE" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 assert data.get('success') is False, 'success should be false'
 assert (data.get('error') or {}).get('category') == 'config', 'error.category should be config'
 assert (data.get('error') or {}).get('message') == 'python3 is required by the installer but was not found.', 'error.message should identify missing python3'
 " 2>/dev/null; then
-    pass "python3 hidden — JSON error category and exact message remain stable"
-else
-  fail "python3 hidden — JSON error category validation failed" \
-       "json line: $(echo "$JSON_LINE" | head -1)"
+      pass "python3 hidden — JSON error category and exact message remain stable"
+  else
+    fail "python3 hidden — JSON error category validation failed" \
+         "json line: $(echo "$JSON_LINE" | head -1)"
+  fi
 fi
 echo ""
 

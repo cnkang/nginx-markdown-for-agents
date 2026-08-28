@@ -212,7 +212,6 @@ check_active_configuration() {
     local nginx_candidate
     local nginx_dump
     local nginx_status=0
-    local config_seen=0
     local config_status=0
 
     nginx_candidate="$(command -v nginx 2>/dev/null || true)"
@@ -239,7 +238,6 @@ check_active_configuration() {
     for config_path in /etc/nginx/nginx.conf \
         /etc/nginx/conf.d/*.conf /etc/nginx/modules-enabled/*.conf; do
         if [[ -f "$config_path" ]]; then
-            config_seen=1
             config_status=0
             configuration_loads_module "$config_path" || config_status=$?
             if [[ "$config_status" -eq 0 ]]; then

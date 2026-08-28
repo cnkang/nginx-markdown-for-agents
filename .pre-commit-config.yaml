@@ -125,7 +125,7 @@ repos:
         # (Rule 61); reformatting it would invalidate provenance.  Fix the
         # generator and re-finalize the baseline instead.
         # Fuzz corpus entries are also byte-exact inputs; never rewrite them.
-        exclude: ^(perf/baselines/.*-raw-probes/|components/rust-converter/fuzz/corpus/)
+        exclude: ^(perf/baselines/.*-raw-probes/|components/rust-converter/fuzz/corpus/|tests/corpus/edge-cases/whitespace-heavy\.html$)
       - id: end-of-file-fixer
         # Same Rule 61 evidence-binding exclusion as trailing-whitespace.
         # Fuzz corpus entries are also byte-exact inputs; never rewrite them.

@@ -224,8 +224,6 @@ END { print maximum + 0 }
 assert_exact_generation() {
     local label="$1"
     local expected="$2"
-    local matched=0
-    local mismatch=0
     if awk -F '\t' -v label="${label}" -v expected="${expected}" '
 $1 == label {
     matched = 1
