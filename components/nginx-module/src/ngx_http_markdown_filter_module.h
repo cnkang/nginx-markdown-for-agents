@@ -75,9 +75,11 @@ ngx_http_markdown_brotli_workspace_limit(ngx_atomic_uint_t configured_limit)
 
 /*
  * Brotli decoder error classes shared by buffered and streaming paths.
- * Brotli 1.0.x reserves gaps in its error-code enum, so classify the
- * documented format and allocation codes explicitly instead of treating
- * contiguous numeric ranges as equivalent.
+ * Brotli 1.0.x defines format errors -1..-16, allocation errors -21, -22,
+ * -25..-27, and -30.  The gaps -17, -23..-24, and -28..-29 are reserved;
+ * -18..-20 and -31 are non-format errors.  Keep the explicit cases aligned
+ * with BrotliDecoderErrorCode rather than treating numeric ranges as
+ * equivalent; unknown values remain internal failures.
  */
 typedef enum {
     NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT = 0,

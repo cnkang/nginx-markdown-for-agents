@@ -1952,7 +1952,7 @@ test_brotli_error_classification(void)
         TEST_ASSERT(
             ngx_http_markdown_brotli_error_classify(code)
                 == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-            "Brotli reserved/control code must use the system-error class");
+            "Brotli reserved/generic code must use the system-error class");
     }
     for (code = -23; code >= -24; code--) {
         TEST_ASSERT(

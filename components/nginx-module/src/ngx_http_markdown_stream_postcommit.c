@@ -750,7 +750,7 @@ ngx_http_markdown_stream_postcommit_send_chain(
      * Reset failure origin at entry so a successful send (which never
      * sets the origin below) cannot leak a stale origin from a prior
      * send.  Each failure branch then overwrites with the precise
-     * provenance (Spec: post-commit sender failurethree-way classification).
+     * provenance (Spec: post-commit sender failure three-way classification).
      */
     ctx->streaming.classify.last_send_failure_origin =
         NGX_HTTP_MD_SEND_ORIGIN_NONE;

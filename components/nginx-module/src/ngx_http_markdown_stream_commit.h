@@ -53,7 +53,9 @@
  *     If any fails, NGX_ERROR is returned before headers are sent
  *     downstream.  The original header state is snapshotted, headers_out
  *     is mutated in place, and the snapshot is restored if Phase 1 fails
- *     — no partial mutations are visible to the fallback path.
+ *     — no partial mutations are visible to the fallback path.  If the
+ *     snapshot cannot be verified/restored, the internal restore-failure
+ *     sentinel is returned and the caller must fail closed.
  *   Phase 2: infallible mutations (Content-Type, Content-Length,
  *     Content-Encoding).  These always succeed.
  *
@@ -71,7 +73,10 @@
  *
  * Returns:
  *   NGX_OK    - Headers committed, streaming proceeds
- *   NGX_ERROR - Commit failed, caller should fallback
+ *   NGX_ERROR - Commit failed and rollback succeeded; caller may fallback
+ *   NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED - rollback could not
+ *     prove that the original response headers were restored; caller must
+ *     fail closed
  */
 ngx_int_t
 ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,

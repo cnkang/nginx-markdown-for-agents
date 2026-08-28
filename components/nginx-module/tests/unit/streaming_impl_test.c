@@ -1385,6 +1385,8 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 
 static ngx_int_t g_stream_commit_headers_rc = NGX_OK;
 static int g_stream_commit_headers_called;
+static ngx_int_t g_stream_header_snapshot_failure_rc = NGX_ERROR;
+static int g_stream_header_snapshot_failure_called;
 
 /* Shared counter mirroring the production pending-output request count:
  * incremented when a NULL slot takes a non-NULL chain and decremented on
@@ -1400,6 +1402,20 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     (void) r; (void) ctx; (void) conf;
     g_stream_commit_headers_called++;
     return g_stream_commit_headers_rc;
+}
+
+/* Stub for the request-layer terminal handler. */
+static ngx_int_t
+ngx_http_markdown_streaming_handle_header_snapshot_failure(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    UNUSED(r);
+    UNUSED(ctx);
+    UNUSED(conf);
+    g_stream_header_snapshot_failure_called++;
+    return g_stream_header_snapshot_failure_rc;
 }
 
 void
@@ -1473,6 +1489,8 @@ reset_globals(void)
     g_set_etag_rc = NGX_OK;
     g_stream_commit_headers_rc = NGX_OK;
     g_stream_commit_headers_called = 0;
+    g_stream_header_snapshot_failure_rc = NGX_ERROR;
+    g_stream_header_snapshot_failure_called = 0;
     g_pending_output_state = 0;
     g_buffer_init_rc = NGX_OK;
     g_buffer_init_fail_after = 0;
@@ -3120,6 +3138,43 @@ test_commit_feed_and_finalize_core_paths(void)
         "terminal last_buf hard errors should record failure");
 
     TEST_PASS("commit/feed-result/finalize core branches covered");
+}
+
+
+/*
+ * A header snapshot rollback failure is not a capability fallback.  The
+ * streaming commit caller must route the distinct sentinel to the terminal
+ * handler so an uncertain response-header state cannot be passed through.
+ */
+static void
+test_streaming_header_snapshot_failure_is_terminal(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_int_t                rc;
+
+    TEST_SUBSECTION("streaming header rollback failure is terminal");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    g_stream_commit_headers_rc =
+        NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED;
+
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+        "header rollback sentinel must use the terminal handler result");
+    TEST_ASSERT(g_stream_header_snapshot_failure_called == 1,
+        "header rollback sentinel must invoke the terminal handler");
+    TEST_ASSERT(g_stream_commit_headers_called == 1,
+        "header commit must be attempted once before terminal handling");
+
+    TEST_PASS("streaming header rollback failure is terminal");
 }
 
 
@@ -7183,6 +7238,7 @@ main(void)
     test_null_input_tracking_and_body_filter_entry();
     test_init_handle_and_chunk_result_helpers();
     test_commit_feed_and_finalize_core_paths();
+    test_streaming_header_snapshot_failure_is_terminal();
     test_header_commit_backpressure_retry_is_atomic();
     test_feed_path_resumes_pending_header_commit();
     test_success_output_defers_body_when_commit_again();

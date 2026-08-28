@@ -306,14 +306,18 @@ impl<'a> BudgetedMarkdownWriter<'a> {
             )));
         }
 
-        let capacity_shortfall = required_len.saturating_sub(self.output.capacity());
-        if capacity_shortfall > 0 {
+        // String::try_reserve_exact() takes additional bytes beyond the
+        // current length, not beyond the current capacity.  Reserving the
+        // capacity shortfall can leave the following push infallible only by
+        // accident when len < capacity < required_len.
+        let additional_capacity = required_len.saturating_sub(self.output.len());
+        if additional_capacity > 0 {
             self.output
-                .try_reserve_exact(capacity_shortfall)
+                .try_reserve_exact(additional_capacity)
                 .map_err(|error| {
                     ConversionError::MemoryLimit(format!(
                         "unable to reserve {} bytes for generated Markdown: {}",
-                        capacity_shortfall, error
+                        additional_capacity, error
                     ))
                 })?;
         }
@@ -845,8 +849,7 @@ impl MarkdownConverter {
             // and fails with a controlled error instead of an allocator abort.
             let capacity = output.capacity();
             ctx.reserve_working_set_with_output(capacity, capacity)?;
-            let normalizer = large_response::FusedNormalizer::try_new(capacity)?;
-            let mut normalizer = normalizer;
+            let mut normalizer = large_response::FusedNormalizer::try_new(capacity)?;
             for line in output.split('\n') {
                 normalizer.push_line(line);
             }
@@ -2663,6 +2666,27 @@ mod tests {
 
         let result = converter.convert_with_context(&dom, &mut ctx);
         assert!(matches!(result, Err(ConversionError::MemoryLimit(_))));
+    }
+
+    #[test]
+    fn test_budgeted_writer_reserves_from_current_length() {
+        let mut output = String::with_capacity(128);
+        output.push_str(&"x".repeat(100));
+        let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
+        ctx.set_output_budget(1024);
+        let mut writer = BudgetedMarkdownWriter {
+            output: &mut output,
+            ctx: &mut ctx,
+        };
+
+        writer
+            .try_reserve(200)
+            .expect("the requested output capacity should fit the budget");
+
+        assert!(
+            writer.output.capacity() >= 300,
+            "fallible reservation must cover len + additional bytes"
+        );
     }
 
     #[test]

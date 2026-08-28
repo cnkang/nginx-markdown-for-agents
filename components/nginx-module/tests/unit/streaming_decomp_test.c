@@ -1071,7 +1071,7 @@ test_truncated_brotli_finish_errors(void)
  *
  * Uses integer casts exclusively (not named enum constants) to pin the
  * documented Brotli 1.0.9 (Ubuntu 22.04) error-code mapping, including
- * reserved gaps that must remain internal.
+ * reserved gaps and non-format control errors that must remain internal.
  */
 static void
 test_brotli_error_classification(void)
@@ -1122,7 +1122,7 @@ test_brotli_error_classification(void)
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "code -17 should classify as INTERNAL");
 
-    /* INTERNAL: -18 (reserved) */
+    /* INTERNAL: -18 (generic compound-dictionary error) */
     cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-18));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
@@ -2298,9 +2298,9 @@ test_brotli_no_progress_guard_and_error_propagation(void)
      *
      * test_brotli_error_classification() is already called from main()
      * and covers:
-     *   - FORMAT codes (-1 to -17) classify correctly
-     *   - ALLOCATION codes (-21 to -30) classify correctly
-     *   - INTERNAL codes (-18 to -20, -31) classify correctly
+     *   - FORMAT codes (-1 to -16) classify correctly
+     *   - ALLOCATION codes (-21, -22, -25 to -27, -30) classify correctly
+     *   - INTERNAL codes (-17 to -20, -31) classify correctly
      *   - Unknown out-of-range classifies as INTERNAL (not FORMAT)
      *
      * This test adds a complementary end-to-end verification that a
@@ -5010,6 +5010,14 @@ test_finish_guard_and_alloc_branches(void)
     TEST_ASSERT(rc == NGX_OK, "finished decompressor should no-op in finish");
     TEST_ASSERT(out == NULL && out_len == 0,
         "finished decompressor should emit empty finish output");
+
+    decomp->max_decompressed_size = 1;
+    rc = ngx_http_markdown_streaming_decomp_finish(
+        decomp, &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "repeated finish should remain an idempotent no-op");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "repeated finish should not emit output or recheck limits");
 
     decomp->finished = 0;
     g_alloc_fail_once = 1;
