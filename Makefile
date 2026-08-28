@@ -1161,6 +1161,12 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 # performance-only workflow's partial evidence.
 release-gates-check-092: release-gates-check-092-canonical
 	@echo "=== 0.9.2 Release Gates (blocking) ==="
+	@echo "  [7/13] Release tag ref protection (immutable v* tags)"
+	# A published tag anchors source archives, provenance, and signatures to
+	# the approved candidate; an unprotected tag can be moved or deleted after
+	# publication, splitting provenance.  Fails closed when the API is
+	# unreachable.  See tools/release/gates/verify_tag_ref_protection.py.
+	python3 tools/release/gates/verify_tag_ref_protection.py
 	@echo "  [8/13] Release candidate evidence bound to HEAD"
 	# The candidate-bound manifests are workflow outputs (generated from
 	# tracked policy/scope inputs at release time), not tracked working-tree
