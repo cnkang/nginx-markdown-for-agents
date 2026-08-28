@@ -19,6 +19,7 @@ No user-supplied patterns are compiled at runtime.
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
 import sys
@@ -402,6 +403,38 @@ def _check_container_bash_shell(
         )
 
 
+def _split_deb_epoch(version: str) -> tuple[int, str]:
+    """Split an optional numeric Debian epoch from the rest of the version."""
+    if ":" in version:
+        epoch, _, rest = version.partition(":")
+        return int(epoch), rest
+    return 0, version
+
+
+def _deb_part_key(part: str) -> tuple:
+    """Order one Debian version part segment-wise.
+
+    Alternating non-digit and digit segments; digit runs compare numerically
+    (missing digit segments compare as zero), non-digit prefixes lexically.
+    """
+    segments: list[tuple[int, str, int]] = []
+    for is_digit_group, group_iter in itertools.groupby(part, key=str.isdigit):
+        group = "".join(group_iter)
+        if is_digit_group:
+            segments.append((1, "", int(group)))
+        else:
+            segments.append((0, group, 0))
+    return (0, tuple(segments), 0)
+
+
+def _split_deb_revision(version: str) -> tuple[str, str]:
+    """Split an upstream part into (upstream, debian-revision)."""
+    if "-" in version:
+        upstream_part, _, debian_part = version.rpartition("-")
+        return upstream_part, debian_part
+    return version, ""
+
+
 def _dpkg_version_key(version: str) -> tuple:
     """Return a sort key that orders Debian versions like dpkg does.
 
@@ -414,41 +447,9 @@ def _dpkg_version_key(version: str) -> tuple:
     nginx.org repository (`X.Y.Z`, `X.Y.Z-R~distro`), which the full dpkg
     algorithm covers for these inputs.
     """
-
-    def _split_epoch(part: str) -> tuple[int, str]:
-        if ":" in part:
-            epoch, _, rest = part.partition(":")
-            return int(epoch), rest
-        return 0, part
-
-    def _segment_key(part: str) -> tuple:
-        # Split into alternating non-digit and digit segments; digits compare
-        # numerically (missing digit segment compares as zero).
-        segments: list[tuple[int, str, int]] = []
-        idx = 0
-        while idx < len(part):
-            if part[idx].isdigit():
-                num = 0
-                while idx < len(part) and part[idx].isdigit():
-                    num = num * 10 + int(part[idx])
-                    idx += 1
-                segments.append((1, "", num))
-            else:
-                start = idx
-                while idx < len(part) and not part[idx].isdigit():
-                    idx += 1
-                segments.append((0, part[start:idx], 0))
-        return (0, tuple(segments), 0)
-
-    def _part_key(part: str) -> tuple:
-        return _segment_key(part)
-
-    epoch, upstream = _split_epoch(version)
-    if "-" in upstream:
-        upstream_part, _, debian_part = upstream.rpartition("-")
-    else:
-        upstream_part, debian_part = upstream, ""
-    return (epoch, _part_key(upstream_part), _part_key(debian_part))
+    epoch, upstream = _split_deb_epoch(version)
+    upstream_part, debian_part = _split_deb_revision(upstream)
+    return (epoch, _deb_part_key(upstream_part), _deb_part_key(debian_part))
 
 
 def _dpkg_version_satisfies(candidate: str, relation: str, target: str) -> bool:
