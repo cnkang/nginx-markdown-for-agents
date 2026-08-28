@@ -29,6 +29,34 @@ REQUIRED_INCLUDE_PATTERN = "refs/tags/v*"
 REQUIRED_RULE_TYPES = frozenset({"deletion", "non_fast_forward"})
 
 
+def _flatten_pages(payload: list) -> list[dict]:
+    """Flatten ``gh api --slurp`` pages into a list of JSON objects."""
+    summaries: list[dict] = []
+    for page in payload:
+        if isinstance(page, list):
+            summaries.extend(item for item in page if isinstance(item, dict))
+        elif isinstance(page, dict):
+            summaries.append(page)
+    return summaries
+
+
+def _fetch_ruleset_detail(repo: str, ruleset_id: int) -> dict | None:
+    """Fetch one ruleset's full definition, or None when unavailable."""
+    detail = subprocess.run(
+        ["gh", "api", f"repos/{repo}/rulesets/{ruleset_id}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if detail.returncode != 0:
+        return None
+    try:
+        parsed = json.loads(detail.stdout)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def _list_rulesets(repo: str) -> list[dict]:
     """Fetch all repository rulesets with their full rule/condition details.
 
@@ -50,33 +78,15 @@ def _list_rulesets(repo: str) -> list[dict]:
         text=True,
         check=True,
     ).stdout
-    pages = json.loads(payload)
-    summaries: list[dict] = []
-    for page in pages:
-        if isinstance(page, list):
-            summaries.extend(item for item in page if isinstance(item, dict))
-        elif isinstance(page, dict):
-            summaries.append(page)
-
-    detailed: list[dict] = []
+    summaries = _flatten_pages(json.loads(payload))
+    detailed = []
     for summary in summaries:
         ruleset_id = summary.get("id")
         if not isinstance(ruleset_id, int):
             continue
-        detail = subprocess.run(
-            ["gh", "api", f"repos/{repo}/rulesets/{ruleset_id}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if detail.returncode != 0:
-            continue
-        try:
-            parsed = json.loads(detail.stdout)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            detailed.append(parsed)
+        detail = _fetch_ruleset_detail(repo, ruleset_id)
+        if detail is not None:
+            detailed.append(detail)
     return detailed
 
 
