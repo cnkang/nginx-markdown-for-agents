@@ -437,7 +437,7 @@ The following files MUST NOT contain hand-maintained support matrices:
 
 - `README.md`
 - `README_zh-CN.md`
-- `docs/COMPATIBILITY.md`
+- `docs/guides/PACKAGE_COMPATIBILITY.md`
 - `docs/guides/INSTALLATION.md`
 - `docs/project/PROJECT_STATUS.md`
 - `docs/guides/PACKAGE_DISTRIBUTION.md`

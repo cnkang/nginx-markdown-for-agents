@@ -45,7 +45,7 @@ CURRENT_BUILD_DOCS = (
     Path("README.md"),
     Path("README_zh-CN.md"),
     Path("CONTRIBUTING.md"),
-    Path("docs/COMPATIBILITY.md"),
+    Path("docs/guides/PACKAGE_COMPATIBILITY.md"),
     Path("docs/FAQ.md"),
     Path("docs/guides/INSTALLATION.md"),
     Path("docs/guides/KUBERNETES_DEPLOYMENT.md"),
