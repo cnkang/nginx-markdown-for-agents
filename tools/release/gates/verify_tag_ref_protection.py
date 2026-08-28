@@ -22,11 +22,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 
 REQUIRED_INCLUDE_PATTERN = "refs/tags/v*"
 REQUIRED_RULE_TYPES = frozenset({"deletion", "non_fast_forward"})
+REPOSITORY_PATTERN = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\Z"
+)
+
+
+def _validate_repo(repo: str) -> str:
+    """Allow only one GitHub owner/repository path component pair."""
+    if not REPOSITORY_PATTERN.fullmatch(repo):
+        raise ValueError(
+            "repository must use the OWNER/REPOSITORY form with "
+            "letters, digits, '.', '_' or '-' only"
+        )
+    return repo
 
 
 def _flatten_pages(payload: list) -> list[dict]:
@@ -42,8 +56,15 @@ def _flatten_pages(payload: list) -> list[dict]:
 
 def _fetch_ruleset_detail(repo: str, ruleset_id: int) -> dict | None:
     """Fetch one ruleset's full definition, or None when unavailable."""
+    safe_repo = _validate_repo(repo)
+    if (
+        not isinstance(ruleset_id, int)
+        or isinstance(ruleset_id, bool)
+        or ruleset_id <= 0
+    ):
+        return None
     detail = subprocess.run(
-        ["gh", "api", f"repos/{repo}/rulesets/{ruleset_id}"],
+        ["gh", "api", f"repos/{safe_repo}/rulesets/{ruleset_id}"],
         capture_output=True,
         text=True,
         check=False,
@@ -66,11 +87,12 @@ def _list_rulesets(repo: str) -> list[dict]:
     individually.  Rulesets whose detail fetch fails are skipped; a repository
     where no ruleset can be verified fails closed in :func:`main`.
     """
+    safe_repo = _validate_repo(repo)
     payload = subprocess.run(
         [
             "gh",
             "api",
-            f"repos/{repo}/rulesets",
+            f"repos/{safe_repo}/rulesets",
             "--paginate",
             "--slurp",
         ],
@@ -118,7 +140,10 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        rulesets = _list_rulesets(args.repo)
+        rulesets = _list_rulesets(_validate_repo(args.repo))
+    except ValueError as exc:
+        print(f"FAIL: invalid repository argument: {exc}", file=sys.stderr)
+        return 1
     except subprocess.CalledProcessError as exc:
         print(
             "FAIL: could not list repository rulesets "

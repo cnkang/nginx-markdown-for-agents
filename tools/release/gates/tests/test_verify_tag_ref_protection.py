@@ -6,6 +6,7 @@ from tools.release.gates.verify_tag_ref_protection import (
     REQUIRED_INCLUDE_PATTERN,
     _flatten_pages,
     _ruleset_protects_release_tags,
+    _validate_repo,
 )
 
 
@@ -57,3 +58,23 @@ def test_flatten_pages_ignores_non_object_entries() -> None:
     ]
 
     assert _flatten_pages(payload) == [{"id": 1}, {"id": 2}]
+
+
+def test_repository_argument_is_limited_to_one_safe_path_pair() -> None:
+    """Repo input cannot add endpoint components or command-like syntax."""
+    assert _validate_repo("cnkang/nginx-markdown-for-agents") == (
+        "cnkang/nginx-markdown-for-agents"
+    )
+
+    for invalid_repo in (
+        "cnkang/nginx-markdown-for-agents/rulesets",
+        "cnkang/nginx-markdown-for-agents?x=1",
+        "--paginate/evil",
+        "cnkang/nginx markdown-for-agents",
+    ):
+        try:
+            _validate_repo(invalid_repo)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"accepted unsafe repository: {invalid_repo}")
