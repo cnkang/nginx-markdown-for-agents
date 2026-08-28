@@ -57,7 +57,7 @@ These gates provide broad validation across the entire release surface.
 | UB-06 | scope-drift | Manual review | No scope creep | No unresolved tripwires |
 | UB-07 | version-framing | Manual review | Consistent 0.5.5 references | CHANGELOG, tooling, docs aligned |
 | UB-08 | planning-note-isolation | Manual review | No planning note dependencies | No references to advisory notes |
-| UB-09 | evidence-artifact | `make release-evidence-manifest-check` | Candidate-bound evidence is valid | Gate exits 0 |
+| UB-09 | candidate-bound-evidence | `make release-evidence-manifest-check` | Evidence is bound to the delivered candidate and required artifact metadata is valid | Gate exits 0 |
 
 ## Candidate-Bound Evidence Gate (UB-09)
 

@@ -9,8 +9,9 @@ Accepted (0.9.0 contract freeze, gate implemented)
 Each release line has a versioned gate (`release-gates-check-070` …
 `-080`). 0.9.0 is a breaking production-readiness release and needs its own
 capstone gate. This ADR freezes the gate **name**, structure, and blocking
-semantics now so downstream plans reference a stable target. The gate body lives in the
-release-gates wave (final wave).
+semantics now so downstream plans reference a stable target. At the time of
+this decision, the project planned the gate body for the final release-gates wave. The
+gate is now implemented. This ADR preserves the original planning context.
 
 ## Decision
 
@@ -45,7 +46,7 @@ release matrix before this capstone gate succeeds.
 |-------|----------|----------|
 | **Blocking** | build/check-headers, `test-rust`, `test-nginx-unit`, `test-e2e-rust`, docs-check, harness-check, gate/naming/config-directive validators, **production-examples `nginx -t` smoke** | fail → gate fails |
 | **Capstone** | aggregate 0.9.0 contract validators (config V2, reason registry, schema v1, HeaderPlan) | fail → gate fails |
-| **Soft / skippable** | `test-rust-fuzz-smoke`, `verify-chunked-native-e2e-smoke` (needs `NGINX_BIN`), `coverage-c`/`coverage-rust`, sanitizer smoke, security-static, supply-chain, perf | env-gated skip with recorded evidence; not silently promoted to blocking |
+| **Soft / skippable** | `test-rust-fuzz-smoke`, `verify-chunked-native-e2e-smoke` (needs `NGINX_BIN`), `coverage-c`/`coverage-rust`, sanitizer smoke, security-static, supply-chain, perf | env-gated skip with recorded evidence. The gate does not become blocking silently |
 | **Env-limited blocking** | `test-production-examples-nginx-t` (needs `NGINX_BIN`) | fails when binary absent **unless** `RELEASE_GATE_ALLOW_SKIP_MODULE=1`, mirroring the 091 module-benchmark skip contract; tag-release CI must still provide `NGINX_BIN` |
 
 Production-examples smoke is **0.9.0 blocking**. When the module-enabled

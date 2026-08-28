@@ -5,12 +5,12 @@
 This document describes the charset detection cascade implementation for the
 NGINX Markdown for Agents module. It follows Requirements FR-05.1, FR-05.2,
 and FR-05.3. Detection records the declared charset for policy and
-diagnostics. The current parser still accepts UTF-8 only and does not
-transcode non-UTF-8 bytes.
+diagnostics. The current parser accepts UTF-8 only and does not transcode
+non-UTF-8 bytes.
 
 ## Requirements
 
-- **FR-05.1**: WHEN the Upstream_Response Content-Type includes a charset parameter, THE Module SHALL use that charset for HTML parsing
+- **FR-05.1**: WHEN the Upstream_Response Content-Type includes a charset parameter, THE Module SHALL record that charset for diagnostics and policy. The module passes the original bytes to the UTF-8-only parser and defers non-UTF-8 transcoding.
 - **FR-05.2**: WHEN the Upstream_Response Content-Type does not include a charset parameter, THE Module SHALL attempt to detect charset from HTML meta tags
 - **FR-05.3**: WHEN charset detection fails, THE Module SHALL use a default charset (UTF-8 recommended)
 
@@ -163,10 +163,11 @@ Total: 35 unit tests for charset detection
 
 ### Transcoding Coverage
 
-The detector honors the declared charset and transcodes supported encodings
-to UTF-8 before parsing (`encoding_rs`). Encodings that `encoding_rs` cannot
-map fall back to strict UTF-8 validation: valid UTF-8 content converts
-successfully, while invalid UTF-8 bytes return an encoding error.
+The detector records the declared charset but does not transcode it. The
+parser receives the original bytes and validates UTF-8, so a response declared
+as a non-UTF-8 charset is not converted by the current contract. Invalid UTF-8
+bytes return an encoding error. The current release defers support for non-UTF-8
+decoding.
 
 ### Performance Considerations
 
@@ -183,9 +184,9 @@ When the NGINX C module calls the Rust converter:
 1. Extract Content-Type header from upstream response
 2. Pass Content-Type to `MarkdownOptions.content_type` field
 3. Rust converter uses charset detection cascade
-4. The detected charset drives **real transcoding**: the parser decodes the
-   input to UTF-8 according to the declaration (`encoding_rs`), then parses.
-   The parser honors a declared non-UTF-8 charset rather than ignoring it.
+4. The converter retains the detected charset for diagnostics and policy. It
+   passes the original bytes to the UTF-8-only parser without transcoding. A
+   declared non-UTF-8 charset does not change parser decoding in this release.
 
 ### Content-Type Parameter Parsing
 
@@ -211,7 +212,7 @@ wins.
 ## Dependencies
 
 - `regex = "1.10"` - For Content-Type and HTML meta tag parsing
-- `html5ever = "0.26"` - For HTML parsing (UTF-8 only)
+- `html5ever = "0.39"` - For HTML parsing (UTF-8 only)
 
 ## Future Enhancements
 

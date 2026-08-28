@@ -1,5 +1,9 @@
 # Package Distribution Strategy
 
+This is the release and packaging-maintainer contract for DEB and RPM
+artifacts. Operators installing a published package should use the
+[Package Installation Guide](PACKAGE_INSTALLATION.md) instead.
+
 ## Overview
 
 This document defines the distribution strategy for the NGINX Markdown Filter

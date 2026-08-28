@@ -8,8 +8,8 @@ or review action.
 
 ## Documentation Gates
 
-- [ ] All 7 sub-specs have requirements documents — Verify: `make release-gates-check-strict` (the project retired the former standalone document validator)
-- [ ] All 7 sub-specs have design documents — Verify: `make release-gates-check-strict` (the project retired the former standalone document validator)
+- [ ] All 7 sub-specs have complete requirements documents. Each document covers scope, behavior, and acceptance criteria. Verify: manual review plus `make release-gates-check-strict` (the project retired the former standalone document validator).
+- [ ] All 7 sub-specs have complete design documents. Each document covers implementation decisions and validation plans. Verify: manual review plus `make release-gates-check-strict` (the project retired the former standalone document validator).
 - [ ] All new operator-facing surfaces appear in docs — Verify: manual review + `make docs-check`
   - A signed review record is mandatory for this item. The record must name the reviewer, the review date, the reviewed scope, and the evidence artifact.
 - [ ] Documentation is accurate and complete, including defaults, behavior, failure modes, and migration guidance — Verify: manual review against current docs plus `make docs-check`

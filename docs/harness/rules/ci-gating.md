@@ -275,7 +275,7 @@ Required:
 - When validating filenames from a release manifest against an artifact directory, resolve paths and verify containment before accessing. Use `Path.relative_to()` (not `startswith`) on resolved paths to reject filenames that escape the artifact directory.
 
 Verification:
-- `grep -rn 'relative_to\|startswith.*resolve' packaging/scripts/validate-release-manifest.py` — verify path traversal guards exist.
+- `grep -rn 'relative_to(' packaging/scripts/validate-release-manifest.py` — verify path traversal guards exist.
 
 ---
 

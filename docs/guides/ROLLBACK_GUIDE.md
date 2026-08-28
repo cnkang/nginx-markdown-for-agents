@@ -49,6 +49,8 @@ Use this guide when an [observation checkpoint](ROLLOUT_COOKBOOK.md#observation-
 - [ROLLOUT_COOKBOOK.md](ROLLOUT_COOKBOOK.md) — rollout stages, selective enablement patterns, observation guidance
 - [CONFIGURATION.md](CONFIGURATION.md) — full directive reference
 - [OPERATIONS.md](OPERATIONS.md) — operational guide and metrics reference
+- [ROLLBACK-0.9.2.md](ROLLBACK-0.9.2.md) — version downgrade and matching
+  configuration restore
 
 ---
 

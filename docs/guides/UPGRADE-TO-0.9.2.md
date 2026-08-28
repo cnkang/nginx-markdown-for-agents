@@ -99,8 +99,25 @@ if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
   echo "ERROR: cannot locate the NGINX modules directory; set MODULES_DIR explicitly" >&2
   exit 1
 fi
-sudo cp "$MODULES_DIR/ngx_http_markdown_filter_module.so" \
-    "$MODULES_DIR/ngx_http_markdown_filter_module.so.0.9.1.bak"
+CONFIG_BACKUP_DIR="/var/backups/nginx-markdown-0.9.1"
+sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
+sudo cp -a /etc/nginx/nginx.conf "${CONFIG_BACKUP_DIR}/"
+for CONFIG_DIR in /etc/nginx/conf.d /etc/nginx/modules-enabled; do
+  if [[ -d "${CONFIG_DIR}" ]]; then
+    sudo cp -a "${CONFIG_DIR}" "${CONFIG_BACKUP_DIR}/"
+  fi
+done
+MODULE_PATH="$MODULES_DIR/ngx_http_markdown_filter_module.so"
+MODULE_BACKUP="${MODULE_PATH}.0.9.1.bak"
+if [[ ! -f "${MODULE_PATH}" ]]; then
+  echo "ERROR: current module is missing: ${MODULE_PATH}" >&2
+  exit 1
+fi
+if [[ -e "${MODULE_BACKUP}" ]]; then
+  echo "Preserving existing module backup: ${MODULE_BACKUP}"
+else
+  sudo cp -a "${MODULE_PATH}" "${MODULE_BACKUP}"
+fi
 ```
 
 ### 4. Replace the module

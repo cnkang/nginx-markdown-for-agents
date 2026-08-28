@@ -131,7 +131,8 @@ location /docs/ {
     # IMS-only: source-representation IMS only (no Markdown ETag)
     markdown_cache_validation ims_only;
 
-    # Or full support (ETag + If-None-Match + If-Modified-Since)
+    # Or full support (Markdown ETag + If-None-Match; source If-Modified-Since
+    # does not validate the transformed response)
     # markdown_cache_validation full;
 
     # Or disable

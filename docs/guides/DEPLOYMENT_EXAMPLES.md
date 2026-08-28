@@ -482,10 +482,13 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost:8080/docs/ |
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost:8080/api/health | grep -i content-type
 ```
 
-Note: `curl -I` (HEAD) is a valid verification method. HEAD responses carry
-the same representation headers as a GET would select
-(`Content-Type: text/markdown; charset=utf-8`, `Vary: Accept`) with an empty
-body. The module supplies no body-derived fields (`Content-Length`, `ETag`)
+Note: `curl -I -H 'Accept: text/markdown' http://localhost:8080/` (HEAD) is a
+valid verification method. HEAD responses carry the same representation
+headers as a GET would select
+(`Content-Type: text/markdown` with `charset=utf-8`, plus `Vary: Accept`) with an empty
+body. HEAD must send the same selection headers as the corresponding GET.
+strict `markdown_accept` negotiation otherwise selects a different
+representation. The module supplies no body-derived fields (`Content-Length`, `ETag`)
 for HEAD because no conversion body is available. GET-based header checks
 (`curl -sD - -o /dev/null ...`) remain the preferred way to also confirm body
 conversion and ETag generation.

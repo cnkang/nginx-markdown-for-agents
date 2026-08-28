@@ -300,11 +300,17 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
    make build
    ```
 
-3. Replace the module binary and reload:
+3. Replace the module binary and perform a complete restart:
    ```bash
    cp components/nginx-module/src/ngx_http_markdown_filter_module.so \
      /usr/lib/nginx/modules/
-   nginx -t && nginx -s reload
+   sudo nginx -t
+   if command -v systemctl >/dev/null 2>&1; then
+     sudo systemctl restart nginx
+   else
+     sudo nginx -s stop
+     sudo nginx
+   fi
    ```
 
 **Why no config toggle:**

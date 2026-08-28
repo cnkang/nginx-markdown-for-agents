@@ -220,7 +220,7 @@ All `unsafe` blocks in the codebase are:
 
 ### Test Coverage
 
-The listed suite contains 10 XSS/Markdown-injection, 6 SSRF, 7 XXE, 3
+The listed suite contains 10 XSS/Markdown-injection, 6 unsafe-URL filtering, 7 XXE, 3
 URL-sanitization, and 5 defense-in-depth tests (31 tests total).
 
 **Location**: `tests/security_tests.rs`
@@ -236,7 +236,7 @@ URL-sanitization, and 5 defense-in-depth tests (31 tests total).
    - Data URL blocking in links and images
    - Markdown link-label and image-alt injection blocking
 
-2. **SSRF Prevention (6 tests)**:
+2. **Unsafe URL Filtering (6 tests)**:
    - iframe tag stripping with URL extraction and dangerous scheme suppression
    - object tag stripping with URL extraction and dangerous scheme suppression
    - embed tag stripping with URL extraction
