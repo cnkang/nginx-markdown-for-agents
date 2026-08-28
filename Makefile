@@ -77,6 +77,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         complexity-check \
         docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline decompression-metric-contract-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-092-canonical release-gates-check-092 release-gates-check-all release-gates-check-strict \
         release-matrix-check \
+        streaming-evidence-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
         test-rust-fuzz-qualification test-e2e-rust-soak \
         perf-evidence-check \
@@ -1176,13 +1177,15 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 # performance-only workflow's partial evidence.
 release-gates-check-092: release-gates-check-092-canonical
 	@echo "=== 0.9.2 Release Gates (blocking) ==="
-	@echo "  [7/13] Release tag ref protection (immutable v* tags)"
+	@echo "  [extended 1/9] Release tag ref protection (immutable v* tags)"
 	# A published tag anchors source archives, provenance, and signatures to
 	# the approved candidate; an unprotected tag can be moved or deleted after
 	# publication, splitting provenance.  Fails closed when the API is
 	# unreachable.  See tools/release/gates/verify_tag_ref_protection.py.
 	python3 tools/release/gates/verify_tag_ref_protection.py
-	@echo "  [8/13] Release candidate evidence bound to HEAD"
+	@echo "  [extended 2/9] Streaming parity evidence"
+	$(MAKE) streaming-evidence-check
+	@echo "  [extended 3/9] Release candidate evidence bound to HEAD"
 	# The candidate-bound manifests are workflow outputs (generated from
 	# tracked policy/scope inputs at release time), not tracked working-tree
 	# state.  Generate the inputs phase locally so this gate can close from a
@@ -1191,19 +1194,30 @@ release-gates-check-092: release-gates-check-092-canonical
 	python3 tools/release/gates/generate_release_gate_manifests.py \
 		--phase inputs --candidate-sha "$$(git rev-parse HEAD)"
 	$(MAKE) release-candidate-evidence-check
-	@echo "  [9/13] Artifact registry evidence"
+	@echo "  [extended 4/9] Artifact registry evidence"
 	$(MAKE) artifact-registry-check
-	@echo "  [10/13] Release evidence manifest"
+	@echo "  [extended 5/9] Release evidence manifest"
 	$(MAKE) release-evidence-manifest-check
-	@echo "  [11/13] Fuzz qualification evidence"
+	@echo "  [extended 6/9] Fuzz qualification evidence"
 	$(MAKE) test-rust-fuzz-qualification
-	@echo "  [12/13] Soak qualification evidence"
+	@echo "  [extended 7/9] Soak qualification evidence"
 	$(MAKE) test-e2e-rust-soak
-	@echo "  [13/13] Repository docs style baseline"
+	@echo "  [extended 8/9] Repository docs style baseline"
 	$(MAKE) docs-style-check-baseline
-	@echo "  Property-based test suites (Rust proptest + Python Hypothesis)"
+	@echo "  [extended 9/9] Property-based test suites (Rust proptest + Python Hypothesis)"
 	$(MAKE) test-property
 	@echo "=== 0.9.2 Release Gates: PASS ==="
+
+# streaming-evidence-check: Blocking parity evidence and registry contract.
+streaming-evidence-check:
+	@echo "=== Streaming Evidence Check ==="
+	@set -e; \
+		summary_path="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-streaming-evidence.XXXXXX")"; \
+		trap 'rm -f "$$summary_path"' EXIT HUP INT TERM; \
+		python3 tools/release/gates/generate_streaming_evidence.py \
+			--output "$$summary_path"; \
+		python3 tools/release/gates/validate_streaming_evidence.py \
+			"$$summary_path" --git-head
 
 # release-matrix-check: Release matrix source/projection gate.
 # Checks that docs/releases/release-matrix.json is the deterministic

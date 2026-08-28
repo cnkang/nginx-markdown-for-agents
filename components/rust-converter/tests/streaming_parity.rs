@@ -25,10 +25,11 @@ use nginx_markdown_converter::error::ConversionError;
 use streaming_test_support::known_differences::KnownDifferences;
 
 use streaming_test_support::{
-    FixtureMeta, check_conversion_errors, check_output_comparison, convert_full_buffer,
-    convert_streaming_chunked, convert_streaming_single, default_streaming_budget,
-    default_streaming_options, discover_html_fixtures, evidence_output_path, fixture_relative_name,
-    known_differences_path, normalize_whitespace_tokens, read_fixture, read_fixture_meta,
+    FixtureMeta, OutputComparisonStats, check_conversion_errors, check_output_comparison,
+    convert_full_buffer, convert_streaming_chunked, convert_streaming_single,
+    default_streaming_budget, default_streaming_options, discover_html_fixtures,
+    evidence_output_path, fixture_relative_name, known_differences_path,
+    normalize_whitespace_tokens, read_fixture, read_fixture_meta,
 };
 
 fn discover_fixtures(corpus_dir: &Path) -> Vec<std::path::PathBuf> {
@@ -74,7 +75,10 @@ fn convert_streaming_chunked_entry(
     Ok(run.markdown)
 }
 
-fn assert_fixture_parity(path: &Path, known_diffs: &KnownDifferences) -> Result<(), String> {
+fn assert_fixture_parity(
+    path: &Path,
+    known_diffs: &KnownDifferences,
+) -> Result<OutputComparisonStats, String> {
     let fixture_name = fixture_relative_name(path);
     let meta = read_fixture_meta(path);
     let html = read_fixture(path);
@@ -111,7 +115,7 @@ fn assert_fixture_parity(path: &Path, known_diffs: &KnownDifferences) -> Result<
         check_conversion_errors(&fixture_name, &meta, &single, &chunked, known_diffs)?;
 
     if !should_compare {
-        return Ok(());
+        return Ok(OutputComparisonStats::default());
     }
 
     let single = single.unwrap();
@@ -157,6 +161,8 @@ fn corpus_driven_differential_harness() {
         .unwrap_or_else(|err| panic!("load known differences: {err}"));
 
     let mut failures = Vec::new();
+    let mut identical_count = 0usize;
+    let mut known_difference_observation_ids = Vec::new();
 
     for category in [
         "simple",
@@ -174,8 +180,12 @@ fn corpus_driven_differential_harness() {
         );
 
         for fixture in fixtures {
-            if let Err(err) = assert_fixture_parity(&fixture, &known) {
-                failures.push(err);
+            match assert_fixture_parity(&fixture, &known) {
+                Ok(stats) => {
+                    identical_count += stats.identical_count;
+                    known_difference_observation_ids.extend(stats.known_difference_ids);
+                }
+                Err(err) => failures.push(err),
             }
         }
     }
@@ -184,6 +194,24 @@ fn corpus_driven_differential_harness() {
         failures.is_empty(),
         "differential harness failures:\n{}",
         failures.join("\n\n")
+    );
+
+    let mut known_difference_ids = known_difference_observation_ids.clone();
+    known_difference_ids.sort_unstable();
+    known_difference_ids.dedup();
+
+    let evidence = serde_json::json!({
+        "total_comparisons": identical_count + known_difference_observation_ids.len(),
+        "identical_count": identical_count,
+        "known_difference_count": known_difference_observation_ids.len(),
+        "unknown_difference_count": 0,
+        "error_parity_mismatch_count": 0,
+        "known_difference_ids": known_difference_ids,
+        "known_difference_observation_ids": known_difference_observation_ids,
+    });
+    println!(
+        "STREAMING_PARITY_EVIDENCE_V1 {}",
+        serde_json::to_string(&evidence).expect("serialize parity evidence")
     );
 }
 

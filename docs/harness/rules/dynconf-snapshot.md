@@ -101,8 +101,8 @@ Required:
   the reload on the next poll cycle, regardless of whether
   `dynconf_check()` detects a new mtime change.
 - Unknown dynconf keys must cause `NGX_ERROR` (atomic reload
-  rejection), not `NGX_DECLINED` (silent ignore).  The entire file
-  the module rejects the file on any unrecognized key.
+  rejection), not `NGX_DECLINED` (silent ignore).  The module must
+  reject the entire file when it encounters any unrecognized key.
 - `dynconf_start` must parse and apply the existing dynconf file
   immediately at startup if it exists.  If the initial parse fails,
   `applied_mtime` must be set to 0 so the timer retries on the

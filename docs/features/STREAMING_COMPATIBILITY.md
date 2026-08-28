@@ -27,6 +27,11 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Decompression (deflate) | ✅ | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 fallback: full-buffer retries as raw after a zero-output format error; streaming detects once on the first two bytes and reports a format error for misclassified streams; streaming since 0.9.1 |
 | Decompression (Brotli) | ✅ | ✅ | Requires `NGX_HTTP_BROTLI`; streaming since 0.9.1 |
 
+For an empty wire body, an identity-only `Content-Encoding` chain remains
+transparent. A declared non-identity decoder still runs at end of input and
+reports truncated input, so a missing encoded body is not accepted as a valid
+compressed response.
+
 ## Legend
 
 - ✅ Supported — feature works as expected in this mode
