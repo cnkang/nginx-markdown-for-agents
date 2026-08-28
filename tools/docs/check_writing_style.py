@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Non-native-reader writing-style checks for maintained Markdown docs.
 
-STE-inspired prose audit (see docs/development/WRITING_GUIDE.md):
+STE-inspired prose audit (see docs/WRITING_GUIDE.md):
 - sentence length (descriptive > 25 words, instruction > 20 words)
 - semicolons in prose
 - Latin abbreviations (e.g., i.e., etc.)

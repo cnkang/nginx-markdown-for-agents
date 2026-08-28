@@ -230,5 +230,5 @@ quality-discipline scenarios.
 - Request lifecycle: [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md)
 - Repository layout: [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md)
 - Harness entrypoint: [../harness/README.md](../harness/README.md)
-- Harness maintenance procedures: [../guides/HARNESS_MAINTENANCE.md](../guides/HARNESS_MAINTENANCE.md)
+- Harness maintenance procedures: [../harness/HARNESS_MAINTENANCE.md](../harness/HARNESS_MAINTENANCE.md)
 - Decision record for this design: [ADR/0005-repo-owned-harness.md](ADR/0005-repo-owned-harness.md)
