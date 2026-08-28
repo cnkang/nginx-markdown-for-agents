@@ -17,12 +17,13 @@ This directory contains the maintained documentation supporting that landing pag
 | Operate and troubleshoot a deployment | [guides/OPERATIONS.md](guides/OPERATIONS.md) |
 | Understand the architecture and design rationale | [architecture/README.md](architecture/README.md) |
 | Understand agent routing, risk packs, and harness checks | [harness/README.md](harness/README.md) |
-| Maintain repo-owned harness rules and local adapter workflow | [guides/HARNESS_MAINTENANCE.md](guides/HARNESS_MAINTENANCE.md) |
+| Maintain repo-owned harness rules and local adapter workflow | [harness/README.md](harness/README.md) |
 | Understand implementation details | [features/README.md](features/README.md) |
 | Check standard terminology and naming style | [glossary.md](glossary.md) |
 | Review tests and validation references | [testing/README.md](testing/README.md) |
 | Check current status and maintenance notes | [project/README.md](project/README.md) |
 | Understand why the repo-owned harness was added and what it intentionally does not do | [project/HARNESS_HISTORY.md](project/HARNESS_HISTORY.md) |
+| Follow the contributor writing policy | [WRITING_GUIDE.md](WRITING_GUIDE.md) |
 
 ## Documentation Sections
 
@@ -34,7 +35,7 @@ Canonical user and operator documentation:
 - source builds and local verification
 - directive reference
 - deployment examples and runbooks
-- harness maintenance and contributor workflow for repo-owned agent rules
+- rollout, rollback, upgrade, and migration guidance
 
 Index: [guides/README.md](guides/README.md)
 
@@ -118,7 +119,8 @@ Per-version release notes and release checklists (one file per release line).
 
 Implementation plans for in-flight release lines (for example the 0.9.2
 implementation plan). Consumed during development and archived when the
-release ships.
+release ships. Contributor writing policy lives at the top level in
+[WRITING_GUIDE.md](WRITING_GUIDE.md).
 
 ### `evidence/`
 
@@ -151,5 +153,6 @@ For duplication policy and mirrored-doc rules, see [DOCUMENTATION_DUPLICATION_PO
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-28 | Hermes | Moved harness maintenance to docs/harness/; added WRITING_GUIDE entry; refreshed guide index |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
