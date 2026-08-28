@@ -169,8 +169,11 @@ for file in "${source_files[@]}"; do
             continue
         fi
 
-        # Check if function has budget enforcement
+        # Check if function has budget enforcement.  Keep both views: the
+        # stripped slice is used for executable tokens, while the raw slice
+        # keeps intentional budget comments available to the heuristic.
         func_body=$(strip_c_comments "$file" | sed -n "${func_start},${line_num}p")
+        raw_func_body=$(sed -n "${func_start},${line_num}p" "$file")
 
         has_budget_check=0
 
@@ -190,7 +193,7 @@ for file in "${source_files[@]}"; do
         fi
 
         # Check for explicit budget comments
-        if echo "$func_body" | grep -qiE '(budget.*check|enforce.*budget|prevent.*bomb)'; then
+        if echo "$raw_func_body" | grep -qiE '(budget.*check|enforce.*budget|prevent.*bomb)'; then
             has_budget_check=1
         fi
 

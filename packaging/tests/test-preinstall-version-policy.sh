@@ -225,7 +225,7 @@ else
     fail "unresolved package target returned unexpected status ${rc}"
 fi
 
-# Scenario 10: negative control (T-B4) — simultaneous PATH injection AND
+# Scenario 10: negative control — simultaneous PATH injection AND
 # TRUSTED_PATH_ROOT environment variable injection must both be ineffective.
 #
 # The script contains a literal `TRUSTED_PATH_ROOT=""` assignment that

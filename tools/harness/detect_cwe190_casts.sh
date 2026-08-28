@@ -297,10 +297,14 @@ while IFS= read -r match; do
     fi
 
     # ── Type awareness: determine source type class within function scope ──
-    # Extract the first identifier after (size_t): the cast target variable.
-    cast_ident="$(printf '%s' "$content_line" | sed -n 's/.*(size_t)[[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\).*/\1/p')"
+    # Extract every identifier after a (size_t) cast.  A greedy sed match
+    # used to retain only the final cast on a line and could hide an earlier
+    # risky conversion behind a later safe one.
+    cast_idents="$(printf '%s' "$content_line" \
+        | grep -oE '\(size_t\)[[:space:]]*[A-Za-z_][A-Za-z0-9_]*' \
+        | sed -E 's/^\(size_t\)[[:space:]]*//' || true)"
 
-    if [[ -n "$cast_ident" ]]; then
+    if [[ -n "$cast_idents" ]]; then
         # Determine function boundary: find the nearest preceding line
         # matching ^} (NGINX style: function-closing brace at column 0).
         # Window starts from the line after that brace (or file start).
@@ -314,42 +318,46 @@ while IFS= read -r match; do
             fi
         fi
 
-        # Search for the nearest declaration in the function window. A
-        # function can contain multiple scopes, and aggregating every
-        # declaration for the same identifier lets an unrelated earlier
-        # declaration change the type classification for this cast.
+        # Search for each declaration independently.  If every cast on this
+        # line is a type that cannot exceed size_t, the line is safe.  Wide
+        # unsigned types such as uint64_t and uintptr_t stay fail-closed so
+        # the detector remains correct on narrower targets.
         func_window="$(sed -n "${func_start},${line}p" "$file" 2>/dev/null)"
-        declaration_line="$(printf '%s\n' "$func_window" \
-            | grep -nE \
-                "(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char|ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]]+\\*[[:space:]]*${cast_ident}([^[:alnum:]_]|$)|(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char|ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]]+${cast_ident}([^[:alnum:]_]|$)" \
-            | tail -1 || true)"
+        all_unsigned=1
+        while IFS= read -r cast_ident; do
+            if [[ -z "$cast_ident" ]]; then
+                continue
+            fi
+            declaration_line="$(printf '%s\n' "$func_window" \
+                | grep -nE \
+                    "(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char|ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]]+\\*[[:space:]]*${cast_ident}([^[:alnum:]_]|$)|(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char|ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]]+${cast_ident}([^[:alnum:]_]|$)" \
+                | tail -1 || true)"
 
-        # Unsigned type set
-        is_unsigned=0
-        if printf '%s\n' "$declaration_line" | grep -qE \
-            "(^|[^[:alnum:]_])(ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]]+\\*[[:space:]]*${cast_ident}([^[:alnum:]_]|$)|(^|[^[:alnum:]_])(ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]]+${cast_ident}([^[:alnum:]_]|$)"; then
-            is_unsigned=1
-        fi
+            is_unsigned=0
+            if printf '%s\n' "$declaration_line" | grep -qE \
+                "(^|[^[:alnum:]_])(ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|u_char|unsigned)[[:space:]]+\\*[[:space:]]*${cast_ident}([^[:alnum:]_]|$)|(^|[^[:alnum:]_])(ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|u_char|unsigned)[[:space:]]+${cast_ident}([^[:alnum:]_]|$)"; then
+                is_unsigned=1
+            fi
 
-        # Signed type set
-        is_signed=0
-        if printf '%s\n' "$declaration_line" | grep -E \
-            "(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char)[[:space:]]+\\*[[:space:]]*${cast_ident}([^[:alnum:]_]|$)|(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char)[[:space:]]+${cast_ident}([^[:alnum:]_]|$)" \
-            | grep -qvE 'u_char|unsigned'; then
-            is_signed=1
-        fi
-        # Refine: if matches both signed and unsigned (e.g., 'unsigned int'),
-        # treat as unsigned (the unsigned qualifier wins).
-        # Actually, re-check: if unsigned was found, it's unsigned regardless.
+            is_signed=0
+            if printf '%s\n' "$declaration_line" | grep -E \
+                "(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char)[[:space:]]+\\*[[:space:]]*${cast_ident}([^[:alnum:]_]|$)|(^|[^[:alnum:]_])(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char)[[:space:]]+${cast_ident}([^[:alnum:]_]|$)" \
+                | grep -qvE 'u_char|unsigned'; then
+                is_signed=1
+            fi
 
-        # Decision: unsigned and NOT signed → skip guard check (cannot be negative)
-        if [[ "$is_unsigned" -eq 1 ]] && [[ "$is_signed" -eq 0 ]]; then
-            echo "  OK      ${file}:${line} — unsigned source type for '${cast_ident}' cannot be negative" >&2
+            if [[ "$is_unsigned" -eq 1 ]] && [[ "$is_signed" -eq 0 ]]; then
+                echo "  OK      ${file}:${line} — unsigned source type for '${cast_ident}' cannot be negative" >&2
+            else
+                all_unsigned=0
+            fi
+        done <<< "$cast_idents"
+
+        if [[ "$all_unsigned" -eq 1 ]]; then
             ssize_hits=$((ssize_hits + 1))
             continue
         fi
-        # Signed found (or both) → continue to guard detection
-        # Neither found (unknown type) → continue to guard detection (fail-closed)
+        # Signed, wide-unsigned, or unknown casts continue to guard detection.
     fi
 
     # Check for guard in preceding 8 lines (expanded from 5 to capture

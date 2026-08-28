@@ -89,6 +89,68 @@ def test_manifest_command_reachability_rejects_missing_surface(tmp_path, monkeyp
     assert ".github/workflows/missing.yml" in result.detail
 
 
+def test_manifest_reachability_rejects_external_symlink_and_absolute_makefile(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "Makefile").write_text("check:\n\t@true\n", encoding="utf-8")
+    external = tmp_path.parent / "external-harness-sync.py"
+    external.write_text("# outside\n", encoding="utf-8")
+    link = tmp_path / "tools" / "linked.py"
+    link.parent.mkdir()
+    link.symlink_to(external)
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync._check_manifest_command_reachability(
+        {
+            "verification_families": {
+                "fixture": {
+                    "commands": [
+                        "python3 tools/linked.py",
+                        f"make -f {tmp_path / 'Makefile'} check",
+                    ]
+                }
+            }
+        }
+    )
+
+    assert result.status == sync.FAIL
+    assert "not repo-owned" in result.detail
+
+
+def test_manifest_reachability_checks_explicit_workflow_paths(tmp_path, monkeypatch):
+    """Workflow paths are validated separately from executable commands."""
+    workflow = tmp_path / ".github" / "workflows" / "observation.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("# fixture\n", encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync._check_manifest_command_reachability(
+        {
+            "verification_families": {
+                "observation": {
+                    "workflow_paths": [".github/workflows/observation.yml"]
+                }
+            }
+        }
+    )
+
+    assert result.status == sync.PASS
+    assert "1 workflow paths" in result.detail
+
+    missing = sync._check_manifest_command_reachability(
+        {
+            "verification_families": {
+                "observation": {
+                    "workflow_paths": [".github/workflows/missing.yml"]
+                }
+            }
+        }
+    )
+
+    assert missing.status == sync.FAIL
+    assert "missing.yml" in missing.detail
+
+
 def test_manifest_command_reachability_checks_every_compound_segment(
     tmp_path, monkeypatch
 ):

@@ -41,6 +41,7 @@ assert_rc() {
         return 1
     fi
     echo "PASS: $description" >&2
+    return 0
 }
 
 run_case() {

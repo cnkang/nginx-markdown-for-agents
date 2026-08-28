@@ -8,7 +8,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DETECTOR="bash ${SCRIPT_DIR}/../detect_ifdef_guard_visibility.sh"
+DETECTOR="${SCRIPT_DIR}/../detect_ifdef_guard_visibility.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -65,7 +65,7 @@ void use_safe(void) {
 C
 
 output_file="${tmp_dir}/clean.out"
-${DETECTOR} "${src_dir}/header.h" "${src_dir}" >"${output_file}" 2>&1
+bash "${DETECTOR}" "${src_dir}/header.h" "${src_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 0 ]]; then
     pass "clean: guarded function only used inside guard"
@@ -84,7 +84,7 @@ void use_outside_guard(void) {
 C
 
 output_file="${tmp_dir}/bad.out"
-${DETECTOR} "${src_dir}/header.h" "${src_dir}" >"${output_file}" 2>&1
+bash "${DETECTOR}" "${src_dir}/header.h" "${src_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]]; then
     pass "bad: guarded function used outside guard detected"
@@ -102,7 +102,7 @@ const ngx_str_t *ngx_http_markdown_reason_all(void);
 H
 
 output_file="${tmp_dir}/noguard.out"
-${DETECTOR} "${src_dir}/no_guard.h" "${src_dir}" >"${output_file}" 2>&1
+bash "${DETECTOR}" "${src_dir}/no_guard.h" "${src_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 0 ]]; then
     pass "no guarded functions passes"
@@ -126,7 +126,7 @@ void use_multiline_outside_guard(void) {
 C
 
 output_file="${tmp_dir}/multicall.out"
-${DETECTOR} "${src_dir}/header.h" "${src_dir}" >"${output_file}" 2>&1
+bash "${DETECTOR}" "${src_dir}/header.h" "${src_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]] \
    && grep -q "ngx_http_markdown_reason_guarded" "${output_file}"; then
@@ -162,7 +162,7 @@ void use_guarded_def(void) {
 C
 
 output_file="${tmp_dir}/def.out"
-${DETECTOR} "${src_dir}/def_header.h" "${src_dir}" >"${output_file}" 2>&1
+bash "${DETECTOR}" "${src_dir}/def_header.h" "${src_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]] \
    && grep -q "ngx_http_markdown_reason_guarded_def" "${output_file}"; then
@@ -205,7 +205,7 @@ void use_dual_def(void) {
 C
 
 output_file="${tmp_dir}/dual.out"
-${DETECTOR} "${src_dir}/dual_header.h" "${src_dir}" >"${output_file}" 2>&1
+bash "${DETECTOR}" "${src_dir}/dual_header.h" "${src_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 0 ]]; then
     pass "clean: guarded definition with feature-disabled twin referenced outside guard"
@@ -247,7 +247,7 @@ void use_split_def(void) {
 C
 
 output_file="${tmp_dir}/split.out"
-${DETECTOR} "${src_dir}/split_header.h" "${src_dir}" >"${output_file}" 2>&1
+bash "${DETECTOR}" "${src_dir}/split_header.h" "${src_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]] \
    && grep -q "ngx_http_markdown_reason_split_def" "${output_file}"; then

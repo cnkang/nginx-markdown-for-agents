@@ -37,7 +37,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -90,11 +89,6 @@ def resolve_git_executable():
     for candidate in _GIT_CANDIDATES:
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
-    which_git = shutil.which("git")
-    if which_git:
-        resolved = Path(os.path.realpath(which_git))
-        if resolved.is_file() and os.access(resolved, os.X_OK):
-            return str(resolved)
     return None
 
 
