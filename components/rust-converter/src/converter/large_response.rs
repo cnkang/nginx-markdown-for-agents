@@ -10,6 +10,7 @@
 //!    after traversal completes.
 
 use super::normalize::{closes_fence, opens_fence};
+use crate::error::ConversionError;
 
 /// Threshold multiplier for pre-allocating the output buffer.
 /// For large documents, we estimate output at ~40% of input size
@@ -73,12 +74,33 @@ impl FusedNormalizer {
     /// # Arguments
     ///
     /// * `capacity` - Initial capacity for the output buffer.
+    #[cfg(test)]
     pub(crate) fn new(capacity: usize) -> Self {
         Self {
             output: String::with_capacity(capacity),
             prev_blank: false,
             active_fence: None,
         }
+    }
+
+    /// Create a fused normalizer with fallible, exact capacity reservation.
+    ///
+    /// The full-buffer path invokes this while the traversal output is still
+    /// live.  Returning a conversion error keeps allocator failure inside the
+    /// request's controlled memory-error path.
+    pub(crate) fn try_new(capacity: usize) -> Result<Self, ConversionError> {
+        let mut output = String::new();
+        output.try_reserve_exact(capacity).map_err(|error| {
+            ConversionError::MemoryLimit(format!(
+                "unable to reserve {} bytes for normalized Markdown: {}",
+                capacity, error
+            ))
+        })?;
+        Ok(Self {
+            output,
+            prev_blank: false,
+            active_fence: None,
+        })
     }
 
     /// Append a line of content, applying normalization rules inline.

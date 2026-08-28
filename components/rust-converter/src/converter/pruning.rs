@@ -51,6 +51,7 @@ pub struct PruneConfig {
 
 impl PruneConfig {
     /// Estimate the physical heap retained by selector storage.
+    #[cfg(any(feature = "streaming", test))]
     pub(crate) fn resident_bytes(&self) -> usize {
         fn string_vec_bytes(values: &[String], capacity: usize) -> usize {
             values

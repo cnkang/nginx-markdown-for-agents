@@ -10,8 +10,24 @@
 use nginx_markdown_converter::converter::MarkdownConverter;
 use nginx_markdown_converter::error::ConversionError;
 use nginx_markdown_converter::parser::parse_html;
+use std::thread;
 
-/// [A06.9] Deep nesting (100+ levels) doesn't crash the parser.
+fn convert_on_large_stack(html: String) -> Result<String, String> {
+    thread::Builder::new()
+        .name("deep-conversion-test".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(move || {
+            let dom = parse_html(html.as_bytes()).map_err(|error| error.to_string())?;
+            MarkdownConverter::new()
+                .convert(&dom)
+                .map_err(|error| error.to_string())
+        })
+        .expect("failed to create deep conversion test thread")
+        .join()
+        .expect("deep conversion test thread panicked")
+}
+
+/// Deep nesting (100+ levels) does not crash the parser.
 ///
 /// Generates HTML with 200 levels of nested `<div>` elements and verifies
 /// the parser handles it without panicking or stack overflow.
@@ -50,7 +66,95 @@ fn test_parser_deep_nesting_no_crash() {
     );
 }
 
-/// [A06.9] Very deep nesting (500+ levels) doesn't crash.
+/// Boundary tests at MAX_NESTING_DEPTH (1000): 999, 1000, 1001 effective
+/// renderer levels. The parser's implicit HTML/body nodes account for two
+/// levels in addition to the generated div elements.
+///
+/// MAX_NESTING_DEPTH is the hard limit enforced by the security layer.
+/// These tests verify the exact boundary behavior:
+/// - 999 levels: must parse and convert successfully (under limit)
+/// - 1000 levels: must parse and convert successfully (at limit)
+/// - 1001 levels: must be rejected by the security layer (over limit)
+#[test]
+fn test_deep_nesting_boundary_999_levels() {
+    let depth = 999;
+    let mut html = String::with_capacity(depth * 12 + 100);
+    html.push_str("<html><body>");
+    for _ in 0..depth.saturating_sub(2) {
+        html.push_str("<div>");
+    }
+    html.push_str("content at depth 999");
+    for _ in 0..depth.saturating_sub(2) {
+        html.push_str("</div>");
+    }
+    html.push_str("</body></html>");
+
+    let md = convert_on_large_stack(html);
+    assert!(
+        md.is_ok(),
+        "Conversion of {depth}-level nested HTML should succeed: {md:?}"
+    );
+    let markdown = md.unwrap();
+    assert!(
+        markdown.contains("content at depth 999"),
+        "Converted output should contain the nested content"
+    );
+}
+
+#[test]
+fn test_deep_nesting_boundary_1000_levels() {
+    let depth = 1000;
+    let mut html = String::with_capacity(depth * 12 + 100);
+    html.push_str("<html><body>");
+    for _ in 0..depth.saturating_sub(2) {
+        html.push_str("<div>");
+    }
+    html.push_str("content at depth 1000");
+    for _ in 0..depth.saturating_sub(2) {
+        html.push_str("</div>");
+    }
+    html.push_str("</body></html>");
+
+    let md = convert_on_large_stack(html);
+    assert!(
+        md.is_ok(),
+        "Conversion of {depth}-level nested HTML should succeed: {md:?}"
+    );
+    let markdown = md.unwrap();
+    assert!(
+        markdown.contains("content at depth 1000"),
+        "Converted output should contain the nested content"
+    );
+}
+
+#[test]
+fn test_deep_nesting_boundary_1001_levels_rejected() {
+    let depth = 1001;
+    let mut html = String::with_capacity(depth * 12 + 100);
+    html.push_str("<html><body>");
+    for _ in 0..depth.saturating_sub(2) {
+        html.push_str("<div>");
+    }
+    html.push_str("content at depth 1001");
+    for _ in 0..depth.saturating_sub(2) {
+        html.push_str("</div>");
+    }
+    html.push_str("</body></html>");
+
+    let md = convert_on_large_stack(html);
+    // Conversion must fail with a security error (nesting depth exceeded)
+    assert!(
+        md.is_err(),
+        "Conversion of {depth}-level nested HTML must be rejected by security layer"
+    );
+    let err_str = md.unwrap_err();
+    assert!(
+        err_str.contains("nesting") || err_str.contains("depth") || err_str.contains("Security"),
+        "Error should indicate nesting depth/security violation: {err_str}"
+    );
+}
+
+/// Very deep nesting (500+ levels) does not crash.
 ///
 /// Tests an extreme nesting depth to verify no stack overflow occurs.
 #[test]
@@ -74,7 +178,7 @@ fn test_parser_very_deep_nesting_500_levels() {
     );
 }
 
-/// [A06.9] Many nodes (10000+ elements) completes without timeout.
+/// Many nodes (10000+ elements) complete without timeout.
 ///
 /// Generates HTML with 10000 sibling `<p>` elements and verifies
 /// parsing and conversion complete successfully.
@@ -110,7 +214,7 @@ fn test_parser_many_nodes_10000_elements() {
     );
 }
 
-/// [A06.9] Many nodes with mixed structure (tables, lists, headings).
+/// Many nodes with mixed structure (tables, lists, and headings).
 ///
 /// Tests a complex document with diverse element types to verify
 /// the parser handles structural variety at scale.
@@ -158,7 +262,7 @@ fn test_parser_many_nodes_mixed_structure() {
     );
 }
 
-/// [A06.9] ParseBudgetExceeded error code maps correctly.
+/// ParseBudgetExceeded error code maps correctly.
 ///
 /// Verifies the error type and FFI code for parse budget exceeded.
 #[test]
@@ -173,7 +277,7 @@ fn test_parse_budget_exceeded_error_code() {
     assert_eq!(err.code(), 11);
 }
 
-/// [A06.9] ParseTimeout error code maps correctly.
+/// ParseTimeout error code maps correctly.
 ///
 /// Verifies the error type and FFI code for parse timeout.
 #[test]
@@ -185,7 +289,7 @@ fn test_parse_timeout_error_code() {
     assert_eq!(err.code(), 10);
 }
 
-/// [A06.9] Deep nesting with inline elements doesn't crash.
+/// Deep nesting with inline elements does not crash.
 ///
 /// Tests deeply nested inline elements (spans, strongs, ems) which
 /// exercise different parser code paths than block elements.
@@ -210,7 +314,7 @@ fn test_parser_deep_inline_nesting() {
     );
 }
 
-/// [A06.9] Large document (>1MB) parses without issue.
+/// Large documents (>1 MB) parse without issue.
 ///
 /// Generates a document exceeding 1MB to verify the parser handles
 /// large inputs within reasonable time.

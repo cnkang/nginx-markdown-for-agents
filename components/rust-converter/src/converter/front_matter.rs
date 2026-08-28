@@ -24,7 +24,7 @@
 //! is always terminated with a trailing `---` followed by a blank line to
 //! ensure clean separation from the Markdown body.
 
-use super::{ConversionContext, ConversionError, MarkdownConverter};
+use super::{BudgetedMarkdownWriter, ConversionContext, ConversionError, MarkdownConverter};
 
 impl MarkdownConverter {
     /// Optionally prepend YAML front matter extracted from DOM metadata.
@@ -44,43 +44,10 @@ impl MarkdownConverter {
         );
 
         let metadata = extractor.extract_with_context(dom, ctx)?;
-        // Reserve the front-matter render size up front: metadata values can
-        // expand substantially through YAML escaping, and the caller's budget
-        // check only ran after this function returned — by then the expansion
-        // had already been allocated.  The reservation fails with a controlled
-        // MemoryLimit before the buffer grows.
-        let reserved = self.front_matter_rendered_len(&metadata);
-        ctx.reserve_working_set(reserved)?;
-        self.write_front_matter(output, &metadata)?;
-        ctx.release_working_set(reserved);
+        let mut writer = ctx.budgeted_writer(output);
+        self.write_front_matter(&mut writer, &metadata)?;
 
         Ok(())
-    }
-
-    /// Upper bound of the YAML front matter this metadata renders to.
-    ///
-    /// YAML escaping can expand a value (quotes, control characters), so the
-    /// estimate charges the worst case: every character escaped to a full
-    /// `\\uXXXX` form plus the double quotes, on top of the key framing.
-    fn front_matter_rendered_len(&self, metadata: &crate::metadata::PageMetadata) -> usize {
-        let mut bound = 8usize; // "---\n" + "---\n\n"
-        let field = |value: &Option<String>| -> usize {
-            match value {
-                Some(v) if !v.is_empty() => {
-                    // key + ": " + quoted escaped value + newline; each source
-                    // byte can expand to at most 6 bytes (`\\uXXXX`).
-                    v.len().saturating_mul(6).saturating_add(16)
-                }
-                _ => 0,
-            }
-        };
-        bound += field(&metadata.title);
-        bound += field(&metadata.url);
-        bound += field(&metadata.description);
-        bound += field(&metadata.image);
-        bound += field(&metadata.author);
-        bound += field(&metadata.published);
-        bound
     }
 
     /// Write YAML front matter from metadata
@@ -119,61 +86,37 @@ impl MarkdownConverter {
     /// Validates: FR-15.3, FR-15.4, FR-15.5
     pub(super) fn write_front_matter(
         &self,
-        output: &mut String,
+        writer: &mut BudgetedMarkdownWriter<'_>,
         metadata: &crate::metadata::PageMetadata,
     ) -> Result<(), ConversionError> {
-        output.push_str("---\n");
+        writer.push_str("---\n")?;
 
-        if let Some(ref title) = metadata.title
-            && !title.is_empty()
-        {
-            output.push_str("title: ");
-            self.write_yaml_string(output, title);
-            output.push('\n');
-        }
+        self.write_optional_yaml_field(writer, "title", metadata.title.as_deref())?;
+        self.write_optional_yaml_field(writer, "url", metadata.url.as_deref())?;
+        self.write_optional_yaml_field(writer, "description", metadata.description.as_deref())?;
+        self.write_optional_yaml_field(writer, "image", metadata.image.as_deref())?;
+        self.write_optional_yaml_field(writer, "author", metadata.author.as_deref())?;
+        self.write_optional_yaml_field(writer, "published", metadata.published.as_deref())?;
 
-        if let Some(ref url) = metadata.url
-            && !url.is_empty()
-        {
-            output.push_str("url: ");
-            self.write_yaml_string(output, url);
-            output.push('\n');
-        }
+        writer.push_str("---\n\n")?;
 
-        if let Some(ref description) = metadata.description
-            && !description.is_empty()
-        {
-            output.push_str("description: ");
-            self.write_yaml_string(output, description);
-            output.push('\n');
-        }
+        Ok(())
+    }
 
-        if let Some(ref image) = metadata.image
-            && !image.is_empty()
-        {
-            output.push_str("image: ");
-            self.write_yaml_string(output, image);
-            output.push('\n');
-        }
+    fn write_optional_yaml_field(
+        &self,
+        writer: &mut BudgetedMarkdownWriter<'_>,
+        key: &str,
+        value: Option<&str>,
+    ) -> Result<(), ConversionError> {
+        let Some(value) = value.filter(|value| !value.is_empty()) else {
+            return Ok(());
+        };
 
-        if let Some(ref author) = metadata.author
-            && !author.is_empty()
-        {
-            output.push_str("author: ");
-            self.write_yaml_string(output, author);
-            output.push('\n');
-        }
-
-        if let Some(ref published) = metadata.published
-            && !published.is_empty()
-        {
-            output.push_str("published: ");
-            self.write_yaml_string(output, published);
-            output.push('\n');
-        }
-
-        output.push_str("---\n\n");
-
+        writer.push_str(key)?;
+        writer.push_str(": ")?;
+        self.write_yaml_string(writer, value)?;
+        writer.push('\n')?;
         Ok(())
     }
 
@@ -181,25 +124,36 @@ impl MarkdownConverter {
     ///
     /// Escapes YAML special characters and wraps the value in double quotes.
     /// This ensures the value is properly interpreted by YAML parsers.
-    pub(super) fn write_yaml_string(&self, output: &mut String, value: &str) {
-        output.push('"');
+    pub(super) fn write_yaml_string(
+        &self,
+        writer: &mut BudgetedMarkdownWriter<'_>,
+        value: &str,
+    ) -> Result<(), ConversionError> {
+        writer.push('"')?;
         for ch in value.chars() {
             match ch {
-                '"' => output.push_str("\\\""),
-                '\\' => output.push_str("\\\\"),
-                '\n' => output.push_str("\\n"),
-                '\r' => output.push_str("\\r"),
-                '\t' => output.push_str("\\t"),
+                '"' => writer.push_str("\\\"")?,
+                '\\' => writer.push_str("\\\\")?,
+                '\n' => writer.push_str("\\n")?,
+                '\r' => writer.push_str("\\r")?,
+                '\t' => writer.push_str("\\t")?,
                 // Escape remaining C0/C1 control characters (U+0000..U+001F,
                 // U+007F..U+009F) as \uXXXX so the generated YAML stays
                 // parseable (review LOW-1).
                 ch if ch.is_control() => {
-                    output.push_str(&format!("\\u{:04x}", ch as u32));
+                    let code = ch as u32;
+                    let mut escaped = *b"\\u0000";
+                    for (index, digit) in escaped[2..].iter_mut().enumerate() {
+                        let shift = 12 - index * 4;
+                        *digit = b"0123456789abcdef"[((code >> shift) & 0xf) as usize];
+                    }
+                    writer.push_str(std::str::from_utf8(&escaped).expect("ASCII YAML escape"))?;
                 }
-                _ => output.push(ch),
+                _ => writer.push(ch)?,
             }
         }
-        output.push('"');
+        writer.push('"')?;
+        Ok(())
     }
 
     /// Returns true if the output buffer already contains Markdown body content.

@@ -758,11 +758,11 @@ static void test_safe_finish_backpressure_preserves_pending_chain(void)
 
     /* Re-enter through the production safe-finish path to drain the
      * downstream-owned chain with NULL after backpressure clears. */
-    test_output_filter_rc = NGX_OK;
+    test_output_filter_rc = NGX_DONE;
     rc = ngx_http_markdown_stream_postcommit_safe_finish(
         &test_request, &ctx);
     TEST_ASSERT(rc == NGX_OK,
-                "safe_finish re-entry should drain pending output");
+                "safe_finish should consume NGX_DONE from pending output");
     TEST_ASSERT(test_output_filter_called == 2,
                 "safe_finish re-entry should call downstream with NULL");
     TEST_ASSERT(test_output_filter_chain == NULL,
@@ -776,6 +776,51 @@ static void test_safe_finish_backpressure_preserves_pending_chain(void)
     TEST_ASSERT((test_request.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
                 "successful re-entry should clear module buffering");
     TEST_PASS("safe_finish backpressure preserves pending chain");
+}
+
+static void test_safe_finish_data_only_pending_continues_to_terminal(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_buf_t data_buf;
+    ngx_int_t rc;
+    u_char payload[] = "pending markdown";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&data_buf, 0, sizeof(data_buf));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    data_buf.pos = payload;
+    data_buf.last = payload + sizeof(payload) - 1;
+    data_buf.memory = 1;
+
+    test_output_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_stream_postcommit_send_chain(
+        &test_request, &ctx, &data_buf, 1, sizeof(payload) - 1);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "data-only pending send should return NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+                "data-only pending send should retain the chain");
+    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 1,
+                "data-only pending send should preserve has_data");
+    TEST_ASSERT(ctx.streaming.pending_meta.main_terminal == 0,
+                "data-only pending send must not mark main terminal");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+                "data-only pending send must not latch main terminal");
+
+    test_output_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "safe_finish should drain data-only pending output");
+    TEST_ASSERT(test_output_filter_called == 3,
+                "safe_finish should resume data then send a terminal chain");
+    TEST_ASSERT(ctx.streaming.pending_output == NULL,
+                "data-only pending output should clear after resume");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+                "safe_finish should send the terminal after data-only resume");
+    TEST_PASS("data-only pending output does not swallow terminal delivery");
 }
 
 static void test_safe_finish_idempotent_reentry(void)
@@ -1453,6 +1498,7 @@ int main(void)
     test_safe_finish_empty_rust_output_sends_terminal();
     test_safe_finish_copies_rust_output_before_free();
     test_safe_finish_backpressure_preserves_pending_chain();
+    test_safe_finish_data_only_pending_continues_to_terminal();
     test_safe_finish_no_closing_bytes_backpressure();
     test_safe_finish_idempotent_reentry();
     test_safe_finish_then_abort_does_not_double_send();

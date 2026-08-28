@@ -208,7 +208,7 @@ impl MetadataExtractor {
                 metadata.image = self.resolve_and_sanitize_url(&content);
             }
             Some("og:url") if metadata.url.is_none() => {
-                metadata.url = Self::sanitize_metadata_url(&content);
+                metadata.url = self.resolve_and_sanitize_url(&content);
             }
             Some("author") if metadata.author.is_none() => {
                 metadata.author = Some(content);

@@ -27,8 +27,24 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 NGINX_BIN="${NGINX_BIN:-}"
 KEEP_ARTIFACTS=0
+
+# Only execute a binary from the repository's canonical test build or from
+# fixed system installation locations.  A PATH entry supplied by a caller is
+# not trusted merely because it is executable.
+TRUSTED_NGINX_PATHS=(
+  "${REPO_ROOT}/components/nginx-module/tests/build/nginx"
+  "${REPO_ROOT}/build/nginx"
+  "/usr/bin/nginx"
+  "/usr/sbin/nginx"
+  "/usr/local/bin/nginx"
+  "/usr/local/sbin/nginx"
+  "/opt/homebrew/bin/nginx"
+  "/opt/homebrew/sbin/nginx"
+)
 
 TESTS_RUN=0
 TESTS_PASSED=0
@@ -80,7 +96,41 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+canonicalize_existing_nginx_path() {
+  local path="$1"
+  local target=""
+  local resolved_dir=""
+  local hop=0
+
+  if [[ "${path}" != /* || ! -f "${path}" || ! -x "${path}" ]]; then
+    return 1
+  fi
+  while [[ -L "${path}" && "${hop}" -lt 40 ]]; do
+    target="$(readlink "${path}")" || return 1
+    if [[ "${target}" == /* ]]; then
+      path="${target}"
+    else
+      path="$(dirname "${path}")/${target}"
+    fi
+    hop=$((hop + 1))
+  done
+  if [[ -L "${path}" ]]; then
+    return 1
+  fi
+  resolved_dir="$(cd -P "$(dirname "${path}")" 2>/dev/null && pwd)" || return 1
+  [[ -n "${resolved_dir}" ]] || return 1
+  path="${resolved_dir}/$(basename "${path}")"
+  [[ -f "${path}" && -x "${path}" ]] || return 1
+  printf '%s\n' "${path}"
+  return 0
+}
+
 resolve_nginx_bin() {
+  local trusted_path=""
+  local resolved_path=""
+  local resolved_trusted_path=""
+  local trusted_match=0
+
   if [[ -z "${NGINX_BIN}" ]]; then
     if command -v nginx >/dev/null 2>&1; then
       NGINX_BIN="$(command -v nginx)"
@@ -89,10 +139,27 @@ resolve_nginx_bin() {
       return 1
     fi
   fi
-  if [[ ! -x "${NGINX_BIN}" ]]; then
-    echo "ERROR: NGINX_BIN is not executable: ${NGINX_BIN}" >&2
+  if [[ "${NGINX_BIN}" != /* ]]; then
+    echo "ERROR: NGINX_BIN must be an absolute path: ${NGINX_BIN}" >&2
     return 1
   fi
+  if ! resolved_path="$(canonicalize_existing_nginx_path "${NGINX_BIN}")"; then
+    echo "ERROR: cannot canonicalize executable NGINX_BIN: ${NGINX_BIN}" >&2
+    return 1
+  fi
+
+  for trusted_path in "${TRUSTED_NGINX_PATHS[@]}"; do
+    if resolved_trusted_path="$(canonicalize_existing_nginx_path "${trusted_path}" \
+      2>/dev/null)" && [[ "${resolved_path}" == "${resolved_trusted_path}" ]]; then
+      trusted_match=1
+      break
+    fi
+  done
+  if [[ "${trusted_match}" -ne 1 ]]; then
+    echo "ERROR: NGINX_BIN is outside the trusted executable allowlist: ${resolved_path}" >&2
+    return 1
+  fi
+  NGINX_BIN="${resolved_path}"
   return 0
 }
 

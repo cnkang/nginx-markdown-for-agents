@@ -972,18 +972,25 @@ pub fn escape_markdown_text(s: &str) -> String {
 /// decisions are identical, but the caller controls the destination buffer so
 /// budget-aware writers can append without materializing a full escaped copy
 /// of the source text first.
+pub(crate) fn escaped_char_len(ch: char, state: &MarkdownTextEscapeState) -> usize {
+    ch.len_utf8() + usize::from(requires_escape(ch, state))
+}
+
 pub(crate) fn push_escaped_char(out: &mut String, ch: char, state: &mut MarkdownTextEscapeState) {
+    if requires_escape(ch, state) {
+        out.push('\\');
+    }
+    out.push(ch);
+    state.advance(ch);
+}
+
+fn requires_escape(ch: char, state: &MarkdownTextEscapeState) -> bool {
     let block_marker = state.line_prefix
         && state.indent <= 3
         && (matches!(ch, '#' | '>' | '+' | '-' | '!' | '|' | '=')
             || (matches!(ch, '.' | ')') && state.ordered_digits));
     let inline_delimiter = matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~');
-
-    if block_marker || inline_delimiter {
-        out.push('\\');
-    }
-    out.push(ch);
-    state.advance(ch);
+    block_marker || inline_delimiter
 }
 
 #[cfg(test)]

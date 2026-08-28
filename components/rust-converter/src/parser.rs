@@ -51,6 +51,7 @@ use html5ever::parse_document;
 use html5ever::tendril::TendrilSink;
 use markup5ever_rcdom::RcDom;
 use std::borrow::Cow;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::charset::detect_charset;
 use crate::error::ConversionError;
@@ -152,7 +153,12 @@ pub fn parse_html_with_charset(
 
     // Parse the HTML document using html5ever directly from a UTF-8 string
     // sink to avoid `std::io::Read`/Cursor overhead in the hot path.
-    let dom = parse_document(RcDom::default(), Default::default()).one(utf8_str.as_ref());
+    let dom = catch_unwind(AssertUnwindSafe(|| {
+        parse_document(RcDom::default(), Default::default()).one(utf8_str.as_ref())
+    }))
+    .map_err(|_| {
+        ConversionError::ParseError("html5ever panicked while parsing malformed HTML".to_string())
+    })?;
 
     Ok(dom)
 }
@@ -245,6 +251,22 @@ mod tests {
         let html = b"<html><body><h1>Hello";
         let result = parse_html(html);
         assert!(result.is_ok(), "Should handle malformed HTML gracefully");
+    }
+
+    #[test]
+    fn test_parse_truncated_content_type_meta_does_not_panic() {
+        let html = b"<html><head><meta http-equiv=\"Content-Type\" \
+            content=\"text/html; charset\"></head><body>safe</body></html>";
+        let result = std::panic::catch_unwind(|| parse_html(html));
+
+        assert!(
+            result.is_ok(),
+            "malformed metadata must not escape as a panic"
+        );
+        assert!(
+            matches!(result.unwrap(), Err(ConversionError::ParseError(_))),
+            "truncated metadata should be reported as a parse error"
+        );
     }
 
     #[test]
