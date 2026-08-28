@@ -44,9 +44,46 @@ impl MarkdownConverter {
         );
 
         let metadata = extractor.extract_with_context(dom, ctx)?;
+        // Reserve the front-matter render size up front: metadata values can
+        // expand substantially through YAML escaping, and the caller's budget
+        // check only ran after this function returned — by then the expansion
+        // had already been allocated.  The reservation fails with a controlled
+        // MemoryLimit before the buffer grows.
+        let reserved = self.front_matter_rendered_len(&metadata);
+        ctx.reserve_working_set(reserved)?;
         self.write_front_matter(output, &metadata)?;
+        ctx.release_working_set(reserved);
 
         Ok(())
+    }
+
+    /// Upper bound of the YAML front matter this metadata renders to.
+    ///
+    /// YAML escaping can expand a value (quotes, control characters), so the
+    /// estimate charges the worst case: every character escaped to a full
+    /// `\\uXXXX` form plus the double quotes, on top of the key framing.
+    fn front_matter_rendered_len(
+        &self,
+        metadata: &crate::metadata::PageMetadata,
+    ) -> usize {
+        let mut bound = 8usize; // "---\n" + "---\n\n"
+        let field = |value: &Option<String>| -> usize {
+            match value {
+                Some(v) if !v.is_empty() => {
+                    // key + ": " + quoted escaped value + newline; each source
+                    // byte can expand to at most 6 bytes (`\\uXXXX`).
+                    v.len().saturating_mul(6).saturating_add(16)
+                }
+                _ => 0,
+            }
+        };
+        bound += field(&metadata.title);
+        bound += field(&metadata.url);
+        bound += field(&metadata.description);
+        bound += field(&metadata.image);
+        bound += field(&metadata.author);
+        bound += field(&metadata.published);
+        bound
     }
 
     /// Write YAML front matter from metadata

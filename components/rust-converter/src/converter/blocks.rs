@@ -234,7 +234,7 @@ impl MarkdownConverter {
 
     fn list_line_continuation_indent(
         line: &str,
-        base_indent: &str,
+        _base_indent: &str,
         continuation_indent_len: usize,
     ) -> usize {
         // Mirrors append_list_item_line: an indented line is stripped of its

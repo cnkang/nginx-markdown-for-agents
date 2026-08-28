@@ -82,7 +82,7 @@ streaming_buffer=2m`.
 |---|---|
 | `conversion_timeout` | Wall-clock limit for conversion |
 | `parser_timeout` | Cooperative parser deadline |
-| `conversion_memory` | Full-buffer input/conversion bound |
+| `conversion_memory` | Full-buffer input admission and generated-output bound; transient scratch allocations are also charged against this budget so conversion aborts with a controlled error instead of growing peak memory past it |
 | `parser_memory` | Rust parser allocation bound |
 | `streaming_buffer` | Per-request streaming working-set and replay budget |
 | `decompressed_size` | Cumulative decompressed output bound |

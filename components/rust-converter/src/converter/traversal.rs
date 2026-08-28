@@ -47,7 +47,7 @@ impl MarkdownConverter {
         &self,
         text: &str,
         output: &mut String,
-        ctx: Option<&mut ConversionContext>,
+        mut ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         let normalized = self.normalize_text(text);
         if normalized.is_empty() {
@@ -67,11 +67,16 @@ impl MarkdownConverter {
             output.push(' ');
         }
 
-        let escaped = crate::security::escape_markdown_text(&normalized);
-        if let Some(ctx) = ctx {
-            ctx.check_output_budget(output.len() + escaped.len())?;
+        // Escape incrementally: materializing the full escaped string first
+        // let transient allocations exceed the conversion budget before the
+        // final length check ran.  The budget-aware append fails before an
+        // over-budget allocation happens.
+        if let Some(ctx) = ctx.as_deref_mut() {
+            let mut escape_state = crate::security::MarkdownTextEscapeState::default();
+            ctx.append_escaped_text(output, &normalized, &mut escape_state)?;
+        } else {
+            output.push_str(&crate::security::escape_markdown_text(&normalized));
         }
-        output.push_str(&escaped);
 
         if text.ends_with(char::is_whitespace) {
             output.push(' ');
