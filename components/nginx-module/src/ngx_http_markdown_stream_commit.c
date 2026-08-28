@@ -231,14 +231,12 @@ static ngx_int_t
 ngx_http_markdown_stream_commit_validate_live_snapshot(
     ngx_http_request_t *r, const ngx_http_markdown_hdr_snap_t *snap)
 {
-    ngx_list_part_t  *part;
-    ngx_table_elt_t  *elts;
-    ngx_uint_t        idx;
-    ngx_uint_t        matched;
+    ngx_uint_t  idx;
+    ngx_uint_t  matched;
 
     idx = 0;
     matched = 0;
-    for (part = &r->headers_out.headers.part;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
          part != NULL;
          part = part->next)
     {
@@ -248,7 +246,7 @@ ngx_http_markdown_stream_commit_validate_live_snapshot(
             return NGX_ERROR;
         }
 
-        elts = part->elts;
+        const ngx_table_elt_t  *elts = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (idx < snap->orig_nelts
                 && ngx_http_markdown_stream_commit_snapshot_entry_matches(
