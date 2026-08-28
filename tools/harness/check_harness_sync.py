@@ -324,6 +324,37 @@ def _iter_manifest_list_commands(value: list):
         yield from _iter_manifest_commands(child)
 
 
+def _iter_manifest_workflow_paths(value: object):
+    """Yield explicit workflow paths from nested manifest families."""
+    if isinstance(value, dict):
+        yield from _iter_manifest_dict_workflow_paths(value)
+    elif isinstance(value, list):
+        yield from _iter_manifest_list_workflow_paths(value)
+
+
+def _iter_manifest_dict_workflow_paths(value: dict):
+    """Yield workflow paths and recurse through one manifest mapping."""
+    workflow_paths = value.get("workflow_paths")
+    if isinstance(workflow_paths, list):
+        yield from _iter_workflow_path_values(workflow_paths)
+    for key, child in value.items():
+        if key != "workflow_paths":
+            yield from _iter_manifest_workflow_paths(child)
+
+
+def _iter_manifest_list_workflow_paths(value: list):
+    """Yield workflow paths from one manifest list."""
+    for child in value:
+        yield from _iter_manifest_workflow_paths(child)
+
+
+def _iter_workflow_path_values(value: list):
+    """Yield non-empty workflow path strings from a manifest field."""
+    for path in value:
+        if isinstance(path, str) and path.strip():
+            yield path
+
+
 def _make_targets(makefile: Path) -> tuple[set[str], str | None]:
     """Return explicitly declared Make targets and an optional read error."""
     try:
@@ -346,14 +377,18 @@ def _make_targets(makefile: Path) -> tuple[set[str], str | None]:
     return targets, None
 
 
-def _manifest_path_candidate(token: str) -> Path | None:
-    """Return repo-owned command paths that should be checked for existence."""
+def _is_manifest_path_token(token: str, allow_unprefixed: bool = False) -> bool:
+    """Return whether a token is intended to name a repository path."""
     token = token.strip()
     if token.startswith("./"):
         token = token[2:]
     if not token or token.startswith("-") or token.startswith(("$", "${")):
-        return None
-    if token.startswith(
+        return False
+    if Path(token).is_absolute():
+        return True
+    if allow_unprefixed:
+        return True
+    return token.startswith(
         (
             "tools/",
             "packaging/",
@@ -367,13 +402,39 @@ def _manifest_path_candidate(token: str) -> Path | None:
             "skills/",
             "fuzz/",
         )
-    ):
-        if any(char in token for char in ";&|<>*?"):
-            return None
-        if ".." in token.split("/"):
-            return None
-        return REPO_ROOT / token
-    return None
+    )
+
+
+def _manifest_path_candidate(
+    token: str, *, allow_unprefixed: bool = False
+) -> Path | None:
+    """Return a canonical repository-owned command path, if applicable."""
+    token = token.strip()
+    original = token
+    if token.startswith("./"):
+        token = token[2:]
+    if not _is_manifest_path_token(original, allow_unprefixed):
+        return None
+    if any(char in token for char in ";&|<>*?"):
+        return None
+    if not Path(token).is_absolute() and ".." in token.split("/"):
+        return None
+
+    candidate = Path(token) if Path(token).is_absolute() else REPO_ROOT / token
+    try:
+        resolved_root = REPO_ROOT.resolve(strict=True)
+        resolved_candidate = candidate.resolve(strict=False)
+        resolved_candidate.relative_to(resolved_root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return resolved_candidate
+
+
+def _manifest_path_is_unsafe(token: str, *, allow_unprefixed: bool = False) -> bool:
+    """Return whether a repository-looking path failed canonical containment."""
+    return _is_manifest_path_token(token, allow_unprefixed) and (
+        _manifest_path_candidate(token, allow_unprefixed=allow_unprefixed) is None
+    )
 
 
 def _missing_make_targets(command: str, tokens: list[str], targets: set[str]) -> list[str]:
@@ -439,21 +500,33 @@ def _classify_make_argument(
     return "target"
 
 
-def _resolve_makefile_targets(after_make: list[str],
-                              targets: set[str]) -> tuple[set[str], str | None]:
+def _resolve_makefile_targets(
+    after_make: list[str], targets: set[str]
+) -> tuple[set[str], str | None]:
     """Resolve the effective Make targets, honoring a -f/--file selection.
 
     Returns ``(targets, error)``: ``error`` is a non-empty string when the
     selected Makefile cannot be parsed, else ``None``.
     """
     for i, flag in enumerate(after_make):
-        if flag in {"-f", "--file"} and i + 1 < len(after_make):
-            return _make_targets(REPO_ROOT / after_make[i + 1])
-        if flag == "-C" and i + 1 < len(after_make):
-            return _make_targets(REPO_ROOT / after_make[i + 1] / "Makefile")
+        if flag in {"-f", "--file", "-C"} and i + 1 < len(after_make):
+            return _resolve_makefile_option(flag, after_make[i + 1])
         if flag.startswith("-C") and len(flag) > 2:
-            return _make_targets(REPO_ROOT / flag[2:] / "Makefile")
+            return _resolve_makefile_option("-C", flag[2:])
     return targets, None
+
+
+def _resolve_makefile_option(
+    flag: str, raw_path: str
+) -> tuple[set[str], str | None]:
+    """Resolve one makefile or make-directory option."""
+    selected = _manifest_path_candidate(raw_path, allow_unprefixed=True)
+    if selected is None:
+        kind = "makefile path" if flag in {"-f", "--file"} else "make directory"
+        return set(), f"{kind} {raw_path!r} is not repo-owned"
+    if flag in {"-f", "--file"}:
+        return _make_targets(selected)
+    return _make_targets(selected / "Makefile")
 
 
 def _missing_command_paths(command: str, tokens: list[str], start: int) -> list[str]:
@@ -467,7 +540,11 @@ def _missing_command_paths(command: str, tokens: list[str], start: int) -> list[
         # repository-path check.
         candidate = candidate.split("::", 1)[0]
         path = _manifest_path_candidate(candidate)
-        if path is not None and not path.exists():
+        if _manifest_path_is_unsafe(candidate):
+            missing.append(
+                f"{command!r}: repository path {candidate!r} is not repo-owned"
+            )
+        elif path is not None and not path.exists():
             missing.append(
                 f"{command!r}: repository path {_display_path(path)!r} is missing"
             )
@@ -481,7 +558,12 @@ def _missing_interpreter_path(
     if index + 1 >= len(tokens):
         return []
     path = _manifest_path_candidate(tokens[index + 1])
-    if path is None or path.exists():
+    if _manifest_path_is_unsafe(tokens[index + 1]) or path is None or path.exists():
+        if _manifest_path_is_unsafe(tokens[index + 1]):
+            return [
+                f"{command!r}: repository path {tokens[index + 1]!r} "
+                "is not repo-owned"
+            ]
         return []
     return [
         f"{command!r}: repository path {_display_path(path)!r} is missing"
@@ -491,7 +573,9 @@ def _missing_interpreter_path(
 def _missing_plain_command_path(command: str, token: str) -> list[str]:
     """Return a missing repository-owned path represented by one token."""
     path = _manifest_path_candidate(token)
-    if path is None or path.exists():
+    if _manifest_path_is_unsafe(token) or path is None or path.exists():
+        if _manifest_path_is_unsafe(token):
+            return [f"{command!r}: repository path {token!r} is not repo-owned"]
         return []
     return [
         f"{command!r}: repository path {_display_path(path)!r} is missing"
@@ -552,12 +636,19 @@ def _missing_one_manifest_command(
 def _check_manifest_command_reachability(manifest: dict) -> CheckResult:
     """Verify manifest Make targets, scripts, and workflow paths are reachable."""
     commands = list(_iter_manifest_commands(manifest))
+    workflow_paths = list(_iter_manifest_workflow_paths(manifest))
     targets, makefile_error = _make_targets(REPO_ROOT / "Makefile")
     missing: list[str] = []
     if makefile_error and any("make" in command.split() for command in commands):
         missing.append(makefile_error)
     for command in commands:
         missing.extend(_missing_one_manifest_command(command, targets))
+    for workflow_path in workflow_paths:
+        path = _manifest_path_candidate(workflow_path)
+        if path is None or not path.exists():
+            missing.append(
+                f"manifest workflow path {workflow_path!r} is missing or not repo-owned"
+            )
     if missing:
         return _result(
             "manifest-command-reachability", FAIL, "; ".join(dict.fromkeys(missing))
@@ -565,7 +656,8 @@ def _check_manifest_command_reachability(manifest: dict) -> CheckResult:
     return _result(
         "manifest-command-reachability",
         PASS,
-        f"{len(commands)} manifest commands resolve to declared or present repository surfaces",
+        f"{len(commands)} manifest commands and {len(workflow_paths)} workflow paths "
+        "resolve to declared or present repository surfaces",
     )
 
 

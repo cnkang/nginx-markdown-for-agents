@@ -193,7 +193,7 @@ run_arbitrary_detector \
 if [[ "${DETECTOR_RC}" -ge 2 ]]; then
     echo "  PASS: detector crash is visible (exit ${DETECTOR_RC})"
 else
-    echo "  FAIL: detector crash was hidden (exit ${DETECTOR_RC}): ${DETECTOR_OUTPUT}"
+    echo "  FAIL: detector crash was hidden (exit ${DETECTOR_RC}): ${DETECTOR_OUTPUT}" >&2
     failures=$((failures + 1))
 fi
 

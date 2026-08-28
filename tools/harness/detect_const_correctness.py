@@ -84,11 +84,11 @@ EXEMPT_FILES = {
 #  append, record, reclassify, rollback, end, export, ensure, snapshot,
 #  otel_span, reserve, forward — these all mutate their pointer parameters)
 INTENTIONAL_MUTATOR_RE = re.compile(
-    r"(?:create|merge|init|set|apply|free|release|update|reset|destroy|alloc|"
+    r"(?<![A-Za-z])(?:create|merge|init|set|apply|free|release|update|reset|destroy|alloc|"
     r"cleanup|write|handle_ctx_alloc_failure|bind_request_snapshot|"
     r"dynconf_snapshot_from_conf|dynconf_apply_snapshot|"
     r"build_effective_conf|append|record|reclassify|rollback|"
-    r"end|export|ensure|snapshot|otel_span|reserve|forward)"
+    r"end|export|ensure|snapshot|mark_header_reject|otel_span|reserve|forward)(?![A-Za-z])"
 )
 
 # NGINX callback signature patterns — adding const to these parameters
