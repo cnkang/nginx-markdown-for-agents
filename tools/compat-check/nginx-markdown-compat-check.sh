@@ -53,6 +53,10 @@ SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VERSION_FILE="$REPO_ROOT/components/rust-converter/Cargo.toml"
+if [[ ! -f "$VERSION_FILE" ]]; then
+    printf '[ERROR] Unable to read project version from %s\n' "$VERSION_FILE" >&2
+    exit 2
+fi
 PROJECT_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$VERSION_FILE" | head -n 1)"
 
 if [[ -z "$PROJECT_VERSION" ]]; then
@@ -102,18 +106,21 @@ log_info() {
     local message="$1"
 
     printf '[INFO]  %s\n' "$message" >&2
+    return 0
 }
 
 log_warn() {
     local message="$1"
 
     printf '[WARN]  %s\n' "$message" >&2
+    return 0
 }
 
 log_error() {
     local message="$1"
 
     printf '[ERROR] %s\n' "$message" >&2
+    return 0
 }
 
 # ---------------------------------------------------------------------------

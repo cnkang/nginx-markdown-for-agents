@@ -212,6 +212,12 @@ ACTION="${1:-install}"
 
 case "$ACTION" in
     install|upgrade|1|2)
+        if [[ -z "${TARGET_NGINX_VERSION}" \
+            || ! "${TARGET_NGINX_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            warn "Package has no resolved NGINX target version; refusing installation."
+            exit 1
+        fi
+
         # Resolve NGINX ONCE and reuse the same absolute identity for the
         # existence check and the version probe.  A root-run maintainer
         # script must not re-resolve a bare "nginx" from PATH after the

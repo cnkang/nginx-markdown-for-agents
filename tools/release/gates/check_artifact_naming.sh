@@ -92,21 +92,25 @@ usage() {
 log_info() {
     local msg="$1"
     printf '[INFO]  %s\n' "$msg" >&2
+    return 0
 }
 
 log_pass() {
     local msg="$1"
     printf '[PASS]  %s\n' "$msg" >&2
+    return 0
 }
 
 log_fail() {
     local msg="$1"
     printf '[FAIL]  %s\n' "$msg" >&2
+    return 0
 }
 
 log_error() {
     local msg="$1"
     printf '[ERROR] %s\n' "$msg" >&2
+    return 0
 }
 
 # ---------------------------------------------------------------------------

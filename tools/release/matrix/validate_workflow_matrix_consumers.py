@@ -744,7 +744,14 @@ def validate_official_docker_matrix_coverage(matrix_path: Path) -> list[str]:
         errors.extend(_validate_official_docker_workflow(document))
 
     expected_ids: set[str] = set()
+    accepted_rows = 0
     for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            errors.append(
+                "official Docker matrix row "
+                f"{index} must be an object"
+            )
+            continue
         row_id = entry.get("matrix_row_id")
         if not isinstance(row_id, str) or not row_id:
             errors.append(
@@ -753,7 +760,8 @@ def validate_official_docker_matrix_coverage(matrix_path: Path) -> list[str]:
             )
             continue
         expected_ids.add(row_id)
-    if len(expected_ids) != len(entries):
+        accepted_rows += 1
+    if len(expected_ids) != accepted_rows:
         errors.append("official Docker matrix contains duplicate execution rows")
     if not expected_ids:
         errors.append("official Docker matrix contains no release-blocking rows")

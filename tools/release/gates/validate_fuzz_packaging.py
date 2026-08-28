@@ -64,9 +64,9 @@ INSTALL_DOCS = [
     PROJECT_ROOT / "docs" / "guides" / "PACKAGE_INSTALLATION.md",
 ]
 COMPAT_DOCS = [
-    PROJECT_ROOT / "docs" / "guides" / "NGINX_COMPATIBILITY.md",
-    PROJECT_ROOT / "docs" / "features" / "NGINX_COMPATIBILITY.md",
-    PROJECT_ROOT / "docs" / "guides" / "COMPATIBILITY.md",
+    # One canonical compatibility reference; old guide paths remain only as
+    # navigation stubs and must not become independent validation surfaces.
+    PROJECT_ROOT / "docs" / "COMPATIBILITY.md",
 ]
 
 # Required fuzz guide sections (keywords that must appear)

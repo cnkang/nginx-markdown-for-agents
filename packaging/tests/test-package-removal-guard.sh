@@ -96,6 +96,16 @@ run_case reference failed-upgrade 0 >/dev/null
 run_case clear remove 0 >/dev/null
 run_case unreadable remove 1 >/dev/null
 
+override_status=0
+NGINX_MARKDOWN_ALLOW_UNVERIFIED_REMOVE=1 "${RUN_SCRIPT}" remove >/dev/null 2>&1 \
+    || override_status=$?
+if [[ "${override_status}" -ne 0 ]]; then
+    printf 'FAIL: explicit unverified-removal override returned %s\n' \
+        "${override_status}" >&2
+    exit 1
+fi
+printf 'PASS: explicit unverified-removal override permits removal\n' >&2
+
 rm -f "${FAKE_ROOT}/usr/sbin/nginx"
 mkdir -p "${FAKE_ROOT}/etc/nginx/conf.d"
 printf 'events {}\n' > "${FAKE_ROOT}/etc/nginx/nginx.conf"

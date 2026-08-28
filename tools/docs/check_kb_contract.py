@@ -54,19 +54,18 @@ def _split_row(line: str) -> list[str] | None:
 
 
 def _find_table_header(
-    lines: list[str], heading_pattern: str
+    lines: list[str], heading: re.Pattern[str]
 ) -> tuple[list[str], int]:
-    heading = re.compile(heading_pattern)
     start = next((i for i, line in enumerate(lines) if heading.match(line)), None)
     if start is None:
-        raise ValueError(f"missing table heading matching {heading_pattern!r}")
+        raise ValueError(f"missing table heading matching {heading.pattern!r}")
 
     header_index = next(
         (i for i in range(start + 1, len(lines)) if _split_row(lines[i]) is not None),
         None,
     )
     if header_index is None:
-        raise ValueError(f"missing table after {heading_pattern!r}")
+        raise ValueError(f"missing table after {heading.pattern!r}")
     headers = [cell.strip().lower() for cell in _split_row(lines[header_index]) or []]
 
     separator_index = header_index + 1
@@ -74,12 +73,15 @@ def _find_table_header(
         separator_index += 1
     separator = _split_row(lines[separator_index]) if separator_index < len(lines) else None
     if separator is None or not all(re.fullmatch(r":?-{3,}:?", cell) for cell in separator):
-        raise ValueError(f"missing separator after table {heading_pattern!r}")
+        raise ValueError(f"missing separator after table {heading.pattern!r}")
     return headers, separator_index
 
 
 def _parse_table_rows(
-    lines: list[str], separator_index: int, headers: list[str], heading_pattern: str
+    lines: list[str],
+    separator_index: int,
+    headers: list[str],
+    heading: re.Pattern[str],
 ) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for line in lines[separator_index + 1 :]:
@@ -94,17 +96,19 @@ def _parse_table_rows(
             continue
         if len(cells) != len(headers):
             raise ValueError(
-                f"table {heading_pattern!r} row has {len(cells)} cells, "
+                f"table {heading.pattern!r} row has {len(cells)} cells, "
                 f"expected {len(headers)}: {line}"
             )
         rows.append(dict(zip(headers, cells)))
     return rows
 
 
-def _parse_table(text: str, heading_pattern: str) -> tuple[list[str], list[dict[str, str]]]:
+def _parse_table(
+    text: str, heading: re.Pattern[str]
+) -> tuple[list[str], list[dict[str, str]]]:
     lines = text.splitlines()
-    headers, separator_index = _find_table_header(lines, heading_pattern)
-    return headers, _parse_table_rows(lines, separator_index, headers, heading_pattern)
+    headers, separator_index = _find_table_header(lines, heading)
+    return headers, _parse_table_rows(lines, separator_index, headers, heading)
 
 
 def _clean(value: object) -> str:
@@ -154,11 +158,11 @@ def _parse_contract_tables(
     contract_text: str,
 ) -> tuple[list[dict[str, str]], ...]:
     patterns = (
-        r"^## Active Directives \(",
-        r"^## Dynconf Keys \(",
-        r"^## Metric Families \(",
-        r"^## Reason Codes \(",
-        r"^## markdown_limits Keys$",
+        re.compile(r"^## Active Directives \("),
+        re.compile(r"^## Dynconf Keys \("),
+        re.compile(r"^## Metric Families \("),
+        re.compile(r"^## Reason Codes \("),
+        re.compile(r"^## markdown_limits Keys$"),
     )
     return tuple(_parse_table(contract_text, pattern)[1] for pattern in patterns)
 
@@ -247,11 +251,11 @@ def _validate_dynconf(
     )
     if heading not in contract_text:
         errors.append("dynconf: heading must distinguish runtime-mutable keys from schema metadata")
-    expected_heading = (
-        rf"{dynamic_count} runtime-mutable keys .*?"
-        r"required `schema_version` metadata"
-    )
-    if not re.search(expected_heading, contract_text, re.I | re.S):
+    expected_count = f"{dynamic_count} runtime-mutable keys"
+    if (
+        expected_count not in contract_text
+        or "required `schema_version` metadata" not in contract_text
+    ):
         errors.append(
             "dynconf: contract must describe the dynamic runtime-mutable "
             "count plus schema metadata"

@@ -133,12 +133,24 @@ if [[ -z "${RUST_VERSION}" ]]; then
     exit 1
 fi
 
+RELEASE_VERSION="$(sed -n 's/^RELEASE_VERSION = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' tools/release/matrix/normalize_matrix.py | head -n 1)"
+if [[ ! "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Unable to resolve the release artifact version from normalize_matrix.py." >&2
+    exit 1
+fi
+export RELEASE_VERSION
+
 FEATURE_MANIFEST_DIGEST="$(python3 - <<'PY'
 import hashlib
 import json
+import os
 from pathlib import Path
 
-path = Path("artifacts/release/0.9.2/official-build-feature-manifest.json")
+path = (
+    Path("artifacts/release")
+    / os.environ["RELEASE_VERSION"]
+    / "official-build-feature-manifest.json"
+)
 manifest = json.loads(path.read_text(encoding="utf-8"))
 expected = {
     "prune_noise_regions": True,

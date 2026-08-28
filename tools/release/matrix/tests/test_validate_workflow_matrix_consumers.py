@@ -589,6 +589,25 @@ class TestOfficialDockerWorkflowCoverage:
 
         assert any("matrix_row_id" in error for error in errors)
 
+    def test_does_not_call_malformed_rows_duplicates(self, tmp_path: Path) -> None:
+        workflow_dir = tmp_path / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "official-nginx-docker.yml").write_text("jobs: {}\n")
+
+        valid_row = {"matrix_row_id": "1.31.4/debian12/glibc/amd64"}
+        with patch(
+            "validate_workflow_matrix_consumers.WORKFLOWS_DIR", workflow_dir
+        ), patch(
+            "validate_workflow_matrix_consumers.load_official_docker_entries",
+            return_value=[valid_row, None],
+        ):
+            errors = validate_official_docker_matrix_coverage(
+                tmp_path / "release-matrix.json"
+            )
+
+        assert any("must be an object" in error for error in errors)
+        assert not any("duplicate execution rows" in error for error in errors)
+
     def test_rejects_contract_markers_only_in_comments(self, tmp_path: Path) -> None:
         matrix_file = tmp_path / "release-matrix.json"
         matrix_file.write_text(

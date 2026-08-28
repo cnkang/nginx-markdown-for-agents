@@ -415,10 +415,24 @@ class TestReleaseGateSnippetExpectations:
         satisfies = validator._dpkg_version_satisfies
         assert satisfies("1.28.3-1~bookworm", ">=", "1.28.3")
         assert satisfies("1.28.3-2~bookworm", ">=", "1.28.3-1~bookworm")
+        assert satisfies("1.28.3-1~bookworm", "<", "1.28.3-1")
+        assert satisfies("1.28.3-1", ">", "1.28.3")
+        assert satisfies("1.28.3~rc1", "<", "1.28.3")
         assert not satisfies("1.28.4", "<<", "1.28.4")
         assert satisfies("1.28.3", "<<", "1.28.4")
         assert satisfies("1.28.10", ">>", "1.28.9")
         assert satisfies("1:1.28.3", ">=", "1.28.3")
+
+    def test_deb_dependency_contract_uses_each_matrix_version(self) -> None:
+        """Probe the interval for versions beyond the historical fixture."""
+        nfpm_content = validator.NFPM_CONFIG.read_text(encoding="utf-8")
+
+        contract_ok, errors = validator.validate_nfpm_deb_dependency_contract(
+            nfpm_content,
+            nginx_versions={"1.28.9", "1.28.10"},
+        )
+
+        assert contract_ok, errors
 
     def test_rpm_spec_dependency_uses_exact_nginx_version(self) -> None:
         """Ensure RPM spec pins the EXACT NGINX version (epoch-aware) and correct module path.
@@ -511,6 +525,11 @@ class TestReleaseGateSnippetExpectations:
             "/usr/share/doc/nginx-module-markdown-for-agents/README.md"
             in validator.NFPM_POSTINSTALL_FORBIDDEN_SNIPPETS
         )
+
+    def test_installation_index_is_not_treated_as_package_surface(self) -> None:
+        """Keep the short legacy index out of the canonical package checks."""
+        assert validator.PROJECT_ROOT / "docs" / "guides" / "INSTALL.md" not in validator.MODULE_NAME_SURFACES
+        assert validator.PACKAGE_INSTALLATION_DOC in validator.MODULE_NAME_SURFACES
 
     def test_gate3_local_smoke_selects_arch_specific_packages(self) -> None:
         """Ensure gate3 local smoke uses architecture-specific package patterns."""

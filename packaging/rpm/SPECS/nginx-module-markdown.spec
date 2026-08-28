@@ -54,6 +54,8 @@ install -m 0644 README.md \
     %{buildroot}/usr/share/doc/nginx-markdown-for-agents/README.md
 install -m 0644 docs/guides/INSTALL.md \
     %{buildroot}/usr/share/doc/nginx-markdown-for-agents/INSTALL.md
+install -m 0644 docs/guides/PACKAGE_INSTALLATION.md \
+    %{buildroot}/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
 install -m 0644 docs/COMPATIBILITY.md \
     %{buildroot}/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
 
@@ -138,6 +140,11 @@ if [ "$1" -eq 0 ]; then
                 fi
             fi
         done
+        if [ "$config_seen" -eq 0 ]; then
+            echo "ERROR: no NGINX binary or standard configuration file was found; refusing RPM removal." >&2
+            echo "Verify the active configuration explicitly before removing the module." >&2
+            exit 1
+        fi
     fi
 fi
 
@@ -145,6 +152,7 @@ fi
 /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so
 /usr/share/doc/nginx-markdown-for-agents/README.md
 /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
+/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
 /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
 %license /usr/share/licenses/nginx-markdown-for-agents/LICENSE
 

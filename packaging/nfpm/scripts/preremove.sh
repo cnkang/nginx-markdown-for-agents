@@ -288,6 +288,10 @@ main() {
         return 1
     fi
     if [[ "$check_status" -eq 2 ]]; then
+        if [[ "${NGINX_MARKDOWN_ALLOW_UNVERIFIED_REMOVE:-0}" == "1" ]]; then
+            info "WARNING: allowing removal because NGINX configuration could not be verified; explicit NGINX_MARKDOWN_ALLOW_UNVERIFIED_REMOVE=1 was supplied."
+            return 0
+        fi
         info "Refusing removal because active NGINX configuration could not be verified."
         info "Disable the module explicitly, run 'nginx -t', then retry package removal."
         return 1

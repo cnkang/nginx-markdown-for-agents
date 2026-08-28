@@ -34,7 +34,6 @@ Part of release matrix source of truth.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import difflib
 import json
 import re
@@ -176,74 +175,102 @@ def resolve_tier(data: dict[str, Any], raw_tier: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def validate_schema(data: dict[str, Any]) -> list[str]:
+def validate_schema(
+    data: dict[str, Any], entries: list[dict[str, Any]] | None = None
+) -> list[str]:
     """Validate matrix data against the schema.
 
     Uses jsonschema if available, otherwise performs basic structural checks.
     Returns a list of error messages (empty means valid).
     """
-    errors: list[str] = []
+    if entries is None:
+        try:
+            entries = get_entries(data)
+        except (KeyError, TypeError, ValueError) as exc:
+            return [f"Invalid release matrix entry: {exc}"]
 
-    # Try jsonschema library first
-    with contextlib.suppress(ImportError):
+    schema_errors = _try_jsonschema_validation(data, entries)
+    if schema_errors is not None:
+        return schema_errors
+    return _validate_basic_schema(data, entries)
+
+
+def _try_jsonschema_validation(
+    data: dict[str, Any], entries: list[dict[str, Any]]
+) -> list[str] | None:
+    """Validate with jsonschema when the optional dependency is available."""
+    try:
         import jsonschema  # type: ignore[import-untyped]
+    except ImportError:
+        return None
+    if not SCHEMA_PATH.exists():
+        return None
+    return _validate_against_jsonschema(data, entries, jsonschema)
 
-        if SCHEMA_PATH.exists():
-            return _validate_against_jsonschema(data, jsonschema, errors)
-    # Fallback: basic structural checks (no jsonschema available)
+
+def _validate_basic_schema(
+    data: dict[str, Any], entries: list[dict[str, Any]]
+) -> list[str]:
+    """Run the structural fallback when jsonschema is unavailable."""
+    errors: list[str] = []
     if "schema_version" not in data:
         errors.append("Missing required field: schema_version")
 
-    entries = get_entries(data)
     if not entries:
         errors.append("No entries found (neither 'entries' nor 'matrix' array)")
         return errors
 
+    for i, entry in enumerate(entries):
+        errors.extend(_validate_basic_entry(i, entry))
+
+    return errors
+
+
+def _validate_basic_entry(index: int, entry: dict[str, Any]) -> list[str]:
+    """Return fallback-schema errors for one normalized entry."""
     required_fields = {
         "nginx_version", "nginx_channel", "os", "libc", "arch",
         "artifact_type", "test_level", "support_tier",
         "release_blocking", "owner_workflow",
         "feature_manifest_digest", "abi_version",
     }
+    missing = required_fields - set(entry.keys())
+    if missing:
+        return [f"Entry {index}: missing fields: {sorted(missing)}"]
+
+    errors: list[str] = []
     valid_tiers = {"supported", "experimental", "best-effort", "unsupported"}
     valid_channels = {"stable", "mainline", "oldstable"}
-
-    for i, entry in enumerate(entries):
-        if missing := required_fields - set(entry.keys()):
-            errors.append(f"Entry {i}: missing fields: {sorted(missing)}")
-            continue
-
-        tier = entry.get("support_tier", "")
-        if tier not in valid_tiers:
-            errors.append(
-                f"Entry {i}: invalid support_tier '{tier}' "
-                f"(expected one of {sorted(valid_tiers)})"
-            )
-
-        channel = entry.get("nginx_channel", "")
-        if channel not in valid_channels:
-            errors.append(
-                f"Entry {i}: invalid nginx_channel '{channel}' "
-                f"(expected one of {sorted(valid_channels)})"
-            )
-
-        blocking = entry.get("release_blocking")
-        if blocking is not None and not isinstance(blocking, bool):
-            errors.append(
-                f"Entry {i}: release_blocking must be boolean, "
-                f"got {type(blocking).__name__}"
-            )
-
+    tier = entry.get("support_tier", "")
+    if tier not in valid_tiers:
+        errors.append(
+            f"Entry {index}: invalid support_tier '{tier}' "
+            f"(expected one of {sorted(valid_tiers)})"
+        )
+    channel = entry.get("nginx_channel", "")
+    if channel not in valid_channels:
+        errors.append(
+            f"Entry {index}: invalid nginx_channel '{channel}' "
+            f"(expected one of {sorted(valid_channels)})"
+        )
+    blocking = entry.get("release_blocking")
+    if blocking is not None and not isinstance(blocking, bool):
+        errors.append(
+            f"Entry {index}: release_blocking must be boolean, "
+            f"got {type(blocking).__name__}"
+        )
     return errors
 
 
-def _validate_against_jsonschema(data, jsonschema, errors):
+def _validate_against_jsonschema(data, entries, jsonschema):
     """Validate matrix entries against the JSON schema file."""
+    errors: list[str] = []
     schema_validated = validate_read_path(SCHEMA_PATH, purpose="release matrix schema")
     with open(schema_validated, encoding="utf-8") as f:
         schema = json.load(f)
-    # Build a normalized entries-format document for validation
-    entries = get_entries(data)
+    # Build an entries-format document from the one normalization pass owned by
+    # the caller.  Re-normalizing here could produce a different failure or
+    # repeat work for alias-heavy legacy matrices.
     validate_data = {
         "schema_version": data.get("schema_version", "1.0"),
         "entries": entries,
@@ -1466,12 +1493,6 @@ def main() -> int:
         print(f"ERROR: Failed to load matrix: {e}", file=sys.stderr)
         return 2
 
-    if schema_errors := validate_schema(matrix_data):
-        print("Schema validation failed:", file=sys.stderr)
-        for err in schema_errors:
-            print(f"  - {err}", file=sys.stderr)
-        return 2
-
     # Get normalized entries. Invalid alias/shape data is a schema failure,
     # not an uncaught traceback from the renderer.
     try:
@@ -1481,6 +1502,12 @@ def main() -> int:
         return 2
     if not entries:
         print("WARNING: No entries found in release matrix.", file=sys.stderr)
+
+    if schema_errors := validate_schema(matrix_data, entries):
+        print("Schema validation failed:", file=sys.stderr)
+        for err in schema_errors:
+            print(f"  - {err}", file=sys.stderr)
+        return 2
 
     # Dispatch mode
     if args.release_notes:

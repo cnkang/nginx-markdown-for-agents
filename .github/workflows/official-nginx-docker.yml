@@ -171,8 +171,8 @@ jobs:
             MODULE_REPO=${{ steps.source.outputs.repo }}
             MODULE_REF=${{ steps.source.outputs.ref }}
             MODULE_SHA=${{ steps.source.outputs.sha }}
-          cache-from: type=gha,scope=official-nginx-docker-${{ matrix.docker_tag }}
-          cache-to: type=gha,mode=max,scope=official-nginx-docker-${{ matrix.docker_tag }}
+          cache-from: type=gha,scope=official-nginx-docker-${{ matrix.matrix_row_id }}
+          cache-to: type=gha,mode=max,scope=official-nginx-docker-${{ matrix.matrix_row_id }}
 
       - name: Verify runtime behavior
         env:
@@ -211,6 +211,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: official-nginx-docker-${{ matrix.docker_tag }}-failure
+          name: official-nginx-docker-${{ matrix.matrix_row_id }}-failure
           path: ${{ runner.temp }}/official-nginx-docker/${{ matrix.matrix_row_id }}
           if-no-files-found: ignore

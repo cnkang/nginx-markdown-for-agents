@@ -116,12 +116,19 @@ prepare_sandboxed_script() {
 
     case "${script_family}" in
         nfpm)
-            sed \
+            local rewritten_script
+            rewritten_script="$(sed \
                 -e "s|TRUSTED_PATH_ROOT=\"\"|TRUSTED_PATH_ROOT=\"${SANDBOX_ROOT}\"|" \
                 -e "s|/etc/nginx|${SANDBOX_ROOT}/etc/nginx|g" \
                 -e "s|/usr/share/nginx|${SANDBOX_ROOT}/usr/share/nginx|g" \
                 -e 's|%%NGINX_VERSION%%|1.26.3|g' \
-                "${source_script}" > "${SCRIPT_UNDER_TEST}"
+                "${source_script}")"
+            if ! printf '%s\n' "$rewritten_script" | grep -Fq \
+                "TRUSTED_PATH_ROOT=\"${SANDBOX_ROOT}\""; then
+                fail "sandbox: TRUSTED_PATH_ROOT substitution did not match"
+                return 1
+            fi
+            printf '%s\n' "$rewritten_script" > "${SCRIPT_UNDER_TEST}"
             ;;
         *)
             fail "sandbox: unknown script family: ${script_family}"

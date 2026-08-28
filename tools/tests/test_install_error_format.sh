@@ -239,7 +239,7 @@ EOF
 run_hiding_python3_with_fake_nginx() {
   shift
 
-  local stderr_file stdout_file shim_info
+  local stderr_file stdout_file shim_info trusted_nginx candidate
   stderr_file="$(mktemp)"
   stdout_file="$(mktemp)"
   shim_info="$(mktemp)"
@@ -250,22 +250,23 @@ run_hiding_python3_with_fake_nginx() {
   shim_dir="$(cat "$shim_info")"
   rm -f "$shim_info"
 
-  cat > "$shim_dir/nginx" <<'EOF'
-#!/bin/sh
-if [ "$1" = "-V" ]; then
-  echo 'nginx version: nginx/1.28.0' 1>&2
-  echo 'configure arguments: --prefix=/etc/nginx --conf-path=/etc/nginx/nginx.conf --modules-path=/etc/nginx/modules' 1>&2
-  exit 0
-fi
-if [ "$1" = "-t" ]; then
-  echo 'nginx: configuration file /etc/nginx/nginx.conf test is successful' 1>&2
-  exit 0
-fi
-exit 0
-EOF
-  chmod +x "$shim_dir/nginx"
+  trusted_nginx=""
+  for candidate in /usr/sbin/nginx /usr/bin/nginx /sbin/nginx /bin/nginx \
+    /usr/local/sbin/nginx /usr/local/bin/nginx /opt/homebrew/sbin/nginx \
+    /opt/homebrew/bin/nginx; do
+    if [[ -x "$candidate" ]]; then
+      trusted_nginx="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$trusted_nginx" ]]; then
+    rm -f "$stderr_file" "$stdout_file"
+    rm -rf "$shim_dir"
+    skip "python3 hidden — no trusted system nginx executable available"
+    return 0
+  fi
 
-  SKIP_ROOT_CHECK=1 NGINX_BIN="$shim_dir/nginx" PATH="$restricted_path" \
+  SKIP_ROOT_CHECK=1 NGINX_BIN="$trusted_nginx" PATH="$restricted_path" \
     bash "$INSTALL_SCRIPT" "$@" >"$stdout_file" 2>"$stderr_file" || true
 
   _LAST_STDOUT="$(cat "$stdout_file")"
@@ -400,8 +401,9 @@ import json, sys
 data = json.load(sys.stdin)
 assert data.get('success') is False, 'success should be false'
 assert (data.get('error') or {}).get('category') == 'config', 'error.category should be config'
+assert (data.get('error') or {}).get('message') == 'python3 is required by the installer but was not found.', 'error.message should identify missing python3'
 " 2>/dev/null; then
-    pass "python3 hidden — JSON error category remains config"
+    pass "python3 hidden — JSON error category and exact message remain stable"
 else
   fail "python3 hidden — JSON error category validation failed" \
        "json line: $(echo "$JSON_LINE" | head -1)"

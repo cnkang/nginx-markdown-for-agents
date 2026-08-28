@@ -502,7 +502,12 @@ def _append_critical_results(
         )
 
 
-def _finish_gate(results: list[GateResult], errors: list[str]) -> int:
+def _finish_gate(
+    results: list[GateResult],
+    errors: list[str],
+    critical_path_min: float,
+    reports: tuple[tuple[str, Path | None, float, float], ...],
+) -> int:
     """Print the coverage report and return its process status."""
     if not results and not errors:
         print("ERROR: no lcov files specified", file=sys.stderr)
@@ -512,7 +517,15 @@ def _finish_gate(results: list[GateResult], errors: list[str]) -> int:
         print(f"ERROR: {err}", file=sys.stderr)
 
     print(format_results(results))
-    print("\n  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (blocking)")
+    component_thresholds = ", ".join(
+        f"{label}: {min_line:.1f}% line/{min_func:.1f}% function"
+        for label, _, min_line, min_func in reports
+    )
+    print(
+        "\n  Policy source: AGENTS.md Rule 25 — configured aggregate "
+        f"thresholds; critical paths: {critical_path_min:.1f}% line (blocking)"
+    )
+    print(f"  Component thresholds: {component_thresholds}")
     print("  Critical paths: auth, error handling, FFI boundary, conditional requests")
 
     if errors:
@@ -550,7 +563,7 @@ def main() -> int:
         [path for _, path, _, _ in reports if path is not None],
         args.critical_path_min,
     )
-    return _finish_gate(results, errors)
+    return _finish_gate(results, errors, args.critical_path_min, reports)
 
 
 if __name__ == "__main__":

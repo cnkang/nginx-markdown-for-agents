@@ -193,6 +193,7 @@ jobs:
           cp build/ngx_http_markdown_filter_module.so "/tmp/${TARBALL_DIR}/"
           cp README.md "/tmp/${TARBALL_DIR}/"
           cp docs/guides/INSTALL.md "/tmp/${TARBALL_DIR}/docs/guides/"
+          cp docs/guides/PACKAGE_INSTALLATION.md "/tmp/${TARBALL_DIR}/docs/guides/"
           cp docs/COMPATIBILITY.md "/tmp/${TARBALL_DIR}/docs/"
           cp LICENSE "/tmp/${TARBALL_DIR}/"
 

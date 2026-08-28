@@ -384,7 +384,7 @@ cleanup() {
     docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
   fi
 
-  if [[ "${KEEP_IMAGE}" -ne 1 && "${IMAGE_BUILT}" -eq 1 && -n "${IMAGE_NAME}" ]]; then
+  if [[ "${KEEP_IMAGE}" != "1" && "${IMAGE_BUILT}" -eq 1 && -n "${IMAGE_NAME}" ]]; then
     docker rmi -f "${IMAGE_NAME}" >/dev/null 2>&1 || true
   fi
 

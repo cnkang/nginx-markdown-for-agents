@@ -124,7 +124,7 @@ port_file = Path(sys.argv[2])
 cert_file = sys.argv[3]
 key_file = sys.argv[4]
 handler = partial(SimpleHTTPRequestHandler, directory=directory)
-server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+server = ThreadingHTTPServer(("", 0), handler)
 tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 tls_context.load_cert_chain(certfile=cert_file, keyfile=key_file)
 server.socket = tls_context.wrap_socket(server.socket, server_side=True)

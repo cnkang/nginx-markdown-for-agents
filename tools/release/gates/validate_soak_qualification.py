@@ -608,7 +608,12 @@ def run_ab_chunk(
         label_token = "ab"
     global _SOAK_LOG_COUNTER
     _SOAK_LOG_COUNTER += 1
-    (raw_dir / f"{label_token}-{_SOAK_LOG_COUNTER}-{int(time.time())}.log").write_text(
+    raw_log_path = validate_write_path_within_root(
+        raw_dir / f"{label_token}-{_SOAK_LOG_COUNTER}-{int(time.time())}.log",
+        REPO_ROOT,
+        purpose="soak raw log",
+    )
+    raw_log_path.write_text(
         ab.stdout + "\n" + ab.stderr, encoding="utf-8"
     )
     report["_returncode"] = ab.returncode
@@ -715,17 +720,27 @@ def build_corpus(runtime_dir: pathlib.Path, manifest: dict) -> dict:
         payload = block.encode("utf-8")
         if len(payload) < size:
             payload += b"<!-- padding -->\n" * ((size - len(payload)) // 18 + 1)
-        (corpus_dir / name).write_bytes(payload[:size])
+        corpus_path = validate_write_path_within_root(
+            corpus_dir / name,
+            REPO_ROOT,
+            purpose="soak corpus file",
+        )
+        corpus_path.write_bytes(payload[:size])
         corpus[scenario_id] = name
     return corpus
 
 
 def _read_master_pid(pid_file: pathlib.Path) -> int | None:
     """Read a valid NGINX master PID, or return None while it starts."""
-    if not pid_file.is_file():
-        return None
     try:
-        return int(pid_file.read_text().strip())
+        validated_pid_file = validate_read_path(
+            pid_file,
+            purpose="NGINX master PID",
+        )
+        validated_pid_file.relative_to(REPO_ROOT.resolve())
+        if not validated_pid_file.is_file():
+            return None
+        return int(validated_pid_file.read_text().strip())
     except (OSError, ValueError):
         return None
 
