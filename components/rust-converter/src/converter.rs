@@ -2590,8 +2590,7 @@ mod tests {
         let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
         ctx.set_output_budget(64);
 
-        let result = MarkdownConverter::with_options(options)
-            .convert_with_context(&dom, &mut ctx);
+        let result = MarkdownConverter::with_options(options).convert_with_context(&dom, &mut ctx);
         assert!(
             matches!(result, Err(ConversionError::MemoryLimit(_))),
             "front matter unexpectedly fit the budget: {result:?}"
