@@ -16,6 +16,44 @@ different customization approaches.
 | ingress-nginx (community) | 1.10+ | Custom image build | Verified |
 | F5 NGINX Ingress Controller | Latest | Dynamic module volume | Experimental |
 
+## F5 NGINX Ingress Controller
+
+**Feasible with limitations.** The F5 NGINX Ingress Controller supports
+dynamic module loading via volume mounts, but the approach requires careful
+version alignment.
+
+### Injection Method
+
+Mount the compiled `.so` file into the Ingress Controller pod via
+a ConfigMap or PersistentVolume, and add `load_module` via the
+`main-snippet` ConfigMap key.
+
+```yaml
+volumeMounts:
+  - name: markdown-module
+    mountPath: /etc/nginx/modules
+    readOnly: true
+```
+
+### Known Limitations
+
+1. **ABI binding**: The `.so` must compile against the exact NGINX
+   version inside the F5 Controller image, using a compatible build
+   configuration (matching `configure` arguments). Use `--with-compat`
+   only when the target binary also enables it; otherwise the module
+   binary must be built with the same configure arguments as the
+   Controller's NGINX.
+2. **No custom image**: F5 does not support replacing the Controller
+   image with a custom build in managed deployments.
+3. **Module updates**: Require rebuilding the `.so` when the Controller
+   image upgrades.
+
+### Alternative: Sidecar Proxy
+
+For environments where Ingress Controller modification is not feasible,
+deploy an NGINX sidecar with the markdown module in front of the
+application pods.
+
 ## Enable/Verify/Disable/Rollback
 
 ### Enable
@@ -614,7 +652,6 @@ Exit code `0` means all checks passed. `1` means one or more failed.
 
 ### See Also
 
-- [F5 Ingress Controller Feasibility](F5_INGRESS_FEASIBILITY.md)
 - [Package Distribution Guide](PACKAGE_DISTRIBUTION.md)
 - [examples/kubernetes/manifest/](../../examples/kubernetes/manifest/) — K8s deployment manifests
 - [charts/nginx-markdown/](../../charts/nginx-markdown/) — Helm chart

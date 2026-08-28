@@ -66,6 +66,18 @@ Using OS signals (SIGALRM, and so on) to interrupt the parser is **not feasible*
 The library does not expose any mechanism to abort parsing partway through.
 The project uses alternative budget enforcement strategies described below.
 
+### 1.4 Feasibility Assessment
+
+| Approach | Feasible? | Trade-offs |
+|----------|-----------|------------|
+| Check elapsed time at DOM traversal boundaries | **Yes** (implemented) | Works post-parse; adds ~10-20 ns per checkpoint |
+| Interrupt html5ever mid-parse | **No** | No API support; `.one()` is atomic |
+| TokenSinkResult::Abort | **No** | Variant does not exist in html5ever |
+| Set alarm/signal to interrupt | **No** | Unsafe across FFI boundary; Rust panic from signal is UB |
+| Use async with timeout | Partial | Requires major refactor of FFI boundary |
+| Memory budget via allocation hook | Partial | Rust global allocator hooks can track but not interrupt |
+| Bound input size pre-parse | **Yes** (implemented) | Limits worst-case parse time indirectly |
+
 ---
 
 ## 2. Alternative Budget Enforcement Strategy

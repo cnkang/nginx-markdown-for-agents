@@ -1345,7 +1345,7 @@ The upstream server sends a compressed response (gzip, brotli, or deflate). The 
    ```bash
    sudo nginx -t && sudo nginx -s reload
    ```
-4. For details on the module's built-in automatic decompression support (gzip, brotli, deflate), see [`docs/features/AUTOMATIC_DECOMPRESSION.md`](../features/AUTOMATIC_DECOMPRESSION.md).
+4. For details on the module's built-in automatic decompression support (gzip, brotli, deflate), see [`docs/features/DECOMPRESSION.md`](../features/DECOMPRESSION.md).
 
 ---
 

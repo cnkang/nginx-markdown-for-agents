@@ -16,13 +16,11 @@ If you need rollout steps, operator checklists, or directive syntax, go back to:
 ### Output quality and determinism
 
 - [deterministic-output.md](deterministic-output.md)
-- [DETERMINISTIC_OUTPUT_IMPLEMENTATION.md](DETERMINISTIC_OUTPUT_IMPLEMENTATION.md)
 - [html-entity-decoding.md](html-entity-decoding.md)
 - [non-content-element-removal.md](non-content-element-removal.md)
 
 ### Input handling and safety
 
-- [AUTOMATIC_DECOMPRESSION.md](AUTOMATIC_DECOMPRESSION.md)
 - [DECOMPRESSION.md](DECOMPRESSION.md)
 - [charset-detection.md](charset-detection.md)
 - [security.md](security.md)
@@ -55,7 +53,6 @@ If you need rollout steps, operator checklists, or directive syntax, go back to:
 ### Parser, limits, and optimization
 
 - [PARSER_BUDGET.md](PARSER_BUDGET.md)
-- [PARSER_INTERRUPT_FEASIBILITY.md](PARSER_INTERRUPT_FEASIBILITY.md)
 - [parser-path-optimization.md](parser-path-optimization.md)
 
 ## What Belongs Here
@@ -71,6 +68,7 @@ Keep setup instructions and rollout steps in [../guides/README.md](../guides/REA
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-28 | Hermes | Removed archived DETERMINISTIC_OUTPUT_IMPLEMENTATION and PARSER_INTERRUPT_FEASIBILITY entries; decompression is a single canonical page |
 | 0.9.2 | 2026-08-08 | Kang | Added parser, limits, and optimization index section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

@@ -621,7 +621,7 @@ The project includes documentation covering:
 - [ADR/](../architecture/ADR/) - Architecture decision records
 
 ### Feature Documentation
-- [AUTOMATIC_DECOMPRESSION.md](../features/AUTOMATIC_DECOMPRESSION.md)
+- [DECOMPRESSION.md](../features/DECOMPRESSION.md)
 - [CACHE_AWARE_RESPONSES.md](../features/CACHE_AWARE_RESPONSES.md)
 - [CONTENT_NEGOTIATION.md](../features/CONTENT_NEGOTIATION.md)
 - [COOPERATIVE_TIMEOUT.md](../features/COOPERATIVE_TIMEOUT.md)

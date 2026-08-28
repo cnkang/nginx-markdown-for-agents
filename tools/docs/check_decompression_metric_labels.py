@@ -10,7 +10,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = ROOT / "schemas/metrics-v1.registry.json"
 DOC_PATHS = (
-    ROOT / "docs/features/AUTOMATIC_DECOMPRESSION.md",
     ROOT / "docs/features/DECOMPRESSION.md",
 )
 FAMILY_NAME = "nginx_markdown_decompression_events_total"
