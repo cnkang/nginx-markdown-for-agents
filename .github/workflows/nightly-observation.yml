@@ -34,6 +34,10 @@ jobs:
         run: cargo +nightly install cargo-fuzz --locked
         shell: bash
 
+      - name: Install cargo-llvm-cov for coverage gates
+        run: cargo +nightly install cargo-llvm-cov --locked --version 0.6.13
+        shell: bash
+
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
