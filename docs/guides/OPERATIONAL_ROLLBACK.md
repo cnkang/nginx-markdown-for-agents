@@ -1,4 +1,10 @@
-# Rollback Guide — Disabling or Narrowing Markdown Conversion
+# Operational Rollback Guide — Disabling or Narrowing Markdown Conversion
+
+This document covers **runtime operational mitigation**: disabling or
+narrowing Markdown conversion with a configuration change and reload, without
+replacing the module binary. For a full **version downgrade** (binary +
+matching configuration), see
+[VERSION_ROLLBACK-0.9.2.md](VERSION_ROLLBACK-0.9.2.md).
 
 ## Table of Contents
 
@@ -49,7 +55,7 @@ Use this guide when an [observation checkpoint](ROLLOUT_COOKBOOK.md#observation-
 - [ROLLOUT_COOKBOOK.md](ROLLOUT_COOKBOOK.md) — rollout stages, selective enablement patterns, observation guidance
 - [CONFIGURATION.md](CONFIGURATION.md) — full directive reference
 - [OPERATIONS.md](OPERATIONS.md) — operational guide and metrics reference
-- [ROLLBACK-0.9.2.md](ROLLBACK-0.9.2.md) — version downgrade and matching
+- [VERSION_ROLLBACK-0.9.2.md](VERSION_ROLLBACK-0.9.2.md) — version downgrade and matching
   configuration restore
 
 ---
