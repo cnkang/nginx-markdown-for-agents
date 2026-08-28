@@ -390,6 +390,20 @@ impl ConversionContext {
         }
     }
 
+    /// Create a conversion context with an explicit full-buffer budget.
+    ///
+    /// This is intended for trusted offline tools that process deliberately
+    /// large fixtures. A zero budget keeps the standard 64 MiB default used
+    /// by [`Self::new`]. NGINX request conversions continue to receive their
+    /// configured budget through the FFI boundary.
+    pub fn with_output_budget(timeout: Duration, output_budget: usize) -> Self {
+        let mut context = Self::new(timeout);
+        if output_budget != 0 {
+            context.output_budget = output_budget;
+        }
+        context
+    }
+
     /// Set a hint about the input HTML size in bytes.
     ///
     /// When the hint exceeds `LARGE_BODY_THRESHOLD`, the converter
@@ -973,6 +987,15 @@ mod tests {
             options.resident_bytes() >= base_url.capacity() + options.prune_config.resident_bytes()
         );
         assert!(options.resident_bytes() >= 8192);
+    }
+
+    #[test]
+    fn custom_output_budget_is_applied_without_changing_default() {
+        let custom = ConversionContext::with_output_budget(Duration::ZERO, 128 * 1024);
+        assert_eq!(custom.output_budget, 128 * 1024);
+
+        let default = ConversionContext::with_output_budget(Duration::ZERO, 0);
+        assert_eq!(default.output_budget, DEFAULT_FULL_BUFFER_OUTPUT_BUDGET);
     }
 
     /// Escape characters that would otherwise be interpreted as HTML markup.
