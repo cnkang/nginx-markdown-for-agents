@@ -22,12 +22,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 
 REQUIRED_INCLUDE_PATTERN = "refs/tags/v*"
-REQUIRED_RULE_TYPES = frozenset({"deletion", "non_fast_forward"})
+REQUIRED_RULE_TYPES = frozenset({"deletion", "non_fast_forward", "update"})
 REPOSITORY_PATTERN = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\Z"
 )
@@ -41,6 +42,36 @@ def _validate_repo(repo: str) -> str:
             "letters, digits, '.', '_' or '-' only"
         )
     return repo
+
+
+def _repository_from_origin_url(remote_url: str) -> str:
+    """Extract and validate an owner/repository pair from a GitHub remote."""
+    value = remote_url.strip()
+    prefixes = (
+        "https://github.com/",
+        "git@github.com:",
+        "ssh://git@github.com/",
+    )
+    for prefix in prefixes:
+        if value.startswith(prefix):
+            repository = value[len(prefix):]
+            if repository.endswith(".git"):
+                repository = repository[:-4]
+            return _validate_repo(repository)
+    raise ValueError("origin remote must be a supported GitHub URL")
+
+
+def _repository_from_origin() -> str:
+    """Resolve the repository from the checkout's origin remote."""
+    result = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        raise ValueError("could not determine repository from the origin remote")
+    return _repository_from_origin_url(result.stdout)
 
 
 def _flatten_pages(payload: list) -> list[dict]:
@@ -123,6 +154,11 @@ def _ruleset_protects_release_tags(ruleset: dict) -> bool:
     include = ref_name.get("include") or []
     if REQUIRED_INCLUDE_PATTERN not in include:
         return False
+    # A bypass actor can still move or delete a release tag.  The release
+    # contract is repository-wide immutability, so an omitted or non-empty
+    # bypass list is not sufficient evidence of protection.
+    if ruleset.get("bypass_actors") != []:
+        return False
     rule_types = {rule.get("type") for rule in ruleset.get("rules") or []}
     return REQUIRED_RULE_TYPES.issubset(rule_types)
 
@@ -134,13 +170,21 @@ def main() -> int:
     )
     parser.add_argument(
         "--repo",
-        default="cnkang/nginx-markdown-for-agents",
-        help="OWNER/REPOSITORY to check (default: cnkang/nginx-markdown-for-agents)",
+        default=None,
+        help="OWNER/REPOSITORY to check (default: GITHUB_REPOSITORY or origin)",
     )
     args = parser.parse_args()
 
     try:
-        rulesets = _list_rulesets(_validate_repo(args.repo))
+        if args.repo is not None:
+            repository = _validate_repo(args.repo)
+        else:
+            repository = os.environ.get("GITHUB_REPOSITORY")
+            if repository:
+                repository = _validate_repo(repository)
+            else:
+                repository = _repository_from_origin()
+        rulesets = _list_rulesets(repository)
     except ValueError as exc:
         print(f"FAIL: invalid repository argument: {exc}", file=sys.stderr)
         return 1
@@ -168,7 +212,8 @@ def main() -> int:
     if not matching:
         print(
             "FAIL: no active tag ruleset protects "
-            f"'{REQUIRED_INCLUDE_PATTERN}' against deletion and updates. "
+            f"'{REQUIRED_INCLUDE_PATTERN}' against deletion and updates "
+            "without bypass actors. "
             "Create one via the repository rulesets API (see the release "
             "checklist) before tagging a release.",
             file=sys.stderr,

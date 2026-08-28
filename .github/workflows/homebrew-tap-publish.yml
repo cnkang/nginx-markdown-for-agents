@@ -212,6 +212,9 @@ jobs:
             exit 1
           fi
           askpass="${RUNNER_TEMP}/homebrew-tap-askpass.sh"
+          # These strings intentionally preserve variables for the generated
+          # askpass script instead of expanding them in this workflow step.
+          # shellcheck disable=SC2016
           {
             printf '%s\n' '#!/usr/bin/env bash'
             printf '%s\n' 'case "$1" in'

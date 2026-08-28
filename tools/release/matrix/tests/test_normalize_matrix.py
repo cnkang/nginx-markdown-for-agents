@@ -204,6 +204,23 @@ class TestCompatibilityDocument:
         with pytest.raises(MatrixNormalizationError):
             normalize_matrix.normalize_compatibility_document(doc)
 
+    def test_compatibility_arch_aliases_are_semantically_equivalent(self):
+        doc = {
+            "entries": [
+                {
+                    "nginx_version": "1.26.3",
+                    "libc": "glibc",
+                    "target": "x86_64",
+                    "arch": "amd64",
+                    "support_tier": "supported",
+                }
+            ]
+        }
+
+        normalized = normalize_matrix.normalize_compatibility_document(doc)
+
+        assert normalized["entries"][0]["target"] == "x86_64"
+
     def test_compatibility_image_metadata_is_preserved(self):
         image_digest = "sha256:" + "b" * 64
         doc = {

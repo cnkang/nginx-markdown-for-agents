@@ -62,7 +62,7 @@ jobs:
           PUBLICATION_TAG: ${{ steps.validate_ref.outputs.publication_tag }}
         run: |
           tag_commit="$(git rev-parse --verify "refs/tags/${PUBLICATION_TAG}^{commit}")"
-          head_commit="$(git rev-parse --verify HEAD^{commit})"
+          head_commit="$(git rev-parse --verify "HEAD^{commit}")"
           if [[ "${tag_commit}" != "${head_commit}" ]]; then
             echo "ERROR: publication tag does not resolve to the prepared commit." >&2
             exit 1
@@ -86,22 +86,20 @@ jobs:
           # release matrix and output them for matrix.include consumption.
           python3 - <<'PY'
           import json, os
+          from tools.release.matrix.normalize_matrix import (
+              canonical_arch,
+              normalize_compatibility_document,
+          )
 
           with open("tools/release-matrix.json", "r") as f:
-              data = json.load(f)
-
-          def normalize_arch(arch):
-              return {
-                  "amd64": "x86_64",
-                  "arm64": "aarch64",
-              }.get(arch, arch)
+              data = normalize_compatibility_document(json.load(f))
 
           owner = ".github/workflows/release-binaries.yml"
           entries = [
               {
                   "nginx": e["nginx_version"],
                   "os_type": e["libc"],
-                  "arch": normalize_arch(e["arch"]),
+                  "arch": canonical_arch(e["target"]),
                   "support_tier": e["support_tier"],
               }
               for e in data.get("entries", [])

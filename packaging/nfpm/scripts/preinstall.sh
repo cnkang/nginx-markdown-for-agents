@@ -39,6 +39,7 @@ path_is_trusted_root() {
     local path="$1"
     local root
     local phys_root
+    local root_prefix
 
     # Prefix matching must use the SAME physical spelling that
     # canonicalize_path() produces: `cd -P`/`pwd -P` rewrite symlinked
@@ -46,14 +47,22 @@ path_is_trusted_root() {
     # logical trusted-root prefix would never match the resolved target.
     # If the root itself cannot be entered nothing beneath it can be a
     # usable executable; fall back to the literal spelling.
-    phys_root="$(cd -P -- "${TRUSTED_PATH_ROOT}" 2>/dev/null && pwd -P)" \
-        || phys_root="${TRUSTED_PATH_ROOT}"
+    if [[ -n "${TRUSTED_PATH_ROOT}" ]]; then
+        phys_root="$(cd -P -- "${TRUSTED_PATH_ROOT}" 2>/dev/null && pwd -P)" \
+            || phys_root="${TRUSTED_PATH_ROOT}"
+    else
+        # An empty prefix denotes the real filesystem root.  `cd ""` enters
+        # HOME in Bash, which would make every normal /usr/bin/nginx path
+        # appear outside the trusted package-maintainer boundary.
+        phys_root="/"
+    fi
 
+    root_prefix="${phys_root%/}"
     for root in \
-        "${phys_root}/usr/sbin" \
-        "${phys_root}/usr/bin" \
-        "${phys_root}/sbin" \
-        "${phys_root}/bin"; do
+        "${root_prefix}/usr/sbin" \
+        "${root_prefix}/usr/bin" \
+        "${root_prefix}/sbin" \
+        "${root_prefix}/bin"; do
         case "$path" in
             "$root"/*)
                 return 0
@@ -175,7 +184,9 @@ resolve_trusted_nginx() {
     # resolved form, while trust and every safety property must hold for
     # the exact executable that will be executed.
     path_is_trusted_root "$resolved" || return 1
-    is_secure_path "$candidate" || return 1
+    # The candidate may traverse a standard system symlink such as
+    # /usr/sbin -> /usr/bin.  Validate the canonical physical path instead
+    # of rejecting the symlink's mode bits (which are conventionally 0777).
     is_secure_path "$resolved" || return 1
     printf '%s\n' "$resolved"
     return 0

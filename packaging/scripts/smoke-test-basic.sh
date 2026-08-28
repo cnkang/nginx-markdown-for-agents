@@ -30,13 +30,59 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NGINX_BIN=""
+REMOVAL_CONFIG_PATH=""
+REMOVAL_CONFIG_BACKUP=""
+REMOVAL_CONFIG_TEMP=""
+REMOVAL_CONFIG_MUTATED=0
 
 usage() {
     sed -n '3,16p' "$0" | sed 's/^#[[:space:]]\{0,1\}//' >&2
     return 0
 }
 
+clear_removal_config_state() {
+    REMOVAL_CONFIG_PATH=""
+    REMOVAL_CONFIG_BACKUP=""
+    REMOVAL_CONFIG_TEMP=""
+    REMOVAL_CONFIG_MUTATED=0
+    return 0
+}
+
+restore_removal_config() {
+    local restore_status=0
+
+    if [[ "$REMOVAL_CONFIG_MUTATED" -eq 1 ]]; then
+        if [[ -z "$REMOVAL_CONFIG_PATH" ]] \
+            || [[ -z "$REMOVAL_CONFIG_BACKUP" ]] \
+            || [[ ! -f "$REMOVAL_CONFIG_BACKUP" ]] \
+            || ! cp -p "$REMOVAL_CONFIG_BACKUP" "$REMOVAL_CONFIG_PATH";
+        then
+            restore_status=1
+        else
+            REMOVAL_CONFIG_MUTATED=0
+        fi
+    fi
+
+    if [[ -n "$REMOVAL_CONFIG_TEMP" ]]; then
+        rm -f "$REMOVAL_CONFIG_TEMP" || restore_status=1
+    fi
+
+    if [[ "$restore_status" -eq 0 ]] \
+        && [[ "$REMOVAL_CONFIG_MUTATED" -eq 0 ]] \
+        && [[ -n "$REMOVAL_CONFIG_BACKUP" ]]; then
+        rm -f "$REMOVAL_CONFIG_BACKUP" || restore_status=1
+    fi
+
+    if [[ "$restore_status" -eq 0 ]]; then
+        clear_removal_config_state
+    fi
+    return "$restore_status"
+}
+
 die() {
+    if ! restore_removal_config; then
+        printf 'ERROR: failed to restore the NGINX configuration fixture\n' >&2
+    fi
     printf 'ERROR: %s\n' "$1" >&2
     run_diagnostics
     exit 1
@@ -45,6 +91,15 @@ die() {
 info() {
     printf '[smoke-test-basic] %s\n' "$1" >&2
 }
+
+# shellcheck disable=SC2329 # Invoked indirectly by the EXIT trap.
+cleanup() {
+    if ! restore_removal_config; then
+        printf 'ERROR: failed to restore the NGINX configuration fixture during cleanup\n' >&2
+    fi
+    return 0
+}
+trap cleanup EXIT
 
 detect_rpm_repo_baseurl() {
     if [[ ! -f /etc/os-release ]]; then
@@ -135,21 +190,27 @@ run_package_removal_lifecycle() {
 
     backup_path="$(mktemp "${TMPDIR:-/tmp}/nginx-markdown-config.XXXXXX")" \
         || die "Failed to create an NGINX configuration backup"
+    REMOVAL_CONFIG_PATH="$config_path"
+    REMOVAL_CONFIG_BACKUP="$backup_path"
     cp -p "$config_path" "$backup_path" \
         || die "Failed to preserve the original NGINX configuration"
     temp_path="$(mktemp "${config_path}.XXXXXX")" \
         || die "Failed to create an NGINX configuration fixture"
+    REMOVAL_CONFIG_TEMP="$temp_path"
     {
         printf 'load_module "%s";\n' "$module_path"
         cat "$config_path"
     } > "$temp_path" || die "Failed to enable the module in the NGINX configuration"
-    mv -f "$temp_path" "$config_path" \
+    # Copy through the destination instead of replacing it.  Some
+    # distributions make nginx.conf a symlink; replacing it would destroy
+    # that packaging invariant and the cleanup path could not restore it.
+    cp -p "$temp_path" "$config_path" \
         || die "Failed to enable the module in the NGINX configuration"
+    REMOVAL_CONFIG_TEMP=""
+    REMOVAL_CONFIG_MUTATED=1
 
     info "Checking the enabled module configuration before removal..."
     if ! "$NGINX_BIN" -t -c "$config_path" >"${INSTALL_LOG}" 2>&1; then
-        cp -p "$backup_path" "$config_path" || true
-        rm -f "$backup_path"
         die "nginx -t failed after enabling the module for removal testing"
     fi
 
@@ -160,15 +221,12 @@ run_package_removal_lifecycle() {
         removal_status=$?
     fi
     if [[ "$removal_status" -eq 0 ]]; then
-        cp -p "$backup_path" "$config_path" || true
-        rm -f "$backup_path"
         die "Package removal unexpectedly succeeded while the module was loaded"
     fi
 
     info "Disabling the module and retrying package removal..."
-    cp -p "$backup_path" "$config_path" \
+    restore_removal_config \
         || die "Failed to disable the module in the NGINX configuration"
-    rm -f "$backup_path"
     if ! "$NGINX_BIN" -t -c "$config_path" >"${INSTALL_LOG}" 2>&1; then
         die "nginx -t failed after disabling the module"
     fi

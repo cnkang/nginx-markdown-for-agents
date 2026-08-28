@@ -51,13 +51,28 @@ def test_release_binaries_resolves_current_schema_without_mutating_matrix() -> N
     assert '".github/workflows/release-binaries.yml"' in resolve_step["run"]
     assert '"nginx": e["nginx_version"]' in resolve_step["run"]
     assert '"os_type": e["libc"]' in resolve_step["run"]
-    assert '"amd64": "x86_64"' in resolve_step["run"]
-    assert '"arm64": "aarch64"' in resolve_step["run"]
+    assert 'canonical_arch(e["target"])' in resolve_step["run"]
     assert 'data.get("matrix", [])' not in resolve_step["run"]
     assert 'support_tier") == "full"' not in resolve_step["run"]
     assert step_names.index("Validate release matrix consumers") < step_names.index(
         "Extract build matrix from release-matrix.json"
     )
+
+
+def test_release_packages_normalizes_matrix_aliases_before_projection() -> None:
+    """Package matrices must not read compatibility aliases directly."""
+    workflow = _workflow_data("release-packages.yml")
+    steps = workflow["jobs"]["prepare"]["steps"]
+    resolve_step = _step_by_name(steps, "Resolve matrix from release-matrix.json")
+    run = resolve_step["run"]
+
+    assert "normalize_compatibility_document(json.load(f))" in run
+    assert "canonical_arch" in run
+    assert 'package_arch(e["target"])' in run
+    source_load = run.split(
+        "with open(\"tools/release-matrix.json\", \"r\") as f:", 1
+    )[1].split("owner =", 1)[0]
+    assert 'e["arch"]' not in source_load
 
 
 def test_release_binaries_workflow_dispatch_can_publish_tag_assets() -> None:

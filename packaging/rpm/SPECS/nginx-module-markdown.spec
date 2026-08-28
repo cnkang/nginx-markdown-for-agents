@@ -63,6 +63,10 @@ install -d %{buildroot}/usr/share/licenses/nginx-markdown-for-agents
 install -m 0644 LICENSE \
     %{buildroot}/usr/share/licenses/nginx-markdown-for-agents/LICENSE
 
+install -d %{buildroot}/usr/libexec/nginx-markdown-for-agents
+install -m 0755 preremove.sh \
+    %{buildroot}/usr/libexec/nginx-markdown-for-agents/preremove.sh
+
 %post
 PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH
 cat >&2 <<'EOF'
@@ -97,55 +101,7 @@ EOF
 # scriptlet environment state.
 %preun
 if [ "$1" -eq 0 ]; then
-    PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH
-    if [ -f /etc/nginx/markdown-module-force-remove ]; then
-        echo "WARNING: forced removal acknowledged (/etc/nginx/markdown-module-force-remove present); skipping active-configuration verification." >&2
-        echo "WARNING: delete /etc/nginx/markdown-module-force-remove after removal to re-enable the guard." >&2
-        exit 0
-    fi
-    nginx_bin="$(command -v nginx 2>/dev/null || true)"
-    module_pattern="^[[:space:]]*load_module[[:space:]]+\\\"?[^;]*ngx_http_markdown_filter_module\\.so\\\"?[[:space:]]*;"
-    nginx_status=0
-    nginx_dump=""
-    config_seen=0
-    grep_status=0
-
-    if [ -n "$nginx_bin" ]; then
-        nginx_dump="$("$nginx_bin" -T 2>&1)" || nginx_status=$?
-        if printf '%s\n' "$nginx_dump" | grep -E -q "$module_pattern"; then
-            echo "ERROR: active NGINX configuration still loads the Markdown module." >&2
-            echo "Remove the load_module directive, run 'nginx -t', and retry RPM removal." >&2
-            exit 1
-        fi
-        if [ "$nginx_status" -ne 0 ]; then
-            echo "ERROR: unable to verify active NGINX configuration; refusing RPM removal." >&2
-            echo "Disable the module explicitly, run 'nginx -t', and retry RPM removal." >&2
-            exit 1
-        fi
-    else
-        for config_path in /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf /etc/nginx/modules-enabled/*.conf; do
-            if [ -f "$config_path" ]; then
-                config_seen=1
-                grep_status=0
-                grep -E -q "$module_pattern" "$config_path" || grep_status=$?
-                if [ "$grep_status" -eq 0 ]; then
-                    echo "ERROR: NGINX configuration still loads the Markdown module: $config_path" >&2
-                    echo "Remove the load_module directive, run 'nginx -t', and retry RPM removal." >&2
-                    exit 1
-                fi
-                if [ "$grep_status" -gt 1 ]; then
-                    echo "ERROR: unable to read NGINX configuration: $config_path" >&2
-                    echo "Disable the module explicitly, run 'nginx -t', and retry RPM removal." >&2
-                    exit 1
-                fi
-            fi
-        done
-        if [ "$config_seen" -eq 0 ]; then
-            echo "ERROR: no NGINX binary or standard configuration file was found; refusing RPM removal." >&2
-            echo "Verify the active configuration explicitly before removing the module." >&2
-            exit 1
-        fi
-    fi
+    /bin/bash /usr/libexec/nginx-markdown-for-agents/preremove.sh remove
 fi
 
 %files
@@ -154,6 +110,7 @@ fi
 /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 /usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
 /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
+%attr(0755,root,root) /usr/libexec/nginx-markdown-for-agents/preremove.sh
 %license /usr/share/licenses/nginx-markdown-for-agents/LICENSE
 
 %changelog
