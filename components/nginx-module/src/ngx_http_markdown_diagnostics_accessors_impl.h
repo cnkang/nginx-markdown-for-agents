@@ -782,7 +782,7 @@ ngx_http_markdown_manifest_append_runtime_fields(
             builder, "dynconf_dry_run",
             conf->advanced.dynconf_dry_run == 1
                 ? (const u_char *) "on" : (const u_char *) "off",
-            conf->advanced.dynconf_dry_run ? sizeof("on") - 1
+            conf->advanced.dynconf_dry_run == 1 ? sizeof("on") - 1
                 : sizeof("off") - 1,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DRY_RUN, 0)
         != NGX_OK)

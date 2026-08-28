@@ -1679,9 +1679,10 @@ test_has_no_transform_no_cache_control(void)
 /* ── last_modified_time fallback tests ──────────────────────── */
 
 /*
- * Regression test: IMS-only with only r->headers_out.last_modified_time
- * set (no Last-Modified list header) must produce a valid Last-Modified
- * string for the Rust conditional decision, enabling a 304 match.
+ * Regression test: an IMS-only request with only the scalar
+ * r->headers_out.last_modified_time set must not be treated as having a
+ * Last-Modified header. The conditional handler must decline without
+ * allocating a result or passing a date to the Rust decision layer.
  */
 static void
 test_handle_ims_only_scalar_time_not_consulted(void)

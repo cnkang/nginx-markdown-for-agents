@@ -291,7 +291,7 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
     remaining = sizeof(translated);
 
     for (src = fmt; *src != '\0' && remaining > 1; src++) {
-        if (*src == '%' && src[1] == 'P') {
+        if (remaining >= 3 && *src == '%' && src[1] == 'P') {
             *dst++ = '%';
             *dst++ = 'd';
             src++;

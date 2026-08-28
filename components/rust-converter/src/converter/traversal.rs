@@ -35,9 +35,35 @@
 //! this function reconstructs proper spacing to avoid accidental token
 //! concatenation in the Markdown output.
 
-use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData};
+use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData, RcDom};
 
 impl MarkdownConverter {
+    /// Validate DOM depth without using the recursive renderer stack.
+    pub(super) fn validate_dom_depth(&self, dom: &RcDom) -> Result<(), ConversionError> {
+        let mut pending = vec![(dom.document.clone(), 0usize)];
+        while let Some((node, depth)) = pending.pop() {
+            if !matches!(node.data, NodeData::Document) {
+                self.security_validator
+                    .validate_depth(depth)
+                    .map_err(ConversionError::InvalidInput)?;
+            }
+
+            let child_depth = if matches!(node.data, NodeData::Document) {
+                depth
+            } else {
+                depth.checked_add(1).ok_or_else(|| {
+                    ConversionError::InvalidInput(
+                        "HTML nesting depth arithmetic overflow".to_string(),
+                    )
+                })?
+            };
+            for child in node.children.borrow().iter().rev() {
+                pending.push((child.clone(), child_depth));
+            }
+        }
+        Ok(())
+    }
+
     /// Normalize and append a text node while preserving meaningful spacing.
     ///
     /// HTML parsing can split adjacent text and whitespace into multiple nodes.
@@ -47,7 +73,7 @@ impl MarkdownConverter {
         &self,
         text: &str,
         output: &mut String,
-        mut ctx: Option<&mut ConversionContext>,
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         let normalized = self.normalize_text(text);
         if normalized.is_empty() {
@@ -71,7 +97,7 @@ impl MarkdownConverter {
         // let transient allocations exceed the conversion budget before the
         // final length check ran.  The budget-aware append fails before an
         // over-budget allocation happens.
-        if let Some(ctx) = ctx.as_deref_mut() {
+        if let Some(ctx) = ctx {
             let mut escape_state = crate::security::MarkdownTextEscapeState::default();
             ctx.append_escaped_text(output, &normalized, &mut escape_state)?;
         } else {
