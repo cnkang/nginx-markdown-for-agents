@@ -15,7 +15,9 @@ mkdir -p "${FAKE_ROOT}/usr/sbin" "${FAKE_ROOT}/usr/bin" \
 
 # Link the fixed utility manifest the guard needs for its trusted-path
 # security checks (path canonicalization plus ownership/mode inspection).
-for util in grep readlink stat; do
+# The complete manifest matches the sibling trust tests: cat, grep, readlink,
+# rm, rmdir, sed, stat, printf, and basename.
+for util in cat grep readlink rm rmdir sed stat printf basename; do
     real_path="$(command -v "${util}" 2>/dev/null || true)"
     if [[ -n "${real_path}" ]]; then
         ln -sf "${real_path}" "${FAKE_ROOT}/usr/bin/${util}"

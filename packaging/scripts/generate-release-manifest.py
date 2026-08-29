@@ -303,8 +303,12 @@ def build_manifest(
     # The manifest contract stores the source archive digest in
     # source.sha256 as a 64-char hex string; reject anything else up
     # front so generation fails instead of producing a manifest the
-    # validator always rejects.
-    if source_sha and not re.fullmatch(r"[0-9a-fA-F]{64}", source_sha):
+    # validator always rejects.  The validator accepts lowercase-only
+    # 64-hex, so normalize uppercase input before validation and
+    # generation to keep accepted values passing.
+    if source_sha:
+        source_sha = source_sha.lower()
+    if source_sha and not re.fullmatch(r"[0-9a-f]{64}", source_sha):
         print(
             "ERROR: --source-sha must be the 64-char hex SHA-256 of the "
             f"source archive, got: {source_sha}",

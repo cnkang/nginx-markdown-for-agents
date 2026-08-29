@@ -58,6 +58,14 @@ ARG NGX_MARKDOWN_SOURCE_SHA
 ARG NGX_MARKDOWN_RUST_VERSION
 ARG NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST
 
+# Validate the release-identity ARGs before the configure step: an unset or
+# empty value would silently produce a release binary with no source
+# binding, breaking the candidate-bound evidence contract.
+RUN set -eux; \
+    test -n "${NGX_MARKDOWN_SOURCE_SHA}"; \
+    test -n "${NGX_MARKDOWN_RUST_VERSION}"; \
+    test -n "${NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST}"
+
 # Pin the Rust toolchain to the repository's rust-toolchain.toml so release
 # binaries are built with the same compiler as the package artifacts
 # (AGENTS.md Rule 13: release builds must not float on `stable`).  rustup

@@ -18,8 +18,7 @@ Built against nginx.org stable %{nginx_version}.
 WARNING: This module is built for nginx.org %{nginx_version} ONLY. NGINX
 dynamic modules require an exact version match — the core loader rejects
 any version difference (including a patch release) before signature
-checks. The RPM dependency and preinstall script both enforce that exact
-version at install time.
+checks. The RPM dependency enforces that exact version at install time.
 It will NOT work with distro-provided, vendor-patched, OpenResty, Tengine,
 or custom-built NGINX binaries, or with any other NGINX version.
 
@@ -56,8 +55,8 @@ install -m 0644 docs/guides/INSTALL.md \
     %{buildroot}/usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 install -m 0644 docs/guides/PACKAGE_INSTALLATION.md \
     %{buildroot}/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
-install -m 0644 docs/COMPATIBILITY.md \
-    %{buildroot}/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
+install -m 0644 docs/guides/PACKAGE_COMPATIBILITY.md \
+    %{buildroot}/usr/share/doc/nginx-markdown-for-agents/PACKAGE_COMPATIBILITY.md
 
 install -d %{buildroot}/usr/share/licenses/nginx-markdown-for-agents
 install -m 0644 LICENSE \
@@ -84,7 +83,7 @@ To enable the module:
      sudo systemctl reload nginx
 
 For compatibility information, see:
-  /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
+  /usr/share/doc/nginx-markdown-for-agents/PACKAGE_COMPATIBILITY.md
 ======================================================================
 EOF
 
@@ -109,7 +108,7 @@ fi
 /usr/share/doc/nginx-markdown-for-agents/README.md
 /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 /usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
-/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
+/usr/share/doc/nginx-markdown-for-agents/PACKAGE_COMPATIBILITY.md
 %attr(0755,root,root) /usr/libexec/nginx-markdown-for-agents/preremove.sh
 %license /usr/share/licenses/nginx-markdown-for-agents/LICENSE
 

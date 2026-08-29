@@ -6,6 +6,7 @@
 # Environment variables (injected by workflow matrix):
 #   PKG_VERSION          - Project version (e.g. 0.8.2)
 #   NGINX_VERSION        - Target NGINX version (e.g. 1.26.3)
+#   NGINX_VERSION_CEIL   - Upper NGINX version bound for the dependency range
 #   RPM_NGINX_EVR        - RPM dependency epoch/version/release (e.g. 1:1.26.3)
 #   NFPM_ARCH            - Target architecture (e.g. amd64, arm64)
 #
