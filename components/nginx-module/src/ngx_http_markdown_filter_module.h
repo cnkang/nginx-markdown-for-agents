@@ -1922,6 +1922,9 @@ ngx_int_t ngx_http_markdown_capture_conditional_request(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
 void ngx_http_markdown_restore_conditional_request(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
+/* Re-adopt suppressed validators orphaned by an internal redirect that
+ * cleared the module context. */
+void ngx_http_markdown_adopt_orphan_conditional_headers(ngx_http_request_t *r);
 
 /* Send 304 Not Modified response */
 ngx_int_t ngx_http_markdown_send_304(ngx_http_request_t *r,

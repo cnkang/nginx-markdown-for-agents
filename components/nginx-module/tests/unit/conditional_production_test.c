@@ -141,6 +141,7 @@ typedef struct ngx_connection_s ngx_connection_t;
 struct ngx_http_request_s {
     ngx_pool_t *pool;
     ngx_connection_t *connection;
+    ngx_http_request_t *parent;
     struct {
         ngx_list_t headers;
         ngx_table_elt_t *accept;
@@ -1222,7 +1223,7 @@ test_capture_restore_conditional_headers(void)
     TEST_ASSERT(inm->hash == 0 && ims->hash == 0,
         "captured validators are hidden from upstream processing");
     TEST_ASSERT(inm->value.len == 0 && ims->value.len == 0,
-        "captured validator values are empty for generic upstream forwarders");
+        "captured validator values are emptied for upstream forwarders");
     TEST_ASSERT(r->headers_in.if_none_match == NULL
                 && r->headers_in.if_modified_since == NULL,
         "typed validator pointers are hidden");
@@ -1240,6 +1241,58 @@ test_capture_restore_conditional_headers(void)
                 && r->headers_in.if_modified_since == ims,
         "typed validator pointers are restored");
     TEST_PASS("capture and restore conditional headers");
+}
+
+static void
+test_adopt_orphan_conditional_headers(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *inm;
+    ngx_table_elt_t *ims;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    inm = add_header(&r->headers_in.headers,
+                     "if-none-match", "\"source\"");
+    ims = add_header(&r->headers_in.headers,
+                     "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_none_match = inm;
+    r->headers_in.if_modified_since = ims;
+    memset(&ctx, 0, sizeof(ctx));
+
+    /* First capture suppresses both validators (hash=0), as PREACCESS does
+     * before an internal redirect. */
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+        "conditional validators are captured");
+    TEST_ASSERT(inm->hash == 0 && ims->hash == 0,
+        "captured validators are hidden");
+
+    /* Internal redirect clears r->ctx (module context array) but leaves the
+     * suppressed request-header entries behind.  The orphan-adopt helper
+     * restores their visibility so the next PREACCESS pass can re-capture. */
+    memset(&ctx, 0, sizeof(ctx));  /* simulates the lost context */
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(inm->hash != 0 && ims->hash != 0,
+        "orphaned validators regain visibility after internal redirect");
+    TEST_ASSERT(inm->value.len == sizeof("\"source\"") - 1
+                && ims->value.len
+                   == sizeof("Wed, 21 Oct 2015 07:28:00 GMT") - 1,
+        "orphaned validator values remain intact");
+
+    /* A fresh capture on the re-adopted headers must succeed. */
+    TEST_ASSERT(ngx_http_markdown_has_conditional_request(r),
+        "re-adopted conditional validator is detected");
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+        "re-capture after orphan adoption succeeds");
+    TEST_ASSERT(inm->hash == 0 && ims->hash == 0,
+        "re-captured validators are hidden again");
+
+    TEST_PASS("adopt orphan conditional headers after internal redirect");
 }
 
 static void
@@ -1860,6 +1913,7 @@ main(void)
     test_find_header_not_found();
     test_find_header_hash_zero_skipped();
     test_capture_restore_conditional_headers();
+    test_adopt_orphan_conditional_headers();
     test_capture_conditional_headers_excludes_range();
 
     test_handle_inm_disabled();

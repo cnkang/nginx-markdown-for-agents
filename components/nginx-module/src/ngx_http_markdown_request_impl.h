@@ -676,6 +676,16 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
 
+    /* Internal redirects clear the module context but leave suppressed
+     * request headers (hash == 0) behind.  Re-adopt those orphan entries
+     * on the main request only: a subrequest shares the parent's
+     * headers_in, so restoring visibility there would un-suppress the
+     * parent's validators mid-flight.  Only run when no live context
+     * exists (a live ctx still owns the suppression). */
+    if (r->parent == NULL && ctx == NULL) {
+        ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    }
+
     if ((r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)) == 0) {
         if (ctx != NULL) {
             ngx_http_markdown_restore_conditional_request(r, ctx);
@@ -692,6 +702,7 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         conf);
 
     filter_enabled = ngx_http_markdown_is_enabled(r, conf, &eff);
+    accept_reason = 0;
     if (!filter_enabled
         || !ngx_http_markdown_should_convert(
                r, conf, &accept_reason))

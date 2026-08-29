@@ -61,6 +61,69 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
     return NULL;
 }
 
+/*
+ * Adopt orphaned conditional headers left by a capture before an internal
+ * redirect.  NGINX internal redirect (ngx_http_internal_redirect) clears the
+ * module context array (r->ctx is memzeroed), so a capture performed by the
+ * first PREACCESS pass is lost, but the suppressed request-header entries
+ * (hash == 0) survive on the request.  Restore their visibility so the
+ * next capture can re-own them and the converted representation can still
+ * produce 304 for a matching validator.  The value bytes and length remain
+ * intact because suppression only clears the hash.
+ */
+static ngx_table_elt_t *
+ngx_http_markdown_find_suppressed_request_header(ngx_http_request_t *r,
+    u_char *name, size_t name_len)
+{
+    if (r == NULL || name == NULL || name_len == 0
+        || r->headers_in.headers.part.nelts == 0) {
+        return NULL;
+    }
+
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            /* Match regardless of hash: the orphan entry has hash == 0. */
+            if (headers[i].key.len == name_len
+                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+            {
+                return &headers[i];
+            }
+        }
+    }
+
+    return NULL;
+}
+
+void
+ngx_http_markdown_adopt_orphan_conditional_headers(ngx_http_request_t *r)
+{
+    ngx_table_elt_t  *header;
+
+    header = ngx_http_markdown_find_suppressed_request_header(
+        r, (u_char *) "If-None-Match", sizeof("If-None-Match") - 1);
+    if (header != NULL && header->hash == 0) {
+        header->hash = 1;
+        /* NGINX NUL-terminates parsed header values, so the byte length
+         * can be rebuilt after suppression zeroed it.  ngx_strlen is the
+         * NGINX equivalent of strlen; the stub test environment provides
+         * the standard C library function. */
+        header->value.len = strlen((char *) header->value.data);
+    }
+
+    header = ngx_http_markdown_find_suppressed_request_header(
+        r, (u_char *) "If-Modified-Since", sizeof("If-Modified-Since") - 1);
+    if (header != NULL && header->hash == 0) {
+        header->hash = 1;
+        header->value.len = strlen((char *) header->value.data);
+    }
+}
+
 static uint8_t
 ngx_http_markdown_conditional_cache_validation(ngx_uint_t mode)
 {
@@ -302,6 +365,12 @@ ngx_http_markdown_suppress_captured_conditional_headers(
          state != NULL;
          state = state->next)
     {
+        /* Clear the hash AND zero the value length.  NGINX's proxy module
+         * forwards request headers without checking hash==0; the empty
+         * value length is what actually suppresses the validator from the
+         * upstream request.  The value bytes stay request-pool owned and
+         * are restored by restore_captured_conditional_headers (or rebuilt
+         * via ngx_strlen after an internal redirect orphans the entry). */
         state->header->hash = 0;
         state->header->value.len = 0;
     }
@@ -396,6 +465,14 @@ ngx_http_markdown_capture_conditional_request(
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
+    }
+
+    /* A subrequest shares the parent request's headers_in.  Capturing on a
+     * subrequest would suppress the parent's validators (hash = 0) while the
+     * parent is still mid-flight and cannot restore them (its ctx is
+     * independent).  Only convert validators on the main request. */
+    if (r->parent != NULL) {
+        return NGX_DECLINED;
     }
 
     if (ctx->conditional.captured) {
