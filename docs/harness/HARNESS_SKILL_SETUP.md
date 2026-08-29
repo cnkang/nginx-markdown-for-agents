@@ -51,6 +51,7 @@ If your agent does not support `npx skills`, symlink the skill folder manually.
 Codex:
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"  # repository root
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
 ln -sfn "$PWD/skills/nginx-markdown-harness-maintenance" \
   "${CODEX_HOME:-$HOME/.codex}/skills/nginx-markdown-harness-maintenance"

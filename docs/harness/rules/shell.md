@@ -109,28 +109,36 @@ run_case || rc=$?
   none are. The gate must cover **all** prohibited regex forms — the PCRE
   character classes `\s`, `\d`, `\w` and the BRE-only grouping syntax
   `\(...\)` — on **any** line that feeds a regex-capable command or a
-  regex variable assignment, not only literal `grep`/`sed`/`awk` lines:
+  regex variable assignment, not only literal `grep`/`sed`/`awk` lines.
+  This includes **arbitrary variable assignments** whose value later feeds
+  a regex-capable command (for example `needle=...` assigned before
+  `grep -E "$needle"`), not just variables named `pattern=` or `regex=`:
   ```bash
   # 1) PCRE classes on regex-command or pattern-assignment lines. Construct
   #    the backslash at runtime so the gate can scan its own source without
   #    matching the detector's example as a prohibited literal.
   _backslash='\'
   _pcre_needle="${_backslash}${_backslash}s|${_backslash}${_backslash}d|${_backslash}${_backslash}w"
+  # Match regex-capable commands OR any shell variable assignment (the
+  # assigned value may later feed a regex command, e.g. needle=... before
+  # grep -E "$needle").  Known non-regex assignments (e.g. entry_pattern
+  # used to build allowlists) are skipped by the allowlist in the
+  # detector, not by this filter.
   if grep -REn "${_pcre_needle}" tools/harness/detect_*.sh \
-      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=' \
+      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|([[:space:]]|^)[A-Za-z_][A-Za-z0-9_]*=' \
       | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then
-      echo "FAIL: prohibited PCRE regex classes found" >&2
-      exit 1
+     echo "FAIL: prohibited PCRE regex classes found" >&2
+     exit 1
   fi
   # 2) BRE-only grouping on regex-capable command lines and shell pattern
   #    assignments. Embedded Python heredocs are exempt: they use Python re
   #    semantics.
   _bre_needle="${_backslash}${_backslash}[()]"   # constructed at runtime
   if grep -REn "${_bre_needle}" tools/harness/detect_*.sh \
-      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|pattern=|regex=' \
+      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|pattern=|regex=|([[:space:]]|^)[A-Za-z_][A-Za-z0-9_]*=' \
       | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then
-      echo "FAIL: BRE-only grouping syntax found" >&2
-      exit 1
+     echo "FAIL: BRE-only grouping syntax found" >&2
+     exit 1
   fi
   ```
   (Python `re` patterns inside detectors are exempt: they use Python
