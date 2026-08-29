@@ -1348,9 +1348,8 @@ fn test_parser_memory_budget_allows_small_input() {
 /// Uses a 1 ms parser deadline against a 500 KiB document.  The parser timer
 /// starts after FFI option decoding and input-budget setup, so total FFI call
 /// time can exceed the parser budget even when parsing itself finishes in
-/// time.  Allow a small setup/teardown margin when interpreting a successful
-/// call; a reported parser timeout must still be at least as old as its
-/// configured deadline.
+/// time.  Every run must report `ERROR_PARSE_TIMEOUT`; a parser that ignored
+/// the deadline would return `ERROR_SUCCESS` and fail the assertion.
 #[test]
 fn test_parse_timeout_enforced_when_overrun() {
     use std::time::{Duration, Instant};

@@ -296,26 +296,63 @@ impl<'a> BudgetedMarkdownWriter<'a> {
             .len()
             .checked_add(additional)
             .ok_or_else(|| ConversionError::MemoryLimit("output length overflow".into()))?;
-        let projected = required_len
+
+        // Fast path: the current capacity already covers the required length.
+        // Do NOT grow geometrically on every call — that would double the
+        // buffer on each small push and balloon a small output toward the
+        // budget ceiling.
+        let current_capacity = self.output.capacity();
+        if required_len <= current_capacity {
+            return Ok(());
+        }
+
+        // Physical-capacity accounting: the budget must bound the actual heap
+        // footprint, not the logical length.  A String's capacity can exceed
+        // its length (amortized growth), so compute the target capacity
+        // explicitly and check it against the budget before reserving.
+        // Geometric growth target (double) keeps repeated small pushes
+        // amortized, but is capped by the budget below.
+        let target_capacity = required_len.max(current_capacity.saturating_mul(2));
+        let projected = target_capacity
             .checked_add(self.ctx.working_set_bytes)
             .ok_or_else(|| ConversionError::MemoryLimit("working-set size overflow".into()))?;
         if projected > self.ctx.output_budget {
-            return Err(ConversionError::MemoryLimit(format!(
-                "generated Markdown output and working set {} bytes would exceed budget {} bytes",
-                projected, self.ctx.output_budget
-            )));
+            // The geometric target would exceed the budget; fall back to an
+            // exact reservation for the required length.  If even that
+            // exceeds the budget, fail closed with a controlled error.
+            let projected_exact = required_len
+                .checked_add(self.ctx.working_set_bytes)
+                .ok_or_else(|| ConversionError::MemoryLimit("working-set size overflow".into()))?;
+            if projected_exact > self.ctx.output_budget {
+                return Err(ConversionError::MemoryLimit(format!(
+                    "generated Markdown output and working set {} bytes would exceed budget {} bytes",
+                    projected_exact, self.ctx.output_budget
+                )));
+            }
+            let additional_capacity = required_len.saturating_sub(self.output.len());
+            if additional_capacity > 0 {
+                self.output
+                    .try_reserve_exact(additional_capacity)
+                    .map_err(|error| {
+                        ConversionError::MemoryLimit(format!(
+                            "unable to reserve {} bytes for generated Markdown: {}",
+                            additional_capacity, error
+                        ))
+                    })?;
+            }
+            return Ok(());
         }
 
         // String::try_reserve takes additional bytes beyond the current
         // length, not beyond the current capacity.  Reserving the capacity
         // shortfall can leave the following push infallible only by accident
-        // when len < capacity < required_len.  The amortized variant (rather
-        // than try_reserve_exact) lets repeated small reservations grow the
-        // buffer geometrically instead of reallocating on every push.
-        let additional_capacity = required_len.saturating_sub(self.output.len());
+        // when len < capacity < required_len.  try_reserve_exact keeps the
+        // physical capacity at the checked target so the budget check above
+        // stays authoritative.
+        let additional_capacity = target_capacity.saturating_sub(self.output.len());
         if additional_capacity > 0 {
             self.output
-                .try_reserve(additional_capacity)
+                .try_reserve_exact(additional_capacity)
                 .map_err(|error| {
                     ConversionError::MemoryLimit(format!(
                         "unable to reserve {} bytes for generated Markdown: {}",
@@ -859,7 +896,23 @@ impl MarkdownConverter {
             ctx.release_working_set(capacity.saturating_mul(2));
             normalized
         } else {
-            self.normalize_output(output)
+            // Small-path normalization also allocates transient scratch:
+            // output.replace("\r\n", "\n") materializes a len-sized string
+            // while the traversal output is still alive, and
+            // String::with_capacity(output.len()) pre-allocates the result
+            // buffer.  Charge the retained capacity plus that scratch so the
+            // transient peak stays inside the budget, matching the
+            // large-path accounting above.
+            let capacity = output.capacity();
+            // include one additional byte for the guaranteed trailing
+            // newline, so the final normalized output (which always ends
+            // in "\n", including for empty input) stays within the
+            // charged budget.
+            let scratch = output.len().saturating_mul(2).saturating_add(1);
+            ctx.reserve_working_set_with_output(capacity, scratch)?;
+            let normalized = self.normalize_output(output);
+            ctx.release_working_set(capacity.saturating_add(scratch));
+            normalized
         };
 
         ctx.check_output_budget(markdown.len())?;
@@ -2698,12 +2751,30 @@ mod tests {
                 .expect("Parse failed");
         let converter = MarkdownConverter::new();
         let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
-        ctx.set_output_budget(100);
+        // The input HTML is ~80 bytes; the converted output is much smaller.
+        // The converter pre-allocates a 1 KiB output buffer, so a budget that
+        // covers the initial capacity plus the normalization scratch (2x
+        // output length) must succeed, proving the budget counts the actual
+        // output rather than the input size.
+        ctx.set_output_budget(4096);
 
         let result = converter.convert_with_context(&dom, &mut ctx);
         assert!(
             result.is_ok(),
             "nested list unexpectedly exceeded budget: {result:?}"
+        );
+
+        // A budget that cannot cover the initial capacity plus the
+        // normalization scratch must fail with a controlled MemoryLimit
+        // error, not succeed silently or abort: the transient normalization
+        // allocation is charged to the same conversion budget as the
+        // retained output.
+        let mut tight_ctx = ConversionContext::new(std::time::Duration::ZERO);
+        tight_ctx.set_output_budget(1024);
+        let tight_result = converter.convert_with_context(&dom, &mut tight_ctx);
+        assert!(
+            matches!(tight_result, Err(ConversionError::MemoryLimit(_))),
+            "tight budget must fail closed with MemoryLimit, got: {tight_result:?}"
         );
     }
 
