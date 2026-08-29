@@ -94,17 +94,22 @@ the original response. `fail_closed` and status policies reject it.
 
 ### Empty body with declared encodings
 
-A zero-byte response body for a **recognized, supported `Content-Encoding`
-chain** is a legal empty payload (design decision, user-confirmed): there is
-nothing to decode, so the chain decoder succeeds with an empty output instead
-of classifying the input as truncated. This differs from the single-format
-decompressors (`decompress_gzip`/`decompress_deflate`/`decompress_brotli`),
-which classify an empty compressed input as `TruncatedInput`. The chain
-decoder follows HTTP semantics where an empty body means "no content".
-Conversion of an empty body yields an empty Markdown document. Malformed or
-unknown chains still follow the configured `markdown_error_policy` exactly as
-documented above. The empty-input contract applies only after the chain
-passes recognition as supported.
+An empty wire body is transparent **only** when the effective chain contains
+no decoder layers (for example, an identity-only chain). If a non-identity
+layer (`gzip`, `deflate`, `br`) is declared, the decoder is invoked at end of
+input and classifies the empty body as `TruncatedInput` — a missing encoded
+body is **not** accepted as a valid compressed response. This keeps chain
+decoding aligned with the single-format decompressors
+(`decompress_gzip`/`decompress_deflate`/`decompress_brotli`), which classify
+an empty compressed input as `TruncatedInput` the same way.
+
+The configured `markdown_error_policy` then applies:
+
+- `pass` → the original encoded response is delivered unchanged (pass-through)
+- `fail_closed` / `status <code>` → the response is rejected
+
+Malformed or unknown chains still follow the configured `markdown_error_policy`
+exactly as documented above.
 
 ## Fail-open sequence
 
@@ -168,8 +173,8 @@ authoritative sources for exact labels and family membership. See
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
+| 0.9.2 | 2026-08-29 | Hermes | Corrected the empty-body contract: an empty wire body is transparent only for an identity-only chain; a declared non-identity layer classifies it as TruncatedInput (aligned with the Rust chain decoder and E2E) |
 | 0.9.2 | 2026-08-28 | Hermes | Merged AUTOMATIC_DECOMPRESSION.md into this canonical page (runtime flow, encodings, empty-body contract, fail-open, observability) |
-| 0.9.2 | 2026-08-19 | Hermes | Document the empty-body-with-declared-encodings contract (empty payload is legal, distinct from single-format truncated-input semantics) |
 | 0.9.2 | 2026-08-15 | Hermes | Document Brotli build control NGX_MARKDOWN_BROTLI_STREAMING and the NGX_HTTP_BROTLI probe outcome |
 | 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: active voice, removed prose semicolons. |
 | 0.9.2 | 2026-08-04 | Hermes | Align decompression controls and metrics with the frozen release contract. |

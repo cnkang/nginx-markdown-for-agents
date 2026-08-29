@@ -136,11 +136,11 @@ only as a historical implementation note:
 
 ## Related: Form Element Content Preservation
 
-Form-related elements (`<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<label>`, `<option>`, and so on) get separate handling from non-content elements. Instead of removing them entirely, the module strips their HTML tags while preserving child text content in the Markdown output. This ensures AI agents retain meaningful information such as labels, button captions, and option lists. See `docs/features/security.md` Layer 2 for details.
+Form-related elements (`<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<label>`, `<option>`, and so on) get separate handling from non-content elements. Instead of removing them entirely, the module strips their HTML tags while preserving child text content in the Markdown output. This ensures AI agents retain meaningful information such as labels, button captions, and option lists. See `docs/features/SECURITY_MODEL.md` Layer 2 for details.
 
 ## Related: Embedded Content Element Handling
 
-Embedded content elements (`<iframe>`, `<object>`, `<embed>`) also use a strip-tag-keep-content approach. The module extracts the `src`/`data` URL as a Markdown link (using the `title` attribute as label when available). Any fallback child text stays preserved. It suppresses dangerous URL schemes (`javascript:`, `data:`, and so on). See `docs/features/security.md` Layer 2 for details.
+Embedded content elements (`<iframe>`, `<object>`, `<embed>`) also use a strip-tag-keep-content approach. The module extracts the `src`/`data` URL as a Markdown link (using the `title` attribute as label when available). Any fallback child text stays preserved. It suppresses dangerous URL schemes (`javascript:`, `data:`, and so on). See `docs/features/SECURITY_MODEL.md` Layer 2 for details.
 
 ## Related: Media Element URL Extraction
 

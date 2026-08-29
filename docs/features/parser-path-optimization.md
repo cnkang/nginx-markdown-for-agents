@@ -79,7 +79,9 @@ build input before each build), including the Rust source, `Cargo.toml`,
 `cargo build`, convert each fixture via
 `MarkdownConverter::new().convert()`, compute `blake3::hash(output)`, and
 compare the fixture-to-hash mappings between revisions. The full artifact lives at
-`docs/evidence/10-parser-path-optimization-corpus-diff.tsv`.
+`docs/evidence/10-parser-path-optimization-corpus-diff.tsv` (a checked-in
+frozen evidence file, distinct from the generated `artifacts/` evidence
+policy described in `docs/guides/BUILD_INSTRUCTIONS.md`).
 
 | Category | Fixtures | Diffs | Status |
 |----------|----------|-------|--------|

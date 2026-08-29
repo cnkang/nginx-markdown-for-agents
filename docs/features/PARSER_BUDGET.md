@@ -251,7 +251,8 @@ input size or elapsed time.
 Request arrives
     │
     ├─ markdown_limits conversion_memory= check (C layer)
-    │   └─ FAIL → pass-through, reason: memory_budget_exceeded
+    │   └─ FAIL → not_eligible (internal state SKIPPED), reason: not_eligible;
+    │      the module then applies markdown_error_policy (pass-through or reject)
     │
     ├─ markdown_limits conversion_timeout= pre-check (overall FFI deadline)
     │   └─ FAIL → pass-through, reason: timeout
@@ -356,7 +357,15 @@ Additional notes:
 
 | Code | Constant | Trigger |
 |------|----------|---------|
-| 10 | `ERROR_PARSE_TIMEOUT` | Elapsed time exceeds the effective deadline: the earlier of `conversion_timeout` (when nonzero) and `parser_timeout` |
+| 3 | `ERROR_TIMEOUT` | Elapsed time exceeds `conversion_timeout` (the overall FFI deadline) |
+| 10 | `ERROR_PARSE_TIMEOUT` | Elapsed time exceeds the parser checkpoint deadline (`parser_timeout`) |
+
+At every checkpoint the parser deadline is checked first, then the overall
+deadline. The two are independent: when `conversion_timeout` expires at a
+parser checkpoint (because it is smaller than `parser_timeout`, or the
+overall budget was consumed by pre-parse work), the conversion reports
+`ERROR_TIMEOUT`; when `parser_timeout` expires first, it reports
+`ERROR_PARSE_TIMEOUT`. A zero value disables that deadline.
 | 11 | `ERROR_PARSE_BUDGET_EXCEEDED` | The estimated parser working set exceeds `parser_memory`, or a later memory checkpoint fails — not only a single allocation failure |
 
 ---
