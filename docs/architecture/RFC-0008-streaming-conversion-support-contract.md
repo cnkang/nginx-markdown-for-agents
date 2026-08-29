@@ -303,12 +303,19 @@ and the memory budget):
 - `markdown_streaming auto` and the module assesses streaming risk
   outweighs benefit.
 
-If the response would exceed full-buffer resource limits, the eligibility
-gate rejects it **before any conversion attempt**: the request is recorded
+If the response would exceed full-buffer resource limits **and the size is
+known at header time** (Content-Length present), the eligibility gate
+rejects it **before any conversion attempt**: the request is recorded
 as `not_eligible` (reason `memory_budget_exceeded`) and does **not**
 increment `nginx_markdown_conversion_attempts_total` nor assign
 `engine="full_buffer"`, because conversion never starts. The module then
 applies the configured `markdown_error_policy` (passthrough or reject).
+
+When the size is **not known at header time** (chunked or no
+Content-Length), the request enters the buffering pipeline and the limit
+is enforced by the body filter; exceeding it there counts as an attempted
+conversion that failed (increments `conversion_attempts_total` and the
+matching failure counter, then applies `markdown_error_policy`).
 
 Full-buffer fallback is **not** an error. It is a normal `auto`-mode decision.
 
