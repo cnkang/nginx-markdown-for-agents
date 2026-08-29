@@ -54,6 +54,20 @@ def _resolve_manifest_path() -> pathlib.Path:
 
     def _version_key(path: pathlib.Path) -> tuple:
         name = path.parent.name
+        # Validate the directory name as SemVer (2.0.0) before using it in
+        # sorting or artifact selection: reject names such as "backup-2027",
+        # "1.2.3.4", or "01.2.3" that are not valid release versions.
+        # Numeric identifiers (major/minor/patch and numeric prerelease
+        # identifiers) must not carry leading zeros.
+        if not re.fullmatch(
+            r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+            r"(?:-(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
+            r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?",
+            name,
+        ):
+            raise ValueError(
+                f"release directory name is not a valid SemVer: {name!r}"
+            )
         base, separator, pre = name.partition("-")
         main = tuple(int(part) for part in re.findall(r"\d+", base))
         if not separator:

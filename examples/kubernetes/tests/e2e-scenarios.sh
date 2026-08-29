@@ -245,6 +245,31 @@ scenario_deploy() {
             return 1
         }
 
+        # Ensure the module ConfigMap exists before mounting it: a volume
+        # that references a missing ConfigMap leaves the pod Pending.
+        kubectl create configmap "$CONFIGMAP_NAME" \
+            -n "$NAMESPACE" --from-literal=placeholder=yes \
+            --dry-run=client -o yaml 2>/dev/null \
+            | kubectl apply -f - >&2 2>&1 || {
+            log_error "Failed to ensure ConfigMap '$CONFIGMAP_NAME' exists"
+            return 1
+        }
+
+        # Mount the module ConfigMap so config updates actually reach the
+        # running module. Without a volume mount, scenario_config_update
+        # only verifies that a ConfigMap object exists — the deployment
+        # never reads it.
+        kubectl patch deployment "$DEPLOYMENT_NAME" \
+            -n "$NAMESPACE" \
+            --type=json \
+            -p='[
+              {"op":"add","path":"/spec/template/spec/volumes","value":[{"name":"markdown-config","configMap":{"name":"nginx-markdown-config"}}]},
+              {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts","value":[{"name":"markdown-config","mountPath":"/etc/nginx/conf.d/markdown","readOnly":true}]}
+            ]' >&2 2>&1 || {
+            log_error "Failed to mount ConfigMap on deployment"
+            return 1
+        }
+
         # Expose as a service if not already present
         local svc_exists
         svc_exists="$(kubectl get service "$SERVICE_NAME" \

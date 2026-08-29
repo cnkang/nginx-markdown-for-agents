@@ -174,14 +174,20 @@ fi
 echo "Step 5: Verifying no truncation on replay..." >&2
 
 CONTENT_LENGTH=$(curl -sS -o /dev/null \
-    -w "%{size_download}" \
+    -w "%{size_download} %{http_code}" \
     -H "$ACCEPT_MARKDOWN" \
-    "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || CONTENT_LENGTH="0"
+    "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || CONTENT_LENGTH="0 000"
 
-if [[ "$CONTENT_LENGTH" -gt 0 ]] 2>/dev/null; then
-    pass "response has content (${CONTENT_LENGTH} bytes)"
+# Require an HTTP 200 before comparing downloaded and expected sizes: a
+# non-200 response (for example a 304 or an error page) would otherwise
+# pass the size comparison with a misleading body.
+DOWNLOADED_SIZE="${CONTENT_LENGTH% *}"
+HTTP_CODE="${CONTENT_LENGTH#* }"
+
+if [[ "$HTTP_CODE" == "200" && "$DOWNLOADED_SIZE" -gt 0 ]] 2>/dev/null; then
+    pass "response has content (${DOWNLOADED_SIZE} bytes, HTTP ${HTTP_CODE})"
 else
-    fail "response has no content or endpoint unavailable"
+    fail "response missing or non-200 (HTTP ${HTTP_CODE}, ${DOWNLOADED_SIZE} bytes)"
 fi
 
 # --- Summary ---

@@ -236,11 +236,24 @@ test_markdown_conversion() {
             log_pass "Markdown conversion: response Content-Type contains markdown ($content_type)"
             ;;
         *)
-            # Check if the body looks like markdown (contains # headers or markdown syntax)
+            # Check if the body looks like markdown (contains # headers or markdown syntax).
+            # A raw text/html response whose visible text merely contains
+            # Markdown-like list markers must NOT pass: the Content-Type
+            # already failed the markdown check, so require a stronger
+            # signal (a heading) before accepting.
             local body
             body="$(printf '%s' "$response" | sed -n '/^\r*$/,$p' | tail -n +2)" || true
             case "$body" in
-                *"# "*|*"- "*|*"* "*)
+                *"<"*"#"*">"*|*"<"*">"*)
+                    # The Content-Type already failed the markdown check;
+                    # if the body carries HTML document/element markup
+                    # (including an HTML-wrapped heading such as
+                    # "<h1># Hello</h1>"), it is an HTML response, not
+                    # converted markdown.
+                    log_fail "Markdown conversion: response body contains HTML markup (Content-Type: $content_type)"
+                    return 1
+                    ;;
+                *"# "*)
                     log_pass "Markdown conversion: response body contains markdown syntax"
                     ;;
                 *)
