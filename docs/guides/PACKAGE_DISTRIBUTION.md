@@ -150,6 +150,7 @@ After downloading both the package and `SHA256SUMS`:
 ```bash
 set -euo pipefail
 # Verify the specific package; an absent matching entry is an error.
+VERSION="0.9.2"
 PACKAGE="nginx-module-markdown-for-agents_${VERSION}_nginx-1.26.3_amd64.deb"
 CHECKSUM_LINE="$(awk -v package="${PACKAGE}" '$2 == package { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"
 printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -

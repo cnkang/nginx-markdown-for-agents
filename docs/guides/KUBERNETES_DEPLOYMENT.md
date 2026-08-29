@@ -233,7 +233,7 @@ After building the image, verify the module is correctly compiled and loaded:
 #### Check NGINX Version and Module
 
 ```bash
-docker run --rm my-ingress:latest nginx -T 2>&1 | grep -F 'load_module'
+docker run --rm my-ingress:latest nginx -T 2>&1 | grep -F 'load_module ngx_http_markdown_filter_module.so;'
 docker run --rm my-ingress:latest nginx -t
 ```
 

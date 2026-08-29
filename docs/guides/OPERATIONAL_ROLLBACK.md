@@ -519,7 +519,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 # 4. Verify: confirm conversion metrics stopped
 curl -s http://localhost/markdown-metrics | \
-  grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total|requests_total)"
+  grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)"
 
 # 5. Verify: confirm client receives HTML
 curl -sD - -o /dev/null \

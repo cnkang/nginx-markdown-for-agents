@@ -97,7 +97,7 @@ VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
-grep " ${PKG}$" SHA256SUMS | sha256sum -c -
+awk -v pkg="${PKG}" '$2 == pkg { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS | sha256sum -c -
 sudo apt install "./${PKG}"
 ```
 

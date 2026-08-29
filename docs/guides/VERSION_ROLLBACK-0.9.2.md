@@ -106,6 +106,12 @@ Publication and artifact availability are separate release gates.
 
    ```bash
    cd nginx-markdown-for-agents
+   # Fetch the tag, verify its cryptographic signature, and compare its
+   # resolved commit against independently authenticated release evidence
+   # before checking out:
+   git fetch origin tag v0.9.1
+   git tag -v v0.9.1
+   git rev-parse v0.9.1^{commit}
    git checkout v0.9.1
    cd components/rust-converter && cargo build --release && cd ../..
    # Rebuild NGINX module per your build procedure
