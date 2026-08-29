@@ -188,7 +188,7 @@ while IFS= read -r match; do
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
     content="$(comment_free_line "$file" "$line")"
-    if ! echo "$content" | grep -qE "conf->(${MUTABLE_FIELDS})[^_a-zA-Z]"; then
+    if ! echo "$content" | grep -qE "conf->(${MUTABLE_FIELDS})([^_a-zA-Z0-9]|$)"; then
         continue
     fi
     basename="$(basename "$file")"

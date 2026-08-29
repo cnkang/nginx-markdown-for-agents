@@ -71,7 +71,7 @@ ABORTED_SOURCE_FIELD = "terminal_aborted_total"
 # assign failed_closed; a missing deduction in one branch must not be
 # masked by the other branch still containing the counter name).
 FAILED_CLOSED_ASSIGN_RE = re.compile(
-    r"failed_closed[ \t]*=([^;]*);"
+    r"failed_closed[ \t]*(?:[+\-]=|=)([^;]*);"
 )
 
 

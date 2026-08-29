@@ -437,12 +437,14 @@ def main() -> int:
     failures.extend(check_operator_config_examples(files))
     changelog_path = ROOT / "CHANGELOG.md"
     changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
-    version_match = re.search(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
+    # Use the unreleased-changelog regex so validation targets the version
+    # under development, not the latest released version.
+    version_match = UNRELEASED_CHANGELOG_RE.search(changelog)
     release_notes_path = None
     if version_match:
         candidate_release_notes = (
             ROOT / "docs" / "releases"
-            / f"{version_match.group(1)}-release-notes.md"
+            / f"{version_match.group('version')}-release-notes.md"
         )
         if candidate_release_notes.is_file():
             release_notes_path = candidate_release_notes

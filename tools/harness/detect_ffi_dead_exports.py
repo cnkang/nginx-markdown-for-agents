@@ -222,7 +222,14 @@ def _scan_c_call_file(
 def _is_non_callsite_line(line: str) -> bool:
     """Return whether a source line is a comment or declaration."""
     stripped = line.lstrip()
-    return stripped.startswith(("/*", "*", "//")) or bool(
+    # A "*" prefix identifies a block-comment continuation line only when
+    # the character following "*" is a space or "/" (or end of line).
+    # Pointer-store callsites such as dereferenced assignments
+    # ("*p = ...") must NOT be treated as comment continuations.
+    is_comment = stripped.startswith(("/*", "//")) or bool(
+        re.match(r"\*(?:\s|/|$)", stripped)
+    )
+    return is_comment or bool(
         DECLARATION_LINE_RE.match(line)
     )
 

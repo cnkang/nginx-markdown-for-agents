@@ -545,7 +545,11 @@ def _resolve_scan_dir(directory: str) -> Path | None:
         return Path(validate_read_path(
             directory, purpose="scan directory",
         ))
-    except (ImportError, FileNotFoundError, ValueError):
+    except (ImportError, FileNotFoundError):
+        # Fallback only for "path_validation module unavailable" and
+        # "directory does not exist" cases.  ValueError (traversal attempt)
+        # must stay fatal: swallowing it would let an attacker-controlled
+        # path proceed to open().
         scan_dir = Path(directory)
         if not scan_dir.is_absolute():
             scan_dir = REPO_ROOT / scan_dir

@@ -127,7 +127,8 @@ def validate() -> list[str]:
 
     # --- Check 2: No tier escalation ---
     errors.extend(_validate_tier_overrides(
-        packaging_data.get("tier_overrides", {}), release_versions, release_data
+        packaging_data.get("tier_overrides", {}), release_versions, release_data,
+        packaging_versions,
     ))
 
     return errors
@@ -152,12 +153,23 @@ def _validate_tier_overrides(
     tier_overrides: dict[str, str],
     release_versions: set[str],
     release_data: dict,
+    packaging_versions: set[str],
 ) -> list[str]:
     """Check 2: no tier escalation beyond release-matrix maximum."""
     errors: list[str] = []
     for version, claimed_tier in tier_overrides.items():
         if version not in release_versions:
-            # Already caught in check 1
+            # Report unknown versions here too: when Check 1 is skipped
+            # (empty packaging_versions), this is the only place that
+            # catches them.  Avoid duplicate errors when Check 1 already
+            # reported the same version.
+            if version in packaging_versions:
+                continue
+            errors.append(
+                f"packaging/matrix.yaml tier_overrides references NGINX "
+                f"version '{version}' which is not present in "
+                f"tools/release-matrix.json"
+            )
             continue
         claimed_level = TIER_ORDER.get(claimed_tier, -1)
         if claimed_level < 0:
