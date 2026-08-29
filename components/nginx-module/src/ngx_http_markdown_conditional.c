@@ -34,7 +34,8 @@
 static ngx_table_elt_t *
 ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_t name_len)
 {
-    if (r->headers_in.headers.part.nelts == 0) {
+    if (r == NULL || name == NULL || name_len == 0
+        || r->headers_in.headers.part.nelts == 0) {
         return NULL;
     }
 
@@ -240,16 +241,18 @@ ngx_http_markdown_has_no_transform(ngx_http_request_t *r)
  */
 static void
 ngx_http_markdown_collect_conditional_headers(ngx_http_request_t *r,
+    const ngx_http_markdown_ctx_t *ctx,
     const ngx_table_elt_t **inm_header, const ngx_table_elt_t **ims_header,
     const ngx_table_elt_t **range_header)
 {
-    {
+    if (ctx != NULL && ctx->conditional.captured) {
+        *inm_header = ctx->conditional.if_none_match;
+        *ims_header = ctx->conditional.if_modified_since;
+    } else {
         static u_char  if_none_match_name[] = "If-None-Match";
         *inm_header = ngx_http_markdown_find_request_header(
             r, if_none_match_name, sizeof(if_none_match_name) - 1);
-    }
 
-    {
         static u_char  if_modified_since_name[] = "If-Modified-Since";
         *ims_header = ngx_http_markdown_find_request_header(
             r, if_modified_since_name, sizeof(if_modified_since_name) - 1);
@@ -260,6 +263,216 @@ ngx_http_markdown_collect_conditional_headers(ngx_http_request_t *r,
         *range_header = ngx_http_markdown_find_request_header(
             r, range_name, sizeof(range_name) - 1);
     }
+}
+
+/* Return whether a request-header name is a captured validator. */
+static ngx_flag_t
+ngx_http_markdown_is_captured_conditional_name(const ngx_str_t *key)
+{
+    static u_char  if_none_match_name[] = "If-None-Match";
+    static u_char  if_modified_since_name[] = "If-Modified-Since";
+
+    if (key == NULL || key->data == NULL) {
+        return 0;
+    }
+
+    if (key->len == sizeof(if_none_match_name) - 1
+        && ngx_strncasecmp(key->data, if_none_match_name, key->len) == 0)
+    {
+        return 1;
+    }
+
+    return (key->len == sizeof(if_modified_since_name) - 1
+            && ngx_strncasecmp(key->data, if_modified_since_name,
+                               key->len) == 0);
+}
+
+/*
+ * Suppress only entries recorded by capture, preserving pre-existing state.
+ * Empty values keep generic upstream header forwarders from evaluating the
+ * validators even when they do not honor hash==0 entries.
+ */
+static void
+ngx_http_markdown_suppress_captured_conditional_headers(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_http_markdown_conditional_header_state_t  *state;
+
+    for (state = ctx->conditional.header_states;
+         state != NULL;
+         state = state->next)
+    {
+        state->header->hash = 0;
+        state->header->value.len = 0;
+    }
+
+    r->headers_in.if_none_match = NULL;
+    r->headers_in.if_modified_since = NULL;
+}
+
+/* Restore each entry to the state observed before capture. */
+static void
+ngx_http_markdown_restore_captured_conditional_headers(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_http_markdown_conditional_header_state_t  *state;
+
+    for (state = ctx->conditional.header_states;
+         state != NULL;
+         state = state->next)
+    {
+        state->header->hash = state->original_hash;
+        state->header->value.len = state->original_value_len;
+    }
+
+    r->headers_in.if_none_match = ctx->conditional.if_none_match;
+    r->headers_in.if_modified_since = ctx->conditional.if_modified_since;
+}
+
+/*
+ * Return the captured validator length while its request header is hidden.
+ * The value bytes remain request-pool owned and are safe to inspect for the
+ * converted-representation decision.
+ */
+static size_t
+ngx_http_markdown_conditional_value_len(
+    const ngx_http_markdown_ctx_t *ctx, const ngx_table_elt_t *header)
+{
+    const ngx_http_markdown_conditional_header_state_t  *state;
+
+    if (header == NULL || ctx == NULL || !ctx->conditional.captured) {
+        return (header == NULL) ? 0 : header->value.len;
+    }
+
+    for (state = ctx->conditional.header_states;
+         state != NULL;
+         state = state->next)
+    {
+        if (state->header == header) {
+            return state->original_value_len;
+        }
+    }
+
+    return header->value.len;
+}
+
+/*
+ * Return whether the request has a conditional validator that can be held
+ * while a negotiated Markdown response is obtained.  Range requests remain
+ * source-representation requests and must not be intercepted here.
+ */
+ngx_flag_t
+ngx_http_markdown_has_conditional_request(ngx_http_request_t *r)
+{
+    const ngx_table_elt_t  *inm_header;
+    const ngx_table_elt_t  *ims_header;
+    const ngx_table_elt_t  *range_header;
+
+    ngx_http_markdown_collect_conditional_headers(
+        r, NULL, &inm_header, &ims_header, &range_header);
+
+    return (range_header == NULL
+            && (inm_header != NULL || ims_header != NULL));
+}
+
+/*
+ * Capture source validators before the upstream content handler or cache can
+ * produce a conditional response.  Repeated phase execution re-applies the
+ * suppression to the same request-owned entries, which also covers internal
+ * redirects before the response header is generated.
+ */
+ngx_int_t
+ngx_http_markdown_capture_conditional_request(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
+{
+    const ngx_table_elt_t  *inm_header;
+    const ngx_table_elt_t  *ims_header;
+    const ngx_table_elt_t  *range_header;
+    ngx_http_markdown_conditional_header_state_t  *state;
+    ngx_http_markdown_conditional_header_state_t  *tail;
+    ngx_table_elt_t  *headers;
+    ngx_list_part_t  *part;
+    ngx_uint_t        i;
+
+    if (r == NULL || ctx == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (ctx->conditional.captured) {
+        ngx_http_markdown_collect_conditional_headers(
+            r, NULL, &inm_header, &ims_header, &range_header);
+        if (range_header != NULL) {
+            ngx_http_markdown_restore_conditional_request(r, ctx);
+            return NGX_DECLINED;
+        }
+
+        ngx_http_markdown_suppress_captured_conditional_headers(r, ctx);
+        ctx->conditional.suppressed = 1;
+        return NGX_OK;
+    }
+
+    ngx_http_markdown_collect_conditional_headers(
+        r, NULL, &inm_header, &ims_header, &range_header);
+    if (range_header != NULL
+        || (inm_header == NULL && ims_header == NULL))
+    {
+        return NGX_DECLINED;
+    }
+
+    ctx->conditional.header_states = NULL;
+    tail = NULL;
+    for (part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        headers = part->elts;
+        for (i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0
+                || !ngx_http_markdown_is_captured_conditional_name(
+                       &headers[i].key))
+            {
+                continue;
+            }
+
+            state = ngx_pcalloc(r->pool, sizeof(*state));
+            if (state == NULL) {
+                return NGX_ERROR;
+            }
+
+            state->header = &headers[i];
+            state->original_hash = headers[i].hash;
+            state->original_value_len = headers[i].value.len;
+            if (tail == NULL) {
+                ctx->conditional.header_states = state;
+            } else {
+                tail->next = state;
+            }
+            tail = state;
+        }
+    }
+
+    ctx->conditional.if_none_match = (ngx_table_elt_t *) inm_header;
+    ctx->conditional.if_modified_since = (ngx_table_elt_t *) ims_header;
+    ctx->conditional.captured = 1;
+
+    ngx_http_markdown_suppress_captured_conditional_headers(r, ctx);
+    ctx->conditional.suppressed = 1;
+    return NGX_OK;
+}
+
+/* Restore captured validators before a source representation is forwarded. */
+void
+ngx_http_markdown_restore_conditional_request(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
+{
+    if (r == NULL || ctx == NULL || !ctx->conditional.captured
+        || !ctx->conditional.suppressed)
+    {
+        return;
+    }
+
+    ngx_http_markdown_restore_captured_conditional_headers(r, ctx);
+    ctx->conditional.suppressed = 0;
 }
 
 /*
@@ -332,11 +545,11 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     }
 
     ngx_http_markdown_collect_conditional_headers(
-        r, &inm_header, &ims_header, &range_header);
+        r, ctx, &inm_header, &ims_header, &range_header);
 
     if (inm_header != NULL) {
         inm_data = inm_header->value.data;
-        inm_len = inm_header->value.len;
+        inm_len = ngx_http_markdown_conditional_value_len(ctx, inm_header);
     } else {
         inm_data = NULL;
         inm_len = 0;

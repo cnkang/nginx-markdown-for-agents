@@ -146,6 +146,8 @@ struct ngx_http_request_s {
         ngx_table_elt_t *accept;
         ngx_table_elt_t *cookie;
         ngx_table_elt_t *authorization;
+        ngx_table_elt_t *if_none_match;
+        ngx_table_elt_t *if_modified_since;
     } headers_in;
     struct {
         ngx_uint_t status;
@@ -1190,6 +1192,84 @@ test_find_header_hash_zero_skipped(void)
     TEST_PASS("hash==0 skipped");
 }
 
+static void
+test_capture_restore_conditional_headers(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *inm;
+    ngx_table_elt_t *ims;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    inm = add_header(&r->headers_in.headers,
+                     "if-none-match", "\"source\"");
+    ims = add_header(&r->headers_in.headers,
+                     "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_none_match = inm;
+    r->headers_in.if_modified_since = ims;
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_has_conditional_request(r),
+        "active conditional validator is detected");
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+        "conditional validators are captured");
+    TEST_ASSERT(ctx.conditional.captured && ctx.conditional.suppressed,
+        "capture records suppressed state");
+    TEST_ASSERT(inm->hash == 0 && ims->hash == 0,
+        "captured validators are hidden from upstream processing");
+    TEST_ASSERT(inm->value.len == 0 && ims->value.len == 0,
+        "captured validator values are empty for generic upstream forwarders");
+    TEST_ASSERT(r->headers_in.if_none_match == NULL
+                && r->headers_in.if_modified_since == NULL,
+        "typed validator pointers are hidden");
+
+    ngx_http_markdown_restore_conditional_request(r, &ctx);
+    TEST_ASSERT(!ctx.conditional.suppressed,
+        "restore clears suppressed state");
+    TEST_ASSERT(inm->hash != 0 && ims->hash != 0,
+        "captured validators regain their original hash state");
+    TEST_ASSERT(inm->value.len == sizeof("\"source\"") - 1
+                && ims->value.len
+                   == sizeof("Wed, 21 Oct 2015 07:28:00 GMT") - 1,
+        "captured validator values regain their original lengths");
+    TEST_ASSERT(r->headers_in.if_none_match == inm
+                && r->headers_in.if_modified_since == ims,
+        "typed validator pointers are restored");
+    TEST_PASS("capture and restore conditional headers");
+}
+
+static void
+test_capture_conditional_headers_excludes_range(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *ims;
+    ngx_table_elt_t *range;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    ims = add_header(&r->headers_in.headers,
+                     "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    range = add_header(&r->headers_in.headers, "Range", "bytes=0-10");
+    r->headers_in.if_modified_since = ims;
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(!ngx_http_markdown_has_conditional_request(r),
+        "range request is not a validator-capture candidate");
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_DECLINED,
+        "range request is declined by capture");
+    TEST_ASSERT(ims->hash != 0 && range->hash != 0,
+        "range request headers remain active");
+    TEST_PASS("range conditional request remains source-scoped");
+}
+
 /* ── handle_if_none_match tests ──────────────────────────────── */
 
 static void
@@ -1779,6 +1859,8 @@ main(void)
     test_find_header_found();
     test_find_header_not_found();
     test_find_header_hash_zero_skipped();
+    test_capture_restore_conditional_headers();
+    test_capture_conditional_headers_excludes_range();
 
     test_handle_inm_disabled();
     test_handle_inm_if_modified_since_only();

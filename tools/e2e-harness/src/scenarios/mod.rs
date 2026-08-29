@@ -12,6 +12,7 @@ pub mod common;
 pub mod conditional_requests;
 pub mod encoding_chain;
 pub mod metrics_endpoint;
+pub mod representation_validator;
 pub mod smoke;
 pub mod status_codes;
 
@@ -191,6 +192,10 @@ static SCENARIOS: &[ScenarioEntry] = &[
     ScenarioEntry {
         name: "conditional-requests",
         run: conditional_requests::run,
+    },
+    ScenarioEntry {
+        name: "representation-validator-e2e",
+        run: representation_validator::run,
     },
     ScenarioEntry {
         name: "metrics-endpoint",
