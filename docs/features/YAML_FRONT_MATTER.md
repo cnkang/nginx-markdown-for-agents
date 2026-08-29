@@ -47,8 +47,12 @@ published: "2024-01-15"
 
 ### Field Priority
 
-1. **title** (required per FR-15.4): From `<title>` tag or Open Graph
-2. **url** (required per FR-15.4): From canonical link or base_url
+1. **title** (required per FR-15.4 for a complete record): From `<title>` tag or Open Graph
+2. **url** (required per FR-15.4 for a complete record): From canonical link or base_url
+
+The `required` markers above apply only to a complete metadata record.
+`write_front_matter()` emits valid partial front matter when either field is
+absent or empty (see below).
 3. **description** (optional per FR-15.5): From meta tags
 4. **image** (optional per FR-15.5): From Open Graph, resolved to absolute URL
 5. **author** (optional): From meta author tag

@@ -76,9 +76,11 @@ The module computes the ETag value from the Markdown output using a hash functio
 The module ensures `Vary: Accept` is present on every representation selected
 through Accept negotiation:
 
-**Original Response**:
+**Original Response** (the original HTML is a representation selected through
+Accept negotiation, so it carries `Vary: Accept` too):
 ```http
 Content-Type: text/html
+Vary: Accept
 ```
 
 **Converted Response**:
@@ -144,8 +146,11 @@ location /docs/ {
 
 - `ims_only` (default): Skip module-side `If-None-Match` processing. NGINX
   may use `If-Modified-Since` only when the module passes through the original
-  response. A converted Markdown response clears the source `Last-Modified`
-  and returns a fresh 200.
+  response. A converted Markdown response never produces a 304 in this mode:
+  source `If-Modified-Since` and `If-None-Match` values do not validate the
+  transformed representation, and no Markdown ETag exists to revalidate
+  against. The module clears the source `Last-Modified` and returns a fresh
+  200 with a full body.
 - `full`: Support Markdown-variant `If-None-Match` (ETag). Converted
   responses use their Markdown ETag only. Source `If-Modified-Since` does not
   validate the transformed body.

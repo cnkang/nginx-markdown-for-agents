@@ -28,6 +28,13 @@ Mount the compiled `.so` file into the Ingress Controller pod via
 a ConfigMap or PersistentVolume, and add `load_module` via the
 `main-snippet` ConfigMap key.
 
+**Image prerequisite.** This flow requires a custom Ingress Controller
+image that already contains the module. A volume mount alone does not
+make the flow supported: the Controller must load a module binary whose
+ABI matches the NGINX inside the image, and managed deployments do not
+allow replacing the Controller image (see Known Limitations). Treat the
+example below as a feasibility sketch, not a supported deployment path.
+
 ```yaml
 volumeMounts:
   - name: markdown-module
@@ -70,17 +77,25 @@ separately compiled dynamic module.
 
 ```bash
 kubectl exec -n ingress-nginx <pod> -- nginx -T 2>&1 \
-  | grep -F 'load_module'
+  | grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so[[:space:]]*;'
+kubectl exec -n ingress-nginx <pod> -- nginx -T 2>&1 \
+  | grep -E '^[[:space:]]*markdown_filter[[:space:]]+on[[:space:]]*;'
 kubectl exec -n ingress-nginx <pod> -- nginx -t
-curl -fsS -H 'Accept: text/markdown' https://<ingress-host>/docs/example
+curl -fsS -D /tmp/markdown-smoke-headers.txt -H 'Accept: text/markdown' \
+  https://<ingress-host>/docs/example
+grep -i '^content-type: text/markdown' /tmp/markdown-smoke-headers.txt
 ```
 
-The first command must show the active module load, the second must parse the
-`markdown_filter` directive from the active configuration, and the request
-must return Markdown rather than the upstream HTML. For a negative control,
-temporarily remove the active `load_module` line and repeat `nginx -t`. The
-module-specific configuration must then fail. The smoke test must report that
-failure rather than treating it as successful.
+The first two commands must show an active, semicolon-terminated
+`load_module` directive and an active `markdown_filter on` directive. A
+comment mentioning the module filename must not satisfy them. `nginx -t`
+validates syntax only, so the directive greps are the load evidence. The
+request must return Markdown rather than the upstream HTML, and the final
+`grep` asserts that the response `Content-Type` header is `text/markdown`,
+failing when the header is missing or names another type. For a negative
+control, temporarily remove the active `load_module` line and repeat
+`nginx -t`. The module-specific configuration must then fail. The smoke test
+must report that failure rather than treating it as successful.
 
 ### Disable
 

@@ -234,14 +234,20 @@ else
 fi
 
 FAILED=$(echo "$METRICS" | grep -E 'nginx_markdown_requests_total\{.*outcome="(failed_[^"]+|aborted)"' | awk '{sum += $2} END {print sum + 0}')
-ATTEMPTED=$(echo "$METRICS" | grep 'nginx_markdown_conversion_attempts_total' | awk '{sum += $2} END {print sum + 0}')
+# All-request failure rate: numerator and denominator come from the same
+# nginx_markdown_requests_total family, matching the Grafana "Failed request
+# rate" PromQL definition above (denominator: every request sample,
+# including skipped requests).  Do not divide by
+# conversion_attempts_total here: a failure before engine selection would
+# otherwise inflate the rate above 100 percent.
+TOTAL_REQUESTS=$(echo "$METRICS" | grep 'nginx_markdown_requests_total' | awk '{sum += $2} END {print sum + 0}')
 
-if [ "$ATTEMPTED" -eq 0 ]; then
-    echo "WARNING: No conversion attempts"
+if [ "$TOTAL_REQUESTS" -eq 0 ]; then
+    echo "WARNING: No requests observed"
     exit 1
 fi
 
-FAILURE_RATE=$(echo "scale=2; ($FAILED / $ATTEMPTED) * 100" | bc)
+FAILURE_RATE=$(echo "scale=2; ($FAILED / $TOTAL_REQUESTS) * 100" | bc)
 
 if (( $(echo "$FAILURE_RATE > 10" | bc -l) )); then
     echo "CRITICAL: Failure rate ${FAILURE_RATE}%"

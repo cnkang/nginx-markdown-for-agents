@@ -13,7 +13,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Content negotiation (Accept header) | ✅ | ✅ | Works identically in both modes |
 | HTML-to-Markdown conversion | ✅ | ✅ | Same output quality |
 | ETag generation | ✅ | ❌ | No ETag for committed streaming responses |
-| Conditional requests (304) | ✅ | ⚠️ | Only If-None-Match/ETag validation requires full buffering; `ims_only` remains streaming-compatible via upstream Last-Modified and NGINX If-Modified-Since handling. Streaming mode is therefore not blanket-incompatible with conditional requests — it cannot validate via ETag, but IMS validation still works |
+| Conditional requests (304) | ✅ | ⚠️ | Only If-None-Match/ETag validation requires full buffering. In `ims_only` mode a converted response never produces a 304: the stream commit clears the upstream `Last-Modified` (both fields), so source `If-Modified-Since` cannot validate the converted representation. Source IMS still applies to pass-through responses |
 | Fail-open (pre-commit) | ✅ | ✅ | Streaming: configurable via `markdown_error_policy` |
 | Fail-open (post-commit) | N/A | ❌ | Post-commit errors produce truncated output |
 | `parser_memory` budget | ✅ | ✅ | Rust parser allocation bound (`parser_memory_budget`): enforced by the conservative pre-parse estimate on the full-buffer path and checked continuously on the streaming path |
@@ -48,10 +48,13 @@ the response headers before the full output is available, so ETag generation
 and `If-None-Match`-based conditional validation are not possible.
 
 Only ETag validation requires full buffering. With `markdown_cache_validation
-ims_only`, streaming remains compatible: the module forwards the upstream
-`Last-Modified` header and NGINX's standard `If-Modified-Since` handling
-performs the 304 decision, so the ims_only mode does not force the full-buffer
-path.
+ims_only`, streaming stays compatible with pass-through conditional handling:
+the module forwards the upstream `Last-Modified` for responses it does not
+convert, and NGINX's standard `If-Modified-Since` handling decides those. A
+converted streaming response is different: the stream commit clears the
+upstream `Last-Modified`, so no source-IMS 304 can apply to it. The mode
+therefore never forces the full-buffer path, and it never produces a 304 for
+converted content.
 
 **Known constraint (user-confirmed):** the same URL can therefore
 yield an ETag for small responses (full-buffer path) and no ETag for large
@@ -68,10 +71,11 @@ the response to the client (pre-commit) handle the same way. With
 error status and do not pass through the original body. `status N` uses that
 explicit status policy.
 Errors that occur after headers have already been sent (post-commit) cannot
-roll back. When a later gzip member fails, the module preserves earlier
-decompressed output and appends Markdown closing bytes to safely close the
-partial response. The client receives a truncated but structurally valid
-Markdown response.
+roll back. When a later gzip member fails, the module attempts a safe
+Markdown finish that preserves earlier decompressed output and appends
+Markdown closing bytes — but only when it can complete that finish. When
+completion is not possible, the module aborts the conversion without
+replaying output, and the client receives a truncated response.
 
 ### Token estimation
 

@@ -38,7 +38,9 @@ Required:
   duplicated inline test logic, so behavior drift is caught by tests.
 - Fuzz/invariance checks that compare conversion paths must evaluate both sides
   as `Result` values and assert success/error parity before comparing outputs,
-  do not early-return on the first `Err` and silently skip asymmetry.
+  do not early-return on the first `Err` and silently skip asymmetry. Matching
+  failure branches must also match the `ConversionError` variant and any error
+  payload details the paths carry, not merely that both sides errored.
 - Full-buffer vs streaming parity tests must keep conversion configuration
   aligned (for example content-type/charset/options) unless the mismatch is the
   explicit subject of the test and documented in-place.

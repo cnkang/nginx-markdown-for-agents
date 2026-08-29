@@ -27,11 +27,11 @@ flowchart TD
     Trigger["Rollback Trigger"] --> Type{"Trigger Type"}
     Type -->|High error rate| Disable["markdown_filter off"]
     Type -->|Conversion failures| Narrow["Narrow scope to<br/>specific paths only"]
-    Type -->|Performance issue| IncreaseLimit["Increase markdown_limits<br/>memory or timeout"]
+    Type -->|Performance issue| StreamOff["markdown_streaming off<br/>or disable on slow paths only"]
     Type -->|Streaming issues| DisableStream["markdown_streaming off"]
     Disable --> Verify["Verify HTML responses<br/>work correctly"]
     Narrow --> Verify
-    IncreaseLimit --> Verify
+    StreamOff --> Verify
     DisableStream --> Verify
     Verify --> Monitor["Monitor metrics<br/>and error logs"]
 
@@ -433,19 +433,31 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 ```
 
 For Method C (restoring fail-open), trigger a known conversion failure first and
-confirm that the module returns the original HTML. Then verify the corresponding
-decision-log entries after the old workers drain:
+confirm that the module returns the original HTML. Then verify the
+corresponding decision-log entries after the old workers drain. Limit the
+log inspection to the entries written by the triggering request: record the
+log byte offset before the request and read only the bytes appended after
+it, instead of searching the whole log with a generic tail:
 
 ```bash
+# Record the offset so verification covers only the triggered request.
+LOG_OFFSET="$(stat -c %s /var/log/nginx/error.log 2>/dev/null \
+  || wc -c < /var/log/nginx/error.log)"
+
 curl -sS -H 'Accept: text/markdown' http://localhost/known-failing-path \
   | grep -F '<html'
 
-grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=failed_closed" | tail -10
-
-grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=failed_open" | tail -10
+# Inspect only entries appended after the trigger request.
+tail -c +"$((LOG_OFFSET + 1))" /var/log/nginx/error.log \
+  | grep "markdown decision:" \
+  | grep -E "reason=(failed_closed|failed_open)"
 ```
+
+The offset excludes earlier history but does not identify a single request.
+On a host with concurrent Markdown traffic, unrelated requests can satisfy
+the check. Trigger the request on a uniquely named path (for example
+`/known-failing-path?probe=<timestamp>`) and match that path in the grep, or
+quiesce competing traffic for the duration of the verification.
 
 ### 2. Confirm Metrics Stop Incrementing
 
@@ -507,7 +519,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 # 4. Verify: confirm conversion metrics stopped
 curl -s http://localhost/markdown-metrics | \
-  grep -E "conversions_(attempted|succeeded|failed)"
+  grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total|requests_total)"
 
 # 5. Verify: confirm client receives HTML
 curl -sD - -o /dev/null \

@@ -14,8 +14,10 @@ benchmark.)
 1.30.4, archival only)
 **Scope:** The local record covers release-build microbenchmarks for the Rust
 converter FFI path and the C conditional-request handler (`If-None-Match`)
-using the standalone test harness with real Rust FFI. Real-NGINX HTTP E2E
-Only the canonical native Linux record reports real-NGINX HTTP E2E baselines.
+using the standalone test harness with real Rust FFI. Local real-NGINX HTTP
+measurements on this machine, including the NGINX 1.28.2 tables below, are
+diagnostic only. Only the canonical native Linux record is eligible for
+release baseline claims.
 
 ## Summary
 

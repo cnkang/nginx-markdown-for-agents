@@ -146,8 +146,7 @@ When conversion fails (either `failed_open` or `failed_closed`), the module reco
 | Failure Reason Code | Meaning |
 |---------------------|---------|
 | `conversion_error` | HTML parse or conversion error — the input HTML could not be processed |
-| `memory_budget_exceeded` | Conversion-memory limit reached (`markdown_limits conversion_memory=`) |
-| `timeout` | The request exceeded the authoritative overall conversion deadline `markdown_limits conversion_timeout=`; `parser_timeout=` triggers an earlier parser checkpoint when nonzero and smaller than `conversion_timeout`, while `conversion_timeout=` remains the overall upper bound and is never extended by `parser_timeout=` |
+| `timeout` | The request exceeded the authoritative overall conversion deadline `markdown_limits conversion_timeout=`. A nonzero `parser_timeout=` arms the parser checkpoint: it fires earlier than `conversion_timeout` when smaller, and it still fires when `conversion_timeout=0`. `conversion_timeout=` remains the overall upper bound and is never extended by `parser_timeout=` |
 | `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from `memory_budget_exceeded` and takes precedence for parser allocations |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
 | `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Decompression](../features/DECOMPRESSION.md)) |
@@ -183,15 +182,17 @@ into `reason_code.rs`, C metadata, diagnostics lookup, and release artifacts.
 The projections mirror [Observability Schema v2](../architecture/observability-schema-v2.md).
 All `as_str()` values are lowercase snake_case. The table below maps the
 high-level decision outcomes described in this document to their reason codes.
-The full registry (including decompression, dynconf, and canonical streaming
-outcome codes) lives in the schema document. Streaming implementation events
-are not registry entries.
+`memory_budget_exceeded` is not in this table because it is an eligibility
+outcome, not a conversion failure: the size-gate row below is its only
+producer. The full registry (including decompression, dynconf, and canonical
+streaming outcome codes) lives in the schema document. Streaming
+implementation events are not registry entries.
 
 | Decision Outcome | Reason Code | Request State | Description |
 |---|---|---|---|
 | Module disabled | `disabled` | NOT_ENABLED | Module disabled by configuration for this scope |
 | Not eligible (method/status/range/content-type/auth) | `not_eligible` | SKIPPED | Response not eligible for conversion |
-| Size gate blocked (`markdown_limits conversion_memory=` exceeded) | `memory_budget_exceeded` | SKIPPED (not eligible) | Hard cumulative input-size cap makes the request ineligible before the FFI attempt. The input is never truncated, and the primary outcome follows `markdown_error_policy` |
+| Size gate blocked (`markdown_limits conversion_memory=` exceeded) | `memory_budget_exceeded` | SKIPPED (not eligible) | Hard cumulative input-size cap makes the request ineligible before the FFI attempt. The input is never truncated, and the outcome stays `memory_budget_exceeded` with request state `SKIPPED`; `markdown_error_policy` does not govern this decision |
 | Accept negotiation — no match | `skipped_accept` | SKIPPED | Accept header present but does not request Markdown |
 | Accept negotiation — no header (strict) | `skipped_no_accept` | SKIPPED | No Accept header present and `markdown_accept` is `strict` |
 | Accept negotiation — explicit reject | `skipped_accept_reject` | SKIPPED | `Accept` explicitly rejects Markdown (`q=0`) |

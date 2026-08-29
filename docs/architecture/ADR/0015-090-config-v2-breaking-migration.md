@@ -68,7 +68,11 @@ Stub set: `markdown_on_wildcard`, `markdown_etag`,
 `markdown_memory_budget`, `markdown_timeout`, `markdown_streaming_budget`,
 `markdown_stream_threshold`, `markdown_large_body_threshold`.
 
-### Cross-directive conflict rules (validated at `nginx -t`)
+### Cross-directive conflict rules (configuration-time errors and request-time warnings)
+
+Some conflicts fail configuration parsing with `nginx -t`. Others pass
+`nginx -t` and surface only at request time. Each rule below names its
+validation boundary.
 
 - `markdown_cache_validation full` + `markdown_streaming force` → **error**
   (streaming cannot generate a strong ETag for chunked output, headers commit

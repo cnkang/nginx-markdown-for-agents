@@ -14,11 +14,13 @@ tag-name matching also removes meaningful content inside those regions (for
 example a navigation block that contains inline text), pruning is **not**
 guaranteed to touch only non-content regions.
 
-Current limitations:
-1. Pruning is opt-in at compile time — operators must rebuild with `--features prune_noise_regions`
-2. No runtime configuration — selectors stay hardcoded defaults
-3. No protection mechanism — operators cannot exclude specific subtrees from pruning
-4. No empty-output fallback — if pruning removes everything, the result is an empty Markdown string
+The decision below resolves v0.5.x limitations 1–3. Limitation 4 remains
+true in 0.9.2:
+
+1. Pruning is opt-in at compile time — operators must rebuild with `--features prune_noise_regions` (resolved: default-enabled, see Feature Gate Change)
+2. No runtime configuration — selectors stay hardcoded defaults (resolved: `markdown_prune_selectors`)
+3. No protection mechanism — operators cannot exclude specific subtrees from pruning (resolved: `markdown_prune_protection_selectors`)
+4. No empty-output fallback — if pruning removes everything, the result is an empty Markdown string (still true, see "Empty-Output Fallback")
 
 ## Decision
 
@@ -53,18 +55,28 @@ When an element matches both a prune selector and a protection selector, protect
 
 Tag-name-only selectors apply to **all** elements matching the selected tag names. A protection selector such as `nav` protects every `nav` element, not a specific instance. Tag-name selectors alone cannot protect individual nav or footer instances. Class/id-based protection (`.class`, `#id`) defers to a future release.
 
-### Empty-Output Fallback
+### Empty-Output Fallback (Deferred)
 
-If pruning removes all content from the output:
-1. Log reason code `PRUNE_EMPTY_FALLBACK`
-2. Return the unpruned conversion result only when the converter has not
-   committed output **and** all consumed input remains fully replayable
-3. Increment `prune_empty_fallback_total` metric
+Not implemented in 0.9.x. If pruning removes all content from the output, the
+module delivers the empty Markdown string as a converted result. The decision
+chain reports no dedicated skip or failure reason for this outcome, and the
+reason registry defines no prune-specific reason code.
 
-When streaming has exceeded the replay buffer or output is post-commit, apply
-the configured streaming failure policy instead of returning unpruned content.
+The fallback design below stays deferred because it needs all three of the
+following, and none fits the 0.9.2 freeze:
 
-This prevents data loss when pruning selectors are too aggressive.
+1. A `prune_empty_fallback` reason code in the reason registry with a
+   `log_decision()` callsite
+2. A `prune_empty_fallback_total` metric family outside the frozen v1 set of
+   exactly 12 families
+3. Replay-capable rollback: return the unpruned conversion result only when
+   the converter has not committed output and all consumed input remains
+   fully replayable
+
+Independent of pruning, streaming conversion failures after the replay window
+apply the configured streaming failure policy. Operators who need to avoid
+empty results keep the built-in selectors and exclude aggressive custom
+selectors instead.
 
 ### New FFI Fields
 
@@ -92,13 +104,13 @@ pub struct PruneConfig {
 2. Making it default-enabled removes the build-time opt-in barrier that prevented most deployments from using it.
 3. Runtime configuration (on/off, custom selectors) provides escape hatches for operators who need different behavior.
 4. Protection selectors solve the "pruning too much" problem without requiring operators to rebuild with different defaults.
-5. Empty-output fallback ensures data safety — aggressive pruning cannot silently drop all content.
+5. The empty-output fallback (see Empty-Output Fallback above) stays deferred. In 0.9.x aggressive pruning can produce an empty result, and operators mitigate with protection selectors or `markdown_prune_noise off`.
 
 ## Consequences
 
 - **Positive**: AI agents get cleaner, more focused Markdown by default. Output volume decreases 15–60%. Operators can customize selectors at runtime without rebuild.
 - **Negative**: Default behavior change from 0.5.x (where pruning was opt-in). Some HTML pages may have content removed that operators expect to see.
-- **Mitigation**: `markdown_prune_noise off` restores 0.5.x behavior. Protection selectors allow fine-grained control. Empty-output fallback prevents data loss. Migration guide documents the change.
+- **Mitigation**: `markdown_prune_noise off` restores 0.5.x behavior. Protection selectors allow fine-grained control. No empty-output fallback exists in 0.9.x (see Empty-Output Fallback above). Migration guide documents the change.
 
 ## Compatibility Contract
 
@@ -117,7 +129,7 @@ pub struct PruneConfig {
 4. Add `markdown_prune_noise`, `markdown_prune_selectors`, `markdown_prune_protection_selectors` directives in C
 5. Add `prune_noise`, `prune_selectors`, `prune_protection_selectors` fields to `ngx_http_markdown_conf_t`
 6. Implement protection-selector priority (protection wins over prune)
-7. Implement empty-output fallback with `PRUNE_EMPTY_FALLBACK` reason code and metric
+7. Empty-output fallback (deferred, see Empty-Output Fallback above): a future line would implement it with a `prune_empty_fallback` reason code and metric outside the frozen v1 set
 8. Update `ngx_http_markdown_prepare_conversion_options()` to set FFI fields
 9. Update `decode_options()` in Rust to read new fields
 10. Add unit tests for selector matching, protection priority, empty-output fallback

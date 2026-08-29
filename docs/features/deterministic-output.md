@@ -190,15 +190,24 @@ fn normalize_output(&self, output: String) -> String {
         // a tab reaches column 4 and therefore cannot introduce a fence.
         let indent = leading_indent_columns(line);
         let fence_line = line.trim_start_matches(|c| c == ' ' || c == '\t');
+        // Count only consecutive bytes matching the first fence character:
+        // a run such as ```~~~ must not count backticks and tildes together.
+        // Accept only backtick or tilde fences, and count only consecutive
+        // bytes matching that first fence character: a run such as ```~~~
+        // must not count backticks and tildes together, and thematic breaks
+        // (---) or emphasis runs must never open a fence.
+        let fence_char = fence_line
+            .as_bytes()
+            .first()
+            .copied()
+            .filter(|&c| c == b'`' || c == b'~');
         let fence_len = if indent > 3 {
             0
         } else {
-            fence_line
-                .bytes()
-                .take_while(|&b| b == b'`' || b == b'~')
-                .count()
+            fence_char
+                .map(|c| fence_line.bytes().take_while(|&b| b == c).count())
+                .unwrap_or(0)
         };
-        let fence_char = fence_line.as_bytes().first().copied();
         let fence_info = fence_line.get(fence_len..).unwrap_or("");
         let is_opening_fence = active_fence.is_none()
             && fence_len >= 3
