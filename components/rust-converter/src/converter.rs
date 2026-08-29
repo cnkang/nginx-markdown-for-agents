@@ -306,14 +306,16 @@ impl<'a> BudgetedMarkdownWriter<'a> {
             )));
         }
 
-        // String::try_reserve_exact() takes additional bytes beyond the
-        // current length, not beyond the current capacity.  Reserving the
-        // capacity shortfall can leave the following push infallible only by
-        // accident when len < capacity < required_len.
+        // String::try_reserve takes additional bytes beyond the current
+        // length, not beyond the current capacity.  Reserving the capacity
+        // shortfall can leave the following push infallible only by accident
+        // when len < capacity < required_len.  The amortized variant (rather
+        // than try_reserve_exact) lets repeated small reservations grow the
+        // buffer geometrically instead of reallocating on every push.
         let additional_capacity = required_len.saturating_sub(self.output.len());
         if additional_capacity > 0 {
             self.output
-                .try_reserve_exact(additional_capacity)
+                .try_reserve(additional_capacity)
                 .map_err(|error| {
                     ConversionError::MemoryLimit(format!(
                         "unable to reserve {} bytes for generated Markdown: {}",
