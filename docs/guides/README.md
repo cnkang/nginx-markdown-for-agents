@@ -30,6 +30,7 @@ Use these documents when you need decisions and procedures you can act on direct
 | [KUBERNETES_DEPLOYMENT.md](KUBERNETES_DEPLOYMENT.md) | Kubernetes and Ingress Controller deployment |
 | [ROLLOUT_COOKBOOK.md](ROLLOUT_COOKBOOK.md) | Controlled enablement and staged rollout |
 | [streaming-rollout-cookbook.md](streaming-rollout-cookbook.md) | Streaming-specific rollout supplement |
+| [performance-rollout-091.md](performance-rollout-091.md) | Historical: 0.9.1 performance rollout (superseded in 0.9.2) |
 | [OPERATIONAL_ROLLBACK.md](OPERATIONAL_ROLLBACK.md) | Runtime mitigation: disable or narrow conversion without binary replacement |
 | [VERSION_ROLLBACK-0.9.2.md](VERSION_ROLLBACK-0.9.2.md) | Version downgrade: 0.9.2 binary + matching configuration |
 | [UPGRADE-TO-0.9.2.md](UPGRADE-TO-0.9.2.md) | Operational upgrade sequence to 0.9.2 |
@@ -37,7 +38,7 @@ Use these documents when you need decisions and procedures you can act on direct
 | [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) | Compact breaking-change reference for 0.9.2 |
 | [doctor.md](doctor.md) | nginx-markdown-doctor diagnostics tool |
 | [prometheus-metrics.md](prometheus-metrics.md) | Prometheus metrics contract |
-| [performance-profiles.md](performance-profiles.md) | Performance settings and presets |
+| [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md) | Performance settings and presets |
 | [streaming-troubleshooting.md](streaming-troubleshooting.md) | Streaming-specific troubleshooting |
 | [GPG_KEY_MANAGEMENT.md](GPG_KEY_MANAGEMENT.md) | Release signing key management |
 | [HOMEBREW_TAP_RELEASE.md](HOMEBREW_TAP_RELEASE.md) | Homebrew tap publication and post-release macOS verification |
@@ -61,6 +62,6 @@ In short:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-28 | Hermes | Removed INSTALL.md stub and HARNESS_MAINTENANCE (moved to ../harness/); added rollback/upgrade/migration/rollout index rows |
+| 0.9.2 | 2026-08-29 | Hermes | Retained INSTALL.md as the legacy-link and package-layout compatibility stub (INSTALLATION.md remains canonical); moved HARNESS_MAINTENANCE to ../harness/; added rollback/upgrade/migration/rollout index rows |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

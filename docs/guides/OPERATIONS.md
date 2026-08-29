@@ -188,11 +188,15 @@ grep "conversion time" /var/log/nginx/error.log | awk '{print $NF}' | sort -n | 
 
 | Pattern | Severity | Meaning |
 |---------|----------|---------|
-| `markdown filter: conversion failed, category=conversion_error` | WARN | HTML parsing or Markdown generation failed |
-| `markdown filter: conversion failed, category=memory_budget_exceeded` | WARN | Memory limit reached |
-| `markdown filter: conversion failed, category=timeout` | WARN | Parser execution exceeded `parser_timeout` |
-| `markdown filter: conversion failed, category=ffi_panic` | ERROR | Internal/system error (Rust↔C panic) |
+| `markdown filter: conversion failed, category=conversion` | WARN | HTML parsing or Markdown generation failed (reason=`conversion_error`) |
+| `markdown filter: conversion failed, category=resource_limit` | WARN | Memory limit reached (reason=`memory_budget_exceeded`) |
+| `markdown filter: conversion failed, category=conversion` | WARN | Parser execution exceeded `parser_timeout` (reason=`timeout`) |
+| `markdown filter: conversion failed, category=system` | ERROR | Internal/system error (reason=`ffi_panic`, Rust↔C panic) |
 | `markdown filter: conversion succeeded, time=XXXms` | INFO | Successful conversion with timing |
+
+`category=` is the high-level failure class (`conversion`, `resource_limit`,
+`system`); `reason=` carries the specific reason-registry key
+(`conversion_error`, `memory_budget_exceeded`, `timeout`, `ffi_panic`, ...).
 
 
 ### Health Checks
@@ -452,6 +456,11 @@ curl -H "Accept: text/markdown" http://localhost/test
 | 0.3.x | 1.24.0+ | Supported |
 | 0.3.x | < 1.24.0 | Not supported |
 
+> **Note**: The 0.3.x rows are historical. The authoritative, machine-readable
+> compatibility projection is generated from `tools/release-matrix.json`
+> (see `docs/releases/release-matrix.json` for the generated document and
+> its `generated_from` binding).
+
 #### Rust Version Compatibility
 
 | Module Version | Rust Version | Status |
@@ -467,7 +476,7 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 - The 0.9.2 metrics layout is a breaking reset. Install the matching module
   and allow a graceful reload to create the new shared-memory layout. The
-  frozen v1 metrics surface exposes the current path counters.
+  frozen v1 metrics surface exposes bounded request and conversion counters.
 - The streaming path (`markdown_streaming off|auto|force`) controls runtime
   selection. `auto` uses an internal bounded heuristic. There is no
   operator-facing response-size threshold.
@@ -922,8 +931,11 @@ same string for each reason code. Streaming path transitions use a separate
 bounded `event=` field. They are not a second reason-code taxonomy. You can
 correlate a log entry directly with a metric counter without translation. The
 request-level outcome classifications (`converted`, `failed_open`,
-`failed_closed`, `skipped`) appear in `nginx_markdown_requests_total` as both
-`outcome` and `reason` label values. The finer failure sub-classification (the
+`failed_closed`, `skipped`) appear in `nginx_markdown_requests_total` as
+`outcome` (the terminal classification) and `reason` (the outcome-specific
+code) label values. For `skipped`, the reason label uses the specific skip
+code (`disabled`, `not_eligible`, `skipped_accept`, and so on), not the
+literal value `skipped`. The finer failure sub-classification (the
 decision-log `category` field, for example `conversion_error`) is intentionally
 **not** exposed as a metric label value. See [Failure Sub-Classification
 Codes](#failure-sub-classification-codes) below.

@@ -158,11 +158,16 @@ the restart in the next step.
 
 ```bash
 sudo nginx -t
-# systemd-managed host:
-sudo systemctl restart nginx
-# If another supervisor owns NGINX, use its restart/reload operation instead.
-# For a directly managed master process, the equivalent is:
-# sudo nginx -s reload
+# systemd-managed host: check the unit EXISTS, not just whether it is
+# currently active — a stopped unit is still owned by systemd and must
+# be restarted through it.
+if systemctl list-unit-files nginx.service >/dev/null 2>&1; then
+  sudo systemctl restart nginx
+else
+  # If another supervisor owns NGINX, use its restart/reload operation instead.
+  # For a directly managed master process, the equivalent is:
+  sudo nginx -s reload
+fi
 ```
 
 ---
@@ -252,9 +257,16 @@ helm repo update
 ### 2. Upgrade the release
 
 ```bash
-helm upgrade nginx-markdown nginx-markdown/nginx-markdown-for-agents \
+# Use the chart source selected in Step 1.
+# In-tree chart (checked out at the 0.9.2 tag):
+helm upgrade nginx-markdown ./charts/nginx-markdown \
     --namespace nginx-markdown \
     --set markdown.image.tag=v0.9.2
+
+# Remote chart repository (added in Step 1):
+#   helm upgrade nginx-markdown nginx-markdown/nginx-markdown-for-agents \
+#       --namespace nginx-markdown \
+#       --set markdown.image.tag=v0.9.2
 ```
 
 ### 3. Verify
