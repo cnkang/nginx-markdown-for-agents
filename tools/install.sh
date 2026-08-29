@@ -1098,6 +1098,34 @@ EOF
   return 1
 }
 
+# verify_requested_tag_identity enforces exact release-tag identity when the
+# operator pinned a version: the release metadata that produced every URL and
+# digest below must describe precisely that tag. The default latest-release
+# flow leaves RELEASE_VERSION empty and has no operator-pinned version to
+# compare against, so the check is skipped there. A single leading v is
+# normalized away so both spellings of the same version compare equal.
+#
+# Arguments:
+#   (none; uses RELEASE_VERSION and RELEASE_TAG global variables)
+#
+# Returns:
+#   0 when no pinned version is set or the pinned version matches the
+#   resolved tag; never returns on mismatch (die_with_error exits).
+verify_requested_tag_identity() {
+  if [[ -z "$RELEASE_VERSION" ]]; then
+    return 0
+  fi
+  local requested_tag_norm="${RELEASE_VERSION#v}"
+  local resolved_tag_norm="${RELEASE_TAG#v}"
+  if [[ "$requested_tag_norm" != "$resolved_tag_norm" ]]; then
+    die_with_error "checksum" \
+      "Resolved release tag ${RELEASE_TAG} does not match the requested version ${RELEASE_VERSION}; refusing to mix metadata across releases." \
+      "Verify the requested version and retry, or pin the exact tag in the download URL." \
+      "Build and install from source if no signed release is available."
+  fi
+  return 0
+}
+
 # manifest_digest_for prints the 64-hex digest for the exact asset name listed
 # in a SHA256SUMS manifest.
 #
@@ -1133,20 +1161,38 @@ manifest_digest_for() {
 # Returns:
 #   0 on success, non-zero if curl fails
 fetch_release_json() {
-  local release_api=""
   local response=""
 
   if [[ -z "$RELEASE_VERSION" ]]; then
-    release_api="https://api.github.com/repos/${REPO}/releases/latest"
-  else
-    release_api="https://api.github.com/repos/${REPO}/releases/tags/${RELEASE_VERSION}"
+    if ! response="$("$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' \
+      "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null)"; then
+      return 1
+    fi
+    printf '%s\n' "$response"
+    return 0
   fi
 
-  if ! response="$("$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$release_api" 2>/dev/null)"; then
-    return 1
+  # Operators may spell the tag with or without the leading v while the
+  # published tag carries exactly one spelling.  Try the requested spelling
+  # first, then its equivalent, so VERSION=0.9.2 resolves release v0.9.2.
+  # The exact-identity check below still binds every URL and digest to the
+  # resolved tag.
+  local -a release_apis=()
+  release_apis+=("https://api.github.com/repos/${REPO}/releases/tags/${RELEASE_VERSION}")
+  if [[ "$RELEASE_VERSION" == v* ]]; then
+    release_apis+=("https://api.github.com/repos/${REPO}/releases/tags/${RELEASE_VERSION#v}")
+  else
+    release_apis+=("https://api.github.com/repos/${REPO}/releases/tags/v${RELEASE_VERSION}")
   fi
-  printf '%s\n' "$response"
-  return 0
+
+  local release_api
+  for release_api in "${release_apis[@]}"; do
+    if response="$("$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$release_api" 2>/dev/null)"; then
+      printf '%s\n' "$response"
+      return 0
+    fi
+  done
+  return 1
 }
 
 # fetch_dist_index_json fetches the GitHub API JSON listing for the repository's `dist` directory at the specified ref and writes it to stdout.
@@ -1906,16 +1952,9 @@ else
   fi
   # Exact requested-tag identity: when the operator named a release, the
   # API metadata that produced every URL and digest below must describe
-  # precisely that tag. Normalize a single leading v so both spellings of
-  # the same version compare equal.
-  REQUESTED_TAG_NORM="${RELEASE_VERSION#v}"
-  RESOLVED_TAG_NORM="${RELEASE_TAG#v}"
-  if [[ "$REQUESTED_TAG_NORM" != "$RESOLVED_TAG_NORM" ]]; then
-    die_with_error "checksum" \
-      "Resolved release tag ${RELEASE_TAG} does not match the requested version ${RELEASE_VERSION}; refusing to mix metadata across releases." \
-      "Verify the requested version and retry, or pin the exact tag in the download URL." \
-      "Build and install from source if no signed release is available."
-  fi
+  # precisely that tag. The latest-release flow has no pinned version and
+  # skips the comparison inside the helper.
+  verify_requested_tag_identity
   if ! "$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS" "$SHA256SUMS_URL"; then
     die_with_error "network" \
       "Failed to download SHA256SUMS manifest." \
