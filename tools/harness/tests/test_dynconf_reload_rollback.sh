@@ -899,7 +899,7 @@ write_dynconf_atomically "schema_version=0.9\nmarkdown_filter=on"
 chmod 555 "${2%/*}"
 trap "cleanup 0" EXIT
 exit 0
-'
+' "$cleanup_rmdir_target"
 then
     chmod 755 "${cleanup_rmdir_target%/*}" 2>/dev/null || true
     rm -f -- "$cleanup_rmdir_target" 2>/dev/null || true

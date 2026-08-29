@@ -80,9 +80,6 @@ readonly GUARDED_CAST_ALLOWLIST=(
 # The regex_pattern is matched against the source line content (not line number),
 # so it survives code edits that shift line numbers.
 readonly SAFE_CAST_ALLOWLIST=(
-    # ── Compile-time constants ──
-    $'ngx_http_markdown_otel_impl.h\tNGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN\tcompile-time constant NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN'
-    $'ngx_http_markdown_otel_impl.h\tNGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN\tcompile-time constant NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN'
     # ── NGX_ERROR sentinel returns (not data casts) ──
     $'ngx_http_markdown_config_handlers_impl.h\treturn.*size_t.*NGX_ERROR\tNGX_ERROR sentinel return (not a data cast)'
     $'ngx_http_markdown_config_handlers_impl.h\t==.*size_t.*NGX_ERROR\tNGX_ERROR sentinel comparison (not a data cast)'

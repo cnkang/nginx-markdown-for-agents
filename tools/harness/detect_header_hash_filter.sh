@@ -23,9 +23,6 @@ SRC_DIR="components/nginx-module/src"
 # matched as a substring of the full path. The justification explains
 # why the file is safe without the hash==0 guard.
 readonly ALLOWLIST=(
-    # Iterates headers_in (request input headers) for traceparent lookup;
-    # request input headers are not invalidated by NGINX header manipulation
-    "ngx_http_markdown_otel_impl.h:iterates headers_in for traceparent; input headers are never invalidated"
     # Generic find-by-name helper; callers filter results and the function
     # returns the first match including invalidated entries only when the
     # caller's key comparison naturally excludes hash==0 entries via

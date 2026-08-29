@@ -49,9 +49,11 @@ done
 
 # The first non-flag argument is the scan directory.
 SCAN_DIR=""
+explicit_scan_dir=0
 for arg in ${1+"$@"}; do
     if [[ "$arg" != "--strict" ]]; then
         SCAN_DIR="$arg"
+        explicit_scan_dir=1
         break
     fi
 done
@@ -126,7 +128,13 @@ while IFS= read -r -d '' file; do
             fi
         done
     done
-done < <(find "$SCAN_DIR" \( -path '*/tests/*' -o -path '*/src/*' \) -type f -print0)
+done < <(if [[ "$explicit_scan_dir" -eq 1 ]]; then
+    # An explicitly provided directory is scanned without the src/tests
+    # path filter so callers can point the detector at any C source tree.
+    find "$SCAN_DIR" -type f -print0
+else
+    find "$SCAN_DIR" \( -path '*/tests/*' -o -path '*/src/*' \) -type f -print0
+fi)
 
 violations=$(wc -l < "$tmp_violations" | tr -d '[:space:]')
 

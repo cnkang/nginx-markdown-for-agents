@@ -154,3 +154,17 @@ def test_github_runner_vars_are_known():
 
 def test_allowlist_requires_justification():
     assert module.is_allowlisted("ci.yml", "SOME_VAR") is False
+
+
+def test_command_substitution_with_nested_quotes_keeps_quote_balance():
+    # A closed quote inside $( ) must pop its frame.  If the closed frame
+    # stays on the stack, the next ) pops the wrong frame, the following
+    # quote toggles shift, and a single-quoted reference further right is
+    # no longer masked (false positive).
+    doc = {
+        "jobs": {"build": {"steps": [
+            {"run": "foo \"$(bar 'baz')\" qux '${SINGLE_QUOTED_VAR}'"},
+        ]}},
+    }
+    hits = findings_for_workflow(doc)
+    assert hits == []
