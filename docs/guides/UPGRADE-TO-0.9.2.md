@@ -230,10 +230,11 @@ fi
 sudo cp objs/ngx_http_markdown_filter_module.so "${MODULES_DIR}/"
 sudo nginx -t
 # Restart through the host's service manager when systemd owns NGINX. For a
-# directly managed master or another service manager, use the executable
-# fallback instead of assuming systemctl exists.
+# systemd-managed host: check the unit EXISTS, not just whether it is
+# currently active — a stopped unit is still owned by systemd and must
+# be restarted through it.
 if command -v systemctl >/dev/null 2>&1 \
-    && sudo systemctl is-active --quiet nginx 2>/dev/null; then
+    && sudo systemctl list-unit-files nginx.service >/dev/null 2>&1; then
     sudo systemctl restart nginx
 else
     sudo nginx -s reload
