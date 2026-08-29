@@ -111,7 +111,8 @@
                   "type": "string",
                   "enum": ["Always", "IfNotPresent", "Never"]
                 }
-              }
+              },
+              "additionalProperties": false
             },
             "port": {
               "type": "integer",
@@ -128,9 +129,11 @@
                 "requests": { "type": "object" }
               }
             }
-          }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     }
   }
 }

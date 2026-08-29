@@ -26,7 +26,12 @@ Use the documents in this directory to understand what the tests cover and what 
 | [DECOMPRESSION_TESTS.md](DECOMPRESSION_TESTS.md) | Decompression-related unit, integration, and E2E coverage |
 | [INTEGRATION_TESTS.md](INTEGRATION_TESTS.md) | Integration scenarios and expected behavior |
 | [E2E_TESTS.md](E2E_TESTS.md) | End-to-end workflows with real NGINX and backend services |
-| [PERFORMANCE_BASELINES.md](PERFORMANCE_BASELINES.md) | Performance expectations and comparison guidance |
+| [C_TEST_BOUNDARY.md](C_TEST_BOUNDARY.md) | C test scope and boundary (what the C unit suite covers) |
+| [benchmark-corpus.md](benchmark-corpus.md) | Benchmark corpus used by the performance harness |
+| [PERFORMANCE_GATE.md](PERFORMANCE_GATE.md) | Performance gate workflow, CI wiring, and reproduction |
+| [PERFORMANCE_METRICS.md](PERFORMANCE_METRICS.md) | Measurement schema companion for `perf/metrics-schema.json` |
+| [PERFORMANCE_THRESHOLDS.md](PERFORMANCE_THRESHOLDS.md) | Threshold policy (values live in `perf/thresholds.json`) |
+| [PERFORMANCE_BASELINES.md](PERFORMANCE_BASELINES.md) | Baseline/evidence/provenance and comparison guidance |
 
 For repo-owned harness validation and adaptive local `.kiro` checks, use
 [../harness/README.md](../harness/README.md) plus `make harness-check`.

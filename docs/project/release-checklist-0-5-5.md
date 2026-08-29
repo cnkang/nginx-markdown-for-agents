@@ -86,7 +86,7 @@ waived before the release proceeds.
 | Scope-creep tripwires clear | UB-06 | No unresolved tripwires | Yes |
 | Naming consistency verified | FS-11 | All documented names match emitted names | Yes |
 | Command examples valid | FS-12 | All examples produce documented output | Yes |
-| Streaming evidence artifact | UB-09 | Exists, validates, pass=true | Yes |
+| Candidate-bound evidence manifest | UB-09 | Candidate-bound manifest + digest + required metadata exist and validate | `make release-evidence-manifest-check` exits 0 |
 | Version framing consistent | UB-07 | CHANGELOG + tooling + docs aligned | Yes |
 | Planning notes isolated | UB-08 | No dependencies on advisory notes | Yes |
 

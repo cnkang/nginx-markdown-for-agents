@@ -105,7 +105,7 @@ Nightly GitHub Actions coverage lives in `.github/workflows/nightly-fuzz.yml`.
 
 ## Related Documentation
 
-- implementation threat model and defenses: `docs/features/security.md`
+- implementation threat model and defenses: `docs/features/SECURITY_MODEL.md`
 - configuration guidance: `docs/guides/CONFIGURATION.md`
 - operations and monitoring guidance: `docs/guides/OPERATIONS.md`
 

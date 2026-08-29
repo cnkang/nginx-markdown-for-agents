@@ -338,7 +338,10 @@ cd components/nginx-module/tests
    - The module handles malformed, truncated, and trailing Brotli streams without
      worker failure under the configured error policy
    - Unit tests assert the exact typed error classification for each case
-   - Budget exceeded preserves the original Brotli response
+   - Budget exceeded preserves the original Brotli response **when the
+     failure occurs before the response is committed**; after commit, the
+     module uses post-commit safe-finish or abort semantics and cannot
+     replay already-sent bytes
 
 4. **Configuration Gates**
    - `markdown_auto_decompress off` → passthrough

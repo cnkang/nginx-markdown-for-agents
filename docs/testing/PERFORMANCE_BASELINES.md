@@ -297,10 +297,10 @@ Memory peak values in this document come from `tools/perf/memory_observer.sh`. T
 
 ### Linux — `os_reported_peak`
 
-On Linux, the observer reads `VmHWM` from `/proc/<pid>/status` **before the
-target process exits or the OS reaps it**: the observer stores the `VmHWM` value
-the first time the process status becomes unreadable (process gone) and
-reports that stored value as `os_reported_peak`. `VmHWM` is the
+On Linux, the observer reads `VmHWM` from `/proc/<pid>/status` and stores the
+last successfully read value **before the target process exits or the OS
+reaps it**: once the status file becomes unreadable (process gone), the
+observer reports that stored sample as `os_reported_peak`. `VmHWM` is the
 kernel-tracked high-water mark for resident set size over the entire process
 lifetime. The entry disappears once the OS reaps the process, so the observer
 captures the value at exit time, not after. The observer also polls `VmRSS`

@@ -151,7 +151,10 @@ Yes, the current `markdown_streaming auto` policy can select the bounded
 streaming engine for eligible large or chunked responses and retains
 full-buffer conversion for small responses and hard-blocked cases. Use
 `markdown_streaming off` to require full-buffer processing or
-`markdown_streaming force` to prefer streaming for every eligible response.
+`markdown_streaming force` to prefer streaming for every eligible response
+**when no hard blocker applies** — `markdown_cache_validation full` is a
+hard blocker that routes to full-buffer regardless of the streaming policy
+(and combining `force` with `full` fails during `nginx -t`).
 See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0007](architecture/ADR/0007-streaming-default.md) for the reasoning behind this design.
 
 ---
