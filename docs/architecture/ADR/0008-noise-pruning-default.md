@@ -74,7 +74,10 @@ following, and none fits the 0.9.2 freeze:
    fully replayable
 
 Independent of pruning, streaming conversion failures after the replay window
-apply the configured streaming failure policy. Operators who need to avoid
+**always enforce fail-closed behavior** — replay-window exhaustion is a
+hard safety boundary, not a policy choice. The configured streaming failure
+policy (including fail-open) applies only when the pre-commit replay
+precondition remains satisfied. Operators who need to avoid
 empty results keep the built-in selectors and exclude aggressive custom
 selectors instead.
 
