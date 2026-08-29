@@ -158,12 +158,7 @@ fi
 if printf '%s\n' "${OUTPUT}" | grep -qi "before trusted PATH"; then
     pass "Fixture 3: correct violation (external command before trusted PATH)"
 else
-    # May also report as missing if cat triggers before PATH is found
-    if printf '%s\n' "${OUTPUT}" | grep -qi "VIOLATION"; then
-        pass "Fixture 3: VIOLATION reported (command before PATH)"
-    else
-        fail "Fixture 3: no VIOLATION reported"
-    fi
+    fail "Fixture 3: expected 'external command before trusted PATH' violation, got: ${OUTPUT}"
 fi
 
 echo "" >&2

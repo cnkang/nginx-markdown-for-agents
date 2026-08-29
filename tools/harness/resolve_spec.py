@@ -142,7 +142,7 @@ def _read_json_pointer(path: Path) -> tuple[str | None, str | None]:
     value = data.get("spec")
     if not isinstance(value, str) or not value.strip():
         return None, None
-    return value, _display_for(path)
+    return value.strip(), _display_for(path)
 
 
 def _read_text_pointer(path: Path) -> tuple[str | None, str | None]:

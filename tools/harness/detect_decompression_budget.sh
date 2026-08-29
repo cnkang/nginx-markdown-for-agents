@@ -148,8 +148,15 @@ for file in "${source_files[@]}"; do
             continue
         fi
 
-        # Extract function name
-        func_name=$(sed -n "${func_start}p" "$file" | grep -oE '^[a-zA-Z_][a-zA-Z0-9_]*' | head -1)
+        # Extract function name: the identifier immediately preceding the
+        # opening parenthesis.  A single-line signature such as
+        # "static ngx_int_t ngx_http_markdown_decomp_foo(" starts with the
+        # return type, so taking the first identifier on the line would
+        # capture "static" instead of the function name.
+        func_name=$(sed -n "${func_start}p" "$file" \
+            | grep -oE '[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\(' \
+            | head -1 \
+            | sed -E 's/[[:space:]]*\($//')
 
         if [[ -z "$func_name" ]]; then
             continue
