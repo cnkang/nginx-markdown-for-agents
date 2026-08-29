@@ -424,6 +424,7 @@ ngx_http_markdown_handle_encoding_collection_failure(
         ngx_http_markdown_reason_failed_open(),
         ngx_http_markdown_reason_from_error_category(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+    ngx_http_markdown_restore_conditional_request(r, ctx);
     rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
     /*
      * Canonical NGINX model: header-chain NGX_AGAIN means the write filter
@@ -464,6 +465,7 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ctx->eligible = 1;
     ctx->buffer_initialized = 0;
     ctx->headers_forwarded = 0;
+    ctx->lifecycle.header_filter_initialized = 1;
     ctx->lifecycle.last_modified.source_last_modified_time =
         r->headers_out.last_modified_time;
     ctx->lifecycle.last_modified.has_last_modified_time =
@@ -646,11 +648,121 @@ ngx_http_markdown_log_streaming_terminal_decision(
     } while (0)
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
+/*
+ * Capture client validators before proxy, cache, or content handlers can
+ * satisfy them against the upstream representation.  The handler only
+ * prepares state; the header filter remains responsible for response
+ * eligibility and representation selection.
+ */
+static ngx_int_t
+ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
+{
+    const ngx_http_markdown_conf_t  *conf;
+    ngx_http_markdown_ctx_t         *ctx;
+    ngx_http_markdown_dynconf_snapshot_t  snap_copy;
+    ngx_http_markdown_effective_conf_t    eff;
+    ngx_flag_t                       filter_enabled;
+    ngx_uint_t                       accept_reason;
+    ngx_int_t                         capture_rc;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
+    conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
+    if (conf == NULL) {
+        ngx_http_markdown_restore_conditional_request(r, ctx);
+        return NGX_DECLINED;
+    }
+
+    if (ctx != NULL && ctx->lifecycle.header_filter_initialized) {
+        return NGX_DECLINED;
+    }
+
+    if ((r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)) == 0) {
+        if (ctx != NULL) {
+            ngx_http_markdown_restore_conditional_request(r, ctx);
+        }
+        return NGX_DECLINED;
+    }
+
+    ngx_memzero(&snap_copy, sizeof(snap_copy));
+    snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
+    ngx_memzero(&eff, sizeof(eff));
+    ngx_http_markdown_build_effective_conf(
+        &eff,
+        conf->advanced.dynconf_enabled == 1 ? &snap_copy : NULL,
+        conf);
+
+    filter_enabled = ngx_http_markdown_is_enabled(r, conf, &eff);
+    if (!filter_enabled
+        || !ngx_http_markdown_should_convert(
+               r, conf, &accept_reason))
+    {
+        if (ctx != NULL) {
+            ngx_http_markdown_restore_conditional_request(r, ctx);
+        }
+        return NGX_DECLINED;
+    }
+
+    if (ctx == NULL && !ngx_http_markdown_has_conditional_request(r)) {
+        return NGX_DECLINED;
+    }
+
+    if (ctx == NULL) {
+        ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_ctx_t));
+        if (ctx == NULL
+            || ngx_http_markdown_register_fullbuffer_cleanup(r, ctx)
+               != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                          "markdown: conditional validator context "
+                          "allocation failed");
+            return (ngx_int_t) ngx_http_markdown_effective_error_status(
+                &eff, conf);
+        }
+    }
+
+    capture_rc = ngx_http_markdown_capture_conditional_request(r, ctx);
+    if (capture_rc == NGX_ERROR) {
+        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                      "markdown: conditional validator capture failed");
+        return (ngx_int_t) ngx_http_markdown_effective_error_status(
+            &eff, conf);
+    }
+    if (capture_rc != NGX_OK) {
+        return NGX_DECLINED;
+    }
+
+    r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
+    return NGX_DECLINED;
+}
+
+/* Forward headers after a precheck has selected source passthrough. */
+static ngx_int_t
+ngx_http_markdown_forward_prechecked_headers(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t  rc;
+
+    if (ctx != NULL) {
+        ctx->eligible = 0;
+        ngx_http_markdown_restore_conditional_request(r, ctx);
+    }
+
+    rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
+    if (ctx != NULL
+        && (rc == NGX_AGAIN || rc == NGX_OK || rc == NGX_DONE))
+    {
+        ctx->headers_forwarded = 1;
+    }
+    return rc;
+}
+
 static ngx_flag_t
 ngx_http_markdown_header_precheck(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *early_eff,
-    ngx_flag_t filter_enabled, ngx_int_t *rc)
+    ngx_flag_t filter_enabled, ngx_http_markdown_ctx_t *ctx,
+    ngx_int_t *rc)
 {
     ngx_http_markdown_eligibility_t  eligibility;
     ngx_uint_t                       accept_reason;
@@ -666,7 +778,7 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
                 r->connection->log));
         ngx_http_markdown_log_header_terminal_decision(
             r, conf, early_eff, "disabled");
-        *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
+        *rc = ngx_http_markdown_forward_prechecked_headers(r, ctx, conf);
         return 1;
     }
 
@@ -687,7 +799,7 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
                 eligibility, r->connection->log));
         ngx_http_markdown_log_header_terminal_decision(
             r, conf, early_eff, "not_eligible");
-        *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
+        *rc = ngx_http_markdown_forward_prechecked_headers(r, ctx, conf);
         return 1;
     }
 
@@ -703,7 +815,7 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
                 r->connection->log));
         ngx_http_markdown_log_header_terminal_decision(
             r, conf, early_eff, "not_eligible");
-        *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
+        *rc = ngx_http_markdown_forward_prechecked_headers(r, ctx, conf);
         return 1;
     }
 
@@ -717,7 +829,7 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
             ngx_http_markdown_reason_bypass_no_transform());
         ngx_http_markdown_log_header_terminal_decision(
             r, conf, early_eff, "bypass_no_transform");
-        *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
+        *rc = ngx_http_markdown_forward_prechecked_headers(r, ctx, conf);
         return 1;
     }
 
@@ -727,6 +839,10 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
 
             vary_rc = ngx_http_markdown_add_vary_accept(r);
             if (vary_rc != NGX_OK) {
+                if (ctx != NULL) {
+                    ctx->eligible = 0;
+                    ngx_http_markdown_restore_conditional_request(r, ctx);
+                }
                 *rc = vary_rc;
                 return 1;
             }
@@ -735,7 +851,7 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_accept_skip(r, conf, early_eff,
             accept_reason);
-        *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
+        *rc = ngx_http_markdown_forward_prechecked_headers(r, ctx, conf);
         return 1;
     }
 
@@ -799,6 +915,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         ngx_http_markdown_log_decision(
             r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_overload());
+        ngx_http_markdown_restore_conditional_request(r, ctx);
         rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         /*
          * Canonical NGINX model: header-chain NGX_AGAIN means the write
@@ -844,6 +961,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         ngx_http_markdown_log_decision(
             r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_failed_open());
+        ngx_http_markdown_restore_conditional_request(r, ctx);
         rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         /*
          * Canonical NGINX model: header-chain NGX_AGAIN means the write
@@ -1022,6 +1140,7 @@ ngx_http_markdown_handle_encoding_header_invalid(
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                   "markdown: malformed Content-Encoding "
                   "chain, returning original encoded content");
+    ngx_http_markdown_restore_conditional_request(r, ctx);
     rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
     /*
      * Canonical NGINX model: header-chain NGX_AGAIN means the write
@@ -1132,6 +1251,7 @@ encoding_policy:
         ngx_http_markdown_log_event(
             r, conf, ctx->effective_conf, "eligibility",
             "compressed_passthrough");
+        ngx_http_markdown_restore_conditional_request(r, ctx);
         *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         /*
          * Canonical NGINX model: header-chain NGX_AGAIN means the write
@@ -1280,6 +1400,9 @@ ngx_http_markdown_header_filter_handle_reentry(const ngx_http_request_t *r)
     if (ctx == NULL) {
         return NGX_DECLINED;
     }
+    if (!ctx->lifecycle.header_filter_initialized) {
+        return NGX_DECLINED;
+    }
     if (ctx->headers_forwarded) {
         return NGX_OK;
     }
@@ -1360,6 +1483,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     /* Get module configuration */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     if (conf == NULL) {
+        ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
+        ngx_http_markdown_restore_conditional_request(r, ctx);
         /* Module not configured, pass through */
         return ngx_http_markdown_next_header_filter_with_auth(r, NULL);
     }
@@ -1372,7 +1497,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     if (precheck_rc != NGX_DECLINED) {
         return precheck_rc;
     }
-    if (ctx != NULL) {
+    if (ctx != NULL && ctx->lifecycle.header_filter_initialized) {
         return ngx_http_markdown_resume_header_filter_reentry(r, ctx, conf);
     }
     /*
@@ -1424,26 +1549,34 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * header/body inconsistencies for dynamic variables.
      */
     filter_enabled = ngx_http_markdown_is_enabled(r, conf, &early_eff);
+    if (ctx != NULL && !ctx->lifecycle.header_filter_initialized) {
+        ngx_http_markdown_init_ctx(r, ctx, filter_enabled);
+    }
+
     if (ngx_http_markdown_header_precheck(
-            r, conf, &early_eff, filter_enabled, &precheck_rc))
+            r, conf, &early_eff, filter_enabled, ctx, &precheck_rc))
     {
         return precheck_rc;
     }
 
-    /* Create request context for buffering */
-    ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_ctx_t));
     if (ctx == NULL) {
-        return ngx_http_markdown_handle_ctx_alloc_failure(
-            r, conf, &early_eff);
-    }
+        /* Create request context for buffering. */
+        ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_ctx_t));
+        if (ctx == NULL) {
+            return ngx_http_markdown_handle_ctx_alloc_failure(
+                r, conf, &early_eff);
+        }
 
-    if (ngx_http_markdown_register_fullbuffer_cleanup(r, ctx) != NGX_OK) {
-        return ngx_http_markdown_handle_ctx_alloc_failure(
-            r, conf, &early_eff);
-    }
+        if (ngx_http_markdown_register_fullbuffer_cleanup(r, ctx)
+            != NGX_OK)
+        {
+            return ngx_http_markdown_handle_ctx_alloc_failure(
+                r, conf, &early_eff);
+        }
 
-    /* Initialize context */
-    ngx_http_markdown_init_ctx(r, ctx, filter_enabled);
+        /* Initialize context. */
+        ngx_http_markdown_init_ctx(r, ctx, filter_enabled);
+    }
 
     /*
      * Bind request-lifetime snapshot and effective_conf from the

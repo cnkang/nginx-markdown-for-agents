@@ -26,6 +26,7 @@
 
 struct MarkdownOptions;
 struct MarkdownResult;
+struct ngx_table_elt_s;
 
 /* Forward declaration: defined in ngx_http_markdown_inflight_impl.h
  * (included after this header).  The request context stores a pointer
@@ -957,6 +958,13 @@ typedef struct {
     ngx_flag_t  has_last_modified_time;    /* Whether Last-Modified was present */
 } ngx_http_markdown_last_modified_state_t;
 
+typedef struct ngx_http_markdown_conditional_header_state_s {
+    struct ngx_table_elt_s  *header;
+    ngx_uint_t               original_hash;
+    size_t                   original_value_len;
+    struct ngx_http_markdown_conditional_header_state_s *next;
+} ngx_http_markdown_conditional_header_state_t;
+
 typedef struct {
     ngx_http_request_t          *request;
     ngx_chain_t                 *in;           /* Input chain */
@@ -972,7 +980,23 @@ typedef struct {
         ngx_http_markdown_last_modified_state_t
                                     last_modified;
         ngx_http_markdown_inflight_cleanup_t *inflight_cleanup;
+        ngx_flag_t                  header_filter_initialized;
     } lifecycle;
+
+    /*
+     * Client validators are captured before an upstream content handler or
+     * proxy cache can evaluate them against the source representation.  The
+     * original request-header entries remain request-pool owned; their active
+     * hash and value state is changed while conversion is pending so upstream
+     * handlers that copy generic headers cannot evaluate source validators.
+     */
+    struct {
+        struct ngx_table_elt_s      *if_none_match;
+        struct ngx_table_elt_s      *if_modified_since;
+        ngx_http_markdown_conditional_header_state_t *header_states;
+        ngx_flag_t                  captured;
+        ngx_flag_t                  suppressed;
+    } conditional;
 
     /*
      * Conversion tracking state.
@@ -1891,6 +1915,13 @@ ngx_int_t ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf, const ngx_http_markdown_ctx_t *ctx,
     struct MarkdownConverterHandle *converter,
     struct MarkdownResult **result);
+
+/* Capture and temporarily suppress source-representation validators. */
+ngx_flag_t ngx_http_markdown_has_conditional_request(ngx_http_request_t *r);
+ngx_int_t ngx_http_markdown_capture_conditional_request(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
+void ngx_http_markdown_restore_conditional_request(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
 
 /* Send 304 Not Modified response */
 ngx_int_t ngx_http_markdown_send_304(ngx_http_request_t *r,
