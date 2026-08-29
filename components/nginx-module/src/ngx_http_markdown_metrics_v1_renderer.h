@@ -306,7 +306,7 @@ ngx_http_markdown_metrics_v1_render_families_1_to_3(
 }
 
 static u_char *
-ngx_http_markdown_metrics_v1_render_families_4_to_7(
+ngx_http_markdown_metrics_v1_render_families_4_to_8(
     u_char *p,
     u_char *end,
     const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
@@ -383,7 +383,7 @@ ngx_http_markdown_metrics_v1_render_families_4_to_7(
 }
 
 static u_char *
-ngx_http_markdown_metrics_v1_render_families_8_to_9(
+ngx_http_markdown_metrics_v1_render_families_9_to_10(
     u_char *p,
     u_char *end,
     const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
@@ -473,7 +473,7 @@ ngx_http_markdown_metrics_v1_render_families_8_to_9(
 }
 
 static u_char *
-ngx_http_markdown_metrics_v1_render_families_10_to_11(
+ngx_http_markdown_metrics_v1_render_families_11_to_12(
     u_char *p,
     u_char *end,
     const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
@@ -578,19 +578,19 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    p = ngx_http_markdown_metrics_v1_render_families_4_to_7(
+    p = ngx_http_markdown_metrics_v1_render_families_4_to_8(
         p, end, snapshot);
     if (p == NULL) {
         return NULL;
     }
 
-    p = ngx_http_markdown_metrics_v1_render_families_8_to_9(
+    p = ngx_http_markdown_metrics_v1_render_families_9_to_10(
         p, end, snapshot);
     if (p == NULL) {
         return NULL;
     }
 
-    return ngx_http_markdown_metrics_v1_render_families_10_to_11(
+    return ngx_http_markdown_metrics_v1_render_families_11_to_12(
         p, end, snapshot);
 }
 
