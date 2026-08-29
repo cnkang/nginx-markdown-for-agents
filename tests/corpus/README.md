@@ -12,6 +12,9 @@ tests/corpus/
 ├── edge-cases/      # Boundary conditions and unusual inputs
 ├── encoding/        # Character encoding test cases
 ├── streaming/       # Streaming-specific edge cases and flush-boundary fixtures
+├── benchmark/       # Benchmark corpus fixtures
+├── large/           # Large-document fixtures
+├── streaming-perf/  # Streaming performance fixtures
 └── README.md        # This file
 ```
 

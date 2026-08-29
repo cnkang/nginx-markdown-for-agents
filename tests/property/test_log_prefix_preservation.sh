@@ -112,6 +112,7 @@ echo "--- Property 4: prefix-fix diff contains only string changes ---"
 # this preservation guard compare unrelated branch history.
 PREFIX_FIX_COMMIT="e8ba9ed0f14ea02bb8eff817601c037a5ee2f0a8"
 MERGE_BASE=""
+DIFF_STATUS="SKIP"
 if ! git cat-file -e "${PREFIX_FIX_COMMIT}^{commit}" 2>/dev/null; then
     # Shallow or pruned checkouts lack the pinned historical commit.  The
     # preservation property cannot run without it; skip with an explicit
@@ -131,6 +132,7 @@ if [[ -n "$MERGE_BASE" ]]; then
 fi
 
 if [[ -z "$MERGE_BASE" ]]; then
+    # Skipped (shallow/pruned checkout): DIFF_STATUS already "SKIP".
     :
 elif [[ -z "$GIT_DIFF" ]]; then
     DIFF_STATUS="FAIL"

@@ -54,7 +54,8 @@ RUN set -eux; \
       exit 1; \
     fi
 
-RUN --mount=type=cache,target=/opt/rust/cargo/registry,sharing=locked \
+RUN --mount=type=cache,target=/opt/rust/rustup,sharing=locked \
+    --mount=type=cache,target=/opt/rust/cargo/registry,sharing=locked \
     --mount=type=cache,target=/opt/rust/cargo/git,sharing=locked \
     set -eux; \
     if ! command -v rustup >/dev/null 2>&1; then \
