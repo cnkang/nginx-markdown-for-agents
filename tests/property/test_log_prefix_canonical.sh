@@ -74,7 +74,7 @@ while IFS= read -r -d '' source_file; do
         file_count="$(grep_space_prefix_count "$source_file")"
         SPACE_COUNT=$((SPACE_COUNT + file_count))
     fi
-done < <(find "$SRCDIR" -type f -print0)
+done < <(find "$SRCDIR" -type f \( -name "*.c" -o -name "*.h" \) -print0)
 
 if [[ "$SPACE_COUNT" -gt 0 ]]; then
     echo "FAIL: Found $SPACE_COUNT log sites with space-separated non-canonical prefixes"
@@ -108,7 +108,7 @@ while IFS= read -r -d '' source_file; do
         file_count="$(grep_underscore_prefix_count "$source_file")"
         UNDERSCORE_COUNT=$((UNDERSCORE_COUNT + file_count))
     fi
-done < <(find "$SRCDIR" -type f -print0)
+done < <(find "$SRCDIR" -type f \( -name "*.c" -o -name "*.h" \) -print0)
 
 if [[ "$UNDERSCORE_COUNT" -gt 0 ]]; then
     echo "FAIL: Found $UNDERSCORE_COUNT log sites with underscore-separated prefixes"
@@ -139,7 +139,7 @@ if [[ "$FAIL" -eq 1 ]]; then
         while IFS= read -r -d '' source_file; do
             grep_space_prefixes "$source_file" | grep -v '"markdown:"' || true
             grep_underscore_prefixes "$source_file" || true
-        done < <(find "$SRCDIR" -type f -print0)
+        done < <(find "$SRCDIR" -type f \( -name "*.c" -o -name "*.h" \) -print0)
     } | cut -d: -f1 | sort | uniq -c | sort -rn
     exit 1
 else

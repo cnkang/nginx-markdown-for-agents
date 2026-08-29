@@ -106,7 +106,14 @@ test_markdown_gzip() {
     echo "--- Test 1: markdown + gzip ---" >&2
 
     local response headers content_type content_encoding status
-    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" -H "Accept-Encoding: gzip" "${NGINX_URL}${TEST_PATH}" 2>&1)" || true
+    response_curl_status=0
+    response_curl_stderr="$(mktemp)"
+    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" -H "Accept-Encoding: gzip" "${NGINX_URL}${TEST_PATH}" 2>"${response_curl_stderr}")" || response_curl_status=$?
+    rm -f "${response_curl_stderr}"
+    if [[ "${response_curl_status}" -ne 0 ]]; then
+        fail "curl exited with status ${response_curl_status}"
+        return
+    fi
     headers="$response"
 
     status="$(echo "$headers" | head -1 | awk '{print $2}')"
@@ -141,7 +148,14 @@ test_markdown_gunzip() {
     # via the test configuration (the client does NOT request gzip, so the
     # upstream gzip scenario is preserved without the client negotiating it).
     local response headers content_type content_encoding status upstream_encoding
-    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${GUNZIP_TEST_PATH}" 2>&1)" || true
+    response_curl_status=0
+    response_curl_stderr="$(mktemp)"
+    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${GUNZIP_TEST_PATH}" 2>"${response_curl_stderr}")" || response_curl_status=$?
+    rm -f "${response_curl_stderr}"
+    if [[ "${response_curl_status}" -ne 0 ]]; then
+        fail "curl exited with status ${response_curl_status}"
+        return
+    fi
     headers="$response"
 
     status="$(echo "$headers" | head -1 | awk '{print $2}')"
@@ -183,7 +197,14 @@ test_markdown_brotli() {
     echo "--- Test 3: markdown + Brotli ---" >&2
 
     local response headers content_type content_encoding status
-    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" -H "Accept-Encoding: br" "${NGINX_URL}${TEST_PATH}" 2>&1)" || true
+    response_curl_status=0
+    response_curl_stderr="$(mktemp)"
+    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" -H "Accept-Encoding: br" "${NGINX_URL}${TEST_PATH}" 2>"${response_curl_stderr}")" || response_curl_status=$?
+    rm -f "${response_curl_stderr}"
+    if [[ "${response_curl_status}" -ne 0 ]]; then
+        fail "curl exited with status ${response_curl_status}"
+        return
+    fi
     headers="$response"
 
     status="$(echo "$headers" | head -1 | awk '{print $2}')"
@@ -238,7 +259,14 @@ test_markdown_proxy_cache() {
 
     # First request: should convert and cache
     local response1 headers1 content_type1 cache_status1 status1
-    response1="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${cache_path}" 2>&1)" || true
+    response1_curl_status=0
+    response1_curl_stderr="$(mktemp)"
+    response1="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${cache_path}" 2>"${response1_curl_stderr}")" || response1_curl_status=$?
+    rm -f "${response1_curl_stderr}"
+    if [[ "${response1_curl_status}" -ne 0 ]]; then
+        fail "curl exited with status ${response1_curl_status}"
+        return
+    fi
     headers1="$response1"
     status1="$(echo "$headers1" | head -1 | awk '{print $2}')"
     content_type1="$(get_header "$headers1" "Content-Type")"
@@ -257,7 +285,14 @@ test_markdown_proxy_cache() {
 
     # Second request: should serve from cache with same Content-Type
     local response2 headers2 content_type2 cache_status2 status2
-    response2="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${cache_path}" 2>&1)" || true
+    response2_curl_status=0
+    response2_curl_stderr="$(mktemp)"
+    response2="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${cache_path}" 2>"${response2_curl_stderr}")" || response2_curl_status=$?
+    rm -f "${response2_curl_stderr}"
+    if [[ "${response2_curl_status}" -ne 0 ]]; then
+        fail "curl exited with status ${response2_curl_status}"
+        return
+    fi
     headers2="$response2"
     status2="$(echo "$headers2" | head -1 | awk '{print $2}')"
     content_type2="$(get_header "$headers2" "Content-Type")"
@@ -297,7 +332,14 @@ test_markdown_no_compression() {
     echo "--- Test 5: markdown + no compression ---" >&2
 
     local response headers content_type content_encoding status
-    response="$(curl -sS -D - -H "Accept: text/markdown" "${NGINX_URL}${TEST_PATH}" 2>&1)" || true
+    response_curl_status=0
+    response_curl_stderr="$(mktemp)"
+    response="$(curl -sS -D - -H "Accept: text/markdown" "${NGINX_URL}${TEST_PATH}" 2>"${response_curl_stderr}")" || response_curl_status=$?
+    rm -f "${response_curl_stderr}"
+    if [[ "${response_curl_status}" -ne 0 ]]; then
+        fail "curl exited with status ${response_curl_status}"
+        return
+    fi
 
     # Split headers (headers end at first empty line)
     # Normalize CRLF line endings so header splitting works correctly
