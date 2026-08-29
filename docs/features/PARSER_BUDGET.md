@@ -283,15 +283,17 @@ The failure branches use the canonical lowercase codes from
 [DECISION_CHAIN.md](DECISION_CHAIN.md): the **primary outcome** is
 `failed_open` (with `markdown_error_policy pass`) or `failed_closed`
 (with `fail_closed`/`status N`), and the **failure category** is
-`timeout` or `budget_exceeded`. `conversion_memory` failures use
-`memory_budget_exceeded`. A `conversion_memory` failure is an eligibility
-cap and reports `memory_budget_exceeded` rather than `not_eligible` before
-the FFI conversion attempt. The category for a parser working-set
-failure is `budget_exceeded`. The category appears as the `reason` label on
-`nginx_markdown_requests_total`. The outcome appears in the `outcome`
-label. Both labels are lowercase canonical values — the internal
-converter constants (`PARSE_TIMEOUT`, `PARSE_BUDGET_EXCEEDED`) are not
-the public labels.
+`timeout` or `budget_exceeded`. A `conversion_memory` failure is an
+eligibility cap: the request is recorded as `not_eligible` (reason
+`not_eligible`) before any FFI conversion attempt, and the module then
+applies the configured `markdown_error_policy` (passthrough or reject).
+The category for a parser working-set failure is `budget_exceeded`. The
+category appears in the `category=` field of the decision log; the
+specific reason (`not_eligible`, `timeout`, `budget_exceeded`, ...)
+appears as the `reason` label on `nginx_markdown_requests_total`. The
+outcome appears in the `outcome` label. Both labels are lowercase
+canonical values — the internal converter constants (`PARSE_TIMEOUT`,
+`PARSE_BUDGET_EXCEEDED`) are not the public labels.
 
 ### Limit Priority
 
@@ -299,7 +301,7 @@ When multiple limits are hit simultaneously, the first detected wins:
 
 1. Input size (`markdown_limits conversion_memory=<size>`) — checked first, before FFI call
 2. Overall FFI deadline (`markdown_limits conversion_timeout=<time>`) — the authoritative upper bound, checked at each checkpoint alongside parser_timeout
-3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — triggers the parser checkpoint when nonzero: earlier than conversion_timeout when smaller, and on its own when conversion_timeout is 0. At each applicable checkpoint the earlier of the two deadlines wins.
+3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — triggers the parser checkpoint when nonzero, measured from conversion start; at each checkpoint the parser deadline is evaluated first, then the overall deadline. The two are independent (a zero value disables that deadline); when `conversion_timeout` is 0 only the parser deadline applies.
 4. Memory budget (`markdown_limits parser_memory=<size>`) — checked on each allocation
 
 ### Fail-Open Behavior

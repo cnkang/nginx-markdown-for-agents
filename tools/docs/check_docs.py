@@ -35,7 +35,7 @@ BOOLEAN_TRUSTED_PROXY_RE = re.compile(
     re.IGNORECASE,
 )
 UNRELEASED_CHANGELOG_RE = re.compile(
-    r"^## \[(?P<version>\d+\.\d+\.\d+)\] - Unreleased\s*$",
+    r"^## \[(?P<version>\d+\.\d+\.\d+)\] - Unreleased(?: candidate)?\s*$",
     re.MULTILINE,
 )
 
