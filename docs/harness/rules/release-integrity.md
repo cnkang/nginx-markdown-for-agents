@@ -113,8 +113,12 @@ not prevent the churn because the *workflow* did not manage the lifecycle:
     so the ref audits itself.  A pushed anchor is immutable: never move it
     and never delete it.  Create one only when the finalizer produces a new
     canonical baseline whose measurement commit no existing ref anchors —
-    a commit that `main` or a release tag already reaches must not receive
-    a redundant ref.  Archival `verbatim_import` packs receive no
+    a commit that an immutable ref (a release tag or an existing
+    `perf-baseline/<stem>` tag) already reaches must not receive a
+    redundant ref.  Reachability from the mutable `main` branch is not a
+    durable anchor: it only defers anchor creation within the active
+    release line, and the release freeze must anchor every measurement
+    commit that no immutable ref reaches yet.  Archival `verbatim_import` packs receive no
     exemption from this clause.  Naming and lifecycle policy live in
     `perf/baselines/README.md`, section `Measurement Commit Durability`.
 

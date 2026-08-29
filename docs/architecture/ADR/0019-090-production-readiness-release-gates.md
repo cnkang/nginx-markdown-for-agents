@@ -17,8 +17,9 @@ gate is now implemented. This ADR preserves the original planning context.
 
 ### Frozen names (1.0-stable)
 
-- Make target: `make release-gates-check-090` (new at the time of writing
-  and implemented since).
+- Make target: `make release-gates-check-090` (new at the time of writing.
+  The Makefile later retired it together with the 0.9.0-specific validator
+  chain — this section preserves the historical contract).
 - Validators: the historical 0.9.0 validator chain, plus
   `validate_config_directives.py` (the merged validator covering v0.7.0–v0.8.0
   directives). The project retired the 0.9.0-specific chain. This ADR
@@ -26,9 +27,14 @@ gate is now implemented. This ADR preserves the original planning context.
 - Production-examples smoke: `make test-production-examples-nginx-t` and
   `make test-production-examples-e2e-smoke` (**new**).
 
-### Structure
+### Structure (historical)
 
-`release-gates-check-090` follows the real 17-step `-080` gate
+The following structure and blocking semantics describe the retired
+`release-gates-check-090` target as it existed at the 0.9.0 release. The
+Makefile no longer defines it, and later release lines run their own
+consolidated gates.
+
+`release-gates-check-090` followed the real 17-step `-080` gate
 (`Makefile:568`), extended with 0.9.0-specific steps (Config V2 reject-only
 golden errors, HeaderPlan fault-injection, reason-registry/diagnostics renderer
 contract, production-examples smoke, version-consistency). It MUST NOT
@@ -40,7 +46,7 @@ for the active version
 The gate also invokes `release-matrix-check` so it validates the checked-in
 release matrix before this capstone gate succeeds.
 
-### Blocking semantics (frozen)
+### Blocking semantics (historical, frozen for the 0.9.0 line)
 
 | Class | Examples | Behavior |
 |-------|----------|----------|

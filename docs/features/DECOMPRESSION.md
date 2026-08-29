@@ -63,7 +63,7 @@ location / {
 
 - `decompressed_size` caps the cumulative decompressed output.
 - `decompression_ratio` caps expansion relative to compressed input.
-- `conversion_memory` remains the overall conversion working-memory cap.
+- `conversion_memory` bounds the cumulative input bytes accepted for conversion. `parser_memory` bounds the estimated parser working set separately.
 - `markdown_error_policy pass` preserves the original response. `fail_closed`
   returns the configured error status.
 
@@ -133,8 +133,18 @@ nginx_markdown_decompression_events_total{
 }
 ```
 
-The `ok` label is a metric-only success sentinel. The failure labels are the
-canonical reason-code registry keys. The module counts them after the decoder
+The `ok` label is a metric-only success sentinel. Metric labels keep the
+short names above. Each failure label maps to exactly one canonical
+reason-code registry key:
+
+| Metric label | Reason registry key |
+|---|---|
+| `budget_exceeded` | `decompression_budget_exceeded` |
+| `format_error` | `decompression_format_error` |
+| `truncated_input` | `decompression_truncated_input` |
+| `io_error` | `decompression_io_error` |
+
+The module counts them after the decoder
 classifies the error and before it handles fail-open or fail-closed responses.
 This makes event totals independent of whether the original body is ultimately
 delivered. The module records successful streaming decompressions when

@@ -35,8 +35,9 @@ cache-control, conditional request, status, or header semantics change.
 - status-specific eligibility, especially `206` and `304`, maps to the intended
   reason code under normal and malformed upstream responses
 - Protocol checks cover HEAD headers with `curl --head` (or an equivalent
-  protocol-correct check) and validate GET/304 body behavior with a normal
-  GET/body-size check
+  protocol-correct check), validate GET/body-size behavior with a normal GET,
+  and send a conditional GET with `If-None-Match` or `If-Modified-Since` to
+  assert a `304` response with an empty body
 - protocol docs use exact config names, reason codes, and retrievable metrics
 - `ngx_str_t` values are NUL-terminated before passing to C APIs that require
   it. Prefer length-bounded NGINX APIs where possible (Rule 30)

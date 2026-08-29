@@ -235,7 +235,12 @@ rename guarantees that every read observes either the complete old file or the
 complete new file. It does not guarantee that all workers apply the new
 snapshot at the same instant. Each worker has its own watcher cycle, so
 workers can briefly report different `config_version` values and serve
-different active snapshots while convergence is in progress:
+different active snapshots while convergence is in progress.
+
+The dynamic configuration path is root-owned, so run the following restore
+commands from a root shell. Prefixing individual commands with `sudo` is not
+enough: the heredoc and the temporary file redirection happen in the calling
+shell before `sudo` runs, and cannot create files in the root-owned directory.
 
 ```bash
 set -eu

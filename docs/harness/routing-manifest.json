@@ -166,7 +166,6 @@
       "phase": "focused-semantic",
       "commands": [
         "make workflow-context-check",
-        "make release-gates-check-080",
         "make release-gates-check-092",
         "make release-gates-check",
         "make release-gates-check-strict"
@@ -263,7 +262,7 @@
         "rpm -qip dist/nginx-markdown-module.rpm",
         "helm lint charts/nginx-markdown"
       ],
-      "notes": "commands validate existing artifacts; build steps are in CI workflows release-rpm.yml and release-packages.yml"
+      "notes": "commands validate existing artifacts; build steps are in CI workflows release-rpm.yml, release-binaries.yml, and release-packages.yml"
     },
     "release-candidate-evidence": {
       "phase": "focused-semantic",

@@ -68,14 +68,17 @@ All 33 fixtures in the benchmark corpus (`tests/corpus/`) converted with
 both the baseline (`2af6fef`) and current code using the same converter
 configuration. The comparison checked out the baseline source,
 built it, converted all fixtures, computed blake3 hashes of each Markdown
-output, then repeated with the current source and compared the hash sets.
+output, then repeated with the current source and compared the
+fixture-to-hash mappings. Each revision records its fixture path together
+with that fixture's output hash, so a hash landing on a different fixture
+counts as a diff even when the two hash sets are equal.
 
 Method: build each revision in an isolated worktree (or restore every relevant
 build input before each build), including the Rust source, `Cargo.toml`,
 `Cargo.lock`, build scripts, feature definitions, and fixtures. Then run
 `cargo build`, convert each fixture via
 `MarkdownConverter::new().convert()`, compute `blake3::hash(output)`, and
-compare the hash sets. The full artifact lives at
+compare the fixture-to-hash mappings between revisions. The full artifact lives at
 `docs/evidence/10-parser-path-optimization-corpus-diff.tsv`.
 
 | Category | Fixtures | Diffs | Status |

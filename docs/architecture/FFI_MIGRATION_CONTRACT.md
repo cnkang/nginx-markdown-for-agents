@@ -76,7 +76,7 @@ remain synchronized across both generated projections and this FFI boundary.
 
 | Removed entry | Evidence | Replacement |
 |---------------|----------|-------------|
-| Profile/conflict FFI snapshots and `markdown_*conflicts` | No production C consumer; the pre-v1 profile model was not part of the active request boundary | C owns the active merged configuration and Rust exposes only consumed request-path decisions |
+| Profile/conflict FFI snapshots and `markdown_*conflicts` | No production C consumer; the pre-v1 profile model was not part of the active request boundary | C owns the active merged configuration, while Rust exposes only production APIs consumed by C — explicitly including dynamic-configuration parsing and request-path decisions |
 
 ## Shared struct policy
 

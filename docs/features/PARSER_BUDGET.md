@@ -217,7 +217,11 @@ Deep nesting stays bounded by the streaming pipeline's `state_stack` budget:
 
 For the full-buffer path, html5ever's tree builder handles deep nesting
 according to the HTML5 spec (which defines a maximum nesting depth of 512
-for formatting elements). The DOM tree size stays bounded by `markdown_limits conversion_memory=<size>`.
+for formatting elements). In this path `markdown_limits conversion_memory=`
+bounds the cumulative input bytes accepted for conversion, while
+`markdown_limits parser_memory=` bounds the estimated full-buffer working
+set through pre-parse and checkpoint checks. The live DOM tree size itself
+is not bounded by `conversion_memory`.
 
 ### 2.5 Node-Count Tracking
 
@@ -294,7 +298,7 @@ When multiple limits are hit simultaneously, the first detected wins:
 
 1. Input size (`markdown_limits conversion_memory=<size>`) — checked first, before FFI call
 2. Overall FFI deadline (`markdown_limits conversion_timeout=<time>`) — the authoritative upper bound, checked at each checkpoint alongside parser_timeout
-3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — triggers an earlier parser checkpoint when nonzero and smaller than conversion_timeout. At each applicable checkpoint the earlier of the two deadlines wins.
+3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — triggers the parser checkpoint when nonzero: earlier than conversion_timeout when smaller, and on its own when conversion_timeout is 0. At each applicable checkpoint the earlier of the two deadlines wins.
 4. Memory budget (`markdown_limits parser_memory=<size>`) — checked on each allocation
 
 ### Fail-Open Behavior
@@ -352,8 +356,8 @@ Additional notes:
 
 | Code | Constant | Trigger |
 |------|----------|---------|
-| 10 | `ERROR_PARSE_TIMEOUT` | Elapsed time exceeds `parser_timeout` |
-| 11 | `ERROR_PARSE_BUDGET_EXCEEDED` | Memory allocation exceeds `parser_memory` |
+| 10 | `ERROR_PARSE_TIMEOUT` | Elapsed time exceeds the effective deadline: the earlier of `conversion_timeout` (when nonzero) and `parser_timeout` |
+| 11 | `ERROR_PARSE_BUDGET_EXCEEDED` | The estimated parser working set exceeds `parser_memory`, or a later memory checkpoint fails — not only a single allocation failure |
 
 ---
 

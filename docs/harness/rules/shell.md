@@ -117,7 +117,7 @@ run_case || rc=$?
   _backslash='\'
   _pcre_needle="${_backslash}${_backslash}s|${_backslash}${_backslash}d|${_backslash}${_backslash}w"
   if grep -REn "${_pcre_needle}" tools/harness/detect_*.sh \
-      | grep -E 'grep|sed|awk|egrep|perl|pattern=|regex=' \
+      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=' \
       | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then
       echo "FAIL: prohibited PCRE regex classes found" >&2
       exit 1
@@ -127,7 +127,7 @@ run_case || rc=$?
   #    semantics.
   _bre_needle="${_backslash}${_backslash}[()]"   # constructed at runtime
   if grep -REn "${_bre_needle}" tools/harness/detect_*.sh \
-      | grep -E 'grep|sed|awk|egrep|pattern=|regex=' \
+      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|pattern=|regex=' \
       | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then
       echo "FAIL: BRE-only grouping syntax found" >&2
       exit 1

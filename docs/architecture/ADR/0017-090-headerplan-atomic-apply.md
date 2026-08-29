@@ -148,6 +148,7 @@ headers are sent).
 | `X-Markdown-Tokens` header | `NGX_ERROR` — abort before send |
 | `Accept-Ranges` removal | Scalar assignment — cannot fail |
 | Auth `Cache-Control` modify | `NGX_ERROR` — abort before send |
+| `Status` line / `Last-Modified` timestamp | Scalar field assignments — cannot fail; applied outside the HeaderPlan atomicity boundary, together with the other post-plan operations before send |
 
 **Rationale**: The atomicity invariant above applies only to core in-place
 mutations covered by HeaderPlan (Content-Type, Content-Encoding, and

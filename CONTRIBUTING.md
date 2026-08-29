@@ -350,7 +350,7 @@ All contributions must include appropriate documentation:
 - Include examples
 - Provide context and rationale
 - Link to related documentation
-- Follow the [Writing Guide](WRITING_GUIDE.md) for non-native-reader-friendly
+- Follow the [Writing Guide](docs/WRITING_GUIDE.md) for non-native-reader-friendly
   prose (sentence length limits, STE-inspired style)
 
 ## Submitting Changes

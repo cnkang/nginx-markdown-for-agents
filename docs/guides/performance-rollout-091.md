@@ -302,8 +302,15 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
 
 3. Replace the module binary and perform a complete restart:
    ```bash
-   cp components/nginx-module/src/ngx_http_markdown_filter_module.so \
-     /usr/lib/nginx/modules/
+   # Derive the modules directory from the installed NGINX build; RPM
+   # packages use /usr/lib64/nginx/modules, Debian packages /usr/lib/nginx/modules.
+   MODULES_DIR="$(nginx -V 2>&1 | sed -nE 's/.*--modules-path=([^ ]+).*/\1/p')"
+   if [ -z "$MODULES_DIR" ]; then
+     echo "cannot determine the NGINX modules path from nginx -V" >&2
+     exit 1
+   fi
+   sudo cp components/nginx-module/src/ngx_http_markdown_filter_module.so \
+     "$MODULES_DIR/"
    sudo nginx -t
    if command -v systemctl >/dev/null 2>&1; then
      sudo systemctl restart nginx
