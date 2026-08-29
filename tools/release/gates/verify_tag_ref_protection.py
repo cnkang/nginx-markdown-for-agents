@@ -76,6 +76,12 @@ def _repository_from_origin() -> str:
         )
     except subprocess.TimeoutExpired as error:
         raise ValueError("origin remote lookup timed out") from error
+    except OSError as error:
+        # Missing git executable: fail closed with the same diagnostic
+        # style as command failures.
+        raise ValueError(
+            "could not run git to resolve the origin remote"
+        ) from error
     if result.returncode != 0 or not result.stdout.strip():
         raise ValueError("could not determine repository from the origin remote")
     return _repository_from_origin_url(result.stdout)
@@ -112,6 +118,9 @@ def _fetch_ruleset_detail(repo: str, ruleset_id: int) -> dict | None:
     except subprocess.TimeoutExpired:
         # A slow ruleset detail is skipped, exactly like a failed fetch;
         # main() fails closed when no ruleset could be verified.
+        return None
+    except OSError:
+        # Missing gh executable: fail closed the same way.
         return None
     if detail.returncode != 0:
         return None

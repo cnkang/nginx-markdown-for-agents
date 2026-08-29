@@ -136,20 +136,24 @@ def _directory_chain_is_safe(resolved: str) -> bool:
 
     Checking only the immediate parent would let an attacker swap a deeper
     directory after validation; walk every directory down to the trusted
-    root instead.  Every chain directory must be root-owned as well: a
-    non-root owner could rename a verified root-owned helper out of the
-    way between validation and execution.
+    root instead.  When running as root, every chain directory must be
+    root-owned as well: a non-root owner could rename a verified root-owned
+    helper out of the way between validation and execution.  When running as
+    a non-root user, the owner check is skipped (matching the resolve_tool
+    policy in run_module_benchmark.sh) so user-owned Homebrew toolchains
+    remain usable while the writability walk still applies.
     """
     root = _trusted_root_for(resolved)
     if root is None:
         return False
+    running_as_root = hasattr(os, "geteuid") and os.geteuid() == 0
     current = os.path.dirname(resolved)
     while True:
         try:
             stat_result = os.stat(current)
         except OSError:
             return False
-        if stat_result.st_uid != 0:
+        if running_as_root and stat_result.st_uid != 0:
             return False
         if stat_result.st_mode & 0o022:
             return False
@@ -168,11 +172,14 @@ def _resolve_tool(name: str) -> str | None:
 
     The candidate must be found on PATH, canonicalize to a regular executable
     whose literal location is under a trusted system executable directory,
-    owned by root, and not writable by group or other users.  Every directory
-    from the executable's parent down to the trusted root must not be group-
-    or other-writable, so a writable directory cannot host a swapped helper.
-    These checks apply on every run regardless of the effective UID.  Returns
-    None when the tool is missing or untrusted.
+    and not be writable by group or other users.  Every directory from the
+    executable's parent down to the trusted root must not be group- or
+    other-writable, so a writable directory cannot host a swapped helper.
+    When running as root, the executable and every chain directory must
+    additionally be owned by root; when running as a non-root user the owner
+    check is skipped (matching the resolve_tool policy in
+    run_module_benchmark.sh) so user-owned Homebrew toolchains remain
+    usable.  Returns None when the tool is missing or untrusted.
     """
     candidate = shutil.which(name)
     if not candidate:
@@ -186,8 +193,9 @@ def _resolve_tool(name: str) -> str | None:
         stat_result = os.stat(resolved)
     except OSError:
         return None
-    if stat_result.st_uid != 0:
-        return None
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        if stat_result.st_uid != 0:
+            return None
     if stat_result.st_mode & 0o022:
         return None
     if not _directory_chain_is_safe(resolved):
