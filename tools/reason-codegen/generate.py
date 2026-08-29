@@ -551,7 +551,13 @@ def generate_rust_impl_continued(reasons) -> str:
     lines.append(RUST_MATCH_SELF)
     for r in reasons:
         variant = snake_to_pascal(r["key"])
-        callsite = LOG_CALLSITES.get(r["key"], f"body_filter: {r['key']}")
+        if r["key"] not in LOG_CALLSITES:
+            # Fail closed: an unregistered key would otherwise ship with a
+            # synthesized body_filter callsite that misstates the phase.
+            raise ValueError(
+                f"unknown reason key {r['key']!r}: no log callsite registered"
+            )
+        callsite = LOG_CALLSITES[r["key"]]
         lines.append(f'            ReasonCode::{variant} => {{')
         lines.append(f'                "{callsite}"')
         lines.append("            }")
@@ -1061,7 +1067,11 @@ def _build_generated_outputs(reasons, hash_hex: str):
 def _check_generated_outputs(outputs):
     """Check every generated artifact and return a process status."""
     print("\nDrift check mode:")
-    all_ok = all(check_drift(path, content) for path, content in outputs)
+    # Materialize every per-artifact result before computing the overall
+    # status so a single drifted artifact cannot short-circuit the check
+    # and hide drift in the remaining artifacts.
+    results = [check_drift(path, content) for path, content in outputs]
+    all_ok = all(results)
     if not all_ok:
         print(
             "\nERROR: Generated files are out of date. "

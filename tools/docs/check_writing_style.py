@@ -619,7 +619,19 @@ def _select_default_files() -> tuple[list[Path], str | None]:
     except RuntimeError:
         # Missing git must behave like --changed's failure path: fall back
         # to the on-disk rglob sweep instead of aborting the default run.
-        return sorted(ROOT.glob("**/*.md")), None
+        # Apply the same maintained-docs filtering as _tracked_md_files so
+        # the fallback cannot pull archive, changelog, build, or vendor
+        # Markdown into the default audit scope.
+        return (
+            sorted(
+                p
+                for p in ROOT.glob("**/*.md")
+                if p.is_file()
+                and _is_maintained(p.relative_to(ROOT).as_posix())
+                and p.relative_to(ROOT).as_posix() not in HISTORICAL_ROOT_DOCS
+            ),
+            None,
+        )
 
 
 def _audit_files(

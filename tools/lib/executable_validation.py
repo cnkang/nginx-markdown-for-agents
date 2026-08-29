@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 
 _APPROVED_EXECUTABLES = frozenset(
-    {"ab", "brotli", "cargo", "git", "ps", "rustfmt"}
+    {"ab", "brotli", "cargo", "git", "ps", "rustc", "rustfmt"}
 )
 _APPROVED_EXECUTABLE_DIRS = (
     Path("/bin"),
