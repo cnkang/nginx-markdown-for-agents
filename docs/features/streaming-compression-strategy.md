@@ -26,16 +26,15 @@ decompression via the Rust FFI path.
 | gzip | automatic decompression on; streaming selected; cache validation not `full` | member-aware streaming decompression |
 | Brotli (`br`) | automatic decompression on; streaming selected; cache validation not `full`; `NGX_HTTP_BROTLI` defined | streaming decompression |
 | Brotli (`br`) | `NGX_HTTP_BROTLI` not defined | bounded full-buffer decompression (Rust FFI) |
-| unknown/unsupported | no supported decoder | passthrough unchanged; no conversion policy is applied |
+| malformed / unknown token / excessive depth | — | `markdown_error_policy` (`pass` / `fail_closed` / `status <code>`) |
 
 ## Routing Decision
 
 When the header filter detects a `Content-Encoding` header on an otherwise
 eligible response, the following logic applies:
 
-1. If `markdown_auto_decompress` is **off**, or the module does not support the encoding,
-   the response passes through unchanged (no conversion attempted). Responses with an
-   unsupported encoding are not subject to `markdown_error_policy`.
+1. If `markdown_auto_decompress` is **off**, the response passes through
+   unchanged (no conversion attempted).
 2. If `markdown_auto_decompress` is **on** and the module selects streaming with cache
    validation not `full`:
    - **Deflate** (zlib-wrapped RFC 1950, with raw RFC 1951 compatibility fallback) uses streaming decompression.
@@ -45,7 +44,14 @@ eligible response, the following logic applies:
 3. Full cache validation selects the bounded full-buffer path for all codecs.
 4. Brotli without `NGX_HTTP_BROTLI` defined routes to bounded full-buffer
    decompression via the Rust FFI path.
-5. Uncompressed responses continue to be eligible for streaming conversion as
+5. A known codec whose streaming decoder is unavailable in the build (for
+   example Brotli without `NGX_HTTP_BROTLI`) uses bounded full-buffer
+   decompression — it does **not** pass through.
+6. A malformed `Content-Encoding` value, an unknown encoding token, or an
+   excessively deep chain follows the configured `markdown_error_policy`:
+   `pass` forwards the original response unchanged; `fail_closed` and
+   `status <code>` reject it. These cases are **not** plain passthrough.
+7. Uncompressed responses continue to be eligible for streaming conversion as
    normal.
 
 ```text
@@ -53,16 +59,19 @@ Upstream response
   │
   ├─ Content-Encoding present?
   │    │
-  │    ├─ auto_decompress OFF or unsupported encoding
+  │    ├─ auto_decompress OFF
   │    │    └─ Passthrough (no conversion)
   │    │
-  │    └─ auto_decompress ON + supported encoding
-  │         ├─ gzip, deflate, or Brotli (compiled) + streaming/cache gates pass
-  │         │    └─ Streaming decompression → streaming conversion
-  │         ├─ Brotli (not compiled) or full cache validation
-  │         │    └─ Bounded full-buffer decompression → conversion
-  │         └─ unknown encoding
-  │              └─ Passthrough unchanged (no conversion policy)
+  │    ├─ auto_decompress ON + known codec
+  │    │    ├─ gzip, deflate, or Brotli (compiled) + streaming/cache gates pass
+  │    │    │    └─ Streaming decompression → streaming conversion
+  │    │    ├─ Brotli (not compiled) or full cache validation
+  │    │    │    └─ Bounded full-buffer decompression → conversion
+  │    │    └─ known codec, streaming decoder unavailable
+  │    │         └─ Bounded full-buffer decompression → conversion
+  │    │
+  │    └─ auto_decompress ON + malformed / unknown / excessive depth
+  │         └─ markdown_error_policy (pass → original response; fail_closed/status → reject)
   │
   └─ No Content-Encoding
        └─ Eligible for streaming conversion
@@ -166,8 +175,7 @@ route to bounded full-buffer decompression regardless of streaming preference.
 
 ## Related Documentation
 
-- [DECOMPRESSION.md](DECOMPRESSION.md) — decompression behavior and error handling
-- [DECOMPRESSION.md](DECOMPRESSION.md) — Budget enforcement and error categories
+- [DECOMPRESSION.md](DECOMPRESSION.md) — decompression behavior, budget enforcement, and error categories
 - [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md) — Directive syntax and defaults
 - [../guides/streaming-rollout-cookbook.md](../guides/streaming-rollout-cookbook.md) — Streaming rollout guidance
 

@@ -11,6 +11,14 @@ lowercase snake_case strings** in both:
 - Decision log entries: `markdown: reason=<code> ...` (see `components/nginx-module/src/ngx_http_markdown_decision_log_impl.h`)
 - Prometheus metrics labels (`reason="<code>"`, see `components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h`)
 
+**Decompression metric-label exception**: the decompression metrics family
+(`nginx_markdown_decompression_events_total`) uses `reason=` labels that are
+decompression outcomes, not canonical reason codes. Only the **failure**
+labels (`budget_exceeded`, `format_error`, `truncated_input`, `io_error`)
+map to reason-registry keys; `ok` is a metric-only success sentinel with no
+reason-registry key. Do not treat those labels as canonical reason-code
+values.
+
 Streaming engine transitions are internal event names, not canonical reason
 codes or Prometheus label values. The logger emits them in the bounded
 `event=` field. See the boundary below.

@@ -158,6 +158,16 @@ location /docs/ {
 
 **Performance Note**: `full` requires conversion to generate a Markdown-variant ETag for comparison, which has performance implications for conditional requests.
 
+For a Markdown-negotiated GET or HEAD request, the module captures incoming
+`If-None-Match` and `If-Modified-Since` values before a static handler, proxy,
+or proxy cache can evaluate them against the source HTML representation.
+Only the captured `If-None-Match` is used to validate a converted Markdown
+response, and only in `full` mode (against the Markdown ETag). The captured
+`If-Modified-Since` is never used to validate a converted representation —
+it is restored only when the request is passed through as the original
+source representation, so source-only conditional behavior remains
+available.
+
 ## Conditional Request Handling
 
 ### If-None-Match (ETag-Based)
@@ -206,7 +216,10 @@ Accept: text/markdown
 If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT
 ```
 
-NGINX core handles this before the module runs, so the module only processes requests that pass the time-based check.
+For a Markdown-negotiated request, the module suppresses the client validator
+before the content handler, proxy, or cache runs. This prevents a source HTML
+`304` from bypassing conversion. A source-only request is not captured and
+continues to use NGINX's normal source-representation conditional handling.
 
 **Semantic note**: an original-representation response may retain the
 upstream HTML timestamp and receive a source-based 304. A transformed

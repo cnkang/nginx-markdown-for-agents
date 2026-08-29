@@ -23,7 +23,7 @@ If you need rollout steps, operator checklists, or directive syntax, go back to:
 
 - [DECOMPRESSION.md](DECOMPRESSION.md)
 - [charset-detection.md](charset-detection.md)
-- [security.md](security.md)
+- [SECURITY_MODEL.md](SECURITY_MODEL.md)
 
 ### Content negotiation and caching
 
