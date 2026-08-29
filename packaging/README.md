@@ -36,6 +36,7 @@ The configuration uses template variables injected by the CI matrix:
 |----------|-------------|---------|
 | `PKG_VERSION` | Project version (from tag or workflow input) | `0.9.2` |
 | `NGINX_VERSION` | Target NGINX version from build matrix | `1.26.3` |
+| `NGINX_VERSION_CEIL` | Exclusive upper bound of the pinned NGINX version (X.Y.Z -> X.Y.Z+1) required by the DEB dependency interval | `1.26.4` |
 | `RPM_NGINX_EVR` | Exact RPM dependency epoch/version/release | `1:1.26.3` |
 | `NFPM_ARCH` | Target architecture | `amd64`, `arm64` |
 
@@ -45,6 +46,10 @@ The configuration uses template variables injected by the CI matrix:
 # Set required environment variables
 export PKG_VERSION="0.9.2"
 export NGINX_VERSION="1.26.3"
+export NGINX_VERSION_CEIL="$(awk 'BEGIN {
+  split(ARGV[1], parts, ".");
+  printf "%d.%d.%d", parts[1], parts[2], parts[3] + 1;
+}' "${NGINX_VERSION}")"
 export RPM_NGINX_EVR="1:${NGINX_VERSION}"
 export NFPM_ARCH="amd64"
 

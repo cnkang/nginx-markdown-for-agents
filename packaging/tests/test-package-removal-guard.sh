@@ -140,4 +140,18 @@ if ! printf '%s\n' "${run_case_output}" \
 fi
 printf 'PASS: no-nginx fallback blocks unverifiable configuration\n' >&2
 
+# No NGINX executable and no standard configuration file at all: nothing can
+# load the module, so removal is safe and must not be blocked.
+rm -f "${FAKE_ROOT}/usr/sbin/nginx"
+rm -rf "${FAKE_ROOT}/etc/nginx/conf.d" "${FAKE_ROOT}/etc/nginx/modules-enabled"
+rm -f "${FAKE_ROOT}/etc/nginx/nginx.conf"
+run_case_status=0
+run_case_output="$(${RUN_SCRIPT} remove 2>&1)" || run_case_status=$?
+if [[ "${run_case_status}" -ne 0 ]]; then
+    printf 'FAIL: empty-host removal returned %s, expected safe removal\n%s\n' \
+        "${run_case_status}" "${run_case_output}" >&2
+    exit 1
+fi
+printf 'PASS: no-nginx host without configuration files permits removal\n' >&2
+
 printf 'PASS: package removal guard lifecycle scenarios\n' >&2

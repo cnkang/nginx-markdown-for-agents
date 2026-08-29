@@ -206,8 +206,14 @@ run_package_removal_lifecycle() {
     # that packaging invariant and the cleanup path could not restore it.
     cp -p "$temp_path" "$config_path" \
         || die "Failed to enable the module in the NGINX configuration"
-    REMOVAL_CONFIG_TEMP=""
+    # Mark the configuration mutated immediately after the successful copy:
+    # any later failure must restore the original configuration.
     REMOVAL_CONFIG_MUTATED=1
+    # The fixture content now lives in the active configuration; delete the
+    # temporary file immediately instead of deferring to the cleanup trap.
+    rm -f "$temp_path" \
+        || die "Failed to remove the NGINX configuration fixture"
+    REMOVAL_CONFIG_TEMP=""
 
     info "Checking the enabled module configuration before removal..."
     if ! "$NGINX_BIN" -t -c "$config_path" >"${INSTALL_LOG}" 2>&1; then
