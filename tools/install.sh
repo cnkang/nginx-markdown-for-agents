@@ -113,16 +113,28 @@ OPENSSL_BIN=""
 # emit_error <category> <message>
 # _json_escape_string <dest_var> <value>
 # Writes a JSON-safe encoding of value into dest_var: backslash, double
-# quote, newline, carriage return, and tab escapes. All JSON string
-# interpolation in this script must go through this one escaping rule so
-# every field stays byte-for-byte consistent.
+# quote, newline, carriage return, tab, and every other control character
+# in U+0000-U+001F (encoded as \u00XX). All JSON string interpolation in
+# this script must go through this one escaping rule so every field stays
+# byte-for-byte consistent.
 _json_escape_string() {
   local __dest_var="$1"
-  local __value="${2//\\/\\\\}"
+  local __value="${2//\\\\/\\\\\\\\}"
   __value="${__value//\"/\\\"}"
   __value="${__value//$'\n'/\\n}"
   __value="${__value//$'\r'/\\r}"
   __value="${__value//$'\t'/\\t}"
+  # Remaining C0 control characters (U+0000-U+001F minus the four above):
+  # encode each as a JSON \u00XX escape so the envelope stays valid JSON.
+  local __i __ch __hex
+  for __i in $(seq 0 31); do
+    case "$__i" in
+      9|10|13) continue ;;  # already handled above
+    esac
+    __ch=$(printf "\\$(printf '%03o' "$__i")")
+    __hex=$(printf '%02x' "$__i")
+    __value="${__value//$__ch/\\u00$__hex}"
+  done
   printf -v "$__dest_var" '%s' "$__value"
   return 0
 }

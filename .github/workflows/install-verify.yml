@@ -135,11 +135,14 @@ jobs:
           signed_asset_names = set()
           if manifest_url:
               try:
+                  # The SHA256SUMS asset is public and its browser_download_url
+                  # redirects to a separate host (objects.githubusercontent.com).
+                  # Do NOT send the API token: it would leak to the redirect
+                  # target. The Accept header alone is sufficient.
                   request = Request(
                       manifest_url,
                       headers={
                           "Accept": "application/octet-stream",
-                          "Authorization": f"Bearer {os.environ['RELEASES_API_TOKEN']}",
                       },
                   )
                   with urlopen(request, timeout=30) as response:
