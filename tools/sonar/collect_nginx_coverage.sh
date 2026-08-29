@@ -1406,7 +1406,9 @@ check_prometheus_response() {
   fi
   content_type="$(awk -F': ' 'tolower($1) == "content-type" { print tolower($2) }' \
     "${header_file}" | tr -d '\r' | tail -n 1)"
-  if [[ "${content_type}" != text/plain* ]]; then
+  # Accept exactly text/plain, optionally followed by parameters such as a
+  # charset; reject lookalikes like text/plain-invalid.
+  if [[ ! "${content_type}" =~ ^text/plain([[:space:]]*;.*)?[[:space:]]*$ ]]; then
     echo "ERROR: Prometheus ${case_label} content type was ${content_type}" >&2
     return 1
   fi

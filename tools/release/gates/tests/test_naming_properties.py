@@ -91,10 +91,19 @@ def test_invalid_prometheus_metric_without_unit_suffix(suffix):
 )
 def test_valid_prometheus_metric_with_unit(suffix, unit):
     """Valid metric with unit suffix."""
-    assume(not suffix.endswith((
-        "_total", "_bytes", "_seconds", "_info",
-    )))
     name = f"nginx_markdown_{suffix}{unit}"
+    # Exclude only the composed names whose base (suffix) already ends in a
+    # reserved unit token AND the appended unit creates a forbidden
+    # double-unit ending (e.g. foo_total_total, foo_bytes_bytes).  A base
+    # ending in _bytes or _seconds combined with _total is legal
+    # (canonical counter units bytes_total / seconds_total) and must be
+    # exercised.
+    assume(not name.endswith((
+        "_total_total", "_total_bytes", "_total_seconds", "_total_info",
+        "_bytes_bytes", "_bytes_seconds", "_bytes_info",
+        "_seconds_bytes", "_seconds_seconds", "_seconds_info",
+        "_info_total", "_info_bytes", "_info_seconds", "_info_info",
+    )))
     assert is_valid_prometheus_metric(name), f"should accept: {name}"
 
 

@@ -1192,7 +1192,16 @@ def _validate_release_binary_signing_security(result: ValidationResult) -> None:
         return
 
     start = workflow.find("\n  integrity-signing:")
-    end = workflow.find("\n  package-artifacts:", start)
+    # Locate the next top-level job key after start (two-space indentation
+    # followed by a name and colon) rather than searching specifically for
+    # package-artifacts, so the boundary stays correct when the job list
+    # changes.
+    end = -1
+    for job_match in re.finditer(r"\n  [a-zA-Z0-9_-]+:", workflow[start + 1:]):
+        candidate = start + 1 + job_match.start()
+        if candidate > start:
+            end = candidate
+            break
     if start == -1 or end == -1:
         result.fail(
             "release-signing-security:job",

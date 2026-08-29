@@ -30,6 +30,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.path_validation import validate_read_path
 from official_docker_matrix import load_official_docker_entries
 
