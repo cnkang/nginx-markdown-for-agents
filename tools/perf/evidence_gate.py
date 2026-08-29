@@ -122,13 +122,57 @@ def _is_trusted_tool_path(path: str) -> bool:
     )
 
 
+def _trusted_root_for(path: str) -> str | None:
+    """Return the trusted root that contains path, or None."""
+    for root in _TRUSTED_TOOL_ROOTS:
+        if path == root or path.startswith(root.rstrip("/") + "/"):
+            return root
+    return None
+
+
+def _directory_chain_is_safe(resolved: str) -> bool:
+    """Return False when any directory between the executable's parent and
+    its trusted root is group- or other-writable.
+
+    Checking only the immediate parent would let an attacker swap a deeper
+    directory after validation; walk every directory down to the trusted
+    root instead.  Every chain directory must be root-owned as well: a
+    non-root owner could rename a verified root-owned helper out of the
+    way between validation and execution.
+    """
+    root = _trusted_root_for(resolved)
+    if root is None:
+        return False
+    current = os.path.dirname(resolved)
+    while True:
+        try:
+            stat_result = os.stat(current)
+        except OSError:
+            return False
+        if stat_result.st_uid != 0:
+            return False
+        if stat_result.st_mode & 0o022:
+            return False
+        if current == root:
+            return True
+        parent = os.path.dirname(current)
+        if parent == current:
+            # Defensive: the walk must reach the trusted root because
+            # _trusted_root_for already confirmed containment.
+            return False
+        current = parent
+
+
 def _resolve_tool(name: str) -> str | None:
     """Resolve a command name to an approved absolute executable path.
 
     The candidate must be found on PATH, canonicalize to a regular executable
-    whose literal location is under a trusted system executable directory, and
-    when running as root must be owned by root and not writable by group or
-    other users.  Returns None when the tool is missing or untrusted.
+    whose literal location is under a trusted system executable directory,
+    owned by root, and not writable by group or other users.  Every directory
+    from the executable's parent down to the trusted root must not be group-
+    or other-writable, so a writable directory cannot host a swapped helper.
+    These checks apply on every run regardless of the effective UID.  Returns
+    None when the tool is missing or untrusted.
     """
     candidate = shutil.which(name)
     if not candidate:
@@ -138,15 +182,16 @@ def _resolve_tool(name: str) -> str | None:
         return None
     if not _is_trusted_tool_path(candidate) or not _is_trusted_tool_path(resolved):
         return None
-    if hasattr(os, "geteuid") and os.geteuid() == 0:
-        try:
-            stat_result = os.stat(resolved)
-        except OSError:
-            return None
-        if stat_result.st_uid != 0:
-            return None
-        if stat_result.st_mode & 0o022:
-            return None
+    try:
+        stat_result = os.stat(resolved)
+    except OSError:
+        return None
+    if stat_result.st_uid != 0:
+        return None
+    if stat_result.st_mode & 0o022:
+        return None
+    if not _directory_chain_is_safe(resolved):
+        return None
     return resolved
 
 

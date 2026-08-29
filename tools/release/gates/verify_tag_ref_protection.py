@@ -34,6 +34,9 @@ REPOSITORY_PATTERN = re.compile(
 )
 
 
+SUBPROCESS_TIMEOUT_SECONDS = 30
+
+
 def _validate_repo(repo: str) -> str:
     """Allow only one GitHub owner/repository path component pair."""
     if not REPOSITORY_PATTERN.fullmatch(repo):
@@ -63,12 +66,16 @@ def _repository_from_origin_url(remote_url: str) -> str:
 
 def _repository_from_origin() -> str:
     """Resolve the repository from the checkout's origin remote."""
-    result = subprocess.run(
-        ["git", "remote", "get-url", "origin"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=SUBPROCESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("origin remote lookup timed out") from error
     if result.returncode != 0 or not result.stdout.strip():
         raise ValueError("could not determine repository from the origin remote")
     return _repository_from_origin_url(result.stdout)
@@ -94,12 +101,18 @@ def _fetch_ruleset_detail(repo: str, ruleset_id: int) -> dict | None:
         or ruleset_id <= 0
     ):
         return None
-    detail = subprocess.run(
-        ["gh", "api", f"repos/{safe_repo}/rulesets/{ruleset_id}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        detail = subprocess.run(
+            ["gh", "api", f"repos/{safe_repo}/rulesets/{ruleset_id}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=SUBPROCESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        # A slow ruleset detail is skipped, exactly like a failed fetch;
+        # main() fails closed when no ruleset could be verified.
+        return None
     if detail.returncode != 0:
         return None
     try:
@@ -119,18 +132,22 @@ def _list_rulesets(repo: str) -> list[dict]:
     where no ruleset can be verified fails closed in :func:`main`.
     """
     safe_repo = _validate_repo(repo)
-    payload = subprocess.run(
-        [
-            "gh",
-            "api",
-            f"repos/{safe_repo}/rulesets",
-            "--paginate",
-            "--slurp",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+    try:
+        payload = subprocess.run(
+            [
+                "gh",
+                "api",
+                f"repos/{safe_repo}/rulesets",
+                "--paginate",
+                "--slurp",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=SUBPROCESS_TIMEOUT_SECONDS,
+        ).stdout
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("ruleset listing timed out") from error
     summaries = _flatten_pages(json.loads(payload))
     detailed = []
     for summary in summaries:

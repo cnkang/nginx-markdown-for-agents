@@ -23,6 +23,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
+from lib.executable_validation import resolve_approved_executable  # noqa: E402
 from lib.path_validation import validate_read_path  # noqa: E402
 
 
@@ -367,14 +368,24 @@ def _sha256_tree(path: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+GIT_TIMEOUT_SECONDS = 30
+
+
 def _git_output(*args: str) -> str | None:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    git_path = resolve_approved_executable("git")
+    if git_path is None:
+        return None
+    try:
+        result = subprocess.run(
+            [git_path, *args],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
     if result.returncode != 0:
         return None
     return result.stdout.strip()
@@ -457,14 +468,21 @@ def _validate_rustc_version(summary: dict[str, Any]) -> list[str]:
     if not isinstance(rustc_version, str) or not rustc_version.strip():
         errors.append("rustc_version must be a non-empty string")
     else:
-        rustc = subprocess.run(
-            ["rustc", "--version"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if rustc.returncode != 0:
+        rustc_path = resolve_approved_executable("rustc")
+        rustc = None
+        if rustc_path is not None:
+            try:
+                rustc = subprocess.run(
+                    [rustc_path, "--version"],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=GIT_TIMEOUT_SECONDS,
+                )
+            except (OSError, subprocess.SubprocessError):
+                rustc = None
+        if rustc is None or rustc.returncode != 0:
             errors.append("unable to execute rustc --version")
         elif rustc.stdout.strip() != rustc_version:
             errors.append("rustc_version does not match the current rustc")

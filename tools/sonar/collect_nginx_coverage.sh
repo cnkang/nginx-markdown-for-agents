@@ -1384,7 +1384,9 @@ check_prometheus_response() {
   local status content_type
   local -a curl_args
 
-  curl_args=(-sS -D "${header_file}" -o "${body_file}")
+  # Bound both the connection phase and the overall request so an
+  # incomplete response fails instead of hanging the coverage run.
+  curl_args=(--connect-timeout 5 --max-time 30 -sS -D "${header_file}" -o "${body_file}")
   if [[ -n "${accept_header}" ]]; then
     curl_args+=(-H "${accept_header}")
   else

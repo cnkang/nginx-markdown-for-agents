@@ -129,15 +129,10 @@ def _load_yaml(
             "Refusing path with '..' traversal component (purpose: workflow)"
         )
     resolved_root = root.resolve(strict=True)
-    absolute_path = path.absolute()
-    try:
-        absolute_path.relative_to(resolved_root)
-    except ValueError as error:
-        raise ValueError(
-            f"Read workflow path resolves outside the allowed root "
-            f"{resolved_root}: {absolute_path}"
-        ) from error
-    resolved_path = absolute_path.resolve(strict=True)
+    # Containment is enforced on the resolved path only: comparing the
+    # unresolved absolute path against the resolved root rejects valid
+    # inputs that traverse symlinks (for example /tmp -> /private/tmp).
+    resolved_path = path.resolve(strict=True)
     try:
         relative_path = resolved_path.relative_to(resolved_root)
     except ValueError as error:
@@ -164,15 +159,10 @@ def _load_json(
             "Refusing path with '..' traversal component (purpose: contract)"
         )
     resolved_root = root.resolve(strict=True)
-    absolute_path = path.absolute()
-    try:
-        absolute_path.relative_to(resolved_root)
-    except ValueError as error:
-        raise ValueError(
-            f"Read contract path resolves outside the allowed root "
-            f"{resolved_root}: {absolute_path}"
-        ) from error
-    resolved_path = absolute_path.resolve(strict=True)
+    # Containment is enforced on the resolved path only: comparing the
+    # unresolved absolute path against the resolved root rejects valid
+    # inputs that traverse symlinks (for example /tmp -> /private/tmp).
+    resolved_path = path.resolve(strict=True)
     try:
         relative_path = resolved_path.relative_to(resolved_root)
     except ValueError as error:

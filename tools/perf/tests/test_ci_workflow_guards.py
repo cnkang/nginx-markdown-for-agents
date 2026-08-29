@@ -589,6 +589,11 @@ def test_tag_workflow_uses_092_blocking_evidence() -> None:
     ).read_text(encoding="utf-8")
     gate_start = workflow.index("  release-gate:")
     gate_block = workflow[gate_start:]
+    # Bound the block to the release-gate job only: the next job key at the
+    # same two-space indentation ends this job's block.
+    next_job_match = re.search(r"\n  [a-z][a-z0-9-]*:", gate_block[len("  release-gate:"):])
+    if next_job_match:
+        gate_block = gate_block[:next_job_match.start() + len("  release-gate:")]
     invocations = re.findall(
         r"make release-perf-evidence-blocking BASELINE_VERSION=([0-9]+)",
         gate_block,

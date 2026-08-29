@@ -240,6 +240,93 @@ esac
 exit 0
 FIXTURE
 
+# --- Fixture: prologue with plain assignments stays safe ---
+cat > "$TMPDIR_TEST/prologue_assignments_safe.sh" <<'FIXTURE'
+#!/bin/bash
+set -e
+MARKER=1
+LOG_LEVEL=info
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+case "$1" in
+    configure)
+        cat >&2 <<'INNEREOF'
+nginx-markdown-for-agents module installed successfully.
+INNEREOF
+        ;;
+    *)
+        ;;
+esac
+
+exit 0
+FIXTURE
+
+# --- Fixture: conditional before the trusted PATH is not unconditional ---
+cat > "$TMPDIR_TEST/unsafe_conditional_path.sh" <<'FIXTURE'
+#!/bin/bash
+set -e
+if [[ "${1}" == "configure" ]]; then
+    STATE=configured
+fi
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+case "$1" in
+    configure)
+        cat >&2 <<'INNEREOF'
+nginx-markdown-for-agents module installed successfully.
+INNEREOF
+        ;;
+    *)
+        ;;
+esac
+
+exit 0
+FIXTURE
+
+# --- Fixture: assignment with command substitution cannot be prologue-safe ---
+cat > "$TMPDIR_TEST/unsafe_command_substitution.sh" <<'FIXTURE'
+#!/bin/bash
+set -e
+MARKER=$(not_a_real_command)
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+case "$1" in
+    configure)
+        cat >&2 <<'INNEREOF'
+nginx-markdown-for-agents module installed successfully.
+INNEREOF
+        ;;
+    *)
+        ;;
+esac
+
+exit 0
+FIXTURE
+
+# --- Fixture: set with a command separator must not be prologue-safe ---
+cat > "$TMPDIR_TEST/unsafe_set_separator.sh" <<'FIXTURE'
+#!/bin/bash
+set -e
+set -x; not_a_real_command
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+case "$1" in
+    configure)
+        cat >&2 <<'INNEREOF'
+nginx-markdown-for-agents module installed successfully.
+INNEREOF
+        ;;
+    *)
+        ;;
+esac
+
+exit 0
+FIXTURE
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -268,6 +355,38 @@ if [[ "$local_exit" -eq 0 ]]; then
     pass "forbidden commands inside heredocs exits 0 (heredoc stripping works)"
 else
     fail "forbidden commands inside heredocs exits 0 (heredoc stripping works)" "expected exit 0, got exit $local_exit"
+fi
+
+local_exit=0
+bash "$CHECK_SCRIPT" "$TMPDIR_TEST/prologue_assignments_safe.sh" >/dev/null 2>/dev/null || local_exit=$?
+if [[ "$local_exit" -eq 0 ]]; then
+    pass "prologue with plain NAME=value assignments exits 0"
+else
+    fail "prologue with plain NAME=value assignments exits 0" "expected exit 0, got exit $local_exit"
+fi
+
+local_exit=0
+bash "$CHECK_SCRIPT" "$TMPDIR_TEST/unsafe_conditional_path.sh" >/dev/null 2>/dev/null || local_exit=$?
+if [[ "$local_exit" -eq 1 ]]; then
+    pass "conditional line before trusted PATH is not an unconditional prologue (exit 1)"
+else
+    fail "conditional line before trusted PATH is not an unconditional prologue (exit 1)" "expected exit 1, got exit $local_exit"
+fi
+
+local_exit=0
+bash "$CHECK_SCRIPT" "$TMPDIR_TEST/unsafe_command_substitution.sh" >/dev/null 2>/dev/null || local_exit=$?
+if [[ "$local_exit" -eq 1 ]]; then
+    pass "assignment with command substitution ends the prologue (exit 1)"
+else
+    fail "assignment with command substitution ends the prologue (exit 1)" "expected exit 1, got exit $local_exit"
+fi
+
+local_exit=0
+bash "$CHECK_SCRIPT" "$TMPDIR_TEST/unsafe_set_separator.sh" >/dev/null 2>/dev/null || local_exit=$?
+if [[ "$local_exit" -eq 1 ]]; then
+    pass "set with a command separator ends the prologue (exit 1)"
+else
+    fail "set with a command separator ends the prologue (exit 1)" "expected exit 1, got exit $local_exit"
 fi
 
 printf '\n'

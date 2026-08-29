@@ -958,6 +958,53 @@ class TestToolResolution:
         assert resolved is not None
         assert evidence_gate.os.path.isabs(resolved)
 
+    def test_resolve_tool_rejects_non_root_owner_on_every_run(self, monkeypatch):
+        """Ownership validation applies regardless of the effective UID."""
+        trusted = "/usr/bin/env"
+        monkeypatch.setattr(evidence_gate.shutil, "which", lambda name: trusted)
+        monkeypatch.setattr(evidence_gate.os.path, "isfile", lambda path: True)
+        monkeypatch.setattr(evidence_gate.os, "access", lambda path, mode: True)
+        monkeypatch.setattr(evidence_gate.os.path, "realpath", lambda path: trusted)
+        user_owned = os.stat_result(
+            (0o100755, 0, 0, 0, 1000, 1000, 0, 0, 0, 0)
+        )
+        monkeypatch.setattr(evidence_gate.os, "stat", lambda path: user_owned)
+        assert evidence_gate._resolve_tool("env") is None
+
+    def test_resolve_tool_rejects_non_root_owned_parent(self, monkeypatch):
+        """A non-root-owned, non-writable chain directory must reject the
+        helper: its owner could rename the helper between validation and
+        execution."""
+        trusted = "/usr/bin/env"
+        monkeypatch.setattr(evidence_gate.shutil, "which", lambda name: trusted)
+        monkeypatch.setattr(evidence_gate.os.path, "isfile", lambda path: True)
+        monkeypatch.setattr(evidence_gate.os, "access", lambda path, mode: True)
+        monkeypatch.setattr(evidence_gate.os.path, "realpath", lambda path: trusted)
+        root_owned = os.stat_result((0o100755, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        user_dir = os.stat_result((0o040755, 0, 0, 0, 1000, 1000, 0, 0, 0, 0))
+
+        def fake_stat(path):
+            return root_owned if path == trusted else user_dir
+
+        monkeypatch.setattr(evidence_gate.os, "stat", fake_stat)
+        assert evidence_gate._resolve_tool("env") is None
+
+    def test_resolve_tool_rejects_writable_parent_directory(self, monkeypatch):
+        """A group/other-writable parent directory must reject the helper."""
+        trusted = "/usr/bin/env"
+        monkeypatch.setattr(evidence_gate.shutil, "which", lambda name: trusted)
+        monkeypatch.setattr(evidence_gate.os.path, "isfile", lambda path: True)
+        monkeypatch.setattr(evidence_gate.os, "access", lambda path, mode: True)
+        monkeypatch.setattr(evidence_gate.os.path, "realpath", lambda path: trusted)
+        root_owned = os.stat_result((0o100755, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        writable_dir = os.stat_result((0o040777, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+
+        def fake_stat(path):
+            return root_owned if path == trusted else writable_dir
+
+        monkeypatch.setattr(evidence_gate.os, "stat", fake_stat)
+        assert evidence_gate._resolve_tool("env") is None
+
     def test_git_functions_use_resolved_binary(self, monkeypatch):
         """git subprocess invocations must use the resolved absolute path."""
         captured = []

@@ -88,7 +88,7 @@ def test_renderer_emits_complete_histogram_families() -> None:
     assert f"{HISTOGRAM_FAMILY}_count" in function
 
     families = re.search(
-        r"static u_char \*\s*ngx_http_markdown_metrics_v1_render_families_4_to_7\("
+        r"static u_char \*\s*ngx_http_markdown_metrics_v1_render_families_4_to_8\("
         r".*?(?=\n}\n\nstatic )",
         source,
         flags=re.DOTALL,
@@ -105,7 +105,24 @@ def test_v1_mapping_does_not_put_gt_1000ms_in_finite_5s_bucket() -> None:
     source = (REPO_ROOT / "components/nginx-module/src/ngx_http_markdown_metrics_impl.h").read_text(
         encoding="utf-8"
     )
-    mapping = source[source.index("ngx_http_markdown_metrics_to_v1"):]
+    # The legacy->v1 band copy lives in the mapping helper body.  Extract
+    # that body by brace-walking from the function signature so a matching
+    # string in a later function cannot satisfy the assertions, and a
+    # relocated assignment cannot escape the check.
+    start = source.index("ngx_http_markdown_metrics_map_v1_histogram")
+    depth = 0
+    end = None
+    for index in range(start, len(source)):
+        character = source[index]
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+    assert end is not None, "mapping helper body is unbalanced"
+    mapping = source[start:end]
     # buckets[9] is the finite le=5s boundary (see the v1 histogram band
     # contract).  >1000ms latency must not be placed in a dedicated
     # >1000ms bucket; the renderer folds everything past the last finite
@@ -113,8 +130,8 @@ def test_v1_mapping_does_not_put_gt_1000ms_in_finite_5s_bucket() -> None:
     # band copy (buckets[8]=le_1000ms, buckets[9]=le_5000ms).
     assert "duration_full_buffer.buckets[9]" not in mapping
     assert "duration_streaming.buckets[9]" not in mapping
-    assert "destination->buckets[9] = source->le_5000ms;" in source
-    assert "destination->buckets[8] = source->le_1000ms;" in source
+    assert "destination->buckets[9] = source->le_5000ms;" in mapping
+    assert "destination->buckets[8] = source->le_1000ms;" in mapping
 
 
 def test_registry_histogram_has_correct_boundaries() -> None:

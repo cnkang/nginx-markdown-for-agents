@@ -110,3 +110,32 @@ def test_loaders_reject_symlink_escape(loader, tmp_path) -> None:
     link.symlink_to(outside)
     with pytest.raises(ValueError, match="outside the allowed root"):
         loader(link, root=tmp_path)
+
+
+@pytest.mark.parametrize("loader", (_load_yaml, _load_json))
+def test_loaders_accept_non_canonical_root_prefix(loader, tmp_path) -> None:
+    """A root reached through a symlinked prefix must be accepted.
+
+    The containment check runs on the resolved path.  Comparing the
+    unresolved absolute input path against the resolved root would
+    spuriously reject a caller that names the root through a symlink
+    (macOS /tmp -> /private/tmp, /var -> /private/var).
+    """
+    real_root = tmp_path / "root"
+    real_root.mkdir()
+    input_name = "input.yaml" if loader is _load_yaml else "input.json"
+    (real_root / input_name).write_text("{}\n", encoding="utf-8")
+
+    symlinked_prefix = None
+    for prefix, canonical in (("/tmp", "/private/tmp"), ("/var", "/private/var")):
+        if str(tmp_path).startswith(canonical):
+            symlinked_prefix = prefix + str(tmp_path)[len(canonical):]
+            break
+    if symlinked_prefix is None:
+        pytest.skip("no canonical /tmp or /var symlink prefix on this platform")
+
+    non_canonical_input = Path(symlinked_prefix) / "root" / input_name
+
+    data = loader(non_canonical_input, root=tmp_path)
+
+    assert data == {}
