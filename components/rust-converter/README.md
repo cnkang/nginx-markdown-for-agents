@@ -70,7 +70,7 @@ fuzz/
 - Canonical architecture and repository layout live in:
   - [../../docs/architecture/SYSTEM_ARCHITECTURE.md](../../docs/architecture/SYSTEM_ARCHITECTURE.md)
   - [../../docs/architecture/REPOSITORY_STRUCTURE.md](../../docs/architecture/REPOSITORY_STRUCTURE.md)
-- [../../docs/features/security.md](../../docs/features/security.md)
+- [../../docs/features/SECURITY_MODEL.md](../../docs/features/SECURITY_MODEL.md)
 - [../../docs/features/deterministic-output.md](../../docs/features/deterministic-output.md)
 - [../../docs/features/TOKEN_ESTIMATOR.md](../../docs/features/TOKEN_ESTIMATOR.md)
 - [../../docs/features/YAML_FRONT_MATTER.md](../../docs/features/YAML_FRONT_MATTER.md)

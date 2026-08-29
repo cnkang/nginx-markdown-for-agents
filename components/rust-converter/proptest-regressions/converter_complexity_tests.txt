@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 2256ea559170009716753da9337954cbb5a258062abe142d20cf14da7d9640e0 # shrinks to symbols = [(0, 0), (1, 0)]
+cc ebaf669f2966e327da331597925d7ff3bbfa67b7b6f2dd1a5dff47d97f1632e1 # shrinks to symbols = [(0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0)]

@@ -256,7 +256,10 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Cache-validation policy.
      *   off      - no ETag, no conditional request handling
-     *   ims_only - no ETag, If-Modified-Since only (default)
+     *   ims_only - no ETag; source If-Modified-Since applies to
+     *              pass-through responses only; converted responses
+     *              never produce a 304 (the module clears the source
+     *              Last-Modified) (default)
      *   full     - transformed ETag + If-None-Match + If-Modified-Since
      * Public default: ims_only
      * Context: http, server, location

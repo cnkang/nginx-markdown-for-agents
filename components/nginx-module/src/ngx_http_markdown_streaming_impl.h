@@ -1510,12 +1510,17 @@ ngx_http_markdown_streaming_record_postcommit_outcome(
             ? "fail_closed" : "pass");
 
     ctx->streaming.completion.failure_recorded = 1;
-    ctx->error.terminal_decision_recorded = 1;
 
     ngx_http_markdown_log_decision(
         r, conf, ctx->effective_conf, decision_reason);
     ngx_http_markdown_log_streaming_terminal_decision(
         r, ctx, conf, conversion_status, terminal_reason, "postcommit");
+
+    /* Set the terminal-decision latch only after the decision logs have
+     * run: ngx_http_markdown_log_terminal_decision_path() skips logging
+     * when this flag is already set, so setting it first would silently
+     * drop the post-commit failure decision from the decision log. */
+    ctx->error.terminal_decision_recorded = 1;
 }
 
 
