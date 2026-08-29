@@ -264,3 +264,18 @@ server {
         for status, check_id, message in result.results
         if status == "FAIL"
     ), f"expected duplicate-markdown_limits failure, got: {result.results}"
+
+
+def test_helm_legacy_values_survive_null_streaming_properties() -> None:
+    """`streaming: {properties: null}` must not raise during the
+    legacy-value scan; budget stays exposed via the nested mapping only."""
+    result = validator.ValidationResult()
+    values_yaml = "markdown:\n  enabled: true\n"
+    markdown_properties = {
+        "enabled": {"type": "boolean"},
+        "streaming": {"properties": None},
+    }
+    validator._validate_helm_legacy_values(
+        result, values_yaml, markdown_properties, configmap=""
+    )
+    assert not result.has_failures

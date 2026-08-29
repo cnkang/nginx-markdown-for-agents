@@ -841,23 +841,59 @@ def _parse_inline_needs(value: str) -> set[str]:
     }
 
 
+def _needs_block_step(
+    indent: int, stripped: str, needs_indent: int, item_indent: int | None
+) -> tuple[str, str, int | None]:
+    """Classify one candidate line inside a ``needs:`` block.
+
+    Returns ``(action, value, item_indent)`` where ``action`` is
+    ``"break"`` (the block ended cleanly), ``"invalid"`` (the block is
+    inconsistent and must be rejected), or ``"item"`` (``value`` carries
+    the dependency name).  ``item_indent`` echoes the accepted item
+    indentation back to the caller.
+    """
+    if indent < needs_indent:
+        return "break", "", item_indent
+    # YAML sequence items start with "- " (dash, whitespace).  A bare dash
+    # glued to content ("-build") is a scalar, not a sequence item.
+    if not re.match(r"^-[ \t]", stripped):
+        if indent <= needs_indent:
+            # A sibling mapping key ends the needs block.
+            return "break", "", item_indent
+        return "invalid", "", item_indent
+    if item_indent is None:
+        item_indent = indent
+    if indent != item_indent:
+        return "invalid", "", item_indent
+    value = stripped[2:].strip().strip("'\"")
+    if not value:
+        return "invalid", "", item_indent
+    return "item", value, item_indent
+
+
 def _parse_block_needs(
     lines: list[str], needs_line_index: int, needs_indent: int
 ) -> set[str]:
-    """Parse a YAML block sequence immediately below ``needs:``."""
+    """Parse a YAML block sequence immediately below ``needs:``.
+
+    Sequence items may sit at any indentation deeper than the ``needs:``
+    key, including the same indentation as the key itself.  The first
+    item fixes the block's item indentation and every remaining item must
+    match it exactly; an inconsistent block is rejected as unparsable.
+    """
     dependencies: set[str] = set()
-    item_indent = needs_indent + 2
+    item_indent: int | None = None
     for line in lines[needs_line_index + 1 :]:
         parts = _publish_line_parts(line)
         if parts is None:
             continue
         indent, stripped = parts
-        if indent <= needs_indent:
+        action, value, item_indent = _needs_block_step(
+            indent, stripped, needs_indent, item_indent
+        )
+        if action == "break":
             break
-        if indent != item_indent or not stripped.startswith("-"):
-            return set()
-        value = stripped[1:].strip().strip("'\"")
-        if not value:
+        if action == "invalid":
             return set()
         dependencies.add(value)
     return dependencies

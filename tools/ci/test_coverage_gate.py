@@ -208,6 +208,27 @@ class TestCriticalPathCoverage(unittest.TestCase):
         self.assertAlmostEqual(summaries["FFI boundary"].line_pct, 100.0)
         self.assertAlmostEqual(summaries["conditional requests"].line_pct, 100.0)
 
+    def test_merges_repository_relative_component_paths(self) -> None:
+        """lcov records with repository-relative component paths must be
+        accepted alongside absolute "/components/" paths."""
+        content = textwrap.dedent("""\
+            SF:components/nginx-module/src/ngx_http_markdown_auth.c
+            DA:1,1
+            SF:components/nginx-module/src/ngx_http_markdown_error.c
+            DA:1,1
+        """)
+        with NamedTemporaryFile(
+            mode="w", suffix=".lcov", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(content)
+            f.flush()
+            paths = [Path(f.name)]
+
+        summaries = parse_lcov_critical_paths(paths)
+
+        self.assertAlmostEqual(summaries["auth"].line_pct, 100.0)
+        self.assertAlmostEqual(summaries["error handling"].line_pct, 100.0)
+
     def test_multiple_files(self) -> None:
         """Verify correct aggregation across multiple file records."""
         content = textwrap.dedent("""\

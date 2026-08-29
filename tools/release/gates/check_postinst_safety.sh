@@ -433,9 +433,31 @@ check_trusted_path() {
                 # a precursor to a later trusted assignment.
                 break
                 ;;
-            set[[:space:]]*|[A-Za-z_]*=*)
-                # Shell options and simple variable assignments are safe in
-                # the prologue and do not resolve commands through PATH.
+            set[[:space:]]*)
+                # Option-only set statements are safe in the prologue.  A
+                # separator or command substitution would let additional
+                # commands run before the trusted PATH assignment.
+                if [[ "$line" == *';'* || "$line" == *'&'* || "$line" == *'|'* \
+                    || "$line" == *'$('* || "$line" == *'`'* ]]; then
+                    break
+                fi
+                ;;
+            *)
+                # A plain variable assignment (NAME=value) is safe in the
+                # prologue and does not resolve commands through PATH.  Case
+                # globs cannot express "name characters immediately followed
+                # by =" without letting * span spaces, so anchor the check
+                # with a regex; conditional statements fall through to break.
+                # Command substitution, backticks, or command separators in
+                # the line execute commands before the trusted PATH
+                # assignment, so they end the prologue.
+                if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= \
+                    && "$line" != *'$('* && "$line" != *'`'* \
+                    && "$line" != *';'* && "$line" != *'&'* && "$line" != *'|'* ]]; then
+                    :
+                else
+                    break
+                fi
                 ;;
             *)
                 break
