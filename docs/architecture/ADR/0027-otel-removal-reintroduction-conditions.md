@@ -42,10 +42,11 @@ Remove all OTel implementation from the 0.9.2 release:
 - Remove the two functional directives `markdown_otel` and
   `markdown_otel_endpoint` from the command table together with their
   configuration handlers
-- Retain `tracing`, `metrics`, `service_name`, `span_buffer_size`, and
-  `export_timeout` as reject-only command-table entries wherever the frozen
-  command registry requires them for migration behavior. They parse and
-  reject, and no handler code remains
+- The former OTel sub-option names (`tracing`, `metrics`, `service_name`,
+  `span_buffer_size`, `export_timeout`) are **not** retained as reject-only
+  command-table entries: they follow the standard unknown-directive
+  behavior (NGINX reports them as unknown directives at `nginx -t`). No
+  handler code remains for any OTel name
 - Delete all OTel implementation code (span creation, export, W3C parsing)
 - Remove `otel_enabled` and `otel_endpoint` from the configuration structure
 - Remove `otel_span` from the per-request context

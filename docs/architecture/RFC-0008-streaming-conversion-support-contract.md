@@ -274,6 +274,12 @@ conversion or apply `markdown_error_policy` before committing headers.
 - Preserve or restore upstream HTML response headers.
 - Metric: `streaming_fallback_total{phase="precommit",action="pass"}`
 
+Original-HTML passthrough is available **only while the replay buffer still
+covers every upstream byte read so far** (see §3.1). When replay is
+incomplete and headers are not yet committed, the module MUST NOT pass
+through: it must continue safe streaming conversion or apply
+`markdown_error_policy` (reject) before committing headers.
+
 #### `markdown_error_policy fail_closed`
 
 - If headers have not been sent, return 502.
@@ -297,9 +303,12 @@ and the memory budget):
 - `markdown_streaming auto` and the module assesses streaming risk
   outweighs benefit.
 
-If the response would exceed full-buffer resource limits, fallback proceeds to
-passthrough or reject according to the applicable `markdown_error_policy`.
-Exceeding the limits triggers the fallback path. The module then applies the configured policy.
+If the response would exceed full-buffer resource limits, the eligibility
+gate rejects it **before any conversion attempt**: the request is recorded
+as `not_eligible` (reason `memory_budget_exceeded`) and does **not**
+increment `nginx_markdown_conversion_attempts_total` nor assign
+`engine="full_buffer"`, because conversion never starts. The module then
+applies the configured `markdown_error_policy` (passthrough or reject).
 
 Full-buffer fallback is **not** an error. It is a normal `auto`-mode decision.
 

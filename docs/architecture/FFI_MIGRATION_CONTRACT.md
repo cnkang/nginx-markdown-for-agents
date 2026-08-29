@@ -2,13 +2,14 @@
 
 ## Purpose and ownership
 
-This document inventories the coordinated Rust↔C boundary after the v0.9.2
-release post-freeze. Rust owns conversion and pure decision logic. C owns
-NGINX lifecycle, pools, chains, filters, headers, and request finalization.
+This document records the **migration history** of the Rust↔C FFI boundary
+between v0.9.1 (ABI v1) and v0.9.2 (ABI v2): what was removed, why, and what
+replaced it. It is a historical record, not the active contract.
 
-This is a bundled internal ABI, not an external converter SDK. The canonical
-declarations are Rust source plus the generated header. The NGINX module is
-the supported consumer.
+For the **active** ABI contract (version, 4-tuple handshake, layout,
+ownership, v1 compatibility policy) see
+[FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md). For the initialization
+contract see [FFI_INITIALIZATION_CONTRACT.md](FFI_INITIALIZATION_CONTRACT.md).
 
 ## Historical ABI identity
 
@@ -19,39 +20,6 @@ The v0.9.1 baseline identifier was `MARKDOWN_ABI_VERSION = 1`. The current
 preconfiguration and refuses directive parsing and startup on mismatch. Cargo
 package version is
 release metadata and is not a substitute for this ABI identifier.
-
-## Production FFI registry
-
-The following families have current NGINX production consumers:
-
-| Family | Exports | Contract |
-|--------|---------|----------|
-| Converter | `markdown_converter_new`, `markdown_convert`, `markdown_result_free`, `markdown_converter_free` | Per-worker handle and full-buffer conversion |
-| Options/results | `markdown_options_init`, `markdown_result_init` | Complete semantic initialization |
-| Accept | `markdown_negotiate_accept` | Rust-owned RFC negotiation |
-| Eligibility | `markdown_decide_eligibility` | Pure eligibility decision |
-| Conditional | `markdown_decide_conditional` | Cache mode, precedence, and bypass decision |
-| Header plan | `markdown_build_header_plan`, `markdown_header_plan_init`, `markdown_header_plan_free` | Rust-owned atomic plan, C application |
-| Base URL | `markdown_trusted_proxies_new`, `markdown_trusted_proxies_push`, `markdown_trusted_proxies_free`, `markdown_decide_base_url` | CIDR-aware trusted forwarding decision |
-| Initialization helpers | `markdown_base_url_input_init` | Base URL input initialization for trusted-proxy decision |
-| Decompression | `markdown_decompress_bounded`, `markdown_decomp_result_init`, `markdown_decompress_free` | Bounded Rust decompression path |
-| Error/reason | `markdown_classify_error_code`, `markdown_reason_code_str`, `markdown_reason_code_metric_key`, `markdown_reason_code_count` | Canonical cross-language classification and labels |
-| Streaming | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` | Streaming request lifecycle |
-| ABI alignment | `markdown_abi_version`, `markdown_abi_header_hash`, `markdown_abi_symbol_set_hash`, `markdown_abi_layout_fingerprint` | Startup-enforced version, generated-header, exported-symbol, and layout match |
-| Dynamic configuration | `markdown_dynconf_parse`, `markdown_dynconf_result_init`, `markdown_dynconf_result_free` | Runtime dynconf parsing and result handling |
-| Encoding chain and hash helpers | `markdown_chain_decode_free`, `markdown_chain_decode_result_init`, `markdown_decode_encoding_chain`, `markdown_parse_encoding_chain`, `markdown_sha256_hex` | Bounded decompression chain decode and SHA-256 hex helpers |
-
-The generated header contains only the bundled production boundary. Test-only
-Rust helpers are not emitted as C declarations.
-
-The canonical reason-code source is
-`components/rust-converter/reason_registry.toml`. The generated
-`components/rust-converter/src/decision/reason_code.rs` is a projection. The
-`markdown_reason_code_str`, `markdown_reason_code_metric_key`, and
-`markdown_reason_code_count` exports expose that source to the C consumer.
-Diagnostics use the generated C reason metadata header for bounded lookup of
-canonical names. Reason-code variants and discriminants must
-remain synchronized across both generated projections and this FFI boundary.
 
 ## Historical v0.9.1 removals
 

@@ -84,7 +84,7 @@ flowchart LR
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Chooses fail-open (`pass`) or fail-closed (`reject`) behavior when conversion or related processing fails |
+| Behavior | Chooses fail-open (`pass`) or fail-closed (`fail_closed` / `status <code>`) behavior when conversion or related processing fails |
 | Lifecycle impact | Buffering failure, decompression failure, conditional-processing failure, and conversion failure branches |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_payload_impl.h`, `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_error.c` |
 | Practical note | This directive shapes the operational posture of the system more than the conversion result itself. |
@@ -230,7 +230,7 @@ flowchart LR
 | Behavior | Controls conditional request handling and ETag generation: `off`, `ims_only`, or `full` (Config V2, 0.9.0) |
 | Lifecycle impact | Conditional resolution branch after buffering and before full conversion; ETag generation on success path |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_conditional.c`, `components/nginx-module/src/ngx_http_markdown_headers.c` |
-| Practical note | Replaces the removed `markdown_etag` and `markdown_conditional_requests` directives. `full` generates a transformed ETag; `ims_only` supports If-Modified-Since via upstream Last-Modified; `off` disables both. |
+| Practical note | Replaces the removed `markdown_etag` and `markdown_conditional_requests` directives. `full` generates a transformed ETag; `ims_only` never produces a 304 for converted responses (the module clears the source `Last-Modified`, so source `If-Modified-Since` does not validate the transformed representation — source IMS applies to pass-through responses only); `off` disables both. |
 
 ## Logging and Observability
 

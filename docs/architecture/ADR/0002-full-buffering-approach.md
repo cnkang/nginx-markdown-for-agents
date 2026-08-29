@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+Accepted — historical baseline; partially superseded/extended by
+[ADR-0004](0004-streaming-bounded-memory-conversion.md),
+[ADR-0011](0011-true-streaming-contract.md), and
+[ADR-0013](0013-streaming-default-policy.md). The full-buffer engine itself
+remains part of the active dual-engine architecture; this ADR records why
+v1 originally chose full buffering.
 
 ## Context
 
