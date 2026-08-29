@@ -227,6 +227,9 @@ fn append_source_passthrough_case(base_url: &str, assertions: &mut Vec<Assertion
 }
 
 fn append_internal_redirect_case(base_url: &str, assertions: &mut Vec<AssertionResult>) {
+    // Case A: source IMS must not produce a 304 for the converted
+    // representation after the internal redirect; the request is answered
+    // with a fresh 200 Markdown body.
     let mut headers = markdown_headers();
     headers.insert("If-Modified-Since".to_string(), SOURCE_IMS.to_string());
     let url = format!("{base_url}/representation-internal");
@@ -234,6 +237,53 @@ fn append_internal_redirect_case(base_url: &str, assertions: &mut Vec<AssertionR
         common::try_get_with_headers(&url, &headers, assertions, "internal_redirect_request")
     {
         push_markdown_shape(assertions, "internal_redirect", &response, 200);
+    }
+
+    // Case B: fetch the converted Markdown ETag via a first (unconditional)
+    // request through the internal-redirect entry, then send it back as
+    // If-None-Match.  A 304 on the second request proves the client
+    // validators survive the internal redirect (re-captured after the
+    // redirect cleared the module context) AND that the converted
+    // representation's own ETag is honored.
+    let plain = markdown_headers();
+    let first_url = format!("{base_url}/representation-internal");
+    let converted_etag = if let Some(response) = common::try_get_with_headers(
+        &first_url,
+        &plain,
+        assertions,
+        "internal_redirect_etag_fetch_request",
+    ) {
+        let etag = common::header_value(&response.headers, "etag");
+        if etag.is_empty() {
+            assertions.push(AssertionResult {
+                name: "internal_redirect_etag_present".to_string(),
+                passed: false,
+                expected: "converted response carries an ETag".to_string(),
+                actual: "no etag header".to_string(),
+                message: None,
+            });
+        }
+        etag
+    } else {
+        String::new()
+    };
+
+    if !converted_etag.is_empty() {
+        let mut etag_headers = markdown_headers();
+        etag_headers.insert("If-None-Match".to_string(), converted_etag);
+        let url = format!("{base_url}/representation-internal");
+        if let Some(response) = common::try_get_with_headers(
+            &url,
+            &etag_headers,
+            assertions,
+            "internal_redirect_etag_request",
+        ) {
+            assertions.push(assertions::assert_status(
+                "internal_redirect_etag_matches",
+                response.status,
+                304,
+            ));
+        }
     }
 }
 
