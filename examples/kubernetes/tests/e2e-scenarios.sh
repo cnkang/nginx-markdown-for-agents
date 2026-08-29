@@ -235,6 +235,18 @@ scenario_deploy() {
     deploy_exists="$(kubectl get deployment "$DEPLOYMENT_NAME" \
         -n "$NAMESPACE" -o name 2>/dev/null)" || true
 
+    # Ensure the module ConfigMap exists before any deployment mounts it: a
+    # volume that references a missing ConfigMap leaves the pod Pending.
+    # (Unconditional: an existing deployment may predate the mount, and
+    # scenario_config_update relies on the ConfigMap object being present.)
+    kubectl create configmap "$CONFIGMAP_NAME" \
+        -n "$NAMESPACE" --from-literal=placeholder=yes \
+        --dry-run=client -o yaml 2>/dev/null \
+        | kubectl apply -f - >&2 2>&1 || {
+        log_error "Failed to ensure ConfigMap '$CONFIGMAP_NAME' exists"
+        return 1
+    }
+
     if [ -z "$deploy_exists" ]; then
         log_info "Creating deployment '$DEPLOYMENT_NAME' with image '$IMAGE'..."
         kubectl create deployment "$DEPLOYMENT_NAME" \
@@ -242,16 +254,6 @@ scenario_deploy() {
             --image="$IMAGE" \
             --port=8080 >&2 2>&1 || {
             log_error "Failed to create deployment"
-            return 1
-        }
-
-        # Ensure the module ConfigMap exists before mounting it: a volume
-        # that references a missing ConfigMap leaves the pod Pending.
-        kubectl create configmap "$CONFIGMAP_NAME" \
-            -n "$NAMESPACE" --from-literal=placeholder=yes \
-            --dry-run=client -o yaml 2>/dev/null \
-            | kubectl apply -f - >&2 2>&1 || {
-            log_error "Failed to ensure ConfigMap '$CONFIGMAP_NAME' exists"
             return 1
         }
 
