@@ -253,9 +253,11 @@ check_active_configuration() {
     # a clean result as proof that a custom executable/configuration is safe.
     # The persistent force-removal sentinel is the explicit operator path for
     # hosts where the include graph was verified out of band.
+    standard_config_present=0
     for config_path in /etc/nginx/nginx.conf \
         /etc/nginx/conf.d/*.conf /etc/nginx/modules-enabled/*.conf; do
         if [[ -f "$config_path" ]]; then
+            standard_config_present=1
             config_status=0
             configuration_loads_module "$config_path" || config_status=$?
             if [[ "$config_status" -eq 0 ]]; then
@@ -268,8 +270,24 @@ check_active_configuration() {
         fi
     done
 
-    # A missing executable, an absent standard file, or an unobserved include
-    # path is unverifiable rather than evidence that no module is loaded.
+    if [[ "$standard_config_present" -eq 0 ]]; then
+        # No NGINX executable on the trusted PATH and no standard
+        # configuration file exists.  This package installs the module only
+        # for a packaged NGINX (the preinstall ABI gate requires a distro
+        # nginx at install time), so nothing the package supports can load
+        # the module in this state.  A custom NGINX build outside the
+        # supported packages is unverifiable by design; the persistent
+        # force-removal sentinel is the explicit operator path for hosts
+        # that run one.
+        info "No NGINX executable and no standard configuration file found."
+        info "If a custom NGINX build uses this module, verify it manually or"
+        info "create ${FORCE_REMOVE_SENTINEL} to acknowledge forced removal."
+        return 1
+    fi
+
+    # A missing executable with configuration files present but unassessable,
+    # or an unobserved include path, is unverifiable rather than evidence
+    # that no module is loaded.
     return 2
 }
 
