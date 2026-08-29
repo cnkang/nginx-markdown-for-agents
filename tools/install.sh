@@ -119,7 +119,7 @@ OPENSSL_BIN=""
 # byte-for-byte consistent.
 _json_escape_string() {
   local __dest_var="$1"
-  local __value="${2//\\\\/\\\\\\\\}"
+  local __value="${2//\\/\\\\}"
   __value="${__value//\"/\\\"}"
   __value="${__value//$'\n'/\\n}"
   __value="${__value//$'\r'/\\r}"
@@ -127,7 +127,10 @@ _json_escape_string() {
   # Remaining C0 control characters (U+0000-U+001F minus the four above):
   # encode each as a JSON \u00XX escape so the envelope stays valid JSON.
   local __i __ch __hex
-  for __i in $(seq 0 31); do
+  # Native arithmetic loop: avoids a dependency on external `seq`, which is
+  # not cached in the trusted-executable set and may be absent from the
+  # hardened PATH used after cache_trusted_executables.
+  for ((__i = 0; __i < 32; __i++)); do
     case "$__i" in
       9|10|13) continue ;;  # already handled above
     esac

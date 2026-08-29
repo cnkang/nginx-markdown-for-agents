@@ -831,7 +831,7 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                              "markdown: linearize chain "
                              "input size overflow, "
-                             "category=resource");
+                             "category=resource_limit");
                 return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
             }
             total += len;
