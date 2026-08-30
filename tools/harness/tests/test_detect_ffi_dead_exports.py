@@ -82,3 +82,42 @@ def test_scanners_reject_parent_paths(scanner) -> None:
     """Directory inputs must be rejected before recursive traversal."""
     with pytest.raises(ValueError, match="Refusing path"):
         scanner(Path("../outside"))
+
+
+def test_block_comment_state_tracks_across_lines() -> None:
+    """Multi-line comment bodies are not scanned for callsites."""
+    state = detector._update_block_comment_state(
+        "/* documentation example: markdown_convert(...)", False
+    )
+    assert state is True
+    state = detector._update_block_comment_state(
+        "continued prose markdown_decompress(...)", state
+    )
+    assert state is True
+    state = detector._update_block_comment_state("*/", state)
+    assert state is False
+
+    # A pointer-store assignment is not a comment continuation.
+    state = detector._update_block_comment_state("*p = markdown_convert(x);", False)
+    assert state is False
+
+    # Open and close on the same line leaves the state untouched.
+    state = detector._update_block_comment_state(
+        "fn /* markdown_convert */ markdown_decompress()", False
+    )
+    assert state is False
+
+
+def test_callsite_names_ignores_multiline_comment_body() -> None:
+    """A comment body line without a leading '*' must not count as a reference."""
+    text = (
+        "/*\n"
+        " * header\n"
+        "markdown_convert is documented here\n"
+        "markdown_decompress too\n"
+        " */\n"
+        "void real_call(void) { markdown_convert(NULL); }\n"
+    )
+    names = detector._callsite_names(text)
+    assert "markdown_convert" in names
+    assert "markdown_decompress" not in names

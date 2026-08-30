@@ -211,12 +211,38 @@ def _scan_c_call_file(
         return
 
     active_guards: list[str] = []
+    in_block_comment = False
     for lineno, line in enumerate(text.splitlines(), start=1):
         _update_guard_stack(line, active_guards)
-        if _is_non_callsite_line(line):
+        in_block_comment = _update_block_comment_state(line, in_block_comment)
+        if in_block_comment or _is_non_callsite_line(line):
             continue
         for match in CALLSITE_RE.finditer(line):
             _record_callsite(callsites, match, path, lineno, line, active_guards)
+
+
+def _update_block_comment_state(line: str, in_block: bool) -> bool:
+    """Return the block-comment state after processing one source line.
+
+    Tracks ``/* ... */`` spans across lines so a multi-line comment body
+    (which does not start every continuation line with ``*``) is not
+    scanned for callsites.  The transition is greedy: the first ``*/``
+    after an opening ``/*`` closes the span.
+    """
+    i = 0
+    while True:
+        if in_block:
+            end = line.find("*/", i)
+            if end == -1:
+                return True
+            in_block = False
+            i = end + 2
+        else:
+            start = line.find("/*", i)
+            if start == -1:
+                return in_block
+            in_block = True
+            i = start + 2
 
 
 def _is_non_callsite_line(line: str) -> bool:
@@ -364,8 +390,10 @@ def _callsite_names(text: str) -> set[str]:
     names: set[str] = set()
     # Align with the production callsite scan: comments, strings and
     # declarations do not count as test references.
+    in_block_comment = False
     for line in text.splitlines():
-        if _is_non_callsite_line(line):
+        in_block_comment = _update_block_comment_state(line, in_block_comment)
+        if in_block_comment or _is_non_callsite_line(line):
             continue
         # Mask out double-quoted string literals so markdown_* names inside
         # test payload strings (e.g. "markdown_convert") are not counted as
