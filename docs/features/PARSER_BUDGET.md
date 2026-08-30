@@ -169,17 +169,35 @@ parser-working-set ceiling. It does not accumulate all bytes ever received.
 #### How It Works
 
 The timeout is **not** enforced during the html5ever parse phase itself
-(which offers no interruption). Instead:
+(which offers no interruption). The full-buffer FFI path keeps separate parser
+and overall durations; it does not collapse them into one earlier-of deadline.
+Instead:
 
-1. **Pre-parse check**: Before calling `parse_document`, the converter
-   checks if the deadline has already passed (`ctx.check_timeout()`).
-2. **Post-parse check**: Immediately after parsing completes, the
-   converter checks the deadline again.
-3. **During DOM traversal**: The converter calls the `increment_and_check()` method
-   for every DOM node processed. Every 100 nodes, it checks elapsed time
-   against the deadline.
-4. **At pipeline boundaries**: Additional checks after metadata extraction,
-   before/after output normalization.
+1. **Pre-parse checkpoint**: Before calling `parse_document`, the converter
+   checks the nonzero `parser_timeout` from `conversion_start` first. This
+   includes the parser working-set estimate and any other pre-parse delay. It
+   then checks the nonzero `conversion_timeout`, also from `conversion_start`.
+2. **Post-parse checkpoint**: Immediately after parsing completes, the
+   converter checks the nonzero `parser_timeout` from `parse_start` first. The
+   converter captures `parse_start` immediately before the pre-parse checks.
+   It then checks `conversion_timeout` from `conversion_start`. These two
+   parser anchors are intentional: the pre-parse check covers work before
+   parsing, while the post-parse check measures the parse call itself.
+3. **During DOM traversal**: The converter gives `ConversionContext` the
+   remaining overall time as `traversal_budget`. Every 100 DOM nodes,
+   `increment_and_check()` checks that overall deadline; `parser_timeout` is
+   no longer checked in this full-buffer phase.
+4. **At pipeline boundaries**: The remaining checks after metadata
+   extraction, before/after output normalization, and after token estimation
+   also use the overall conversion deadline.
+
+At both parser-boundary checkpoints, the parser check runs before the overall
+check. If elapsed time exceeds both deadlines at the same checkpoint, the
+converter reports the parser timeout (`ERROR_PARSE_TIMEOUT`). This is
+call-order precedence, not a minimum or an "earlier of" calculation. When
+`conversion_timeout=0` reaches the FFI layer, the FFI layer disables the
+overall deadline but keeps a nonzero `parser_timeout` active at the two
+parser checkpoints.
 
 #### Checkpoint Frequency
 
@@ -271,11 +289,11 @@ Request arrives
     │      failed_open|failed_closed per error policy, category:
     │      resource_limit
     │
-    ├─ markdown_limits conversion_timeout= pre-check (overall FFI deadline)
-    │   └─ FAIL → pass-through, reason: timeout
-    │
-    ├─ markdown_limits parser_timeout= pre-check
-    │   └─ FAIL → pass-through, reason: timeout
+    ├─ Full-buffer pre-parse deadline checkpoint
+    │   ├─ parser_timeout= (nonzero, from conversion_start, check first)
+    │   │   └─ FAIL → pass-through, reason: timeout
+    │   └─ conversion_timeout= (from conversion_start)
+    │       └─ FAIL → pass-through, reason: timeout
     │
     ├─ html5ever parse_document (uninterruptible)
     │   └─ Input capped by markdown_limits conversion_memory= before parsing
@@ -283,16 +301,20 @@ Request arrives
     │      size is classified as not_eligible. Parser working-set estimates
     │      are bounded separately by parser_memory=
     │
-    ├─ markdown_limits conversion_timeout= / parser_timeout= post-parse check
-    │   └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
+    ├─ Full-buffer post-parse deadline checkpoint
+    │   ├─ parser_timeout= (nonzero, from parse_start, check first)
+    │   │   └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
+    │   └─ conversion_timeout= (from conversion_start)
+    │       └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
     │
-    ├─ DOM traversal with cooperative checkpoints
-    │   ├─ Every 100 nodes: check_timeout() against the earlier of conversion_timeout= and parser_timeout=
+    ├─ DOM traversal with cooperative conversion-timeout checkpoints
+    │   ├─ Every 100 nodes: check_timeout() against remaining conversion_timeout=
+    │   │   (`traversal_budget`; parser_timeout= is not checked in this phase)
     │   │   └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
     │   └─ Memory budget checks (streaming path)
     │       └─ FAIL → outcome failed_open|failed_closed (per error policy), category: budget_exceeded
     │
-    └─ Output normalization + final timeout check (earlier of conversion_timeout= and parser_timeout=)
+    └─ Output normalization + final conversion_timeout= checks
         └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
 ```
 
@@ -319,9 +341,13 @@ canonical values — the internal converter constants (`PARSE_TIMEOUT`,
 
 When multiple limits are hit simultaneously, the first detected wins:
 
+For the two full-buffer deadline checkpoints, the parser check precedes the
+overall check. The numbering below names the limit surfaces; it does not
+claim that the overall deadline is evaluated before the parser deadline.
+
 1. Input size (`markdown_limits conversion_memory=<size>`) — checked first, before FFI call
-2. Overall FFI deadline (`markdown_limits conversion_timeout=<time>`) — the authoritative upper bound, checked at each checkpoint alongside parser_timeout
-3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — triggers the parser checkpoint when nonzero, measured from conversion start; at each checkpoint the parser deadline is evaluated first, then the overall deadline. The two are independent; when `conversion_timeout` is 0 only the parser deadline applies.
+2. Overall FFI deadline (`markdown_limits conversion_timeout=<time>`) — the authoritative upper bound, measured from `conversion_start`. The converter checks it after `parser_timeout` at the pre-parse and post-parse checkpoints. The converter uses it as the only deadline for DOM traversal and output processing. A zero value disables this deadline.
+3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — when nonzero, the converter measures it from `conversion_start` for the pre-parse check and from `parse_start` for the post-parse check. The converter evaluates it before the overall deadline at both parser checkpoints. If elapsed time exceeds both deadlines, the converter reports the parser timeout. The two checks are separately configured, not an earlier-of/minimum deadline. When `conversion_timeout` is 0, a nonzero parser deadline still applies.
 4. Memory budget (`markdown_limits parser_memory=<size>`) — checked on each allocation
 
 ### Fail-Open Behavior
@@ -372,7 +398,7 @@ Additional notes:
 | Limit | Status | Path | Enforcement Point |
 |-------|--------|------|-------------------|
 | Input size (`markdown_limits conversion_memory=`) | ✅ Implemented | Both | C body filter pre-check |
-| Parse timeout (`markdown_limits parser_timeout=`) | ✅ Implemented | Both | Cooperative checkpoints in Rust |
+| Parse timeout (`markdown_limits parser_timeout=`) | ✅ Implemented | Full-buffer and streaming | Engine-specific cooperative checkpoints in Rust |
 | Parser memory budget (`markdown_limits parser_memory=`) | ✅ Implemented | Streaming | Modeled working-set checkpoints |
 | Parser memory budget (full-buffer) | ✅ Implemented | Full-buffer | Conservative pre-parse estimate |
 | Depth limit (explicit directive) | ⏳ Planned | — | Future: configurable max nesting |
@@ -385,21 +411,18 @@ Additional notes:
 |------|----------|---------|
 | 3 | `ERROR_TIMEOUT` | Elapsed time exceeds `conversion_timeout` (the overall FFI deadline) |
 | 10 | `ERROR_PARSE_TIMEOUT` | Elapsed time exceeds the parser checkpoint deadline (`parser_timeout`) |
-
-At every checkpoint the parser deadline is checked first, then the overall
-deadline. The two are independent: when `conversion_timeout` expires at a
-parser checkpoint (because it is smaller than `parser_timeout`, or the
-overall budget was consumed by pre-parse work), the conversion reports
-`ERROR_TIMEOUT`; when `parser_timeout` expires first, it reports
-`ERROR_PARSE_TIMEOUT`. The parser deadline is measured from the pipeline
-entry (conversion start) for the pre-parse check, and from the parser
-entry for the post-parse check, so pre-parse work (budget estimation,
-upstream delay) is bounded by the parser sub-limit as well. In the
-configuration layer `parser_timeout` must be a positive duration
-(1ms..1h); a zero value is rejected by `nginx -t`. The zero-value
-fallback to the overall timeout exists only inside the FFI option
-decoder for callers that omit the field.
 | 11 | `ERROR_PARSE_BUDGET_EXCEEDED` | The estimated parser working set exceeds `parser_memory`, or a later memory checkpoint fails — not only a single allocation failure |
+
+At the two full-buffer parser checkpoints, the parser deadline is checked
+first, then the overall deadline. If only the overall deadline has elapsed,
+the conversion reports `ERROR_TIMEOUT`; if the parser deadline has elapsed,
+it reports `ERROR_PARSE_TIMEOUT`, including when both deadlines have
+expired. The
+pre-parse parser check uses `conversion_start`, and the post-parse parser
+check uses `parse_start`; subsequent traversal and output checks use only the
+remaining overall deadline. At the FFI boundary, a zero
+`conversion_timeout` disables only the overall deadline, so a nonzero
+`parser_timeout` still produces `ERROR_PARSE_TIMEOUT` at a parser checkpoint.
 
 ---
 
