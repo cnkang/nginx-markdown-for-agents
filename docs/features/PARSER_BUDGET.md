@@ -99,6 +99,16 @@ limit are never passed to the Rust converter.
 - **Effect**: Prevents the parser from receiving unbounded input
 - **Enforcement point**: C body filter, before FFI call
 
+**Dual-role contract**: `conversion_memory` is not only the C-side input
+admission cap.  The same configured value is passed to the Rust converter
+as the full-buffer **generated-output budget** (`output_budget`), and
+transient scratch allocations (normalizer buffers, table containers,
+working-set reservations) are charged against it as well.  A conversion
+that would grow the generated Markdown or its transient working set past
+this value aborts with a controlled `MemoryLimit` error instead of
+exceeding the configured peak.  `parser_memory` remains the independent
+bound for the Rust parser's DOM/working-set allocations.
+
 This is the primary defense for the full-buffer path: since `parse_document`
 has no interruption mechanism, limiting input size bounds the worst-case parse time. The size gate caps the parse window.
 
