@@ -86,26 +86,31 @@ def test_scanners_reject_parent_paths(scanner) -> None:
 
 def test_block_comment_state_tracks_across_lines() -> None:
     """Multi-line comment bodies are not scanned for callsites."""
-    state = detector._update_block_comment_state(
+    code, state = detector._mask_inline_comments(
         "/* documentation example: markdown_convert(...)", False
     )
     assert state is True
-    state = detector._update_block_comment_state(
+    assert "markdown_convert" not in code
+    code, state = detector._mask_inline_comments(
         "continued prose markdown_decompress(...)", state
     )
     assert state is True
-    state = detector._update_block_comment_state("*/", state)
+    assert "markdown_decompress" not in code
+    code, state = detector._mask_inline_comments("*/", state)
     assert state is False
 
     # A pointer-store assignment is not a comment continuation.
-    state = detector._update_block_comment_state("*p = markdown_convert(x);", False)
+    code, state = detector._mask_inline_comments("*p = markdown_convert(x);", False)
     assert state is False
+    assert "markdown_convert" in code
 
     # Open and close on the same line leaves the state untouched.
-    state = detector._update_block_comment_state(
+    code, state = detector._mask_inline_comments(
         "fn /* markdown_convert */ markdown_decompress()", False
     )
     assert state is False
+    assert "markdown_convert" not in code
+    assert "markdown_decompress" in code
 
 
 def test_callsite_names_ignores_multiline_comment_body() -> None:
