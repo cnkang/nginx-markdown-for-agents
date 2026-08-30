@@ -37,6 +37,188 @@
 
 use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData, RcDom};
 
+/// Append a string through the conversion budget when a context is present.
+///
+/// The context-aware path delegates to [`BudgetedMarkdownWriter`] so output
+/// capacity is checked before `String` grows.  The context-free path is kept
+/// for the unit-test helpers that exercise the renderer without a budget.
+pub(super) fn append_str_with_context(
+    output: &mut String,
+    value: &str,
+    ctx: &mut Option<&mut ConversionContext>,
+) -> Result<(), ConversionError> {
+    if let Some(context) = ctx.as_deref_mut() {
+        let mut writer = context.budgeted_writer(output);
+        writer.push_str(value)
+    } else {
+        output.push_str(value);
+        Ok(())
+    }
+}
+
+/// Append one character through the conversion budget when a context exists.
+pub(super) fn append_char_with_context(
+    output: &mut String,
+    value: char,
+    ctx: &mut Option<&mut ConversionContext>,
+) -> Result<(), ConversionError> {
+    if let Some(context) = ctx.as_deref_mut() {
+        let mut writer = context.budgeted_writer(output);
+        writer.push(value)
+    } else {
+        output.push(value);
+        Ok(())
+    }
+}
+
+/// Append ordinary Markdown text without materializing an escaped copy when
+/// the conversion context is available.
+pub(super) fn append_escaped_text_with_context(
+    output: &mut String,
+    text: &str,
+    ctx: &mut Option<&mut ConversionContext>,
+) -> Result<(), ConversionError> {
+    if let Some(context) = ctx.as_deref_mut() {
+        let mut state = crate::security::MarkdownTextEscapeState::default();
+        context.append_escaped_text(output, text, &mut state)
+    } else {
+        output.push_str(&crate::security::escape_markdown_text(text));
+        Ok(())
+    }
+}
+
+/// Append a repeated character without allocating a temporary `String`.
+pub(super) fn append_repeated_char_with_context(
+    output: &mut String,
+    value: char,
+    count: usize,
+    ctx: &mut Option<&mut ConversionContext>,
+) -> Result<(), ConversionError> {
+    for _ in 0..count {
+        append_char_with_context(output, value, ctx)?;
+    }
+    Ok(())
+}
+
+/// Reserve a temporary allocation while the final output remains live.
+///
+/// `output.capacity()` is charged only for the duration of the reservation
+/// check.  The temporary charge remains active while `f` runs, so a writer
+/// growth or nested scratch allocation cannot exceed the same logical budget.
+pub(super) fn with_reserved_working_set<F>(
+    output: &mut String,
+    ctx: &mut Option<&mut ConversionContext>,
+    bytes: usize,
+    f: F,
+) -> Result<(), ConversionError>
+where
+    F: FnOnce(&mut String, &mut Option<&mut ConversionContext>) -> Result<(), ConversionError>,
+{
+    let output_capacity = output.capacity();
+    if let Some(context) = ctx.as_deref_mut() {
+        context.reserve_working_set_with_output(output_capacity, bytes)?;
+        context.release_working_set(output_capacity);
+    }
+
+    let result = f(output, ctx);
+
+    if let Some(context) = ctx.as_deref_mut() {
+        context.release_working_set(bytes);
+    }
+
+    result
+}
+
+fn link_label_escape_capacity(label: &str) -> Result<usize, ConversionError> {
+    let needs_escape = label.chars().any(|ch| {
+        matches!(
+            ch,
+            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' | '\n' | '\r'
+        )
+    });
+    if needs_escape {
+        label.len().checked_add(8).ok_or_else(|| {
+            ConversionError::MemoryLimit("link label working-set size overflow".into())
+        })
+    } else {
+        Ok(0)
+    }
+}
+
+/// Append a link label using the canonical security escaper.
+pub(super) fn append_link_label(
+    output: &mut String,
+    label: &str,
+    ctx: &mut Option<&mut ConversionContext>,
+) -> Result<(), ConversionError> {
+    let capacity = link_label_escape_capacity(label)?;
+    with_reserved_working_set(output, ctx, capacity, |output, ctx| {
+        let escaped = crate::security::escape_link_label(label);
+        append_str_with_context(output, escaped.as_ref(), ctx)
+    })
+}
+
+/// Append a Markdown link destination without allocating an escaped copy.
+pub(super) fn append_link_destination(
+    output: &mut String,
+    url: &str,
+    ctx: &mut Option<&mut ConversionContext>,
+) -> Result<(), ConversionError> {
+    let needs_angle_brackets = url.contains(' ')
+        || url.contains('(')
+        || url.contains(')')
+        || url.contains('<')
+        || url.contains('>');
+    if !needs_angle_brackets {
+        return append_str_with_context(output, url, ctx);
+    }
+
+    append_char_with_context(output, '<', ctx)?;
+    for ch in url.chars() {
+        match ch {
+            '<' => append_str_with_context(output, "%3C", ctx)?,
+            '>' => append_str_with_context(output, "%3E", ctx)?,
+            _ => append_char_with_context(output, ch, ctx)?,
+        }
+    }
+    append_char_with_context(output, '>', ctx)
+}
+
+/// Append a Markdown link title while escaping its two delimiter characters.
+pub(super) fn append_markdown_title(
+    output: &mut String,
+    title: &str,
+    ctx: &mut Option<&mut ConversionContext>,
+) -> Result<(), ConversionError> {
+    for ch in title.chars() {
+        if matches!(ch, '\\' | '"') {
+            append_char_with_context(output, '\\', ctx)?;
+        }
+        append_char_with_context(output, ch, ctx)?;
+    }
+    Ok(())
+}
+
+/// Append Markdown image syntax without materializing escaped fields.
+pub(super) fn append_image_with_context(
+    output: &mut String,
+    alt: &str,
+    url: &str,
+    title: Option<&str>,
+    ctx: &mut Option<&mut ConversionContext>,
+) -> Result<(), ConversionError> {
+    append_str_with_context(output, "![", ctx)?;
+    append_link_label(output, alt, ctx)?;
+    append_str_with_context(output, "](", ctx)?;
+    append_link_destination(output, url, ctx)?;
+    if let Some(title) = title.map(str::trim).filter(|title| !title.is_empty()) {
+        append_str_with_context(output, " \"", ctx)?;
+        append_markdown_title(output, title, ctx)?;
+        append_char_with_context(output, '"', ctx)?;
+    }
+    append_char_with_context(output, ')', ctx)
+}
+
 impl MarkdownConverter {
     /// Validate DOM depth without using the recursive renderer stack.
     pub(super) fn validate_dom_depth(&self, dom: &RcDom) -> Result<(), ConversionError> {
@@ -75,39 +257,38 @@ impl MarkdownConverter {
         output: &mut String,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        let normalized = self.normalize_text(text);
-        if normalized.is_empty() {
-            if text.chars().all(char::is_whitespace)
+        let mut ctx = ctx;
+        let normalized_capacity = text.len();
+        with_reserved_working_set(output, &mut ctx, normalized_capacity, |output, ctx| {
+            let normalized = self.normalize_text(text);
+            if normalized.is_empty() {
+                if text.chars().all(char::is_whitespace)
+                    && self.has_body_content(output)
+                    && !output.ends_with(' ')
+                {
+                    append_char_with_context(output, ' ', ctx)?;
+                }
+                return Ok(());
+            }
+
+            if text.starts_with(char::is_whitespace)
                 && self.has_body_content(output)
                 && !output.ends_with(' ')
             {
-                output.push(' ');
+                append_char_with_context(output, ' ', ctx)?;
             }
-            return Ok(());
-        }
 
-        if text.starts_with(char::is_whitespace)
-            && self.has_body_content(output)
-            && !output.ends_with(' ')
-        {
-            output.push(' ');
-        }
+            // Escape incrementally: materializing the full escaped string first
+            // let transient allocations exceed the conversion budget before the
+            // final length check ran.  The budget-aware append fails before an
+            // over-budget allocation happens.
+            append_escaped_text_with_context(output, &normalized, ctx)?;
 
-        // Escape incrementally: materializing the full escaped string first
-        // let transient allocations exceed the conversion budget before the
-        // final length check ran.  The budget-aware append fails before an
-        // over-budget allocation happens.
-        if let Some(ctx) = ctx {
-            let mut escape_state = crate::security::MarkdownTextEscapeState::default();
-            ctx.append_escaped_text(output, &normalized, &mut escape_state)?;
-        } else {
-            output.push_str(&crate::security::escape_markdown_text(&normalized));
-        }
-
-        if text.ends_with(char::is_whitespace) {
-            output.push(' ');
-        }
-        Ok(())
+            if text.ends_with(char::is_whitespace) {
+                append_char_with_context(output, ' ', ctx)?;
+            }
+            Ok(())
+        })
     }
 
     /// Traverse all child nodes in source order.
@@ -148,36 +329,50 @@ impl MarkdownConverter {
     }
 
     /// Internal element dispatcher shared by context and non-context entry points.
-    fn append_escaped_control_text(output: &mut String, text: Option<String>) {
+    fn append_escaped_control_text(
+        output: &mut String,
+        text: Option<&str>,
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
         if let Some(text) = text {
             let trimmed = text.trim();
             if !trimmed.is_empty() {
-                output.push_str(&crate::security::escape_markdown_text(trimmed));
-                output.push(' ');
+                append_escaped_text_with_context(output, trimmed, ctx)?;
+                append_char_with_context(output, ' ', ctx)?;
             }
         }
+        Ok(())
     }
 
-    fn handle_void_form_control(&self, node: &Handle, output: &mut String) {
+    fn handle_void_form_control(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
         if let NodeData::Element { ref attrs, .. } = node.data {
             let attrs_borrowed = attrs.borrow();
             let input_type = attrs_borrowed
                 .iter()
                 .find(|a| a.name.local.as_ref() == "type")
-                .map(|a| a.value.to_string())
-                .unwrap_or_default()
-                .to_lowercase();
+                .map(|a| a.value.as_ref())
+                .unwrap_or_default();
+            let is_hidden = input_type.eq_ignore_ascii_case("hidden");
+            let is_submit = input_type.eq_ignore_ascii_case("submit");
+            let is_reset = input_type.eq_ignore_ascii_case("reset");
+            let is_image = input_type.eq_ignore_ascii_case("image");
 
-            if matches!(input_type.as_str(), "hidden" | "submit" | "reset" | "image") {
-                if matches!(input_type.as_str(), "submit" | "reset")
+            if is_hidden || is_submit || is_reset || is_image {
+                if (is_submit || is_reset)
                     && let Some(value) = attrs_borrowed
                         .iter()
                         .find(|a| a.name.local.as_ref() == "value")
-                        .map(|a| a.value.to_string())
+                        .map(|a| a.value.as_ref())
                 {
-                    Self::append_escaped_control_text(output, Some(value));
+                    Self::append_escaped_control_text(output, Some(value), &mut ctx)?;
                 }
-                return;
+                return Ok(());
             }
 
             let text = attrs_borrowed
@@ -193,10 +388,11 @@ impl MarkdownConverter {
                         .iter()
                         .find(|a| a.name.local.as_ref() == "value")
                 })
-                .map(|a| a.value.to_string());
+                .map(|a| a.value.as_ref());
 
-            Self::append_escaped_control_text(output, text);
+            Self::append_escaped_control_text(output, text, &mut ctx)?;
         }
+        Ok(())
     }
 
     fn handle_strip_element(
@@ -207,33 +403,33 @@ impl MarkdownConverter {
         depth: usize,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
         self.security_validator
             .validate_depth(depth)
             .map_err(ConversionError::InvalidInput)?;
 
-        if self.security_validator.is_embedded_content(tag_name) {
-            let embedded = if let NodeData::Element { ref attrs, .. } = node.data {
-                let attrs_borrowed = attrs.borrow();
-                let url_attr = if tag_name == "object" { "data" } else { "src" };
-                let url = attrs_borrowed
-                    .iter()
-                    .find(|a| a.name.local.as_ref() == url_attr)
-                    .map(|a| a.value.to_string());
-                let title = attrs_borrowed
-                    .iter()
-                    .find(|a| a.name.local.as_ref() == "title")
-                    .map(|a| a.value.to_string());
-                Some((url, title))
-            } else {
-                None
-            };
+        if self.security_validator.is_embedded_content(tag_name)
+            && let NodeData::Element { ref attrs, .. } = node.data
+        {
+            let attrs_borrowed = attrs.borrow();
+            let url_attr = if tag_name == "object" { "data" } else { "src" };
+            let url = attrs_borrowed
+                .iter()
+                .find(|a| a.name.local.as_ref() == url_attr)
+                .map(|a| a.value.as_ref());
+            let title = attrs_borrowed
+                .iter()
+                .find(|a| a.name.local.as_ref() == "title")
+                .map(|a| a.value.as_ref());
 
-            if let Some((url, title)) = embedded
-                && let Some(url) = url
+            if let Some(url) = url
                 && let Some(safe_url) = self.security_validator.sanitize_url(url.trim())
             {
-                let resolved_url = self.resolve_url(safe_url);
-                Self::emit_markdown_link(&[title.as_deref()], &resolved_url, &resolved_url, output);
+                let url_capacity = self.resolved_url_capacity(safe_url)?;
+                with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                    let resolved_url = self.resolve_url(safe_url);
+                    Self::emit_markdown_link(&[title], &resolved_url, output, ctx)
+                })?;
             }
         }
 
@@ -257,7 +453,7 @@ impl MarkdownConverter {
             "h6" => self.handle_heading_with_context(node, 6, output, depth, ctx.as_deref_mut())?,
             "p" => self.handle_paragraph_with_context(node, output, depth, ctx.as_deref_mut())?,
             "a" => self.handle_link_with_context(node, output, depth, ctx.as_deref_mut())?,
-            "img" => self.handle_image(node, output, depth)?,
+            "img" => self.handle_image(node, output, depth, ctx.as_deref_mut())?,
             "ul" => self.handle_list_with_context(node, output, 0, false, ctx.as_deref_mut())?,
             "ol" => self.handle_list_with_context(node, output, 0, true, ctx.as_deref_mut())?,
             "li" => self.handle_list_item_with_context(node, output, 0, ctx.as_deref_mut())?,
@@ -274,12 +470,12 @@ impl MarkdownConverter {
             "table" => self.handle_table_with_context(node, output, depth, ctx.as_deref_mut())?,
             "script" | "style" | "noscript" => {}
             "video" | "audio" => {
-                self.extract_media_urls(node, tag_name, output);
-                self.traverse_children(node, output, depth + 1, ctx)?;
+                self.extract_media_urls(node, tag_name, output, ctx.as_deref_mut())?;
+                self.traverse_children(node, output, depth + 1, ctx.as_deref_mut())?;
             }
-            "source" => self.extract_source_url(node, output),
-            "track" => self.extract_track_url(node, output),
-            "area" => self.extract_area_link(node, output),
+            "source" => self.extract_source_url(node, output, ctx.as_deref_mut())?,
+            "track" => self.extract_track_url(node, output, ctx.as_deref_mut())?,
+            "area" => self.extract_area_link(node, output, ctx.as_deref_mut())?,
             _ => self.traverse_children(node, output, depth + 1, ctx)?,
         }
         Ok(())
@@ -291,7 +487,7 @@ impl MarkdownConverter {
         tag_name: &str,
         output: &mut String,
         depth: usize,
-        ctx: Option<&mut ConversionContext>,
+        mut ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         use crate::security::SanitizeAction;
 
@@ -318,7 +514,7 @@ impl MarkdownConverter {
         let is_fast_path = ctx.as_ref().is_some_and(|c| c.is_fast_path);
 
         if !is_fast_path && self.security_validator.is_void_form_control(tag_name) {
-            self.handle_void_form_control(node, output);
+            self.handle_void_form_control(node, output, ctx.as_deref_mut())?;
             return Ok(());
         }
 
@@ -409,45 +605,23 @@ impl MarkdownConverter {
         self.handle_element_internal(node, tag_name, output, depth, Some(ctx))
     }
 
-    /// Escape a URL destination for use inside a Markdown link.
-    ///
-    /// If the URL contains characters that would break a bare `(url)`
-    /// destination (spaces, parentheses, `<`, `>`), `escape_link_destination`
-    /// wraps the URL in angle brackets with both `<` and `>` percent-encoded.
-    /// Otherwise the URL is returned unchanged.
-    ///
-    /// # Arguments
-    ///
-    /// * `url` - The sanitized URL string to escape.
-    ///
-    /// # Returns
-    ///
-    /// A `String` safe for use as a Markdown link destination.
-    pub(super) fn escape_link_destination(url: &str) -> String {
-        if url.contains(' ')
-            || url.contains('(')
-            || url.contains(')')
-            || url.contains('<')
-            || url.contains('>')
+    /// Return an upper bound for the temporary `String` created by URL
+    /// resolution.  Absolute and disabled-resolution paths copy only `url`;
+    /// relative paths can include the base URL and one separator.
+    pub(super) fn resolved_url_capacity(&self, url: &str) -> Result<usize, ConversionError> {
+        if !self.options.resolve_relative_urls
+            || self.options.base_url.is_none()
+            || Self::has_absolute_uri_scheme(url)
         {
-            /* Wrap in angle brackets; percent-encode '<' and '>' so they
-             * do not break angle-bracket destination semantics. */
-            let escaped = url.replace('<', "%3C").replace('>', "%3E");
-            format!("<{}>", escaped)
-        } else {
-            url.to_string()
+            return Ok(url.len());
         }
-    }
 
-    /// Escape text for use inside Markdown link/image label brackets.
-    ///
-    /// Labels are enclosed in `[...]`; unescaped brackets or backslashes from
-    /// attacker-controlled HTML text can break out of the label and inject a
-    /// new Markdown destination.  Delegates to the canonical
-    /// [`crate::security::escape_link_label`] so all label-escaping sites
-    /// share a single implementation (AGENTS.md Rule 27).
-    pub(super) fn escape_link_label(label: &str) -> String {
-        crate::security::escape_link_label(label).into_owned()
+        self.options
+            .base_url
+            .as_ref()
+            .and_then(|base| base.len().checked_add(url.len()))
+            .and_then(|length| length.checked_add(1))
+            .ok_or_else(|| ConversionError::MemoryLimit("resolved URL size overflow".into()))
     }
 
     /// Emit a Markdown link `[label](url)\n` into `output`.
@@ -455,7 +629,7 @@ impl MarkdownConverter {
     /// Centralizes the label-escape and URL-destination-escape logic shared
     /// by the embedded-content, media, source, track, and area emit sites.
     /// Both label and destination are escaped to prevent Markdown injection
-    /// (see [`escape_link_label`] and [`escape_link_destination`]).
+    /// by the shared append helpers.
     ///
     /// # Arguments
     ///
@@ -463,24 +637,24 @@ impl MarkdownConverter {
     ///   first non-empty trimmed value is used. This allows callers to
     ///   express a priority chain (e.g., `alt` text before `title` text
     ///   before a URL-derived fallback).
-    /// * `fallback_label` - Fallback label when all candidates are empty.
     /// * `safe_url` - Already-sanitized URL from `SecurityValidator`.
     /// * `output` - The output buffer to append to.
     fn emit_markdown_link(
         label_candidates: &[Option<&str>],
-        fallback_label: &str,
         safe_url: &str,
         output: &mut String,
-    ) {
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
         let label = label_candidates
             .iter()
             .filter_map(|opt| opt.map(str::trim).filter(|s| !s.is_empty()))
             .next()
-            .unwrap_or(fallback_label);
-        let escaped_label = Self::escape_link_label(label);
-        let escaped_dest = Self::escape_link_destination(safe_url);
-        output.push_str(&format!("[{}]({})", escaped_label, escaped_dest));
-        output.push('\n');
+            .unwrap_or(safe_url);
+        append_char_with_context(output, '[', ctx)?;
+        append_link_label(output, label, ctx)?;
+        append_str_with_context(output, "](", ctx)?;
+        append_link_destination(output, safe_url, ctx)?;
+        append_str_with_context(output, ")\n", ctx)
     }
 
     /// Extract `src` and `poster` URLs from `<video>` / `<audio>` elements
@@ -490,29 +664,34 @@ impl MarkdownConverter {
     /// and the `poster` thumbnail URL (as a `![](url)` image) are emitted.
     /// For `<audio>` elements, only the `src` URL is emitted. All URLs pass
     /// through `SecurityValidator::sanitize_url` before emission.
-    fn extract_media_urls(&self, node: &Handle, tag_name: &str, output: &mut String) {
+    fn extract_media_urls(
+        &self,
+        node: &Handle,
+        tag_name: &str,
+        output: &mut String,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
         if let NodeData::Element { ref attrs, .. } = node.data {
             let attrs_borrowed = attrs.borrow();
 
             let src = attrs_borrowed
                 .iter()
                 .find(|a| a.name.local.as_ref() == "src")
-                .map(|a| a.value.to_string());
+                .map(|a| a.value.as_ref());
             let title = attrs_borrowed
                 .iter()
                 .find(|a| a.name.local.as_ref() == "title")
-                .map(|a| a.value.to_string());
+                .map(|a| a.value.as_ref());
 
             if let Some(u) = src {
                 let trimmed = u.trim();
                 if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
-                    let resolved_url = self.resolve_url(safe_url);
-                    Self::emit_markdown_link(
-                        &[title.as_deref()],
-                        &resolved_url,
-                        &resolved_url,
-                        output,
-                    );
+                    let url_capacity = self.resolved_url_capacity(safe_url)?;
+                    with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                        let resolved_url = self.resolve_url(safe_url);
+                        Self::emit_markdown_link(&[title], &resolved_url, output, ctx)
+                    })?;
                 }
             }
 
@@ -521,27 +700,36 @@ impl MarkdownConverter {
                 && let Some(poster) = attrs_borrowed
                     .iter()
                     .find(|a| a.name.local.as_ref() == "poster")
-                    .map(|a| a.value.to_string())
+                    .map(|a| a.value.as_ref())
             {
                 let trimmed = poster.trim();
                 if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
-                    let resolved_url = self.resolve_url(safe_url);
-                    let escaped_dest = Self::escape_link_destination(&resolved_url);
-                    output.push_str(&format!("![]({})", escaped_dest));
-                    output.push('\n');
+                    let url_capacity = self.resolved_url_capacity(safe_url)?;
+                    with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                        let resolved_url = self.resolve_url(safe_url);
+                        append_image_with_context(output, "", &resolved_url, None, ctx)?;
+                        append_char_with_context(output, '\n', ctx)
+                    })?;
                 }
             }
         }
+        Ok(())
     }
 
     /// Extract `src` from a `<source>` element as a Markdown link.
-    fn extract_source_url(&self, node: &Handle, output: &mut String) {
+    fn extract_source_url(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
         if let NodeData::Element { ref attrs, .. } = node.data {
             let attrs_borrowed = attrs.borrow();
             let src = attrs_borrowed
                 .iter()
                 .find(|a| a.name.local.as_ref() == "src")
-                .map(|a| a.value.to_string());
+                .map(|a| a.value.as_ref());
 
             if let Some(u) = src {
                 let trimmed = u.trim();
@@ -550,27 +738,32 @@ impl MarkdownConverter {
                     let type_attr = attrs_borrowed
                         .iter()
                         .find(|a| a.name.local.as_ref() == "type")
-                        .map(|a| a.value.to_string());
-                    let resolved_url = self.resolve_url(safe_url);
-                    Self::emit_markdown_link(
-                        &[type_attr.as_deref()],
-                        &resolved_url,
-                        &resolved_url,
-                        output,
-                    );
+                        .map(|a| a.value.as_ref());
+                    let url_capacity = self.resolved_url_capacity(safe_url)?;
+                    with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                        let resolved_url = self.resolve_url(safe_url);
+                        Self::emit_markdown_link(&[type_attr], &resolved_url, output, ctx)
+                    })?;
                 }
             }
         }
+        Ok(())
     }
 
     /// Extract `src` and `label` from a `<track>` element as a Markdown link.
-    fn extract_track_url(&self, node: &Handle, output: &mut String) {
+    fn extract_track_url(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
         if let NodeData::Element { ref attrs, .. } = node.data {
             let attrs_borrowed = attrs.borrow();
             let src = attrs_borrowed
                 .iter()
                 .find(|a| a.name.local.as_ref() == "src")
-                .map(|a| a.value.to_string());
+                .map(|a| a.value.as_ref());
 
             if let Some(u) = src {
                 let trimmed = u.trim();
@@ -578,27 +771,32 @@ impl MarkdownConverter {
                     let label = attrs_borrowed
                         .iter()
                         .find(|a| a.name.local.as_ref() == "label")
-                        .map(|a| a.value.to_string());
-                    let resolved_url = self.resolve_url(safe_url);
-                    Self::emit_markdown_link(
-                        &[label.as_deref()],
-                        &resolved_url,
-                        &resolved_url,
-                        output,
-                    );
+                        .map(|a| a.value.as_ref());
+                    let url_capacity = self.resolved_url_capacity(safe_url)?;
+                    with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                        let resolved_url = self.resolve_url(safe_url);
+                        Self::emit_markdown_link(&[label], &resolved_url, output, ctx)
+                    })?;
                 }
             }
         }
+        Ok(())
     }
 
     /// Extract `href` and `alt` from an `<area>` element as a Markdown link.
-    fn extract_area_link(&self, node: &Handle, output: &mut String) {
+    fn extract_area_link(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
         if let NodeData::Element { ref attrs, .. } = node.data {
             let attrs_borrowed = attrs.borrow();
             let href = attrs_borrowed
                 .iter()
                 .find(|a| a.name.local.as_ref() == "href")
-                .map(|a| a.value.to_string());
+                .map(|a| a.value.as_ref());
 
             if let Some(u) = href {
                 let trimmed = u.trim();
@@ -606,20 +804,19 @@ impl MarkdownConverter {
                     let alt = attrs_borrowed
                         .iter()
                         .find(|a| a.name.local.as_ref() == "alt")
-                        .map(|a| a.value.to_string());
+                        .map(|a| a.value.as_ref());
                     let title = attrs_borrowed
                         .iter()
                         .find(|a| a.name.local.as_ref() == "title")
-                        .map(|a| a.value.to_string());
-                    let resolved_url = self.resolve_url(safe_url);
-                    Self::emit_markdown_link(
-                        &[alt.as_deref(), title.as_deref()],
-                        &resolved_url,
-                        &resolved_url,
-                        output,
-                    );
+                        .map(|a| a.value.as_ref());
+                    let url_capacity = self.resolved_url_capacity(safe_url)?;
+                    with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                        let resolved_url = self.resolve_url(safe_url);
+                        Self::emit_markdown_link(&[alt, title], &resolved_url, output, ctx)
+                    })?;
                 }
             }
         }
+        Ok(())
     }
 }
