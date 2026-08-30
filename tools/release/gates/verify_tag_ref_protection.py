@@ -64,6 +64,10 @@ def _repository_from_origin_url(remote_url: str) -> str:
     raise ValueError("origin remote must be a supported GitHub URL")
 
 
+class GitResolutionError(Exception):
+    """Raised when the git executable cannot be run to resolve the origin."""
+
+
 def _repository_from_origin() -> str:
     """Resolve the repository from the checkout's origin remote."""
     try:
@@ -77,9 +81,10 @@ def _repository_from_origin() -> str:
     except subprocess.TimeoutExpired as error:
         raise ValueError("origin remote lookup timed out") from error
     except OSError as error:
-        # Missing git executable: fail closed with the same diagnostic
-        # style as command failures.
-        raise ValueError(
+        # Missing or unlaunchable git executable: this is an operational
+        # failure, not an invalid repository argument.  Propagate a
+        # distinct type so main() can report the cause accurately.
+        raise GitResolutionError(
             "could not run git to resolve the origin remote"
         ) from error
     if result.returncode != 0 or not result.stdout.strip():
@@ -216,6 +221,9 @@ def main() -> int:
         return 1
     except ValueError as exc:
         print(f"FAIL: invalid repository argument: {exc}", file=sys.stderr)
+        return 1
+    except GitResolutionError as exc:
+        print(f"FAIL: could not resolve the origin remote: {exc}", file=sys.stderr)
         return 1
     except subprocess.CalledProcessError as exc:
         print(

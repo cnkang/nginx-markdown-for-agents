@@ -69,7 +69,11 @@ def _resolve_manifest_path() -> pathlib.Path:
             raise ValueError(
                 f"release directory name is not a valid SemVer: {name!r}"
             )
-        base, separator, pre = name.partition("-")
+        # Build metadata ("+build.7") is syntactically validated above but
+        # ignored for precedence: strip it before partitioning so it never
+        # contaminates the main or prerelease identifiers.
+        precedence_name = name.split("+", 1)[0]
+        base, separator, pre = precedence_name.partition("-")
         main = tuple(int(part) for part in re.findall(r"\d+", base))
         if not separator:
             # Stable release: ranks above every prerelease of the same
