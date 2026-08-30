@@ -125,8 +125,9 @@ run_case || rc=$?
   # used to build allowlists) are skipped by the allowlist in the
   # detector, not by this filter.
   if grep -REn "${_pcre_needle}" tools/harness/detect_*.sh \
-      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|([[:space:]]|[;|&({]|^)[A-Za-z_][A-Za-z0-9_]*=' \
-      | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then
+      | sed -E 's/^[^:]*:[0-9]+://' \
+      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|(^|[[:space:]]|[;|&({])[A-Za-z_][A-Za-z0-9_]*=' \
+      | grep -vE '^[[:space:]]*(#|//)' >/dev/null 2>&1; then
      echo "FAIL: prohibited PCRE regex classes found" >&2
      exit 1
   fi
@@ -135,8 +136,9 @@ run_case || rc=$?
   #    semantics.
   _bre_needle="${_backslash}${_backslash}[()]"   # constructed at runtime
   if grep -REn "${_bre_needle}" tools/harness/detect_*.sh \
-      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|([[:space:]]|[;|&({]|^)[A-Za-z_][A-Za-z0-9_]*=' \
-      | grep -vE ':[0-9]+:[[:space:]]*(#|//)' >/dev/null 2>&1; then
+      | sed -E 's/^[^:]*:[0-9]+://' \
+      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|(^|[[:space:]]|[;|&({])[A-Za-z_][A-Za-z0-9_]*=' \
+      | grep -vE '^[[:space:]]*(#|//)' >/dev/null 2>&1; then
      echo "FAIL: BRE-only grouping syntax found" >&2
      exit 1
   fi

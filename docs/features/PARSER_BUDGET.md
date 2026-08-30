@@ -290,7 +290,7 @@ Request arrives
     │      buffering) → failed conversion attempt: conversions_attempted/
     │      failed + failures_resource_limit recorded, outcome
     │      failed_open|failed_closed per error policy, category:
-    │      resource_limit
+    │      resource_limit, reason: memory_budget_exceeded
     │
     ├─ Full-buffer pre-parse deadline checkpoint
     │   ├─ parser_timeout= (nonzero, from conversion_start, check first)
@@ -324,21 +324,24 @@ Request arrives
 The failure branches use the canonical lowercase codes from
 [DECISION_CHAIN.md](DECISION_CHAIN.md): the **primary outcome** is
 `failed_open` (with `markdown_error_policy pass`) or `failed_closed`
-(with `fail_closed`/`status N`), and the **failure category** is
-`timeout` or `budget_exceeded`. A `conversion_memory` failure with a
-known size (Content-Length present) is an eligibility cap: the request
-is recorded as `not_eligible` (reason `not_eligible`) before any FFI
-conversion attempt, and the module forwards the original response
-without evaluating `markdown_error_policy` (prechecked passthrough).
-Only a failure detected while buffering an unknown-size body (or any
-conversion/body-buffer failure) enters the error policy. The category
-for a parser working-set failure is `budget_exceeded`. The
-category appears in the `category=` field of the decision log; the
-specific reason (`not_eligible`, `timeout`, `budget_exceeded`, ...)
-appears as the `reason` label on `nginx_markdown_requests_total`. The
-outcome appears in the `outcome` label. Both labels are lowercase
-canonical values — the internal converter constants (`PARSE_TIMEOUT`,
-`PARSE_BUDGET_EXCEEDED`) are not the public labels.
+(with `fail_closed`/`status N`). The **failure category** (`category=`
+field of the decision log) is the coarse `resource_limit` for every
+budget failure (memory budgets and input-size overruns) and `timeout`
+for deadline failures. The **reason** (`reason` label on
+`nginx_markdown_requests_total`, also `reason=` in the decision log)
+is the specific canonical key recorded for that failure:
+`memory_budget_exceeded` for a `conversion_memory` overrun,
+`budget_exceeded` for a parser working-set failure, and `timeout` for
+a deadline failure. A `conversion_memory` failure with a known size
+(Content-Length present) is an eligibility cap: the request becomes
+`not_eligible` (reason `not_eligible`, category omitted)
+before any FFI conversion attempt, and the module forwards the
+original response without evaluating `markdown_error_policy`
+(prechecked passthrough). Only a failure detected while buffering an
+unknown-size body (or any conversion/body-buffer failure) enters the
+error policy. The outcome appears in the `outcome` label. All labels
+are lowercase canonical values — the internal converter constants
+(`PARSE_TIMEOUT`, `PARSE_BUDGET_EXCEEDED`) are not the public labels.
 
 ### Limit Priority
 

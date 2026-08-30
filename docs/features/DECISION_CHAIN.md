@@ -231,6 +231,7 @@ implementation events are not registry entries.
 | `decompression_io_error` | I/O error during decompression operation |
 | `timeout` | Conversion exceeded a deadline. In the full-buffer path, the converter checks `parser_timeout=` before `conversion_timeout=` at the pre-parse and post-parse checkpoints. It measures the parser deadline from `conversion_start` and `parse_start` respectively. Traversal and output then use only the remaining overall deadline. A nonzero `parser_timeout=` remains active when `conversion_timeout=0`. |
 | `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=` (default 32m) |
+| `memory_budget_exceeded` | `markdown_limits conversion_memory=` exceeded while buffering an unknown-size body, or another conversion working-set memory limit; the module records category `resource_limit` and increments `failures_resource_limit` |
 | `overload` | Inflight guard rejected the request |
 | `invalid_dynconf` / `degraded_snapshot` | Dynamic configuration error / degraded snapshot |
 | `header_plan_apply_error` | Header plan apply error |
