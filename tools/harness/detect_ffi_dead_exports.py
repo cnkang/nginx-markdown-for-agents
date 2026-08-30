@@ -256,26 +256,34 @@ def _mask_inline_comments(
         c = chars[i]
         if in_dq:
             if c == "\\" and i + 1 < length:
+                chars[i] = " "
+                chars[i + 1] = " "
                 i += 2
                 continue
+            chars[i] = " "
             if c == '"':
                 in_dq = False
             i += 1
             continue
         if in_sq:
             if c == "\\" and i + 1 < length:
+                chars[i] = " "
+                chars[i + 1] = " "
                 i += 2
                 continue
+            chars[i] = " "
             if c == "'":
                 in_sq = False
             i += 1
             continue
         if c == '"':
             in_dq = True
+            chars[i] = " "
             i += 1
             continue
         if c == "'":
             in_sq = True
+            chars[i] = " "
             i += 1
             continue
         if c == "/" and i + 1 < length:
