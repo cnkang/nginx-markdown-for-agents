@@ -130,14 +130,22 @@ where
 }
 
 fn link_label_escape_capacity(label: &str) -> Result<usize, ConversionError> {
-    let needs_escape = label.chars().any(|ch| {
-        matches!(
+    // escape_link_label prefixes a backslash to each escapable character
+    // (9 chars) and replaces \n/\r with a space (1:1).  The exact extra
+    // bytes are the count of escapable characters, not a fixed +8.
+    let mut extra = 0usize;
+    for ch in label.chars() {
+        if matches!(
             ch,
-            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' | '\n' | '\r'
-        )
-    });
-    if needs_escape {
-        label.len().checked_add(8).ok_or_else(|| {
+            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~'
+        ) {
+            extra = extra.checked_add(1).ok_or_else(|| {
+                ConversionError::MemoryLimit("link label working-set size overflow".into())
+            })?;
+        }
+    }
+    if extra > 0 {
+        label.len().checked_add(extra).ok_or_else(|| {
             ConversionError::MemoryLimit("link label working-set size overflow".into())
         })
     } else {
