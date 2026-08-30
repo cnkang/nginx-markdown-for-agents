@@ -1082,8 +1082,8 @@ The alignment works as follows:
 | Skip codes (`not_eligible`, `skipped_*`, `bypass_no_transform`) | `nginx_markdown_requests_total{outcome="skipped",reason="..."}` | `reason` field in decision log | `grep "reason=not_eligible" error.log` |
 | Failure categories (`conversion`, `resource_limit`, `system`) | Canonical failed outcome in `nginx_markdown_requests_total{outcome=~"failed_(open|closed)"}` | `category` field in decision log | `grep -E "category=(conversion|resource_limit|system)" error.log` |
 | `converted` | `nginx_markdown_requests_total{outcome="converted"}` | `reason` field in decision log | `grep "reason=converted" error.log` |
-| `failed_open` | `nginx_markdown_requests_total{outcome="failed_open"}` | `reason` field in decision log | `grep "reason=failed_open" error.log` |
-| `failed_closed` | `nginx_markdown_requests_total{outcome="failed_closed"}` | `reason` field in decision log | `grep "reason=failed_closed" error.log` |
+| `failed_open` | `nginx_markdown_requests_total{outcome="failed_open"}` | `outcome` field in decision log | `grep "outcome=failed_open" error.log` |
+| `failed_closed` | `nginx_markdown_requests_total{outcome="failed_closed"}` | `outcome` field in decision log | `grep "outcome=failed_closed" error.log` |
 
 #### Correlating a Metric Spike with Logs
 
@@ -1196,7 +1196,7 @@ The `markdown_log_verbosity` directive controls which decision outcomes produce 
 | `info` (default) | All outcomes | Base | Recommended for rollout — full visibility into every decision |
 | `debug` | All outcomes | Extended (adds `filter_value`, `accept`, `status`) | Troubleshooting — maximum detail for diagnosing specific requests |
 
-At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, and `converted`) are silently suppressed. Both levels only emit failure outcomes such as `failed_open` and `failed_closed`. At `info` and `debug` levels, the full bounded outcome set is available. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`. The Prometheus `nginx_markdown_requests_total` family carries outcome-level reason values (for example `failed_open` and `failed_closed`) in its `reason` label. Specific failure reason codes such as `memory_budget_exceeded` and `timeout` appear in decision log entries, not in the `requests_total` `reason` label.
+At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, and `converted`) are silently suppressed. Both levels only emit failure outcomes such as `failed_open` and `failed_closed`. At `info` and `debug` levels, the full bounded outcome set is available. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`. The Prometheus `nginx_markdown_requests_total` family carries the terminal classification in its `outcome` label (`converted`, `failed_open`, `failed_closed`, `skipped`) and the outcome-specific code in its `reason` label. Specific failure reason codes such as `memory_budget_exceeded` and `timeout` appear in decision log entries, not in the `requests_total` `reason` label.
 
 #### Configuration examples
 
