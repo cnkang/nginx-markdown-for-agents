@@ -214,35 +214,54 @@ def _scan_c_call_file(
     in_block_comment = False
     for lineno, line in enumerate(text.splitlines(), start=1):
         _update_guard_stack(line, active_guards)
-        in_block_comment = _update_block_comment_state(line, in_block_comment)
-        if in_block_comment or _is_non_callsite_line(line):
+        code, in_block_comment = _mask_inline_comments(line, in_block_comment)
+        if _is_non_callsite_line(code):
             continue
-        for match in CALLSITE_RE.finditer(line):
+        for match in CALLSITE_RE.finditer(code):
             _record_callsite(callsites, match, path, lineno, line, active_guards)
 
 
-def _update_block_comment_state(line: str, in_block: bool) -> bool:
-    """Return the block-comment state after processing one source line.
+def _mask_inline_comments(line: str, in_block: bool) -> tuple[str, bool]:
+    """Return (code, new_block_state) for one source line.
 
-    Tracks ``/* ... */`` spans across lines so a multi-line comment body
-    (which does not start every continuation line with ``*``) is not
-    scanned for callsites.  The transition is greedy: the first ``*/``
-    after an opening ``/*`` closes the span.
+    Comment segments — ``/* ... */`` spans (including spans that open or
+    close on this line) and trailing ``//`` line comments — are replaced
+    with spaces so callsite matching only sees non-comment code, while the
+    block-comment state is carried across lines.
     """
+    chars = list(line)
+    length = len(chars)
     i = 0
-    while True:
+    while i < length:
         if in_block:
             end = line.find("*/", i)
             if end == -1:
-                return True
+                for j in range(i, length):
+                    chars[j] = " "
+                return "".join(chars), True
+            for j in range(i, end + 2):
+                chars[j] = " "
             in_block = False
             i = end + 2
-        else:
-            start = line.find("/*", i)
-            if start == -1:
-                return in_block
-            in_block = True
-            i = start + 2
+            continue
+        start = line.find("/*", i)
+        if start == -1:
+            # Mask any trailing // line comment after the last code span.
+            slash = line.find("//", i)
+            if slash != -1:
+                for j in range(slash, length):
+                    chars[j] = " "
+            return "".join(chars), in_block
+        end = line.find("*/", start + 2)
+        if end == -1:
+            for j in range(start, length):
+                chars[j] = " "
+            return "".join(chars), True
+        for j in range(start, end + 2):
+            chars[j] = " "
+        in_block = False
+        i = end + 2
+    return "".join(chars), in_block
 
 
 def _is_non_callsite_line(line: str) -> bool:
@@ -392,13 +411,13 @@ def _callsite_names(text: str) -> set[str]:
     # declarations do not count as test references.
     in_block_comment = False
     for line in text.splitlines():
-        in_block_comment = _update_block_comment_state(line, in_block_comment)
-        if in_block_comment or _is_non_callsite_line(line):
+        code, in_block_comment = _mask_inline_comments(line, in_block_comment)
+        if _is_non_callsite_line(code):
             continue
         # Mask out double-quoted string literals so markdown_* names inside
         # test payload strings (e.g. "markdown_convert") are not counted as
         # references.
-        masked = re.sub(r'"[^"\n]*"', '""', line)
+        masked = re.sub(r'"[^"\n]*"', '""', code)
         for match in FN_POINTER_RE.finditer(masked):
             # The regex enforces the markdown_ prefix already.
             names.add(match.group(1))

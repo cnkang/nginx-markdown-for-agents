@@ -144,7 +144,7 @@ for file in "${source_files[@]}"; do
             NR == end && !printed { print last_func; printed = 1 }
         ')
 
-        if [[ -z "$func_start" ]]; then
+        if [[ -z "$func_start" || ! "$func_start" =~ ^[0-9]+$ ]]; then
             continue
         fi
 
