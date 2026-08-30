@@ -12,7 +12,9 @@ This page focuses on implementation-level defenses and threat boundaries. For op
 
 1. **XSS (Cross-Site Scripting)**: Malicious JavaScript in HTML that could execute in downstream contexts
 2. **XXE (XML External Entity)**: External entity references that could read local files or make network requests
-3. **SSRF (Server-Side Request Forgery)**: External resource loading that could probe internal networks
+3. **Dangerous URL schemes**: `javascript:`, `data:`, `vbscript:`, `file:`,
+   `about:` links removed from output (this module never initiates
+   server-side network requests)
 4. **Code Injection**: Event handlers, inline scripts, and other executable content
 5. **Resource Exhaustion**: Deeply nested structures or large documents that could cause DoS
 
@@ -124,7 +126,7 @@ pub fn is_event_handler(&self, attr_name: &str) -> bool {
 - `javascript:` - JavaScript execution
 - `data:` - Can contain executable content
 - `vbscript:` - VBScript execution (legacy IE)
-- `file:` - Local file access (SSRF)
+- `file:` - Local file access (unsafe scheme for link output)
 - `about:` - Browser internal URLs
 
 **Safe URL Schemes Allowed**:
@@ -379,7 +381,8 @@ The implementation details in this document feed into a few operator-facing conc
 - **OWASP Top 10**: Addresses A03:2021 (Injection)
 - **CWE-79**: XSS prevention
 - **CWE-611**: XXE prevention
-- **CWE-918**: SSRF prevention
+- **CWE-918**: Unsafe URL scheme filtering (this module never initiates
+  server-side network requests)
 
 ### Security Certifications
 
@@ -406,7 +409,7 @@ The implementation details in this document feed into a few operator-facing conc
 - Initial security implementation
 - XSS prevention (script tags, event handlers, dangerous URLs)
 - XXE prevention (html5ever design)
-- SSRF prevention (iframe, object, embed removal)
+- Unsafe URL scheme filtering (iframe, object, embed removal)
 - Comprehensive security test suite
 - Security documentation
 
