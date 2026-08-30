@@ -20,7 +20,9 @@
 //! # Defense Layers
 //!
 //! 1. **Input Validation**: Validate HTML structure and size before processing
-//! 2. **Element Sanitization**: Remove dangerous elements (script, style, etc.); strip tags but preserve content for form and embedded content elements (iframe, object, embed)
+//! 2. **Element Sanitization**: Remove dangerous elements (script, style, etc.);
+//!    strip safe container tags while applying the form-control privacy policy
+//!    and preserving safe embedded-content fallback text
 //! 3. **Attribute Sanitization**: Remove event handlers (`on*` prefix match) and dangerous attributes
 //! 4. **URL Sanitization**: Block javascript:, data:, and external URLs
 //! 5. **Entity Safety**: html5ever prevents XXE by default (no external entity resolution)
@@ -56,23 +58,91 @@ const EMBEDDED_CONTENT_ELEMENTS: &[&str] = &[
     "embed",  // Void element — no children, but src URL is valuable context
 ];
 
-/// Form-related elements whose tags are stripped but whose child content is
-/// preserved for Markdown conversion. These elements may carry meaningful text
-/// (labels, button captions, option lists) that AI agents benefit from seeing,
-/// but the raw HTML tags must not leak into the Markdown output.
+/// Form-related elements whose tags are stripped before Markdown conversion.
+/// Labels, button captions, option labels, and visible output text remain useful
+/// page content, while control values are handled by the shared input policy.
 const FORM_ELEMENTS: &[&str] = &[
     "form",     // Container — children often hold descriptive text
     "button",   // Caption text is useful context
     "select",   // Contains <option> text
-    "textarea", // May contain default/placeholder text
+    "textarea", // Placeholder/label may be useful; default text is user data
     "fieldset", // Groups related controls with a <legend>
     "legend",   // Label for a <fieldset>
     "label",    // Descriptive text for a control
-    "option",   // Individual choice text inside <select>
+    "option",   // Display label remains; the value attribute does not
     "optgroup", // Group label for options
-    "datalist", // Suggestion list
-    "output",   // Calculation result text
+    "datalist", // Display labels remain; suggestion values do not
+    "output",   // Visible calculation result text remains
 ];
+
+/// Normalize an input type for the shared value-privacy policy.
+///
+/// HTML input types are ASCII case-insensitive. Whitespace is intentionally
+/// preserved: `type=" button "` is not the exact `button` type and therefore
+/// must not receive the button value fallback.
+pub(crate) fn normalize_input_type(raw_type: Option<&str>) -> String {
+    raw_type.unwrap_or("text").to_ascii_lowercase()
+}
+
+/// Return whether an exact normalized input type may use its `value` as a
+/// description fallback.
+///
+/// Only `button` is allowed. All other input types treat `value` as submitted
+/// or prefilled user data rather than page-visible descriptive text.
+pub(crate) fn input_type_allows_value_fallback(normalized_type: &str) -> bool {
+    normalized_type == "button"
+}
+
+/// Return whether an exact normalized input type must emit no description.
+///
+/// Hidden, image, and password controls are fully suppressed. In particular,
+/// password controls do not expose even their accessible label or placeholder.
+pub(crate) fn input_type_is_suppressed(normalized_type: &str) -> bool {
+    matches!(normalized_type, "hidden" | "image" | "password")
+}
+
+/// Select descriptive text for an input-like control using the shared privacy
+/// policy.
+///
+/// Empty or whitespace-only attributes do not block the next fallback. Submit
+/// and reset controls use `value` as their button caption; only an exact
+/// `button` type may otherwise use `value`. The iterator owns no data, so the
+/// returned slice remains borrowed from the caller's attribute storage.
+pub(crate) fn select_input_control_text<'a, I>(normalized_type: &str, attrs: I) -> Option<&'a str>
+where
+    I: IntoIterator<Item = (&'a str, &'a str)>,
+{
+    if input_type_is_suppressed(normalized_type) {
+        return None;
+    }
+
+    let mut aria_label = None;
+    let mut placeholder = None;
+    let mut value = None;
+
+    for (name, attr_value) in attrs {
+        if attr_value.trim().is_empty() {
+            continue;
+        }
+
+        match name {
+            "aria-label" if aria_label.is_none() => aria_label = Some(attr_value),
+            "placeholder" if placeholder.is_none() => placeholder = Some(attr_value),
+            "value" if value.is_none() => value = Some(attr_value),
+            _ => {}
+        }
+    }
+
+    if matches!(normalized_type, "submit" | "reset") {
+        return value;
+    }
+
+    aria_label.or(placeholder).or_else(|| {
+        input_type_allows_value_fallback(normalized_type)
+            .then_some(value)
+            .flatten()
+    })
+}
 
 /// HTML attributes whose values can navigate to or load a URL.
 ///
@@ -226,9 +296,9 @@ pub enum SanitizeAction {
     Allow,
     /// Remove the element and all its children
     Remove,
-    /// Strip the element tag but keep child content for text extraction.
-    /// Used for form-related elements whose text is meaningful but whose
-    /// HTML structure must not leak into Markdown output.
+    /// Strip the element tag while applying the element-specific content policy.
+    /// Labels, option labels, and visible output text remain eligible for
+    /// extraction; privacy-sensitive control defaults do not.
     StripElement,
     /// Strip dangerous attributes but keep the element
     StripAttributes,
@@ -548,7 +618,7 @@ mod tests {
         assert!(validator.is_embedded_content("embed"));
         assert!(!validator.is_embedded_content("div"));
 
-        // Form elements should be stripped (tag removed, children kept)
+        // Form elements should be stripped (tag removed, policy decides content)
         assert_eq!(
             validator.check_element("form"),
             SanitizeAction::StripElement
