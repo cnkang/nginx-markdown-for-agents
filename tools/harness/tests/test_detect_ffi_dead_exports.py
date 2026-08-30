@@ -126,3 +126,28 @@ def test_callsite_names_ignores_multiline_comment_body() -> None:
     names = detector._callsite_names(text)
     assert "markdown_convert" in names
     assert "markdown_decompress" not in names
+
+
+def test_mask_keeps_string_literal_callsites() -> None:
+    """URLs and strings containing // or /* must not hide real callsites."""
+    code, state = detector._mask_inline_comments(
+        'url = "http://example.com/x"; markdown_convert(NULL);', False
+    )
+    assert state is False
+    assert "markdown_convert" in code
+
+    code, state = detector._mask_inline_comments(
+        's = "a/*b"; markdown_decompress(NULL);', False
+    )
+    assert state is False
+    assert "markdown_decompress" in code
+
+    code, state = detector._mask_inline_comments(
+        "s = 'it\\'s // fine'; markdown_convert(NULL); // real comment", False
+    )
+    assert state is False
+    assert "markdown_convert" in code
+    # The trailing comment is masked, the single-quoted literal is not
+    # treated as a comment delimiter.
+    assert code.endswith("markdown_convert(NULL);                          ") or \
+        "markdown_convert(NULL);" in code
