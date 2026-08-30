@@ -57,7 +57,7 @@ pending until the blocking gates pass.
   completeness gate.
 - **Reason-code registry normalization**: one declarative lowercase registry
   now drives Rust, C, logs, metrics, diagnostics, and generated projections.
-  The former C-only uppercase mirror was removed.
+  The project removed the former C-only uppercase mirror.
 - **README consistency verification**: English and Chinese READMEs verified
   for version, directive, and default-value consistency.
 

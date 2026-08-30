@@ -187,7 +187,7 @@ curl -sD - -o /dev/null \
 - Conversion success rate > 95% (few or no `failed_open` / `failed_closed` request outcomes)
 - No decision-log failure reasons. Inspect the `reason=` field for
   specific reason-registry keys (`ffi_panic`, `memory_budget_exceeded`,
-  `timeout`, `conversion_error`, ...); reserve the `category=` field for
+  `timeout`, `conversion_error`, ...). Reserve the `category=` field for
   high-level classes (`conversion`, `resource_limit`, `system`). The
   reason values listed here are failure **reasons**, not categories
 - Conversion latency within the configured `markdown_limits`

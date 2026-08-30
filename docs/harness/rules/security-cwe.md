@@ -134,7 +134,8 @@ Required:
   caught exception types to ensure `ValueError` and `ImportError` are not in
   the tuple.  `ImportError` must remain **fatal** during startup: a missing
   `path_validation` module is a broken installation, not a fallback
-  condition, so it must not be swallowed into a permissive fallback path.
+  condition, so the detector must not swallow it into a permissive fallback
+  path.
 - For single-artifact CLI tools, prefer emitting the artifact to stdout and
   letting the trusted caller redirect it. Do not accept a caller-controlled
   output path when the Python process does not need filesystem ownership of
