@@ -195,7 +195,7 @@ grep "conversion time" /var/log/nginx/error.log | awk '{print $NF}' | sort -n | 
 | `markdown: outcome=converted stage=... reason=converted event=...` | INFO | Successful conversion with timing |
 
 `category=` is the high-level failure class (`conversion`, `resource_limit`,
-`system`); `reason=` carries the specific reason-registry key
+`system`), and `reason=` carries the specific reason-registry key
 (`conversion_error`, `memory_budget_exceeded`, `timeout`, `ffi_panic`, ...).
 Decision-log lines start with the `markdown:` prefix — matching on
 `grep "conversion failed"` will not find them.
@@ -462,7 +462,7 @@ curl -H "Accept: text/markdown" http://localhost/test
 | 0.3.x | < 1.24.0 | Not supported |
 
 > **Note**: The 0.3.x rows are historical. The authoritative, machine-readable
-> compatibility projection is generated from `tools/release-matrix.json`
+> compatibility projection comes from the generator that reads `tools/release-matrix.json`
 > (see `docs/releases/release-matrix.json` for the generated document and
 > its `generated_from` binding).
 
@@ -991,7 +991,8 @@ outcome/reason labels. It does not expose these sub-classifications as metric
 reason values.
 
 The `category` field is the broad class (`conversion`, `resource_limit`,
-`system`); the `reason` field is the specific reason-registry key.  The table
+`system`), and the `reason` field is the specific reason-registry key.  The
+table
 below lists reasons by their category — a reason is a value of the `reason=`
 field, never a value of `category=`.
 

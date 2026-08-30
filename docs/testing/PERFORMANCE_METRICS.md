@@ -70,8 +70,8 @@ All sample content is deterministic and version-controlled. The tier name `large
 
 Baselines are platform-specific JSON files stored in `perf/baselines/<platform>.json`.
 They contain only core metrics (`p50_ms`, `p95_ms`, `p99_ms`, `peak_memory_bytes`,
-`req_per_s`, `input_mb_per_s`) — runtime metadata like `stage_breakdown`, `iterations`,
-and `warmup` are excluded.
+`req_per_s`, `input_mb_per_s`) — the files exclude runtime metadata like
+`stage_breakdown`, `iterations`, and `warmup`.
 
 ### Generating or Updating a Baseline
 

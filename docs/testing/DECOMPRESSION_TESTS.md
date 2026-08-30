@@ -339,8 +339,8 @@ cd components/nginx-module/tests
      worker failure under the configured error policy
    - Unit tests assert the exact typed error classification for each case
    - Budget exceeded preserves the original Brotli response **when the
-     failure occurs before the response is committed**; after commit, the
-     module uses post-commit safe-finish or abort semantics and cannot
+     failure occurs before the module commits the response**. After commit,
+     the module uses post-commit safe-finish or abort semantics and cannot
      replay already-sent bytes
 
 4. **Configuration Gates**

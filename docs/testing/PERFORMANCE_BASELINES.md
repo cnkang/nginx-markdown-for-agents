@@ -305,8 +305,9 @@ kernel-tracked high-water mark for resident set size over the entire process
 lifetime. The entry disappears once the OS reaps the process, so the observer
 captures the value at exit time, not after. The observer also polls `VmRSS`
 during the run as a fallback when `VmHWM` cannot be read at exit (the caller
-has already reaped the process). When the fallback is used, the reported
-value is the last successfully sampled `VmRSS` reading — the last observed
+has already reaped the process). When the observer uses the fallback, the
+reported value is the last successfully sampled `VmRSS` reading — the last
+observed
 value, not an exact kernel-tracked peak (exactness applies only when the
 final allocation is known to precede that successful read and the `VmHWM`
 read succeeded).
