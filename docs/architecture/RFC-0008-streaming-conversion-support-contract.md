@@ -292,6 +292,25 @@ full-buffer conversion, provided the response remains within configured
 full-buffer resource limits (for example `markdown_limits conversion_memory=`
 and the memory budget):
 
+When the module selects the full-buffer path, its deadline contract follows
+[PARSER_BUDGET.md](../features/PARSER_BUDGET.md). At the pre-parse and
+post-parse checkpoints, the converter checks `parser_timeout=` before
+`conversion_timeout=`. The converter measures the parser deadline from
+`conversion_start` for the pre-parse check and from `parse_start` for the
+post-parse check. It measures `conversion_timeout=` from `conversion_start`
+at both checkpoints. It then uses that overall deadline for traversal and
+output. If elapsed time exceeds both deadlines at a shared checkpoint, the
+converter reports parser timeout. A zero `conversion_timeout=` leaves a
+nonzero `parser_timeout=` active. The two deadlines do not collapse into an
+earlier-of deadline.
+
+This ordering is specific to the full-buffer FFI checkpoints. True streaming
+uses a wall-clock `conversion_timeout=` and checks it at `feed_chunk` and
+`finalize` entry. It accumulates html5ever tokenizer work for
+`parser_timeout=` and checks that allowance at tokenizer-slice and
+finalization boundaries. Idle time between streaming chunks does not consume
+the parser allowance.
+
 - Strict ETag / `If-None-Match` handling that requires computing an ETag from
   the complete Markdown output.
 - Front matter fields that depend on full-text scanning to produce stable
