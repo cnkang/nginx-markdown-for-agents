@@ -1127,6 +1127,23 @@ test_send_304_send_header_fails(void)
     TEST_PASS("send_304 header failure");
 }
 
+static void
+test_send_304_send_header_again(void)
+{
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_AGAIN;
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    struct MarkdownResult result;
+    memset(&result, 0, sizeof(result));
+
+    ngx_int_t rc = ngx_http_markdown_send_304(r, &result);
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "send_304 must preserve downstream NGX_AGAIN");
+    TEST_PASS("send_304 header backpressure");
+}
+
 /* ── find_request_header tests ───────────────────────────────── */
 
 static void
@@ -1380,6 +1397,52 @@ test_capture_conditional_headers_excludes_range(void)
     TEST_ASSERT(ims->hash != 0 && range->hash != 0,
         "range request headers remain active");
     TEST_PASS("range conditional request remains source-scoped");
+}
+
+static void
+test_subrequest_capture_does_not_mutate_shared_validators(void)
+{
+    ngx_http_request_t *parent;
+    ngx_http_request_t *subrequest;
+    ngx_http_markdown_ctx_t parent_ctx;
+    ngx_http_markdown_ctx_t subrequest_ctx;
+    ngx_table_elt_t *validator;
+
+    g_pool_offset = 0;
+    parent = make_req();
+    subrequest = make_req();
+    if (parent == NULL || subrequest == NULL) {
+        TEST_FAIL("alloc failed");
+        return;
+    }
+
+    validator = add_header(&parent->headers_in.headers,
+                           "If-None-Match", "\"parent-etag\"");
+    parent->headers_in.if_none_match = validator;
+    subrequest->headers_in.headers = parent->headers_in.headers;
+    subrequest->headers_in.if_none_match = validator;
+    subrequest->parent = parent;
+    memset(&parent_ctx, 0, sizeof(parent_ctx));
+    memset(&subrequest_ctx, 0, sizeof(subrequest_ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(
+                    parent, &parent_ctx) == NGX_OK,
+                "parent must capture the shared validator");
+    TEST_ASSERT(validator->hash == 0 && validator->value.len == 0,
+                "parent capture must suppress the shared validator");
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(
+                    subrequest, &subrequest_ctx) == NGX_DECLINED,
+                "subrequest capture must decline shared validators");
+    TEST_ASSERT(!subrequest_ctx.conditional.captured
+                && !subrequest_ctx.conditional.suppressed
+                && validator->hash == 0 && validator->value.len == 0,
+                "subrequest capture must not alter parent suppression");
+
+    ngx_http_markdown_restore_conditional_request(parent, &parent_ctx);
+    TEST_ASSERT(validator->hash != 0
+                && validator->value.len == sizeof("\"parent-etag\"") - 1,
+                "parent restore must remain responsible for shared headers");
+    TEST_PASS("subrequest capture preserves shared parent validators");
 }
 
 /* ── handle_if_none_match tests ──────────────────────────────── */
@@ -1962,6 +2025,7 @@ main(void)
     test_send_304_null_result();
     test_send_304_empty_etag();
     test_send_304_send_header_fails();
+    test_send_304_send_header_again();
     test_send_304_etag_failure_restores_headers();
     test_send_304_etag_value_failure_restores_headers();
     test_send_304_vary_failure_restores_headers();
@@ -1975,6 +2039,7 @@ main(void)
     test_adopt_orphan_conditional_headers();
     test_adopt_orphan_restores_repeated_validators();
     test_capture_conditional_headers_excludes_range();
+    test_subrequest_capture_does_not_mutate_shared_validators();
 
     test_handle_inm_disabled();
     test_handle_inm_if_modified_since_only();
