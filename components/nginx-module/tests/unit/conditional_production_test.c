@@ -1282,6 +1282,9 @@ test_adopt_orphan_conditional_headers(void)
                 && ims->value.len
                    == sizeof("Wed, 21 Oct 2015 07:28:00 GMT") - 1,
         "orphaned validator values remain intact");
+    TEST_ASSERT(r->headers_in.if_none_match == inm
+                && r->headers_in.if_modified_since == ims,
+        "orphan adoption rebuilds typed validator pointers");
 
     /* A fresh capture on the re-adopted headers must succeed. */
     TEST_ASSERT(ngx_http_markdown_has_conditional_request(r),
@@ -1293,6 +1296,62 @@ test_adopt_orphan_conditional_headers(void)
         "re-captured validators are hidden again");
 
     TEST_PASS("adopt orphan conditional headers after internal redirect");
+}
+
+static void
+test_adopt_orphan_restores_repeated_validators(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *inm1;
+    ngx_table_elt_t *inm2;
+    ngx_table_elt_t *ims;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    /* Repeated If-None-Match fields: capture records a state entry for
+     * each one, so orphan adoption must restore every entry, not just
+     * the first match. */
+    inm1 = add_header(&r->headers_in.headers,
+                      "if-none-match", "\"first\"");
+    inm2 = add_header(&r->headers_in.headers,
+                      "if-none-match", "\"second\"");
+    ims = add_header(&r->headers_in.headers,
+                     "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_none_match = inm1;
+    r->headers_in.if_modified_since = ims;
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+        "repeated validators are captured");
+    TEST_ASSERT(inm1->hash == 0 && inm2->hash == 0 && ims->hash == 0,
+        "all repeated validator entries are suppressed");
+    TEST_ASSERT(inm1->value.len == 0 && inm2->value.len == 0,
+        "all repeated validator values are emptied");
+
+    /* Internal redirect loses the context; adoption must restore every
+     * suppressed entry and rebuild the typed pointer from the first one. */
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(inm1->hash != 0 && inm2->hash != 0 && ims->hash != 0,
+        "every repeated validator regains visibility");
+    TEST_ASSERT(inm1->value.len == sizeof("\"first\"") - 1
+                && inm2->value.len == sizeof("\"second\"") - 1,
+        "every repeated validator value length is rebuilt");
+    TEST_ASSERT(r->headers_in.if_none_match == inm1,
+        "typed pointer names the first restored entry");
+
+    /* A fresh capture re-owns all entries again. */
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+        "re-capture after adoption owns repeated entries");
+    TEST_ASSERT(inm1->hash == 0 && inm2->hash == 0,
+        "re-capture suppresses repeated entries again");
+
+    TEST_PASS("orphan adoption restores repeated validators");
 }
 
 static void
@@ -1914,6 +1973,7 @@ main(void)
     test_find_header_hash_zero_skipped();
     test_capture_restore_conditional_headers();
     test_adopt_orphan_conditional_headers();
+    test_adopt_orphan_restores_repeated_validators();
     test_capture_conditional_headers_excludes_range();
 
     test_handle_inm_disabled();
