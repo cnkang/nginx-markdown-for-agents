@@ -185,7 +185,11 @@ curl -sD - -o /dev/null \
 #### Safe to Continue
 
 - Conversion success rate > 95% (few or no `failed_open` / `failed_closed` request outcomes)
-- No decision-log failure reasons (`ffi_panic`, `memory_budget_exceeded`, `timeout`, or `conversion_error`). Inspect the `category=` field for high-level classes (`conversion`, `resource_limit`, `system`) and the `reason=` field for the specific reason-registry key (`conversion_error`, `memory_budget_exceeded`, `timeout`, `ffi_panic`, ...); the reason values listed here are failure **reasons**, not categories
+- No decision-log failure reasons. Inspect the `reason=` field for
+  specific reason-registry keys (`ffi_panic`, `memory_budget_exceeded`,
+  `timeout`, `conversion_error`, ...); reserve the `category=` field for
+  high-level classes (`conversion`, `resource_limit`, `system`). The
+  reason values listed here are failure **reasons**, not categories
 - Conversion latency within the configured `markdown_limits`
 - No upstream error rate increase
 - No `not_eligible` reason codes for requests you expect to convert

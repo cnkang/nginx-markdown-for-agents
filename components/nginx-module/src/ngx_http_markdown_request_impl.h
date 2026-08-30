@@ -2175,11 +2175,18 @@ ngx_http_markdown_resume_pending_304(ngx_http_request_t *r,
         return NGX_DECLINED;
     }
 
+    if (ctx->conditional.resume_completed) {
+        /* The pending 304 header send already completed; later body-filter
+         * entries must not re-enter the header send. */
+        return NGX_DONE;
+    }
+
     rc = ngx_http_send_header(r);
     if (rc == NGX_AGAIN) {
         return NGX_AGAIN;
     }
     if (rc == NGX_OK || rc == NGX_DONE) {
+        ctx->conditional.resume_completed = 1;
         return NGX_DONE;
     }
 

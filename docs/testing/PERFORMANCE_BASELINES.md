@@ -306,9 +306,10 @@ lifetime. The entry disappears once the OS reaps the process, so the observer
 captures the value at exit time, not after. The observer also polls `VmRSS`
 during the run as a fallback when `VmHWM` cannot be read at exit (the caller
 has already reaped the process). When the fallback is used, the reported
-value is the last successfully sampled `VmRSS` reading, not an exact
-kernel-tracked peak — treat `os_reported_peak` as exact only when the
-`VmHWM` read succeeded.
+value is the last successfully sampled `VmRSS` reading — the last observed
+value, not an exact kernel-tracked peak (exactness applies only when the
+final allocation is known to precede that successful read and the `VmHWM`
+read succeeded).
 
 ### macOS — `sampled_peak`
 

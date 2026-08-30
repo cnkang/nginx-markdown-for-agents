@@ -162,6 +162,13 @@ def _list_rulesets(repo: str) -> list[dict]:
         ).stdout
     except subprocess.TimeoutExpired as error:
         raise ValueError("ruleset listing timed out") from error
+    except OSError as error:
+        # Missing or unlaunchable gh executable: fail closed with the same
+        # classified result used for detail fetching, so main() reports a
+        # controlled failure instead of an unhandled traceback.
+        raise GitResolutionError(
+            "could not run gh to list repository rulesets"
+        ) from error
     summaries = _flatten_pages(json.loads(payload))
     detailed = []
     for summary in summaries:

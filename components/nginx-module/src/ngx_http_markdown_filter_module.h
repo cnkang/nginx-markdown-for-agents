@@ -997,6 +997,10 @@ typedef struct {
         ngx_http_markdown_conditional_header_state_t *header_states;
         ngx_flag_t                  captured;
         ngx_flag_t                  suppressed;
+        /* One-shot latch: set when a pending 304 header send completes;
+         * later body-filter entries return NGX_DONE without re-entering
+         * the header send. */
+        ngx_flag_t                  resume_completed;
     } conditional;
 
     /*
