@@ -762,6 +762,13 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
             ngx_http_markdown_reason_failed_open(),
             ngx_http_markdown_reason_from_error_category(
                 NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+        /* Establish a durable request-scoped bypass: install the context
+         * with eligible = 0 so the header filter sees a live context and
+         * passes the response through instead of re-entering the
+         * conversion path (which would double-count metrics and convert
+         * despite the fail-open decision). */
+        ctx->eligible = 0;
+        r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
         return NGX_DECLINED;
     }
     if (capture_rc != NGX_OK) {
