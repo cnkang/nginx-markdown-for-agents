@@ -805,6 +805,13 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
     if (capture_rc != NGX_OK) {
+        /*
+         * A declined capture (for example, a subrequest or Range request)
+         * still owns this cleanup-backed pool context. Publish it so the
+         * header filter reuses the context instead of registering a second
+         * cleanup.
+         */
+        r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
         return NGX_DECLINED;
     }
 

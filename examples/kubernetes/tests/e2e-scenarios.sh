@@ -228,19 +228,40 @@ append_json_patch_operation() {
     return 0
 }
 
+# Resolve the deployment container index by name, falling back to the first
+# container when the expected deployment-named container is not present.
+resolve_deployment_container_index() {
+    local container_names="$1"
+    local name_index
+    local container_name
+
+    name_index=0
+    while IFS= read -r container_name; do
+        if [[ "$container_name" == "$DEPLOYMENT_NAME" ]]; then
+            printf '%s\n' "$name_index"
+            return 0
+        fi
+        name_index=$((name_index + 1))
+    done <<< "$container_names"
+
+    printf '0\n'
+    return 0
+}
+
 # Build a JSON Patch for the named ConfigMap volume and its first mount.
 # Arguments describe the fields returned by kubectl JSONPath.  Empty field
 # values represent missing fields, while volume_configmap_exists distinguishes
 # a missing configMap object from a configMap object with a missing name.
 build_configmap_mount_patch() {
-    local volume_index="$1"
-    local volume_configmap_exists="$2"
-    local volume_configmap="$3"
-    local volumes_exist="$4"
-    local mount_index="$5"
-    local mount_path="$6"
-    local mount_read_only="$7"
-    local mounts_exist="$8"
+    local container_index="$1"
+    local volume_index="$2"
+    local volume_configmap_exists="$3"
+    local volume_configmap="$4"
+    local volumes_exist="$5"
+    local mount_index="$6"
+    local mount_path="$7"
+    local mount_read_only="$8"
+    local mounts_exist="$9"
     local patch_ops="["
     local patch_has_operation=false
     local operation
@@ -271,29 +292,29 @@ build_configmap_mount_patch() {
 
     if [[ "$mount_index" -ge 0 ]]; then
         if [[ -z "$mount_path" ]]; then
-            operation="{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/volumeMounts/${mount_index}/mountPath\",\"value\":\"/etc/nginx/conf.d/markdown\"}"
+            operation="{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/${container_index}/volumeMounts/${mount_index}/mountPath\",\"value\":\"/etc/nginx/conf.d/markdown\"}"
             patch_ops="$(append_json_patch_operation "$patch_ops" "$patch_has_operation" "$operation")"
             patch_has_operation=true
         elif [[ "$mount_path" != "/etc/nginx/conf.d/markdown" ]]; then
-            operation="{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/volumeMounts/${mount_index}/mountPath\",\"value\":\"/etc/nginx/conf.d/markdown\"}"
+            operation="{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/${container_index}/volumeMounts/${mount_index}/mountPath\",\"value\":\"/etc/nginx/conf.d/markdown\"}"
             patch_ops="$(append_json_patch_operation "$patch_ops" "$patch_has_operation" "$operation")"
             patch_has_operation=true
         fi
         if [[ -z "$mount_read_only" ]]; then
-            operation="{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/volumeMounts/${mount_index}/readOnly\",\"value\":true}"
+            operation="{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/${container_index}/volumeMounts/${mount_index}/readOnly\",\"value\":true}"
             patch_ops="$(append_json_patch_operation "$patch_ops" "$patch_has_operation" "$operation")"
             patch_has_operation=true
         elif [[ "$mount_read_only" != "true" ]]; then
-            operation="{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/volumeMounts/${mount_index}/readOnly\",\"value\":true}"
+            operation="{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/${container_index}/volumeMounts/${mount_index}/readOnly\",\"value\":true}"
             patch_ops="$(append_json_patch_operation "$patch_ops" "$patch_has_operation" "$operation")"
             patch_has_operation=true
         fi
     elif [[ -n "$mounts_exist" ]]; then
-        operation="{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/volumeMounts/-\",\"value\":{\"name\":\"markdown-config\",\"mountPath\":\"/etc/nginx/conf.d/markdown\",\"readOnly\":true}}"
+        operation="{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/${container_index}/volumeMounts/-\",\"value\":{\"name\":\"markdown-config\",\"mountPath\":\"/etc/nginx/conf.d/markdown\",\"readOnly\":true}}"
         patch_ops="$(append_json_patch_operation "$patch_ops" "$patch_has_operation" "$operation")"
         patch_has_operation=true
     else
-        operation="{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/volumeMounts\",\"value\":[{\"name\":\"markdown-config\",\"mountPath\":\"/etc/nginx/conf.d/markdown\",\"readOnly\":true}]}"
+        operation="{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/${container_index}/volumeMounts\",\"value\":[{\"name\":\"markdown-config\",\"mountPath\":\"/etc/nginx/conf.d/markdown\",\"readOnly\":true}]}"
         patch_ops="$(append_json_patch_operation "$patch_ops" "$patch_has_operation" "$operation")"
         patch_has_operation=true
     fi
@@ -308,8 +329,8 @@ build_configmap_mount_patch() {
 # it).  Idempotent: existing objects are repaired by name and missing objects
 # are appended, preserving every unrelated volume, mount, and manifest field.
 ensure_deployment_configmap_mount() {
-    local volume_index mount_index volumes_exist mounts_exist
-    local volume_names mount_names volume_configmap volume_path
+    local container_index volume_index mount_index volumes_exist mounts_exist
+    local container_names volume_names mount_names volume_configmap volume_path
     local volume_configmap_exists mount_path mount_read_only
     local name_index object_name
 
@@ -333,9 +354,14 @@ ensure_deployment_configmap_mount() {
         done <<< "$volume_names"
     fi
 
+    container_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
+        -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
+        2>/dev/null)"
+    container_index="$(resolve_deployment_container_index "$container_names")"
+
     mount_index=-1
     mount_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
-        -o jsonpath='{range .spec.template.spec.containers[0].volumeMounts[*]}{.name}{"\n"}{end}' \
+        -o "jsonpath={range .spec.template.spec.containers[${container_index}].volumeMounts[*]}{.name}{\"\n\"}{end}" \
         2>/dev/null)"
     if [[ -n "$mount_names" ]]; then
         name_index=0
@@ -369,11 +395,11 @@ ensure_deployment_configmap_mount() {
     if [[ "$mount_index" -ge 0 ]]; then
         mount_path="$(kubectl get deployment "$DEPLOYMENT_NAME" \
             -n "$NAMESPACE" \
-            -o "jsonpath={.spec.template.spec.containers[0].volumeMounts[${mount_index}].mountPath}" \
+            -o "jsonpath={.spec.template.spec.containers[${container_index}].volumeMounts[${mount_index}].mountPath}" \
             2>/dev/null)"
         mount_read_only="$(kubectl get deployment "$DEPLOYMENT_NAME" \
             -n "$NAMESPACE" \
-            -o "jsonpath={.spec.template.spec.containers[0].volumeMounts[${mount_index}].readOnly}" \
+            -o "jsonpath={.spec.template.spec.containers[${container_index}].volumeMounts[${mount_index}].readOnly}" \
             2>/dev/null)"
     fi
 
@@ -393,15 +419,15 @@ ensure_deployment_configmap_mount() {
     fi
     if [[ "$mount_index" -lt 0 ]]; then
         mounts_exist="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
-            -o jsonpath='{.spec.template.spec.containers[0].volumeMounts}' \
+            -o "jsonpath={.spec.template.spec.containers[${container_index}].volumeMounts}" \
             2>/dev/null)"
     fi
 
     local patch_ops
     patch_ops="$(build_configmap_mount_patch \
-        "$volume_index" "$volume_configmap_exists" "$volume_configmap" \
-        "$volumes_exist" "$mount_index" "$mount_path" "$mount_read_only" \
-        "$mounts_exist")" || {
+        "$container_index" "$volume_index" "$volume_configmap_exists" \
+        "$volume_configmap" "$volumes_exist" "$mount_index" "$mount_path" \
+        "$mount_read_only" "$mounts_exist")" || {
         log_error "Failed to build ConfigMap mount patch"
         return 1
     }
@@ -426,9 +452,11 @@ assert_configmap_mount_patch_applies() {
     local fixture_json="$1"
     local patch_json="$2"
     local description="$3"
+    local container_index="$4"
 
     if K8S_PATCH_FIXTURE="$fixture_json" \
         K8S_PATCH_DOCUMENT="$patch_json" \
+        K8S_PATCH_CONTAINER_INDEX="$container_index" \
         python3 - "$description" <<'PY'
 import copy
 import json
@@ -490,8 +518,9 @@ for operation in json.loads(os.environ["K8S_PATCH_DOCUMENT"]):
     apply_operation(document, operation)
 
 pod_spec = document["spec"]["template"]["spec"]
+container_index = int(os.environ["K8S_PATCH_CONTAINER_INDEX"])
 volume = pod_spec["volumes"][0]
-mount = pod_spec["containers"][0]["volumeMounts"][0]
+mount = pod_spec["containers"][container_index]["volumeMounts"][0]
 assert volume["configMap"]["name"] == "nginx-markdown-config"
 assert mount["mountPath"] == "/etc/nginx/conf.d/markdown"
 assert mount["readOnly"] is True
@@ -511,25 +540,47 @@ run_configmap_mount_patch_self_tests() {
         return 2
     fi
 
-    local fixture_json patch_json
+    local container_index fixture_json patch_json
+
+    container_index="$(resolve_deployment_container_index "sidecar
+$DEPLOYMENT_NAME")"
+    if [[ "$container_index" != "1" ]]; then
+        log_error "Container name lookup returned '$container_index', expected 1"
+        return 1
+    fi
+
+    container_index="$(resolve_deployment_container_index "sidecar")"
+    if [[ "$container_index" != "0" ]]; then
+        log_error "Missing container name fallback returned '$container_index', expected 0"
+        return 1
+    fi
 
     fixture_json='{"spec":{"template":{"spec":{"volumes":[{"name":"markdown-config","emptyDir":{}}],"containers":[{"volumeMounts":[{"name":"markdown-config","mountPath":"/etc/nginx/conf.d/markdown"}]}]}}}}'
     patch_json="$(build_configmap_mount_patch \
-        0 false "" present 0 "/etc/nginx/conf.d/markdown" "" present)"
+        0 0 false "" present 0 "/etc/nginx/conf.d/markdown" "" present)"
     assert_configmap_mount_patch_applies "$fixture_json" "$patch_json" \
-        "wrong-kind volume and missing readOnly" || return 1
+        "wrong-kind volume and missing readOnly" 0 || return 1
 
     fixture_json='{"spec":{"template":{"spec":{"volumes":[{"name":"markdown-config","configMap":{}}],"containers":[{"volumeMounts":[{"name":"markdown-config"}]}]}}}}'
     patch_json="$(build_configmap_mount_patch \
-        0 true "" present 0 "" "" present)"
+        0 0 true "" present 0 "" "" present)"
     assert_configmap_mount_patch_applies "$fixture_json" "$patch_json" \
-        "missing configMap name, mountPath, and readOnly" || return 1
+        "missing configMap name, mountPath, and readOnly" 0 || return 1
 
     fixture_json='{"spec":{"template":{"spec":{"volumes":[{"name":"markdown-config","configMap":{"name":"old-config"}}],"containers":[{"volumeMounts":[{"name":"markdown-config","mountPath":"/old","readOnly":false}]}]}}}}'
     patch_json="$(build_configmap_mount_patch \
-        0 true old-config present 0 /old false present)"
+        0 0 true old-config present 0 /old false present)"
     assert_configmap_mount_patch_applies "$fixture_json" "$patch_json" \
-        "existing wrong field values" || return 1
+        "existing wrong field values" 0 || return 1
+
+    container_index="$(resolve_deployment_container_index "sidecar
+$DEPLOYMENT_NAME")"
+    fixture_json='{"spec":{"template":{"spec":{"volumes":[{"name":"markdown-config","emptyDir":{}}],"containers":[{"name":"sidecar","volumeMounts":[{"name":"sidecar-config","mountPath":"/sidecar","readOnly":false}]},{"name":"nginx-markdown","volumeMounts":[{"name":"markdown-config","mountPath":"/old","readOnly":false}]}]}}}}'
+    patch_json="$(build_configmap_mount_patch \
+        "$container_index" 0 false "" present 0 /old false present)"
+    assert_configmap_mount_patch_applies "$fixture_json" "$patch_json" \
+        "named non-primary container receives the ConfigMap mount" \
+        "$container_index" || return 1
 
     log_info "All ConfigMap JSON Patch self-tests passed"
     return 0
