@@ -293,8 +293,7 @@ The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs th
 - No file system access beyond NGINX configuration
 
 ### 2. Fail Secure
-- Default to fail-open (return the original eligible HTML response) to maintain availability
-- Conversion failures do not expose internal details
+- Default to fail-open (return the original eligible HTML response) to maintain availability — conversion failures do not expose internal details, but the trade-off is that an unavailability of the conversion engine yields unconverted HTML rather than an error
 - Error messages are generic to clients, detailed in logs
 
 ### 3. Defense in Depth
@@ -379,10 +378,10 @@ The implementation details in this document feed into a few operator-facing conc
 ### Standards Compliance
 
 - **OWASP Top 10**: Addresses A03:2021 (Injection)
-- **CWE-79**: XSS prevention
+- **CWE-79**: XSS prevention, including dangerous URL-scheme filtering
+  (`javascript:`, `data:`, `vbscript:`, `file:`, `about:` removed from
+  link output)
 - **CWE-611**: XXE prevention
-- **CWE-918**: Unsafe URL scheme filtering (this module never initiates
-  server-side network requests)
 
 ### Security Certifications
 
