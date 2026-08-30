@@ -140,14 +140,15 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
 void
 ngx_http_markdown_adopt_orphan_conditional_headers(ngx_http_request_t *r)
 {
+    static u_char  inm_name[] = "If-None-Match";
+    static u_char  ims_name[] = "If-Modified-Since";
     ngx_table_elt_t  *inm;
     ngx_table_elt_t  *ims;
 
     ngx_http_markdown_adopt_one_conditional_headers(
-        r, (u_char *) "If-None-Match", sizeof("If-None-Match") - 1, &inm);
+        r, inm_name, sizeof(inm_name) - 1, &inm);
     ngx_http_markdown_adopt_one_conditional_headers(
-        r, (u_char *) "If-Modified-Since",
-        sizeof("If-Modified-Since") - 1, &ims);
+        r, ims_name, sizeof(ims_name) - 1, &ims);
 
     r->headers_in.if_none_match = inm;
     r->headers_in.if_modified_since = ims;
@@ -334,8 +335,8 @@ ngx_http_markdown_has_no_transform(ngx_http_request_t *r)
 static void
 ngx_http_markdown_collect_conditional_headers(ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx,
-    const ngx_table_elt_t **inm_header, const ngx_table_elt_t **ims_header,
-    const ngx_table_elt_t **range_header)
+    ngx_table_elt_t **inm_header, ngx_table_elt_t **ims_header,
+    ngx_table_elt_t **range_header)
 {
     if (ctx != NULL && ctx->conditional.captured) {
         *inm_header = ctx->conditional.if_none_match;
@@ -462,9 +463,9 @@ ngx_http_markdown_conditional_value_len(
 ngx_flag_t
 ngx_http_markdown_has_conditional_request(ngx_http_request_t *r)
 {
-    const ngx_table_elt_t  *inm_header;
-    const ngx_table_elt_t  *ims_header;
-    const ngx_table_elt_t  *range_header;
+    ngx_table_elt_t  *inm_header;
+    ngx_table_elt_t  *ims_header;
+    ngx_table_elt_t  *range_header;
 
     ngx_http_markdown_collect_conditional_headers(
         r, NULL, &inm_header, &ims_header, &range_header);
@@ -483,9 +484,9 @@ ngx_int_t
 ngx_http_markdown_capture_conditional_request(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
 {
-    const ngx_table_elt_t  *inm_header;
-    const ngx_table_elt_t  *ims_header;
-    const ngx_table_elt_t  *range_header;
+    ngx_table_elt_t  *inm_header;
+    ngx_table_elt_t  *ims_header;
+    ngx_table_elt_t  *range_header;
     ngx_http_markdown_conditional_header_state_t  *state;
     ngx_http_markdown_conditional_header_state_t  *tail;
     ngx_table_elt_t  *headers;
@@ -636,9 +637,9 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     struct MarkdownResult    *conv_result;
     struct FFIConditionalInput  cond_input;
     struct FFIConditionalDecision cond_decision;
-    const ngx_table_elt_t   *inm_header;
-    const ngx_table_elt_t   *ims_header;
-    const ngx_table_elt_t   *range_header;
+    ngx_table_elt_t        *inm_header;
+    ngx_table_elt_t        *ims_header;
+    ngx_table_elt_t        *range_header;
     const u_char            *inm_data;
     size_t                   inm_len;
     ngx_flag_t               needs_entity_etag;
