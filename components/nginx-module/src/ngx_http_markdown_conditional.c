@@ -113,12 +113,20 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
                 continue;
             }
 
-            if (headers[i].value.data != NULL) {
-                /* NGINX NUL-terminates parsed header values, so the byte
-                 * length can be rebuilt after suppression zeroed it. */
-                headers[i].value.len =
-                    (size_t) strlen((const char *) headers[i].value.data);
+            /* Module suppression clears hash AND length together.  An
+             * entry with hash == 0 but a non-zero length was invalidated
+             * by other code, not by this module, and must not be adopted
+             * (its value bytes may not be NUL-terminated). */
+            if (headers[i].value.len != 0
+                || headers[i].value.data == NULL)
+            {
+                continue;
             }
+
+            /* NGINX NUL-terminates parsed header values, so the byte
+             * length can be rebuilt after suppression zeroed it. */
+            headers[i].value.len =
+                (size_t) strlen((const char *) headers[i].value.data);
             headers[i].hash = 1;
             if (*first_restored == NULL) {
                 *first_restored = &headers[i];

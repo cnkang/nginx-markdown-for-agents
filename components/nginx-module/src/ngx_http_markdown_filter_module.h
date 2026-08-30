@@ -981,6 +981,7 @@ typedef struct {
                                     last_modified;
         ngx_http_markdown_inflight_cleanup_t *inflight_cleanup;
         ngx_flag_t                  header_filter_initialized;
+        ngx_flag_t                  bypass;
     } lifecycle;
 
     /*
