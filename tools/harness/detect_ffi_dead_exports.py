@@ -212,36 +212,42 @@ def _scan_c_call_file(
 
     active_guards: list[str] = []
     in_block_comment = False
+    in_dq = False
+    in_sq = False
     for lineno, line in enumerate(text.splitlines(), start=1):
         _update_guard_stack(line, active_guards)
-        code, in_block_comment = _mask_inline_comments(line, in_block_comment)
+        code, in_block_comment, in_dq, in_sq = _mask_inline_comments(
+            line, in_block_comment, in_dq, in_sq
+        )
         if _is_non_callsite_line(code):
             continue
         for match in CALLSITE_RE.finditer(code):
             _record_callsite(callsites, match, path, lineno, line, active_guards)
 
 
-def _mask_inline_comments(line: str, in_block: bool) -> tuple[str, bool]:
-    """Return (code, new_block_state) for one source line.
+def _mask_inline_comments(
+    line: str, in_block: bool, in_dq: bool = False, in_sq: bool = False
+) -> tuple[str, bool, bool, bool]:
+    """Return (code, in_block, in_dq, in_sq) for one source line.
 
     A character-level scan that tracks double- and single-quoted string
     literals (including escape sequences) and block-comment state.  Only
     comment delimiters outside string literals are masked, so a URL or
     string containing ``//`` or ``/*`` cannot hide a real callsite or
-    enter block-comment state.
+    enter block-comment state.  The string-literal states are returned so
+    a C backslash-continuation that splits a literal across physical
+    lines keeps the literal state on the next line.
     """
     chars = list(line)
     length = len(chars)
     i = 0
-    in_dq = False
-    in_sq = False
     while i < length:
         if in_block:
             end = line.find("*/", i)
             if end == -1:
                 for j in range(i, length):
                     chars[j] = " "
-                return "".join(chars), True
+                return "".join(chars), True, in_dq, in_sq
             for j in range(i, end + 2):
                 chars[j] = " "
             in_block = False
@@ -279,7 +285,7 @@ def _mask_inline_comments(line: str, in_block: bool) -> tuple[str, bool]:
                 if end == -1:
                     for j in range(i, length):
                         chars[j] = " "
-                    return "".join(chars), True
+                    return "".join(chars), True, in_dq, in_sq
                 for j in range(i, end + 2):
                     chars[j] = " "
                 i = end + 2
@@ -287,9 +293,9 @@ def _mask_inline_comments(line: str, in_block: bool) -> tuple[str, bool]:
             if nxt == "/":
                 for j in range(i, length):
                     chars[j] = " "
-                return "".join(chars), in_block
+                return "".join(chars), in_block, in_dq, in_sq
         i += 1
-    return "".join(chars), in_block
+    return "".join(chars), in_block, in_dq, in_sq
 
 
 def _is_non_callsite_line(line: str) -> bool:
@@ -438,8 +444,12 @@ def _callsite_names(text: str) -> set[str]:
     # Align with the production callsite scan: comments, strings and
     # declarations do not count as test references.
     in_block_comment = False
+    in_dq = False
+    in_sq = False
     for line in text.splitlines():
-        code, in_block_comment = _mask_inline_comments(line, in_block_comment)
+        code, in_block_comment, in_dq, in_sq = _mask_inline_comments(
+            line, in_block_comment, in_dq, in_sq
+        )
         if _is_non_callsite_line(code):
             continue
         # Mask out double-quoted string literals so markdown_* names inside
