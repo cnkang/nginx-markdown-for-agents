@@ -216,50 +216,123 @@ cleanup() {
 # Mount the module ConfigMap on the deployment so config updates actually
 # reach the running module (without a volume mount, scenario_config_update
 # only verifies that a ConfigMap object exists — the deployment never reads
-# it).  Idempotent: only the missing pieces (the markdown-config volume and
-# its container mount) are appended, preserving every existing volume,
-# mount, and unrelated manifest field.
+# it).  Idempotent: existing objects are repaired by name and missing objects
+# are appended, preserving every unrelated volume, mount, and manifest field.
 ensure_deployment_configmap_mount() {
-    local has_volume has_mount volumes_exist mounts_exist
-    # Verify the volume references the expected ConfigMap by name, not
-    # just that a volume with the right name exists.
-    has_volume="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
-        -o jsonpath='{.spec.template.spec.volumes[?(@.name=="markdown-config" && @.configMap.name=="nginx-markdown-config")].name}' \
+    local volume_index mount_index volumes_exist mounts_exist
+    local volume_names mount_names volume_configmap mount_path mount_read_only
+    local name_index object_name patch_has_operation
+
+    # kubectl JSONPath does not support && in filter expressions.  Enumerate
+    # names with separate queries and resolve the array indexes in the shell.
+    volume_index=-1
+    volume_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
+        -o jsonpath='{range .spec.template.spec.volumes[*]}{.name}{"\n"}{end}' \
         2>/dev/null)"
-    # Verify the mount uses the expected path and readOnly flag on the
-    # first container, not just that a mount with the right name exists.
-    has_mount="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
-        -o jsonpath='{.spec.template.spec.containers[0].volumeMounts[?(@.name=="markdown-config" && @.mountPath=="/etc/nginx/conf.d/markdown" && @.readOnly==true)].name}' \
+    if [[ -n "$volume_names" ]]; then
+        name_index=0
+        while IFS= read -r object_name; do
+            if [[ "$object_name" == "markdown-config" ]]; then
+                volume_index="$name_index"
+                break
+            fi
+            name_index=$((name_index + 1))
+        done <<< "$volume_names"
+    fi
+
+    mount_index=-1
+    mount_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
+        -o jsonpath='{range .spec.template.spec.containers[0].volumeMounts[*]}{.name}{"\n"}{end}' \
         2>/dev/null)"
-    if [ -n "$has_volume" ] && [ -n "$has_mount" ]; then
+    if [[ -n "$mount_names" ]]; then
+        name_index=0
+        while IFS= read -r object_name; do
+            if [[ "$object_name" == "markdown-config" ]]; then
+                mount_index="$name_index"
+                break
+            fi
+            name_index=$((name_index + 1))
+        done <<< "$mount_names"
+    fi
+
+    volume_configmap=""
+    if [[ "$volume_index" -ge 0 ]]; then
+        volume_configmap="$(kubectl get deployment "$DEPLOYMENT_NAME" \
+            -n "$NAMESPACE" \
+            -o "jsonpath={.spec.template.spec.volumes[${volume_index}].configMap.name}" \
+            2>/dev/null)"
+    fi
+
+    mount_path=""
+    mount_read_only=""
+    if [[ "$mount_index" -ge 0 ]]; then
+        mount_path="$(kubectl get deployment "$DEPLOYMENT_NAME" \
+            -n "$NAMESPACE" \
+            -o "jsonpath={.spec.template.spec.containers[0].volumeMounts[${mount_index}].mountPath}" \
+            2>/dev/null)"
+        mount_read_only="$(kubectl get deployment "$DEPLOYMENT_NAME" \
+            -n "$NAMESPACE" \
+            -o "jsonpath={.spec.template.spec.containers[0].volumeMounts[${mount_index}].readOnly}" \
+            2>/dev/null)"
+    fi
+
+    if [[ "$volume_index" -ge 0 \
+        && "$volume_configmap" == "$CONFIGMAP_NAME" \
+        && "$mount_index" -ge 0 \
+        && "$mount_path" == "/etc/nginx/conf.d/markdown" \
+        && "$mount_read_only" == "true" ]]; then
         log_info "Deployment already mounts ConfigMap correctly; skipping patch"
         return 0
     fi
 
     local patch_ops="["
-    if [ -z "$has_volume" ]; then
+    patch_has_operation=false
+    if [[ "$volume_index" -ge 0 ]]; then
+        if [[ "$volume_configmap" != "$CONFIGMAP_NAME" ]]; then
+            patch_ops="${patch_ops}{\"op\":\"replace\",\"path\":\"/spec/template/spec/volumes/${volume_index}/configMap/name\",\"value\":\"${CONFIGMAP_NAME}\"}"
+            patch_has_operation=true
+        fi
+    else
         volumes_exist="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
             -o jsonpath='{.spec.template.spec.volumes}' 2>/dev/null)"
-        if [ -n "$volumes_exist" ]; then
+        if [[ -n "$volumes_exist" ]]; then
             # Append to the existing array; a JSON-patch "add" on the array
             # path itself would replace the whole array.
             patch_ops="${patch_ops}{\"op\":\"add\",\"path\":\"/spec/template/spec/volumes/-\",\"value\":{\"name\":\"markdown-config\",\"configMap\":{\"name\":\"nginx-markdown-config\"}}}"
         else
             patch_ops="${patch_ops}{\"op\":\"add\",\"path\":\"/spec/template/spec/volumes\",\"value\":[{\"name\":\"markdown-config\",\"configMap\":{\"name\":\"nginx-markdown-config\"}}]}"
         fi
+        patch_has_operation=true
     fi
-    if [ -z "$has_mount" ]; then
-        if [ -z "$has_volume" ]; then
+
+    if [[ "$mount_index" -ge 0 ]]; then
+        if [[ "$mount_path" != "/etc/nginx/conf.d/markdown" ]]; then
+            if [[ "$patch_has_operation" == true ]]; then
+                patch_ops="${patch_ops},"
+            fi
+            patch_ops="${patch_ops}{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/volumeMounts/${mount_index}/mountPath\",\"value\":\"/etc/nginx/conf.d/markdown\"}"
+            patch_has_operation=true
+        fi
+        if [[ "$mount_read_only" != "true" ]]; then
+            if [[ "$patch_has_operation" == true ]]; then
+                patch_ops="${patch_ops},"
+            fi
+            patch_ops="${patch_ops}{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/volumeMounts/${mount_index}/readOnly\",\"value\":true}"
+            patch_has_operation=true
+        fi
+    else
+        if [[ "$patch_has_operation" == true ]]; then
             patch_ops="${patch_ops},"
         fi
         mounts_exist="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
             -o jsonpath='{.spec.template.spec.containers[0].volumeMounts}' \
             2>/dev/null)"
-        if [ -n "$mounts_exist" ]; then
+        if [[ -n "$mounts_exist" ]]; then
             patch_ops="${patch_ops}{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/volumeMounts/-\",\"value\":{\"name\":\"markdown-config\",\"mountPath\":\"/etc/nginx/conf.d/markdown\",\"readOnly\":true}}"
         else
             patch_ops="${patch_ops}{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/volumeMounts\",\"value\":[{\"name\":\"markdown-config\",\"mountPath\":\"/etc/nginx/conf.d/markdown\",\"readOnly\":true}]}"
         fi
+        patch_has_operation=true
     fi
     patch_ops="${patch_ops}]"
 
