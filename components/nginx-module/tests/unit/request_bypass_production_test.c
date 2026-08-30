@@ -1049,7 +1049,7 @@ reset_test_state(void)
     g_has_conditional = 1;
     g_capture_rc = NGX_ERROR;
     g_conditional_rc = NGX_DECLINED;
-    g_send_304_rc = NGX_OK;
+    g_send_304_rc = NGX_DONE;
     g_resume_send_header_rc = NGX_OK;
     g_if_none_match_calls = 0;
     g_send_304_calls = 0;

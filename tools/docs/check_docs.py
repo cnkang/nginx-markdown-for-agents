@@ -244,7 +244,7 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
     version: str | None = None
     errors: list[str] = []
     for match in re.finditer(
-        r"^[ ]{0,3}##[ \t]+\[[^\]]*\][^\n]*$",
+        r"^[ ]{0,3}##[ \t]+[^\n]*$",
         changelog,
         re.MULTILINE,
     ):
