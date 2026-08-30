@@ -161,13 +161,14 @@ location /docs/ {
 For a Markdown-negotiated GET or HEAD request, the module captures incoming
 `If-None-Match` and `If-Modified-Since` values before a static handler, proxy,
 or proxy cache can evaluate them against the source HTML representation.
-Only the captured `If-None-Match` is used to validate a converted Markdown
-response, and only in `full` mode (against the Markdown ETag). The captured
-`If-Modified-Since` is never used to validate a converted representation.
-When the request is passed through as the original source representation
-(unconverted or fail-open passthrough), both captured validators — the
-`If-None-Match` and the `If-Modified-Since` — are restored, so source-only
-conditional behavior remains available against the original HTML response.
+Only the captured `If-None-Match` validates a converted Markdown response,
+and only in `full` mode (against the Markdown ETag). The captured
+`If-Modified-Since` never validates a converted representation.
+When the request passes through as the original source representation
+(unconverted or fail-open passthrough), the module restores both captured
+validators — the `If-None-Match` and the `If-Modified-Since` — so
+source-only conditional behavior remains available against the original
+HTML response.
 
 ## Conditional Request Handling
 

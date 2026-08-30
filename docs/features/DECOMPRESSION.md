@@ -96,8 +96,8 @@ the original response. `fail_closed` and status policies reject it.
 
 An empty wire body is transparent **only** when the effective chain contains
 no decoder layers (for example, an identity-only chain). If a non-identity
-layer (`gzip`, `deflate`, `br`) is declared, the decoder is invoked at end of
-input and classifies the empty body as `TruncatedInput` — a missing encoded
+layer (`gzip`, `deflate`, `br`) exists in the chain, the decoder runs at end
+of input and classifies the empty body as `TruncatedInput` — a missing encoded
 body is **not** accepted as a valid compressed response. This keeps chain
 decoding aligned with the single-format decompressors
 (`decompress_gzip`/`decompress_deflate`/`decompress_brotli`), which classify
@@ -105,8 +105,8 @@ an empty compressed input as `TruncatedInput` the same way.
 
 The configured `markdown_error_policy` then applies:
 
-- `pass` → the original encoded response is delivered unchanged (pass-through)
-- `fail_closed` / `status <code>` → the response is rejected
+- `pass` → the module delivers the original encoded response unchanged (pass-through)
+- `fail_closed` / `status <code>` → the module rejects the response
 
 Malformed or unknown chains still follow the configured `markdown_error_policy`
 exactly as documented above.

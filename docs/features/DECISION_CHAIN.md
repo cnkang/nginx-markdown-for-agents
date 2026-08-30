@@ -15,7 +15,7 @@ lowercase snake_case strings** in both:
 (`nginx_markdown_decompression_events_total`) uses `reason=` labels that are
 decompression outcomes, not canonical reason codes. Only the **failure**
 labels (`budget_exceeded`, `format_error`, `truncated_input`, `io_error`)
-map to reason-registry keys; `ok` is a metric-only success sentinel with no
+map to reason-registry keys. `ok` is a metric-only success sentinel with no
 reason-registry key. Do not treat those labels as canonical reason-code
 values.
 

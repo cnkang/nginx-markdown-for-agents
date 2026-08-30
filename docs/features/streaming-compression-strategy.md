@@ -49,7 +49,7 @@ eligible response, the following logic applies:
    decompression — it does **not** pass through.
 6. A malformed `Content-Encoding` value, an unknown encoding token, or an
    excessively deep chain follows the configured `markdown_error_policy`:
-   `pass` forwards the original response unchanged; `fail_closed` and
+   `pass` forwards the original response unchanged. `fail_closed` and
    `status <code>` reject it. These cases are **not** plain passthrough.
 7. Uncompressed responses continue to be eligible for streaming conversion as
    normal.
