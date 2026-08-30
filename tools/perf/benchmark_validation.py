@@ -687,6 +687,23 @@ def _is_numeric_count(value) -> bool:
     return finite and value >= 0
 
 
+def _derive_fallback_rate(
+    requests_total: Any, streaming_failopen_total: Any
+) -> float | None:
+    """Derive the bounded fail-open rate when both counters are valid."""
+    if not _is_numeric_count(requests_total) or not _is_numeric_count(
+        streaming_failopen_total
+    ):
+        return None
+
+    assert requests_total is not None and streaming_failopen_total is not None
+    if requests_total == 0:
+        return 0.0 if streaming_failopen_total == 0 else None
+    if streaming_failopen_total > requests_total:
+        return None
+    return streaming_failopen_total / requests_total
+
+
 def _path_metrics(
     nginx_metrics: Mapping[str, Any],
 ) -> tuple[
@@ -712,27 +729,11 @@ def _path_metrics(
     streaming_fallback_total = streaming.get("fallback_total")
     streaming_failopen_total = streaming.get("precommit_failopen_total")
 
-    if _is_numeric_count(requests_total) and _is_numeric_count(
-        streaming_failopen_total
-    ):
-        # fallback_rate is the hard fail-open share:
-        # precommit_failopen_total / streaming_requests_total (1.0 when every
-        # streaming request fails open). Capability fallbacks are reported
-        # separately and must not affect the release gate.
-        assert requests_total is not None and streaming_failopen_total is not None
-        if requests_total > 0:
-            if streaming_failopen_total > requests_total:
-                # Inconsistent counters: more fail-open events than requests
-                # is missing/duplicated evidence, not a rate above 1.0.
-                fallback_rate = None
-            else:
-                fallback_rate = streaming_failopen_total / requests_total
-        elif streaming_failopen_total == 0:
-            fallback_rate = 0.0
-        else:
-            fallback_rate = None
-    else:
-        fallback_rate = None
+    # fallback_rate is the hard fail-open share. Capability fallbacks are
+    # reported separately and must not affect the release gate.
+    fallback_rate = _derive_fallback_rate(
+        requests_total, streaming_failopen_total
+    )
     return (
         perf,
         streaming,
