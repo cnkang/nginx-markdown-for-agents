@@ -225,84 +225,107 @@ def _scan_c_call_file(
             _record_callsite(callsites, match, path, lineno, line, active_guards)
 
 
+def _mask_block_comment(line: str, chars: list[str], start: int) -> tuple[int, bool]:
+    """Mask a block-comment continuation and return its next state."""
+    end = line.find("*/", start)
+    stop = len(line) if end == -1 else end + 2
+    for index in range(start, stop):
+        chars[index] = " "
+    return stop, end == -1
+
+
+def _mask_quoted_character(
+    chars: list[str], start: int, quote: str
+) -> tuple[int, bool]:
+    """Mask one character from a quoted literal and return its next state."""
+    if chars[start] == "\\" and start + 1 < len(chars):
+        chars[start] = " "
+        chars[start + 1] = " "
+        return start + 2, True
+
+    closes_quote = chars[start] == quote
+    chars[start] = " "
+    return start + 1, not closes_quote
+
+
+def _mask_quoted_state(
+    chars: list[str], start: int, in_dq: bool, in_sq: bool
+) -> tuple[int, bool, bool]:
+    """Mask a character in the active quote and preserve both states."""
+    quote = '"' if in_dq else "'"
+    next_index, is_open = _mask_quoted_character(chars, start, quote)
+    return next_index, is_open if in_dq else in_dq, is_open if in_sq else in_sq
+
+
+def _mask_quote_start(chars: list[str], start: int) -> tuple[bool, bool] | None:
+    """Mask a quote delimiter and return the newly active quote state."""
+    if chars[start] == '"':
+        chars[start] = " "
+        return True, False
+    if chars[start] == "'":
+        chars[start] = " "
+        return False, True
+    return None
+
+
+def _mask_comment_start(
+    line: str, chars: list[str], start: int
+) -> tuple[int, bool, bool] | None:
+    """Mask a comment beginning and return (next index, block, line)."""
+    if chars[start] != "/" or start + 1 >= len(chars):
+        return None
+
+    delimiter = chars[start + 1]
+    if delimiter == "/":
+        for index in range(start, len(chars)):
+            chars[index] = " "
+        return len(chars), False, True
+    if delimiter != "*":
+        return None
+
+    end = line.find("*/", start + 2)
+    stop = len(line) if end == -1 else end + 2
+    for index in range(start, stop):
+        chars[index] = " "
+    return stop, end == -1, False
+
+
 def _mask_inline_comments(
     line: str, in_block: bool, in_dq: bool = False, in_sq: bool = False
 ) -> tuple[str, bool, bool, bool]:
     """Return (code, in_block, in_dq, in_sq) for one source line.
 
     A character-level scan that tracks double- and single-quoted string
-    literals (including escape sequences) and block-comment state.  Only
+    literals (including escape sequences) and block-comment state. Only
     comment delimiters outside string literals are masked, so a URL or
-    string containing ``//`` or ``/*`` cannot hide a real callsite or
-    enter block-comment state.  The string-literal states are returned so
-    a C backslash-continuation that splits a literal across physical
-    lines keeps the literal state on the next line.
+    string containing ``//`` or ``/*`` cannot hide a real callsite or enter
+    block-comment state. The string-literal states are returned so a C
+    backslash-continuation that splits a literal across physical lines keeps
+    the literal state on the next line.
     """
     chars = list(line)
-    length = len(chars)
     i = 0
-    while i < length:
+    while i < len(chars):
         if in_block:
-            end = line.find("*/", i)
-            if end == -1:
-                for j in range(i, length):
-                    chars[j] = " "
-                return "".join(chars), True, in_dq, in_sq
-            for j in range(i, end + 2):
-                chars[j] = " "
-            in_block = False
-            i = end + 2
+            i, in_block = _mask_block_comment(line, chars, i)
             continue
-        c = chars[i]
-        if in_dq:
-            if c == "\\" and i + 1 < length:
-                chars[i] = " "
-                chars[i + 1] = " "
-                i += 2
-                continue
-            chars[i] = " "
-            if c == '"':
-                in_dq = False
+        if in_dq or in_sq:
+            i, in_dq, in_sq = _mask_quoted_state(chars, i, in_dq, in_sq)
+            continue
+
+        quote_state = _mask_quote_start(chars, i)
+        if quote_state is not None:
+            in_dq, in_sq = quote_state
             i += 1
             continue
-        if in_sq:
-            if c == "\\" and i + 1 < length:
-                chars[i] = " "
-                chars[i + 1] = " "
-                i += 2
-                continue
-            chars[i] = " "
-            if c == "'":
-                in_sq = False
+
+        comment = _mask_comment_start(line, chars, i)
+        if comment is None:
             i += 1
             continue
-        if c == '"':
-            in_dq = True
-            chars[i] = " "
-            i += 1
-            continue
-        if c == "'":
-            in_sq = True
-            chars[i] = " "
-            i += 1
-            continue
-        if c == "/" and i + 1 < length:
-            nxt = chars[i + 1]
-            if nxt == "*":
-                end = line.find("*/", i + 2)
-                if end == -1:
-                    for j in range(i, length):
-                        chars[j] = " "
-                    return "".join(chars), True, in_dq, in_sq
-                for j in range(i, end + 2):
-                    chars[j] = " "
-                i = end + 2
-                continue
-            if nxt == "/":
-                for j in range(i, length):
-                    chars[j] = " "
-                return "".join(chars), in_block, in_dq, in_sq
-        i += 1
+        i, in_block, is_line_comment = comment
+        if is_line_comment:
+            return "".join(chars), in_block, in_dq, in_sq
     return "".join(chars), in_block, in_dq, in_sq
 
 
