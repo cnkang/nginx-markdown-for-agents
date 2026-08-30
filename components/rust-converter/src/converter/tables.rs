@@ -94,6 +94,7 @@ impl MarkdownConverter {
                     &mut row_cells,
                     table_scratch,
                 )?;
+                Self::charge_vec_growth(rows, ctx, table_scratch)?;
                 rows.push(row_cells);
             }
         }
@@ -134,6 +135,7 @@ impl MarkdownConverter {
             "tr" => {
                 let mut row_cells = Vec::new();
                 self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells, table_scratch)?;
+                Self::charge_vec_growth(rows, ctx, table_scratch)?;
                 rows.push(row_cells);
                 Ok(())
             }
@@ -173,7 +175,12 @@ impl MarkdownConverter {
             let mut rows: Vec<Vec<String>> = Vec::new();
 
             let mut col_alignments: Vec<Option<TableAlignment>> = Vec::new();
-            self.extract_colgroup_alignments_from(node, &mut col_alignments);
+            self.extract_colgroup_alignments_from(
+                node,
+                &mut ctx,
+                &mut col_alignments,
+                &mut table_scratch,
+            )?;
 
             for child in node.children.borrow().iter() {
                 self.extract_table_child(
@@ -191,10 +198,16 @@ impl MarkdownConverter {
             }
 
             while alignments.len() < headers.len() {
+                Self::charge_vec_growth(&alignments, &mut ctx, &mut table_scratch)?;
                 alignments.push(TableAlignment::Left);
             }
 
-            Self::apply_col_alignments(&mut alignments, &col_alignments);
+            Self::apply_col_alignments(
+                &mut alignments,
+                &col_alignments,
+                &mut ctx,
+                &mut table_scratch,
+            )?;
 
             // The final output buffer was retained as working-set charge
             // while cells were collected.  Release that charge before the
@@ -242,31 +255,41 @@ impl MarkdownConverter {
     fn extract_colgroup_alignments_from(
         &self,
         node: &Handle,
+        ctx: &mut Option<&mut ConversionContext>,
         col_alignments: &mut Vec<Option<TableAlignment>>,
-    ) {
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
         for child in node.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data
                 && name.local.as_ref() == "colgroup"
             {
-                self.extract_colgroup_alignments(child, col_alignments);
+                self.extract_colgroup_alignments(child, ctx, col_alignments, table_scratch)?;
             }
         }
+        Ok(())
     }
 
     fn apply_col_alignments(
         alignments: &mut Vec<TableAlignment>,
         col_alignments: &[Option<TableAlignment>],
-    ) {
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
         for (i, col_align) in col_alignments.iter().enumerate() {
             if let Some(col_align) = col_align {
                 if i < alignments.len() {
                     alignments[i] = *col_align;
                 } else {
-                    alignments.resize(i + 1, TableAlignment::Left);
+                    let required_len = i.checked_add(1).ok_or_else(|| {
+                        ConversionError::MemoryLimit("table alignment size overflow".into())
+                    })?;
+                    Self::charge_vec_growth_to(alignments, required_len, ctx, table_scratch)?;
+                    alignments.resize(required_len, TableAlignment::Left);
                     alignments[i] = *col_align;
                 }
             }
         }
+        Ok(())
     }
 
     /// Extract column alignments from a `<colgroup>` element.
@@ -277,8 +300,10 @@ impl MarkdownConverter {
     pub(super) fn extract_colgroup_alignments(
         &self,
         colgroup: &Handle,
+        ctx: &mut Option<&mut ConversionContext>,
         col_alignments: &mut Vec<Option<TableAlignment>>,
-    ) {
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
         for child in colgroup.children.borrow().iter() {
             if let NodeData::Element {
                 ref name,
@@ -296,10 +321,12 @@ impl MarkdownConverter {
                     .clamp(1, 1_000);
                 let alignment = self.extract_explicit_alignment(&attrs_borrowed);
                 for _ in 0..span {
+                    Self::charge_vec_growth(col_alignments, ctx, table_scratch)?;
                     col_alignments.push(alignment);
                 }
             }
         }
+        Ok(())
     }
 
     /// Extract header cells from a `<thead>` section.
@@ -470,10 +497,33 @@ impl MarkdownConverter {
         ctx: &mut Option<&mut ConversionContext>,
         table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
-        if vec.capacity() > vec.len() {
+        let required_len = vec
+            .len()
+            .checked_add(1)
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+        Self::charge_vec_growth_to(vec, required_len, ctx, table_scratch)
+    }
+
+    fn charge_vec_growth_to<T>(
+        vec: &Vec<T>,
+        required_len: usize,
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
+        if required_len <= vec.capacity() {
             return Ok(());
         }
-        let growth = vec.capacity().max(1).saturating_mul(2);
+        // Vec grows geometrically (doubling).  Charge the byte size of the
+        // new backing allocation: capacity is an element count, so multiply
+        // by the element size before passing bytes to the working set.
+        let doubled_capacity =
+            vec.capacity().max(1).checked_mul(2).ok_or_else(|| {
+                ConversionError::MemoryLimit("table container size overflow".into())
+            })?;
+        let new_capacity = doubled_capacity.max(required_len);
+        let growth = new_capacity
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
         if let Some(context) = ctx.as_deref_mut() {
             let next = table_scratch.checked_add(growth).ok_or_else(|| {
                 ConversionError::MemoryLimit("table container size overflow".into())
@@ -627,4 +677,69 @@ fn parse_text_align_from_style(style: &str) -> Option<TableAlignment> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{ConversionContext, ConversionOptions, MarkdownConverter, MarkdownFlavor};
+    use crate::error::ConversionError;
+    use crate::parser::parse_html;
+    use std::time::Duration;
+
+    #[test]
+    fn table_output_is_byte_identical_with_working_set_accounting() {
+        let html = "<table><thead><tr><th>Header</th><th align=\"right\">Count</th></tr></thead><tbody><tr><td>Item</td><td>2</td></tr></tbody></table>";
+        let dom = parse_html(html.as_bytes()).expect("test HTML should parse");
+        let converter = MarkdownConverter::with_options(ConversionOptions {
+            flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
+            ..ConversionOptions::default()
+        });
+        let expected = "| Header | Count |\n| --- | ---: |\n| Item | 2 |\n";
+
+        assert_eq!(
+            converter.convert(&dom).expect("conversion should succeed"),
+            expected
+        );
+
+        let mut context = ConversionContext::with_output_budget(Duration::ZERO, 4096);
+        let with_budget = converter
+            .convert_with_context(&dom, &mut context)
+            .expect("conversion should fit the budget");
+        assert_eq!(with_budget, expected);
+        assert_eq!(context.working_set_bytes, 0);
+    }
+
+    #[test]
+    fn many_empty_table_cells_fail_and_release_working_set() {
+        let mut html = String::from(
+            "<table><colgroup><col span=\"64\" align=\"center\"></colgroup><thead><tr>",
+        );
+        for _ in 0..64 {
+            html.push_str("<th></th>");
+        }
+        html.push_str("</tr></thead><tbody>");
+        for _ in 0..64 {
+            html.push_str("<tr>");
+            for _ in 0..64 {
+                html.push_str("<td></td>");
+            }
+            html.push_str("</tr>");
+        }
+        html.push_str("</tbody></table>");
+
+        let dom = parse_html(html.as_bytes()).expect("test HTML should parse");
+        let converter = MarkdownConverter::with_options(ConversionOptions {
+            flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
+            ..ConversionOptions::default()
+        });
+        let mut context = ConversionContext::with_output_budget(Duration::ZERO, 32 * 1024);
+
+        let result = converter.convert_with_context(&dom, &mut context);
+
+        assert!(
+            matches!(result, Err(ConversionError::MemoryLimit(_))),
+            "large empty-cell table must fail with MemoryLimit, got: {result:?}"
+        );
+        assert_eq!(context.working_set_bytes, 0);
+    }
 }
