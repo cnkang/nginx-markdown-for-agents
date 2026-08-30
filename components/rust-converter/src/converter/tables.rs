@@ -364,8 +364,10 @@ impl MarkdownConverter {
 
                     Self::trim_cell_output(&mut cell_output);
                     Self::charge_cell_output(&cell_output, &mut ctx, table_scratch)?;
+                    Self::charge_vec_growth(headers, &mut ctx, table_scratch)?;
                     headers.push(cell_output);
                     let attrs_borrowed = attrs.borrow();
+                    Self::charge_vec_growth(alignments, &mut ctx, table_scratch)?;
                     alignments.push(self.extract_alignment(&attrs_borrowed));
                 }
             }
@@ -389,6 +391,7 @@ impl MarkdownConverter {
             {
                 let mut row_cells = Vec::new();
                 self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells, table_scratch)?;
+                Self::charge_vec_growth(rows, &mut ctx, table_scratch)?;
                 rows.push(row_cells);
             }
         }
@@ -420,6 +423,7 @@ impl MarkdownConverter {
                     }
                     Self::trim_cell_output(&mut cell_output);
                     Self::charge_cell_output(&cell_output, &mut ctx, table_scratch)?;
+                    Self::charge_vec_growth(cells, &mut ctx, table_scratch)?;
                     cells.push(cell_output);
                 }
             }
@@ -448,6 +452,33 @@ impl MarkdownConverter {
                 ConversionError::MemoryLimit("table working-set size overflow".into())
             })?;
             context.reserve_working_set(capacity)?;
+            *table_scratch = next;
+        }
+        Ok(())
+    }
+
+    /// Charge the backing allocation of a container Vec before it grows.
+    ///
+    /// The table pipeline keeps several container Vecs alive while cells are
+    /// collected (headers, alignments, rows, per-row cell lists).  Their
+    /// backing allocations are not Markdown output, so they must be charged
+    /// against the working set explicitly; otherwise a table with many empty
+    /// cells can amplify memory far beyond the configured budget while
+    /// `working_set_bytes` stays low.
+    fn charge_vec_growth<T>(
+        vec: &Vec<T>,
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
+        if vec.capacity() > vec.len() {
+            return Ok(());
+        }
+        let growth = vec.capacity().max(1).saturating_mul(2);
+        if let Some(context) = ctx.as_deref_mut() {
+            let next = table_scratch.checked_add(growth).ok_or_else(|| {
+                ConversionError::MemoryLimit("table container size overflow".into())
+            })?;
+            context.reserve_working_set(growth)?;
             *table_scratch = next;
         }
         Ok(())
