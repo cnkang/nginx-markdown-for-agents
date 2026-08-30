@@ -518,17 +518,15 @@ grep "markdown decision:" /var/log/nginx/error.log | \
   grep "reason=disabled" | tail -5
 
 # 4. Verify: confirm conversion metrics stopped
-# Record the counters, then send requests to a known conversion-eligible
-# endpoint during the comparison interval, and only then capture the
-# after values.  The rollback is verified only if the expected metric
-# lines are present and neither counter increases.
+# Stabilize before capturing the baseline so the before counters reflect
+# the quiesced state immediately before the comparison interval.
+sleep 5
 before=$(curl -fsS http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
 if [ -z "$before" ]; then
   echo "FAIL: conversion metrics not present before rollback check"
   exit 1
 fi
-sleep 5
 curl -fsS -o /dev/null -H "Accept: text/markdown" http://localhost/test
 after=$(curl -fsS http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")

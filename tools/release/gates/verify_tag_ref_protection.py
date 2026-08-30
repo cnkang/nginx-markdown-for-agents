@@ -230,7 +230,7 @@ def main() -> int:
         print(f"FAIL: invalid repository argument: {exc}", file=sys.stderr)
         return 1
     except GitResolutionError as exc:
-        print(f"FAIL: could not resolve the origin remote: {exc}", file=sys.stderr)
+        print(f"FAIL: could not run a required git/gh command: {exc}", file=sys.stderr)
         return 1
     except subprocess.CalledProcessError as exc:
         print(
