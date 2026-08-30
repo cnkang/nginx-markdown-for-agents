@@ -2,7 +2,7 @@
 
 > **Note**: This document originated in v0.7.0 as the zero/default
 > initialization strategy. Its safety goals remain in effect for v0.9.2,
-> however the contract is now **semantic initializer first**; zero
+> however the contract is now **semantic initializer first**. Zero
 > initialization is only a fallback. See
 > [FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) for the active ABI
 > contract and [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md) for
@@ -18,8 +18,9 @@ for a struct with no semantic defaults and no initializer. This ensures that:
 1. Every field has a defined value (no uninitialized memory across FFI)
 2. Pointer fields are NULL (safe to call `free` on)
 3. Length fields are 0 (safe for C code to check before dereference)
-4. Non-zero semantic defaults (flavor, policy, mode) are applied by the
-   initializer, never left to a blind `memset`
+4. Non-zero semantic defaults (flavor, policy, mode) come from the
+   initializer itself (it establishes them), and the zero-fallback path
+   never runs for those structs.
 
 ## Implementation
 

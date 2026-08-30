@@ -55,7 +55,7 @@ directive. `force` requests streaming after the hard eligibility gates pass.
 Full cache validation, excluded content types, and build-disabled streaming
 features can still select full-buffer or passthrough. A known codec whose
 streaming decoder is unavailable in the build (for example Brotli without
-`NGX_HTTP_BROTLI`) uses bounded full-buffer decompression; a malformed,
+`NGX_HTTP_BROTLI`) uses bounded full-buffer decompression. A malformed,
 unknown, or excessively deep `Content-Encoding` chain follows the configured
 `markdown_error_policy` (`pass` forwards the original response, `fail_closed`
 and `status <code>` reject it).

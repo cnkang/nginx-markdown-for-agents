@@ -3,7 +3,7 @@
 ## Purpose and ownership
 
 This document records the **migration history** of the Rust↔C FFI boundary
-between v0.9.1 (ABI v1) and v0.9.2 (ABI v2): what was removed, why, and what
+between v0.9.1 (ABI v1) and v0.9.2 (ABI v2): what we removed, why, and what
 replaced it. It is a historical record, not the active contract.
 
 For the **active** ABI contract (version, 4-tuple handshake, layout,

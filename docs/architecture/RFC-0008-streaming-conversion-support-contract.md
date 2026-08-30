@@ -325,19 +325,19 @@ the parser allowance.
 If the response would exceed the full-buffer **input-size** limit
 (`markdown_limits conversion_memory=`) **and the size is
 known at header time** (Content-Length present), the eligibility gate
-rejects it **before any conversion attempt**: the request is recorded
-as `not_eligible` (reason `not_eligible`) and does **not**
+rejects it **before any conversion attempt**: the module records the
+request as `not_eligible` (reason `not_eligible`) and does **not**
 increment `nginx_markdown_conversion_attempts_total` nor assign
 `engine="full_buffer"`, because conversion never starts. The module
 forwards the original response without evaluating `markdown_error_policy`
 (prechecked passthrough). Generated-output, transient-working-set, and
 `parser_memory` failures are **not** prechecked at header time: they can
-only be detected during conversion, so those cases go through
+only appear during conversion, so those cases go through
 `markdown_error_policy` like any other conversion failure.
 
 When the size is **not known at header time** (chunked or no
-Content-Length), the request enters the buffering pipeline and the limit
-is enforced by the body filter; exceeding it there counts as an attempted
+Content-Length), the request enters the buffering pipeline and the body
+filter enforces the limit. Exceeding it there counts as an attempted
 conversion that failed (increments `conversion_attempts_total` and the
 matching failure counter, then applies `markdown_error_policy`).
 
