@@ -250,7 +250,10 @@ test_markdown_conversion() {
             # already failed the markdown check, so require a stronger
             # signal (a heading) before accepting.
             local body
-            body="$(printf '%s' "$response" | sed -n '/^\r*$/,$p' | tail -n +2)" || true
+            # Strip carriage returns first so the header/body split below
+            # works on any platform without relying on a non-portable
+            # "\r" pattern in sed.
+            body="$(printf '%s' "$response" | tr -d '\r' | sed -n '/^$/,$p' | tail -n +2)" || true
             # Only a tag-shaped token counts as HTML markup: a '<' followed
             # by a tag name whose next character is whitespace, '>', '/',
             # a comment, or a doctype.  Plain angle-bracket comparisons
