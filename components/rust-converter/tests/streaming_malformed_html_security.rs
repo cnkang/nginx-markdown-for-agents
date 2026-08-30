@@ -626,8 +626,7 @@ fn full_buffer_and_streaming_url_canonicalization_match() {
                 "full-buffer path must reject control URL {url:?}, got {full:?}"
             );
             assert!(
-                !streamed.markdown.contains("http://")
-                    && !streamed.markdown.contains("https://"),
+                !streamed.markdown.contains("http://") && !streamed.markdown.contains("https://"),
                 "streaming path must reject control URL {url:?}, got {:?}",
                 streamed.markdown
             );
