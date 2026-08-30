@@ -301,7 +301,7 @@ When multiple limits are hit simultaneously, the first detected wins:
 
 1. Input size (`markdown_limits conversion_memory=<size>`) — checked first, before FFI call
 2. Overall FFI deadline (`markdown_limits conversion_timeout=<time>`) — the authoritative upper bound, checked at each checkpoint alongside parser_timeout
-3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — triggers the parser checkpoint when nonzero, measured from conversion start; at each checkpoint the parser deadline is evaluated first, then the overall deadline. The two are independent (a zero value disables that deadline); when `conversion_timeout` is 0 only the parser deadline applies.
+3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — triggers the parser checkpoint when nonzero, measured from conversion start; at each checkpoint the parser deadline is evaluated first, then the overall deadline. The two are independent; when `conversion_timeout` is 0 only the parser deadline applies.
 4. Memory budget (`markdown_limits parser_memory=<size>`) — checked on each allocation
 
 ### Fail-Open Behavior
@@ -367,7 +367,14 @@ deadline. The two are independent: when `conversion_timeout` expires at a
 parser checkpoint (because it is smaller than `parser_timeout`, or the
 overall budget was consumed by pre-parse work), the conversion reports
 `ERROR_TIMEOUT`; when `parser_timeout` expires first, it reports
-`ERROR_PARSE_TIMEOUT`. A zero value disables that deadline.
+`ERROR_PARSE_TIMEOUT`. The parser deadline is measured from the pipeline
+entry (conversion start) for the pre-parse check, and from the parser
+entry for the post-parse check, so pre-parse work (budget estimation,
+upstream delay) is bounded by the parser sub-limit as well. In the
+configuration layer `parser_timeout` must be a positive duration
+(1ms..1h); a zero value is rejected by `nginx -t`. The zero-value
+fallback to the overall timeout exists only inside the FFI option
+decoder for callers that omit the field.
 | 11 | `ERROR_PARSE_BUDGET_EXCEEDED` | The estimated parser working set exceeds `parser_memory`, or a later memory checkpoint fails — not only a single allocation failure |
 
 ---
