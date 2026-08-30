@@ -1000,7 +1000,6 @@ make_request(void)
     memset(&connection, 0, sizeof(connection));
     request.pool = &pool;
     request.connection = &connection;
-    request.main = &request;
     request.method = NGX_HTTP_GET;
     return request;
 }
@@ -1027,6 +1026,7 @@ test_preaccess_handler_installs_durable_bypass(void)
     ngx_chain_t pending_chain;
     ngx_int_t rc;
 
+    request.main = &request;
     reset_test_state();
     memset(&conf, 0, sizeof(conf));
     conf.enabled = 1;
@@ -1134,6 +1134,7 @@ test_header_filter_bypass_forwards_once(void)
     ngx_http_markdown_conf_t conf;
     ngx_int_t rc;
 
+    request.main = &request;
     memset(&ctx, 0, sizeof(ctx));
     memset(&conf, 0, sizeof(conf));
     g_conf = &conf;
@@ -1189,6 +1190,7 @@ test_preaccess_bypass_terminal_header_outcomes(void)
     g_conf = &conf;
 
     request = make_request();
+    request.main = &request;
     reset_test_state();
     rc = ngx_http_markdown_preaccess_handler(&request);
     TEST_ASSERT(rc == NGX_DECLINED,
@@ -1218,6 +1220,7 @@ test_preaccess_bypass_terminal_header_outcomes(void)
                 "body delivery errors must not duplicate fail-open accounting");
 
     request = make_request();
+    request.main = &request;
     reset_test_state();
     rc = ngx_http_markdown_preaccess_handler(&request);
     TEST_ASSERT(rc == NGX_DECLINED,
