@@ -306,10 +306,11 @@ and the memory budget):
 If the response would exceed full-buffer resource limits **and the size is
 known at header time** (Content-Length present), the eligibility gate
 rejects it **before any conversion attempt**: the request is recorded
-as `not_eligible` (reason `memory_budget_exceeded`) and does **not**
+as `not_eligible` (reason `not_eligible`) and does **not**
 increment `nginx_markdown_conversion_attempts_total` nor assign
-`engine="full_buffer"`, because conversion never starts. The module then
-applies the configured `markdown_error_policy` (passthrough or reject).
+`engine="full_buffer"`, because conversion never starts. The module
+forwards the original response without evaluating `markdown_error_policy`
+(prechecked passthrough).
 
 When the size is **not known at header time** (chunked or no
 Content-Length), the request enters the buffering pipeline and the limit

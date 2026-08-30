@@ -1080,7 +1080,7 @@ The alignment works as follows:
 | Reason Code Category | Metrics Endpoint Field | Log Correlation | Example |
 |---|---|---|---|
 | Skip codes (`not_eligible`, `skipped_*`, `bypass_no_transform`) | `nginx_markdown_requests_total{outcome="skipped",reason="..."}` | `reason` field in decision log | `grep "reason=not_eligible" error.log` |
-| Failure categories (`conversion`, `resource_limit`, `system`) | Canonical failed outcome in `nginx_markdown_requests_total{outcome=~"failed_.*",reason=~"failed_open|failed_closed"}` | `category` field in decision log | `grep -E "category=(conversion|resource_limit|system)" error.log` |
+| Failure categories (`conversion`, `resource_limit`, `system`) | Canonical failed outcome in `nginx_markdown_requests_total{outcome=~"failed_(open|closed)"}` | `category` field in decision log | `grep -E "category=(conversion|resource_limit|system)" error.log` |
 | `converted` | `nginx_markdown_requests_total{outcome="converted"}` | `reason` field in decision log | `grep "reason=converted" error.log` |
 | `failed_open` | `nginx_markdown_requests_total{outcome="failed_open"}` | `reason` field in decision log | `grep "reason=failed_open" error.log` |
 | `failed_closed` | `nginx_markdown_requests_total{outcome="failed_closed"}` | `reason` field in decision log | `grep "reason=failed_closed" error.log` |

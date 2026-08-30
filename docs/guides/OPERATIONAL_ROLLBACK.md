@@ -518,8 +518,19 @@ grep "markdown decision:" /var/log/nginx/error.log | \
   grep "reason=disabled" | tail -5
 
 # 4. Verify: confirm conversion metrics stopped
-curl -s http://localhost/markdown-metrics | \
-  grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)"
+# Compare the counters before and after a short interval; the rollback
+# is verified only if neither counter increases.
+before=$(curl -s http://localhost/markdown-metrics | \
+  grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
+sleep 5
+after=$(curl -s http://localhost/markdown-metrics | \
+  grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
+if [ "$before" = "$after" ]; then
+  echo "OK: conversion counters stable after rollback"
+else
+  echo "FAIL: conversion counters still increasing after rollback"
+  exit 1
+fi
 
 # 5. Verify: confirm client receives HTML
 curl -sD - -o /dev/null \

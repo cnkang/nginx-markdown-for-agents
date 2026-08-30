@@ -388,7 +388,7 @@ The implementation details in this document feed into a few operator-facing conc
   link output)
 - **CWE-611**: XXE prevention
 
-### Security Certifications
+### Security Properties
 
 - Memory safety guaranteed by Rust
 - No unsafe code in conversion logic
