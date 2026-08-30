@@ -81,6 +81,14 @@ static ngx_int_t ngx_http_markdown_handle_encoding_collection_failure(
     const ngx_http_markdown_effective_conf_t *eff);
 static void ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled);
+static void ngx_http_markdown_establish_preaccess_bypass(
+    ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled);
+static ngx_int_t ngx_http_markdown_forward_prechecked_headers(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf);
+static ngx_int_t ngx_http_markdown_handle_durable_bypass(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf);
 static void ngx_http_markdown_log_failure_decision(
     ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
@@ -466,6 +474,7 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ctx->buffer_initialized = 0;
     ctx->headers_forwarded = 0;
     ctx->lifecycle.header_filter_initialized = 1;
+    ctx->lifecycle.bypass = 0;
     ctx->lifecycle.last_modified.source_last_modified_time =
         r->headers_out.last_modified_time;
     ctx->lifecycle.last_modified.has_last_modified_time =
@@ -648,6 +657,22 @@ ngx_http_markdown_log_streaming_terminal_decision(
     } while (0)
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
+
+static void
+ngx_http_markdown_establish_preaccess_bypass(
+    ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled)
+{
+    if (ctx == NULL) {
+        return;
+    }
+
+    ctx->filter_enabled = filter_enabled;
+    ctx->eligible = 0;
+    ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    ctx->error.has_category = 1;
+    ctx->lifecycle.bypass = 1;
+}
+
 /*
  * Capture client validators before proxy, cache, or content handlers can
  * satisfy them against the upstream representation.  The handler only
@@ -762,12 +787,11 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
             ngx_http_markdown_reason_failed_open(),
             ngx_http_markdown_reason_from_error_category(
                 NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
-        /* Establish a durable request-scoped bypass: install the context
-         * with eligible = 0 so the header filter sees a live context and
-         * passes the response through instead of re-entering the
-         * conversion path (which would double-count metrics and convert
-         * despite the fail-open decision). */
-        ctx->eligible = 0;
+        /* Establish a durable request-scoped bypass before the header filter
+         * can initialize the context and overwrite the eligibility decision.
+         * The cached filter decision lets the body filter reach its existing
+         * ineligible pass-through path without preparing conversion state. */
+        ngx_http_markdown_establish_preaccess_bypass(ctx, filter_enabled);
         r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
         return NGX_DECLINED;
     }
@@ -1496,6 +1520,25 @@ ngx_http_markdown_resume_header_filter_reentry(
 
 
 static ngx_int_t
+ngx_http_markdown_handle_durable_bypass(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (ctx == NULL || !ctx->lifecycle.bypass) {
+        return NGX_DECLINED;
+    }
+
+    if (ctx->headers_forwarded) {
+        return NGX_OK;
+    }
+
+    /* Preaccess already made and logged the fail-open decision.  Forward
+     * the source representation without initializing conversion state. */
+    return ngx_http_markdown_forward_prechecked_headers(r, ctx, conf);
+}
+
+
+static ngx_int_t
 ngx_http_markdown_header_filter(ngx_http_request_t *r)
 {
     ngx_http_markdown_ctx_t         *ctx;
@@ -1526,8 +1569,14 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 
     /* Get module configuration */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
+    ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
+
+    precheck_rc = ngx_http_markdown_handle_durable_bypass(r, ctx, conf);
+    if (precheck_rc != NGX_DECLINED) {
+        return precheck_rc;
+    }
+
     if (conf == NULL) {
-        ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
         ngx_http_markdown_restore_conditional_request(r, ctx);
         /* Module not configured, pass through */
         return ngx_http_markdown_next_header_filter_with_auth(r, NULL);
@@ -1536,7 +1585,6 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     /* Header-filter re-entry must reuse the request context created by the
      * first pass; allocating a second context would duplicate cleanup hooks
      * and reset the request's phase latches. */
-    ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
     precheck_rc = ngx_http_markdown_header_filter_handle_reentry(r);
     if (precheck_rc != NGX_DECLINED) {
         return precheck_rc;
