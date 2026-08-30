@@ -300,11 +300,14 @@ The failure branches use the canonical lowercase codes from
 [DECISION_CHAIN.md](DECISION_CHAIN.md): the **primary outcome** is
 `failed_open` (with `markdown_error_policy pass`) or `failed_closed`
 (with `fail_closed`/`status N`), and the **failure category** is
-`timeout` or `budget_exceeded`. A `conversion_memory` failure is an
-eligibility cap: the request is recorded as `not_eligible` (reason
-`not_eligible`) before any FFI conversion attempt, and the module then
-applies the configured `markdown_error_policy` (passthrough or reject).
-The category for a parser working-set failure is `budget_exceeded`. The
+`timeout` or `budget_exceeded`. A `conversion_memory` failure with a
+known size (Content-Length present) is an eligibility cap: the request
+is recorded as `not_eligible` (reason `not_eligible`) before any FFI
+conversion attempt, and the module forwards the original response
+without evaluating `markdown_error_policy` (prechecked passthrough).
+Only a failure detected while buffering an unknown-size body (or any
+conversion/body-buffer failure) enters the error policy. The category
+for a parser working-set failure is `budget_exceeded`. The
 category appears in the `category=` field of the decision log; the
 specific reason (`not_eligible`, `timeout`, `budget_exceeded`, ...)
 appears as the `reason` label on `nginx_markdown_requests_total`. The
@@ -328,13 +331,17 @@ commit boundary (when response headers are sent):
 
 **Pre-commit failures** (before the module sends response headers):
 
-These include the input-size check, the pre-parse timeout check, and any
-limit hit before output begins. With `markdown_error_policy pass`, the module
-preserves the original HTML content and passes it through to the client
-unchanged. The original content is still available because no transformation
-has committed yet. With `markdown_error_policy fail_closed`, the module
-returns the configured error status instead of the original content. `status N`
-follows the configured status policy.
+These include the pre-parse timeout check and any limit hit before
+output begins. With `markdown_error_policy pass`, the module preserves
+the original HTML content and passes it through to the client
+unchanged. The original content is still available because no
+transformation has committed yet. With `markdown_error_policy
+fail_closed`, the module returns the configured error status instead of
+the original content. `status N` follows the configured status policy.
+
+The known-size `conversion_memory` check is an exception: it is an
+eligibility decision, not a failure, so it always forwards the original
+response (prechecked passthrough) regardless of the error policy.
 
 **Post-commit failures** (after response headers are sent):
 
