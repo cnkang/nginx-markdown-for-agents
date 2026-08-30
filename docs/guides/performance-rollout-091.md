@@ -315,10 +315,17 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
    # Restart through systemd only when it actually owns the running NGINX
    # process.  A unit file existing on disk is not proof of ownership —
    # the process may be started by another supervisor or directly.
-   if systemctl is-active --quiet nginx.service \
-       && systemctl show -p MainPID --value nginx.service | grep -q '[0-9]' \
-       && [ "$(systemctl show -p MainPID --value nginx.service)" = "$(pgrep -x nginx | head -1)" ]; then
-     sudo systemctl restart nginx
+   if command -v systemctl >/dev/null 2>&1 \
+       && systemctl is-active --quiet nginx.service; then
+     main_pid="$(systemctl show -p MainPID --value nginx.service)"
+     if [[ "$main_pid" =~ ^[0-9]+$ ]] \
+         && [ -x "/proc/$main_pid/exe" ] \
+         && [ "$main_pid" = "$(pgrep -x nginx | head -1)" ]; then
+       sudo systemctl restart nginx
+     else
+       sudo nginx -s stop
+       sudo nginx
+     fi
    else
      sudo nginx -s stop
      sudo nginx

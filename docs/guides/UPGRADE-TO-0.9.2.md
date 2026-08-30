@@ -162,10 +162,16 @@ sudo nginx -t
 # owned by nginx.service before restarting through systemd.  A unit
 # file existing on disk is not proof of ownership — the process may be
 # started by another supervisor or directly.
-if systemctl is-active --quiet nginx.service \
-    && systemctl show -p MainPID --value nginx.service | grep -q '[0-9]' \
-    && [ "$(systemctl show -p MainPID --value nginx.service)" = "$(pgrep -x nginx | head -1)" ]; then
-  sudo systemctl restart nginx
+if command -v systemctl >/dev/null 2>&1 \
+    && systemctl is-active --quiet nginx.service; then
+  main_pid="$(systemctl show -p MainPID --value nginx.service)"
+  if [[ "$main_pid" =~ ^[0-9]+$ ]] \
+      && [ -x "/proc/$main_pid/exe" ] \
+      && [ "$main_pid" = "$(pgrep -x nginx | head -1)" ]; then
+    sudo systemctl restart nginx
+  else
+    sudo nginx -s reload
+  fi
 else
   # If another supervisor owns NGINX, use its restart/reload operation instead.
   # For a directly managed master process, the equivalent is:
@@ -237,10 +243,15 @@ sudo nginx -t
 # proof of ownership — the process may be started by another supervisor
 # or directly.
 if command -v systemctl >/dev/null 2>&1 \
-    && systemctl is-active --quiet nginx.service \
-    && systemctl show -p MainPID --value nginx.service | grep -q '[0-9]' \
-    && [ "$(systemctl show -p MainPID --value nginx.service)" = "$(pgrep -x nginx | head -1)" ]; then
-    sudo systemctl restart nginx
+    && systemctl is-active --quiet nginx.service; then
+    main_pid="$(systemctl show -p MainPID --value nginx.service)"
+    if [[ "$main_pid" =~ ^[0-9]+$ ]] \
+        && [ -x "/proc/$main_pid/exe" ] \
+        && [ "$main_pid" = "$(pgrep -x nginx | head -1)" ]; then
+        sudo systemctl restart nginx
+    else
+        sudo nginx -s reload
+    fi
 else
     sudo nginx -s reload
 fi
