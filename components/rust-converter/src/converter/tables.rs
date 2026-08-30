@@ -94,7 +94,7 @@ impl MarkdownConverter {
                     &mut row_cells,
                     table_scratch,
                 )?;
-                Self::charge_vec_growth(rows, ctx, table_scratch)?;
+                Self::charge_vec_growth(&mut *rows, ctx, table_scratch)?;
                 rows.push(row_cells);
             }
         }
@@ -135,7 +135,7 @@ impl MarkdownConverter {
             "tr" => {
                 let mut row_cells = Vec::new();
                 self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells, table_scratch)?;
-                Self::charge_vec_growth(rows, ctx, table_scratch)?;
+                Self::charge_vec_growth(&mut *rows, ctx, table_scratch)?;
                 rows.push(row_cells);
                 Ok(())
             }
@@ -198,7 +198,7 @@ impl MarkdownConverter {
             }
 
             while alignments.len() < headers.len() {
-                Self::charge_vec_growth(&alignments, &mut ctx, &mut table_scratch)?;
+                Self::charge_vec_growth(&mut alignments, &mut ctx, &mut table_scratch)?;
                 alignments.push(TableAlignment::Left);
             }
 
@@ -391,10 +391,10 @@ impl MarkdownConverter {
 
                     Self::trim_cell_output(&mut cell_output);
                     Self::charge_cell_output(&cell_output, &mut ctx, table_scratch)?;
-                    Self::charge_vec_growth(headers, &mut ctx, table_scratch)?;
+                    Self::charge_vec_growth(&mut *headers, &mut ctx, table_scratch)?;
                     headers.push(cell_output);
                     let attrs_borrowed = attrs.borrow();
-                    Self::charge_vec_growth(alignments, &mut ctx, table_scratch)?;
+                    Self::charge_vec_growth(&mut *alignments, &mut ctx, table_scratch)?;
                     alignments.push(self.extract_alignment(&attrs_borrowed));
                 }
             }
@@ -418,7 +418,7 @@ impl MarkdownConverter {
             {
                 let mut row_cells = Vec::new();
                 self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells, table_scratch)?;
-                Self::charge_vec_growth(rows, &mut ctx, table_scratch)?;
+                Self::charge_vec_growth(&mut *rows, &mut ctx, table_scratch)?;
                 rows.push(row_cells);
             }
         }
@@ -450,7 +450,7 @@ impl MarkdownConverter {
                     }
                     Self::trim_cell_output(&mut cell_output);
                     Self::charge_cell_output(&cell_output, &mut ctx, table_scratch)?;
-                    Self::charge_vec_growth(cells, &mut ctx, table_scratch)?;
+                    Self::charge_vec_growth(&mut *cells, &mut ctx, table_scratch)?;
                     cells.push(cell_output);
                 }
             }
@@ -493,7 +493,7 @@ impl MarkdownConverter {
     /// cells can amplify memory far beyond the configured budget while
     /// `working_set_bytes` stays low.
     fn charge_vec_growth<T>(
-        vec: &Vec<T>,
+        vec: &mut Vec<T>,
         ctx: &mut Option<&mut ConversionContext>,
         table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
@@ -505,7 +505,7 @@ impl MarkdownConverter {
     }
 
     fn charge_vec_growth_to<T>(
-        vec: &Vec<T>,
+        vec: &mut Vec<T>,
         required_len: usize,
         ctx: &mut Option<&mut ConversionContext>,
         table_scratch: &mut usize,
@@ -513,24 +513,78 @@ impl MarkdownConverter {
         if required_len <= vec.capacity() {
             return Ok(());
         }
-        // Vec grows geometrically (doubling).  Charge the byte size of the
-        // new backing allocation: capacity is an element count, so multiply
-        // by the element size before passing bytes to the working set.
-        let doubled_capacity =
-            vec.capacity().max(1).checked_mul(2).ok_or_else(|| {
-                ConversionError::MemoryLimit("table container size overflow".into())
-            })?;
-        let new_capacity = doubled_capacity.max(required_len);
-        let growth = new_capacity
+
+        let old_capacity = vec.capacity();
+        let doubled_capacity = old_capacity
+            .max(1)
+            .checked_mul(2)
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+        let requested_capacity = doubled_capacity.max(required_len);
+        let additional = requested_capacity
+            .checked_sub(vec.len())
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+        let old_bytes = old_capacity
             .checked_mul(std::mem::size_of::<T>())
             .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+        if old_bytes > *table_scratch {
+            return Err(ConversionError::MemoryLimit(
+                "table container charge is inconsistent".into(),
+            ));
+        }
+        let requested_bytes = requested_capacity
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+        let requested_growth = requested_bytes
+            .checked_sub(old_bytes)
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
         if let Some(context) = ctx.as_deref_mut() {
-            let next = table_scratch.checked_add(growth).ok_or_else(|| {
+            context.reserve_working_set(requested_growth)?;
+        }
+
+        if let Err(error) = vec.try_reserve_exact(additional) {
+            if let Some(context) = ctx.as_deref_mut() {
+                context.release_working_set(requested_growth);
+            }
+            return Err(ConversionError::MemoryLimit(format!(
+                "unable to reserve {} bytes for table container: {}",
+                requested_bytes, error
+            )));
+        }
+
+        let actual_capacity = vec.capacity();
+        let actual_bytes = actual_capacity
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+        if actual_bytes > requested_bytes {
+            let extra = actual_bytes - requested_bytes;
+            if let Some(context) = ctx.as_deref_mut()
+                && let Err(error) = context.reserve_working_set(extra)
+            {
+                context.release_working_set(requested_growth);
+                return Err(ConversionError::MemoryLimit(format!(
+                    "table container capacity {} bytes exceeds budget: {}",
+                    actual_bytes, error
+                )));
+            }
+        } else if let Some(context) = ctx.as_deref_mut() {
+            context.release_working_set(requested_bytes - actual_bytes);
+        }
+
+        if let Some(context) = ctx.as_deref_mut() {
+            // Replace the old backing-allocation charge after reallocating.
+            // The provisional growth charge has already proved the budget;
+            // rebuilding the charge makes the actual capacity authoritative.
+            let actual_growth = actual_bytes.checked_sub(old_bytes).ok_or_else(|| {
                 ConversionError::MemoryLimit("table container size overflow".into())
             })?;
-            context.reserve_working_set(growth)?;
-            *table_scratch = next;
+            context.release_working_set(actual_growth);
+            context.release_working_set(old_bytes);
+            context.reserve_working_set(actual_bytes)?;
         }
+        *table_scratch = table_scratch
+            .checked_sub(old_bytes)
+            .and_then(|base| base.checked_add(actual_bytes))
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
         Ok(())
     }
 
@@ -681,7 +735,9 @@ fn parse_text_align_from_style(style: &str) -> Option<TableAlignment> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{ConversionContext, ConversionOptions, MarkdownConverter, MarkdownFlavor};
+    use super::super::{
+        ConversionContext, ConversionOptions, MarkdownConverter, MarkdownFlavor, TableAlignment,
+    };
     use crate::error::ConversionError;
     use crate::parser::parse_html;
     use std::time::Duration;
@@ -707,6 +763,89 @@ mod tests {
             .expect("conversion should fit the budget");
         assert_eq!(with_budget, expected);
         assert_eq!(context.working_set_bytes, 0);
+    }
+
+    #[test]
+    fn table_vec_growth_replaces_old_capacity_charge() {
+        let element_size = std::mem::size_of::<String>();
+        let mut expected_values = Vec::<String>::new();
+        let mut expected_capacities = Vec::new();
+        for _ in 0..10 {
+            if expected_values.len() + 1 > expected_values.capacity() {
+                let requested_capacity = expected_values.capacity().max(1) * 2;
+                expected_values
+                    .try_reserve_exact(requested_capacity - expected_values.len())
+                    .expect("test capacity should be reservable");
+            }
+            expected_capacities.push(expected_values.capacity());
+            expected_values.push(String::new());
+        }
+        let final_capacity = *expected_capacities
+            .last()
+            .expect("capacity probe should have entries");
+        let initial_capacity = *expected_capacities
+            .first()
+            .expect("capacity probe should have an initial allocation");
+        assert!(final_capacity > initial_capacity);
+        let mut values = Vec::<String>::new();
+        let mut context =
+            ConversionContext::with_output_budget(Duration::ZERO, element_size * final_capacity);
+        let mut table_scratch = 0;
+
+        {
+            let mut context_slot = Some(&mut context);
+            for expected_capacity in expected_capacities {
+                MarkdownConverter::charge_vec_growth(
+                    &mut values,
+                    &mut context_slot,
+                    &mut table_scratch,
+                )
+                .expect("explicit table capacity should fit the budget");
+                assert_eq!(values.capacity(), expected_capacity);
+                assert_eq!(
+                    table_scratch,
+                    values.capacity() * std::mem::size_of::<String>()
+                );
+                values.push(String::new());
+            }
+        }
+
+        assert_eq!(context.working_set_bytes, element_size * final_capacity);
+    }
+
+    #[test]
+    fn table_vec_growth_to_respects_required_length_boundary() {
+        let element_size = std::mem::size_of::<TableAlignment>();
+        let mut expected_values = Vec::<TableAlignment>::new();
+        expected_values
+            .try_reserve_exact(5)
+            .expect("test capacity should be reservable");
+        let expected_capacity = expected_values.capacity();
+        let mut values = Vec::<TableAlignment>::new();
+        let mut context =
+            ConversionContext::with_output_budget(Duration::ZERO, element_size * expected_capacity);
+        let mut table_scratch = 0;
+
+        {
+            let mut context_slot = Some(&mut context);
+            MarkdownConverter::charge_vec_growth_to(
+                &mut values,
+                5,
+                &mut context_slot,
+                &mut table_scratch,
+            )
+            .expect("required table capacity should fit exactly");
+        }
+
+        assert!(values.capacity() >= 5);
+        assert_eq!(
+            table_scratch,
+            values.capacity() * std::mem::size_of::<TableAlignment>()
+        );
+        assert_eq!(values.capacity(), expected_capacity);
+        assert_eq!(table_scratch, element_size * expected_capacity);
+
+        assert_eq!(context.working_set_bytes, element_size * expected_capacity);
     }
 
     #[test]

@@ -129,33 +129,15 @@ where
     result
 }
 
-fn link_label_escape_capacity(label: &str) -> Result<usize, ConversionError> {
-    // escape_link_label returns Cow::Owned when the label contains any
-    // escapable character OR a newline/CR (which is replaced by a space),
-    // and allocates s.len() + 8 in that case.  The working-set charge must
-    // match the escaper's actual allocation, not a per-character count.
-    let needs_owned = label.chars().any(|ch| {
-        matches!(
-            ch,
-            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' | '\n' | '\r'
-        )
-    });
-    if needs_owned {
-        label.len().checked_add(8).ok_or_else(|| {
-            ConversionError::MemoryLimit("link label working-set size overflow".into())
-        })
-    } else {
-        Ok(0)
-    }
-}
-
 /// Append a link label using the canonical security escaper.
 pub(super) fn append_link_label(
     output: &mut String,
     label: &str,
     ctx: &mut Option<&mut ConversionContext>,
 ) -> Result<(), ConversionError> {
-    let capacity = link_label_escape_capacity(label)?;
+    let capacity = crate::security::link_label_escaped_capacity(label).ok_or_else(|| {
+        ConversionError::MemoryLimit("link label working-set size overflow".into())
+    })?;
     with_reserved_working_set(output, ctx, capacity, |output, ctx| {
         let escaped = crate::security::escape_link_label(label);
         append_str_with_context(output, escaped.as_ref(), ctx)
@@ -822,5 +804,42 @@ impl MarkdownConverter {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn link_label_reservation_covers_all_escaped_bytes_and_newline() {
+        let label = "[]\\<>*_`~\n";
+        let expected = crate::security::escape_link_label(label).into_owned();
+        let required = crate::security::link_label_escaped_capacity(label)
+            .expect("link label capacity should not overflow");
+
+        assert_eq!(required, expected.len());
+
+        let mut output = String::new();
+        let mut context = ConversionContext::with_output_budget(Duration::ZERO, required * 2);
+        {
+            let mut context_slot = Some(&mut context);
+            append_link_label(&mut output, label, &mut context_slot)
+                .expect("exact temporary and output budget should fit");
+        }
+        assert_eq!(output, expected);
+        assert_eq!(context.working_set_bytes, 0);
+
+        let mut limited_output = String::new();
+        let mut limited_context =
+            ConversionContext::with_output_budget(Duration::ZERO, required * 2 - 1);
+        let result = {
+            let mut context_slot = Some(&mut limited_context);
+            append_link_label(&mut limited_output, label, &mut context_slot)
+        };
+        assert!(matches!(result, Err(ConversionError::MemoryLimit(_))));
+        assert!(limited_output.is_empty());
+        assert_eq!(limited_context.working_set_bytes, 0);
     }
 }

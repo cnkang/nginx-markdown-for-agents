@@ -918,6 +918,44 @@ pub fn parse_forwarded_headers(
     Some((scheme, host.to_string()))
 }
 
+#[derive(Clone, Copy)]
+enum LinkLabelEscapeAction {
+    Copy,
+    Escape,
+    ReplaceWithSpace,
+}
+
+fn link_label_escape_action(ch: char) -> LinkLabelEscapeAction {
+    match ch {
+        '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' => LinkLabelEscapeAction::Escape,
+        '\n' | '\r' => LinkLabelEscapeAction::ReplaceWithSpace,
+        _ => LinkLabelEscapeAction::Copy,
+    }
+}
+
+/// Return the exact temporary capacity needed by [`escape_link_label`].
+///
+/// A label without transformations stays borrowed and needs no temporary
+/// allocation. A transformed label receives its exact escaped byte length,
+/// so callers can reserve and charge the same amount as the escaper.
+pub(crate) fn link_label_escaped_capacity(s: &str) -> Option<usize> {
+    let mut capacity = 0usize;
+    let mut needs_owned = false;
+
+    for ch in s.chars() {
+        let action = link_label_escape_action(ch);
+        let byte_len = match action {
+            LinkLabelEscapeAction::Copy => ch.len_utf8(),
+            LinkLabelEscapeAction::Escape => ch.len_utf8().checked_add(1)?,
+            LinkLabelEscapeAction::ReplaceWithSpace => 1,
+        };
+        capacity = capacity.checked_add(byte_len)?;
+        needs_owned |= !matches!(action, LinkLabelEscapeAction::Copy);
+    }
+
+    if needs_owned { Some(capacity) } else { Some(0) }
+}
+
 /// Escape a string for safe use as a Markdown link label.
 ///
 /// Per CommonMark §4.7, link labels may contain backslash escapes.
@@ -929,26 +967,28 @@ pub fn parse_forwarded_headers(
 /// emitter and the full-buffer traversal both delegate here so the escaping
 /// rule cannot drift between emission sites (AGENTS.md Rule 27).
 pub fn escape_link_label<'a>(s: &'a str) -> Cow<'a, str> {
-    let first_escape = s.char_indices().find(|(_, ch)| {
-        matches!(
-            ch,
-            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' | '\n' | '\r'
-        )
-    });
+    let capacity = link_label_escaped_capacity(s).unwrap_or(s.len());
+    if capacity == 0 {
+        return Cow::Borrowed(s);
+    }
+
+    let first_escape = s
+        .char_indices()
+        .find(|(_, ch)| !matches!(link_label_escape_action(*ch), LinkLabelEscapeAction::Copy));
     let Some((first_index, _)) = first_escape else {
         return Cow::Borrowed(s);
     };
 
-    let mut out = String::with_capacity(s.len() + 8);
+    let mut out = String::with_capacity(capacity);
     out.push_str(&s[..first_index]);
     for ch in s[first_index..].chars() {
-        match ch {
-            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' => {
+        match link_label_escape_action(ch) {
+            LinkLabelEscapeAction::Escape => {
                 out.push('\\');
                 out.push(ch);
             }
-            '\n' | '\r' => out.push(' '),
-            _ => out.push(ch),
+            LinkLabelEscapeAction::ReplaceWithSpace => out.push(' '),
+            LinkLabelEscapeAction::Copy => out.push(ch),
         }
     }
     Cow::Owned(out)
@@ -1179,6 +1219,26 @@ mod url_validation_tests {
         );
         assert_eq!(escape_link_label("a\nb"), "a b");
         assert_eq!(escape_link_label("a\rb"), "a b");
+    }
+
+    #[test]
+    fn test_escape_link_label_capacity_matches_all_escapable_bytes() {
+        let label = "[]\\<>*_`~\n";
+        let expected = r"\[\]\\\<\>\*\_\`\~ ";
+
+        assert_eq!(link_label_escaped_capacity(label), Some(expected.len()));
+        let escaped = escape_link_label(label);
+        assert_eq!(escaped.as_ref(), expected);
+        match escaped {
+            Cow::Owned(value) => assert!(value.capacity() >= expected.len()),
+            Cow::Borrowed(_) => panic!("an escaped label must own its output"),
+        }
+    }
+
+    #[test]
+    fn test_plain_link_label_needs_no_temporary_capacity() {
+        assert_eq!(link_label_escaped_capacity("plain label"), Some(0));
+        assert!(matches!(escape_link_label("plain label"), Cow::Borrowed(_)));
     }
 
     #[test]
