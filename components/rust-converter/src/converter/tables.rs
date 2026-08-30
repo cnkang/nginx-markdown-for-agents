@@ -44,6 +44,63 @@ use super::{
 use html5ever::Attribute;
 use std::cell::Ref;
 
+struct TableVecGrowthPlan {
+    old_bytes: usize,
+    requested_bytes: usize,
+    additional: usize,
+    requested_growth: usize,
+}
+
+fn table_vec_growth_plan<T>(
+    vec: &Vec<T>,
+    required_len: usize,
+) -> Result<TableVecGrowthPlan, ConversionError> {
+    let old_capacity = vec.capacity();
+    let doubled_capacity = old_capacity
+        .max(1)
+        .checked_mul(2)
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+    let requested_capacity = doubled_capacity.max(required_len);
+    let additional = requested_capacity
+        .checked_sub(vec.len())
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+    let element_size = std::mem::size_of::<T>();
+    let old_bytes = old_capacity
+        .checked_mul(element_size)
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+    let requested_bytes = requested_capacity
+        .checked_mul(element_size)
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+    let requested_growth = requested_bytes
+        .checked_sub(old_bytes)
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+
+    Ok(TableVecGrowthPlan {
+        old_bytes,
+        requested_bytes,
+        additional,
+        requested_growth,
+    })
+}
+
+fn reconcile_table_vec_charge(
+    context: &mut ConversionContext,
+    old_bytes: usize,
+    requested_growth: usize,
+    actual_bytes: usize,
+) -> Result<(), ConversionError> {
+    let actual_growth = actual_bytes
+        .checked_sub(old_bytes)
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+
+    // Replace the provisional reservation with the allocator's actual
+    // capacity in one transaction. This also restores the old charge when
+    // the actual capacity cannot fit, so no failed extra reservation can
+    // leave a stale or partially released ledger.
+    context.release_working_set(requested_growth);
+    context.reserve_working_set(actual_growth)
+}
+
 impl MarkdownConverter {
     fn extract_table_body(
         &self,
@@ -514,77 +571,67 @@ impl MarkdownConverter {
             return Ok(());
         }
 
-        let old_capacity = vec.capacity();
-        let doubled_capacity = old_capacity
-            .max(1)
-            .checked_mul(2)
-            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
-        let requested_capacity = doubled_capacity.max(required_len);
-        let additional = requested_capacity
-            .checked_sub(vec.len())
-            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
-        let old_bytes = old_capacity
-            .checked_mul(std::mem::size_of::<T>())
-            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
-        if old_bytes > *table_scratch {
+        let plan = table_vec_growth_plan(vec, required_len)?;
+        if plan.old_bytes > *table_scratch {
             return Err(ConversionError::MemoryLimit(
                 "table container charge is inconsistent".into(),
             ));
         }
-        let requested_bytes = requested_capacity
-            .checked_mul(std::mem::size_of::<T>())
-            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
-        let requested_growth = requested_bytes
-            .checked_sub(old_bytes)
-            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
         if let Some(context) = ctx.as_deref_mut() {
-            context.reserve_working_set(requested_growth)?;
+            context.reserve_working_set(plan.requested_growth)?;
         }
 
-        if let Err(error) = vec.try_reserve_exact(additional) {
+        if let Err(error) = vec.try_reserve_exact(plan.additional) {
             if let Some(context) = ctx.as_deref_mut() {
-                context.release_working_set(requested_growth);
+                context.release_working_set(plan.requested_growth);
             }
             return Err(ConversionError::MemoryLimit(format!(
                 "unable to reserve {} bytes for table container: {}",
-                requested_bytes, error
+                plan.requested_bytes, error
             )));
         }
 
         let actual_capacity = vec.capacity();
         let actual_bytes = actual_capacity
             .checked_mul(std::mem::size_of::<T>())
-            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
-        if actual_bytes > requested_bytes {
-            let extra = actual_bytes - requested_bytes;
-            if let Some(context) = ctx.as_deref_mut()
-                && let Err(error) = context.reserve_working_set(extra)
-            {
-                context.release_working_set(requested_growth);
-                return Err(ConversionError::MemoryLimit(format!(
-                    "table container capacity {} bytes exceeds budget: {}",
-                    actual_bytes, error
-                )));
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()));
+        let actual_bytes = match actual_bytes {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                if let Some(context) = ctx.as_deref_mut() {
+                    context.release_working_set(plan.requested_growth);
+                }
+                return Err(error);
             }
-        } else if let Some(context) = ctx.as_deref_mut() {
-            context.release_working_set(requested_bytes - actual_bytes);
-        }
-
-        if let Some(context) = ctx.as_deref_mut() {
-            // Replace the old backing-allocation charge after reallocating.
-            // The provisional growth charge has already proved the budget;
-            // rebuilding the charge makes the actual capacity authoritative.
-            let actual_growth = actual_bytes.checked_sub(old_bytes).ok_or_else(|| {
-                ConversionError::MemoryLimit("table container size overflow".into())
-            })?;
-            context.release_working_set(actual_growth);
-            context.release_working_set(old_bytes);
-            context.reserve_working_set(actual_bytes)?;
-        }
-        *table_scratch = table_scratch
-            .checked_sub(old_bytes)
+        };
+        let updated_scratch = table_scratch
+            .checked_sub(plan.old_bytes)
             .and_then(|base| base.checked_add(actual_bytes))
-            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()));
+        let updated_scratch = match updated_scratch {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                if let Some(context) = ctx.as_deref_mut() {
+                    context.release_working_set(plan.requested_growth);
+                }
+                return Err(error);
+            }
+        };
+
+        if let Some(context) = ctx.as_deref_mut()
+            && let Err(error) = reconcile_table_vec_charge(
+                context,
+                plan.old_bytes,
+                plan.requested_growth,
+                actual_bytes,
+            )
+        {
+            return Err(ConversionError::MemoryLimit(format!(
+                "table container capacity {} bytes exceeds budget: {}",
+                actual_bytes, error
+            )));
+        }
+        *table_scratch = updated_scratch;
         Ok(())
     }
 
@@ -846,6 +893,44 @@ mod tests {
         assert_eq!(table_scratch, element_size * expected_capacity);
 
         assert_eq!(context.working_set_bytes, element_size * expected_capacity);
+    }
+
+    #[test]
+    fn table_vec_growth_reconciles_actual_capacity_after_provisional_charge() {
+        let element_size = std::mem::size_of::<String>();
+        let old_bytes = element_size;
+        let requested_growth = element_size;
+        let actual_bytes = element_size * 3;
+        let mut context = ConversionContext::with_output_budget(Duration::ZERO, actual_bytes + 8);
+        context
+            .reserve_working_set(old_bytes)
+            .expect("the existing table allocation should fit");
+        context
+            .reserve_working_set(requested_growth)
+            .expect("the provisional growth should fit");
+
+        super::reconcile_table_vec_charge(&mut context, old_bytes, requested_growth, actual_bytes)
+            .expect("actual allocator capacity should replace provisional growth");
+        assert_eq!(context.working_set_bytes, actual_bytes);
+
+        let mut tight_context =
+            ConversionContext::with_output_budget(Duration::ZERO, actual_bytes - 1);
+        tight_context
+            .reserve_working_set(old_bytes)
+            .expect("the existing table allocation should fit");
+        tight_context
+            .reserve_working_set(requested_growth)
+            .expect("the provisional growth should fit before reconciliation");
+        assert!(matches!(
+            super::reconcile_table_vec_charge(
+                &mut tight_context,
+                old_bytes,
+                requested_growth,
+                actual_bytes,
+            ),
+            Err(ConversionError::MemoryLimit(_))
+        ));
+        assert_eq!(tight_context.working_set_bytes, old_bytes);
     }
 
     #[test]

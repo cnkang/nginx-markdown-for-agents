@@ -14,8 +14,9 @@ mod streaming_test_support;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use nginx_markdown_converter::converter::ConversionOptions;
+use nginx_markdown_converter::converter::{ConversionOptions, MarkdownConverter};
 use nginx_markdown_converter::error::ConversionError;
+use nginx_markdown_converter::parser::parse_html;
 use nginx_markdown_converter::streaming::{MemoryBudget, StreamingConverter};
 use streaming_test_support::{convert_streaming_chunked, default_streaming_options};
 
@@ -580,6 +581,45 @@ fn control_chars_in_url_rejected_streaming() {
         "control char leaked: {:?}",
         result.markdown
     );
+}
+
+/// Full-buffer and streaming link destinations must share URL canonicalization
+/// and reject raw control characters at the same security boundary.
+#[test]
+fn full_buffer_and_streaming_url_canonicalization_match() {
+    let urls = [
+        "\thttps://example.com/path",
+        "https://example.com/path\t",
+        "https://example.com/pa\th",
+        "\rhttps://example.com/path",
+        "https://example.com/path\rnext",
+        "https://example.com/path\r",
+        "\nhttps://example.com/path",
+        "https://example.com/path\nnext",
+        "https://example.com/path\n",
+        "https://example.com/path\\",
+        r"https://example.com/a\b",
+        "  https://example.com/path  ",
+    ];
+
+    for url in urls {
+        let html = format!("<p><a href=\"{url}\">link</a></p>");
+        let dom = parse_html(html.as_bytes()).expect("test HTML should parse");
+        let full = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("full-buffer conversion should succeed");
+        let streamed = convert_streaming_chunked(
+            html.as_bytes(),
+            &[html.len()],
+            Some("text/html; charset=UTF-8"),
+            default_streaming_options(),
+            MemoryBudget::default(),
+            None,
+        )
+        .expect("streaming conversion should succeed");
+
+        assert_eq!(full, streamed.markdown, "URL parity failed for {url:?}");
+    }
 }
 
 /// Multiple XSS vectors in one document, streamed in small chunks.

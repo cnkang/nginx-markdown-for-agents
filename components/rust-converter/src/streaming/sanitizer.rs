@@ -16,11 +16,12 @@
 
 use crate::converter::pruning::{PruneConfig, should_prune_with_config};
 use crate::security::URL_ATTRIBUTES;
+use crate::security::escape_markdown_destination;
 use crate::security::escape_markdown_text;
 use crate::security::is_dangerous_url_value;
 use crate::security::normalize_input_type;
+use crate::security::sanitize_url_value;
 use crate::security::select_input_control_text;
-use crate::streaming::emitter::escape_markdown_destination;
 use crate::streaming::types::StreamEvent;
 
 /// HTML void elements that never have children.
@@ -354,14 +355,17 @@ impl StreamingSanitizer {
 
     fn url_decision(tag: &str, url: Option<String>) -> SanitizeDecision {
         match url {
-            Some(url_value) if !is_dangerous_url(&url_value) => {
-                let escaped = escape_markdown_destination(&url_value);
+            Some(url_value) => {
+                let Some(safe_url) = sanitize_url_value(&url_value) else {
+                    return SanitizeDecision::Skip;
+                };
+                let escaped = escape_markdown_destination(safe_url);
                 SanitizeDecision::PassGenerated(StreamEvent::Text(format!(
                     "[{}]({})",
                     tag, escaped
                 )))
             }
-            _ => SanitizeDecision::Skip,
+            None => SanitizeDecision::Skip,
         }
     }
 

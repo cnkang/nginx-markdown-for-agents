@@ -182,7 +182,11 @@ impl MarkdownConverter {
     ///
     /// The normalized Markdown text with consistent line endings, whitespace, blank lines, and one trailing newline.
     pub(super) fn normalize_output(&self, output: String) -> String {
-        let output = output.replace("\r\n", "\n");
+        let output = if output.contains("\r\n") {
+            output.replace("\r\n", "\n")
+        } else {
+            output
+        };
 
         let mut result = String::with_capacity(output.len());
         let mut prev_blank = false;

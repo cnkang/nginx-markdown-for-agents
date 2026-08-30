@@ -501,7 +501,11 @@ impl SecurityValidator {
     ///
     /// # Returns
     ///
-    /// Returns `None` if the URL is dangerous, `Some(url)` if safe.
+    /// Returns `None` if the URL is dangerous. Safe URLs are returned in their
+    /// canonical, outer-whitespace-trimmed form, including an empty string
+    /// when the caller supplied an empty destination. Control characters are
+    /// rejected before trimming so an attacker cannot hide one at either edge
+    /// of the value.
     ///
     /// # Examples
     ///
@@ -513,11 +517,7 @@ impl SecurityValidator {
     /// assert_eq!(validator.sanitize_url("https://example.com"), Some("https://example.com"));
     /// ```
     pub fn sanitize_url<'a>(&self, url: &'a str) -> Option<&'a str> {
-        if self.is_dangerous_url(url) {
-            None
-        } else {
-            Some(url)
-        }
+        sanitize_url_value(url)
     }
 
     /// Get a list of attributes to remove from an element
@@ -790,6 +790,37 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_url_trims_safe_outer_whitespace_but_rejects_controls() {
+        let validator = SecurityValidator::new();
+
+        assert_eq!(
+            validator.sanitize_url("  https://example.com/path  "),
+            Some("https://example.com/path")
+        );
+        for url in [
+            "\thttps://example.com/path",
+            "https://example.com/pa\th",
+            "https://example.com/path\nnext",
+            "https://example.com/path\rnext",
+        ] {
+            assert_eq!(validator.sanitize_url(url), None, "control URL: {url:?}");
+        }
+    }
+
+    #[test]
+    fn markdown_destination_escaping_is_shared_and_capacity_exact() {
+        let url = r"https://example.com/a\\b<c>d (x)";
+        let escaped = escape_markdown_destination(url);
+
+        assert_eq!(escaped.as_ref(), r"<https://example.com/a\\\\b\<c\>d (x)>");
+        assert_eq!(
+            markdown_destination_escaped_capacity(url),
+            Some(escaped.len())
+        );
+        assert_eq!(markdown_destination_escaped_capacity("safe"), Some(0));
+    }
+
+    #[test]
     fn test_xxe_prevention_documentation() {
         let doc = xxe_prevention_documentation();
         assert!(doc.contains("html5ever"));
@@ -889,10 +920,10 @@ pub fn validate_link_url(url: &str) -> Result<(), &'static str> {
 /// become a Rust `str`; the FFI/parser boundary rejects malformed UTF-8 before
 /// this helper is reached.
 pub(crate) fn is_dangerous_url_value(url: &str) -> bool {
-    let trimmed = url.trim();
-    if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
+    if url.chars().any(|ch| ch == '\0' || ch.is_control()) {
         return true;
     }
+    let trimmed = url.trim();
     if contains_percent_encoded_control(trimmed) {
         return true;
     }
@@ -912,6 +943,77 @@ pub(crate) fn is_dangerous_url_value(url: &str) -> bool {
     DANGEROUS_URL_SCHEMES
         .iter()
         .any(|scheme| url_lower.starts_with(scheme))
+}
+
+/// Return a safe URL in the canonical form shared by both converter paths.
+///
+/// Outer ordinary whitespace is presentation noise and is removed. All
+/// control characters, including TAB, CR, and LF, are rejected before that
+/// normalization; percent-encoded controls remain rejected as well. Empty
+/// destinations remain valid after canonicalization so existing callers keep
+/// their empty-destination behavior.
+pub(crate) fn sanitize_url_value(url: &str) -> Option<&str> {
+    if is_dangerous_url_value(url) {
+        return None;
+    }
+
+    Some(url.trim())
+}
+
+/// Return the exact temporary capacity needed by [`escape_markdown_destination`].
+///
+/// `Some(0)` means that the input can be borrowed without an escaped copy;
+/// it is also the valid result for an empty input. Callers must therefore use
+/// the value as a no-allocation sentinel rather than as the input length.
+pub(crate) fn markdown_destination_escaped_capacity(url: &str) -> Option<usize> {
+    let needs_escape = url
+        .chars()
+        .any(|ch| matches!(ch, ' ' | '(' | ')' | '<' | '>' | '\\' | '\n' | '\r' | '\t'));
+    if !needs_escape {
+        return Some(0);
+    }
+
+    let mut capacity = 2usize;
+    for ch in url.chars() {
+        let additional = match ch {
+            '<' | '>' | '\\' | '\n' | '\r' | '\t' => 2,
+            _ => ch.len_utf8(),
+        };
+        capacity = capacity.checked_add(additional)?;
+    }
+    Some(capacity)
+}
+
+/// Escape a URL for use as a Markdown link or image destination.
+///
+/// Destinations containing Markdown-sensitive whitespace, delimiters, or
+/// control-like line characters are enclosed in angle brackets. Delimiters
+/// are backslash-escaped inside the wrapper. Sanitized production URLs do not
+/// contain raw controls, but escaping them here keeps this helper safe for
+/// every direct caller and makes the full-buffer and streaming emitters share
+/// one canonical representation.
+pub(crate) fn escape_markdown_destination(url: &str) -> Cow<'_, str> {
+    let capacity =
+        markdown_destination_escaped_capacity(url).unwrap_or_else(|| url.len().saturating_add(4));
+    if capacity == 0 {
+        return Cow::Borrowed(url);
+    }
+
+    let mut escaped = String::with_capacity(capacity);
+    escaped.push('<');
+    for ch in url.chars() {
+        match ch {
+            '<' => escaped.push_str("\\<"),
+            '>' => escaped.push_str("\\>"),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped.push('>');
+    Cow::Owned(escaped)
 }
 
 fn contains_percent_encoded_control(url: &str) -> bool {

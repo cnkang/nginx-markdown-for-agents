@@ -455,6 +455,87 @@ impl MarkdownConverter {
         Ok(())
     }
 
+    fn render_list_item_content(
+        &self,
+        node: &Handle,
+        output: &str,
+        depth: usize,
+        ordered: bool,
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(String, usize), ConversionError> {
+        let mut item_output = String::new();
+        let mut newline_count = 0usize;
+        for child in node.children.borrow().iter() {
+            let child_output_start = item_output.len();
+            self.render_list_item_child(child, &mut item_output, depth, ctx)?;
+
+            let appended_newlines = item_output[child_output_start..]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count();
+            newline_count = newline_count
+                .checked_add(appended_newlines)
+                .ok_or_else(|| {
+                    ConversionError::MemoryLimit(
+                        "generated Markdown list newline count overflow".to_string(),
+                    )
+                })?;
+
+            if let Some(context) = ctx.as_deref_mut() {
+                let upper_bound = Self::format_list_item_upper_bound(
+                    item_output.len(),
+                    newline_count,
+                    depth,
+                    ordered,
+                )?;
+                let projected_len = output.len().checked_add(upper_bound).ok_or_else(|| {
+                    ConversionError::MemoryLimit(
+                        "generated Markdown list output length overflow".to_string(),
+                    )
+                })?;
+                context.check_output_budget(projected_len)?;
+            }
+        }
+        Ok((item_output, newline_count))
+    }
+
+    fn format_list_item_with_context(
+        &self,
+        output: &mut String,
+        item_output: String,
+        depth: usize,
+        ordered: bool,
+        ctx: &mut Option<&mut ConversionContext>,
+        output_charge_released: &mut bool,
+    ) -> Result<(), ConversionError> {
+        let Some(context) = ctx.as_deref_mut() else {
+            let result = self.format_list_item_lines(output, &item_output, depth, ordered, ctx);
+            drop(item_output);
+            return result;
+        };
+
+        let rendered_len = Self::format_list_item_rendered_len(&item_output, depth, ordered);
+        let projected_len = output.len().checked_add(rendered_len).ok_or_else(|| {
+            ConversionError::MemoryLimit(
+                "generated Markdown list output length overflow".to_string(),
+            )
+        })?;
+        context.check_output_budget(projected_len)?;
+
+        let item_capacity = item_output.capacity();
+        let output_capacity = output.capacity();
+        context.reserve_working_set(item_capacity)?;
+        context.release_working_set(output_capacity);
+        *output_charge_released = true;
+
+        let format_result = self.format_list_item_lines(output, &item_output, depth, ordered, ctx);
+        drop(item_output);
+        if let Some(context) = ctx.as_deref_mut() {
+            context.release_working_set(item_capacity);
+        }
+        format_result
+    }
+
     /// Renders a list item using an ordered or unordered Markdown marker.
     ///
     /// Nested list content is rendered at the specified depth, and the conversion
@@ -483,70 +564,16 @@ impl MarkdownConverter {
 
         let mut output_charge_released = false;
         let result = (|| {
-            let mut item_output = String::new();
-            let mut newline_count = 0usize;
-            for child in node.children.borrow().iter() {
-                let child_output_start = item_output.len();
-
-                self.render_list_item_child(child, &mut item_output, depth, &mut ctx)?;
-
-                let appended_newlines = item_output[child_output_start..]
-                    .bytes()
-                    .filter(|byte| *byte == b'\n')
-                    .count();
-                newline_count = newline_count
-                    .checked_add(appended_newlines)
-                    .ok_or_else(|| {
-                        ConversionError::MemoryLimit(
-                            "generated Markdown list newline count overflow".to_string(),
-                        )
-                    })?;
-
-                if let Some(context) = ctx.as_deref_mut() {
-                    let upper_bound = Self::format_list_item_upper_bound(
-                        item_output.len(),
-                        newline_count,
-                        depth,
-                        ordered,
-                    )?;
-                    let projected_len = output.len().checked_add(upper_bound).ok_or_else(|| {
-                        ConversionError::MemoryLimit(
-                            "generated Markdown list output length overflow".to_string(),
-                        )
-                    })?;
-                    context.check_output_budget(projected_len)?;
-                }
-            }
-
-            if ctx.is_some() {
-                let rendered_len =
-                    Self::format_list_item_rendered_len(&item_output, depth, ordered);
-                let projected_len = output.len().checked_add(rendered_len).ok_or_else(|| {
-                    ConversionError::MemoryLimit(
-                        "generated Markdown list output length overflow".to_string(),
-                    )
-                })?;
-                ctx.as_deref_mut()
-                    .expect("context checked above")
-                    .check_output_budget(projected_len)?;
-
-                let item_capacity = item_output.capacity();
-                if let Some(context) = ctx.as_deref_mut() {
-                    context.reserve_working_set(item_capacity)?;
-                    context.release_working_set(output_capacity);
-                }
-                output_charge_released = true;
-
-                let format_result =
-                    self.format_list_item_lines(output, &item_output, depth, ordered, &mut ctx);
-                drop(item_output);
-                if let Some(context) = ctx.as_deref_mut() {
-                    context.release_working_set(item_capacity);
-                }
-                format_result?;
-            } else {
-                self.format_list_item_lines(output, &item_output, depth, ordered, &mut ctx)?;
-            }
+            let (item_output, _) =
+                self.render_list_item_content(node, output, depth, ordered, &mut ctx)?;
+            self.format_list_item_with_context(
+                output,
+                item_output,
+                depth,
+                ordered,
+                &mut ctx,
+                &mut output_charge_released,
+            )?;
 
             if let Some(context) = ctx.as_deref_mut() {
                 context.check_output_budget(output.len())?;
@@ -583,7 +610,7 @@ impl MarkdownConverter {
         // Measure the code payload before any output allocation.  The payload
         // is then streamed directly into the final budgeted writer, avoiding
         // an uncharged `String` that used to hold the entire code block.
-        let stats = self.measure_code_content(node, 0)?;
+        let stats = self.measure_code_content(node, 0, &mut ctx)?;
         let fence_len = if stats.max_backtick_run == 0 {
             3
         } else {
@@ -755,6 +782,38 @@ mod tests {
 
         assert_memory_limit(result);
         assert_eq!(context.working_set_bytes, 0);
+    }
+
+    fn assert_large_prescan_times_out(html: String) {
+        let dom = parse_html(html.as_bytes()).expect("test HTML should parse");
+        let converter = MarkdownConverter::new();
+        let mut context = ConversionContext::new(Duration::from_nanos(1));
+        std::thread::sleep(Duration::from_millis(1));
+
+        assert!(matches!(
+            converter.convert_with_context(&dom, &mut context),
+            Err(ConversionError::Timeout)
+        ));
+    }
+
+    #[test]
+    fn large_link_text_prescan_checks_timeout() {
+        let body = "x".repeat(32 * 1024);
+        assert_large_prescan_times_out(format!(
+            "<p><a href=\"https://example.test\">{body}</a></p>"
+        ));
+    }
+
+    #[test]
+    fn large_inline_code_prescan_checks_timeout() {
+        let body = "x".repeat(32 * 1024);
+        assert_large_prescan_times_out(format!("<p><code>{body}</code></p>"));
+    }
+
+    #[test]
+    fn large_fenced_code_prescan_checks_timeout() {
+        let body = "x".repeat(32 * 1024);
+        assert_large_prescan_times_out(format!("<pre><code>{body}</code></pre>"));
     }
 
     #[test]

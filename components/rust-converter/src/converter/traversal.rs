@@ -114,6 +114,13 @@ pub(super) fn with_reserved_working_set<F>(
 where
     F: FnOnce(&mut String, &mut Option<&mut ConversionContext>) -> Result<(), ConversionError>,
 {
+    // A zero-byte reservation is the escaper's borrowed-value sentinel. It
+    // must not still charge output capacity, because that would reject a
+    // no-scratch path under a budget that otherwise fits the output.
+    if bytes == 0 {
+        return f(output, ctx);
+    }
+
     let output_capacity = output.capacity();
     if let Some(context) = ctx.as_deref_mut() {
         context.reserve_working_set_with_output(output_capacity, bytes)?;
@@ -144,30 +151,20 @@ pub(super) fn append_link_label(
     })
 }
 
-/// Append a Markdown link destination without allocating an escaped copy.
+/// Append a Markdown link destination using the shared URL escaper.
 pub(super) fn append_link_destination(
     output: &mut String,
     url: &str,
     ctx: &mut Option<&mut ConversionContext>,
 ) -> Result<(), ConversionError> {
-    let needs_angle_brackets = url.contains(' ')
-        || url.contains('(')
-        || url.contains(')')
-        || url.contains('<')
-        || url.contains('>');
-    if !needs_angle_brackets {
-        return append_str_with_context(output, url, ctx);
-    }
-
-    append_char_with_context(output, '<', ctx)?;
-    for ch in url.chars() {
-        match ch {
-            '<' => append_str_with_context(output, "%3C", ctx)?,
-            '>' => append_str_with_context(output, "%3E", ctx)?,
-            _ => append_char_with_context(output, ch, ctx)?,
-        }
-    }
-    append_char_with_context(output, '>', ctx)
+    let capacity =
+        crate::security::markdown_destination_escaped_capacity(url).ok_or_else(|| {
+            ConversionError::MemoryLimit("link destination working-set size overflow".into())
+        })?;
+    with_reserved_working_set(output, ctx, capacity, |output, ctx| {
+        let escaped = crate::security::escape_markdown_destination(url);
+        append_str_with_context(output, escaped.as_ref(), ctx)
+    })
 }
 
 /// Append a Markdown link title while escaping its two delimiter characters.
@@ -400,7 +397,7 @@ impl MarkdownConverter {
                 .map(|a| a.value.as_ref());
 
             if let Some(url) = url
-                && let Some(safe_url) = self.security_validator.sanitize_url(url.trim())
+                && let Some(safe_url) = self.security_validator.sanitize_url(url)
             {
                 let url_capacity = self.resolved_url_capacity(safe_url)?;
                 with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
@@ -662,15 +659,14 @@ impl MarkdownConverter {
                 .find(|a| a.name.local.as_ref() == "title")
                 .map(|a| a.value.as_ref());
 
-            if let Some(u) = src {
-                let trimmed = u.trim();
-                if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
-                    let url_capacity = self.resolved_url_capacity(safe_url)?;
-                    with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
-                        let resolved_url = self.resolve_url(safe_url);
-                        Self::emit_markdown_link(&[title], &resolved_url, output, ctx)
-                    })?;
-                }
+            if let Some(u) = src
+                && let Some(safe_url) = self.security_validator.sanitize_url(u)
+            {
+                let url_capacity = self.resolved_url_capacity(safe_url)?;
+                with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                    let resolved_url = self.resolve_url(safe_url);
+                    Self::emit_markdown_link(&[title], &resolved_url, output, ctx)
+                })?;
             }
 
             // video poster thumbnail
@@ -679,16 +675,14 @@ impl MarkdownConverter {
                     .iter()
                     .find(|a| a.name.local.as_ref() == "poster")
                     .map(|a| a.value.as_ref())
+                && let Some(safe_url) = self.security_validator.sanitize_url(poster)
             {
-                let trimmed = poster.trim();
-                if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
-                    let url_capacity = self.resolved_url_capacity(safe_url)?;
-                    with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
-                        let resolved_url = self.resolve_url(safe_url);
-                        append_image_with_context(output, "", &resolved_url, None, ctx)?;
-                        append_char_with_context(output, '\n', ctx)
-                    })?;
-                }
+                let url_capacity = self.resolved_url_capacity(safe_url)?;
+                with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                    let resolved_url = self.resolve_url(safe_url);
+                    append_image_with_context(output, "", &resolved_url, None, ctx)?;
+                    append_char_with_context(output, '\n', ctx)
+                })?;
             }
         }
         Ok(())
@@ -709,20 +703,19 @@ impl MarkdownConverter {
                 .find(|a| a.name.local.as_ref() == "src")
                 .map(|a| a.value.as_ref());
 
-            if let Some(u) = src {
-                let trimmed = u.trim();
-                if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
-                    // Use type attribute as context if available
-                    let type_attr = attrs_borrowed
-                        .iter()
-                        .find(|a| a.name.local.as_ref() == "type")
-                        .map(|a| a.value.as_ref());
-                    let url_capacity = self.resolved_url_capacity(safe_url)?;
-                    with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
-                        let resolved_url = self.resolve_url(safe_url);
-                        Self::emit_markdown_link(&[type_attr], &resolved_url, output, ctx)
-                    })?;
-                }
+            if let Some(u) = src
+                && let Some(safe_url) = self.security_validator.sanitize_url(u)
+            {
+                // Use type attribute as context if available
+                let type_attr = attrs_borrowed
+                    .iter()
+                    .find(|a| a.name.local.as_ref() == "type")
+                    .map(|a| a.value.as_ref());
+                let url_capacity = self.resolved_url_capacity(safe_url)?;
+                with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                    let resolved_url = self.resolve_url(safe_url);
+                    Self::emit_markdown_link(&[type_attr], &resolved_url, output, ctx)
+                })?;
             }
         }
         Ok(())
@@ -743,19 +736,18 @@ impl MarkdownConverter {
                 .find(|a| a.name.local.as_ref() == "src")
                 .map(|a| a.value.as_ref());
 
-            if let Some(u) = src {
-                let trimmed = u.trim();
-                if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
-                    let label = attrs_borrowed
-                        .iter()
-                        .find(|a| a.name.local.as_ref() == "label")
-                        .map(|a| a.value.as_ref());
-                    let url_capacity = self.resolved_url_capacity(safe_url)?;
-                    with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
-                        let resolved_url = self.resolve_url(safe_url);
-                        Self::emit_markdown_link(&[label], &resolved_url, output, ctx)
-                    })?;
-                }
+            if let Some(u) = src
+                && let Some(safe_url) = self.security_validator.sanitize_url(u)
+            {
+                let label = attrs_borrowed
+                    .iter()
+                    .find(|a| a.name.local.as_ref() == "label")
+                    .map(|a| a.value.as_ref());
+                let url_capacity = self.resolved_url_capacity(safe_url)?;
+                with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                    let resolved_url = self.resolve_url(safe_url);
+                    Self::emit_markdown_link(&[label], &resolved_url, output, ctx)
+                })?;
             }
         }
         Ok(())
@@ -776,23 +768,22 @@ impl MarkdownConverter {
                 .find(|a| a.name.local.as_ref() == "href")
                 .map(|a| a.value.as_ref());
 
-            if let Some(u) = href {
-                let trimmed = u.trim();
-                if let Some(safe_url) = self.security_validator.sanitize_url(trimmed) {
-                    let alt = attrs_borrowed
-                        .iter()
-                        .find(|a| a.name.local.as_ref() == "alt")
-                        .map(|a| a.value.as_ref());
-                    let title = attrs_borrowed
-                        .iter()
-                        .find(|a| a.name.local.as_ref() == "title")
-                        .map(|a| a.value.as_ref());
-                    let url_capacity = self.resolved_url_capacity(safe_url)?;
-                    with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
-                        let resolved_url = self.resolve_url(safe_url);
-                        Self::emit_markdown_link(&[alt, title], &resolved_url, output, ctx)
-                    })?;
-                }
+            if let Some(u) = href
+                && let Some(safe_url) = self.security_validator.sanitize_url(u)
+            {
+                let alt = attrs_borrowed
+                    .iter()
+                    .find(|a| a.name.local.as_ref() == "alt")
+                    .map(|a| a.value.as_ref());
+                let title = attrs_borrowed
+                    .iter()
+                    .find(|a| a.name.local.as_ref() == "title")
+                    .map(|a| a.value.as_ref());
+                let url_capacity = self.resolved_url_capacity(safe_url)?;
+                with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                    let resolved_url = self.resolve_url(safe_url);
+                    Self::emit_markdown_link(&[alt, title], &resolved_url, output, ctx)
+                })?;
             }
         }
         Ok(())
