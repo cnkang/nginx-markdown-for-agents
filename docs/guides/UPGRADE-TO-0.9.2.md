@@ -166,11 +166,11 @@ if command -v systemctl >/dev/null 2>&1 \
     && systemctl is-active --quiet nginx.service; then
   main_pid="$(systemctl show -p MainPID --value nginx.service)"
   if [[ "$main_pid" =~ ^[0-9]+$ ]] \
-      && [ -x "/proc/$main_pid/exe" ] \
-      && [ "$main_pid" = "$(pgrep -x nginx | head -1)" ]; then
+      && pgrep -x nginx | grep -qx "$main_pid"; then
     sudo systemctl restart nginx
   else
-    sudo nginx -s reload
+    echo "ERROR: nginx.service is active but does not own the running NGINX master; refusing to reload" >&2
+    exit 1
   fi
 else
   # If another supervisor owns NGINX, use its restart/reload operation instead.
