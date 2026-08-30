@@ -148,7 +148,7 @@ ngx_http_markdown_settle_durable_bypass_delivery(
         return;
     }
 
-    if (rc == NGX_AGAIN) {
+    if (rc == NGX_AGAIN || rc == NGX_ERROR) {
         ngx_http_markdown_publish_durable_bypass(
             r, kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER
                     || kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY
@@ -236,6 +236,10 @@ static void ngx_http_markdown_init_ctx(ngx_http_request_t *r,
 static void ngx_http_markdown_establish_preaccess_bypass(
     ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled,
     const ngx_http_markdown_effective_conf_t *eff, ngx_flag_t failopen);
+static ngx_int_t ngx_http_markdown_handle_preaccess_failure(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff);
 static void ngx_http_markdown_request_cleanup(void *data);
 static ngx_int_t ngx_http_markdown_forward_prechecked_headers(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
@@ -243,6 +247,10 @@ static ngx_int_t ngx_http_markdown_forward_prechecked_headers(
 static ngx_int_t ngx_http_markdown_handle_durable_bypass(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
+static ngx_int_t ngx_http_markdown_create_header_context(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    ngx_flag_t filter_enabled, ngx_http_markdown_ctx_t **ctx_out);
 static void ngx_http_markdown_log_failure_decision(
     ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
@@ -832,6 +840,43 @@ ngx_http_markdown_establish_preaccess_bypass(
     ctx->fullbuffer.failopen_delivery_pending = failopen;
 }
 
+static ngx_int_t
+ngx_http_markdown_handle_preaccess_failure(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff)
+{
+    const ngx_str_t  *error_category;
+
+    error_category = ngx_http_markdown_reason_from_error_category(
+        NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log);
+    if (ctx != NULL) {
+        ctx->eligible = 0;
+        ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+        ctx->error.has_category = 1;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+    NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+
+    if (ngx_http_markdown_effective_error_policy(eff, conf)
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+    {
+        ngx_http_markdown_log_decision_with_category(
+            r, conf, eff,
+            ngx_http_markdown_reason_failed_closed(), error_category);
+        return (ngx_int_t) ngx_http_markdown_effective_error_status(
+            eff, conf);
+    }
+
+    ngx_http_markdown_log_decision_with_category(
+        r, conf, eff,
+        ngx_http_markdown_reason_failed_open(), error_category);
+    return NGX_DECLINED;
+}
+
 /*
  * Capture client validators before proxy, cache, or content handlers can
  * satisfy them against the upstream representation.  The handler only
@@ -848,6 +893,7 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
     ngx_flag_t                       filter_enabled;
     ngx_uint_t                       accept_reason;
     ngx_int_t                         capture_rc;
+    ngx_int_t                         failure_rc;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
     if (ngx_http_markdown_durable_bypass_kind(ctx)
@@ -919,20 +965,11 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
             ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                           "markdown: conditional validator context "
                           "allocation failed");
-            if (ngx_http_markdown_effective_error_policy(&eff, conf)
-                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-            {
-                return (ngx_int_t) ngx_http_markdown_effective_error_status(
-                    &eff, conf);
+            failure_rc = ngx_http_markdown_handle_preaccess_failure(
+                r, ctx, conf, &eff);
+            if (failure_rc != NGX_DECLINED) {
+                return failure_rc;
             }
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-            NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
-            ngx_http_markdown_log_decision_with_category(
-                r, conf, &eff,
-                ngx_http_markdown_reason_failed_open(),
-                ngx_http_markdown_reason_from_error_category(
-                    NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
             ngx_http_markdown_publish_durable_bypass(
                 r, NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER);
             return NGX_DECLINED;
@@ -943,20 +980,11 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
     if (capture_rc == NGX_ERROR) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                       "markdown: conditional validator capture failed");
-        if (ngx_http_markdown_effective_error_policy(&eff, conf)
-            == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-        {
-            return (ngx_int_t) ngx_http_markdown_effective_error_status(
-                &eff, conf);
+        failure_rc = ngx_http_markdown_handle_preaccess_failure(
+            r, ctx, conf, &eff);
+        if (failure_rc != NGX_DECLINED) {
+            return failure_rc;
         }
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
-        ngx_http_markdown_log_decision_with_category(
-            r, conf, &eff,
-            ngx_http_markdown_reason_failed_open(),
-            ngx_http_markdown_reason_from_error_category(
-                NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
         /* Establish a durable request-scoped bypass before the header filter
          * can initialize the context and overwrite the eligibility decision.
          * The cached filter decision lets the body filter reach its existing
@@ -1752,6 +1780,32 @@ ngx_http_markdown_handle_durable_bypass(
     return ngx_http_markdown_forward_prechecked_headers(r, ctx, conf);
 }
 
+/* Allocate and initialize the request context used by the header filter. */
+static ngx_int_t
+ngx_http_markdown_create_header_context(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    ngx_flag_t filter_enabled,
+    ngx_http_markdown_ctx_t **ctx_out)
+{
+    ngx_http_markdown_ctx_t  *ctx;
+
+    *ctx_out = NULL;
+    ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_ctx_t));
+    if (ctx == NULL) {
+        return ngx_http_markdown_handle_ctx_alloc_failure(r, conf, eff);
+    }
+
+    if (ngx_http_markdown_register_fullbuffer_cleanup(r, ctx) != NGX_OK) {
+        return ngx_http_markdown_handle_ctx_alloc_failure(r, conf, eff);
+    }
+
+    ngx_http_markdown_init_ctx(r, ctx, filter_enabled);
+    *ctx_out = ctx;
+    return NGX_OK;
+}
+
 
 static ngx_int_t
 ngx_http_markdown_header_filter(ngx_http_request_t *r)
@@ -1762,25 +1816,6 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ngx_int_t                        precheck_rc;
     ngx_http_markdown_dynconf_snapshot_t  snap_copy;
     ngx_http_markdown_effective_conf_t    early_eff;
-
-    /* Dynamic config: no file I/O in request path.
-     *
-     * The timer handler performs two-phase reload (read + parse
-     * into staging, then atomic swap of active snapshot) entirely
-     * in the event loop, never on the request path.  The
-     * header_filter copies the active snapshot into request-pool
-     * memory and builds an effective_conf view from that copy.
-     * A concurrent reload may swap the global active_snapshot,
-     * but this request continues using its own copy and derived
-     * effective view, guaranteeing request-level consistency.
-     *
-     * [Rule 34 / E03.2 audit] Bind-once semantic verified:
-     *   - active_snapshot read exactly once (snap_copy below)
-     *   - build_effective_conf called once from snap_copy
-     *   - ctx->effective_conf bound via bind_request_snapshot
-     *   - body_filter, streaming, conversion paths all read
-     *     from ctx->effective_conf — never re-read global
-     */
 
     /* Get module configuration */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
@@ -1807,42 +1842,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     if (ctx != NULL && ctx->lifecycle.header_filter_initialized) {
         return ngx_http_markdown_resume_header_filter_reentry(r, ctx, conf);
     }
-    /*
-     * Build a request-local effective configuration view early, before
-     * the enabled check, so that is_enabled() and all subsequent
-     * header-phase decision logs read from the snapshot rather than
-     * live conf.  This stack-allocated view is later copied into the
-     * request-pool-allocated ctx->effective_conf.
-     *
-     * snap_copy and early_eff are function-lifetime variables so they
-     * remain valid through ctx binding below.  The snapshot copy on
-     * the stack guarantees that the enabled decision is consistent
-     * with all subsequent body/conversion/logging reads, even if a
-     * concurrent timer reload swaps the global active_snapshot between
-     * the early read and the ctx bind — we copy snap_copy into ctx,
-     * never re-read the global active_snapshot.
-     */
-
-    /*
-     * Copy the global snapshot exactly once.  NGINX runs timer reloads
-     * and request header filters on the worker event loop, not
-     * concurrently on separate threads, so a plain struct copy is the
-     * correct lifecycle primitive here.  Do not use atomic builtins on
-     * the aggregate snapshot: coverage builds promote clang's
-     * large/misaligned atomic-struct warning to a compile error.
-     */
+    /* Copy the snapshot once; dynconf-disabled locations use static conf. */
     snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
-
-    /*
-     * Build effective conf from the global snapshot ONLY when
-     * dynconf_enabled is true for this location.  When a location
-     * has markdown_dynamic_config off, it must not consume values
-     * from the global dynconf snapshot — doing so would leak
-     * runtime changes from other locations into this location's
-     * static/inherited configuration.  Passing NULL causes
-     * build_effective_conf to fall back to the live conf, which
-     * is the correct source for non-dynconf locations.
-     */
     ngx_memzero(&early_eff, sizeof(early_eff));
     ngx_http_markdown_build_effective_conf(
         &early_eff,
@@ -1866,38 +1867,14 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
 
     if (ctx == NULL) {
-        /* Create request context for buffering. */
-        ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_ctx_t));
+        precheck_rc = ngx_http_markdown_create_header_context(
+            r, conf, &early_eff, filter_enabled, &ctx);
         if (ctx == NULL) {
-            return ngx_http_markdown_handle_ctx_alloc_failure(
-                r, conf, &early_eff);
+            return precheck_rc;
         }
-
-        if (ngx_http_markdown_register_fullbuffer_cleanup(r, ctx)
-            != NGX_OK)
-        {
-            return ngx_http_markdown_handle_ctx_alloc_failure(
-                r, conf, &early_eff);
-        }
-
-        /* Initialize context. */
-        ngx_http_markdown_init_ctx(r, ctx, filter_enabled);
     }
 
-    /*
-     * Bind request-lifetime snapshot and effective_conf from the
-     * function-level snap_copy and early_eff.  This eliminates the
-     * race window where the global active_snapshot could be swapped
-     * by a concurrent timer reload between the early read (above)
-     * and a second read here.  We never re-read the global
-     * active_snapshot in this function after the initial copy.
-     *
-     * Degraded mode: if the dynconf snapshot allocation fails, only
-     * ctx->dynconf_snapshot remains NULL.  ctx->effective_conf still
-     * points at the by-value early_eff copy, so a concurrent dynconf
-     * reload cannot cause mid-request drift.  The allocation failure
-     * is logged at NGX_LOG_WARN.
-     */
+    /* Bind the same request-local snapshot used for the header decision. */
     ngx_http_markdown_bind_request_context_snapshot(
         r, ctx, &snap_copy, &early_eff, conf);
 
