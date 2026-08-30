@@ -478,6 +478,16 @@ static ngx_uint_t g_next_header_calls;
 static ngx_uint_t g_next_body_calls;
 static ngx_uint_t g_restore_calls;
 static ngx_pool_cleanup_t *g_last_cleanup;
+static ngx_flag_t g_cleanup_fail;
+static ngx_flag_t g_has_conditional;
+static ngx_int_t g_capture_rc;
+static ngx_int_t g_conditional_rc;
+static ngx_int_t g_send_304_rc;
+static ngx_int_t g_resume_send_header_rc;
+static ngx_uint_t g_if_none_match_calls;
+static ngx_uint_t g_send_304_calls;
+static ngx_uint_t g_resume_send_header_calls;
+static struct MarkdownResult g_conditional_result;
 
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
@@ -537,6 +547,12 @@ ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
     UNUSED(pool);
     UNUSED(size);
     static ngx_pool_cleanup_t cleanup;
+
+    if (g_cleanup_fail) {
+        g_last_cleanup = NULL;
+        return NULL;
+    }
+
     memset(&cleanup, 0, sizeof(cleanup));
     g_last_cleanup = &cleanup;
     return &cleanup;
@@ -598,7 +614,7 @@ ngx_flag_t
 ngx_http_markdown_has_conditional_request(ngx_http_request_t *r)
 {
     UNUSED(r);
-    return 1;
+    return g_has_conditional;
 }
 
 ngx_flag_t
@@ -654,7 +670,7 @@ ngx_http_markdown_capture_conditional_request(
 {
     UNUSED(r);
     UNUSED(ctx);
-    return NGX_ERROR;
+    return g_capture_rc;
 }
 
 void
@@ -826,17 +842,31 @@ ngx_http_markdown_handle_if_none_match(
     UNUSED(conf);
     UNUSED(ctx);
     UNUSED(converter);
-    UNUSED(result);
-    return NGX_DECLINED;
+    g_if_none_match_calls++;
+    if (result != NULL) {
+        *result = &g_conditional_result;
+    }
+    return g_conditional_rc;
 }
 
 ngx_int_t
 ngx_http_markdown_send_304(ngx_http_request_t *r,
     const struct MarkdownResult *result)
 {
-    UNUSED(r);
     UNUSED(result);
-    return NGX_OK;
+    g_send_304_calls++;
+    if (r != NULL) {
+        r->headers_out.status = NGX_HTTP_NOT_MODIFIED;
+    }
+    return g_send_304_rc;
+}
+
+ngx_int_t
+ngx_http_send_header(ngx_http_request_t *r)
+{
+    UNUSED(r);
+    g_resume_send_header_calls++;
+    return g_resume_send_header_rc;
 }
 
 void
@@ -1015,6 +1045,16 @@ reset_test_state(void)
     g_next_body_calls = 0;
     g_restore_calls = 0;
     g_last_cleanup = NULL;
+    g_cleanup_fail = 0;
+    g_has_conditional = 1;
+    g_capture_rc = NGX_ERROR;
+    g_conditional_rc = NGX_DECLINED;
+    g_send_304_rc = NGX_OK;
+    g_resume_send_header_rc = NGX_OK;
+    g_if_none_match_calls = 0;
+    g_send_304_calls = 0;
+    g_resume_send_header_calls = 0;
+    memset(&g_conditional_result, 0, sizeof(g_conditional_result));
 }
 
 static void
@@ -1242,6 +1282,384 @@ test_preaccess_bypass_terminal_header_outcomes(void)
     TEST_PASS("preaccess bypass settles NGX_OK and NGX_DONE headers");
 }
 
+static void
+test_preaccess_allocation_failure_uses_durable_bypass(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    g_pool_offset = sizeof(g_pool_storage);
+
+    rc = ngx_http_markdown_preaccess_handler(&request);
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "preaccess allocation failure must fail open");
+    TEST_ASSERT(request.ctx[ngx_http_markdown_filter_module.ctx_index] != NULL,
+                "preaccess allocation failure must publish durable state");
+
+    g_next_header_rc = NGX_AGAIN;
+    ngx_http_next_header_filter = test_next_header_filter;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_AGAIN && g_next_header_calls == 1,
+                "durable allocation bypass must forward headers once");
+    TEST_ASSERT(g_metrics.results.failopen_count == 0,
+                "header NGX_AGAIN must defer allocation fail-open count");
+
+    g_next_header_rc = NGX_ERROR;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_OK && g_next_header_calls == 1,
+                "allocation bypass header re-entry must be idempotent");
+
+    g_next_body_rc = NGX_AGAIN;
+    ngx_http_next_body_filter = test_next_body_filter;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_AGAIN && g_next_body_calls == 1,
+                "allocation bypass must preserve body backpressure");
+    TEST_ASSERT(g_metrics.results.failopen_count == 0,
+                "body NGX_AGAIN must not count fail-open delivery");
+
+    g_next_body_rc = NGX_OK;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_OK && g_next_body_calls == 2,
+                "allocation bypass must settle on body NGX_OK");
+    TEST_ASSERT(g_metrics.results.failopen_count == 1,
+                "allocation fail-open delivery must count once");
+
+    g_next_body_rc = NGX_DONE;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_DONE && g_next_body_calls == 3,
+                "allocation bypass must return body NGX_DONE");
+    TEST_ASSERT(g_metrics.results.failopen_count == 1,
+                "allocation fail-open delivery must not double count");
+    TEST_PASS("preaccess allocation failure uses durable bypass");
+}
+
+static void
+test_preaccess_cleanup_failure_uses_durable_bypass(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    g_cleanup_fail = 1;
+
+    rc = ngx_http_markdown_preaccess_handler(&request);
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "cleanup registration failure must fail open");
+    TEST_ASSERT(request.ctx[ngx_http_markdown_filter_module.ctx_index] != NULL,
+                "cleanup failure must publish durable state");
+
+    g_next_header_rc = NGX_AGAIN;
+    ngx_http_next_header_filter = test_next_header_filter;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_AGAIN && g_next_header_calls == 1,
+                "cleanup bypass must forward headers once");
+    TEST_ASSERT(g_metrics.results.failopen_count == 0,
+                "cleanup bypass header NGX_AGAIN must defer accounting");
+
+    g_next_header_rc = NGX_ERROR;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_OK && g_next_header_calls == 1,
+                "cleanup bypass re-entry must not forward twice");
+
+    g_next_body_rc = NGX_OK;
+    ngx_http_next_body_filter = test_next_body_filter;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_OK && g_next_body_calls == 1,
+                "cleanup bypass must forward body after header resume");
+    TEST_ASSERT(g_metrics.results.failopen_count == 1,
+                "cleanup fail-open delivery must count once");
+    TEST_PASS("preaccess cleanup failure uses durable bypass");
+}
+
+static void
+test_header_filter_allocation_failure_uses_durable_bypass(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    g_pool_offset = sizeof(g_pool_storage);
+
+    g_next_header_rc = NGX_AGAIN;
+    ngx_http_next_header_filter = test_next_header_filter;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_AGAIN && g_next_header_calls == 1,
+                "header allocation failure must forward headers");
+    TEST_ASSERT(request.ctx[ngx_http_markdown_filter_module.ctx_index]
+                != NULL,
+                "header allocation failure must publish durable state");
+    TEST_ASSERT(g_metrics.results.failopen_count == 0,
+                "header allocation NGX_AGAIN must defer accounting");
+
+    g_next_header_rc = NGX_ERROR;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_OK && g_next_header_calls == 1,
+                "header allocation bypass must survive re-entry");
+
+    g_next_body_rc = NGX_OK;
+    ngx_http_next_body_filter = test_next_body_filter;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_OK && g_next_body_calls == 1,
+                "header allocation bypass must forward body");
+    TEST_ASSERT(g_metrics.results.failopen_count == 1,
+                "header allocation fail-open must count once");
+    TEST_PASS("header filter allocation failure uses durable bypass");
+}
+
+static void
+test_subrequest_declined_capture_establishes_bypass(void)
+{
+    ngx_http_request_t request;
+    ngx_http_request_t parent;
+    ngx_http_markdown_conf_t conf;
+    ngx_table_elt_t validator;
+    ngx_int_t conditional_results[2] = { NGX_HTTP_NOT_MODIFIED, NGX_DECLINED };
+    ngx_uint_t i;
+
+    for (i = 0; i < 2; i++) {
+        request = make_request();
+        parent = make_request();
+        memset(&validator, 0, sizeof(validator));
+        validator.hash = 1;
+        validator.key.data = (u_char *) "If-None-Match";
+        validator.key.len = sizeof("If-None-Match") - 1;
+        validator.value.data = (u_char *) "\"parent-etag\"";
+        validator.value.len = sizeof("\"parent-etag\"") - 1;
+        parent.headers_in.if_none_match = &validator;
+        request.headers_in = parent.headers_in;
+        request.parent = &parent;
+        request.main = &parent;
+
+        reset_test_state();
+        memset(&conf, 0, sizeof(conf));
+        conf.enabled = 1;
+        conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+        conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+        g_conf = &conf;
+        g_capture_rc = NGX_DECLINED;
+        g_conditional_rc = conditional_results[i];
+
+        TEST_ASSERT(ngx_http_markdown_preaccess_handler(&request)
+                    == NGX_DECLINED,
+                    "subrequest declined capture must continue request");
+        ngx_http_markdown_ctx_t *ctx = (ngx_http_markdown_ctx_t *)
+            request.ctx[ngx_http_markdown_filter_module.ctx_index];
+        TEST_ASSERT(ctx != NULL && ctx->lifecycle.bypass == 1
+                    && ctx->eligible == 0,
+                    "subrequest capture decline must establish bypass");
+        TEST_ASSERT(!ctx->error.has_category
+                    && !ctx->fullbuffer.failopen_delivery_pending,
+                    "intentional subrequest bypass is not fail-open error");
+        TEST_ASSERT(request.headers_in.if_none_match == &validator
+                    && validator.hash == 1,
+                    "subrequest bypass must leave parent validator visible");
+
+        g_next_header_rc = NGX_AGAIN;
+        ngx_http_next_header_filter = test_next_header_filter;
+        TEST_ASSERT(ngx_http_markdown_header_filter(&request) == NGX_AGAIN,
+                    "subrequest bypass must forward headers");
+        g_next_header_rc = NGX_ERROR;
+        TEST_ASSERT(ngx_http_markdown_header_filter(&request) == NGX_OK,
+                    "subrequest bypass header resume must be idempotent");
+
+        g_next_body_rc = NGX_OK;
+        ngx_http_next_body_filter = test_next_body_filter;
+        TEST_ASSERT(ngx_http_markdown_body_filter(&request, NULL) == NGX_OK,
+                    "subrequest bypass must forward body");
+        TEST_ASSERT(g_if_none_match_calls == 0
+                    && g_send_304_calls == 0,
+                    "subrequest bypass must not consume parent validator");
+        TEST_ASSERT(g_metrics.results.failopen_count == 0
+                    && g_metrics.conversions_bypassed == 1,
+                    "subrequest bypass must not count as fail-open");
+    }
+
+    TEST_PASS("subrequest declined capture establishes validator bypass");
+}
+
+static void
+test_subrequest_without_visible_validator_uses_durable_bypass(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_request_t parent = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    request.parent = &parent;
+    request.main = &parent;
+    parent.main = &parent;
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    g_has_conditional = 0;
+
+    rc = ngx_http_markdown_preaccess_handler(&request);
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "subrequest without visible validator must continue");
+    TEST_ASSERT(request.ctx[ngx_http_markdown_filter_module.ctx_index]
+                != NULL,
+                "subrequest must publish durable bypass without ctx alloc");
+    TEST_ASSERT(g_metrics.conversions_bypassed == 1
+                && g_metrics.results.failopen_count == 0,
+                "intentional subrequest bypass must be counted once");
+
+    g_next_header_rc = NGX_AGAIN;
+    ngx_http_next_header_filter = test_next_header_filter;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_AGAIN && g_next_header_calls == 1,
+                "subrequest marker must forward headers once");
+
+    g_next_header_rc = NGX_ERROR;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_OK && g_next_header_calls == 1,
+                "subrequest marker header resume must be idempotent");
+
+    g_next_body_rc = NGX_AGAIN;
+    ngx_http_next_body_filter = test_next_body_filter;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_AGAIN && g_next_body_calls == 1,
+                "subrequest marker must preserve body backpressure");
+    g_next_body_rc = NGX_OK;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_OK && g_next_body_calls == 2,
+                "subrequest marker must resume body delivery");
+    TEST_ASSERT(g_metrics.conversions_bypassed == 1
+                && g_metrics.results.failopen_count == 0,
+                "subrequest marker must not double count or fail open");
+    TEST_PASS("subrequest without visible validator uses durable bypass");
+}
+
+static void
+test_304_again_resumes_without_body(ngx_int_t resume_rc)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_effective_conf_t eff;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&eff, 0, sizeof(eff));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    eff.error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    g_conf = &conf;
+    g_conditional_rc = NGX_HTTP_NOT_MODIFIED;
+    g_send_304_rc = NGX_AGAIN;
+    ctx.request = &request;
+    ctx.filter_enabled = 1;
+    ctx.eligible = 1;
+    ctx.buffer_initialized = 1;
+    ctx.buffer.data = (u_char *) "body";
+    ctx.buffer.size = sizeof("body") - 1;
+    ctx.conversion.attempted = 1;
+    ctx.conditional.captured = 1;
+    ctx.conditional.suppressed = 1;
+    ctx.effective_conf = &eff;
+    request.ctx[ngx_http_markdown_filter_module.ctx_index] = &ctx;
+
+    rc = ngx_http_markdown_body_filter_convert_and_output(
+        &request, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "304 header NGX_AGAIN must remain pending");
+    TEST_ASSERT(ctx.headers_forwarded == 1
+                && g_metrics.failures_system == 0,
+                "304 NGX_AGAIN must latch header state without failure");
+    TEST_ASSERT(g_send_304_calls == 1,
+                "304 sender must run exactly once before resume");
+
+    g_resume_send_header_rc = resume_rc;
+    ngx_http_next_body_filter = test_next_body_filter;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_DONE,
+                "304 resume must return terminal NGX_DONE");
+    TEST_ASSERT(g_resume_send_header_calls == 1
+                && g_next_body_calls == 0,
+                "304 resume must retry headers without sending body");
+}
+
+static void
+test_304_again_resume_ok(void)
+{
+    test_304_again_resumes_without_body(NGX_OK);
+    TEST_PASS("304 NGX_AGAIN resumes through NGX_OK");
+}
+
+static void
+test_304_again_resume_done(void)
+{
+    test_304_again_resumes_without_body(NGX_DONE);
+    TEST_PASS("304 NGX_AGAIN resumes through NGX_DONE");
+}
+
+static void
+test_304_header_error_is_propagated(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_effective_conf_t eff;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&eff, 0, sizeof(eff));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    eff.error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    g_conf = &conf;
+    g_conditional_rc = NGX_HTTP_NOT_MODIFIED;
+    g_send_304_rc = NGX_ERROR;
+    ctx.request = &request;
+    ctx.filter_enabled = 1;
+    ctx.eligible = 1;
+    ctx.buffer_initialized = 1;
+    ctx.buffer.data = (u_char *) "body";
+    ctx.buffer.size = sizeof("body") - 1;
+    ctx.conversion.attempted = 1;
+    ctx.conditional.captured = 1;
+    ctx.conditional.suppressed = 1;
+    ctx.effective_conf = &eff;
+    request.ctx[ngx_http_markdown_filter_module.ctx_index] = &ctx;
+
+    TEST_ASSERT(ngx_http_markdown_body_filter_convert_and_output(
+                    &request, &ctx, &conf) == NGX_ERROR,
+                "304 header NGX_ERROR must propagate");
+    TEST_ASSERT(g_metrics.failures_system == 1,
+                "304 header NGX_ERROR must classify system failure");
+    TEST_PASS("304 header error is propagated");
+}
+
 int
 main(void)
 {
@@ -1253,6 +1671,14 @@ main(void)
     test_preaccess_handler_installs_durable_bypass();
     test_header_filter_bypass_forwards_once();
     test_preaccess_bypass_terminal_header_outcomes();
+    test_preaccess_allocation_failure_uses_durable_bypass();
+    test_preaccess_cleanup_failure_uses_durable_bypass();
+    test_header_filter_allocation_failure_uses_durable_bypass();
+    test_subrequest_declined_capture_establishes_bypass();
+    test_subrequest_without_visible_validator_uses_durable_bypass();
+    test_304_again_resume_ok();
+    test_304_again_resume_done();
+    test_304_header_error_is_propagated();
 
     printf("\n========================================\n");
     printf("All request bypass tests passed!\n");

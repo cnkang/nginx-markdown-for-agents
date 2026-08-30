@@ -19,6 +19,158 @@
 #include "ngx_http_markdown_diagnostics.h"
 #include "ngx_http_markdown_decompression_route.h"
 
+typedef enum {
+    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_NONE = 0,
+    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER,
+    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY,
+    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED,
+    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER,
+    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY,
+    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED
+} ngx_http_markdown_durable_bypass_kind_t;
+
+typedef struct {
+    ngx_http_markdown_durable_bypass_kind_t kind;
+} ngx_http_markdown_durable_bypass_marker_t;
+
+/*
+ * These immutable marker addresses occupy the request context slot when a
+ * request context cannot be allocated.  State transitions replace the
+ * address, so no mutable state is shared between requests.
+ */
+static const ngx_http_markdown_durable_bypass_marker_t
+    ngx_http_markdown_failopen_header_marker = {
+        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER
+    };
+static const ngx_http_markdown_durable_bypass_marker_t
+    ngx_http_markdown_failopen_body_marker = {
+        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY
+    };
+static const ngx_http_markdown_durable_bypass_marker_t
+    ngx_http_markdown_failopen_completed_marker = {
+        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED
+    };
+static const ngx_http_markdown_durable_bypass_marker_t
+    ngx_http_markdown_subrequest_header_marker = {
+        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER
+    };
+static const ngx_http_markdown_durable_bypass_marker_t
+    ngx_http_markdown_subrequest_body_marker = {
+        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY
+    };
+static const ngx_http_markdown_durable_bypass_marker_t
+    ngx_http_markdown_subrequest_completed_marker = {
+        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED
+    };
+
+static ngx_http_markdown_durable_bypass_kind_t
+ngx_http_markdown_durable_bypass_kind(const void *value)
+{
+    if (value == (const void *) &ngx_http_markdown_failopen_header_marker) {
+        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER;
+    }
+    if (value == (const void *) &ngx_http_markdown_failopen_body_marker) {
+        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY;
+    }
+    if (value == (const void *) &ngx_http_markdown_failopen_completed_marker) {
+        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED;
+    }
+    if (value == (const void *) &ngx_http_markdown_subrequest_header_marker) {
+        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER;
+    }
+    if (value == (const void *) &ngx_http_markdown_subrequest_body_marker) {
+        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY;
+    }
+    if (value
+        == (const void *) &ngx_http_markdown_subrequest_completed_marker)
+    {
+        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED;
+    }
+    return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_NONE;
+}
+
+static void
+ngx_http_markdown_publish_durable_bypass(
+    ngx_http_request_t *r,
+    ngx_http_markdown_durable_bypass_kind_t kind)
+{
+    if (r == NULL) {
+        return;
+    }
+
+    switch (kind) {
+    case NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER:
+        r->ctx[ngx_http_markdown_filter_module.ctx_index] =
+            (void *) &ngx_http_markdown_failopen_header_marker;
+        break;
+
+    case NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY:
+        r->ctx[ngx_http_markdown_filter_module.ctx_index] =
+            (void *) &ngx_http_markdown_failopen_body_marker;
+        break;
+
+    case NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED:
+        r->ctx[ngx_http_markdown_filter_module.ctx_index] =
+            (void *) &ngx_http_markdown_failopen_completed_marker;
+        break;
+
+    case NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER:
+        r->ctx[ngx_http_markdown_filter_module.ctx_index] =
+            (void *) &ngx_http_markdown_subrequest_header_marker;
+        break;
+
+    case NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY:
+        r->ctx[ngx_http_markdown_filter_module.ctx_index] =
+            (void *) &ngx_http_markdown_subrequest_body_marker;
+        break;
+
+    case NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED:
+        r->ctx[ngx_http_markdown_filter_module.ctx_index] =
+            (void *) &ngx_http_markdown_subrequest_completed_marker;
+        break;
+
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_settle_durable_bypass_delivery(
+    ngx_http_request_t *r,
+    ngx_http_markdown_durable_bypass_kind_t kind,
+    ngx_int_t rc)
+{
+    if (kind != NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER
+        && kind != NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY
+        && kind != NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER
+        && kind != NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY)
+    {
+        return;
+    }
+
+    if (rc == NGX_AGAIN) {
+        ngx_http_markdown_publish_durable_bypass(
+            r, kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER
+                    || kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY
+                ? NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY
+                : NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY);
+        return;
+    }
+
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        if (kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER
+            || kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY)
+        {
+            NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
+        }
+        ngx_http_markdown_publish_durable_bypass(
+            r, kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER
+                    || kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY
+                ? NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED
+                : NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED);
+    }
+}
+
 /*
  * Forward declarations for streaming functions defined in
  * ngx_http_markdown_streaming_impl.h (included after this header).
@@ -83,7 +235,7 @@ static void ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled);
 static void ngx_http_markdown_establish_preaccess_bypass(
     ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled,
-    const ngx_http_markdown_effective_conf_t *eff);
+    const ngx_http_markdown_effective_conf_t *eff, ngx_flag_t failopen);
 static void ngx_http_markdown_request_cleanup(void *data);
 static ngx_int_t ngx_http_markdown_forward_prechecked_headers(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
@@ -348,14 +500,11 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
         ngx_http_markdown_reason_failed_open(),
         ngx_http_markdown_reason_from_error_category(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+    ngx_http_markdown_publish_durable_bypass(
+        r, NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER);
     rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
-    /* No request context exists on this allocation-failure path, so an
-     * NGX_AGAIN return cannot be settled on a later body-filter resume.
-     * Keep delivery accounting conservative: only definitive downstream
-     * success publishes failopen_count. */
-    if (rc == NGX_OK || rc == NGX_DONE) {
-        ngx_http_markdown_metric_inc_failopen(eff, conf);
-    }
+    ngx_http_markdown_settle_durable_bypass_delivery(
+        r, NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER, rc);
     return rc;
 }
 
@@ -663,7 +812,7 @@ ngx_http_markdown_log_streaming_terminal_decision(
 static void
 ngx_http_markdown_establish_preaccess_bypass(
     ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled,
-    const ngx_http_markdown_effective_conf_t *eff)
+    const ngx_http_markdown_effective_conf_t *eff, ngx_flag_t failopen)
 {
     if (ctx == NULL) {
         return;
@@ -675,10 +824,12 @@ ngx_http_markdown_establish_preaccess_bypass(
     }
     ctx->filter_enabled = filter_enabled;
     ctx->eligible = 0;
-    ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
-    ctx->error.has_category = 1;
+    if (failopen) {
+        ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+        ctx->error.has_category = 1;
+    }
     ctx->lifecycle.bypass = 1;
-    ctx->fullbuffer.failopen_delivery_pending = 1;
+    ctx->fullbuffer.failopen_delivery_pending = failopen;
 }
 
 /*
@@ -699,6 +850,11 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
     ngx_int_t                         capture_rc;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
+    if (ngx_http_markdown_durable_bypass_kind(ctx)
+        != NGX_HTTP_MARKDOWN_DURABLE_BYPASS_NONE)
+    {
+        return NGX_DECLINED;
+    }
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     if (conf == NULL) {
         ngx_http_markdown_restore_conditional_request(r, ctx);
@@ -726,7 +882,6 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
 
-    ngx_memzero(&snap_copy, sizeof(snap_copy));
     snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
     ngx_memzero(&eff, sizeof(eff));
     ngx_http_markdown_build_effective_conf(
@@ -747,6 +902,11 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
     }
 
     if (ctx == NULL && !ngx_http_markdown_has_conditional_request(r)) {
+        if (r->parent != NULL) {
+            ngx_http_markdown_publish_durable_bypass(
+                r, NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER);
+            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+        }
         return NGX_DECLINED;
     }
 
@@ -773,6 +933,8 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
                 ngx_http_markdown_reason_failed_open(),
                 ngx_http_markdown_reason_from_error_category(
                     NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+            ngx_http_markdown_publish_durable_bypass(
+                r, NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER);
             return NGX_DECLINED;
         }
     }
@@ -800,17 +962,21 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
          * The cached filter decision lets the body filter reach its existing
          * ineligible pass-through path without preparing conversion state. */
         ngx_http_markdown_establish_preaccess_bypass(
-            ctx, filter_enabled, &eff);
+            ctx, filter_enabled, &eff, 1);
         r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
         return NGX_DECLINED;
     }
     if (capture_rc != NGX_OK) {
         /*
-         * A declined capture (for example, a subrequest or Range request)
-         * still owns this cleanup-backed pool context. Publish it so the
-         * header filter reuses the context instead of registering a second
-         * cleanup.
+         * A subrequest shares headers_in with its parent.  It must not use
+         * the parent's validators to select a converted representation.
+         * Keep the context and make that bypass decision durable through the
+         * header and body filters.
          */
+        if (r->parent != NULL) {
+            ngx_http_markdown_establish_preaccess_bypass(
+                ctx, filter_enabled, &eff, 0);
+        }
         r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
         return NGX_DECLINED;
     }
@@ -1555,6 +1721,24 @@ ngx_http_markdown_handle_durable_bypass(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {
+    ngx_http_markdown_durable_bypass_kind_t  kind;
+    ngx_int_t                                rc;
+
+    kind = ngx_http_markdown_durable_bypass_kind(ctx);
+    if (kind != NGX_HTTP_MARKDOWN_DURABLE_BYPASS_NONE) {
+        if (kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY
+            || kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED
+            || kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY
+            || kind == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED)
+        {
+            return NGX_OK;
+        }
+
+        rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
+        ngx_http_markdown_settle_durable_bypass_delivery(r, kind, rc);
+        return rc;
+    }
+
     if (ctx == NULL || !ctx->lifecycle.bypass) {
         return NGX_DECLINED;
     }
@@ -1638,7 +1822,6 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * the early read and the ctx bind — we copy snap_copy into ctx,
      * never re-read the global active_snapshot.
      */
-    ngx_memzero(&snap_copy, sizeof(snap_copy));
 
     /*
      * Copy the global snapshot exactly once.  NGINX runs timer reloads
@@ -1797,6 +1980,11 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         /* send_304 emitted the terminal headers; do not continue the filter
          * chain after the terminal return. */
         return NGX_DONE;
+    }
+    if (rc == NGX_AGAIN) {
+        /* The 304 header chain owns the pending send; resume it from the
+         * body-filter entry point without treating backpressure as failure. */
+        return NGX_AGAIN;
     }
     if (rc != NGX_OK) {
         /* Conditional processing failed — log failure outcome */
@@ -1972,6 +2160,35 @@ ngx_http_markdown_body_filter_pass_through(ngx_http_request_t *r, ngx_chain_t *i
     return rc;
 }
 
+static ngx_int_t
+ngx_http_markdown_resume_pending_304(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_int_t  rc;
+
+    if (!ctx->conversion.attempted
+        || !ctx->headers_forwarded
+        || !ctx->conditional.captured
+        || !ctx->conditional.suppressed
+        || r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
+    {
+        return NGX_DECLINED;
+    }
+
+    rc = ngx_http_send_header(r);
+    if (rc == NGX_AGAIN) {
+        return NGX_AGAIN;
+    }
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        return NGX_DONE;
+    }
+
+    if (!ctx->error.has_category) {
+        ngx_http_markdown_record_system_failure(ctx);
+    }
+    return rc;
+}
+
 
 /*
  * Main body filter logic after HEAD handling.
@@ -1983,6 +2200,11 @@ ngx_http_markdown_body_filter_main(ngx_http_request_t *r, ngx_chain_t *in,
                                     const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t rc;
+
+    rc = ngx_http_markdown_resume_pending_304(r, ctx);
+    if (rc != NGX_DECLINED) {
+        return rc;
+    }
 
     /* Rule 1 / Rule 38: resume full-buffer pending chain. */
     if (ctx->fullbuffer.pending_has_data) {
@@ -2068,6 +2290,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     ngx_http_markdown_ctx_t   *ctx;
     const ngx_http_markdown_conf_t  *conf;
+    ngx_http_markdown_durable_bypass_kind_t  bypass_kind;
     ngx_int_t                  rc;
 
     /* Get module configuration */
@@ -2089,6 +2312,21 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         /* No context means header filter didn't set up conversion */
         /* Pass through unchanged */
         return ngx_http_next_body_filter(r, in);
+    }
+
+    bypass_kind = ngx_http_markdown_durable_bypass_kind(ctx);
+    if (bypass_kind != NGX_HTTP_MARKDOWN_DURABLE_BYPASS_NONE) {
+        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+        rc = ngx_http_next_body_filter(r, in);
+        if (bypass_kind
+                == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY
+            || bypass_kind
+                == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY)
+        {
+            ngx_http_markdown_settle_durable_bypass_delivery(
+                r, bypass_kind, rc);
+        }
+        return rc;
     }
 
     if (ctx->error.header_reject) {

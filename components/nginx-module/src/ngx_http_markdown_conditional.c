@@ -1145,7 +1145,12 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
                   "markdown: 304 response with Vary: Accept");
 
     rc = ngx_http_send_header(r);
-    if (rc == NGX_ERROR || rc > NGX_OK) {
+    if (rc == NGX_AGAIN) {
+        /* Keep the prepared 304 representation and let the header chain
+         * resume it on the next filter invocation. */
+        return NGX_AGAIN;
+    }
+    if (rc != NGX_OK && rc != NGX_DONE) {
         return rc;
     }
 
