@@ -26,7 +26,7 @@ decompression via the Rust FFI path.
 | gzip | automatic decompression on; streaming selected; cache validation not `full` | member-aware streaming decompression |
 | Brotli (`br`) | automatic decompression on; streaming selected; cache validation not `full`; `NGX_HTTP_BROTLI` defined | streaming decompression |
 | Brotli (`br`) | `NGX_HTTP_BROTLI` not defined | bounded full-buffer decompression (Rust FFI) |
-| malformed / unknown token / excessive depth | — | `markdown_error_policy` (`pass` / `fail_closed` / `status <code>`) |
+| malformed / unknown token / excessive depth | automatic decompression on | `markdown_error_policy` (`pass` / `fail_closed` / `status <code>`); passthrough unchanged when automatic decompression is off |
 
 ## Routing Decision
 
