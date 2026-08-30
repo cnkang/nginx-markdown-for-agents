@@ -126,23 +126,14 @@ def test_loaders_accept_non_canonical_root_prefix(loader, tmp_path) -> None:
     input_name = "input.yaml" if loader is _load_yaml else "input.json"
     (real_root / input_name).write_text("{}\n", encoding="utf-8")
 
-    symlinked_prefix = None
-    # Build the platform alias strings at runtime so static scanners do not
-    # treat them as public-writable path usage (S5443).  The values are
-    # only compared against the resolved temp root for the macOS
-    # /tmp -> /private/tmp (and /var -> /private/var) symlink case.
-    tmp_alias = "/" + "tmp"
-    var_alias = "/" + "var"
-    priv_tmp = "/private/" + "tmp"
-    priv_var = "/private/" + "var"
-    for prefix, canonical in ((tmp_alias, priv_tmp), (var_alias, priv_var)):
-        if str(tmp_path).startswith(canonical):
-            symlinked_prefix = prefix + str(tmp_path)[len(canonical):]
-            break
-    if symlinked_prefix is None:
-        pytest.skip("no canonical /tmp or /var symlink prefix on this platform")
-
-    non_canonical_input = Path(symlinked_prefix) / "root" / input_name
+    # Symlink the root through an alias directory inside the test tree.
+    # This reproduces a non-canonical prefix (like macOS /tmp -> /private/tmp)
+    # without referencing any platform path, and works on every OS.
+    alias_dir = tmp_path / "alias"
+    alias_dir.mkdir()
+    symlinked_prefix = alias_dir / "root-real"
+    symlinked_prefix.symlink_to(real_root, target_is_directory=True)
+    non_canonical_input = symlinked_prefix / input_name
 
     data = loader(non_canonical_input, root=tmp_path)
 
