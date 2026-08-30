@@ -302,9 +302,11 @@ The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs th
 - Bypass of one layer does not compromise security
 
 ### 4. Secure Defaults
-- Conservative resource limits (10MB max size, 5s conversion timeout) and
-  cooperative parser checkpoints. An in-progress parse may overshoot its
-  configured `parser_timeout`
+- Conservative resource limits: `decompressed_size` 10MB (input cap),
+  `conversion_memory` 64MB (input admission + generated-output budget),
+  `conversion_timeout` 30s, `parser_timeout` 10s, `parser_memory` 32MB,
+  `streaming_buffer` 2MB — with cooperative parser checkpoints. An
+  in-progress parse may overshoot its configured `parser_timeout`
 - Fail-open strategy prevents DoS
 - All dangerous elements/attributes blocked by default
 
