@@ -43,6 +43,39 @@ pub(super) struct CodeContentStats {
     pub(super) len: usize,
 }
 
+const MEASUREMENT_CHECKPOINT_BYTES: usize = 1024;
+
+fn check_measurement_node(ctx: &mut Option<&mut ConversionContext>) -> Result<(), ConversionError> {
+    if let Some(context) = ctx.as_deref_mut() {
+        context.increment_and_check()?;
+    }
+    Ok(())
+}
+
+fn check_measurement_bytes(
+    ctx: &mut Option<&mut ConversionContext>,
+    bytes: &[u8],
+) -> Result<(), ConversionError> {
+    if let Some(context) = ctx.as_deref_mut() {
+        for _ in bytes.chunks(MEASUREMENT_CHECKPOINT_BYTES) {
+            context.check_timeout()?;
+        }
+    }
+    Ok(())
+}
+
+fn check_measurement_checkpoint(
+    ctx: &mut Option<&mut ConversionContext>,
+    byte_index: usize,
+) -> Result<(), ConversionError> {
+    if byte_index.is_multiple_of(MEASUREMENT_CHECKPOINT_BYTES)
+        && let Some(context) = ctx.as_deref_mut()
+    {
+        context.check_timeout()?;
+    }
+    Ok(())
+}
+
 impl MarkdownConverter {
     /// Handle anchor (link) elements with optional timeout context.
     pub(super) fn handle_link_with_context(
@@ -64,7 +97,7 @@ impl MarkdownConverter {
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
-        let link_text_capacity = self.text_content_len(node, depth)?;
+        let link_text_capacity = self.text_content_len(node, depth, &mut ctx)?;
 
         with_reserved_working_set(output, &mut ctx, link_text_capacity, |output, ctx| {
             let mut link_text = String::with_capacity(link_text_capacity);
@@ -87,7 +120,9 @@ impl MarkdownConverter {
                         .map(|attr| attr.value.as_ref());
 
                     if let Some(url) = href {
-                        if let Some(safe_url) = self.security_validator.sanitize_url(url) {
+                        if let Some(safe_url) = self.security_validator.sanitize_url(url)
+                            && !safe_url.is_empty()
+                        {
                             let url_capacity = self.resolved_url_capacity(safe_url)?;
                             with_reserved_working_set(output, ctx, url_capacity, |output, ctx| {
                                 let resolved_url = self.resolve_url(safe_url);
@@ -142,7 +177,9 @@ impl MarkdownConverter {
 
             let safe_url = src.and_then(|url| self.security_validator.sanitize_url(url));
 
-            if let Some(url) = safe_url {
+            if let Some(url) = safe_url
+                && !url.is_empty()
+            {
                 let url_capacity = self.resolved_url_capacity(url)?;
                 with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
                     let resolved_url = self.resolve_url(url);
@@ -166,7 +203,7 @@ impl MarkdownConverter {
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
-        let stats = self.measure_code_content(node, depth)?;
+        let stats = self.measure_code_content(node, depth, &mut ctx)?;
         let fence_len = stats.max_backtick_run.checked_add(1).ok_or_else(|| {
             ConversionError::MemoryLimit("inline code fence length overflow".into())
         })?;
@@ -217,13 +254,23 @@ impl MarkdownConverter {
     /// Count the raw text bytes emitted by [`extract_text`] without
     /// allocating.  The count pre-reserves the temporary link-label source
     /// before the recursive extractor starts writing it.
-    fn text_content_len(&self, node: &Handle, depth: usize) -> Result<usize, ConversionError> {
+    fn text_content_len(
+        &self,
+        node: &Handle,
+        depth: usize,
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<usize, ConversionError> {
+        check_measurement_node(ctx)?;
         self.security_validator
             .validate_depth(depth)
             .map_err(ConversionError::InvalidInput)?;
 
         match node.data {
-            NodeData::Text { ref contents } => Ok(contents.borrow().len()),
+            NodeData::Text { ref contents } => {
+                let text = contents.borrow();
+                check_measurement_bytes(ctx, text.as_bytes())?;
+                Ok(text.len())
+            }
             NodeData::Element { ref name, .. } => {
                 if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
                     return Ok(0);
@@ -235,7 +282,7 @@ impl MarkdownConverter {
                 let mut total = 0usize;
                 for child in node.children.borrow().iter() {
                     total = total
-                        .checked_add(self.text_content_len(child, child_depth)?)
+                        .checked_add(self.text_content_len(child, child_depth, ctx)?)
                         .ok_or_else(|| {
                             ConversionError::MemoryLimit(
                                 "link text working-set size overflow".into(),
@@ -253,9 +300,10 @@ impl MarkdownConverter {
         &self,
         node: &Handle,
         depth: usize,
+        ctx: &mut Option<&mut ConversionContext>,
     ) -> Result<CodeContentStats, ConversionError> {
         let mut stats = CodeContentStats::default();
-        self.measure_code_content_into(node, depth, &mut stats)?;
+        self.measure_code_content_into(node, depth, &mut stats, ctx)?;
         Ok(stats)
     }
 
@@ -264,7 +312,9 @@ impl MarkdownConverter {
         node: &Handle,
         depth: usize,
         stats: &mut CodeContentStats,
+        ctx: &mut Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        check_measurement_node(ctx)?;
         self.security_validator
             .validate_depth(depth)
             .map_err(ConversionError::InvalidInput)?;
@@ -272,7 +322,8 @@ impl MarkdownConverter {
         match node.data {
             NodeData::Text { ref contents } => {
                 let text = contents.borrow();
-                for byte in text.as_ref().bytes() {
+                for (byte_index, byte) in text.as_ref().bytes().enumerate() {
+                    check_measurement_checkpoint(ctx, byte_index)?;
                     if stats.first_byte.is_none() {
                         stats.first_byte = Some(byte);
                     }
@@ -301,7 +352,7 @@ impl MarkdownConverter {
                     ConversionError::MemoryLimit("code extraction depth overflow".into())
                 })?;
                 for child in node.children.borrow().iter() {
-                    self.measure_code_content_into(child, child_depth, stats)?;
+                    self.measure_code_content_into(child, child_depth, stats, ctx)?;
                 }
             }
             _ => {}

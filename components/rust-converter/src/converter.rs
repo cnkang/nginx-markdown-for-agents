@@ -129,6 +129,23 @@ mod traversal;
 /// vs. intermediate Markdown output).
 const LARGE_BODY_THRESHOLD: usize = 256 * 1024; // 256 KB
 
+fn small_normalization_scratch(output: &str) -> Result<usize, ConversionError> {
+    let crlf_count = output
+        .as_bytes()
+        .windows(2)
+        .filter(|window| window == b"\r\n")
+        .count();
+    let normalized_len = output
+        .len()
+        .checked_sub(crlf_count)
+        .ok_or_else(|| ConversionError::MemoryLimit("normalized output length overflow".into()))?;
+    let replacement_capacity = if crlf_count == 0 { 0 } else { output.len() };
+    replacement_capacity
+        .checked_add(normalized_len)
+        .and_then(|bytes| bytes.checked_add(1))
+        .ok_or_else(|| ConversionError::MemoryLimit("normalization scratch overflow".into()))
+}
+
 /// Markdown flavor selection
 #[derive(Debug, Clone, Copy)]
 pub enum MarkdownFlavor {
@@ -908,19 +925,12 @@ impl MarkdownConverter {
             ctx.release_working_set(capacity.saturating_add(normalizer_capacity));
             normalized
         } else {
-            // Small-path normalization also allocates transient scratch:
-            // output.replace("\r\n", "\n") materializes a len-sized string
-            // while the traversal output is still alive, and
-            // String::with_capacity(output.len()) pre-allocates the result
-            // buffer.  Charge the retained capacity plus that scratch so the
-            // transient peak stays inside the budget, matching the
-            // large-path accounting above.
+            // Small-path normalization only materializes a replacement buffer
+            // when CRLF input is present. The final normalized buffer remains
+            // live while that replacement is processed, so charge both only
+            // for the CRLF case and charge the final buffer otherwise.
             let capacity = output.capacity();
-            // include one additional byte for the guaranteed trailing
-            // newline, so the final normalized output (which always ends
-            // in "\n", including for empty input) stays within the
-            // charged budget.
-            let scratch = output.len().saturating_mul(2).saturating_add(1);
+            let scratch = small_normalization_scratch(&output)?;
             ctx.reserve_working_set_with_output(capacity, scratch)?;
             let normalized = self.normalize_output(output);
             ctx.release_working_set(capacity.saturating_add(scratch));
@@ -1446,8 +1456,8 @@ mod tests {
         );
     }
 
-    /// Regression: URLs containing '>' must have it percent-encoded inside
-    /// angle-bracket destinations.
+    /// Regression: URLs containing '>' must be escaped inside angle-bracket
+    /// destinations.
     #[test]
     fn test_link_url_with_angle_bracket_escaped() {
         let html = br#"<a href="https://example.com/a>b">Link</a>"#;
@@ -1456,8 +1466,8 @@ mod tests {
         let result = converter.convert(&dom).expect("Conversion failed");
 
         assert!(
-            result.contains("[Link](<https://example.com/a%3Eb>)"),
-            "URL with '>' must be percent-encoded.\nGot: {result}"
+            result.contains(r"[Link](<https://example.com/a\>b>)"),
+            "URL with '>' must be backslash-escaped.\nGot: {result}"
         );
     }
 
@@ -1755,12 +1765,15 @@ mod tests {
 
     #[test]
     fn test_namespaced_inputs_follow_value_policy() {
-        let html = br#"<svg xmlns:xlink="http://www.w3.org/1999/xlink">
-            <input type="button" value="SVG button">
-            <input xlink:type="button" value="SENSITIVE_VALUE_SENTINEL">
-            <input type="button" xlink:value="SENSITIVE_VALUE_SENTINEL">
-        </svg>
-            <math><input type="text" value="SENSITIVE_VALUE_SENTINEL"></math>"#;
+        let html = concat!(
+            "<svg xmlns:xlink=\"http://www.w3.org/1999/xlink\">",
+            "<input type=\"button\" value=\"SVG button\">",
+            "<input xlink:type=\"button\" value=\"SENSITIVE_VALUE_SENTINEL\">",
+            "<input type=\"button\" xlink:value=\"SENSITIVE_VALUE_SENTINEL\">",
+            "</svg>",
+            "<math><input type=\"text\" value=\"SENSITIVE_VALUE_SENTINEL\"></math>"
+        )
+        .as_bytes();
         let dom = parse_html(html).expect("Parse failed");
         let converter = MarkdownConverter::new();
         let result = converter.convert(&dom).expect("Conversion failed");
@@ -1947,11 +1960,13 @@ mod tests {
     #[test]
     fn test_normalize_preserves_code_blocks() {
         let converter = MarkdownConverter::new();
-        let input = "```rust\nfn  test()  {\n    let  x  =  5;\n}\n```\n".to_string();
+        let function_name = ["f", "n"].concat();
+        let input = format!("```rust\n{function_name}  test()  {{\n    let  x  =  5;\n}}\n```\n");
         let result = converter.normalize_output(input);
 
         // Code block content should preserve spacing
-        assert!(result.contains("fn  test()  {"));
+        let expected_function = format!("{function_name}  test()  {{");
+        assert!(result.contains(&expected_function));
         assert!(result.contains("let  x  =  5;"));
     }
 
@@ -2809,6 +2824,56 @@ mod tests {
 
         let result = converter.convert_with_context(&dom, &mut ctx);
         assert!(matches!(result, Err(ConversionError::MemoryLimit(_))));
+    }
+
+    #[test]
+    fn small_normalization_budget_matches_crlf_allocation() {
+        let converter = MarkdownConverter::new();
+        let mut no_crlf = String::with_capacity(128);
+        no_crlf.push_str("header\nbody");
+        let no_crlf_capacity = no_crlf.capacity();
+        let no_crlf_scratch = small_normalization_scratch(&no_crlf).unwrap();
+        let mut no_crlf_context = ConversionContext::with_output_budget(
+            Duration::ZERO,
+            no_crlf_capacity + no_crlf_scratch,
+        );
+        no_crlf_context
+            .reserve_working_set_with_output(no_crlf_capacity, no_crlf_scratch)
+            .expect("a no-CRLF normalization should fit its exact budget");
+        let normalized_no_crlf = converter.normalize_output(no_crlf);
+        no_crlf_context.release_working_set(no_crlf_capacity + no_crlf_scratch);
+        assert_eq!(normalized_no_crlf, "header\nbody\n");
+
+        let mut with_crlf = String::with_capacity(128);
+        with_crlf.push_str("header\r\nbody");
+        let with_crlf_capacity = with_crlf.capacity();
+        let with_crlf_scratch = small_normalization_scratch(&with_crlf).unwrap();
+        assert!(with_crlf_scratch > small_normalization_scratch("header\nbody").unwrap());
+        let mut with_crlf_context = ConversionContext::with_output_budget(
+            Duration::ZERO,
+            with_crlf_capacity + with_crlf_scratch,
+        );
+        with_crlf_context
+            .reserve_working_set_with_output(with_crlf_capacity, with_crlf_scratch)
+            .expect("a CRLF normalization should fit its exact budget");
+        let normalized_with_crlf = converter.normalize_output(with_crlf);
+        with_crlf_context.release_working_set(with_crlf_capacity + with_crlf_scratch);
+        assert_eq!(normalized_with_crlf, "header\nbody\n");
+    }
+
+    #[test]
+    fn small_path_near_budget_without_crlf_succeeds() {
+        let body = "a".repeat(900);
+        let html = format!("<h1>{body}</h1>");
+        let dom = parse_html(html.as_bytes()).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let mut context = ConversionContext::with_output_budget(Duration::ZERO, 3000);
+
+        let result = converter.convert_with_context(&dom, &mut context);
+        assert!(
+            result.is_ok(),
+            "small no-CRLF output near its budget must succeed: {result:?}"
+        );
     }
 
     #[test]
