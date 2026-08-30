@@ -48,7 +48,7 @@ flowchart TD
     H -->|No| J{"Content-Type<br/>text/html?"}
     J -->|No| K["not_eligible"]
     J -->|Yes| L{"Size within<br/>budget?"}
-    L -->|No| M["memory_budget_exceeded"]
+    L -->|No| M["not_eligible"]
     L -->|Yes| N{"Auth policy<br/>denies request?"}
     N -->|Yes| O["not_eligible"]
     N -->|No| P{"Accept header<br/>requests MD?"}
@@ -69,7 +69,8 @@ flowchart TD
 > visible in the decision log's structured metadata (`method`, `content_type`,
 > `status`) for diagnostics, but the reason code string is `not_eligible`.
 > The size check (check 6) is the exception: an over-limit response reports the
-> dedicated `memory_budget_exceeded` classification, as [Parser Budget](PARSER_BUDGET.md) documents.
+> dedicated `not_eligible` classification (the size check is an eligibility
+> gate, not a conversion failure), as [Parser Budget](PARSER_BUDGET.md) documents.
 
 ## Check Order
 
@@ -82,7 +83,7 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 | 3 | Response status | Is the upstream response status `200 OK`? A `206 Partial Content` status is classified as a range request (same reason code as check 4). Other non-200 responses (redirects, errors, etc.) are not eligible. | `not_eligible` |
 | 4 | Range request | Is this a range request (`Range` header present)? Range requests are not eligible because partial content cannot be converted. | `not_eligible` |
 | 5 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `not_eligible` |
-| 6 | Response size | Is the response body size within the configured `markdown_limits conversion_memory=` budget? This is a hard cumulative input-size cap applied to both buffered and streaming paths. The cap gates eligibility and blocks conversion before the FFI attempt. Oversized input is never truncated. | `memory_budget_exceeded` |
+| 6 | Response size | Is the response body size within the configured `markdown_limits conversion_memory=` budget? This is a hard cumulative input-size cap applied to both buffered and streaming paths. The cap gates eligibility and blocks conversion before the FFI attempt. Oversized input is never truncated. | `not_eligible` |
 | 7 | Auth policy | Is the request authenticated and `markdown_auth_policy` set to `deny`? Authenticated requests are detected through the existing `Authorization` header and auth-cookie checks. | `not_eligible` |
 | 8 | Accept negotiation | Does the `Accept` header indicate the client wants Markdown? Evaluated per `markdown_accept` (`strict` | `wildcard` | `force`). | `skipped_accept_reject` / `skipped_no_accept` / `skipped_accept` (see below) |
 | 9 | Conversion attempt | All checks passed. The module attempts HTML-to-Markdown conversion. | _(see outcome determination below)_ |
@@ -90,7 +91,8 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 ### Accept negotiation outcomes
 
 Checks 2–5 and 7 collapse to the canonical `not_eligible` reason when they
-reject a request, and the size check (6) reports `memory_budget_exceeded`.
+reject a request, and the size check (6) reports `not_eligible` as well
+(the size gate is an eligibility decision, not a conversion failure).
 Accept negotiation is the other exception: when the request is otherwise
 eligible but the `Accept` header does not resolve in favor of Markdown, the module emits one of three distinct skip
 reason codes (this is the one eligibility branch that preserves sub-case
@@ -155,7 +157,7 @@ When conversion fails (either `failed_open` or `failed_closed`), the module reco
 |---------------------|---------|
 | `conversion_error` | HTML parse or conversion error — the input HTML could not be processed |
 | `timeout` | The request exceeded the authoritative overall conversion deadline `markdown_limits conversion_timeout=`. A nonzero `parser_timeout=` arms the parser checkpoint: it fires earlier than `conversion_timeout` when smaller, and it still fires when `conversion_timeout=0`. `conversion_timeout=` remains the overall upper bound and is never extended by `parser_timeout=` |
-| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from `memory_budget_exceeded` and takes precedence for parser allocations |
+| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from the `not_eligible` size gate and takes precedence for parser allocations |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
 | `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Decompression](../features/DECOMPRESSION.md)) |
 | `replay_error` | Fail-open replay buffer init/append failure |
@@ -190,9 +192,9 @@ into `reason_code.rs`, C metadata, diagnostics lookup, and release artifacts.
 The projections mirror [Observability Schema v2](../architecture/observability-schema-v2.md).
 All `as_str()` values are lowercase snake_case. The table below maps the
 high-level decision outcomes described in this document to their reason codes.
-`memory_budget_exceeded` is not in this table because it is an eligibility
-outcome, not a conversion failure: the size-gate row below is its only
-producer. The full registry (including decompression, dynconf, and canonical
+The size gate is an eligibility decision: it emits `not_eligible` (request
+state SKIPPED) and never produces a conversion-failure reason. The full
+registry (including decompression, dynconf, and canonical
 streaming outcome codes) lives in the schema document. Streaming
 implementation events are not registry entries.
 
@@ -200,7 +202,7 @@ implementation events are not registry entries.
 |---|---|---|---|
 | Module disabled | `disabled` | NOT_ENABLED | Module disabled by configuration for this scope |
 | Not eligible (method/status/range/content-type/auth) | `not_eligible` | SKIPPED | Response not eligible for conversion |
-| Size gate blocked (`markdown_limits conversion_memory=` exceeded) | `memory_budget_exceeded` | SKIPPED (not eligible) | Hard cumulative input-size cap makes the request ineligible before the FFI attempt. The input is never truncated, and the outcome stays `memory_budget_exceeded` with request state `SKIPPED`; `markdown_error_policy` does not govern this decision |
+| Size gate blocked (`markdown_limits conversion_memory=` exceeded) | `not_eligible` | SKIPPED (not eligible) | Hard cumulative input-size cap makes the request ineligible before the FFI attempt. The input is never truncated, and the outcome stays `not_eligible` with request state `SKIPPED`; `markdown_error_policy` does not govern this decision |
 | Accept negotiation — no match | `skipped_accept` | SKIPPED | Accept header present but does not request Markdown |
 | Accept negotiation — no header (strict) | `skipped_no_accept` | SKIPPED | No Accept header present and `markdown_accept` is `strict` |
 | Accept negotiation — explicit reject | `skipped_accept_reject` | SKIPPED | `Accept` explicitly rejects Markdown (`q=0`) |
@@ -214,7 +216,7 @@ implementation events are not registry entries.
 > such as `SKIP_METHOD`, `SKIP_STATUS`, `SKIP_CONFIG`, and `ELIGIBLE_CONVERTED`.
 > The 0.9.0 observability schema consolidated these: eligibility checks
 > 2–5 and 7 emit `not_eligible`, the size gate (6) emits
-> `memory_budget_exceeded`, scope-off emits `disabled`, and the conversion
+> `not_eligible` as well, scope-off emits `disabled`, and the conversion
 > outcomes are `converted` / `failed_open` / `failed_closed`. If you are
 > correlating old dashboards or alerts, update them to the lowercase codes above.
 
