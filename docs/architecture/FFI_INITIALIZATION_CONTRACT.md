@@ -53,6 +53,7 @@ defaults. Stack-allocated FFI structs must call the matching initializer.
 | `FFIAcceptResult` | `should_convert=0, reason=0` | Zero-default; no dedicated initializer — the owning decision FFI call populates it directly |
 | `FFIHeaderPlan` | `markdown_header_plan_init` sets `handle=NULL`, `entries=NULL`, `count=0` | Must be released with `markdown_header_plan_free` after successful build |
 | `MarkdownOptions` | `markdown_options_init` applies semantic defaults as well as NULL/0 fields | Do not replace it with a blind memset |
+| `MarkdownDecompResult` | `markdown_decomp_result_init` sets pointer/length fields NULL/0 | Successfully filled results must be released with `markdown_decompress_free` after use |
 
 ## Safety Invariant
 
