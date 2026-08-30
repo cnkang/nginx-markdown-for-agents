@@ -224,14 +224,17 @@ def _scan_c_call_file(
 def _mask_inline_comments(line: str, in_block: bool) -> tuple[str, bool]:
     """Return (code, new_block_state) for one source line.
 
-    Comment segments — ``/* ... */`` spans (including spans that open or
-    close on this line) and trailing ``//`` line comments — are replaced
-    with spaces so callsite matching only sees non-comment code, while the
-    block-comment state is carried across lines.
+    A character-level scan that tracks double- and single-quoted string
+    literals (including escape sequences) and block-comment state.  Only
+    comment delimiters outside string literals are masked, so a URL or
+    string containing ``//`` or ``/*`` cannot hide a real callsite or
+    enter block-comment state.
     """
     chars = list(line)
     length = len(chars)
     i = 0
+    in_dq = False
+    in_sq = False
     while i < length:
         if in_block:
             end = line.find("*/", i)
@@ -244,23 +247,48 @@ def _mask_inline_comments(line: str, in_block: bool) -> tuple[str, bool]:
             in_block = False
             i = end + 2
             continue
-        start = line.find("/*", i)
-        if start == -1:
-            # Mask any trailing // line comment after the last code span.
-            slash = line.find("//", i)
-            if slash != -1:
-                for j in range(slash, length):
+        c = chars[i]
+        if in_dq:
+            if c == "\\" and i + 1 < length:
+                i += 2
+                continue
+            if c == '"':
+                in_dq = False
+            i += 1
+            continue
+        if in_sq:
+            if c == "\\" and i + 1 < length:
+                i += 2
+                continue
+            if c == "'":
+                in_sq = False
+            i += 1
+            continue
+        if c == '"':
+            in_dq = True
+            i += 1
+            continue
+        if c == "'":
+            in_sq = True
+            i += 1
+            continue
+        if c == "/" and i + 1 < length:
+            nxt = chars[i + 1]
+            if nxt == "*":
+                end = line.find("*/", i + 2)
+                if end == -1:
+                    for j in range(i, length):
+                        chars[j] = " "
+                    return "".join(chars), True
+                for j in range(i, end + 2):
                     chars[j] = " "
-            return "".join(chars), in_block
-        end = line.find("*/", start + 2)
-        if end == -1:
-            for j in range(start, length):
-                chars[j] = " "
-            return "".join(chars), True
-        for j in range(start, end + 2):
-            chars[j] = " "
-        in_block = False
-        i = end + 2
+                i = end + 2
+                continue
+            if nxt == "/":
+                for j in range(i, length):
+                    chars[j] = " "
+                return "".join(chars), in_block
+        i += 1
     return "".join(chars), in_block
 
 

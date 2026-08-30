@@ -249,7 +249,7 @@ test_markdown_conversion() {
             # such as "2 < 3 > 1" and Markdown autolinks such as
             # "<https://example.com>" are valid Markdown and must pass.
             # Doctype matches are case-insensitive (!DOCTYPE / !doctype).
-            if printf '%s' "$body" | grep -qiE '<[a-zA-Z][a-zA-Z0-9]*([[:space:]]|/?>)|</[a-zA-Z][a-zA-Z0-9]*[[:space:]]*>|<!--|<!doctype'; then
+            if printf '%s' "$body" | grep -qiE '<[a-zA-Z][a-zA-Z0-9-]*([[:space:]]|/?>)|</[a-zA-Z][a-zA-Z0-9-]*[[:space:]]*>|<!--|<!doctype'; then
                 # The Content-Type already failed the markdown check;
                 # if the body carries HTML document/element markup
                 # (including an HTML-wrapped heading such as
