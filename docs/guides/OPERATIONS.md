@@ -1095,8 +1095,8 @@ When you see a spike in a metric, use the same reason code string to find the co
 grep "markdown:" /var/log/nginx/error.log | grep -E "category=(conversion|resource_limit|system)"
 
 # Example: you see failed_open or failed_closed samples increasing
-# Find the matching log entries:
-grep "markdown:" /var/log/nginx/error.log | grep -E 'reason=(failed_open|failed_closed)'
+# Find the matching log entries (outcome is the terminal classification):
+grep "markdown:" /var/log/nginx/error.log | grep -E 'outcome=(failed_open|failed_closed)'
 
 # See the full reason code distribution:
 grep "markdown:" /var/log/nginx/error.log | \

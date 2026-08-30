@@ -178,11 +178,14 @@ Instead:
    includes the parser working-set estimate and any other pre-parse delay. It
    then checks the nonzero `conversion_timeout`, also from `conversion_start`.
 2. **Post-parse checkpoint**: Immediately after parsing completes, the
-   converter checks the nonzero `parser_timeout` from `parse_start` first. The
-   converter captures `parse_start` immediately before the pre-parse checks.
-   It then checks `conversion_timeout` from `conversion_start`. These two
-   parser anchors are intentional: the pre-parse check covers work before
-   parsing, while the post-parse check measures the parse call itself.
+   converter checks the nonzero `parser_timeout` from `parse_start` first.
+   The converter captures `parse_start` immediately before the pre-parse
+   checks, so the post-parse measurement includes the pre-parse checks
+   themselves plus the parse call. It then checks `conversion_timeout`
+   from `conversion_start`. These two parser anchors are intentional: the
+   pre-parse check covers work before parsing, while the post-parse check
+   measures the parse call plus the pre-parse checks that ran after
+   `parse_start` was captured.
 3. **During DOM traversal**: The converter gives `ConversionContext` the
    remaining overall time as `traversal_budget`. Every 100 DOM nodes,
    `increment_and_check()` checks that overall deadline; `parser_timeout` is

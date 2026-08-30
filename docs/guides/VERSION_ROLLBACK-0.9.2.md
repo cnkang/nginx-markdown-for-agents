@@ -108,10 +108,17 @@ Publication and artifact availability are separate release gates.
    cd nginx-markdown-for-agents
    # Fetch the tag, verify its cryptographic signature, and compare its
    # resolved commit against independently authenticated release evidence
-   # before checking out:
+   # before checking out.  Each step fails the script on error, so a
+   # failed signature or a commit mismatch stops before checkout:
+   set -euo pipefail
    git fetch origin tag v0.9.1
    git tag -v v0.9.1
-   git rev-parse v0.9.1^{commit}
+   expected_sha="<SHA from independently authenticated release evidence>"
+   resolved_sha="$(git rev-parse v0.9.1^{commit})"
+   if [ "$resolved_sha" != "$expected_sha" ]; then
+     echo "FAIL: tag v0.9.1 resolves to $resolved_sha, expected $expected_sha" >&2
+     exit 1
+   fi
    git checkout v0.9.1
    cd components/rust-converter && cargo build --release && cd ../..
    # Rebuild NGINX module per your build procedure

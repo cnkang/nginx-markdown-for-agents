@@ -158,10 +158,13 @@ the restart in the next step.
 
 ```bash
 sudo nginx -t
-# systemd-managed host: check the unit EXISTS, not just whether it is
-# currently active — a stopped unit is still owned by systemd and must
-# be restarted through it.
-if systemctl list-unit-files nginx.service >/dev/null 2>&1; then
+# systemd-managed host: verify the RUNNING nginx process is actually
+# owned by nginx.service before restarting through systemd.  A unit
+# file existing on disk is not proof of ownership — the process may be
+# started by another supervisor or directly.
+if systemctl is-active --quiet nginx.service \
+    && systemctl show -p MainPID --value nginx.service | grep -q '[0-9]' \
+    && [ "$(systemctl show -p MainPID --value nginx.service)" = "$(pgrep -x nginx | head -1)" ]; then
   sudo systemctl restart nginx
 else
   # If another supervisor owns NGINX, use its restart/reload operation instead.
@@ -229,12 +232,14 @@ if [[ -z "${MODULES_DIR}" || ! -d "${MODULES_DIR}" ]]; then
 fi
 sudo cp objs/ngx_http_markdown_filter_module.so "${MODULES_DIR}/"
 sudo nginx -t
-# Restart through the host's service manager when systemd owns NGINX. For a
-# systemd-managed host: check the unit EXISTS, not just whether it is
-# currently active — a stopped unit is still owned by systemd and must
-# be restarted through it.
+# Restart through the host's service manager only when systemd actually
+# owns the running NGINX process.  A unit file existing on disk is not
+# proof of ownership — the process may be started by another supervisor
+# or directly.
 if command -v systemctl >/dev/null 2>&1 \
-    && sudo systemctl list-unit-files nginx.service >/dev/null 2>&1; then
+    && systemctl is-active --quiet nginx.service \
+    && systemctl show -p MainPID --value nginx.service | grep -q '[0-9]' \
+    && [ "$(systemctl show -p MainPID --value nginx.service)" = "$(pgrep -x nginx | head -1)" ]; then
     sudo systemctl restart nginx
 else
     sudo nginx -s reload

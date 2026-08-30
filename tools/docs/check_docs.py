@@ -254,7 +254,7 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
             if version is None:
                 version = valid.group("version")
             continue
-        if "Unreleased" in line:
+        if "unreleased" in line.lower():
             errors.append(
                 "CHANGELOG.md: malformed unreleased heading "
                 f"{line.strip()!r}; expected "
