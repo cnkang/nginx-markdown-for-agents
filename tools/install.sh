@@ -133,6 +133,7 @@ _json_escape_string() {
   for ((__i = 0; __i < 32; __i++)); do
     case "$__i" in
       9|10|13) continue ;;  # already handled above
+      *) ;;                 # all other control characters are escaped below
     esac
     __ch=$(printf "\\$(printf '%03o' "$__i")")
     __hex=$(printf '%02x' "$__i")

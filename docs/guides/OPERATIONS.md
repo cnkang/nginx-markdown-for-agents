@@ -1063,7 +1063,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 grep "markdown:" /var/log/nginx/error.log | grep -c "reason=converted"
 
 # Count FAILED from logs
-grep "markdown:" /var/log/nginx/error.log | grep -cE 'reason=(failed_open|failed_closed)'
+grep "markdown:" /var/log/nginx/error.log | grep -cE 'outcome=(failed_open|failed_closed)'
 ```
 
 ### Reason Code and Metrics Label Alignment
@@ -1260,7 +1260,7 @@ Example output:
 ```bash
 # Find all failures
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E 'reason=(failed_open|failed_closed)'
+  grep -E 'outcome=(failed_open|failed_closed)'
 ```
 
 #### Extract URIs that failed conversion
