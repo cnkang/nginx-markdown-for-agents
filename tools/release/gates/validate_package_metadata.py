@@ -1195,14 +1195,15 @@ def _validate_release_binary_signing_security(result: ValidationResult) -> None:
     # Locate the next top-level job key after start (two-space indentation
     # followed by a name and colon) rather than searching specifically for
     # package-artifacts, so the boundary stays correct when the job list
-    # changes.
-    end = -1
+    # changes.  When integrity-signing is the final job, the boundary is
+    # the end of the file.
+    end = len(workflow)
     for job_match in re.finditer(r"\n  [a-zA-Z0-9_-]+:", workflow[start + 1:]):
         candidate = start + 1 + job_match.start()
         if candidate > start:
             end = candidate
             break
-    if start == -1 or end == -1:
+    if start == -1:
         result.fail(
             "release-signing-security:job",
             "release-binaries.yml must define a bounded integrity-signing job",

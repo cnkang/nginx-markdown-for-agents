@@ -292,7 +292,7 @@ The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs th
 - No elevated permissions required
 - No file system access beyond NGINX configuration
 
-### 2. Fail Secure
+### 2. Fail-Open Availability Trade-off
 - Default to fail-open (return the original eligible HTML response) to maintain availability — conversion failures do not expose internal details, but the trade-off is that an unavailability of the conversion engine yields unconverted HTML rather than an error
 - Error messages are generic to clients, detailed in logs
 
@@ -302,11 +302,12 @@ The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs th
 - Bypass of one layer does not compromise security
 
 ### 4. Secure Defaults
-- Conservative resource limits: `decompressed_size` 10MB (input cap),
-  `conversion_memory` 64MB (input admission + generated-output budget),
-  `conversion_timeout` 30s, `parser_timeout` 10s, `parser_memory` 32MB,
-  `streaming_buffer` 2MB — with cooperative parser checkpoints. An
-  in-progress parse may overshoot its configured `parser_timeout`
+- Conservative resource limits: `decompressed_size` 10MB (cumulative
+  decompressed-output cap), `conversion_memory` 64MB (input admission +
+  generated-output budget), `conversion_timeout` 30s, `parser_timeout`
+  10s, `parser_memory` 32MB, `streaming_buffer` 2MB — with cooperative
+  parser checkpoints. An in-progress parse may overshoot its configured
+  `parser_timeout`
 - Fail-open strategy prevents DoS
 - All dangerous elements/attributes blocked by default
 

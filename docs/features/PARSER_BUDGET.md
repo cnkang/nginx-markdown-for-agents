@@ -261,8 +261,14 @@ input size or elapsed time.
 Request arrives
     │
     ├─ markdown_limits conversion_memory= check (C layer)
-    │   └─ FAIL → not_eligible (internal state SKIPPED), reason: not_eligible;
-    │      the module then applies markdown_error_policy (pass-through or reject)
+    │   ├─ FAIL with known size (Content-Length present) → not_eligible
+    │   │  (internal state SKIPPED), reason: not_eligible; the module then
+    │   │  applies markdown_error_policy (pass-through or reject)
+    │   └─ FAIL with unknown size (body filter detects over-limit while
+    │      buffering) → failed conversion attempt: conversions_attempted/
+    │      failed + failures_resource_limit recorded, outcome
+    │      failed_open|failed_closed per error policy, category:
+    │      resource_limit
     │
     ├─ markdown_limits conversion_timeout= pre-check (overall FFI deadline)
     │   └─ FAIL → pass-through, reason: timeout
@@ -272,9 +278,9 @@ Request arrives
     │
     ├─ html5ever parse_document (uninterruptible)
     │   └─ Input capped by markdown_limits conversion_memory= before parsing
-    │      (default 64 MiB, configurable). An oversized input is classified as
-    │      not_eligible. Parser working-set estimates are bounded separately
-    │      by parser_memory=
+    │      (default 64 MiB, configurable). An oversized input with a known
+    │      size is classified as not_eligible. Parser working-set estimates
+    │      are bounded separately by parser_memory=
     │
     ├─ markdown_limits conversion_timeout= / parser_timeout= post-parse check
     │   └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
