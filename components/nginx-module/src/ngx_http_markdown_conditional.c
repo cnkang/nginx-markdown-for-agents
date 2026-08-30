@@ -12,6 +12,8 @@
 #include "ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
 
+#include <string.h>
+
 
 #define NGX_HTTP_MARKDOWN_HTTP_DATE_LEN \
     (sizeof("Mon, 28 Sep 1970 06:00:00 GMT") - 1)
@@ -68,18 +70,27 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
  * first PREACCESS pass is lost, but the suppressed request-header entries
  * (hash == 0) survive on the request.  Restore their visibility so the
  * next capture can re-own them and the converted representation can still
- * produce 304 for a matching validator.  The value bytes and length remain
- * intact because suppression only clears the hash.
+ * produce 304 for a matching validator.  The value bytes remain intact
+ * because suppression only clears the hash and zeroes the length.
+ *
+ * Every suppressed entry is restored — a request may legitimately carry
+ * repeated validator fields, and capture records state for each one.
+ * Typed convenience pointers (r->headers_in.if_none_match /
+ * if_modified_since) are rebuilt from the first restored entry of each
+ * name, matching the NGINX core convention that the typed pointer names
+ * the first occurrence.
  */
-static ngx_table_elt_t *
-ngx_http_markdown_find_suppressed_request_header(ngx_http_request_t *r,
-    u_char *name, size_t name_len)
+static void
+ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
+    u_char *name, size_t name_len, ngx_table_elt_t **first_restored)
 {
     if (r == NULL || name == NULL || name_len == 0
-        || r->headers_in.headers.part.nelts == 0) {
-        return NULL;
+        || r->headers_in.headers.part.nelts == 0)
+    {
+        return;
     }
 
+    *first_restored = NULL;
     for (ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
@@ -88,40 +99,49 @@ ngx_http_markdown_find_suppressed_request_header(ngx_http_request_t *r,
 
         headers = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            /* Match regardless of hash: the orphan entry has hash == 0. */
-            if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+            if (headers[i].key.len != name_len
+                || ngx_strncasecmp(headers[i].key.data, name, name_len) != 0)
             {
-                return &headers[i];
+                continue;
+            }
+
+            /* A hash that survived was never suppressed by this module
+             * (suppression clears hash and length together); leave it. */
+            if (headers[i].hash != 0) {
+                if (*first_restored == NULL) {
+                    *first_restored = &headers[i];
+                }
+                continue;
+            }
+
+            if (headers[i].value.data != NULL) {
+                /* NGINX NUL-terminates parsed header values, so the byte
+                 * length can be rebuilt after suppression zeroed it. */
+                headers[i].value.len =
+                    (size_t) strlen((const char *) headers[i].value.data);
+            }
+            headers[i].hash = 1;
+            if (*first_restored == NULL) {
+                *first_restored = &headers[i];
             }
         }
     }
-
-    return NULL;
 }
 
 void
 ngx_http_markdown_adopt_orphan_conditional_headers(ngx_http_request_t *r)
 {
-    ngx_table_elt_t  *header;
+    ngx_table_elt_t  *inm;
+    ngx_table_elt_t  *ims;
 
-    header = ngx_http_markdown_find_suppressed_request_header(
-        r, (u_char *) "If-None-Match", sizeof("If-None-Match") - 1);
-    if (header != NULL && header->hash == 0) {
-        header->hash = 1;
-        /* NGINX NUL-terminates parsed header values, so the byte length
-         * can be rebuilt after suppression zeroed it.  ngx_strlen is the
-         * NGINX equivalent of strlen; the stub test environment provides
-         * the standard C library function. */
-        header->value.len = strlen((char *) header->value.data);
-    }
+    ngx_http_markdown_adopt_one_conditional_headers(
+        r, (u_char *) "If-None-Match", sizeof("If-None-Match") - 1, &inm);
+    ngx_http_markdown_adopt_one_conditional_headers(
+        r, (u_char *) "If-Modified-Since",
+        sizeof("If-Modified-Since") - 1, &ims);
 
-    header = ngx_http_markdown_find_suppressed_request_header(
-        r, (u_char *) "If-Modified-Since", sizeof("If-Modified-Since") - 1);
-    if (header != NULL && header->hash == 0) {
-        header->hash = 1;
-        header->value.len = strlen((char *) header->value.data);
-    }
+    r->headers_in.if_none_match = inm;
+    r->headers_in.if_modified_since = ims;
 }
 
 static uint8_t

@@ -726,8 +726,21 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
             ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                           "markdown: conditional validator context "
                           "allocation failed");
-            return (ngx_int_t) ngx_http_markdown_effective_error_status(
-                &eff, conf);
+            if (ngx_http_markdown_effective_error_policy(&eff, conf)
+                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+            {
+                return (ngx_int_t) ngx_http_markdown_effective_error_status(
+                    &eff, conf);
+            }
+            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+            ngx_http_markdown_log_decision_with_category(
+                r, conf, &eff,
+                ngx_http_markdown_reason_failed_open(),
+                ngx_http_markdown_reason_from_error_category(
+                    NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+            return NGX_DECLINED;
         }
     }
 
@@ -735,8 +748,21 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
     if (capture_rc == NGX_ERROR) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                       "markdown: conditional validator capture failed");
-        return (ngx_int_t) ngx_http_markdown_effective_error_status(
-            &eff, conf);
+        if (ngx_http_markdown_effective_error_policy(&eff, conf)
+            == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+        {
+            return (ngx_int_t) ngx_http_markdown_effective_error_status(
+                &eff, conf);
+        }
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+        ngx_http_markdown_log_decision_with_category(
+            r, conf, &eff,
+            ngx_http_markdown_reason_failed_open(),
+            ngx_http_markdown_reason_from_error_category(
+                NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+        return NGX_DECLINED;
     }
     if (capture_rc != NGX_OK) {
         return NGX_DECLINED;
