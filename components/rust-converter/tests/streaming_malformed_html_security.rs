@@ -618,6 +618,20 @@ fn full_buffer_and_streaming_url_canonicalization_match() {
         )
         .expect("streaming conversion should succeed");
 
+        if url.chars().any(|ch| ch.is_control()) {
+            // Control characters are rejected outright: neither path may
+            // emit a link destination for them.
+            assert!(
+                !full.contains("http://") && !full.contains("https://"),
+                "full-buffer path must reject control URL {url:?}, got {full:?}"
+            );
+            assert!(
+                !streamed.markdown.contains("http://")
+                    && !streamed.markdown.contains("https://"),
+                "streaming path must reject control URL {url:?}, got {:?}",
+                streamed.markdown
+            );
+        }
         assert_eq!(full, streamed.markdown, "URL parity failed for {url:?}");
     }
 }

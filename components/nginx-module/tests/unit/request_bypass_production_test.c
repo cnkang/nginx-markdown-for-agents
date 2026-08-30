@@ -115,6 +115,7 @@ struct ngx_http_request_s {
     ngx_uint_t method;
     ngx_flag_t buffered;
     ngx_flag_t filter_need_in_memory;
+    ngx_flag_t header_sent;
     ngx_int_t sa_family;
     ngx_str_t key;
     ngx_str_t uri;
@@ -866,9 +867,17 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
 ngx_int_t
 ngx_http_send_header(ngx_http_request_t *r)
 {
-    UNUSED(r);
+    ngx_int_t  rc;
+
+    if (r != NULL && r->header_sent) {
+        return NGX_ERROR;
+    }
     g_resume_send_header_calls++;
-    return g_resume_send_header_rc;
+    rc = g_resume_send_header_rc;
+    if (rc == NGX_OK && r != NULL) {
+        r->header_sent = 1;
+    }
+    return rc;
 }
 
 void
