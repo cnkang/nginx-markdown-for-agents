@@ -1631,36 +1631,28 @@ test_subrequest_without_visible_validator_uses_durable_bypass(void)
     TEST_ASSERT(rc == NGX_DECLINED,
                 "subrequest without visible validator must continue");
     TEST_ASSERT(request.ctx[ngx_http_markdown_filter_module.ctx_index]
-                != NULL,
-                "subrequest must publish durable bypass without ctx alloc");
-    TEST_ASSERT(g_metrics.conversions_bypassed == 1
+                == NULL,
+                "subrequest without visible validator must not publish "
+                "a bypass marker");
+    TEST_ASSERT(g_metrics.conversions_bypassed == 0
                 && g_metrics.results.failopen_count == 0,
-                "intentional subrequest bypass must be counted once");
+                "subrequest without visible validator must not bypass "
+                "or fail open");
 
-    g_next_header_rc = NGX_AGAIN;
+    /* The header filter then initializes the normal conversion context:
+     * a plain subrequest (for example an SSI fragment include) is a
+     * regular representation fetch and must be converted.  Header
+     * emission is deferred to the body filter on the normal path, so
+     * the next header filter is not invoked here. */
+    g_next_header_rc = NGX_OK;
     ngx_http_next_header_filter = test_next_header_filter;
     rc = ngx_http_markdown_header_filter(&request);
-    TEST_ASSERT(rc == NGX_AGAIN && g_next_header_calls == 1,
-                "subrequest marker must forward headers once");
-
-    g_next_header_rc = NGX_ERROR;
-    rc = ngx_http_markdown_header_filter(&request);
-    TEST_ASSERT(rc == NGX_OK && g_next_header_calls == 1,
-                "subrequest marker header resume must be idempotent");
-
-    g_next_body_rc = NGX_AGAIN;
-    ngx_http_next_body_filter = test_next_body_filter;
-    rc = ngx_http_markdown_body_filter(&request, NULL);
-    TEST_ASSERT(rc == NGX_AGAIN && g_next_body_calls == 1,
-                "subrequest marker must preserve body backpressure");
-    g_next_body_rc = NGX_OK;
-    rc = ngx_http_markdown_body_filter(&request, NULL);
-    TEST_ASSERT(rc == NGX_OK && g_next_body_calls == 2,
-                "subrequest marker must resume body delivery");
-    TEST_ASSERT(g_metrics.conversions_bypassed == 1
-                && g_metrics.results.failopen_count == 0,
-                "subrequest marker must not double count or fail open");
-    TEST_PASS("subrequest without visible validator uses durable bypass");
+    TEST_ASSERT(rc == NGX_OK && g_next_header_calls == 0,
+                "subrequest normal path must defer header emission");
+    TEST_ASSERT(request.ctx[ngx_http_markdown_filter_module.ctx_index]
+                != NULL,
+                "subrequest header filter must allocate a normal context");
+    TEST_PASS("subrequest without visible validator uses normal conversion");
 }
 
 static void

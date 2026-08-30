@@ -948,11 +948,13 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
     }
 
     if (ctx == NULL && !ngx_http_markdown_has_conditional_request(r)) {
-        if (r->parent != NULL) {
-            ngx_http_markdown_publish_durable_bypass(
-                r, NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER);
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        }
+        /* A subrequest with no visible conditional validator is a plain
+         * representation fetch (for example an SSI fragment include).  It
+         * must be allowed through the normal conversion path: bypassing it
+         * here would silently return the unconverted source fragment.
+         * Only subrequests that carry a conditional validator need the
+         * durable bypass, and they are handled after the capture attempt
+         * below. */
         return NGX_DECLINED;
     }
 
@@ -996,12 +998,17 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
     }
     if (capture_rc != NGX_OK) {
         /*
-         * A subrequest shares headers_in with its parent.  It must not use
-         * the parent's validators to select a converted representation.
-         * Keep the context and make that bypass decision durable through the
-         * header and body filters.
+         * A subrequest shares headers_in with its parent.  When it carries
+         * a conditional validator it must not use the parent's validators
+         * to select a converted representation, so make that bypass
+         * decision durable through the header and body filters.  A
+         * subrequest without a conditional validator (for example an SSI
+         * fragment include) keeps the context and continues into the
+         * normal conversion path.
          */
-        if (r->parent != NULL) {
+        if (r->parent != NULL
+            && ngx_http_markdown_has_conditional_request(r))
+        {
             ngx_http_markdown_establish_preaccess_bypass(
                 ctx, filter_enabled, &eff, 0);
         }
