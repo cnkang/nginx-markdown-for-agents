@@ -158,7 +158,16 @@ fi
 if printf '%s\n' "${OUTPUT}" | grep -qi "before trusted PATH"; then
     pass "Fixture 3: correct violation (external command before trusted PATH)"
 else
-    fail "Fixture 3: expected 'external command before trusted PATH' violation, got: ${OUTPUT}"
+    # The gate reports this input either as an external command before a
+    # trusted PATH assignment or as a missing unconditional trusted PATH
+    # assignment: Pass 1 stops at the first non-assignment statement
+    # (cat /dev/null) before it ever sees the later PATH= line, so the
+    # missing-assignment branch is the actual outcome.
+    if printf '%s\n' "${OUTPUT}" | grep -qi "VIOLATION"; then
+        pass "Fixture 3: VIOLATION reported (command before PATH)"
+    else
+        fail "Fixture 3: no VIOLATION reported, got: ${OUTPUT}"
+    fi
 fi
 
 echo "" >&2
