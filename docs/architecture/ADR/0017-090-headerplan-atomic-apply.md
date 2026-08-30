@@ -113,7 +113,7 @@ the core plan commits and fall within the atomic scope boundary below
 - `Vary: Accept` add
 - `X-Markdown-Tokens` header
 - Auth `Cache-Control` modify
-- `Accept-Ranges` (post-plan classification; see the operation table)
+- `Accept-Ranges` (post-plan classification, see the operation table)
 
 Any **new** exception requires ADR justification and an entry here. No other code may mutate `headers_out` in place outside HeaderPlan **for core fields** (Content-Type, Content-Encoding, Content-Length). The post-plan operations listed above (status, `last_modified_time`, ETag, Vary, X-Markdown-Tokens, Auth `Cache-Control`, and `Accept-Ranges`) are explicitly exempt from the HeaderPlan atomicity invariant. They execute after the plan commits under the pre-send best-effort boundary.
 

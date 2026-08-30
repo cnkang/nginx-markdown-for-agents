@@ -68,7 +68,7 @@ Stub set: `markdown_on_wildcard`, `markdown_etag`,
 `markdown_memory_budget`, `markdown_timeout`, `markdown_streaming_budget`,
 `markdown_stream_threshold`, `markdown_large_body_threshold`,
 `markdown_decompress_max_size` (maps to the `decompressed_size` key of
-`markdown_limits`; reject-only with a migration hint, exactly like the
+`markdown_limits`. It is reject-only with a migration hint, exactly like the
 other removed directives).
 
 ### Cross-directive conflict rules (configuration-time errors and request-time warnings)
