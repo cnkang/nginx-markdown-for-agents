@@ -161,10 +161,13 @@ def test_mask_keeps_string_state_across_continuation_lines() -> None:
     )
     assert in_dq is True
     assert "markdown_convert" not in code
-    # Line 2: still inside the string; a // here is literal, not a comment.
+    # Line 2: still inside the string; a // here is literal, not a comment,
+    # and the string content is masked so it cannot be scanned as code.
     code, block, in_dq, in_sq = detector._mask_inline_comments(
         "part2 // still literal\"; markdown_convert(NULL);", block, in_dq, in_sq
     )
     assert in_dq is False
     assert "markdown_convert" in code
-    assert "part2" in code
+    # The string content (including the literal //) is masked, not treated
+    # as a comment delimiter that would hide the real callsite.
+    assert "part2" not in code
