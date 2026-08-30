@@ -132,8 +132,12 @@ _json_escape_string() {
   # hardened PATH used after cache_trusted_executables.
   for ((__i = 0; __i < 32; __i++)); do
     case "$__i" in
-      9|10|13) continue ;;  # already handled above
-      *) ;;                 # all other control characters are escaped below
+      # 0 is skipped: a NUL byte cannot be stored in a bash variable (C
+      # string terminator), so the substitution pattern would be empty and
+      # the replacement behavior is version-dependent.  Input strings can
+      # never contain NUL, so no escape is needed for it.
+      0|9|10|13) continue ;;  # already handled above
+      *) ;;                   # all other control characters are escaped below
     esac
     __ch=$(printf "\\$(printf '%03o' "$__i")")
     __hex=$(printf '%02x' "$__i")
