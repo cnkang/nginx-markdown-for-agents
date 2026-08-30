@@ -38,10 +38,18 @@
 
 #define NGX_HTTP_MARKDOWN_PRERESERVE_LIMIT (16 * 1024 * 1024)
 
-#define NGX_HTTP_MARKDOWN_METRIC_INC(name)       do { } while (0)
-#define NGX_HTTP_MARKDOWN_METRIC_ADD(name, value) do { (void) (value); } while (0)
+static ngx_http_markdown_metrics_t g_metrics;
+
+#define NGX_HTTP_MARKDOWN_METRIC_INC(name) \
+    do { g_metrics.name++; } while (0)
+#define NGX_HTTP_MARKDOWN_METRIC_ADD(name, value) \
+    do { g_metrics.name += (value); } while (0)
 #define NGX_HTTP_MARKDOWN_METRIC_WATERMARK(name, value) \
-    do { (void) (value); } while (0)
+    do { \
+        if (g_metrics.name < (value)) { \
+            g_metrics.name = (value); \
+        } \
+    } while (0)
 
 #ifdef ngx_log_error
 #undef ngx_log_error
@@ -354,8 +362,15 @@ ngx_http_markdown_metric_inc_failopen(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf)
 {
-    UNUSED(eff);
-    UNUSED(conf);
+    if (eff == NULL && conf == NULL) {
+        return;
+    }
+
+    if (ngx_http_markdown_effective_error_policy(eff, conf)
+        == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
+    {
+        g_metrics.results.failopen_count++;
+    }
 }
 
 static const ngx_str_t *
@@ -370,6 +385,18 @@ static void
 ngx_http_markdown_metric_inc_skip(ngx_http_markdown_eligibility_t eligibility)
 {
     UNUSED(eligibility);
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_converted(void)
+{
+    return &g_test_reason;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_header_plan_apply_err(void)
+{
+    return &g_test_reason;
 }
 
 static void
@@ -446,8 +473,11 @@ ngx_http_markdown_record_decompression_failure_io(
 static u_char g_pool_storage[128 * 1024];
 static size_t g_pool_offset;
 static ngx_int_t g_next_header_rc;
+static ngx_int_t g_next_body_rc;
 static ngx_uint_t g_next_header_calls;
+static ngx_uint_t g_next_body_calls;
 static ngx_uint_t g_restore_calls;
+static ngx_pool_cleanup_t *g_last_cleanup;
 
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
@@ -508,6 +538,7 @@ ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
     UNUSED(size);
     static ngx_pool_cleanup_t cleanup;
     memset(&cleanup, 0, sizeof(cleanup));
+    g_last_cleanup = &cleanup;
     return &cleanup;
 }
 
@@ -711,12 +742,249 @@ ngx_http_markdown_buffer_release(ngx_http_markdown_buffer_t *buffer)
     }
 }
 
+ngx_int_t
+ngx_http_markdown_buffer_init(ngx_http_markdown_buffer_t *buffer,
+    size_t max_size, ngx_pool_t *pool)
+{
+    UNUSED(pool);
+    if (buffer == NULL) {
+        return NGX_ERROR;
+    }
+    memset(buffer, 0, sizeof(*buffer));
+    buffer->max_size = max_size;
+    return NGX_OK;
+}
+
+ngx_int_t
+ngx_http_markdown_buffer_reserve(ngx_http_markdown_buffer_t *buffer,
+    size_t capacity_hint)
+{
+    UNUSED(buffer);
+    UNUSED(capacity_hint);
+    return NGX_OK;
+}
+
+ngx_int_t
+ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buffer,
+    const u_char *data, size_t len)
+{
+    UNUSED(buffer);
+    UNUSED(data);
+    UNUSED(len);
+    return NGX_OK;
+}
+
+ngx_http_markdown_error_category_t
+ngx_http_markdown_classify_error(uint32_t error_code)
+{
+    UNUSED(error_code);
+    return NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+}
+
+const ngx_str_t *
+ngx_http_markdown_error_category_string(
+    ngx_http_markdown_error_category_t category)
+{
+    UNUSED(category);
+    return &g_test_reason;
+}
+
+ngx_int_t
+ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
+{
+    UNUSED(r);
+    return NGX_OK;
+}
+
+ngx_int_t
+ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
+{
+    UNUSED(r);
+    return NGX_OK;
+}
+
+ngx_int_t
+ngx_http_markdown_update_headers(ngx_http_request_t *r,
+    const struct MarkdownResult *result,
+    const ngx_http_markdown_conf_t *conf)
+{
+    UNUSED(r);
+    UNUSED(result);
+    UNUSED(conf);
+    return NGX_OK;
+}
+
+ngx_int_t
+ngx_http_markdown_handle_if_none_match(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_ctx_t *ctx,
+    struct MarkdownConverterHandle *converter,
+    struct MarkdownResult **result)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(ctx);
+    UNUSED(converter);
+    UNUSED(result);
+    return NGX_DECLINED;
+}
+
+ngx_int_t
+ngx_http_markdown_send_304(ngx_http_request_t *r,
+    const struct MarkdownResult *result)
+{
+    UNUSED(r);
+    UNUSED(result);
+    return NGX_OK;
+}
+
+void
+ngx_http_markdown_release_inflight_for_request(const ngx_http_request_t *r)
+{
+    UNUSED(r);
+}
+
+void
+markdown_options_init(struct MarkdownOptions *options)
+{
+    if (options != NULL) {
+        memset(options, 0, sizeof(*options));
+    }
+}
+
+void
+markdown_convert(struct MarkdownConverterHandle *handle,
+    const uint8_t *input, uintptr_t input_len,
+    const struct MarkdownOptions *options, struct MarkdownResult *result)
+{
+    UNUSED(handle);
+    UNUSED(input);
+    UNUSED(input_len);
+    UNUSED(options);
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+    }
+}
+
+void
+markdown_result_init(struct MarkdownResult *result)
+{
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+    }
+}
+
+void
+markdown_result_free(struct MarkdownResult *result)
+{
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+    }
+}
+
+void
+markdown_decomp_result_init(struct FFIDecompResult *result)
+{
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+    }
+}
+
+uint32_t
+markdown_decompress_bounded(const uint8_t *input, uintptr_t input_len,
+    uint8_t format, uintptr_t budget, uint64_t ratio,
+    struct FFIDecompResult *result)
+{
+    UNUSED(input);
+    UNUSED(input_len);
+    UNUSED(format);
+    UNUSED(budget);
+    UNUSED(ratio);
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+    }
+    return 0;
+}
+
+void
+markdown_decompress_free(struct FFIDecompResult *result)
+{
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+    }
+}
+
+void
+markdown_base_url_input_init(struct FFIBaseUrlInput *input)
+{
+    if (input != NULL) {
+        memset(input, 0, sizeof(*input));
+    }
+}
+
+uint8_t
+markdown_decide_base_url(const struct FFIBaseUrlInput *input,
+    uint8_t *out_buf, uintptr_t out_buf_cap,
+    struct FFIBaseUrlDecision *out)
+{
+    UNUSED(input);
+    UNUSED(out_buf);
+    UNUSED(out_buf_cap);
+    if (out != NULL) {
+        memset(out, 0, sizeof(*out));
+    }
+    return DECIDE_BASE_URL_INVALID;
+}
+
+void
+markdown_chain_decode_result_init(struct FFIChainDecodeResult *result)
+{
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+    }
+}
+
+uint32_t
+markdown_decode_encoding_chain(const uint8_t *input, uintptr_t input_len,
+    const uint8_t *layers, uint32_t layer_count, uintptr_t max_output,
+    uint64_t ratio, struct FFIChainDecodeResult *result)
+{
+    UNUSED(input);
+    UNUSED(input_len);
+    UNUSED(layers);
+    UNUSED(layer_count);
+    UNUSED(max_output);
+    UNUSED(ratio);
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+    }
+    return 0;
+}
+
+void
+markdown_chain_decode_free(struct FFIChainDecodeResult *result)
+{
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+    }
+}
+
 static ngx_int_t
 test_next_header_filter(ngx_http_request_t *r)
 {
     UNUSED(r);
     g_next_header_calls++;
     return g_next_header_rc;
+}
+
+static ngx_int_t
+test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    UNUSED(r);
+    UNUSED(in);
+    g_next_body_calls++;
+    return g_next_body_rc;
 }
 
 #include "../../src/ngx_http_markdown_request_impl.h"
@@ -738,13 +1006,28 @@ make_request(void)
 }
 
 static void
+reset_test_state(void)
+{
+    memset(&g_metrics, 0, sizeof(g_metrics));
+    g_pool_offset = 0;
+    g_next_header_rc = NGX_OK;
+    g_next_body_rc = NGX_OK;
+    g_next_header_calls = 0;
+    g_next_body_calls = 0;
+    g_restore_calls = 0;
+    g_last_cleanup = NULL;
+}
+
+static void
 test_preaccess_handler_installs_durable_bypass(void)
 {
     ngx_http_request_t request = make_request();
     ngx_http_markdown_conf_t conf;
     ngx_http_markdown_ctx_t *ctx;
+    ngx_chain_t pending_chain;
     ngx_int_t rc;
 
+    reset_test_state();
     memset(&conf, 0, sizeof(conf));
     conf.enabled = 1;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
@@ -764,6 +1047,10 @@ test_preaccess_handler_installs_durable_bypass(void)
                 "preaccess handler must install an ineligible durable bypass");
     TEST_ASSERT(ctx->filter_enabled == 1,
                 "body filter must retain the enabled decision");
+    TEST_ASSERT(ctx->effective_conf != NULL
+                && ctx->effective_conf->error_policy
+                    == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
+                "bypass must retain the request effective error policy");
     TEST_ASSERT(ctx->error.has_category
                 && ctx->error.last_category
                     == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
@@ -786,15 +1073,56 @@ test_preaccess_handler_installs_durable_bypass(void)
                 && ctx->buffer_initialized == 0
                 && ctx->conversion.attempted == 0
                 && ctx->decompression.needed == 0
-                && ctx->effective_conf == NULL,
+                && ctx->effective_conf != NULL,
                 "header bypass must skip conversion preparation");
     TEST_ASSERT(ctx->headers_forwarded == 1,
                 "header backpressure must latch forwarded headers");
+    TEST_ASSERT(g_metrics.results.failopen_count == 0
+                && ctx->fullbuffer.failopen_delivery_pending == 1,
+                "NGX_AGAIN must defer fail-open delivery accounting");
 
     g_next_header_rc = NGX_ERROR;
     rc = ngx_http_markdown_header_filter(&request);
     TEST_ASSERT(rc == NGX_OK && g_next_header_calls == 1,
                 "header re-entry must not forward headers twice");
+
+    g_next_body_rc = NGX_AGAIN;
+    g_next_body_calls = 0;
+    ngx_http_next_body_filter = test_next_body_filter;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_AGAIN && g_next_body_calls == 1,
+                "body pass-through must expose downstream backpressure");
+    TEST_ASSERT(g_metrics.results.failopen_count == 0
+                && ctx->fullbuffer.failopen_delivery_pending == 1,
+                "body NGX_AGAIN must keep fail-open delivery pending");
+
+    g_next_body_rc = NGX_OK;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_OK && g_next_body_calls == 2,
+                "body pass-through must settle after downstream NGX_OK");
+    TEST_ASSERT(g_metrics.results.failopen_count == 1
+                && ctx->failopen_completed == 1
+                && ctx->fullbuffer.failopen_delivery_pending == 0,
+                "successful body delivery must account fail-open exactly once");
+
+    g_next_body_rc = NGX_DONE;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_DONE && g_next_body_calls == 3,
+                "body pass-through must return downstream NGX_DONE");
+    TEST_ASSERT(g_metrics.results.failopen_count == 1,
+                "a second terminal body delivery must not double count");
+
+    memset(&pending_chain, 0, sizeof(pending_chain));
+    ctx->fullbuffer.pending_output = &pending_chain;
+    ctx->fullbuffer.pending_has_data = 1;
+    ctx->fullbuffer.failopen_delivery_pending = 1;
+    TEST_ASSERT(g_last_cleanup != NULL && g_last_cleanup->handler != NULL,
+                "bypass must register request cleanup");
+    g_last_cleanup->handler(g_last_cleanup->data);
+    TEST_ASSERT(ctx->fullbuffer.pending_output == NULL
+                && ctx->fullbuffer.pending_has_data == 0
+                && ctx->fullbuffer.failopen_delivery_pending == 0,
+                "request cleanup must release pending bypass state");
     TEST_PASS("preaccess handler installs durable bypass on capture failure");
 }
 
@@ -846,6 +1174,71 @@ test_header_filter_bypass_forwards_once(void)
     TEST_PASS("header filter durable bypass forwards once and survives re-entry");
 }
 
+static void
+test_preaccess_bypass_terminal_header_outcomes(void)
+{
+    ngx_http_request_t request;
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_ctx_t *ctx;
+    ngx_int_t rc;
+
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+
+    request = make_request();
+    reset_test_state();
+    rc = ngx_http_markdown_preaccess_handler(&request);
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "preaccess must prepare the fail-open OK header case");
+    ctx = (ngx_http_markdown_ctx_t *)
+        request.ctx[ngx_http_markdown_filter_module.ctx_index];
+    TEST_ASSERT(ctx != NULL && ctx->fullbuffer.failopen_delivery_pending == 1,
+                "OK header case must start with a pending delivery latch");
+
+    g_next_header_rc = NGX_OK;
+    ngx_http_next_header_filter = test_next_header_filter;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_OK && g_next_header_calls == 1,
+                "header bypass must return downstream NGX_OK");
+    TEST_ASSERT(g_metrics.results.failopen_count == 1
+                && ctx->failopen_completed == 1
+                && ctx->fullbuffer.failopen_delivery_pending == 0,
+                "NGX_OK header delivery must settle fail-open once");
+
+    g_next_body_rc = NGX_ERROR;
+    g_next_body_calls = 0;
+    ngx_http_next_body_filter = test_next_body_filter;
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+    TEST_ASSERT(rc == NGX_ERROR && g_next_body_calls == 1,
+                "body delivery errors must be returned to the caller");
+    TEST_ASSERT(g_metrics.results.failopen_count == 1,
+                "body delivery errors must not duplicate fail-open accounting");
+
+    request = make_request();
+    reset_test_state();
+    rc = ngx_http_markdown_preaccess_handler(&request);
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "preaccess must prepare the fail-open DONE header case");
+    ctx = (ngx_http_markdown_ctx_t *)
+        request.ctx[ngx_http_markdown_filter_module.ctx_index];
+    TEST_ASSERT(ctx != NULL,
+                "DONE header case must install a request context");
+
+    g_next_header_rc = NGX_DONE;
+    ngx_http_next_header_filter = test_next_header_filter;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_DONE,
+                "header bypass must return downstream NGX_DONE");
+    TEST_ASSERT(g_metrics.results.failopen_count == 1
+                && ctx->failopen_completed == 1
+                && ctx->fullbuffer.failopen_delivery_pending == 0,
+                "NGX_DONE header delivery must settle fail-open once");
+    TEST_PASS("preaccess bypass settles NGX_OK and NGX_DONE headers");
+}
+
 int
 main(void)
 {
@@ -854,9 +1247,9 @@ main(void)
     printf("========================================\n");
 
     g_conf = NULL;
-    g_pool_offset = 0;
     test_preaccess_handler_installs_durable_bypass();
     test_header_filter_bypass_forwards_once();
+    test_preaccess_bypass_terminal_header_outcomes();
 
     printf("\n========================================\n");
     printf("All request bypass tests passed!\n");

@@ -82,7 +82,9 @@ static ngx_int_t ngx_http_markdown_handle_encoding_collection_failure(
 static void ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled);
 static void ngx_http_markdown_establish_preaccess_bypass(
-    ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled);
+    ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled,
+    const ngx_http_markdown_effective_conf_t *eff);
+static void ngx_http_markdown_request_cleanup(void *data);
 static ngx_int_t ngx_http_markdown_forward_prechecked_headers(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
@@ -660,17 +662,23 @@ ngx_http_markdown_log_streaming_terminal_decision(
 
 static void
 ngx_http_markdown_establish_preaccess_bypass(
-    ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled)
+    ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled,
+    const ngx_http_markdown_effective_conf_t *eff)
 {
     if (ctx == NULL) {
         return;
     }
 
+    if (eff != NULL) {
+        ctx->effective_conf_storage = *eff;
+        ctx->effective_conf = &ctx->effective_conf_storage;
+    }
     ctx->filter_enabled = filter_enabled;
     ctx->eligible = 0;
     ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
     ctx->error.has_category = 1;
     ctx->lifecycle.bypass = 1;
+    ctx->fullbuffer.failopen_delivery_pending = 1;
 }
 
 /*
@@ -791,7 +799,8 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
          * can initialize the context and overwrite the eligibility decision.
          * The cached filter decision lets the body filter reach its existing
          * ineligible pass-through path without preparing conversion state. */
-        ngx_http_markdown_establish_preaccess_bypass(ctx, filter_enabled);
+        ngx_http_markdown_establish_preaccess_bypass(
+            ctx, filter_enabled, &eff);
         r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
         return NGX_DECLINED;
     }
@@ -821,6 +830,7 @@ ngx_http_markdown_forward_prechecked_headers(
         && (rc == NGX_AGAIN || rc == NGX_OK || rc == NGX_DONE))
     {
         ctx->headers_forwarded = 1;
+        ngx_http_markdown_settle_buffered_failopen_delivery(ctx, conf, rc);
     }
     return rc;
 }
@@ -1395,6 +1405,20 @@ path_selected:
 #endif
 }
 
+static void
+ngx_http_markdown_request_cleanup(void *data)
+{
+    ngx_http_markdown_ctx_t  *ctx;
+
+    ctx = data;
+    if (ctx == NULL) {
+        return;
+    }
+
+    ngx_http_markdown_fullbuffer_cleanup(data);
+    ctx->fullbuffer.failopen_delivery_pending = 0;
+}
+
 static ngx_int_t
 ngx_http_markdown_register_fullbuffer_cleanup(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx)
@@ -1406,7 +1430,7 @@ ngx_http_markdown_register_fullbuffer_cleanup(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    cleanup->handler = ngx_http_markdown_fullbuffer_cleanup;
+    cleanup->handler = ngx_http_markdown_request_cleanup;
     cleanup->data = ctx;
     return NGX_OK;
 }
