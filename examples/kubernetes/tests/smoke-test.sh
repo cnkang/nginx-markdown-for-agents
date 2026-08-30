@@ -243,12 +243,13 @@ test_markdown_conversion() {
             # signal (a heading) before accepting.
             local body
             body="$(printf '%s' "$response" | sed -n '/^\r*$/,$p' | tail -n +2)" || true
-            # Only a tag-shaped token (letter, slash, or '!' after '<'),
-            # an HTML comment, or a doctype counts as HTML markup —
-            # plain angle-bracket comparisons such as "2 < 3 > 1" are
-            # valid Markdown and must not be rejected.  Doctype matches
-            # are case-insensitive (!DOCTYPE / !doctype).
-            if printf '%s' "$body" | grep -qiE '<[a-zA-Z/!][^>]*>|<!--|<!doctype'; then
+            # Only a tag-shaped token counts as HTML markup: a '<' followed
+            # by a tag name whose next character is whitespace, '>', '/',
+            # a comment, or a doctype.  Plain angle-bracket comparisons
+            # such as "2 < 3 > 1" and Markdown autolinks such as
+            # "<https://example.com>" are valid Markdown and must pass.
+            # Doctype matches are case-insensitive (!DOCTYPE / !doctype).
+            if printf '%s' "$body" | grep -qiE '<[a-zA-Z][a-zA-Z0-9]*([[:space:]]|/?>)|</[a-zA-Z][a-zA-Z0-9]*[[:space:]]*>|<!--|<!doctype'; then
                 # The Content-Type already failed the markdown check;
                 # if the body carries HTML document/element markup
                 # (including an HTML-wrapped heading such as
@@ -257,15 +258,16 @@ test_markdown_conversion() {
                 log_fail "Markdown conversion: response body contains HTML markup (Content-Type: $content_type)"
                 return 1
             fi
-            case "$body" in
-                *"# "*)
-                    log_pass "Markdown conversion: response body contains markdown syntax"
-                    ;;
-                *)
-                    log_fail "Markdown conversion: response does not appear to be markdown (Content-Type: $content_type)"
-                    return 1
-                    ;;
-            esac
+            # A line-anchored ATX heading (optional indentation, 1-6 '#'
+            # followed by whitespace or end of line) is the strong
+            # markdown signal required here — the Content-Type already
+            # failed, so bare list markers are not enough.
+            if printf '%s' "$body" | grep -qE '^[[:space:]]{0,3}#{1,6}([[:space:]]|$)'; then
+                log_pass "Markdown conversion: response body contains markdown syntax"
+            else
+                log_fail "Markdown conversion: response does not appear to be markdown (Content-Type: $content_type)"
+                return 1
+            fi
             ;;
     esac
 
