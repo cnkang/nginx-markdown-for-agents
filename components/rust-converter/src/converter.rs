@@ -1606,16 +1606,17 @@ mod tests {
         );
     }
 
-    /// Test that form elements are stripped but their text content is preserved.
-    /// AI agents benefit from seeing labels, button text, and option lists.
-    /// Validates: I-02 security fix — no raw HTML form tags in output.
+    /// Test that form elements are stripped while privacy-sensitive defaults
+    /// and option values stay out of the Markdown output.
     #[test]
     fn test_form_content_extraction() {
         let html = br#"<form action="/search">
             <label>Search query</label>
-            <input type="text" placeholder="Enter keywords">
-            <select><option>Option A</option><option>Option B</option></select>
-            <textarea>Default text</textarea>
+            <input type="text" placeholder="Enter keywords" value="SENSITIVE_VALUE_SENTINEL">
+            <select><option value="SENSITIVE_VALUE_SENTINEL">Option A</option><option>Option B</option></select>
+            <textarea placeholder="Enter notes">SENSITIVE_VALUE_SENTINEL</textarea>
+            <datalist><option value="SENSITIVE_VALUE_SENTINEL">Suggestion A</option></datalist>
+            <output value="SENSITIVE_VALUE_SENTINEL">Calculation result: 42</output>
             <button>Submit</button>
         </form>"#;
         let dom = parse_html(html).expect("Parse failed");
@@ -1640,8 +1641,20 @@ mod tests {
             "Option text should be preserved"
         );
         assert!(
-            result.contains("Default text"),
-            "Textarea content should be preserved"
+            result.contains("Enter notes"),
+            "Textarea placeholder should be preserved"
+        );
+        assert!(
+            result.contains("Suggestion A"),
+            "Datalist option label should be preserved"
+        );
+        assert!(
+            result.contains("Calculation result: 42"),
+            "Visible output text should be preserved"
+        );
+        assert!(
+            !result.contains("SENSITIVE_VALUE_SENTINEL"),
+            "Control values and textarea defaults must not reach Markdown"
         );
         assert!(result.contains("Submit"), "Button text should be preserved");
 
@@ -1669,33 +1682,96 @@ mod tests {
         assert!(!result.contains("action="), "Form attributes must not leak");
     }
 
-    /// Test that hidden inputs are suppressed but submit/reset values are kept.
+    /// Test the shared input value-privacy policy in the full-buffer path.
     #[test]
     fn test_input_type_handling() {
         let html = br#"<div>
-            <input type="hidden" name="csrf" value="token123">
-            <input type="submit" value="Send">
-            <input type="reset" value="Clear">
-            <input type="text" aria-label="Username field" placeholder="user" value="john">
+            <input type="hidden" aria-label="HIDDEN_LABEL_SENTINEL" placeholder="HIDDEN_PLACEHOLDER_SENTINEL" value="SENSITIVE_VALUE_SENTINEL">
+            <input TYPE="IMAGE" aria-label="IMAGE_LABEL_SENTINEL" placeholder="IMAGE_PLACEHOLDER_SENTINEL" value="SENSITIVE_VALUE_SENTINEL">
+            <input TYPE="PASSWORD" aria-label="PASSWORD_LABEL_SENTINEL" placeholder="PASSWORD_PLACEHOLDER_SENTINEL" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="submit" aria-label="ignored" placeholder="ignored" value="Send *now* [x]">
+            <input type="reset" value="Clear *now* [x]">
+            <input TYPE="BUTTON" value="Button *fallback* [label]">
+            <input type="button" aria-label="Accessible button" placeholder="ignored" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="text" aria-label="   " placeholder="Placeholder *hint* [x]" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="text" aria-label="Username field" placeholder="user" value="SENSITIVE_VALUE_SENTINEL">
+            <input value="SENSITIVE_VALUE_SENTINEL">
+            <input type="unknown" value="SENSITIVE_VALUE_SENTINEL">
+            <input type=" text " value="SENSITIVE_VALUE_SENTINEL">
+            <input type="email" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="number" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="search" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="tel" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="url" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="date" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="month" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="week" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="time" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="datetime-local" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="range" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="color" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="checkbox" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="radio" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="file" value="SENSITIVE_VALUE_SENTINEL">
         </div>"#;
         let dom = parse_html(html).expect("Parse failed");
         let converter = MarkdownConverter::new();
         let result = converter.convert(&dom).expect("Conversion failed");
 
-        // Hidden input content should not appear
         assert!(
-            !result.contains("token123"),
-            "Hidden input value must be suppressed"
+            !result.contains("SENSITIVE_VALUE_SENTINEL"),
+            "Sensitive and data-type input values must be suppressed"
         );
-
-        // Submit/reset button text should appear
-        assert!(result.contains("Send"), "Submit value should be preserved");
-        assert!(result.contains("Clear"), "Reset value should be preserved");
-
-        // aria-label takes priority over placeholder and value
+        assert!(
+            !result.contains("PASSWORD_LABEL_SENTINEL")
+                && !result.contains("PASSWORD_PLACEHOLDER_SENTINEL"),
+            "Password descriptions must be fully suppressed"
+        );
+        assert!(
+            result.contains(r"Send \*now\* \[x\]"),
+            "Submit value should be preserved and escaped"
+        );
+        assert!(
+            result.contains(r"Clear \*now\* \[x\]"),
+            "Reset value should be preserved and escaped"
+        );
+        assert!(
+            result.contains(r"Button \*fallback\* \[label\]"),
+            "Button value should be the only ordinary value fallback"
+        );
+        assert!(
+            result.contains("Accessible button"),
+            "aria-label should take priority over a button value"
+        );
+        assert!(
+            result.contains(r"Placeholder \*hint\* \[x\]"),
+            "A blank aria-label must fall back to placeholder"
+        );
         assert!(
             result.contains("Username field"),
             "aria-label should be preferred"
+        );
+    }
+
+    #[test]
+    fn test_namespaced_inputs_follow_value_policy() {
+        let html = br#"<svg xmlns:xlink="http://www.w3.org/1999/xlink">
+            <input type="button" value="SVG button">
+            <input xlink:type="button" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="button" xlink:value="SENSITIVE_VALUE_SENTINEL">
+        </svg>
+            <math><input type="text" value="SENSITIVE_VALUE_SENTINEL"></math>"#;
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("SVG button"),
+            "SVG-local input controls should use the same local-name policy"
+        );
+        assert!(
+            !result.contains("SENSITIVE_VALUE_SENTINEL"),
+            "Math-local data values must remain suppressed"
         );
     }
 

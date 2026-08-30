@@ -70,9 +70,18 @@ The converter classifies elements into three categories using `SanitizeAction`:
 - `<base>` - Can change base URL for all relative URLs
 - `<noscript>` - Alternative content, usually redundant with main content
 
-**Form Elements — Tags Stripped, Content Preserved** (`SanitizeAction::StripElement`):
-- `<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<legend>`, `<label>`, `<option>`, `<optgroup>`, `<datalist>`, `<output>` - The module removes tags but preserves child text content in the Markdown output. This ensures AI agents see meaningful content (labels, button captions, option lists) without raw HTML leaking into the output.
-- `<input>` (void form control) - The module extracts descriptive text from attributes in priority order: `aria-label` > `placeholder` > `value`. It suppresses sensitive control types (`type="password"`, `type="hidden"`) entirely and does not fall back to their `value` attribute. Other control types (such as `type="text"`, `type="email"`, `type="number"`) may use the `value` fallback only when `aria-label` and `placeholder` are absent.
+**Form Elements — Tags Stripped, Content Policy Applied** (`SanitizeAction::StripElement`):
+- `<form>`, `<button>`, `<fieldset>`, `<legend>`, and `<label>` - The module removes tags. It preserves descriptive child text, such as labels and button captions.
+- `<select>`, `<option>`, and `<datalist>` - The module preserves visible option labels. It never emits an `option[value]` or other control `value` attribute. This keeps stored or suggested user data out of Markdown while retaining page-provided choices.
+- `<textarea>` - The module may emit a non-blank `aria-label`, followed by a non-blank `placeholder`. It suppresses default child text because users can enter or prefill that text.
+- `<output>` - The module removes the tag. It preserves visible child text because that text represents page content, such as a calculation result.
+- `<input>` (void form control) - The module lowercases `type` using ASCII rules. It does not trim whitespace.
+- `type="password"` - The module suppresses the entire control, including its `aria-label`, `placeholder`, and `value`.
+- `type="hidden"` and `type="image"` - The module keeps their existing full suppression behavior.
+- `type="submit"` and `type="reset"` - The module uses `value` as the visible button caption.
+- All other input types - The descriptive fallback is non-blank `aria-label` > non-blank `placeholder`. Only the exact `type="button"` may then use `value` as a fallback. Data controls such as `text`, `email`, `number`, `search`, `tel`, `url`, and date/time types never expose their values. Missing, unknown, and whitespace-padded types also receive no value fallback.
+
+This policy favors page descriptions over form state. The module must not expose user-entered, restored, or prefilled values to AI-facing Markdown. It may expose a visible caption from a button or a submit/reset control.
 
 **Embedded Content Elements — Tags Stripped, URL Extracted, Fallback Preserved** (`SanitizeAction::StripElement`):
 - `<iframe>`, `<object>`, `<embed>` - The module removes tags. It extracts the `src` (iframe/embed) or `data` (object) URL as a Markdown link, using the `title` attribute as the link label when available. Fallback child text between the tags stays in the output. It suppresses dangerous URL schemes (`javascript:`, `data:`, and so on) — only safe URLs appear in the output. The module blocks unsafe schemes entirely.
@@ -293,7 +302,7 @@ The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs th
 - No file system access beyond NGINX configuration
 
 ### 2. Fail-Open Availability Trade-off
-- Default to fail-open (return the original eligible HTML response) to maintain availability — conversion failures do not expose internal details, but the trade-off is that an unavailability of the conversion engine yields unconverted HTML rather than an error
+- Default to fail-open and return the original eligible HTML response. This preserves availability when conversion fails. Conversion failures do not expose internal details. If the conversion engine is unavailable, the module returns the original HTML instead of an error.
 - Error messages are generic to clients, detailed in logs
 
 ### 3. Defense in Depth
@@ -308,7 +317,7 @@ The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs th
   10s, `parser_memory` 32MB, `streaming_buffer` 2MB — with cooperative
   parser checkpoints. An in-progress parse may overshoot its configured
   `parser_timeout`
-- Fail-open returns the original HTML after a conversion failure;
+- Fail-open returns the original HTML after a conversion failure.
   resource limits and bounded buffers provide resource-exhaustion
   protection
 - All dangerous elements/attributes blocked by default

@@ -339,42 +339,18 @@ impl MarkdownConverter {
         let mut ctx = ctx;
         if let NodeData::Element { ref attrs, .. } = node.data {
             let attrs_borrowed = attrs.borrow();
-            let input_type = attrs_borrowed
+            let raw_input_type = attrs_borrowed
                 .iter()
-                .find(|a| a.name.local.as_ref() == "type")
-                .map(|a| a.value.as_ref())
-                .unwrap_or_default();
-            let is_hidden = input_type.eq_ignore_ascii_case("hidden");
-            let is_submit = input_type.eq_ignore_ascii_case("submit");
-            let is_reset = input_type.eq_ignore_ascii_case("reset");
-            let is_image = input_type.eq_ignore_ascii_case("image");
-
-            if is_hidden || is_submit || is_reset || is_image {
-                if (is_submit || is_reset)
-                    && let Some(value) = attrs_borrowed
-                        .iter()
-                        .find(|a| a.name.local.as_ref() == "value")
-                        .map(|a| a.value.as_ref())
-                {
-                    Self::append_escaped_control_text(output, Some(value), &mut ctx)?;
-                }
-                return Ok(());
-            }
-
-            let text = attrs_borrowed
-                .iter()
-                .find(|a| a.name.local.as_ref() == "aria-label")
-                .or_else(|| {
-                    attrs_borrowed
-                        .iter()
-                        .find(|a| a.name.local.as_ref() == "placeholder")
-                })
-                .or_else(|| {
-                    attrs_borrowed
-                        .iter()
-                        .find(|a| a.name.local.as_ref() == "value")
-                })
+                .find(|a| a.name.ns.is_empty() && a.name.local.as_ref() == "type")
                 .map(|a| a.value.as_ref());
+            let input_type = crate::security::normalize_input_type(raw_input_type);
+            let text = crate::security::select_input_control_text(
+                &input_type,
+                attrs_borrowed
+                    .iter()
+                    .filter(|attribute| attribute.name.ns.is_empty())
+                    .map(|attribute| (attribute.name.local.as_ref(), attribute.value.as_ref())),
+            );
 
             Self::append_escaped_control_text(output, text, &mut ctx)?;
         }
@@ -393,6 +369,21 @@ impl MarkdownConverter {
         self.security_validator
             .validate_depth(depth)
             .map_err(ConversionError::InvalidInput)?;
+
+        if tag_name == "textarea" {
+            if let NodeData::Element { ref attrs, .. } = node.data {
+                let attrs_borrowed = attrs.borrow();
+                let text = crate::security::select_input_control_text(
+                    "textarea",
+                    attrs_borrowed
+                        .iter()
+                        .filter(|attribute| attribute.name.ns.is_empty())
+                        .map(|attribute| (attribute.name.local.as_ref(), attribute.value.as_ref())),
+                );
+                Self::append_escaped_control_text(output, text, &mut ctx)?;
+            }
+            return Ok(());
+        }
 
         if self.security_validator.is_embedded_content(tag_name)
             && let NodeData::Element { ref attrs, .. } = node.data
@@ -504,8 +495,9 @@ impl MarkdownConverter {
             return Ok(());
         }
 
-        // Form container elements: strip the tag but traverse children so
-        // their text content is preserved in the Markdown output.
+        // Form container elements: strip the tag and apply the element-specific
+        // content policy; textarea was handled above because its default text
+        // is privacy-sensitive.
         if !is_fast_path && matches!(sanitize_action, SanitizeAction::StripElement) {
             return self.handle_strip_element(node, tag_name, output, depth, ctx);
         }

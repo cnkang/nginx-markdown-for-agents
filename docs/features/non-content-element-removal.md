@@ -134,9 +134,9 @@ only as a historical implementation note:
 2. **Other non-content elements**: `<svg>`, `<canvas>` (if needed)
 3. **Inline event handlers**: Removal of all `on*` attributes via prefix matching — **complete**, already covered by `security.rs` and `test_inline_script_removal`. This is not a future item.
 
-## Related: Form Element Content Preservation
+## Related: Form Element Content Policy
 
-Form-related elements (`<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<label>`, `<option>`, and so on) get separate handling from non-content elements. Instead of removing them entirely, the module strips their HTML tags while preserving child text content in the Markdown output. This ensures AI agents retain meaningful information such as labels, button captions, and option lists. See `docs/features/SECURITY_MODEL.md` Layer 2 for details.
+Form-related elements (`<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<label>`, `<option>`, and so on) get separate handling from non-content elements. The module strips their HTML tags while retaining descriptive page content such as labels, button captions, visible option labels, and visible `<output>` text. It suppresses input control values, `<option value>` data, and textarea default child text because those fields may contain user-entered, restored, or prefilled data. Textarea `aria-label`/`placeholder` descriptions remain eligible, and only input `type="button"` (plus the established submit/reset captions) may use a `value` as fallback text. See `docs/features/SECURITY_MODEL.md` Layer 2 for the complete policy.
 
 ## Related: Embedded Content Element Handling
 
