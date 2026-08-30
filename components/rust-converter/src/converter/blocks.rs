@@ -28,14 +28,15 @@
 //!
 //! # Code Block Fencing
 //!
-//! [`choose_code_fence`] selects a backtick fence length that is strictly
-//! longer than any backtick run in the code payload, preventing premature
-//! fence termination. [`longest_backtick_run`] is the helper that scans the
-//! payload for the longest contiguous backtick sequence.
+//! Code content is measured while it is still in the DOM, allowing the
+//! handler to select a safe fence and stream the content directly into the
+//! budgeted output writer without a second payload allocation.
 
-use super::{
-    Attribute, ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData, Ref,
+use super::traversal::{
+    append_char_with_context, append_repeated_char_with_context, append_str_with_context,
+    with_reserved_working_set,
 };
+use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData};
 
 impl MarkdownConverter {
     /// Emit one list item while preserving multi-line/nested-item indentation.
@@ -55,42 +56,67 @@ impl MarkdownConverter {
         content: &str,
         depth: usize,
         ordered: bool,
-    ) {
-        let base_indent = "  ".repeat(depth);
-        let marker = if ordered { "1. " } else { "- " };
-        // Continuation indent aligns with content after the marker (e.g. "- " → 2 chars).
-        let continuation_indent = format!("{base_indent}{}", " ".repeat(marker.len()));
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        let base_indent_len = depth.checked_mul(2).ok_or_else(|| {
+            ConversionError::MemoryLimit("list indentation working-set overflow".into())
+        })?;
+        let marker_len: usize = if ordered { 3 } else { 2 };
+        let temp_bytes = base_indent_len
+            .checked_mul(2)
+            .and_then(|value| {
+                marker_len
+                    .checked_mul(2)
+                    .and_then(|mark| value.checked_add(mark))
+            })
+            .ok_or_else(|| {
+                ConversionError::MemoryLimit("list indentation working-set overflow".into())
+            })?;
 
-        let trimmed = content.trim_matches('\n');
-        if trimmed.is_empty() {
-            output.push_str(&base_indent);
-            output.push_str(marker);
-            output.push('\n');
-            return;
-        }
+        with_reserved_working_set(output, ctx, temp_bytes, |output, ctx| {
+            let base_indent = "  ".repeat(depth);
+            let marker = if ordered { "1. " } else { "- " };
+            // Continuation indent aligns with content after the marker (e.g. "- " → 2 chars).
+            let continuation_indent = format!("{base_indent}{}", " ".repeat(marker.len()));
 
-        for (index, line) in trimmed.lines().enumerate() {
-            if index == 0 {
-                output.push_str(&base_indent);
-                output.push_str(marker);
-                // If the content already starts with a list marker (from a
-                // nested list that was converted earlier), emit a blank line
-                // after our marker and then the content with continuation
-                // indentation to avoid producing a malformed double-marker.
-                if Self::list_line_is_nested(line) {
-                    output.push('\n');
-                    Self::append_list_item_line(output, line, &base_indent, &continuation_indent);
-                    continue;
-                }
-            } else if !line.is_empty() && !Self::list_line_is_indented(line, &base_indent) {
-                // Indent continuation lines unless they already carry
-                // indentation (from pre-formatted or nested content).
-                output.push_str(&continuation_indent);
+            let trimmed = content.trim_matches('\n');
+            if trimmed.is_empty() {
+                append_str_with_context(output, &base_indent, ctx)?;
+                append_str_with_context(output, marker, ctx)?;
+                append_char_with_context(output, '\n', ctx)?;
+                return Ok(());
             }
 
-            output.push_str(line);
-            output.push('\n');
-        }
+            for (index, line) in trimmed.lines().enumerate() {
+                if index == 0 {
+                    append_str_with_context(output, &base_indent, ctx)?;
+                    append_str_with_context(output, marker, ctx)?;
+                    // If the content already starts with a list marker (from a
+                    // nested list that was converted earlier), emit a blank line
+                    // after our marker and then the content with continuation
+                    // indentation to avoid producing a malformed double-marker.
+                    if Self::list_line_is_nested(line) {
+                        append_char_with_context(output, '\n', ctx)?;
+                        Self::append_list_item_line(
+                            output,
+                            line,
+                            &base_indent,
+                            &continuation_indent,
+                            ctx,
+                        )?;
+                        continue;
+                    }
+                } else if !line.is_empty() && !Self::list_line_is_indented(line, &base_indent) {
+                    // Indent continuation lines unless they already carry
+                    // indentation (from pre-formatted or nested content).
+                    append_str_with_context(output, &continuation_indent, ctx)?;
+                }
+
+                append_str_with_context(output, line, ctx)?;
+                append_char_with_context(output, '\n', ctx)?;
+            }
+            Ok(())
+        })
     }
 
     /// Append one list-item payload line, aligning it with the item's own
@@ -107,54 +133,25 @@ impl MarkdownConverter {
         line: &str,
         base_indent: &str,
         continuation_indent: &str,
-    ) {
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
         if line.is_empty() {
-            return;
+            return Ok(());
         }
         if Self::list_line_is_indented(line, base_indent) {
             // Strip exactly the nested render's leading whitespace, then
             // re-anchor the line under this item's continuation indent.
             let stripped = line.trim_start_matches([' ', '\t']);
             if stripped.is_empty() {
-                return;
+                return Ok(());
             }
-            output.push_str(continuation_indent);
-            output.push_str(stripped);
+            append_str_with_context(output, continuation_indent, ctx)?;
+            append_str_with_context(output, stripped, ctx)?;
         } else {
-            output.push_str(continuation_indent);
-            output.push_str(line);
+            append_str_with_context(output, continuation_indent, ctx)?;
+            append_str_with_context(output, line, ctx)?;
         }
-        output.push('\n');
-    }
-
-    /// Return the longest contiguous run of backticks in `content`.
-    pub(super) fn longest_backtick_run(&self, content: &str) -> usize {
-        let mut longest = 0;
-        let mut current = 0;
-
-        for ch in content.chars() {
-            if ch == '`' {
-                current += 1;
-                longest = longest.max(current);
-            } else {
-                current = 0;
-            }
-        }
-
-        longest
-    }
-
-    /// Choose a fenced-code delimiter that cannot collide with the payload.
-    ///
-    /// Markdown requires the outer fence to be longer than any backtick run
-    /// contained inside the code block.
-    pub(super) fn choose_code_fence(&self, content: &str) -> String {
-        let longest_backticks = self.longest_backtick_run(content);
-        if longest_backticks == 0 {
-            "```".to_string()
-        } else {
-            "`".repeat(longest_backticks.max(3) + 1)
-        }
+        append_char_with_context(output, '\n', ctx)
     }
 
     /// Handle heading elements (h1-h6) with optional timeout context.
@@ -168,29 +165,33 @@ impl MarkdownConverter {
     ) -> Result<(), ConversionError> {
         if !output.is_empty() && !output.ends_with("\n\n") {
             if output.ends_with('\n') {
-                output.push('\n');
+                append_char_with_context(output, '\n', &mut ctx)?;
             } else {
-                output.push_str("\n\n");
+                append_str_with_context(output, "\n\n", &mut ctx)?;
             }
         }
 
         for _ in 0..level {
-            output.push('#');
+            append_char_with_context(output, '#', &mut ctx)?;
         }
-        output.push(' ');
+        append_char_with_context(output, ' ', &mut ctx)?;
 
         let start_len = output.len();
         for child in node.children.borrow().iter() {
             self.traverse_node_optional(child, output, depth + 1, ctx.as_deref_mut())?;
         }
 
-        let heading_content = output[start_len..].to_string();
-        let normalized = self.normalize_text(&heading_content);
-        output.truncate(start_len);
-        output.push_str(&normalized);
-        output.push_str("\n\n");
-
-        Ok(())
+        let heading_len = output.len().saturating_sub(start_len);
+        let temp_bytes = heading_len.checked_mul(2).ok_or_else(|| {
+            ConversionError::MemoryLimit("heading working-set size overflow".into())
+        })?;
+        with_reserved_working_set(output, &mut ctx, temp_bytes, |output, ctx| {
+            let heading_content = output[start_len..].to_string();
+            let normalized = self.normalize_text(&heading_content);
+            output.truncate(start_len);
+            append_str_with_context(output, &normalized, ctx)?;
+            append_str_with_context(output, "\n\n", ctx)
+        })
     }
 
     /// Handle paragraph elements with optional timeout context.
@@ -203,9 +204,9 @@ impl MarkdownConverter {
     ) -> Result<(), ConversionError> {
         if !output.is_empty() && !output.ends_with("\n\n") {
             if output.ends_with('\n') {
-                output.push('\n');
+                append_char_with_context(output, '\n', &mut ctx)?;
             } else {
-                output.push_str("\n\n");
+                append_str_with_context(output, "\n\n", &mut ctx)?;
             }
         }
 
@@ -215,7 +216,7 @@ impl MarkdownConverter {
         }
 
         if output.len() > start_len {
-            output.push_str("\n\n");
+            append_str_with_context(output, "\n\n", &mut ctx)?;
         }
 
         Ok(())
@@ -232,11 +233,7 @@ impl MarkdownConverter {
             || line.starts_with('\t')
     }
 
-    fn list_line_continuation_indent(
-        line: &str,
-        _base_indent: &str,
-        continuation_indent_len: usize,
-    ) -> usize {
+    fn list_line_continuation_indent(line: &str, continuation_indent_len: usize) -> usize {
         // Mirrors append_list_item_line: an indented line is stripped of its
         // leading whitespace and re-anchored under the continuation indent,
         // so the rendered length always includes that indent (never 0 for a
@@ -257,7 +254,6 @@ impl MarkdownConverter {
         let base_indent_len = depth * 2;
         let marker_len = if ordered { 3 } else { 2 };
         let continuation_indent_len = base_indent_len + marker_len;
-        let base_indent = "  ".repeat(depth);
 
         let trimmed = content.trim_matches('\n');
         if trimmed.is_empty() {
@@ -273,21 +269,13 @@ impl MarkdownConverter {
                     // continuation indentation unless already indented.
                     total += 1;
                     if !line.is_empty() {
-                        total += Self::list_line_continuation_indent(
-                            line,
-                            &base_indent,
-                            continuation_indent_len,
-                        );
+                        total += Self::list_line_continuation_indent(line, continuation_indent_len);
                         total += line.len() + 1;
                     }
                     continue;
                 }
             } else {
-                total += Self::list_line_continuation_indent(
-                    line,
-                    &base_indent,
-                    continuation_indent_len,
-                );
+                total += Self::list_line_continuation_indent(line, continuation_indent_len);
             }
 
             total += line.len() + 1;
@@ -367,9 +355,9 @@ impl MarkdownConverter {
 
         if !output.is_empty() && !output.ends_with("\n\n") {
             if output.ends_with('\n') {
-                output.push('\n');
+                append_char_with_context(output, '\n', &mut ctx)?;
             } else {
-                output.push_str("\n\n");
+                append_str_with_context(output, "\n\n", &mut ctx)?;
             }
         }
 
@@ -388,7 +376,7 @@ impl MarkdownConverter {
         }
 
         if !output.ends_with("\n\n") {
-            output.push('\n');
+            append_char_with_context(output, '\n', &mut ctx)?;
         }
 
         if let Some(context) = ctx {
@@ -447,7 +435,7 @@ impl MarkdownConverter {
                 let tag_name = name.local.as_ref();
                 if tag_name == "ul" || tag_name == "ol" {
                     if !item_output.is_empty() && !item_output.ends_with('\n') {
-                        item_output.push('\n');
+                        append_char_with_context(item_output, '\n', ctx)?;
                     }
                     self.handle_list_with_context(
                         child,
@@ -485,59 +473,94 @@ impl MarkdownConverter {
         ordered: bool,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        let mut item_output = String::new();
-        let mut newline_count = 0usize;
         let mut ctx = ctx;
-        for child in node.children.borrow().iter() {
-            let child_output_start = item_output.len();
+        let output_capacity = output.capacity();
+        let mut output_charge_active = false;
+        if let Some(context) = ctx.as_deref_mut() {
+            context.reserve_working_set(output_capacity)?;
+            output_charge_active = true;
+        }
 
-            self.render_list_item_child(child, &mut item_output, depth, &mut ctx)?;
+        let mut output_charge_released = false;
+        let result = (|| {
+            let mut item_output = String::new();
+            let mut newline_count = 0usize;
+            for child in node.children.borrow().iter() {
+                let child_output_start = item_output.len();
 
-            let appended_newlines = item_output[child_output_start..]
-                .bytes()
-                .filter(|byte| *byte == b'\n')
-                .count();
-            newline_count = newline_count
-                .checked_add(appended_newlines)
-                .ok_or_else(|| {
-                    ConversionError::MemoryLimit(
-                        "generated Markdown list newline count overflow".to_string(),
-                    )
-                })?;
+                self.render_list_item_child(child, &mut item_output, depth, &mut ctx)?;
 
-            if let Some(context) = ctx.as_deref_mut() {
-                let upper_bound = Self::format_list_item_upper_bound(
-                    item_output.len(),
-                    newline_count,
-                    depth,
-                    ordered,
-                )?;
-                let projected_len = output.len().checked_add(upper_bound).ok_or_else(|| {
+                let appended_newlines = item_output[child_output_start..]
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count();
+                newline_count = newline_count
+                    .checked_add(appended_newlines)
+                    .ok_or_else(|| {
+                        ConversionError::MemoryLimit(
+                            "generated Markdown list newline count overflow".to_string(),
+                        )
+                    })?;
+
+                if let Some(context) = ctx.as_deref_mut() {
+                    let upper_bound = Self::format_list_item_upper_bound(
+                        item_output.len(),
+                        newline_count,
+                        depth,
+                        ordered,
+                    )?;
+                    let projected_len = output.len().checked_add(upper_bound).ok_or_else(|| {
+                        ConversionError::MemoryLimit(
+                            "generated Markdown list output length overflow".to_string(),
+                        )
+                    })?;
+                    context.check_output_budget(projected_len)?;
+                }
+            }
+
+            if ctx.is_some() {
+                let rendered_len =
+                    Self::format_list_item_rendered_len(&item_output, depth, ordered);
+                let projected_len = output.len().checked_add(rendered_len).ok_or_else(|| {
                     ConversionError::MemoryLimit(
                         "generated Markdown list output length overflow".to_string(),
                     )
                 })?;
-                context.check_output_budget(projected_len)?;
+                ctx.as_deref_mut()
+                    .expect("context checked above")
+                    .check_output_budget(projected_len)?;
+
+                let item_capacity = item_output.capacity();
+                if let Some(context) = ctx.as_deref_mut() {
+                    context.reserve_working_set(item_capacity)?;
+                    context.release_working_set(output_capacity);
+                }
+                output_charge_released = true;
+
+                let format_result =
+                    self.format_list_item_lines(output, &item_output, depth, ordered, &mut ctx);
+                drop(item_output);
+                if let Some(context) = ctx.as_deref_mut() {
+                    context.release_working_set(item_capacity);
+                }
+                format_result?;
+            } else {
+                self.format_list_item_lines(output, &item_output, depth, ordered, &mut ctx)?;
             }
+
+            if let Some(context) = ctx.as_deref_mut() {
+                context.check_output_budget(output.len())?;
+            }
+            Ok(())
+        })();
+
+        if output_charge_active
+            && !output_charge_released
+            && let Some(context) = ctx
+        {
+            context.release_working_set(output_capacity);
         }
-
-        if let Some(context) = ctx.as_deref_mut() {
-            let rendered_len = Self::format_list_item_rendered_len(&item_output, depth, ordered);
-            let projected_len = output.len().checked_add(rendered_len).ok_or_else(|| {
-                ConversionError::MemoryLimit(
-                    "generated Markdown list output length overflow".to_string(),
-                )
-            })?;
-            context.check_output_budget(projected_len)?;
-        }
-
-        self.format_list_item_lines(output, &item_output, depth, ordered);
-
-        if let Some(context) = ctx {
-            context.check_output_budget(output.len())?;
-        }
-
-        Ok(())
+        result
     }
 
     /// Handle code block elements (pre/code) with optional timeout context.
@@ -548,39 +571,48 @@ impl MarkdownConverter {
         _depth: usize,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
         if !output.is_empty() && !output.ends_with("\n\n") {
             if output.ends_with('\n') {
-                output.push('\n');
+                append_char_with_context(output, '\n', &mut ctx)?;
             } else {
-                output.push_str("\n\n");
+                append_str_with_context(output, "\n\n", &mut ctx)?;
             }
         }
 
-        let language = self.extract_code_language(node);
+        // Measure the code payload before any output allocation.  The payload
+        // is then streamed directly into the final budgeted writer, avoiding
+        // an uncharged `String` that used to hold the entire code block.
+        let stats = self.measure_code_content(node, 0)?;
+        let fence_len = if stats.max_backtick_run == 0 {
+            3
+        } else {
+            stats
+                .max_backtick_run
+                .max(3)
+                .checked_add(1)
+                .ok_or_else(|| ConversionError::MemoryLimit("code fence length overflow".into()))?
+        };
 
-        let mut code_content = String::new();
-        self.extract_code_content(node, &mut code_content, 0, ctx)?;
-        let fence = self.choose_code_fence(&code_content);
+        append_repeated_char_with_context(output, '`', fence_len, &mut ctx)?;
+        self.append_code_language(node, output, &mut ctx)?;
+        append_char_with_context(output, '\n', &mut ctx)?;
 
-        output.push_str(&fence);
-        if !language.is_empty() {
-            output.push_str(&language);
-        }
-        output.push('\n');
-
-        output.push_str(&code_content);
+        self.extract_code_content(node, output, 0, ctx.as_deref_mut())?;
 
         if !output.ends_with('\n') {
-            output.push('\n');
+            append_char_with_context(output, '\n', &mut ctx)?;
         }
-        output.push_str(&fence);
-        output.push('\n');
-        output.push('\n');
-
-        Ok(())
+        append_repeated_char_with_context(output, '`', fence_len, &mut ctx)?;
+        append_str_with_context(output, "\n\n", &mut ctx)
     }
 
-    fn extract_code_language(&self, node: &Handle) -> String {
+    fn append_code_language(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
         for child in node.children.borrow().iter() {
             if let NodeData::Element {
                 ref name,
@@ -588,58 +620,66 @@ impl MarkdownConverter {
                 ..
             } = child.data
                 && name.local.as_ref() == "code"
-                && let Some(lang) = self.find_language_from_attrs(&attrs.borrow())
             {
-                return lang;
+                let attrs_borrowed = attrs.borrow();
+                for attr in attrs_borrowed.iter() {
+                    if attr.name.local.as_ref() != "class" {
+                        continue;
+                    }
+                    for class in attr.value.split_whitespace() {
+                        let candidate = class
+                            .strip_prefix("language-")
+                            .or_else(|| class.strip_prefix("lang-"));
+                        if let Some(language) = candidate
+                            && Self::is_safe_code_language(language)
+                        {
+                            append_str_with_context(output, language, ctx)?;
+                            return Ok(());
+                        }
+                    }
+                }
             }
         }
-        String::new()
-    }
-
-    fn find_language_from_attrs(&self, attrs: &Ref<Vec<Attribute>>) -> Option<String> {
-        for attr in attrs.iter() {
-            if attr.name.local.as_ref() == "class"
-                && let Some(lang) = self.find_language_from_classes(&attr.value)
-            {
-                return Some(lang);
-            }
-        }
-        None
-    }
-
-    fn find_language_from_classes(&self, class_value: &str) -> Option<String> {
-        for class in class_value.split_whitespace() {
-            let candidate = class
-                .strip_prefix("language-")
-                .or_else(|| class.strip_prefix("lang-"));
-            if let Some(lang) = candidate
-                && let Some(valid) = Self::safe_code_language(lang)
-            {
-                return Some(valid);
-            }
-        }
-        None
+        Ok(())
     }
 
     /// Accept common code-language identifiers without allowing characters
     /// that can alter the opening Markdown fence or inject a new line.
-    fn safe_code_language(language: &str) -> Option<String> {
+    fn is_safe_code_language(language: &str) -> bool {
         if !language.is_empty()
             && language.bytes().all(|byte| {
                 byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'+' | b'.' | b'#')
             })
         {
-            return Some(language.to_string());
+            return true;
         }
 
-        None
+        false
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::{ConversionContext, ConversionOptions, MarkdownFlavor};
     use super::MarkdownConverter;
     use crate::error::ConversionError;
+    use crate::parser::parse_html;
+    use std::time::Duration;
+
+    fn convert_with_budget(
+        converter: &MarkdownConverter,
+        html: &str,
+        budget: usize,
+    ) -> (Result<String, ConversionError>, ConversionContext) {
+        let dom = parse_html(html.as_bytes()).expect("test HTML should parse");
+        let mut context = ConversionContext::with_output_budget(Duration::ZERO, budget);
+        let result = converter.convert_with_context(&dom, &mut context);
+        (result, context)
+    }
+
+    fn assert_memory_limit(result: Result<String, ConversionError>) {
+        assert!(matches!(result, Err(ConversionError::MemoryLimit(_))));
+    }
 
     #[test]
     fn list_line_indent_detection_matches_rendering_contract() {
@@ -697,5 +737,89 @@ mod tests {
             MarkdownConverter::format_list_item_upper_bound(usize::MAX, 0, 0, false),
             Err(ConversionError::MemoryLimit(_))
         ));
+    }
+
+    #[test]
+    fn large_code_block_is_rejected_before_payload_allocation() {
+        let html = format!("<pre>{}</pre>", "x".repeat(16 * 1024));
+        let (result, context) = convert_with_budget(&MarkdownConverter::new(), &html, 1024);
+
+        assert_memory_limit(result);
+        assert_eq!(context.working_set_bytes, 0);
+    }
+
+    #[test]
+    fn large_inline_code_is_rejected_before_payload_allocation() {
+        let html = format!("<p><code>{}</code></p>", "x".repeat(16 * 1024));
+        let (result, context) = convert_with_budget(&MarkdownConverter::new(), &html, 1024);
+
+        assert_memory_limit(result);
+        assert_eq!(context.working_set_bytes, 0);
+    }
+
+    #[test]
+    fn large_table_is_rejected_before_cell_growth() {
+        let mut html = String::from("<table><thead><tr><th>head</th><th>head</th></tr></thead>");
+        for _ in 0..24 {
+            html.push_str("<tr><td>");
+            html.push_str(&"cell ".repeat(32));
+            html.push_str("</td><td>");
+            html.push_str(&"value ".repeat(32));
+            html.push_str("</td></tr>");
+        }
+        html.push_str("</table>");
+
+        let converter = MarkdownConverter::with_options(ConversionOptions {
+            flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
+            ..ConversionOptions::default()
+        });
+        let (result, context) = convert_with_budget(&converter, &html, 4096);
+
+        assert_memory_limit(result);
+        assert_eq!(context.working_set_bytes, 0);
+    }
+
+    #[test]
+    fn long_text_line_is_rejected_before_normalization_allocation() {
+        let html = format!("<p>{}</p>", "long-word ".repeat(4096));
+        let (result, context) = convert_with_budget(&MarkdownConverter::new(), &html, 1024);
+
+        assert_memory_limit(result);
+        assert_eq!(context.working_set_bytes, 0);
+    }
+
+    #[test]
+    fn large_link_and_media_are_rejected_before_resolution_allocation() {
+        let long_path = "x".repeat(16 * 1024);
+        let link_html = format!("<a href=\"https://example.test/{long_path}\">link</a>");
+        let (link_result, link_context) =
+            convert_with_budget(&MarkdownConverter::new(), &link_html, 1024);
+        assert_memory_limit(link_result);
+        assert_eq!(link_context.working_set_bytes, 0);
+
+        let image_html = format!("<img src=\"https://example.test/{long_path}\" alt=\"image\">");
+        let (image_result, image_context) =
+            convert_with_budget(&MarkdownConverter::new(), &image_html, 1024);
+        assert_memory_limit(image_result);
+        assert_eq!(image_context.working_set_bytes, 0);
+    }
+
+    #[test]
+    fn failed_reservation_is_released_before_context_reuse() {
+        let large_html = format!("<pre>{}</pre>", "x".repeat(16 * 1024));
+        let small_html = "<p>reused context</p>";
+        let dom_large = parse_html(large_html.as_bytes()).expect("test HTML should parse");
+        let dom_small = parse_html(small_html.as_bytes()).expect("test HTML should parse");
+        let converter = MarkdownConverter::new();
+        let mut context = ConversionContext::with_output_budget(Duration::ZERO, 2048);
+
+        assert_memory_limit(converter.convert_with_context(&dom_large, &mut context));
+        assert_eq!(context.working_set_bytes, 0);
+
+        let markdown = converter
+            .convert_with_context(&dom_small, &mut context)
+            .expect("small conversion should reuse released working set");
+        assert_eq!(markdown, "reused context\n");
+        assert_eq!(context.working_set_bytes, 0);
     }
 }

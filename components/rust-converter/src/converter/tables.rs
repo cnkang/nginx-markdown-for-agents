@@ -36,6 +36,7 @@
 //! - Empty tables (no rows) produce no output.
 //! - Cell content is recursively converted, allowing inline Markdown within cells.
 
+use super::traversal::{append_char_with_context, append_str_with_context};
 use super::{
     ConversionContext, ConversionError, Handle, MarkdownConverter, MarkdownFlavor, NodeData,
     TableAlignment,
@@ -51,9 +52,10 @@ impl MarkdownConverter {
         headers: &mut Vec<String>,
         alignments: &mut Vec<TableAlignment>,
         rows: &mut Vec<Vec<String>>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         if !headers.is_empty() {
-            return self.extract_table_rows(tbody, ctx.as_deref_mut(), rows);
+            return self.extract_table_rows(tbody, ctx.as_deref_mut(), rows, table_scratch);
         }
 
         let children = tbody.children.borrow();
@@ -64,10 +66,16 @@ impl MarkdownConverter {
             )
         });
         let Some(first_tr) = first_tr else {
-            return self.extract_table_rows(tbody, ctx.as_deref_mut(), rows);
+            return self.extract_table_rows(tbody, ctx.as_deref_mut(), rows, table_scratch);
         };
 
-        self.extract_table_row_as_header(first_tr, ctx.as_deref_mut(), headers, alignments)?;
+        self.extract_table_row_as_header(
+            first_tr,
+            ctx.as_deref_mut(),
+            headers,
+            alignments,
+            table_scratch,
+        )?;
 
         let mut is_first = true;
         for tbody_child in children.iter() {
@@ -80,7 +88,12 @@ impl MarkdownConverter {
                 }
 
                 let mut row_cells = Vec::new();
-                self.extract_table_row(tbody_child, ctx.as_deref_mut(), &mut row_cells)?;
+                self.extract_table_row(
+                    tbody_child,
+                    ctx.as_deref_mut(),
+                    &mut row_cells,
+                    table_scratch,
+                )?;
                 rows.push(row_cells);
             }
         }
@@ -94,20 +107,33 @@ impl MarkdownConverter {
         headers: &mut Vec<String>,
         alignments: &mut Vec<TableAlignment>,
         rows: &mut Vec<Vec<String>>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         let NodeData::Element { ref name, .. } = child.data else {
             return Ok(());
         };
 
         match name.local.as_ref() {
-            "thead" => self.extract_table_header(child, ctx.as_deref_mut(), headers, alignments),
-            "tbody" => self.extract_table_body(child, ctx, headers, alignments, rows),
-            "tr" if headers.is_empty() => {
-                self.extract_table_row_as_header(child, ctx.as_deref_mut(), headers, alignments)
+            "thead" => self.extract_table_header(
+                child,
+                ctx.as_deref_mut(),
+                headers,
+                alignments,
+                table_scratch,
+            ),
+            "tbody" => {
+                self.extract_table_body(child, ctx, headers, alignments, rows, table_scratch)
             }
+            "tr" if headers.is_empty() => self.extract_table_row_as_header(
+                child,
+                ctx.as_deref_mut(),
+                headers,
+                alignments,
+                table_scratch,
+            ),
             "tr" => {
                 let mut row_cells = Vec::new();
-                self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells)?;
+                self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells, table_scratch)?;
                 rows.push(row_cells);
                 Ok(())
             }
@@ -129,47 +155,88 @@ impl MarkdownConverter {
             return self.traverse_children(node, output, depth + 1, ctx);
         }
 
-        Self::ensure_blank_line_before(output);
-
-        let mut headers: Vec<String> = Vec::new();
-        let mut alignments: Vec<TableAlignment> = Vec::new();
-        let mut rows: Vec<Vec<String>> = Vec::new();
-
-        let mut col_alignments: Vec<Option<TableAlignment>> = Vec::new();
-        self.extract_colgroup_alignments_from(node, &mut col_alignments);
-
         let mut ctx = ctx;
-        for child in node.children.borrow().iter() {
-            self.extract_table_child(child, &mut ctx, &mut headers, &mut alignments, &mut rows)?;
+        Self::ensure_blank_line_before(output, &mut ctx)?;
+
+        let output_capacity = output.capacity();
+        let mut output_charge_active = false;
+        if let Some(context) = ctx.as_deref_mut() {
+            context.reserve_working_set(output_capacity)?;
+            output_charge_active = true;
         }
+        let mut output_charge_released = false;
+        let mut table_scratch = 0usize;
 
-        if headers.is_empty() {
-            return Ok(());
+        let result = (|| {
+            let mut headers: Vec<String> = Vec::new();
+            let mut alignments: Vec<TableAlignment> = Vec::new();
+            let mut rows: Vec<Vec<String>> = Vec::new();
+
+            let mut col_alignments: Vec<Option<TableAlignment>> = Vec::new();
+            self.extract_colgroup_alignments_from(node, &mut col_alignments);
+
+            for child in node.children.borrow().iter() {
+                self.extract_table_child(
+                    child,
+                    &mut ctx,
+                    &mut headers,
+                    &mut alignments,
+                    &mut rows,
+                    &mut table_scratch,
+                )?;
+            }
+
+            if headers.is_empty() {
+                return Ok(());
+            }
+
+            while alignments.len() < headers.len() {
+                alignments.push(TableAlignment::Left);
+            }
+
+            Self::apply_col_alignments(&mut alignments, &col_alignments);
+
+            // The final output buffer was retained as working-set charge
+            // while cells were collected.  Release that charge before the
+            // table writer runs so capacity growth is checked against the
+            // actual live cell scratch only, not counted twice.
+            if output_charge_active {
+                if let Some(context) = ctx.as_deref_mut() {
+                    context.release_working_set(output_capacity);
+                }
+                output_charge_released = true;
+            }
+
+            self.write_gfm_table(output, &headers, &alignments, &rows, ctx.as_deref_mut())?;
+
+            if !output.ends_with("\n\n") {
+                append_char_with_context(output, '\n', &mut ctx)?;
+            }
+
+            Ok(())
+        })();
+
+        if let Some(context) = ctx {
+            if output_charge_active && !output_charge_released {
+                context.release_working_set(output_capacity);
+            }
+            context.release_working_set(table_scratch);
         }
-
-        while alignments.len() < headers.len() {
-            alignments.push(TableAlignment::Left);
-        }
-
-        Self::apply_col_alignments(&mut alignments, &col_alignments);
-
-        self.write_gfm_table(output, &headers, &alignments, &rows)?;
-
-        if !output.ends_with("\n\n") {
-            output.push('\n');
-        }
-
-        Ok(())
+        result
     }
 
-    fn ensure_blank_line_before(output: &mut String) {
+    fn ensure_blank_line_before(
+        output: &mut String,
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
         if !output.is_empty() && !output.ends_with("\n\n") {
             if output.ends_with('\n') {
-                output.push('\n');
+                append_char_with_context(output, '\n', ctx)?;
             } else {
-                output.push_str("\n\n");
+                append_str_with_context(output, "\n\n", ctx)?;
             }
         }
+        Ok(())
     }
 
     fn extract_colgroup_alignments_from(
@@ -242,13 +309,20 @@ impl MarkdownConverter {
         ctx: Option<&mut ConversionContext>,
         headers: &mut Vec<String>,
         alignments: &mut Vec<TableAlignment>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
         for child in thead.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data
                 && name.local.as_ref() == "tr"
             {
-                self.extract_table_row_as_header(child, ctx.as_deref_mut(), headers, alignments)?;
+                self.extract_table_row_as_header(
+                    child,
+                    ctx.as_deref_mut(),
+                    headers,
+                    alignments,
+                    table_scratch,
+                )?;
                 break;
             }
         }
@@ -266,6 +340,7 @@ impl MarkdownConverter {
         ctx: Option<&mut ConversionContext>,
         headers: &mut Vec<String>,
         alignments: &mut Vec<TableAlignment>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
         for child in tr.children.borrow().iter() {
@@ -287,7 +362,9 @@ impl MarkdownConverter {
                         )?;
                     }
 
-                    headers.push(cell_output.trim().to_string());
+                    Self::trim_cell_output(&mut cell_output);
+                    Self::charge_cell_output(&cell_output, &mut ctx, table_scratch)?;
+                    headers.push(cell_output);
                     let attrs_borrowed = attrs.borrow();
                     alignments.push(self.extract_alignment(&attrs_borrowed));
                 }
@@ -303,6 +380,7 @@ impl MarkdownConverter {
         tbody: &Handle,
         ctx: Option<&mut ConversionContext>,
         rows: &mut Vec<Vec<String>>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
         for child in tbody.children.borrow().iter() {
@@ -310,7 +388,7 @@ impl MarkdownConverter {
                 && name.local.as_ref() == "tr"
             {
                 let mut row_cells = Vec::new();
-                self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells)?;
+                self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells, table_scratch)?;
                 rows.push(row_cells);
             }
         }
@@ -324,6 +402,7 @@ impl MarkdownConverter {
         tr: &Handle,
         ctx: Option<&mut ConversionContext>,
         cells: &mut Vec<String>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
         for child in tr.children.borrow().iter() {
@@ -339,11 +418,38 @@ impl MarkdownConverter {
                             ctx.as_deref_mut(),
                         )?;
                     }
-                    cells.push(cell_output.trim().to_string());
+                    Self::trim_cell_output(&mut cell_output);
+                    Self::charge_cell_output(&cell_output, &mut ctx, table_scratch)?;
+                    cells.push(cell_output);
                 }
             }
         }
 
+        Ok(())
+    }
+
+    fn trim_cell_output(output: &mut String) {
+        let start = output.len() - output.trim_start().len();
+        let end = output.trim_end().len();
+        if start > 0 {
+            output.drain(..start);
+        }
+        output.truncate(end.saturating_sub(start));
+    }
+
+    fn charge_cell_output(
+        output: &String,
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
+        let capacity = output.capacity();
+        if let Some(context) = ctx.as_deref_mut() {
+            let next = table_scratch.checked_add(capacity).ok_or_else(|| {
+                ConversionError::MemoryLimit("table working-set size overflow".into())
+            })?;
+            context.reserve_working_set(capacity)?;
+            *table_scratch = next;
+        }
         Ok(())
     }
 
@@ -389,12 +495,27 @@ impl MarkdownConverter {
         None
     }
 
-    /// Escape row/cell content for safe GFM table rendering.
-    fn escape_gfm_table_cell(&self, cell: &str) -> String {
-        cell.replace("\r\n", "\n")
-            .replace('\r', "\n")
-            .replace('\n', "<br>")
-            .replace('|', "\\|")
+    fn append_gfm_table_cell(
+        &self,
+        output: &mut String,
+        cell: &str,
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        let mut chars = cell.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\r' => {
+                    if chars.peek() == Some(&'\n') {
+                        chars.next();
+                    }
+                    append_str_with_context(output, "<br>", ctx)?;
+                }
+                '\n' => append_str_with_context(output, "<br>", ctx)?,
+                '|' => append_str_with_context(output, "\\|", ctx)?,
+                _ => append_char_with_context(output, ch, ctx)?,
+            }
+        }
+        Ok(())
     }
 
     /// Render a normalized GitHub-Flavored Markdown table.
@@ -407,42 +528,44 @@ impl MarkdownConverter {
         headers: &[String],
         alignments: &[TableAlignment],
         rows: &[Vec<String>],
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
         let max_cols = headers
             .len()
             .max(rows.iter().map(Vec::len).max().unwrap_or(0));
 
-        output.push('|');
+        append_char_with_context(output, '|', &mut ctx)?;
         for i in 0..max_cols {
-            output.push(' ');
+            append_char_with_context(output, ' ', &mut ctx)?;
             let header = headers.get(i).map(String::as_str).unwrap_or("");
-            output.push_str(&self.escape_gfm_table_cell(header));
-            output.push_str(" |");
+            self.append_gfm_table_cell(output, header, &mut ctx)?;
+            append_str_with_context(output, " |", &mut ctx)?;
         }
-        output.push('\n');
+        append_char_with_context(output, '\n', &mut ctx)?;
 
-        output.push('|');
+        append_char_with_context(output, '|', &mut ctx)?;
         for i in 0..max_cols {
-            output.push(' ');
+            append_char_with_context(output, ' ', &mut ctx)?;
             match alignments.get(i).unwrap_or(&TableAlignment::Left) {
-                TableAlignment::Left => output.push_str("---"),
-                TableAlignment::Center => output.push_str(":---:"),
-                TableAlignment::Right => output.push_str("---:"),
+                TableAlignment::Left => append_str_with_context(output, "---", &mut ctx)?,
+                TableAlignment::Center => append_str_with_context(output, ":---:", &mut ctx)?,
+                TableAlignment::Right => append_str_with_context(output, "---:", &mut ctx)?,
             }
-            output.push_str(" |");
+            append_str_with_context(output, " |", &mut ctx)?;
         }
-        output.push('\n');
+        append_char_with_context(output, '\n', &mut ctx)?;
 
         for row in rows {
-            output.push('|');
+            append_char_with_context(output, '|', &mut ctx)?;
             for i in 0..max_cols {
-                output.push(' ');
+                append_char_with_context(output, ' ', &mut ctx)?;
                 if let Some(cell) = row.get(i) {
-                    output.push_str(&self.escape_gfm_table_cell(cell));
+                    self.append_gfm_table_cell(output, cell, &mut ctx)?;
                 }
-                output.push_str(" |");
+                append_str_with_context(output, " |", &mut ctx)?;
             }
-            output.push('\n');
+            append_char_with_context(output, '\n', &mut ctx)?;
         }
 
         Ok(())

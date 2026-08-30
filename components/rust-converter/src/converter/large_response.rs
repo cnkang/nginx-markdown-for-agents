@@ -151,8 +151,7 @@ impl FusedNormalizer {
                 self.prev_blank = true;
             }
         } else {
-            let normalized = super::normalize::normalize_line_whitespace(trimmed);
-            self.output.push_str(&normalized);
+            super::normalize::normalize_line_whitespace_into(trimmed, &mut self.output);
             self.output.push('\n');
             self.prev_blank = false;
         }

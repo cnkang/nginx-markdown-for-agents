@@ -24,30 +24,26 @@
 //! When a URL is rejected, the link text is still emitted but the URL is
 //! omitted, preventing XSS while preserving content accessibility for AI agents.
 //!
-//! # Title Escaping
-//!
-//! [`escape_markdown_title`] applies minimal escaping for link title attributes
-//! (backslash and double-quote) to produce valid Markdown link syntax.
-
+use super::traversal::{
+    append_char_with_context, append_escaped_text_with_context, append_image_with_context,
+    append_link_destination, append_link_label, append_repeated_char_with_context,
+    append_str_with_context, with_reserved_working_set,
+};
 use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData};
 
-impl MarkdownConverter {
-    /// Escape backslash and double-quote characters in a Markdown link title.
-    ///
-    /// Markdown link titles are enclosed in double quotes, so backslashes and
-    /// quotes inside the title must be escaped to produce valid syntax.
-    ///
-    /// # Arguments
-    ///
-    /// * `title` - Raw title string to escape
-    ///
-    /// # Returns
-    ///
-    /// Escaped title safe for use inside `"..."` in a Markdown link.
-    fn escape_markdown_title(title: &str) -> String {
-        title.replace('\\', "\\\\").replace('"', "\\\"")
-    }
+/// Statistics for code content collected without materializing a second
+/// `String`.  The backtick run is carried across text-node boundaries so
+/// the selected fence remains identical to the concatenated legacy value.
+#[derive(Debug, Default)]
+pub(super) struct CodeContentStats {
+    pub(super) max_backtick_run: usize,
+    current_backtick_run: usize,
+    pub(super) first_byte: Option<u8>,
+    pub(super) last_byte: Option<u8>,
+    pub(super) len: usize,
+}
 
+impl MarkdownConverter {
     /// Handle anchor (link) elements with optional timeout context.
     pub(super) fn handle_link_with_context(
         &self,
@@ -67,43 +63,52 @@ impl MarkdownConverter {
         depth: usize,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        let href = if let NodeData::Element { ref attrs, .. } = node.data {
-            attrs
-                .borrow()
-                .iter()
-                .find(|attr| attr.name.local.as_ref() == "href")
-                .map(|attr| attr.value.to_string())
-        } else {
-            None
-        };
-
-        let mut link_text = String::new();
         let mut ctx = ctx;
-        for child in node.children.borrow().iter() {
-            self.extract_text(child, &mut link_text, depth + 1, ctx.as_deref_mut())?;
-        }
-        let normalized_text = self.normalize_text(&link_text);
+        let link_text_capacity = self.text_content_len(node, depth)?;
 
-        if let Some(url) = href {
-            if let Some(safe_url) = self.security_validator.sanitize_url(&url) {
-                if !normalized_text.is_empty() {
-                    let resolved_url = self.resolve_url(safe_url);
-                    let escaped_text = Self::escape_link_label(&normalized_text);
-                    let escaped_dest = Self::escape_link_destination(&resolved_url);
-                    output.push('[');
-                    output.push_str(&escaped_text);
-                    output.push_str("](");
-                    output.push_str(&escaped_dest);
-                    output.push(')');
-                }
-            } else if !normalized_text.is_empty() {
-                output.push_str(&Self::escape_link_label(&normalized_text));
+        with_reserved_working_set(output, &mut ctx, link_text_capacity, |output, ctx| {
+            let mut link_text = String::with_capacity(link_text_capacity);
+            for child in node.children.borrow().iter() {
+                self.extract_text(child, &mut link_text, depth + 1, ctx.as_deref_mut())?;
             }
-        } else if !normalized_text.is_empty() {
-            output.push_str(&crate::security::escape_markdown_text(&normalized_text));
-        }
 
-        Ok(())
+            let normalized_capacity = link_text.len();
+            with_reserved_working_set(output, ctx, normalized_capacity, |output, ctx| {
+                let normalized_text = self.normalize_text(&link_text);
+                if normalized_text.is_empty() {
+                    return Ok(());
+                }
+
+                if let NodeData::Element { ref attrs, .. } = node.data {
+                    let attrs_borrowed = attrs.borrow();
+                    let href = attrs_borrowed
+                        .iter()
+                        .find(|attr| attr.name.local.as_ref() == "href")
+                        .map(|attr| attr.value.as_ref());
+
+                    if let Some(url) = href {
+                        if let Some(safe_url) = self.security_validator.sanitize_url(url) {
+                            let url_capacity = self.resolved_url_capacity(safe_url)?;
+                            with_reserved_working_set(output, ctx, url_capacity, |output, ctx| {
+                                let resolved_url = self.resolve_url(safe_url);
+                                append_char_with_context(output, '[', ctx)?;
+                                append_link_label(output, &normalized_text, ctx)?;
+                                append_str_with_context(output, "](", ctx)?;
+                                append_link_destination(output, &resolved_url, ctx)?;
+                                append_char_with_context(output, ')', ctx)
+                            })?;
+                        } else {
+                            append_link_label(output, &normalized_text, ctx)?;
+                        }
+                    } else {
+                        append_escaped_text_with_context(output, &normalized_text, ctx)?;
+                    }
+                } else {
+                    append_escaped_text_with_context(output, &normalized_text, ctx)?;
+                }
+                Ok(())
+            })
+        })
     }
 
     /// Handle image elements.
@@ -116,51 +121,37 @@ impl MarkdownConverter {
         node: &Handle,
         output: &mut String,
         _depth: usize,
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        let (src, alt, title) = if let NodeData::Element { ref attrs, .. } = node.data {
+        let mut ctx = ctx;
+        if let NodeData::Element { ref attrs, .. } = node.data {
             let attrs_borrowed = attrs.borrow();
             let src = attrs_borrowed
                 .iter()
                 .find(|attr| attr.name.local.as_ref() == "src")
-                .map(|attr| attr.value.to_string());
+                .map(|attr| attr.value.as_ref());
             let alt = attrs_borrowed
                 .iter()
                 .find(|attr| attr.name.local.as_ref() == "alt")
-                .map(|attr| attr.value.to_string())
+                .map(|attr| attr.value.as_ref())
                 .unwrap_or_default();
             let title = attrs_borrowed
                 .iter()
                 .find(|attr| attr.name.local.as_ref() == "title")
-                .map(|attr| attr.value.to_string());
-            (src, alt, title)
-        } else {
-            (None, String::new(), None)
-        };
+                .map(|attr| attr.value.as_ref());
 
-        let safe_url = src
-            .as_deref()
-            .and_then(|u| self.security_validator.sanitize_url(u));
+            let safe_url = src.and_then(|url| self.security_validator.sanitize_url(url));
 
-        if let Some(url) = safe_url {
-            let resolved_url = self.resolve_url(url);
-            let escaped_dest = Self::escape_link_destination(&resolved_url);
-            let escaped_alt = Self::escape_link_label(&alt);
-            output.push_str("![");
-            output.push_str(&escaped_alt);
-            output.push_str("](");
-            output.push_str(&escaped_dest);
-            if let Some(ref t) = title {
-                let trimmed = t.trim();
-                if !trimmed.is_empty() {
-                    output.push_str(" \"");
-                    output.push_str(&Self::escape_markdown_title(trimmed));
-                    output.push('"');
-                }
+            if let Some(url) = safe_url {
+                let url_capacity = self.resolved_url_capacity(url)?;
+                with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
+                    let resolved_url = self.resolve_url(url);
+                    append_image_with_context(output, alt, &resolved_url, title, ctx)
+                })?;
+            } else if !alt.trim().is_empty() {
+                // URL missing or dangerous — preserve alt text for AI agents
+                append_link_label(output, alt.trim(), &mut ctx)?;
             }
-            output.push(')');
-        } else if !alt.trim().is_empty() {
-            // URL missing or dangerous — preserve alt text for AI agents
-            output.push_str(&Self::escape_link_label(alt.trim()));
         }
 
         Ok(())
@@ -174,16 +165,22 @@ impl MarkdownConverter {
         depth: usize,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        let mut code_content = String::new();
-        self.extract_code_content(node, &mut code_content, depth, ctx)?;
-        let fence = "`".repeat(self.longest_backtick_run(&code_content) + 1);
-        if code_content.starts_with('`') || code_content.ends_with('`') {
-            code_content.insert(0, ' ');
-            code_content.push(' ');
+        let mut ctx = ctx;
+        let stats = self.measure_code_content(node, depth)?;
+        let fence_len = stats.max_backtick_run.checked_add(1).ok_or_else(|| {
+            ConversionError::MemoryLimit("inline code fence length overflow".into())
+        })?;
+        let padded = stats.first_byte == Some(b'`') || stats.last_byte == Some(b'`');
+
+        append_repeated_char_with_context(output, '`', fence_len, &mut ctx)?;
+        if padded {
+            append_char_with_context(output, ' ', &mut ctx)?;
         }
-        output.push_str(&fence);
-        output.push_str(&code_content);
-        output.push_str(&fence);
+        self.extract_code_content(node, output, depth, ctx.as_deref_mut())?;
+        if padded {
+            append_char_with_context(output, ' ', &mut ctx)?;
+        }
+        append_repeated_char_with_context(output, '`', fence_len, &mut ctx)?;
         Ok(())
     }
 
@@ -195,9 +192,10 @@ impl MarkdownConverter {
         depth: usize,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        output.push_str("**");
-        self.traverse_children(node, output, depth + 1, ctx)?;
-        output.push_str("**");
+        let mut ctx = ctx;
+        append_str_with_context(output, "**", &mut ctx)?;
+        self.traverse_children(node, output, depth + 1, ctx.as_deref_mut())?;
+        append_str_with_context(output, "**", &mut ctx)?;
         Ok(())
     }
 
@@ -209,9 +207,105 @@ impl MarkdownConverter {
         depth: usize,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        output.push('*');
-        self.traverse_children(node, output, depth + 1, ctx)?;
-        output.push('*');
+        let mut ctx = ctx;
+        append_char_with_context(output, '*', &mut ctx)?;
+        self.traverse_children(node, output, depth + 1, ctx.as_deref_mut())?;
+        append_char_with_context(output, '*', &mut ctx)?;
+        Ok(())
+    }
+
+    /// Count the raw text bytes emitted by [`extract_text`] without
+    /// allocating.  The count pre-reserves the temporary link-label source
+    /// before the recursive extractor starts writing it.
+    fn text_content_len(&self, node: &Handle, depth: usize) -> Result<usize, ConversionError> {
+        self.security_validator
+            .validate_depth(depth)
+            .map_err(ConversionError::InvalidInput)?;
+
+        match node.data {
+            NodeData::Text { ref contents } => Ok(contents.borrow().len()),
+            NodeData::Element { ref name, .. } => {
+                if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
+                    return Ok(0);
+                }
+
+                let child_depth = depth.checked_add(1).ok_or_else(|| {
+                    ConversionError::MemoryLimit("text extraction depth overflow".into())
+                })?;
+                let mut total = 0usize;
+                for child in node.children.borrow().iter() {
+                    total = total
+                        .checked_add(self.text_content_len(child, child_depth)?)
+                        .ok_or_else(|| {
+                            ConversionError::MemoryLimit(
+                                "link text working-set size overflow".into(),
+                            )
+                        })?;
+                }
+                Ok(total)
+            }
+            _ => Ok(0),
+        }
+    }
+
+    /// Measure code content before output writes begin.
+    pub(super) fn measure_code_content(
+        &self,
+        node: &Handle,
+        depth: usize,
+    ) -> Result<CodeContentStats, ConversionError> {
+        let mut stats = CodeContentStats::default();
+        self.measure_code_content_into(node, depth, &mut stats)?;
+        Ok(stats)
+    }
+
+    fn measure_code_content_into(
+        &self,
+        node: &Handle,
+        depth: usize,
+        stats: &mut CodeContentStats,
+    ) -> Result<(), ConversionError> {
+        self.security_validator
+            .validate_depth(depth)
+            .map_err(ConversionError::InvalidInput)?;
+
+        match node.data {
+            NodeData::Text { ref contents } => {
+                let text = contents.borrow();
+                for byte in text.as_ref().bytes() {
+                    if stats.first_byte.is_none() {
+                        stats.first_byte = Some(byte);
+                    }
+                    stats.last_byte = Some(byte);
+                    stats.len = stats.len.checked_add(1).ok_or_else(|| {
+                        ConversionError::MemoryLimit("code content size overflow".into())
+                    })?;
+                    if byte == b'`' {
+                        stats.current_backtick_run =
+                            stats.current_backtick_run.checked_add(1).ok_or_else(|| {
+                                ConversionError::MemoryLimit("code fence length overflow".into())
+                            })?;
+                        stats.max_backtick_run =
+                            stats.max_backtick_run.max(stats.current_backtick_run);
+                    } else {
+                        stats.current_backtick_run = 0;
+                    }
+                }
+            }
+            NodeData::Element { ref name, .. } => {
+                if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
+                    return Ok(());
+                }
+
+                let child_depth = depth.checked_add(1).ok_or_else(|| {
+                    ConversionError::MemoryLimit("code extraction depth overflow".into())
+                })?;
+                for child in node.children.borrow().iter() {
+                    self.measure_code_content_into(child, child_depth, stats)?;
+                }
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -233,14 +327,20 @@ impl MarkdownConverter {
             .map_err(ConversionError::InvalidInput)?;
 
         match node.data {
-            NodeData::Text { ref contents } => output.push_str(&contents.borrow()),
+            NodeData::Text { ref contents } => {
+                let text = contents.borrow();
+                append_str_with_context(output, text.as_ref(), &mut ctx)?;
+            }
             NodeData::Element { ref name, .. } => {
                 if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
                     return Ok(());
                 }
 
                 for child in node.children.borrow().iter() {
-                    self.extract_code_content(child, output, depth + 1, ctx.as_deref_mut())?;
+                    let child_depth = depth.checked_add(1).ok_or_else(|| {
+                        ConversionError::MemoryLimit("code extraction depth overflow".into())
+                    })?;
+                    self.extract_code_content(child, output, child_depth, ctx.as_deref_mut())?;
                 }
             }
             _ => {}
@@ -266,14 +366,20 @@ impl MarkdownConverter {
             .map_err(ConversionError::InvalidInput)?;
 
         match node.data {
-            NodeData::Text { ref contents } => output.push_str(&contents.borrow()),
+            NodeData::Text { ref contents } => {
+                let text = contents.borrow();
+                append_str_with_context(output, text.as_ref(), &mut ctx)?;
+            }
             NodeData::Element { ref name, .. } => {
                 if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
                     return Ok(());
                 }
 
                 for child in node.children.borrow().iter() {
-                    self.extract_text(child, output, depth + 1, ctx.as_deref_mut())?;
+                    let child_depth = depth.checked_add(1).ok_or_else(|| {
+                        ConversionError::MemoryLimit("text extraction depth overflow".into())
+                    })?;
+                    self.extract_text(child, output, child_depth, ctx.as_deref_mut())?;
                 }
             }
             _ => {}

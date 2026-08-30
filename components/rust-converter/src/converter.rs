@@ -104,9 +104,7 @@
 //!   output size; full DOM materialization is proportional to input
 
 use crate::error::ConversionError;
-use html5ever::Attribute;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use std::cell::Ref;
 use std::time::{Duration, Instant};
 
 mod blocks;
@@ -306,9 +304,10 @@ impl<'a> BudgetedMarkdownWriter<'a> {
             return Ok(());
         }
 
-        // Physical-capacity accounting: the budget must bound the actual heap
-        // footprint, not the logical length.  A String's capacity can exceed
-        // its length (amortized growth), so compute the target capacity
+        // Capacity accounting: the budget bounds the observable logical
+        // capacity (the allocation size the String will request), not the
+        // allocator's actual heap footprint — a Rust allocator may return
+        // a larger block than requested.  Compute the target capacity
         // explicitly and check it against the budget before reserving.
         // Geometric growth target (double) keeps repeated small pushes
         // amortized, but is capped by the budget below.
@@ -888,7 +887,16 @@ impl MarkdownConverter {
             // and fails with a controlled error instead of an allocator abort.
             let capacity = output.capacity();
             ctx.reserve_working_set_with_output(capacity, capacity)?;
-            let mut normalizer = large_response::FusedNormalizer::try_new(capacity)?;
+            let mut normalizer = match large_response::FusedNormalizer::try_new(capacity) {
+                Ok(normalizer) => normalizer,
+                Err(error) => {
+                    // Release the reservation taken above before returning:
+                    // a failed try_new must not leave a stale charge on a
+                    // reused ConversionContext.
+                    ctx.release_working_set(capacity.saturating_mul(2));
+                    return Err(error);
+                }
+            };
             for line in output.split('\n') {
                 normalizer.push_line(line);
             }
