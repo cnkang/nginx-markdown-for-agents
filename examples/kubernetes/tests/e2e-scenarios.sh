@@ -221,14 +221,18 @@ cleanup() {
 # mount, and unrelated manifest field.
 ensure_deployment_configmap_mount() {
     local has_volume has_mount volumes_exist mounts_exist
+    # Verify the volume references the expected ConfigMap by name, not
+    # just that a volume with the right name exists.
     has_volume="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
-        -o jsonpath='{.spec.template.spec.volumes[?(@.name=="markdown-config")].name}' \
+        -o jsonpath='{.spec.template.spec.volumes[?(@.name=="markdown-config" && @.configMap.name=="nginx-markdown-config")].name}' \
         2>/dev/null)"
+    # Verify the mount uses the expected path and readOnly flag on the
+    # first container, not just that a mount with the right name exists.
     has_mount="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
-        -o jsonpath='{.spec.template.spec.containers[0].volumeMounts[?(@.name=="markdown-config")].name}' \
+        -o jsonpath='{.spec.template.spec.containers[0].volumeMounts[?(@.name=="markdown-config" && @.mountPath=="/etc/nginx/conf.d/markdown" && @.readOnly==true)].name}' \
         2>/dev/null)"
     if [ -n "$has_volume" ] && [ -n "$has_mount" ]; then
-        log_info "Deployment already mounts ConfigMap; skipping patch"
+        log_info "Deployment already mounts ConfigMap correctly; skipping patch"
         return 0
     fi
 

@@ -227,6 +227,14 @@ test_markdown_conversion() {
     # Extract HTTP status code from response headers
     http_code="$(printf '%s\n' "$response" | head -1 | grep -o '[0-9][0-9][0-9]' | head -1)" || true
 
+    # A non-2xx response must fail regardless of Content-Type or body:
+    # an error page could otherwise carry markdown-looking content and
+    # pass the conversion check.
+    if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+        log_fail "Markdown conversion: unexpected HTTP status '$http_code' (expected 2xx)"
+        return 1
+    fi
+
     # Extract Content-Type header (case-insensitive)
     content_type="$(printf '%s\n' "$response" | grep -i '^content-type:' | head -1)" || true
 
