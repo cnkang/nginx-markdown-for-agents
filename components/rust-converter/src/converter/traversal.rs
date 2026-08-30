@@ -130,22 +130,18 @@ where
 }
 
 fn link_label_escape_capacity(label: &str) -> Result<usize, ConversionError> {
-    // escape_link_label prefixes a backslash to each escapable character
-    // (9 chars) and replaces \n/\r with a space (1:1).  The exact extra
-    // bytes are the count of escapable characters, not a fixed +8.
-    let mut extra = 0usize;
-    for ch in label.chars() {
-        if matches!(
+    // escape_link_label returns Cow::Owned when the label contains any
+    // escapable character OR a newline/CR (which is replaced by a space),
+    // and allocates s.len() + 8 in that case.  The working-set charge must
+    // match the escaper's actual allocation, not a per-character count.
+    let needs_owned = label.chars().any(|ch| {
+        matches!(
             ch,
-            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~'
-        ) {
-            extra = extra.checked_add(1).ok_or_else(|| {
-                ConversionError::MemoryLimit("link label working-set size overflow".into())
-            })?;
-        }
-    }
-    if extra > 0 {
-        label.len().checked_add(extra).ok_or_else(|| {
+            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' | '\n' | '\r'
+        )
+    });
+    if needs_owned {
+        label.len().checked_add(8).ok_or_else(|| {
             ConversionError::MemoryLimit("link label working-set size overflow".into())
         })
     } else {

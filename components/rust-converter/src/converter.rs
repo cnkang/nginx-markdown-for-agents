@@ -886,14 +886,18 @@ impl MarkdownConverter {
             // the working set so the transient peak stays inside the budget
             // and fails with a controlled error instead of an allocator abort.
             let capacity = output.capacity();
-            ctx.reserve_working_set_with_output(capacity, capacity)?;
+            // FusedNormalizer::try_new reserves capacity + 1 (one extra
+            // byte for the guaranteed trailing newline), so the transient
+            // peak is output_capacity + normalizer_capacity.
+            let normalizer_capacity = capacity.saturating_add(1);
+            ctx.reserve_working_set_with_output(capacity, normalizer_capacity)?;
             let mut normalizer = match large_response::FusedNormalizer::try_new(capacity) {
                 Ok(normalizer) => normalizer,
                 Err(error) => {
                     // Release the reservation taken above before returning:
                     // a failed try_new must not leave a stale charge on a
                     // reused ConversionContext.
-                    ctx.release_working_set(capacity.saturating_mul(2));
+                    ctx.release_working_set(capacity.saturating_add(normalizer_capacity));
                     return Err(error);
                 }
             };
@@ -901,7 +905,7 @@ impl MarkdownConverter {
                 normalizer.push_line(line);
             }
             let normalized = normalizer.finalize();
-            ctx.release_working_set(capacity.saturating_mul(2));
+            ctx.release_working_set(capacity.saturating_add(normalizer_capacity));
             normalized
         } else {
             // Small-path normalization also allocates transient scratch:
