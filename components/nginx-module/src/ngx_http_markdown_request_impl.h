@@ -34,31 +34,34 @@ typedef struct {
 } ngx_http_markdown_durable_bypass_marker_t;
 
 /*
- * These immutable marker addresses occupy the request context slot when a
- * request context cannot be allocated.  State transitions replace the
- * address, so no mutable state is shared between requests.
+ * These marker addresses occupy the request context slot when a request
+ * context cannot be allocated.  State transitions replace the address, so
+ * no mutable state is shared between requests.  The objects are never
+ * written through: the context slot is a `void *`, so the markers stay
+ * non-const to avoid casts that drop a qualifier; only their addresses
+ * are ever compared.
  */
-static const ngx_http_markdown_durable_bypass_marker_t
+static ngx_http_markdown_durable_bypass_marker_t
     ngx_http_markdown_failopen_header_marker = {
         NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER
     };
-static const ngx_http_markdown_durable_bypass_marker_t
+static ngx_http_markdown_durable_bypass_marker_t
     ngx_http_markdown_failopen_body_marker = {
         NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY
     };
-static const ngx_http_markdown_durable_bypass_marker_t
+static ngx_http_markdown_durable_bypass_marker_t
     ngx_http_markdown_failopen_completed_marker = {
         NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED
     };
-static const ngx_http_markdown_durable_bypass_marker_t
+static ngx_http_markdown_durable_bypass_marker_t
     ngx_http_markdown_subrequest_header_marker = {
         NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER
     };
-static const ngx_http_markdown_durable_bypass_marker_t
+static ngx_http_markdown_durable_bypass_marker_t
     ngx_http_markdown_subrequest_body_marker = {
         NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY
     };
-static const ngx_http_markdown_durable_bypass_marker_t
+static ngx_http_markdown_durable_bypass_marker_t
     ngx_http_markdown_subrequest_completed_marker = {
         NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED
     };
