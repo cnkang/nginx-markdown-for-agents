@@ -475,7 +475,13 @@ fn md_html_response(
     method: Method,
     headers: HeaderMap,
 ) -> axum::response::Response {
-    let etag = "\"converted-etag-12345\"";
+    // The fixture serves its source representation under a source-scoped
+    // ETag.  A converted representation carries a module-generated ETag
+    // (rewritten by the header filter), so a client echo of the converted
+    // ETag can never match the fixture's own validator: a 304 for that
+    // echo can only be produced by the module's converted-representation
+    // decision, not by an upstream shortcut.
+    let etag = "\"source-etag-12345\"";
     let if_none_match = header_value(&headers, "If-None-Match").unwrap_or_default();
     let if_modified_since = header_value(&headers, "If-Modified-Since").unwrap_or_default();
     let cookie = header_value(&headers, "Cookie").unwrap_or_default();

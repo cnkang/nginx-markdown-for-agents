@@ -213,6 +213,62 @@ cleanup() {
 # Scenario 1: Deploy
 # ---------------------------------------------------------------------------
 
+# Mount the module ConfigMap on the deployment so config updates actually
+# reach the running module (without a volume mount, scenario_config_update
+# only verifies that a ConfigMap object exists — the deployment never reads
+# it).  Idempotent: only the missing pieces (the markdown-config volume and
+# its container mount) are appended, preserving every existing volume,
+# mount, and unrelated manifest field.
+ensure_deployment_configmap_mount() {
+    local has_volume has_mount volumes_exist mounts_exist
+    has_volume="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
+        -o jsonpath='{.spec.template.spec.volumes[?(@.name=="markdown-config")].name}' \
+        2>/dev/null)"
+    has_mount="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
+        -o jsonpath='{.spec.template.spec.containers[0].volumeMounts[?(@.name=="markdown-config")].name}' \
+        2>/dev/null)"
+    if [ -n "$has_volume" ] && [ -n "$has_mount" ]; then
+        log_info "Deployment already mounts ConfigMap; skipping patch"
+        return 0
+    fi
+
+    local patch_ops="["
+    if [ -z "$has_volume" ]; then
+        volumes_exist="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
+            -o jsonpath='{.spec.template.spec.volumes}' 2>/dev/null)"
+        if [ -n "$volumes_exist" ]; then
+            # Append to the existing array; a JSON-patch "add" on the array
+            # path itself would replace the whole array.
+            patch_ops="${patch_ops}{\"op\":\"add\",\"path\":\"/spec/template/spec/volumes/-\",\"value\":{\"name\":\"markdown-config\",\"configMap\":{\"name\":\"nginx-markdown-config\"}}}"
+        else
+            patch_ops="${patch_ops}{\"op\":\"add\",\"path\":\"/spec/template/spec/volumes\",\"value\":[{\"name\":\"markdown-config\",\"configMap\":{\"name\":\"nginx-markdown-config\"}}]}"
+        fi
+    fi
+    if [ -z "$has_mount" ]; then
+        if [ -z "$has_volume" ]; then
+            patch_ops="${patch_ops},"
+        fi
+        mounts_exist="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
+            -o jsonpath='{.spec.template.spec.containers[0].volumeMounts}' \
+            2>/dev/null)"
+        if [ -n "$mounts_exist" ]; then
+            patch_ops="${patch_ops}{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/volumeMounts/-\",\"value\":{\"name\":\"markdown-config\",\"mountPath\":\"/etc/nginx/conf.d/markdown\",\"readOnly\":true}}"
+        else
+            patch_ops="${patch_ops}{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/volumeMounts\",\"value\":[{\"name\":\"markdown-config\",\"mountPath\":\"/etc/nginx/conf.d/markdown\",\"readOnly\":true}]}"
+        fi
+    fi
+    patch_ops="${patch_ops}]"
+
+    kubectl patch deployment "$DEPLOYMENT_NAME" \
+        -n "$NAMESPACE" \
+        --type=json \
+        -p="$patch_ops" >&2 2>&1 || {
+        log_error "Failed to mount ConfigMap on deployment"
+        return 1
+    }
+    return 0
+}
+
 scenario_deploy() {
     log_scenario "1. Deploy — Apply manifests and wait for pods to be ready"
 
@@ -237,15 +293,23 @@ scenario_deploy() {
 
     # Ensure the module ConfigMap exists before any deployment mounts it: a
     # volume that references a missing ConfigMap leaves the pod Pending.
-    # (Unconditional: an existing deployment may predate the mount, and
-    # scenario_config_update relies on the ConfigMap object being present.)
-    kubectl create configmap "$CONFIGMAP_NAME" \
-        -n "$NAMESPACE" --from-literal=placeholder=yes \
-        --dry-run=client -o yaml 2>/dev/null \
-        | kubectl apply -f - >&2 2>&1 || {
-        log_error "Failed to ensure ConfigMap '$CONFIGMAP_NAME' exists"
-        return 1
-    }
+    # Only create the object when it is absent — an existing ConfigMap may
+    # carry manifest-provided configuration that must not be overwritten
+    # with a placeholder (client-side apply would otherwise replace or
+    # clobber its data keys).
+    if ! kubectl get configmap "$CONFIGMAP_NAME" -n "$NAMESPACE" \
+        >/dev/null 2>&1; then
+        log_info "Creating placeholder ConfigMap '$CONFIGMAP_NAME'..."
+        kubectl create configmap "$CONFIGMAP_NAME" \
+            -n "$NAMESPACE" --from-literal=placeholder=yes \
+            --dry-run=client -o yaml 2>/dev/null \
+            | kubectl apply -f - >&2 2>&1 || {
+            log_error "Failed to ensure ConfigMap '$CONFIGMAP_NAME' exists"
+            return 1
+        }
+    else
+        log_info "ConfigMap '$CONFIGMAP_NAME' already exists; keeping its data"
+    fi
 
     if [ -z "$deploy_exists" ]; then
         log_info "Creating deployment '$DEPLOYMENT_NAME' with image '$IMAGE'..."
@@ -258,19 +322,8 @@ scenario_deploy() {
         }
 
         # Mount the module ConfigMap so config updates actually reach the
-        # running module. Without a volume mount, scenario_config_update
-        # only verifies that a ConfigMap object exists — the deployment
-        # never reads it.
-        kubectl patch deployment "$DEPLOYMENT_NAME" \
-            -n "$NAMESPACE" \
-            --type=json \
-            -p='[
-              {"op":"add","path":"/spec/template/spec/volumes","value":[{"name":"markdown-config","configMap":{"name":"nginx-markdown-config"}}]},
-              {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts","value":[{"name":"markdown-config","mountPath":"/etc/nginx/conf.d/markdown","readOnly":true}]}
-            ]' >&2 2>&1 || {
-            log_error "Failed to mount ConfigMap on deployment"
-            return 1
-        }
+        # running module (see ensure_deployment_configmap_mount).
+        ensure_deployment_configmap_mount || return 1
 
         # Expose as a service if not already present
         local svc_exists
@@ -288,6 +341,9 @@ scenario_deploy() {
         kubectl set image deployment/"$DEPLOYMENT_NAME" \
             -n "$NAMESPACE" \
             "*=$IMAGE" >&2 2>&1 || true
+        # A pre-existing deployment may predate the ConfigMap mount; ensure
+        # it is mounted so scenario_config_update reaches the module.
+        ensure_deployment_configmap_mount || return 1
     fi
 
     # Wait for rollout

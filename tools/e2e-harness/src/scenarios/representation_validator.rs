@@ -13,7 +13,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 
 const SCENARIO: &str = "representation-validator-e2e";
-const SOURCE_ETAG: &str = "\"converted-etag-12345\"";
+const SOURCE_ETAG: &str = "\"source-etag-12345\"";
 const SOURCE_IMS: &str = "Mon, 01 Jan 2030 00:00:00 GMT";
 const PROXY_PATH: &str = "/representation-proxy";
 
