@@ -262,8 +262,9 @@ Request arrives
     │
     ├─ markdown_limits conversion_memory= check (C layer)
     │   ├─ FAIL with known size (Content-Length present) → not_eligible
-    │   │  (internal state SKIPPED), reason: not_eligible; the module then
-    │   │  applies markdown_error_policy (pass-through or reject)
+    │   │  (internal state SKIPPED), reason: not_eligible; the module
+    │   │  forwards the original response without applying
+    │   │  markdown_error_policy (prechecked passthrough path)
     │   └─ FAIL with unknown size (body filter detects over-limit while
     │      buffering) → failed conversion attempt: conversions_attempted/
     │      failed + failures_resource_limit recorded, outcome
