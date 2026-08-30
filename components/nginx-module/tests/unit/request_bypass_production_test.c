@@ -250,6 +250,7 @@ ngx_http_markdown_effective_memory_budget(
 }
 
 static ngx_str_t g_test_reason = ngx_string("test_reason");
+static ngx_uint_t g_decision_category_calls;
 
 const ngx_str_t *
 ngx_http_markdown_reason_failed_open(void)
@@ -337,6 +338,7 @@ ngx_http_markdown_log_decision_with_category(
     const ngx_str_t *reason_code,
     const ngx_str_t *error_category)
 {
+    g_decision_category_calls++;
     UNUSED(r);
     UNUSED(conf);
     UNUSED(eff);
@@ -1054,6 +1056,7 @@ reset_test_state(void)
     g_if_none_match_calls = 0;
     g_send_304_calls = 0;
     g_resume_send_header_calls = 0;
+    g_decision_category_calls = 0;
     memset(&g_conditional_result, 0, sizeof(g_conditional_result));
 }
 
@@ -1387,6 +1390,103 @@ test_preaccess_cleanup_failure_uses_durable_bypass(void)
 }
 
 static void
+test_preaccess_allocation_failure_reject_records_metrics(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = 451;
+    g_conf = &conf;
+    g_pool_offset = sizeof(g_pool_storage);
+
+    rc = ngx_http_markdown_preaccess_handler(&request);
+    TEST_ASSERT(rc == 451,
+                "allocation reject must return the configured status");
+    TEST_ASSERT(g_metrics.conversions_attempted == 1
+                && g_metrics.conversions_failed == 1
+                && g_metrics.failures_system == 1,
+                "allocation reject must record all system-failure metrics");
+    TEST_ASSERT(g_decision_category_calls == 1,
+                "allocation reject must log one categorized decision");
+    TEST_ASSERT(request.ctx[ngx_http_markdown_filter_module.ctx_index] == NULL,
+                "allocation reject must not publish a fail-open marker");
+    TEST_PASS("preaccess allocation reject records metrics");
+}
+
+static void
+test_preaccess_capture_failure_reject_records_metrics(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = 452;
+    g_conf = &conf;
+    g_capture_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_preaccess_handler(&request);
+    TEST_ASSERT(rc == 452,
+                "capture reject must return the configured status");
+    TEST_ASSERT(g_metrics.conversions_attempted == 1
+                && g_metrics.conversions_failed == 1
+                && g_metrics.failures_system == 1,
+                "capture reject must record all system-failure metrics");
+    TEST_ASSERT(g_decision_category_calls == 1,
+                "capture reject must log one categorized decision");
+    TEST_ASSERT(request.ctx[ngx_http_markdown_filter_module.ctx_index] == NULL,
+                "capture reject must not retain a bypass context");
+    TEST_PASS("preaccess capture reject records metrics");
+}
+
+static void
+test_durable_marker_header_error_enters_body_state(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    g_pool_offset = sizeof(g_pool_storage);
+
+    rc = ngx_http_markdown_preaccess_handler(&request);
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "allocation failure must publish a fail-open marker");
+
+    g_next_header_rc = NGX_ERROR;
+    ngx_http_next_header_filter = test_next_header_filter;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_ERROR && g_next_header_calls == 1,
+                "marker header error must be returned after one delivery");
+    TEST_ASSERT(ngx_http_markdown_durable_bypass_kind(
+                    request.ctx[ngx_http_markdown_filter_module.ctx_index])
+                == NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY,
+                "marker header error must publish BODY state");
+
+    g_next_header_rc = NGX_OK;
+    rc = ngx_http_markdown_header_filter(&request);
+    TEST_ASSERT(rc == NGX_OK && g_next_header_calls == 1,
+                "BODY marker re-entry must not send headers again");
+    TEST_PASS("durable marker header error enters body state");
+}
+
+static void
 test_header_filter_allocation_failure_uses_durable_bypass(void)
 {
     ngx_http_request_t request = make_request();
@@ -1673,6 +1773,9 @@ main(void)
     test_preaccess_bypass_terminal_header_outcomes();
     test_preaccess_allocation_failure_uses_durable_bypass();
     test_preaccess_cleanup_failure_uses_durable_bypass();
+    test_preaccess_allocation_failure_reject_records_metrics();
+    test_preaccess_capture_failure_reject_records_metrics();
+    test_durable_marker_header_error_enters_body_state();
     test_header_filter_allocation_failure_uses_durable_bypass();
     test_subrequest_declined_capture_establishes_bypass();
     test_subrequest_without_visible_validator_uses_durable_bypass();
