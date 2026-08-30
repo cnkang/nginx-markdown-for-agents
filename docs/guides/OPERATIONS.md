@@ -188,10 +188,10 @@ grep "conversion time" /var/log/nginx/error.log | awk '{print $NF}' | sort -n | 
 
 | Pattern | Severity | Meaning |
 |---------|----------|---------|
-| `markdown: outcome=failed_closed stage=... reason=conversion_error category=conversion` | WARN | HTML parsing or Markdown generation failed |
-| `markdown: outcome=failed_closed stage=... reason=memory_budget_exceeded category=resource_limit` | WARN | Memory limit reached |
-| `markdown: outcome=failed_closed stage=... reason=timeout category=resource_limit` | WARN | Parser or conversion deadline exceeded |
-| `markdown: outcome=failed_closed stage=... reason=ffi_panic category=system` | ERROR | Internal/system error (Rust↔C panic) |
+| `markdown: outcome=failed_closed stage=... reason=failed_closed category=conversion` | WARN | HTML parsing or Markdown generation failed |
+| `markdown: outcome=failed_closed stage=... reason=failed_closed category=resource_limit` | WARN | Memory limit reached (buffered path; the specific code is the category, e.g. `memory_budget_exceeded`) |
+| `markdown: outcome=failed_closed stage=... reason=failed_closed category=resource_limit` | WARN | Parser or conversion deadline exceeded (buffered path) |
+| `markdown: outcome=failed_closed stage=... reason=failed_closed category=system` | ERROR | Internal/system error (Rust↔C panic) |
 | `markdown: outcome=converted stage=... reason=converted event=...` | INFO | Successful conversion with timing |
 
 `category=` is the high-level failure class (`conversion`, `resource_limit`,

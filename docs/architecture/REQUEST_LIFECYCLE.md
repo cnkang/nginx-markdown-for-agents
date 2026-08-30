@@ -73,9 +73,12 @@ responses use the decoder selected by `markdown_auto_decompress` and the
 encoding. `markdown_limits` configures the decompression limits:
 
 ```nginx
-markdown_limits conversion_memory=64m conversion_timeout=10s
-    parser_memory=32m parser_timeout=5s streaming_buffer=2m
-    decompressed_size=20m decompression_ratio=100 max_inflight=64;
+# Example values; the defaults are conversion_memory=64m,
+# conversion_timeout=30s, parser_memory=32m, parser_timeout=10s,
+# streaming_buffer=2m, decompressed_size=10m.
+markdown_limits conversion_memory=64m conversion_timeout=30s
+    parser_memory=32m parser_timeout=10s streaming_buffer=2m
+    decompressed_size=10m decompression_ratio=100 max_inflight=64;
 ```
 
 Decoder accounting is response-wide. Gzip member completion does not reset
