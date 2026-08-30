@@ -243,16 +243,21 @@ test_markdown_conversion() {
             # signal (a heading) before accepting.
             local body
             body="$(printf '%s' "$response" | sed -n '/^\r*$/,$p' | tail -n +2)" || true
+            # Only a tag-shaped token (letter, slash, or '!' after '<'),
+            # an HTML comment, or a doctype counts as HTML markup —
+            # plain angle-bracket comparisons such as "2 < 3 > 1" are
+            # valid Markdown and must not be rejected.  Doctype matches
+            # are case-insensitive (!DOCTYPE / !doctype).
+            if printf '%s' "$body" | grep -qiE '<[a-zA-Z/!][^>]*>|<!--|<!doctype'; then
+                # The Content-Type already failed the markdown check;
+                # if the body carries HTML document/element markup
+                # (including an HTML-wrapped heading such as
+                # "<h1># Hello</h1>"), it is an HTML response, not
+                # converted markdown.
+                log_fail "Markdown conversion: response body contains HTML markup (Content-Type: $content_type)"
+                return 1
+            fi
             case "$body" in
-                *"<"*"#"*">"*|*"<"*">"*)
-                    # The Content-Type already failed the markdown check;
-                    # if the body carries HTML document/element markup
-                    # (including an HTML-wrapped heading such as
-                    # "<h1># Hello</h1>"), it is an HTML response, not
-                    # converted markdown.
-                    log_fail "Markdown conversion: response body contains HTML markup (Content-Type: $content_type)"
-                    return 1
-                    ;;
                 *"# "*)
                     log_pass "Markdown conversion: response body contains markdown syntax"
                     ;;
