@@ -33,7 +33,6 @@ Use it when you need more than deployment guidance but less than source-level im
 | Inflight guard | [inflight-guard.md](inflight-guard.md) |
 | Observability schema v2 | [observability-schema-v2.md](observability-schema-v2.md) |
 | FFI ABI compatibility | [FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) |
-| FFI migration contract | [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md) |
 | FFI initialization contract | [FFI_INITIALIZATION_CONTRACT.md](FFI_INITIALIZATION_CONTRACT.md) |
 | Streaming eligibility audit (0.9.2) | [streaming-eligibility-audit.md](streaming-eligibility-audit.md) |
 
@@ -41,6 +40,7 @@ Use it when you need more than deployment guidance but less than source-level im
 
 | Topic | Read |
 |-------|------|
+| FFI migration contract (historical v0.9.1 → v0.9.2 record) | [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md) |
 | Streaming security check order (0.7.x verification) | [streaming-check-order.md](streaming-check-order.md) |
 | Profile field map (0.9.1 historical field inventory) | [profile-inventory.md](profile-inventory.md) |
 | Profile system design (retired profile-system rationale) | [profiles.md](profiles.md) |
