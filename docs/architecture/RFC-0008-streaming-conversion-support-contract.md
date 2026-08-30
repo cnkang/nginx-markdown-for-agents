@@ -322,14 +322,18 @@ the parser allowance.
 - `markdown_streaming auto` and the module assesses streaming risk
   outweighs benefit.
 
-If the response would exceed full-buffer resource limits **and the size is
+If the response would exceed the full-buffer **input-size** limit
+(`markdown_limits conversion_memory=`) **and the size is
 known at header time** (Content-Length present), the eligibility gate
 rejects it **before any conversion attempt**: the request is recorded
 as `not_eligible` (reason `not_eligible`) and does **not**
 increment `nginx_markdown_conversion_attempts_total` nor assign
 `engine="full_buffer"`, because conversion never starts. The module
 forwards the original response without evaluating `markdown_error_policy`
-(prechecked passthrough).
+(prechecked passthrough). Generated-output, transient-working-set, and
+`parser_memory` failures are **not** prechecked at header time: they can
+only be detected during conversion, so those cases go through
+`markdown_error_policy` like any other conversion failure.
 
 When the size is **not known at header time** (chunked or no
 Content-Length), the request enters the buffering pipeline and the limit

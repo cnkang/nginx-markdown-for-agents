@@ -105,11 +105,10 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
             }
 
             /* A hash that survived was never suppressed by this module
-             * (suppression clears hash and length together); leave it. */
+             * (suppression clears hash and length together); leave it.
+             * It is not a restoration, so it must not become the typed
+             * pointer target. */
             if (headers[i].hash != 0) {
-                if (*first_restored == NULL) {
-                    *first_restored = &headers[i];
-                }
                 continue;
             }
 

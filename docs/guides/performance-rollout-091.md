@@ -312,10 +312,12 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
    sudo cp components/nginx-module/src/ngx_http_markdown_filter_module.so \
      "$MODULES_DIR/"
    sudo nginx -t
-   # systemd-managed host: check the unit EXISTS, not just whether it is
-   # currently active — a stopped unit is still owned by systemd and must
-   # be started through it.
-   if systemctl list-unit-files nginx.service >/dev/null 2>&1; then
+   # Restart through systemd only when it actually owns the running NGINX
+   # process.  A unit file existing on disk is not proof of ownership —
+   # the process may be started by another supervisor or directly.
+   if systemctl is-active --quiet nginx.service \
+       && systemctl show -p MainPID --value nginx.service | grep -q '[0-9]' \
+       && [ "$(systemctl show -p MainPID --value nginx.service)" = "$(pgrep -x nginx | head -1)" ]; then
      sudo systemctl restart nginx
    else
      sudo nginx -s stop
