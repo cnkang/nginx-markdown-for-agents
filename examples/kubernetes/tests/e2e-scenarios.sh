@@ -791,10 +791,14 @@ scenario_rollback() {
     log_scenario "4. Rollback — Execute rollout undo and verify previous version restored"
 
     # Record current image/env before rollback
-    local pre_rollback_env
+    local pre_rollback_env rollback_container_index container_names
+    container_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
+        -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
+        2>/dev/null)"
+    rollback_container_index="$(resolve_deployment_container_index "$container_names")"
     pre_rollback_env="$(kubectl get deployment "$DEPLOYMENT_NAME" \
         -n "$NAMESPACE" \
-        -o jsonpath='{.spec.template.spec.containers[0].env}' 2>/dev/null)" || true
+        -o jsonpath="{.spec.template.spec.containers[${rollback_container_index}].env}" 2>/dev/null)" || true
     log_info "Pre-rollback env: $pre_rollback_env"
 
     # Execute rollback
@@ -812,7 +816,7 @@ scenario_rollback() {
     local post_rollback_env
     post_rollback_env="$(kubectl get deployment "$DEPLOYMENT_NAME" \
         -n "$NAMESPACE" \
-        -o jsonpath='{.spec.template.spec.containers[0].env}' 2>/dev/null)" || true
+        -o jsonpath="{.spec.template.spec.containers[${rollback_container_index}].env}" 2>/dev/null)" || true
     log_info "Post-rollback env: $post_rollback_env"
 
     if [ "$pre_rollback_env" = "$post_rollback_env" ]; then
