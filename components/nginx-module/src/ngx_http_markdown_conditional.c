@@ -84,13 +84,12 @@ static void
 ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
     u_char *name, size_t name_len, ngx_table_elt_t **first_restored)
 {
+    *first_restored = NULL;
     if (r == NULL || name == NULL || name_len == 0
         || r->headers_in.headers.part.nelts == 0)
     {
         return;
     }
-
-    *first_restored = NULL;
     for (ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
