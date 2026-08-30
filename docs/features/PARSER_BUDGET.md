@@ -306,19 +306,19 @@ Request arrives
     │
     ├─ Full-buffer post-parse deadline checkpoint
     │   ├─ parser_timeout= (nonzero, from parse_start, check first)
-    │   │   └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
+    │   │   └─ FAIL → outcome failed_open|failed_closed (per error policy), reason: timeout
     │   └─ conversion_timeout= (from conversion_start)
-    │       └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
+    │       └─ FAIL → outcome failed_open|failed_closed (per error policy), reason: timeout
     │
     ├─ DOM traversal with cooperative conversion-timeout checkpoints
     │   ├─ Every 100 nodes: check_timeout() against remaining conversion_timeout=
     │   │   (`traversal_budget`; parser_timeout= is not checked in this phase)
-    │   │   └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
+    │   │   └─ FAIL → outcome failed_open|failed_closed (per error policy), reason: timeout
     │   └─ Memory budget checks (streaming path)
-    │       └─ FAIL → outcome failed_open|failed_closed (per error policy), category: budget_exceeded
+    │       └─ FAIL → outcome failed_open|failed_closed (per error policy), category: resource_limit, reason: memory_budget_exceeded
     │
     └─ Output normalization + final conversion_timeout= checks
-        └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
+        └─ FAIL → outcome failed_open|failed_closed (per error policy), reason: timeout
 ```
 
 The failure branches use the canonical lowercase codes from
@@ -326,17 +326,18 @@ The failure branches use the canonical lowercase codes from
 `failed_open` (with `markdown_error_policy pass`) or `failed_closed`
 (with `fail_closed`/`status N`). The **failure category** (`category=`
 field of the decision log) is the coarse `resource_limit` for every
-budget failure (memory budgets and input-size overruns) and `timeout`
-for deadline failures. The **reason** (`reason` label on
+resource failure — memory budgets, input-size overruns, and deadline
+timeouts all classify as `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT` in
+the C error classification. The **reason** (`reason` label on
 `nginx_markdown_requests_total`, also `reason=` in the decision log)
 is the specific canonical key recorded for that failure:
-`memory_budget_exceeded` for a `conversion_memory` overrun,
-`budget_exceeded` for a parser working-set failure, and `timeout` for
-a deadline failure. A `conversion_memory` failure with a known size
-(Content-Length present) is an eligibility cap: the request becomes
-`not_eligible` (reason `not_eligible`, category omitted)
-before any FFI conversion attempt, and the module forwards the
-original response without evaluating `markdown_error_policy`
+`memory_budget_exceeded` for a `conversion_memory` overrun (full-buffer
+and streaming), `budget_exceeded` for a parser working-set failure,
+and `timeout` for a deadline failure. A `conversion_memory` failure
+with a known size (Content-Length present) is an eligibility cap: the
+request becomes `not_eligible` (reason `not_eligible`, category
+omitted) before any FFI conversion attempt, and the module forwards
+the original response without evaluating `markdown_error_policy`
 (prechecked passthrough). Only a failure detected while buffering an
 unknown-size body (or any conversion/body-buffer failure) enters the
 error policy. The outcome appears in the `outcome` label. All labels
