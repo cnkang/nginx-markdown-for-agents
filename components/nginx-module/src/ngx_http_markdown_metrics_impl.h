@@ -652,24 +652,16 @@ ngx_http_markdown_metrics_to_v1(
     latency_count = v1->duration_full_buffer.count
         + v1->duration_streaming.count;
     if (latency_count == 0) {
-        /* The renderer accumulates buckets into cumulative le-buckets, so
-         * the fallback must hold per-band deltas rather than the cumulative
-         * threshold counts: derive each successive band by subtracting the
-         * preceding cumulative threshold. */
+        /* Legacy counters are exclusive per-band counts, so map them directly
+         * to the matching v1 bands before the renderer accumulates thresholds. */
         v1->duration_full_buffer.buckets[2] =
             snapshot->conversion_latency.le_10ms;
         v1->duration_full_buffer.buckets[5] =
-            snapshot->conversion_latency.le_100ms
-            > snapshot->conversion_latency.le_10ms
-            ? snapshot->conversion_latency.le_100ms
-              - snapshot->conversion_latency.le_10ms
-            : 0;
+            snapshot->conversion_latency.le_100ms;
         v1->duration_full_buffer.buckets[8] =
-            snapshot->conversion_latency.le_1000ms
-            > snapshot->conversion_latency.le_100ms
-            ? snapshot->conversion_latency.le_1000ms
-              - snapshot->conversion_latency.le_100ms
-            : 0;
+            snapshot->conversion_latency.le_1000ms;
+        v1->duration_full_buffer.buckets[9] =
+            snapshot->conversion_latency.gt_1000ms;
         v1->duration_full_buffer.sum_us =
             ngx_http_markdown_metrics_ms_to_us(
                 snapshot->conversion_time_sum_ms);
@@ -757,6 +749,7 @@ ngx_http_markdown_metrics_to_v1(
 #endif
 }
 
+#ifndef NGX_HTTP_MARKDOWN_METRICS_CORE_ONLY
 /*
  * Enforce the metrics endpoint's loopback-only peer boundary before method
  * handling. NGINX `allow`/`deny` rules can further restrict that location,
@@ -1015,5 +1008,6 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
     return ngx_http_markdown_metrics_send_response(
         r, b, response_end);
 }
+#endif /* NGX_HTTP_MARKDOWN_METRICS_CORE_ONLY */
 
 #endif /* NGX_HTTP_MARKDOWN_METRICS_IMPL_H */
