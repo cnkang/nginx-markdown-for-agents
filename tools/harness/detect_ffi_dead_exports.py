@@ -211,18 +211,136 @@ def _scan_c_call_file(
         return
 
     active_guards: list[str] = []
+    in_block_comment = False
+    in_dq = False
+    in_sq = False
     for lineno, line in enumerate(text.splitlines(), start=1):
         _update_guard_stack(line, active_guards)
-        if _is_non_callsite_line(line):
+        code, in_block_comment, in_dq, in_sq = _mask_inline_comments(
+            line, in_block_comment, in_dq, in_sq
+        )
+        if _is_non_callsite_line(code):
             continue
-        for match in CALLSITE_RE.finditer(line):
+        for match in CALLSITE_RE.finditer(code):
             _record_callsite(callsites, match, path, lineno, line, active_guards)
+
+
+def _mask_block_comment(line: str, chars: list[str], start: int) -> tuple[int, bool]:
+    """Mask a block-comment continuation and return its next state."""
+    end = line.find("*/", start)
+    stop = len(line) if end == -1 else end + 2
+    for index in range(start, stop):
+        chars[index] = " "
+    return stop, end == -1
+
+
+def _mask_quoted_character(
+    chars: list[str], start: int, quote: str
+) -> tuple[int, bool]:
+    """Mask one character from a quoted literal and return its next state."""
+    if chars[start] == "\\" and start + 1 < len(chars):
+        chars[start] = " "
+        chars[start + 1] = " "
+        return start + 2, True
+
+    closes_quote = chars[start] == quote
+    chars[start] = " "
+    return start + 1, not closes_quote
+
+
+def _mask_quoted_state(
+    chars: list[str], start: int, in_dq: bool, in_sq: bool
+) -> tuple[int, bool, bool]:
+    """Mask a character in the active quote and preserve both states."""
+    quote = '"' if in_dq else "'"
+    next_index, is_open = _mask_quoted_character(chars, start, quote)
+    return next_index, is_open if in_dq else in_dq, is_open if in_sq else in_sq
+
+
+def _mask_quote_start(chars: list[str], start: int) -> tuple[bool, bool] | None:
+    """Mask a quote delimiter and return the newly active quote state."""
+    if chars[start] == '"':
+        chars[start] = " "
+        return True, False
+    if chars[start] == "'":
+        chars[start] = " "
+        return False, True
+    return None
+
+
+def _mask_comment_start(
+    line: str, chars: list[str], start: int
+) -> tuple[int, bool, bool] | None:
+    """Mask a comment beginning and return (next index, block, line)."""
+    if chars[start] != "/" or start + 1 >= len(chars):
+        return None
+
+    delimiter = chars[start + 1]
+    if delimiter == "/":
+        for index in range(start, len(chars)):
+            chars[index] = " "
+        return len(chars), False, True
+    if delimiter != "*":
+        return None
+
+    end = line.find("*/", start + 2)
+    stop = len(line) if end == -1 else end + 2
+    for index in range(start, stop):
+        chars[index] = " "
+    return stop, end == -1, False
+
+
+def _mask_inline_comments(
+    line: str, in_block: bool, in_dq: bool = False, in_sq: bool = False
+) -> tuple[str, bool, bool, bool]:
+    """Return (code, in_block, in_dq, in_sq) for one source line.
+
+    A character-level scan that tracks double- and single-quoted string
+    literals (including escape sequences) and block-comment state. Only
+    comment delimiters outside string literals are masked, so a URL or
+    string containing ``//`` or ``/*`` cannot hide a real callsite or enter
+    block-comment state. The string-literal states are returned so a C
+    backslash-continuation that splits a literal across physical lines keeps
+    the literal state on the next line.
+    """
+    chars = list(line)
+    i = 0
+    while i < len(chars):
+        if in_block:
+            i, in_block = _mask_block_comment(line, chars, i)
+            continue
+        if in_dq or in_sq:
+            i, in_dq, in_sq = _mask_quoted_state(chars, i, in_dq, in_sq)
+            continue
+
+        quote_state = _mask_quote_start(chars, i)
+        if quote_state is not None:
+            in_dq, in_sq = quote_state
+            i += 1
+            continue
+
+        comment = _mask_comment_start(line, chars, i)
+        if comment is None:
+            i += 1
+            continue
+        i, in_block, is_line_comment = comment
+        if is_line_comment:
+            return "".join(chars), in_block, in_dq, in_sq
+    return "".join(chars), in_block, in_dq, in_sq
 
 
 def _is_non_callsite_line(line: str) -> bool:
     """Return whether a source line is a comment or declaration."""
     stripped = line.lstrip()
-    return stripped.startswith(("/*", "*", "//")) or bool(
+    # A "*" prefix identifies a block-comment continuation line only when
+    # the character following "*" is a space or "/" (or end of line).
+    # Pointer-store callsites such as dereferenced assignments
+    # ("*p = ...") must NOT be treated as comment continuations.
+    is_comment = stripped.startswith(("/*", "//")) or (
+        bool(re.match(r"\*(?:\s|/|$)", stripped))
+        and not re.match(r"\*\s+[A-Za-z_]\w*\s*=", stripped)
+    )
+    return is_comment or bool(
         DECLARATION_LINE_RE.match(line)
     )
 
@@ -357,13 +475,19 @@ def _callsite_names(text: str) -> set[str]:
     names: set[str] = set()
     # Align with the production callsite scan: comments, strings and
     # declarations do not count as test references.
+    in_block_comment = False
+    in_dq = False
+    in_sq = False
     for line in text.splitlines():
-        if _is_non_callsite_line(line):
+        code, in_block_comment, in_dq, in_sq = _mask_inline_comments(
+            line, in_block_comment, in_dq, in_sq
+        )
+        if _is_non_callsite_line(code):
             continue
         # Mask out double-quoted string literals so markdown_* names inside
         # test payload strings (e.g. "markdown_convert") are not counted as
         # references.
-        masked = re.sub(r'"[^"\n]*"', '""', line)
+        masked = re.sub(r'"[^"\n]*"', '""', code)
         for match in FN_POINTER_RE.finditer(masked):
             # The regex enforces the markdown_ prefix already.
             names.add(match.group(1))

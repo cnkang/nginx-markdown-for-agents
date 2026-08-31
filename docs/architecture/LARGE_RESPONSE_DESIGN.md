@@ -283,7 +283,7 @@ For all inputs that produce correct results through the full-buffer path, the ac
 | Missing `Content-Length` | Buffer first, decide path after threshold comparison | Transparent to client |
 | `incremental` feature not compiled but threshold configured (pre-0.9.0) | Ignore threshold, use full-buffer path, log warning | `error.log` warning; conversion still works |
 
-For the active `markdown_streaming` path error handling, see [STREAMING_COMPATIBILITY.md](../features/STREAMING_COMPATIBILITY.md) and [AUTOMATIC_DECOMPRESSION.md](../features/AUTOMATIC_DECOMPRESSION.md).
+For the active `markdown_streaming` path error handling, see [STREAMING_COMPATIBILITY.md](../features/STREAMING_COMPATIBILITY.md) and [DECOMPRESSION.md](../features/DECOMPRESSION.md).
 
 ## Rollback
 
@@ -299,7 +299,7 @@ nginx -s reload
 
 This immediately routes all requests back to the full-buffer path. Git history
 retains the pre-0.9.0 rollout playbook. Current operators should use the
-[Rollback Guide](../guides/ROLLBACK_GUIDE.md#rollback-methods).
+[Rollback Guide](../guides/OPERATIONAL_ROLLBACK.md#rollback-methods).
 
 ## Related Documents
 

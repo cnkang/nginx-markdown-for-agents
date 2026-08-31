@@ -149,8 +149,10 @@ def check_release_package_workflow_version(
     if not workflow:
         result.fail(RELEASE_VERSION_GATE, "release-packages.yml missing")
         return
+    # YAML scalars may be quoted or bare; accept both spellings so the
+    # gate tracks the declared value rather than one serialization style.
     match = re.search(
-        r'^\s*RELEASE_VERSION:\s*["\']([^"\']+)["\']\s*$',
+        r'^\s*RELEASE_VERSION:\s*["\']?([^"\'\s#]+)["\']?\s*$',
         workflow,
         re.MULTILINE,
     )

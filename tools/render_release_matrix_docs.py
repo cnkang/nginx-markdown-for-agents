@@ -67,7 +67,7 @@ END_RE = re.compile(
 # Section registry: maps target file (relative to ROOT) -> list of section names
 SECTION_REGISTRY: dict[str, list[str]] = {
     "README.md": ["support-matrix"],
-    "docs/COMPATIBILITY.md": ["compatibility-matrix"],
+    "docs/guides/PACKAGE_COMPATIBILITY.md": ["compatibility-matrix"],
     "docs/guides/INSTALLATION.md": ["installation-matrix"],
     "docs/project/PROJECT_STATUS.md": ["status-matrix"],
     "README_zh-CN.md": ["support-matrix"],
@@ -586,7 +586,7 @@ def _generate_platform_summary(
 def _generate_compatibility_matrix(
     entries: list[dict[str, Any]], data: dict[str, Any]
 ) -> str:
-    """Generate full compatibility details for docs/COMPATIBILITY.md.
+    """Generate full compatibility details for docs/guides/PACKAGE_COMPATIBILITY.md.
 
     Includes all columns: NGINX version, channel, OS, libc, arch, artifact,
     test level, tier, blocking flag, and owner workflow.

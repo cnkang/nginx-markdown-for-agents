@@ -154,8 +154,9 @@ EOF
 assert_detector_clean "${TMPDIR_TEST}/case4b" "same-line fi terminator"
 
 # Fixture 4c: an operand named `fi` must not close the current block before
-# the actual terminator.  The nested clean branch remains under the outer
-# negated branch and therefore its status read must still be flagged.
+# the actual terminator.  The nested `if true;` header executes its
+# condition, which refreshes $?, so the inner status read is legitimate and
+# must not be flagged.
 mkdir -p "${TMPDIR_TEST}/case4c"
 cat > "${TMPDIR_TEST}/case4c/terminator_operand.sh" << 'EOF'
 #!/bin/bash
@@ -166,10 +167,11 @@ if ! [ "$mode" = fi ]; then
     fi
 fi
 EOF
-assert_detector_flags "${TMPDIR_TEST}/case4c" \
+assert_detector_clean "${TMPDIR_TEST}/case4c" \
     "terminator operand is not a block close"
 
-# Fixture 5: nested control flow must retain the outer negated branch.
+# Fixture 5: a nested condition header refreshes $?, so the inner status
+# read is legitimate; the outer negated branch is no longer pending.
 mkdir -p "${TMPDIR_TEST}/case5"
 cat > "${TMPDIR_TEST}/case5/nested_branch.sh" << 'EOF'
 #!/bin/bash
@@ -184,7 +186,45 @@ if ! probe; then
 fi
 EOF
 
-assert_detector_flags "${TMPDIR_TEST}/case5" "nested negated branch"
+assert_detector_clean "${TMPDIR_TEST}/case5" "nested header refreshes status"
+
+# Fixture 6: after a command has executed inside the negated body, $? holds
+# that command status, so a later capture must not be flagged.
+mkdir -p "${TMPDIR_TEST}/case6"
+cat > "${TMPDIR_TEST}/case6/status_after_command.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+run_case() {
+    return 2
+}
+rc=0
+if ! run_case; then
+    echo "run_case failed" >&2
+    rc=$?
+fi
+if [[ "${rc}" == "2" ]]; then
+    echo "usage error path"
+fi
+EOF
+assert_detector_clean "${TMPDIR_TEST}/case6" "status read after a body command"
+
+# Fixture 7: a nested conditional header alone must refresh the pending
+# negated status even when the nested body never runs a command.
+mkdir -p "${TMPDIR_TEST}/case7"
+cat > "${TMPDIR_TEST}/case7/nested_header_refresh.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+probe() {
+    return 3
+}
+if ! probe; then
+    if true; then
+        status=$?
+        echo "status ${status}"
+    fi
+fi
+EOF
+assert_detector_clean "${TMPDIR_TEST}/case7" "nested conditional header refreshes status"
 
 # A detector crash must not be mistaken for a clean result.  This exercises
 # the shared status capture path with a deliberately missing executable.

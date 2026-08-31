@@ -101,19 +101,27 @@ curl -sD - -o "$SNAPSHOT_DIR/markdown-gzip.out" \
 ```
 
 The expected converted response has `Content-Type: text/markdown` and valid
-Markdown output. Capture isolated metric snapshots before and after the
-request, for example:
+Markdown output.
+
+Measure one known streaming-eligible request per before/after snapshot
+pair. The metrics endpoint runs on the NGINX host itself, so target the
+loopback address for snapshot capture:
 
 ```bash
-curl -s http://staging.example.com/markdown-metrics \
+# Pick the uncompressed request as the single measured request.
+curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' http://localhost/markdown-metrics \
   > "$SNAPSHOT_DIR/metrics.before"
-# Send the request shown above, then capture the after snapshot.
-curl -s http://staging.example.com/markdown-metrics \
+# Send exactly one streaming-eligible request between the snapshots,
+# then capture the after snapshot without any other conversion request.
+curl -s -H 'Accept: text/markdown' http://localhost/docs/ \
+  > /dev/null
+curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' http://localhost/markdown-metrics \
   > "$SNAPSHOT_DIR/metrics.after"
 ```
 
 Assert that `nginx_markdown_conversion_deliveries_total{engine="streaming"}`
-increases by exactly one. If you need byte accounting, compare the delta of
+increases by exactly one between the two snapshots for that single request.
+If you need byte accounting, compare the delta of
 `nginx_markdown_output_bytes_total`. Never use a delivery count as a byte
 measurement. A downstream `NGX_AGAIN` is a suspension, not a successful
 delivery.

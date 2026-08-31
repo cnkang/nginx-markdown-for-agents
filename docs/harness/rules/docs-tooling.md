@@ -71,13 +71,13 @@ Historical issues: writing-pass semantic drift found in the docs/kb-pilot
 review (`cae5450d`): passive-to-active rewrites that inverted meaning
 (budget exceeds, tail data must reject), dropped subjects, and removed
 requirements. The style gate exists to keep maintained docs readable by
-translators, NMT engines, and LLMs (see `docs/development/WRITING_GUIDE.md`).
+translators, NMT engines, and LLMs (see `docs/WRITING_GUIDE.md`).
 
 Required:
 - Maintained Markdown (current reader-facing root docs + `docs/`, excluding
   `docs/archive/` and gitignored paths) must follow the
   STE-inspired prose rules in
-  `docs/development/WRITING_GUIDE.md`: sentences ≤ 25 words (descriptive) /
+  `docs/WRITING_GUIDE.md`: sentences ≤ 25 words (descriptive) /
   ≤ 20 words (instructions), active voice, no Latin abbreviations
   (`e.g.`/`i.e.`/`etc.`), no contractions, no multi-word noun chains
   (≥ 4 capitalized words), no semicolon chains in prose.

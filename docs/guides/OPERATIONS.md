@@ -188,11 +188,17 @@ grep "conversion time" /var/log/nginx/error.log | awk '{print $NF}' | sort -n | 
 
 | Pattern | Severity | Meaning |
 |---------|----------|---------|
-| `markdown filter: conversion failed, category=conversion_error` | WARN | HTML parsing or Markdown generation failed |
-| `markdown filter: conversion failed, category=memory_budget_exceeded` | WARN | Memory limit reached |
-| `markdown filter: conversion failed, category=timeout` | WARN | Parser execution exceeded `parser_timeout` |
-| `markdown filter: conversion failed, category=ffi_panic` | ERROR | Internal/system error (Rust↔C panic) |
-| `markdown filter: conversion succeeded, time=XXXms` | INFO | Successful conversion with timing |
+| `markdown: outcome=failed_closed stage=... reason=failed_closed category=conversion` | WARN | HTML parsing or Markdown generation failed |
+| `markdown: outcome=failed_closed stage=... reason=failed_closed category=resource_limit` | WARN | Memory limit reached (buffered path; the specific code is the category, e.g. `memory_budget_exceeded`) |
+| `markdown: outcome=failed_closed stage=... reason=failed_closed category=resource_limit` | WARN | Parser or conversion deadline exceeded (buffered path) |
+| `markdown: outcome=failed_closed stage=... reason=failed_closed category=system` | ERROR | Internal/system error (Rust↔C panic) |
+| `markdown: outcome=converted stage=... reason=converted event=...` | INFO | Successful conversion with timing |
+
+`category=` is the high-level failure class (`conversion`, `resource_limit`,
+`system`), and `reason=` carries the specific reason-registry key
+(`conversion_error`, `memory_budget_exceeded`, `timeout`, `ffi_panic`, ...).
+Decision-log lines start with the `markdown:` prefix — matching on
+`grep "conversion failed"` will not find them.
 
 
 ### Health Checks
@@ -234,14 +240,20 @@ else
 fi
 
 FAILED=$(echo "$METRICS" | grep -E 'nginx_markdown_requests_total\{.*outcome="(failed_[^"]+|aborted)"' | awk '{sum += $2} END {print sum + 0}')
-ATTEMPTED=$(echo "$METRICS" | grep 'nginx_markdown_conversion_attempts_total' | awk '{sum += $2} END {print sum + 0}')
+# All-request failure rate: numerator and denominator come from the same
+# nginx_markdown_requests_total family, matching the Grafana "Failed request
+# rate" PromQL definition above (denominator: every request sample,
+# including skipped requests).  Do not divide by
+# conversion_attempts_total here: a failure before engine selection would
+# otherwise inflate the rate above 100 percent.
+TOTAL_REQUESTS=$(echo "$METRICS" | grep 'nginx_markdown_requests_total' | awk '{sum += $2} END {print sum + 0}')
 
-if [ "$ATTEMPTED" -eq 0 ]; then
-    echo "WARNING: No conversion attempts"
+if [ "$TOTAL_REQUESTS" -eq 0 ]; then
+    echo "WARNING: No requests observed"
     exit 1
 fi
 
-FAILURE_RATE=$(echo "scale=2; ($FAILED / $ATTEMPTED) * 100" | bc)
+FAILURE_RATE=$(echo "scale=2; ($FAILED / $TOTAL_REQUESTS) * 100" | bc)
 
 if (( $(echo "$FAILURE_RATE > 10" | bc -l) )); then
     echo "CRITICAL: Failure rate ${FAILURE_RATE}%"
@@ -334,23 +346,26 @@ curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/mar
 
 2. **Analyze error logs:**
 ```bash
-grep "conversion failed" /var/log/nginx/error.log | tail -50
+grep "markdown:" /var/log/nginx/error.log | \
+  grep -E "outcome=failed_(open|closed)" | tail -50
 ```
 
 3. **Identify failure patterns:**
 ```bash
 # Group by category
-grep "conversion failed" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
+  grep -E "outcome=failed_(open|closed)" | \
   grep -o 'category=[a-z_]*' | sort | uniq -c
 
 # Find problematic URLs
-grep "conversion failed" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
+  grep -E "outcome=failed_(open|closed)" | \
   grep -o 'uri=[^ ]*' | sort | uniq -c | sort -rn | head -10
 ```
 
 **Common Causes:**
 
-| Category | Cause | Solution |
+| Reason | Cause | Solution |
 |----------|-------|----------|
 | `conversion_error` | Malformed HTML | Investigate HTML source, improve error handling |
 | `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=...` or `parser_memory=...`) | Increase the relevant `markdown_limits` key, or exclude large/complex pages from conversion scope |
@@ -446,6 +461,11 @@ curl -H "Accept: text/markdown" http://localhost/test
 | 0.3.x | 1.24.0+ | Supported |
 | 0.3.x | < 1.24.0 | Not supported |
 
+> **Note**: The 0.3.x rows are historical. The authoritative, machine-readable
+> compatibility projection comes from the generator that reads `tools/release-matrix.json`
+> (see `docs/releases/release-matrix.json` for the generated document and
+> its `generated_from` binding).
+
 #### Rust Version Compatibility
 
 | Module Version | Rust Version | Status |
@@ -461,7 +481,7 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 - The 0.9.2 metrics layout is a breaking reset. Install the matching module
   and allow a graceful reload to create the new shared-memory layout. The
-  frozen v1 metrics surface exposes the current path counters.
+  frozen v1 metrics surface exposes bounded request and conversion counters.
 - The streaming path (`markdown_streaming off|auto|force`) controls runtime
   selection. `auto` uses an internal bounded heuristic. There is no
   operator-facing response-size threshold.
@@ -558,8 +578,8 @@ curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/mar
 
 2. **Identify failure category:**
 ```bash
-grep "conversion failed" /var/log/nginx/error.log | tail -50
-# Look for: category=conversion_error|memory_budget_exceeded|timeout|ffi_panic
+grep "markdown:" /var/log/nginx/error.log | grep -E "outcome=failed_(open|closed)" | tail -50
+# Look for: reason=conversion_error|memory_budget_exceeded|timeout|ffi_panic
 ```
 
 3. **Take action based on category:**
@@ -916,9 +936,13 @@ same string for each reason code. Streaming path transitions use a separate
 bounded `event=` field. They are not a second reason-code taxonomy. You can
 correlate a log entry directly with a metric counter without translation. The
 request-level outcome classifications (`converted`, `failed_open`,
-`failed_closed`, `skipped`) appear in `nginx_markdown_requests_total` as both
-`outcome` and `reason` label values. The finer failure sub-classification (the
-decision-log `category` field, for example `conversion_error`) is intentionally
+`failed_closed`, `skipped`) appear in `nginx_markdown_requests_total` as
+`outcome` (the terminal classification) and `reason` (the outcome-specific
+code) label values. For `skipped`, the reason label uses the specific skip
+code (`disabled`, `not_eligible`, `skipped_accept`, and so on), not the
+literal value `skipped`. The finer failure sub-classification (the
+decision-log `category` field, for example `conversion`, `resource_limit`,
+or `system`) is intentionally
 **not** exposed as a metric label value. See [Failure Sub-Classification
 Codes](#failure-sub-classification-codes) below.
 
@@ -966,12 +990,18 @@ records a bounded failure sub-classification in its `category` field. The
 outcome/reason labels. It does not expose these sub-classifications as metric
 reason values.
 
-| Failure Code | Description | Suggested Operator Action |
-|---|---|---|
-| `conversion_error` | HTML parse or conversion error | Inspect the failing HTML with `curl`. Check if the upstream changed its HTML structure. Report a bug if the HTML is valid. |
-| `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=...` or `parser_memory=...`) | Increase the relevant `markdown_limits` key, or exclude large/complex pages from conversion scope. |
-| `timeout` | Parser execution exceeded `markdown_limits parser_timeout=...` | Increase `markdown_limits parser_timeout=...` or exclude slow pages. |
-| `ffi_panic` | Internal/system error (Rust↔C panic) | Urgent — indicates an unexpected internal failure. Collect logs (`dmesg`) and report a bug. |
+The `category` field is the broad class (`conversion`, `resource_limit`,
+`system`), and the `reason` field is the specific reason-registry key.  The
+table
+below lists reasons by their category — a reason is a value of the `reason=`
+field, never a value of `category=`.
+
+| Category | Reason Code | Description | Suggested Operator Action |
+|---|---|---|---|
+| `conversion` | `conversion_error` | HTML parse or conversion error | Inspect the failing HTML with `curl`. Check if the upstream changed its HTML structure. Report a bug if the HTML is valid. |
+| `resource_limit` | `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=...` or `parser_memory=...`) | Increase the relevant `markdown_limits` key, or exclude large/complex pages from conversion scope. |
+| `resource_limit` | `timeout` | Parser execution exceeded `markdown_limits parser_timeout=...` | Increase `markdown_limits parser_timeout=...` or exclude slow pages. |
+| `system` | `ffi_panic` | Internal/system error (Rust↔C panic) | Urgent — indicates an unexpected internal failure. Collect logs (`dmesg`) and report a bug. |
 
 ### Request States
 
@@ -1034,7 +1064,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 grep "markdown:" /var/log/nginx/error.log | grep -c "reason=converted"
 
 # Count FAILED from logs
-grep "markdown:" /var/log/nginx/error.log | grep -cE 'reason=(failed_open|failed_closed)'
+grep "markdown:" /var/log/nginx/error.log | grep -cE 'outcome=(failed_open|failed_closed)'
 ```
 
 ### Reason Code and Metrics Label Alignment
@@ -1051,10 +1081,10 @@ The alignment works as follows:
 | Reason Code Category | Metrics Endpoint Field | Log Correlation | Example |
 |---|---|---|---|
 | Skip codes (`not_eligible`, `skipped_*`, `bypass_no_transform`) | `nginx_markdown_requests_total{outcome="skipped",reason="..."}` | `reason` field in decision log | `grep "reason=not_eligible" error.log` |
-| Failure categories (`conversion_error`, `memory_budget_exceeded`, `timeout`, `ffi_panic`) | Canonical failed outcome in `nginx_markdown_requests_total{outcome=~"failed_.*",reason=~"failed_open|failed_closed"}` | `category` field in decision log | `grep -E "category=(conversion_error|memory_budget_exceeded|timeout|ffi_panic)" error.log` |
+| Failure categories (`conversion`, `resource_limit`, `system`) | Canonical failed outcome in `nginx_markdown_requests_total{outcome=~"failed_(open|closed)"}` | `category` field in decision log | `grep -E "category=(conversion|resource_limit|system)" error.log` |
 | `converted` | `nginx_markdown_requests_total{outcome="converted"}` | `reason` field in decision log | `grep "reason=converted" error.log` |
-| `failed_open` | `nginx_markdown_requests_total{outcome="failed_open"}` | `reason` field in decision log | `grep "reason=failed_open" error.log` |
-| `failed_closed` | `nginx_markdown_requests_total{outcome="failed_closed"}` | `reason` field in decision log | `grep "reason=failed_closed" error.log` |
+| `failed_open` | `nginx_markdown_requests_total{outcome="failed_open"}` | `outcome` field in decision log | `grep "outcome=failed_open" error.log` |
+| `failed_closed` | `nginx_markdown_requests_total{outcome="failed_closed"}` | `outcome` field in decision log | `grep "outcome=failed_closed" error.log` |
 
 #### Correlating a Metric Spike with Logs
 
@@ -1063,11 +1093,11 @@ When you see a spike in a metric, use the same reason code string to find the co
 ```bash
 # Example: you see failed request samples increasing in the metrics endpoint
 # Find the matching log entries:
-grep "markdown:" /var/log/nginx/error.log | grep -E "category=(conversion_error|memory_budget_exceeded|timeout|ffi_panic)"
+grep "markdown:" /var/log/nginx/error.log | grep -E "category=(conversion|resource_limit|system)"
 
 # Example: you see failed_open or failed_closed samples increasing
-# Find the matching log entries:
-grep "markdown:" /var/log/nginx/error.log | grep -E 'reason=(failed_open|failed_closed)'
+# Find the matching log entries (outcome is the terminal classification):
+grep "markdown:" /var/log/nginx/error.log | grep -E 'outcome=(failed_open|failed_closed)'
 
 # See the full reason code distribution:
 grep "markdown:" /var/log/nginx/error.log | \
@@ -1078,7 +1108,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 
 - [Decision Chain Model](../features/DECISION_CHAIN.md) — full check order, flowchart, outcome determination, and implementation details
 - [Rollout Cookbook](ROLLOUT_COOKBOOK.md) — staged rollout procedures with observation checkpoints
-- [Rollback Guide](ROLLBACK_GUIDE.md) — how to disable or narrow conversion scope
+- [Rollback Guide](OPERATIONAL_ROLLBACK.md) — how to disable or narrow conversion scope
 
 ---
 
@@ -1167,7 +1197,7 @@ The `markdown_log_verbosity` directive controls which decision outcomes produce 
 | `info` (default) | All outcomes | Base | Recommended for rollout — full visibility into every decision |
 | `debug` | All outcomes | Extended (adds `filter_value`, `accept`, `status`) | Troubleshooting — maximum detail for diagnosing specific requests |
 
-At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, and `converted`) are silently suppressed. Both levels only emit failure outcomes such as `failed_open` and `failed_closed`. At `info` and `debug` levels, the full bounded outcome set is available. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`. The Prometheus `nginx_markdown_requests_total` family carries outcome-level reason values (for example `failed_open` and `failed_closed`) in its `reason` label. Specific failure reason codes such as `memory_budget_exceeded` and `timeout` appear in decision log entries, not in the `requests_total` `reason` label.
+At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, and `converted`) are silently suppressed. Both levels only emit failure outcomes such as `failed_open` and `failed_closed`. At `info` and `debug` levels, the full bounded outcome set is available. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`. The Prometheus `nginx_markdown_requests_total` family carries the terminal classification in its `outcome` label (`converted`, `failed_open`, `failed_closed`, `skipped`) and the outcome-specific code in its `reason` label. Specific failure reason codes such as `memory_budget_exceeded` and `timeout` appear in decision log entries, not in the `requests_total` `reason` label.
 
 #### Configuration examples
 
@@ -1231,7 +1261,7 @@ Example output:
 ```bash
 # Find all failures
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E 'reason=(failed_open|failed_closed)'
+  grep -E 'outcome=(failed_open|failed_closed)'
 ```
 
 #### Extract URIs that failed conversion
@@ -1277,7 +1307,7 @@ tail -f /var/log/nginx/error.log | grep "markdown:"
 - [Decision Chain Model](../features/DECISION_CHAIN.md) — check order, reason code definitions, and outcome determination
 - [Reason Code Reference](#reason-code-reference-for-operators) — complete reason code table with operator actions
 - [Rollout Cookbook](ROLLOUT_COOKBOOK.md) — observation checkpoints that use decision log patterns
-- [Rollback Guide](ROLLBACK_GUIDE.md) — verification steps that check decision log entries after rollback
+- [Rollback Guide](OPERATIONAL_ROLLBACK.md) — verification steps that check decision log entries after rollback
 
 ---
 
@@ -1288,7 +1318,7 @@ tail -f /var/log/nginx/error.log | grep "markdown:"
 - **Documentation Index:** [../README.md](../README.md)
 - **Performance Baselines:** [../testing/PERFORMANCE_BASELINES.md](../testing/PERFORMANCE_BASELINES.md)
 - **Integration Tests:** [../testing/INTEGRATION_TESTS.md](../testing/INTEGRATION_TESTS.md)
-- **Automatic Decompression:** [../features/AUTOMATIC_DECOMPRESSION.md](../features/AUTOMATIC_DECOMPRESSION.md)
+- **Decompression:** [../features/DECOMPRESSION.md](../features/DECOMPRESSION.md)
 - **E2E Tests:** [../testing/E2E_TESTS.md](../testing/E2E_TESTS.md)
 - **Requirements Traceability:** [../project/PROJECT_STATUS.md](../project/PROJECT_STATUS.md)
 - **Architecture Index:** [../architecture/README.md](../architecture/README.md)

@@ -270,7 +270,19 @@ auth_metrics_before="$(metrics_snapshot)" || {
 }
 auth_attempts_before="$(conversion_attempts_total "$auth_metrics_before")"
 auth_terminals_before="$(converted_terminal_total "$auth_metrics_before")"
-if auth_body="$(curl -fsS "${NGINX_URL}${AUTH_PAGE_PATH}")"; then
+# Probe the fixture without curl's fail-on-error flag: any HTTP status is a
+# real observation.  Only 404 counts as fixture absence; other error statuses
+# (401, 500, ...) mean the fixture exists but misbehaves.
+auth_body_file="$(mktemp)"
+auth_http_status=""
+auth_http_status="$(curl -sS -o "${auth_body_file}" -w '%{http_code}' \
+    "${NGINX_URL}${AUTH_PAGE_PATH}" 2>/dev/null)" || auth_http_status=""
+auth_body=""
+if [[ -n "${auth_http_status}" && -s "${auth_body_file}" ]]; then
+    auth_body="$(cat "${auth_body_file}")"
+fi
+rm -f "${auth_body_file}"
+if [[ "${auth_http_status}" == "200" ]]; then
     if echo "$auth_body" | grep -qE "^# |^[-*] "; then
         pass "auth_request-protected page served with converted content"
     elif echo "$auth_body" | grep -qE "<h1|<html|<body|<p[ >]"; then
@@ -303,6 +315,10 @@ if auth_body="$(curl -fsS "${NGINX_URL}${AUTH_PAGE_PATH}")"; then
     else
         fail "auth_request counters did not prove conversion and terminal delivery"
     fi
+elif [[ "${auth_http_status}" != "404" && -n "${auth_http_status}" ]]; then
+    # A fixture that answers with any status other than 200/404 exists but
+    # does not behave like the scenario fixture.
+    fail "auth_request fixture at ${AUTH_PAGE_PATH} answered HTTP ${auth_http_status}; expected 200"
 elif [[ "${REQUIRE_AUTH_SUBREQUEST:-0}" == "1" ]]; then
     # Final E2E qualification (decision D6): the subrequest_in_memory
     # path must be exercised; an absent fixture is a failure, not a skip.

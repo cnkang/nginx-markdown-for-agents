@@ -35,7 +35,7 @@ BOOLEAN_TRUSTED_PROXY_RE = re.compile(
     re.IGNORECASE,
 )
 UNRELEASED_CHANGELOG_RE = re.compile(
-    r"^## \[(?P<version>\d+\.\d+\.\d+)\] - Unreleased\s*$",
+    r"^ {0,3}##[ \t]+\[(?P<version>\d+\.\d+\.\d+)\][ \t]*-[ \t]*Unreleased(?:[ \t]+candidate)?[ \t]*$",
     re.MULTILINE,
 )
 
@@ -231,6 +231,41 @@ def check_operator_config_examples(files: list[Path]) -> list[str]:
     return errors
 
 
+def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[str]]:
+    """Return (version, errors) for the first unreleased changelog heading.
+
+    Every unreleased-like heading is inspected, not just the first match:
+    a valid heading followed later by a malformed one must still fail
+    closed, otherwise a typo'd line could silently survive the gate.  A
+    well-formed line yields its version; a heading that merely starts like
+    an unreleased line but carries an unexpected suffix produces an
+    explanatory error.
+    """
+    version: str | None = None
+    errors: list[str] = []
+    for match in re.finditer(
+        r"^ {0,3}##[^\n]*$",
+        changelog,
+        re.MULTILINE,
+    ):
+        line = match.group(0)
+        valid = UNRELEASED_CHANGELOG_RE.match(line)
+        if valid is not None:
+            if version is None:
+                version = valid.group("version")
+            continue
+        if "unreleased" in line.lower():
+            errors.append(
+                "CHANGELOG.md: malformed unreleased heading "
+                f"{line.strip()!r}; expected "
+                "'## [<version>] - Unreleased' or '## [<version>] - "
+                "Unreleased candidate' without suffix"
+            )
+    if errors:
+        return None, errors
+    return version, []
+
+
 def check_release_status_consistency(
     changelog_path: Path,
     project_status_path: Path,
@@ -238,11 +273,10 @@ def check_release_status_consistency(
 ) -> list[str]:
     """Keep an unreleased release line from being presented as stable."""
     changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
-    match = UNRELEASED_CHANGELOG_RE.search(changelog)
-    if match is None:
-        return []
+    version, errors = _find_unreleased_changelog_line(changelog)
+    if version is None:
+        return errors
 
-    version = match.group("version")
     project_status = project_status_path.read_text(
         encoding="utf-8",
         errors="ignore",
@@ -437,12 +471,14 @@ def main() -> int:
     failures.extend(check_operator_config_examples(files))
     changelog_path = ROOT / "CHANGELOG.md"
     changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
-    version_match = re.search(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
+    # Use the unreleased-changelog regex so validation targets the version
+    # under development, not the latest released version.
+    version_match, _ = _find_unreleased_changelog_line(changelog)
     release_notes_path = None
     if version_match:
         candidate_release_notes = (
             ROOT / "docs" / "releases"
-            / f"{version_match.group(1)}-release-notes.md"
+            / f"{version_match}-release-notes.md"
         )
         if candidate_release_notes.is_file():
             release_notes_path = candidate_release_notes

@@ -12,7 +12,7 @@
 #   /usr/share/doc/nginx-markdown-for-agents/README.md
 #   /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 #   /usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
-#   /usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
+#   /usr/share/doc/nginx-markdown-for-agents/PACKAGE_COMPATIBILITY.md
 #   /usr/share/licenses/nginx-markdown-for-agents/LICENSE
 #
 # USAGE:
@@ -57,7 +57,7 @@ FAIL_COUNT=0
 COMMON_REQUIRED_PATHS="/usr/share/doc/nginx-markdown-for-agents/README.md
 /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 /usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
-/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md
+/usr/share/doc/nginx-markdown-for-agents/PACKAGE_COMPATIBILITY.md
 /usr/share/licenses/nginx-markdown-for-agents/LICENSE"
 
 # ---------------------------------------------------------------------------

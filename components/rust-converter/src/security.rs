@@ -20,7 +20,9 @@
 //! # Defense Layers
 //!
 //! 1. **Input Validation**: Validate HTML structure and size before processing
-//! 2. **Element Sanitization**: Remove dangerous elements (script, style, etc.); strip tags but preserve content for form and embedded content elements (iframe, object, embed)
+//! 2. **Element Sanitization**: Remove dangerous elements (script, style, etc.);
+//!    strip safe container tags while applying the form-control privacy policy
+//!    and preserving safe embedded-content fallback text
 //! 3. **Attribute Sanitization**: Remove event handlers (`on*` prefix match) and dangerous attributes
 //! 4. **URL Sanitization**: Block javascript:, data:, and external URLs
 //! 5. **Entity Safety**: html5ever prevents XXE by default (no external entity resolution)
@@ -56,23 +58,91 @@ const EMBEDDED_CONTENT_ELEMENTS: &[&str] = &[
     "embed",  // Void element — no children, but src URL is valuable context
 ];
 
-/// Form-related elements whose tags are stripped but whose child content is
-/// preserved for Markdown conversion. These elements may carry meaningful text
-/// (labels, button captions, option lists) that AI agents benefit from seeing,
-/// but the raw HTML tags must not leak into the Markdown output.
+/// Form-related elements whose tags are stripped before Markdown conversion.
+/// Labels, button captions, option labels, and visible output text remain useful
+/// page content, while control values are handled by the shared input policy.
 const FORM_ELEMENTS: &[&str] = &[
     "form",     // Container — children often hold descriptive text
     "button",   // Caption text is useful context
     "select",   // Contains <option> text
-    "textarea", // May contain default/placeholder text
+    "textarea", // Placeholder/label may be useful; default text is user data
     "fieldset", // Groups related controls with a <legend>
     "legend",   // Label for a <fieldset>
     "label",    // Descriptive text for a control
-    "option",   // Individual choice text inside <select>
+    "option",   // Display label remains; the value attribute does not
     "optgroup", // Group label for options
-    "datalist", // Suggestion list
-    "output",   // Calculation result text
+    "datalist", // Display labels remain; suggestion values do not
+    "output",   // Visible calculation result text remains
 ];
+
+/// Normalize an input type for the shared value-privacy policy.
+///
+/// HTML input types are ASCII case-insensitive. Whitespace is intentionally
+/// preserved: `type=" button "` is not the exact `button` type and therefore
+/// must not receive the button value fallback.
+pub(crate) fn normalize_input_type(raw_type: Option<&str>) -> String {
+    raw_type.unwrap_or("text").to_ascii_lowercase()
+}
+
+/// Return whether an exact normalized input type may use its `value` as a
+/// description fallback.
+///
+/// Only `button` is allowed. All other input types treat `value` as submitted
+/// or prefilled user data rather than page-visible descriptive text.
+pub(crate) fn input_type_allows_value_fallback(normalized_type: &str) -> bool {
+    normalized_type == "button"
+}
+
+/// Return whether an exact normalized input type must emit no description.
+///
+/// Hidden, image, and password controls are fully suppressed. In particular,
+/// password controls do not expose even their accessible label or placeholder.
+pub(crate) fn input_type_is_suppressed(normalized_type: &str) -> bool {
+    matches!(normalized_type, "hidden" | "image" | "password")
+}
+
+/// Select descriptive text for an input-like control using the shared privacy
+/// policy.
+///
+/// Empty or whitespace-only attributes do not block the next fallback. Submit
+/// and reset controls use `value` as their button caption; only an exact
+/// `button` type may otherwise use `value`. The iterator owns no data, so the
+/// returned slice remains borrowed from the caller's attribute storage.
+pub(crate) fn select_input_control_text<'a, I>(normalized_type: &str, attrs: I) -> Option<&'a str>
+where
+    I: IntoIterator<Item = (&'a str, &'a str)>,
+{
+    if input_type_is_suppressed(normalized_type) {
+        return None;
+    }
+
+    let mut aria_label = None;
+    let mut placeholder = None;
+    let mut value = None;
+
+    for (name, attr_value) in attrs {
+        if attr_value.trim().is_empty() {
+            continue;
+        }
+
+        match name {
+            "aria-label" if aria_label.is_none() => aria_label = Some(attr_value),
+            "placeholder" if placeholder.is_none() => placeholder = Some(attr_value),
+            "value" if value.is_none() => value = Some(attr_value),
+            _ => {}
+        }
+    }
+
+    if matches!(normalized_type, "submit" | "reset") {
+        return value;
+    }
+
+    aria_label.or(placeholder).or_else(|| {
+        input_type_allows_value_fallback(normalized_type)
+            .then_some(value)
+            .flatten()
+    })
+}
 
 /// HTML attributes whose values can navigate to or load a URL.
 ///
@@ -226,9 +296,9 @@ pub enum SanitizeAction {
     Allow,
     /// Remove the element and all its children
     Remove,
-    /// Strip the element tag but keep child content for text extraction.
-    /// Used for form-related elements whose text is meaningful but whose
-    /// HTML structure must not leak into Markdown output.
+    /// Strip the element tag while applying the element-specific content policy.
+    /// Labels, option labels, and visible output text remain eligible for
+    /// extraction; privacy-sensitive control defaults do not.
     StripElement,
     /// Strip dangerous attributes but keep the element
     StripAttributes,
@@ -431,7 +501,11 @@ impl SecurityValidator {
     ///
     /// # Returns
     ///
-    /// Returns `None` if the URL is dangerous, `Some(url)` if safe.
+    /// Returns `None` if the URL is dangerous. Safe URLs are returned in their
+    /// canonical, outer-whitespace-trimmed form, including an empty string
+    /// when the caller supplied an empty destination. Control characters are
+    /// rejected before trimming so an attacker cannot hide one at either edge
+    /// of the value.
     ///
     /// # Examples
     ///
@@ -443,11 +517,7 @@ impl SecurityValidator {
     /// assert_eq!(validator.sanitize_url("https://example.com"), Some("https://example.com"));
     /// ```
     pub fn sanitize_url<'a>(&self, url: &'a str) -> Option<&'a str> {
-        if self.is_dangerous_url(url) {
-            None
-        } else {
-            Some(url)
-        }
+        sanitize_url_value(url)
     }
 
     /// Get a list of attributes to remove from an element
@@ -548,7 +618,7 @@ mod tests {
         assert!(validator.is_embedded_content("embed"));
         assert!(!validator.is_embedded_content("div"));
 
-        // Form elements should be stripped (tag removed, children kept)
+        // Form elements should be stripped (tag removed, policy decides content)
         assert_eq!(
             validator.check_element("form"),
             SanitizeAction::StripElement
@@ -720,6 +790,37 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_url_trims_safe_outer_whitespace_but_rejects_controls() {
+        let validator = SecurityValidator::new();
+
+        assert_eq!(
+            validator.sanitize_url("  https://example.com/path  "),
+            Some("https://example.com/path")
+        );
+        for url in [
+            "\thttps://example.com/path",
+            "https://example.com/pa\th",
+            "https://example.com/path\nnext",
+            "https://example.com/path\rnext",
+        ] {
+            assert_eq!(validator.sanitize_url(url), None, "control URL: {url:?}");
+        }
+    }
+
+    #[test]
+    fn markdown_destination_escaping_is_shared_and_capacity_exact() {
+        let url = r"https://example.com/a\\b<c>d (x)";
+        let escaped = escape_markdown_destination(url);
+
+        assert_eq!(escaped.as_ref(), r"<https://example.com/a\\\\b\<c\>d (x)>");
+        assert_eq!(
+            markdown_destination_escaped_capacity(url),
+            Some(escaped.len())
+        );
+        assert_eq!(markdown_destination_escaped_capacity("safe"), Some(0));
+    }
+
+    #[test]
     fn test_xxe_prevention_documentation() {
         let doc = xxe_prevention_documentation();
         assert!(doc.contains("html5ever"));
@@ -819,10 +920,10 @@ pub fn validate_link_url(url: &str) -> Result<(), &'static str> {
 /// become a Rust `str`; the FFI/parser boundary rejects malformed UTF-8 before
 /// this helper is reached.
 pub(crate) fn is_dangerous_url_value(url: &str) -> bool {
-    let trimmed = url.trim();
-    if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
+    if url.chars().any(|ch| ch == '\0' || ch.is_control()) {
         return true;
     }
+    let trimmed = url.trim();
     if contains_percent_encoded_control(trimmed) {
         return true;
     }
@@ -842,6 +943,77 @@ pub(crate) fn is_dangerous_url_value(url: &str) -> bool {
     DANGEROUS_URL_SCHEMES
         .iter()
         .any(|scheme| url_lower.starts_with(scheme))
+}
+
+/// Return a safe URL in the canonical form shared by both converter paths.
+///
+/// Outer ordinary whitespace is presentation noise and is removed. All
+/// control characters, including TAB, CR, and LF, are rejected before that
+/// normalization; percent-encoded controls remain rejected as well. Empty
+/// destinations remain valid after canonicalization so existing callers keep
+/// their empty-destination behavior.
+pub(crate) fn sanitize_url_value(url: &str) -> Option<&str> {
+    if is_dangerous_url_value(url) {
+        return None;
+    }
+
+    Some(url.trim())
+}
+
+/// Return the exact temporary capacity needed by [`escape_markdown_destination`].
+///
+/// `Some(0)` means that the input can be borrowed without an escaped copy;
+/// it is also the valid result for an empty input. Callers must therefore use
+/// the value as a no-allocation sentinel rather than as the input length.
+pub(crate) fn markdown_destination_escaped_capacity(url: &str) -> Option<usize> {
+    let needs_escape = url
+        .chars()
+        .any(|ch| matches!(ch, ' ' | '(' | ')' | '<' | '>' | '\\' | '\n' | '\r' | '\t'));
+    if !needs_escape {
+        return Some(0);
+    }
+
+    let mut capacity = 2usize;
+    for ch in url.chars() {
+        let additional = match ch {
+            '<' | '>' | '\\' | '\n' | '\r' | '\t' => 2,
+            _ => ch.len_utf8(),
+        };
+        capacity = capacity.checked_add(additional)?;
+    }
+    Some(capacity)
+}
+
+/// Escape a URL for use as a Markdown link or image destination.
+///
+/// Destinations containing Markdown-sensitive whitespace, delimiters, or
+/// control-like line characters are enclosed in angle brackets. Delimiters
+/// are backslash-escaped inside the wrapper. Sanitized production URLs do not
+/// contain raw controls, but escaping them here keeps this helper safe for
+/// every direct caller and makes the full-buffer and streaming emitters share
+/// one canonical representation.
+pub(crate) fn escape_markdown_destination(url: &str) -> Cow<'_, str> {
+    let capacity =
+        markdown_destination_escaped_capacity(url).unwrap_or_else(|| url.len().saturating_add(4));
+    if capacity == 0 {
+        return Cow::Borrowed(url);
+    }
+
+    let mut escaped = String::with_capacity(capacity);
+    escaped.push('<');
+    for ch in url.chars() {
+        match ch {
+            '<' => escaped.push_str("\\<"),
+            '>' => escaped.push_str("\\>"),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped.push('>');
+    Cow::Owned(escaped)
 }
 
 fn contains_percent_encoded_control(url: &str) -> bool {
@@ -918,6 +1090,44 @@ pub fn parse_forwarded_headers(
     Some((scheme, host.to_string()))
 }
 
+#[derive(Clone, Copy)]
+enum LinkLabelEscapeAction {
+    Copy,
+    Escape,
+    ReplaceWithSpace,
+}
+
+fn link_label_escape_action(ch: char) -> LinkLabelEscapeAction {
+    match ch {
+        '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' => LinkLabelEscapeAction::Escape,
+        '\n' | '\r' => LinkLabelEscapeAction::ReplaceWithSpace,
+        _ => LinkLabelEscapeAction::Copy,
+    }
+}
+
+/// Return the exact temporary capacity needed by [`escape_link_label`].
+///
+/// A label without transformations stays borrowed and needs no temporary
+/// allocation. A transformed label receives its exact escaped byte length,
+/// so callers can reserve and charge the same amount as the escaper.
+pub(crate) fn link_label_escaped_capacity(s: &str) -> Option<usize> {
+    let mut capacity = 0usize;
+    let mut needs_owned = false;
+
+    for ch in s.chars() {
+        let action = link_label_escape_action(ch);
+        let byte_len = match action {
+            LinkLabelEscapeAction::Copy => ch.len_utf8(),
+            LinkLabelEscapeAction::Escape => ch.len_utf8().checked_add(1)?,
+            LinkLabelEscapeAction::ReplaceWithSpace => 1,
+        };
+        capacity = capacity.checked_add(byte_len)?;
+        needs_owned |= !matches!(action, LinkLabelEscapeAction::Copy);
+    }
+
+    if needs_owned { Some(capacity) } else { Some(0) }
+}
+
 /// Escape a string for safe use as a Markdown link label.
 ///
 /// Per CommonMark §4.7, link labels may contain backslash escapes.
@@ -929,26 +1139,28 @@ pub fn parse_forwarded_headers(
 /// emitter and the full-buffer traversal both delegate here so the escaping
 /// rule cannot drift between emission sites (AGENTS.md Rule 27).
 pub fn escape_link_label<'a>(s: &'a str) -> Cow<'a, str> {
-    let first_escape = s.char_indices().find(|(_, ch)| {
-        matches!(
-            ch,
-            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' | '\n' | '\r'
-        )
-    });
+    let capacity = link_label_escaped_capacity(s).unwrap_or(s.len());
+    if capacity == 0 {
+        return Cow::Borrowed(s);
+    }
+
+    let first_escape = s
+        .char_indices()
+        .find(|(_, ch)| !matches!(link_label_escape_action(*ch), LinkLabelEscapeAction::Copy));
     let Some((first_index, _)) = first_escape else {
         return Cow::Borrowed(s);
     };
 
-    let mut out = String::with_capacity(s.len() + 8);
+    let mut out = String::with_capacity(capacity);
     out.push_str(&s[..first_index]);
     for ch in s[first_index..].chars() {
-        match ch {
-            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' => {
+        match link_label_escape_action(ch) {
+            LinkLabelEscapeAction::Escape => {
                 out.push('\\');
                 out.push(ch);
             }
-            '\n' | '\r' => out.push(' '),
-            _ => out.push(ch),
+            LinkLabelEscapeAction::ReplaceWithSpace => out.push(' '),
+            LinkLabelEscapeAction::Copy => out.push(ch),
         }
     }
     Cow::Owned(out)
@@ -1179,6 +1391,26 @@ mod url_validation_tests {
         );
         assert_eq!(escape_link_label("a\nb"), "a b");
         assert_eq!(escape_link_label("a\rb"), "a b");
+    }
+
+    #[test]
+    fn test_escape_link_label_capacity_matches_all_escapable_bytes() {
+        let label = "[]\\<>*_`~\n";
+        let expected = r"\[\]\\\<\>\*\_\`\~ ";
+
+        assert_eq!(link_label_escaped_capacity(label), Some(expected.len()));
+        let escaped = escape_link_label(label);
+        assert_eq!(escaped.as_ref(), expected);
+        match escaped {
+            Cow::Owned(value) => assert!(value.capacity() >= expected.len()),
+            Cow::Borrowed(_) => panic!("an escaped label must own its output"),
+        }
+    }
+
+    #[test]
+    fn test_plain_link_label_needs_no_temporary_capacity() {
+        assert_eq!(link_label_escaped_capacity("plain label"), Some(0));
+        assert!(matches!(escape_link_label("plain label"), Cow::Borrowed(_)));
     }
 
     #[test]

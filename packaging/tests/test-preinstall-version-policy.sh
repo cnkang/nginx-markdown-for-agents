@@ -217,6 +217,12 @@ fi
 fake_nginx "1.26.3"
 unresolved_script="$(sed -e "s|^TRUSTED_PATH_ROOT=\"\"$|TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\"|" \
     "${PREINSTALL}")"
+# Assert the TRUSTED_PATH_ROOT substitution landed exactly like run_preinstall
+# does: a silent substitution failure would test an unhardened script.
+if ! echo "${unresolved_script}" | grep -q "TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\""; then
+    echo "FATAL: TRUSTED_PATH_ROOT substitution failed — test infrastructure broken" >&2
+    exit 2
+fi
 rc=0
 bash -c "${unresolved_script}" preinstall.sh install 2>/dev/null || rc=$?
 if [[ "${rc}" -eq 1 ]]; then

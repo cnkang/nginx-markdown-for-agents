@@ -274,6 +274,12 @@ conversion or apply `markdown_error_policy` before committing headers.
 - Preserve or restore upstream HTML response headers.
 - Metric: `streaming_fallback_total{phase="precommit",action="pass"}`
 
+Original-HTML passthrough is available **only while the replay buffer still
+covers every upstream byte read so far** (see §3.1). When replay is
+incomplete and headers are not yet committed, the module MUST NOT pass
+through: it must continue safe streaming conversion or apply
+`markdown_error_policy` (reject) before committing headers.
+
 #### `markdown_error_policy fail_closed`
 
 - If headers have not been sent, return 502.
@@ -286,6 +292,25 @@ full-buffer conversion, provided the response remains within configured
 full-buffer resource limits (for example `markdown_limits conversion_memory=`
 and the memory budget):
 
+When the module selects the full-buffer path, its deadline contract follows
+[PARSER_BUDGET.md](../features/PARSER_BUDGET.md). At the pre-parse and
+post-parse checkpoints, the converter checks `parser_timeout=` before
+`conversion_timeout=`. The converter measures the parser deadline from
+`conversion_start` for the pre-parse check and from `parse_start` for the
+post-parse check. It measures `conversion_timeout=` from `conversion_start`
+at both checkpoints. It then uses that overall deadline for traversal and
+output. If elapsed time exceeds both deadlines at a shared checkpoint, the
+converter reports parser timeout. A zero `conversion_timeout=` leaves a
+nonzero `parser_timeout=` active. The two deadlines do not collapse into an
+earlier-of deadline.
+
+This ordering is specific to the full-buffer FFI checkpoints. True streaming
+uses a wall-clock `conversion_timeout=` and checks it at `feed_chunk` and
+`finalize` entry. It accumulates html5ever tokenizer work for
+`parser_timeout=` and checks that allowance at tokenizer-slice and
+finalization boundaries. Idle time between streaming chunks does not consume
+the parser allowance.
+
 - Strict ETag / `If-None-Match` handling that requires computing an ETag from
   the complete Markdown output.
 - Front matter fields that depend on full-text scanning to produce stable
@@ -297,9 +322,24 @@ and the memory budget):
 - `markdown_streaming auto` and the module assesses streaming risk
   outweighs benefit.
 
-If the response would exceed full-buffer resource limits, fallback proceeds to
-passthrough or reject according to the applicable `markdown_error_policy`.
-Exceeding the limits triggers the fallback path. The module then applies the configured policy.
+If the response would exceed the full-buffer **input-size** limit
+(`markdown_limits conversion_memory=`) **and the size is
+known at header time** (Content-Length present), the eligibility gate
+rejects it **before any conversion attempt**: the module records the
+request as `not_eligible` (reason `not_eligible`) and does **not**
+increment `nginx_markdown_conversion_attempts_total` nor assign
+`engine="full_buffer"`, because conversion never starts. The module
+forwards the original response without evaluating `markdown_error_policy`
+(prechecked passthrough). Generated-output, transient-working-set, and
+`parser_memory` failures are **not** prechecked at header time: they can
+only appear during conversion, so those cases go through
+`markdown_error_policy` like any other conversion failure.
+
+When the size is **not known at header time** (chunked or no
+Content-Length), the request enters the buffering pipeline and the body
+filter enforces the limit. Exceeding it there counts as an attempted
+conversion that failed (increments `conversion_attempts_total` and the
+matching failure counter, then applies `markdown_error_policy`).
 
 Full-buffer fallback is **not** an error. It is a normal `auto`-mode decision.
 
@@ -437,7 +477,7 @@ The following files MUST NOT contain hand-maintained support matrices:
 
 - `README.md`
 - `README_zh-CN.md`
-- `docs/COMPATIBILITY.md`
+- `docs/guides/PACKAGE_COMPATIBILITY.md`
 - `docs/guides/INSTALLATION.md`
 - `docs/project/PROJECT_STATUS.md`
 - `docs/guides/PACKAGE_DISTRIBUTION.md`

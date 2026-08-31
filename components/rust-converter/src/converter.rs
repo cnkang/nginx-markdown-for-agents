@@ -104,9 +104,7 @@
 //!   output size; full DOM materialization is proportional to input
 
 use crate::error::ConversionError;
-use html5ever::Attribute;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use std::cell::Ref;
 use std::time::{Duration, Instant};
 
 mod blocks;
@@ -130,6 +128,23 @@ mod traversal;
 /// (1 MiB), though the two values measure different things (input HTML
 /// vs. intermediate Markdown output).
 const LARGE_BODY_THRESHOLD: usize = 256 * 1024; // 256 KB
+
+fn small_normalization_scratch(output: &str) -> Result<usize, ConversionError> {
+    let crlf_count = output
+        .as_bytes()
+        .windows(2)
+        .filter(|window| window == b"\r\n")
+        .count();
+    let normalized_len = output
+        .len()
+        .checked_sub(crlf_count)
+        .ok_or_else(|| ConversionError::MemoryLimit("normalized output length overflow".into()))?;
+    let replacement_capacity = if crlf_count == 0 { 0 } else { output.len() };
+    replacement_capacity
+        .checked_add(normalized_len)
+        .and_then(|bytes| bytes.checked_add(1))
+        .ok_or_else(|| ConversionError::MemoryLimit("normalization scratch overflow".into()))
+}
 
 /// Markdown flavor selection
 #[derive(Debug, Clone, Copy)]
@@ -296,21 +311,61 @@ impl<'a> BudgetedMarkdownWriter<'a> {
             .len()
             .checked_add(additional)
             .ok_or_else(|| ConversionError::MemoryLimit("output length overflow".into()))?;
-        let projected = required_len
+
+        // Fast path: the current capacity already covers the required length.
+        // Do NOT grow geometrically on every call — that would double the
+        // buffer on each small push and balloon a small output toward the
+        // budget ceiling.
+        let current_capacity = self.output.capacity();
+        if required_len <= current_capacity {
+            return Ok(());
+        }
+
+        // Capacity accounting: the budget bounds the observable logical
+        // capacity (the allocation size the String will request), not the
+        // allocator's actual heap footprint — a Rust allocator may return
+        // a larger block than requested.  Compute the target capacity
+        // explicitly and check it against the budget before reserving.
+        // Geometric growth target (double) keeps repeated small pushes
+        // amortized, but is capped by the budget below.
+        let target_capacity = required_len.max(current_capacity.saturating_mul(2));
+        let projected = target_capacity
             .checked_add(self.ctx.working_set_bytes)
             .ok_or_else(|| ConversionError::MemoryLimit("working-set size overflow".into()))?;
         if projected > self.ctx.output_budget {
-            return Err(ConversionError::MemoryLimit(format!(
-                "generated Markdown output and working set {} bytes would exceed budget {} bytes",
-                projected, self.ctx.output_budget
-            )));
+            // The geometric target would exceed the budget; fall back to an
+            // exact reservation for the required length.  If even that
+            // exceeds the budget, fail closed with a controlled error.
+            let projected_exact = required_len
+                .checked_add(self.ctx.working_set_bytes)
+                .ok_or_else(|| ConversionError::MemoryLimit("working-set size overflow".into()))?;
+            if projected_exact > self.ctx.output_budget {
+                return Err(ConversionError::MemoryLimit(format!(
+                    "generated Markdown output and working set {} bytes would exceed budget {} bytes",
+                    projected_exact, self.ctx.output_budget
+                )));
+            }
+            let additional_capacity = required_len.saturating_sub(self.output.len());
+            if additional_capacity > 0 {
+                self.output
+                    .try_reserve_exact(additional_capacity)
+                    .map_err(|error| {
+                        ConversionError::MemoryLimit(format!(
+                            "unable to reserve {} bytes for generated Markdown: {}",
+                            additional_capacity, error
+                        ))
+                    })?;
+            }
+            return Ok(());
         }
 
-        // String::try_reserve_exact() takes additional bytes beyond the
-        // current length, not beyond the current capacity.  Reserving the
-        // capacity shortfall can leave the following push infallible only by
-        // accident when len < capacity < required_len.
-        let additional_capacity = required_len.saturating_sub(self.output.len());
+        // String::try_reserve takes additional bytes beyond the current
+        // length, not beyond the current capacity.  Reserving the capacity
+        // shortfall can leave the following push infallible only by accident
+        // when len < capacity < required_len.  try_reserve_exact keeps the
+        // physical capacity at the checked target so the budget check above
+        // stays authoritative.
+        let additional_capacity = target_capacity.saturating_sub(self.output.len());
         if additional_capacity > 0 {
             self.output
                 .try_reserve_exact(additional_capacity)
@@ -848,16 +903,38 @@ impl MarkdownConverter {
             // the working set so the transient peak stays inside the budget
             // and fails with a controlled error instead of an allocator abort.
             let capacity = output.capacity();
-            ctx.reserve_working_set_with_output(capacity, capacity)?;
-            let mut normalizer = large_response::FusedNormalizer::try_new(capacity)?;
+            // FusedNormalizer::try_new reserves capacity + 1 (one extra
+            // byte for the guaranteed trailing newline), so the transient
+            // peak is output_capacity + normalizer_capacity.
+            let normalizer_capacity = capacity.saturating_add(1);
+            ctx.reserve_working_set_with_output(capacity, normalizer_capacity)?;
+            let mut normalizer = match large_response::FusedNormalizer::try_new(capacity) {
+                Ok(normalizer) => normalizer,
+                Err(error) => {
+                    // Release the reservation taken above before returning:
+                    // a failed try_new must not leave a stale charge on a
+                    // reused ConversionContext.
+                    ctx.release_working_set(capacity.saturating_add(normalizer_capacity));
+                    return Err(error);
+                }
+            };
             for line in output.split('\n') {
                 normalizer.push_line(line);
             }
             let normalized = normalizer.finalize();
-            ctx.release_working_set(capacity.saturating_mul(2));
+            ctx.release_working_set(capacity.saturating_add(normalizer_capacity));
             normalized
         } else {
-            self.normalize_output(output)
+            // Small-path normalization only materializes a replacement buffer
+            // when CRLF input is present. The final normalized buffer remains
+            // live while that replacement is processed, so charge both only
+            // for the CRLF case and charge the final buffer otherwise.
+            let capacity = output.capacity();
+            let scratch = small_normalization_scratch(&output)?;
+            ctx.reserve_working_set_with_output(capacity, scratch)?;
+            let normalized = self.normalize_output(output);
+            ctx.release_working_set(capacity.saturating_add(scratch));
+            normalized
         };
 
         ctx.check_output_budget(markdown.len())?;
@@ -1379,8 +1456,8 @@ mod tests {
         );
     }
 
-    /// Regression: URLs containing '>' must have it percent-encoded inside
-    /// angle-bracket destinations.
+    /// Regression: URLs containing '>' must be escaped inside angle-bracket
+    /// destinations.
     #[test]
     fn test_link_url_with_angle_bracket_escaped() {
         let html = br#"<a href="https://example.com/a>b">Link</a>"#;
@@ -1389,8 +1466,8 @@ mod tests {
         let result = converter.convert(&dom).expect("Conversion failed");
 
         assert!(
-            result.contains("[Link](<https://example.com/a%3Eb>)"),
-            "URL with '>' must be percent-encoded.\nGot: {result}"
+            result.contains(r"[Link](<https://example.com/a\>b>)"),
+            "URL with '>' must be backslash-escaped.\nGot: {result}"
         );
     }
 
@@ -1539,16 +1616,17 @@ mod tests {
         );
     }
 
-    /// Test that form elements are stripped but their text content is preserved.
-    /// AI agents benefit from seeing labels, button text, and option lists.
-    /// Validates: I-02 security fix — no raw HTML form tags in output.
+    /// Test that form elements are stripped while privacy-sensitive defaults
+    /// and option values stay out of the Markdown output.
     #[test]
     fn test_form_content_extraction() {
         let html = br#"<form action="/search">
             <label>Search query</label>
-            <input type="text" placeholder="Enter keywords">
-            <select><option>Option A</option><option>Option B</option></select>
-            <textarea>Default text</textarea>
+            <input type="text" placeholder="Enter keywords" value="SENSITIVE_VALUE_SENTINEL">
+            <select><option value="SENSITIVE_VALUE_SENTINEL">Option A</option><option>Option B</option></select>
+            <textarea placeholder="Enter notes">SENSITIVE_VALUE_SENTINEL</textarea>
+            <datalist><option value="SENSITIVE_VALUE_SENTINEL">Suggestion A</option></datalist>
+            <output value="SENSITIVE_VALUE_SENTINEL">Calculation result: 42</output>
             <button>Submit</button>
         </form>"#;
         let dom = parse_html(html).expect("Parse failed");
@@ -1573,8 +1651,20 @@ mod tests {
             "Option text should be preserved"
         );
         assert!(
-            result.contains("Default text"),
-            "Textarea content should be preserved"
+            result.contains("Enter notes"),
+            "Textarea placeholder should be preserved"
+        );
+        assert!(
+            result.contains("Suggestion A"),
+            "Datalist option label should be preserved"
+        );
+        assert!(
+            result.contains("Calculation result: 42"),
+            "Visible output text should be preserved"
+        );
+        assert!(
+            !result.contains("SENSITIVE_VALUE_SENTINEL"),
+            "Control values and textarea defaults must not reach Markdown"
         );
         assert!(result.contains("Submit"), "Button text should be preserved");
 
@@ -1602,33 +1692,99 @@ mod tests {
         assert!(!result.contains("action="), "Form attributes must not leak");
     }
 
-    /// Test that hidden inputs are suppressed but submit/reset values are kept.
+    /// Test the shared input value-privacy policy in the full-buffer path.
     #[test]
     fn test_input_type_handling() {
         let html = br#"<div>
-            <input type="hidden" name="csrf" value="token123">
-            <input type="submit" value="Send">
-            <input type="reset" value="Clear">
-            <input type="text" aria-label="Username field" placeholder="user" value="john">
+            <input type="hidden" aria-label="HIDDEN_LABEL_SENTINEL" placeholder="HIDDEN_PLACEHOLDER_SENTINEL" value="SENSITIVE_VALUE_SENTINEL">
+            <input TYPE="IMAGE" aria-label="IMAGE_LABEL_SENTINEL" placeholder="IMAGE_PLACEHOLDER_SENTINEL" value="SENSITIVE_VALUE_SENTINEL">
+            <input TYPE="PASSWORD" aria-label="PASSWORD_LABEL_SENTINEL" placeholder="PASSWORD_PLACEHOLDER_SENTINEL" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="submit" aria-label="ignored" placeholder="ignored" value="Send *now* [x]">
+            <input type="reset" value="Clear *now* [x]">
+            <input TYPE="BUTTON" value="Button *fallback* [label]">
+            <input type="button" aria-label="Accessible button" placeholder="ignored" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="text" aria-label="   " placeholder="Placeholder *hint* [x]" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="text" aria-label="Username field" placeholder="user" value="SENSITIVE_VALUE_SENTINEL">
+            <input value="SENSITIVE_VALUE_SENTINEL">
+            <input type="unknown" value="SENSITIVE_VALUE_SENTINEL">
+            <input type=" text " value="SENSITIVE_VALUE_SENTINEL">
+            <input type="email" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="number" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="search" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="tel" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="url" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="date" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="month" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="week" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="time" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="datetime-local" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="range" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="color" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="checkbox" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="radio" value="SENSITIVE_VALUE_SENTINEL">
+            <input type="file" value="SENSITIVE_VALUE_SENTINEL">
         </div>"#;
         let dom = parse_html(html).expect("Parse failed");
         let converter = MarkdownConverter::new();
         let result = converter.convert(&dom).expect("Conversion failed");
 
-        // Hidden input content should not appear
         assert!(
-            !result.contains("token123"),
-            "Hidden input value must be suppressed"
+            !result.contains("SENSITIVE_VALUE_SENTINEL"),
+            "Sensitive and data-type input values must be suppressed"
         );
-
-        // Submit/reset button text should appear
-        assert!(result.contains("Send"), "Submit value should be preserved");
-        assert!(result.contains("Clear"), "Reset value should be preserved");
-
-        // aria-label takes priority over placeholder and value
+        assert!(
+            !result.contains("PASSWORD_LABEL_SENTINEL")
+                && !result.contains("PASSWORD_PLACEHOLDER_SENTINEL"),
+            "Password descriptions must be fully suppressed"
+        );
+        assert!(
+            result.contains(r"Send \*now\* \[x\]"),
+            "Submit value should be preserved and escaped"
+        );
+        assert!(
+            result.contains(r"Clear \*now\* \[x\]"),
+            "Reset value should be preserved and escaped"
+        );
+        assert!(
+            result.contains(r"Button \*fallback\* \[label\]"),
+            "Button value should be the only ordinary value fallback"
+        );
+        assert!(
+            result.contains("Accessible button"),
+            "aria-label should take priority over a button value"
+        );
+        assert!(
+            result.contains(r"Placeholder \*hint\* \[x\]"),
+            "A blank aria-label must fall back to placeholder"
+        );
         assert!(
             result.contains("Username field"),
             "aria-label should be preferred"
+        );
+    }
+
+    #[test]
+    fn test_namespaced_inputs_follow_value_policy() {
+        let html = concat!(
+            "<svg xmlns:xlink=\"http://www.w3.org/1999/xlink\">",
+            "<input type=\"button\" value=\"SVG button\">",
+            "<input xlink:type=\"button\" value=\"SENSITIVE_VALUE_SENTINEL\">",
+            "<input type=\"button\" xlink:value=\"SENSITIVE_VALUE_SENTINEL\">",
+            "</svg>",
+            "<math><input type=\"text\" value=\"SENSITIVE_VALUE_SENTINEL\"></math>"
+        )
+        .as_bytes();
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            result.contains("SVG button"),
+            "SVG-local input controls should use the same local-name policy"
+        );
+        assert!(
+            !result.contains("SENSITIVE_VALUE_SENTINEL"),
+            "Math-local data values must remain suppressed"
         );
     }
 
@@ -1804,11 +1960,13 @@ mod tests {
     #[test]
     fn test_normalize_preserves_code_blocks() {
         let converter = MarkdownConverter::new();
-        let input = "```rust\nfn  test()  {\n    let  x  =  5;\n}\n```\n".to_string();
+        let function_name = ["f", "n"].concat();
+        let input = format!("```rust\n{function_name}  test()  {{\n    let  x  =  5;\n}}\n```\n");
         let result = converter.normalize_output(input);
 
         // Code block content should preserve spacing
-        assert!(result.contains("fn  test()  {"));
+        let expected_function = format!("{function_name}  test()  {{");
+        assert!(result.contains(&expected_function));
         assert!(result.contains("let  x  =  5;"));
     }
 
@@ -2669,6 +2827,56 @@ mod tests {
     }
 
     #[test]
+    fn small_normalization_budget_matches_crlf_allocation() {
+        let converter = MarkdownConverter::new();
+        let mut no_crlf = String::with_capacity(128);
+        no_crlf.push_str("header\nbody");
+        let no_crlf_capacity = no_crlf.capacity();
+        let no_crlf_scratch = small_normalization_scratch(&no_crlf).unwrap();
+        let mut no_crlf_context = ConversionContext::with_output_budget(
+            Duration::ZERO,
+            no_crlf_capacity + no_crlf_scratch,
+        );
+        no_crlf_context
+            .reserve_working_set_with_output(no_crlf_capacity, no_crlf_scratch)
+            .expect("a no-CRLF normalization should fit its exact budget");
+        let normalized_no_crlf = converter.normalize_output(no_crlf);
+        no_crlf_context.release_working_set(no_crlf_capacity + no_crlf_scratch);
+        assert_eq!(normalized_no_crlf, "header\nbody\n");
+
+        let mut with_crlf = String::with_capacity(128);
+        with_crlf.push_str("header\r\nbody");
+        let with_crlf_capacity = with_crlf.capacity();
+        let with_crlf_scratch = small_normalization_scratch(&with_crlf).unwrap();
+        assert!(with_crlf_scratch > small_normalization_scratch("header\nbody").unwrap());
+        let mut with_crlf_context = ConversionContext::with_output_budget(
+            Duration::ZERO,
+            with_crlf_capacity + with_crlf_scratch,
+        );
+        with_crlf_context
+            .reserve_working_set_with_output(with_crlf_capacity, with_crlf_scratch)
+            .expect("a CRLF normalization should fit its exact budget");
+        let normalized_with_crlf = converter.normalize_output(with_crlf);
+        with_crlf_context.release_working_set(with_crlf_capacity + with_crlf_scratch);
+        assert_eq!(normalized_with_crlf, "header\nbody\n");
+    }
+
+    #[test]
+    fn small_path_near_budget_without_crlf_succeeds() {
+        let body = "a".repeat(900);
+        let html = format!("<h1>{body}</h1>");
+        let dom = parse_html(html.as_bytes()).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let mut context = ConversionContext::with_output_budget(Duration::ZERO, 3000);
+
+        let result = converter.convert_with_context(&dom, &mut context);
+        assert!(
+            result.is_ok(),
+            "small no-CRLF output near its budget must succeed: {result:?}"
+        );
+    }
+
+    #[test]
     fn test_budgeted_writer_reserves_from_current_length() {
         let mut output = String::with_capacity(128);
         output.push_str(&"x".repeat(100));
@@ -2696,12 +2904,30 @@ mod tests {
                 .expect("Parse failed");
         let converter = MarkdownConverter::new();
         let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
-        ctx.set_output_budget(100);
+        // The input HTML is ~80 bytes; the converted output is much smaller.
+        // The converter pre-allocates a 1 KiB output buffer, so a budget that
+        // covers the initial capacity plus the normalization scratch (2x
+        // output length) must succeed, proving the budget counts the actual
+        // output rather than the input size.
+        ctx.set_output_budget(4096);
 
         let result = converter.convert_with_context(&dom, &mut ctx);
         assert!(
             result.is_ok(),
             "nested list unexpectedly exceeded budget: {result:?}"
+        );
+
+        // A budget that cannot cover the initial capacity plus the
+        // normalization scratch must fail with a controlled MemoryLimit
+        // error, not succeed silently or abort: the transient normalization
+        // allocation is charged to the same conversion budget as the
+        // retained output.
+        let mut tight_ctx = ConversionContext::new(std::time::Duration::ZERO);
+        tight_ctx.set_output_budget(1024);
+        let tight_result = converter.convert_with_context(&dom, &mut tight_ctx);
+        assert!(
+            matches!(tight_result, Err(ConversionError::MemoryLimit(_))),
+            "tight budget must fail closed with MemoryLimit, got: {tight_result:?}"
         );
     }
 

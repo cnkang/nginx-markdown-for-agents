@@ -1,9 +1,9 @@
-# Rollback Guide: 0.9.2
+# Version Rollback Guide: 0.9.2
 
-This document covers version downgrade from 0.9.2 to an older binary and its
-matching configuration. For the faster operational response that disables or
-narrowly scopes conversion without replacing the binary, see
-[ROLLBACK_GUIDE.md](ROLLBACK_GUIDE.md).
+This document covers **version downgrade** from 0.9.2 to an older binary and
+its matching configuration. For the faster operational response that disables
+or narrowly scopes conversion **without replacing the binary**, see
+[OPERATIONAL_ROLLBACK.md](OPERATIONAL_ROLLBACK.md).
 
 ## Overview
 
@@ -106,6 +106,19 @@ Publication and artifact availability are separate release gates.
 
    ```bash
    cd nginx-markdown-for-agents
+   # Fetch the tag, verify its cryptographic signature, and compare its
+   # resolved commit against independently authenticated release evidence
+   # before checking out.  Each step fails the script on error, so a
+   # failed signature or a commit mismatch stops before checkout:
+   set -euo pipefail
+   git fetch origin tag v0.9.1
+   git tag -v v0.9.1
+   expected_sha="<SHA from independently authenticated release evidence>"
+   resolved_sha="$(git rev-parse v0.9.1^{commit})"
+   if [ "$resolved_sha" != "$expected_sha" ]; then
+     echo "FAIL: tag v0.9.1 resolves to $resolved_sha, expected $expected_sha" >&2
+     exit 1
+   fi
    git checkout v0.9.1
    cd components/rust-converter && cargo build --release && cd ../..
    # Rebuild NGINX module per your build procedure
@@ -235,7 +248,12 @@ rename guarantees that every read observes either the complete old file or the
 complete new file. It does not guarantee that all workers apply the new
 snapshot at the same instant. Each worker has its own watcher cycle, so
 workers can briefly report different `config_version` values and serve
-different active snapshots while convergence is in progress:
+different active snapshots while convergence is in progress.
+
+The dynamic configuration path is root-owned, so run the following restore
+commands from a root shell. Prefixing individual commands with `sudo` is not
+enough: the heredoc and the temporary file redirection happen in the calling
+shell before `sudo` runs, and cannot create files in the root-owned directory.
 
 ```bash
 set -eu

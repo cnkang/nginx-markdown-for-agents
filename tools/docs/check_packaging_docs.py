@@ -294,10 +294,10 @@ def check_compression_sop(text: str) -> list[str]:
             "'proxy_set_header Accept-Encoding \"\"'"
         )
     if "automatic_decompression" not in sop.lower() and \
-       "AUTOMATIC_DECOMPRESSION" not in sop:
+       "DECOMPRESSION.md" not in sop:
         errors.append(
             "Compression SOP does not reference the built-in "
-            "decompression documentation (AUTOMATIC_DECOMPRESSION.md)"
+            "decompression documentation (DECOMPRESSION.md)"
         )
     return errors
 

@@ -34,6 +34,9 @@ REPOSITORY_PATTERN = re.compile(
 )
 
 
+SUBPROCESS_TIMEOUT_SECONDS = 30
+
+
 def _validate_repo(repo: str) -> str:
     """Allow only one GitHub owner/repository path component pair."""
     if not REPOSITORY_PATTERN.fullmatch(repo):
@@ -61,14 +64,29 @@ def _repository_from_origin_url(remote_url: str) -> str:
     raise ValueError("origin remote must be a supported GitHub URL")
 
 
+class GitResolutionError(Exception):
+    """Raised when the git executable cannot be run to resolve the origin."""
+
+
 def _repository_from_origin() -> str:
     """Resolve the repository from the checkout's origin remote."""
-    result = subprocess.run(
-        ["git", "remote", "get-url", "origin"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=SUBPROCESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("origin remote lookup timed out") from error
+    except OSError as error:
+        # Missing or unlaunchable git executable: this is an operational
+        # failure, not an invalid repository argument.  Propagate a
+        # distinct type so main() can report the cause accurately.
+        raise GitResolutionError(
+            "could not run git to resolve the origin remote"
+        ) from error
     if result.returncode != 0 or not result.stdout.strip():
         raise ValueError("could not determine repository from the origin remote")
     return _repository_from_origin_url(result.stdout)
@@ -94,12 +112,21 @@ def _fetch_ruleset_detail(repo: str, ruleset_id: int) -> dict | None:
         or ruleset_id <= 0
     ):
         return None
-    detail = subprocess.run(
-        ["gh", "api", f"repos/{safe_repo}/rulesets/{ruleset_id}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        detail = subprocess.run(
+            ["gh", "api", f"repos/{safe_repo}/rulesets/{ruleset_id}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=SUBPROCESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        # A slow ruleset detail is skipped, exactly like a failed fetch;
+        # main() fails closed when no ruleset could be verified.
+        return None
+    except OSError:
+        # Missing gh executable: fail closed the same way.
+        return None
     if detail.returncode != 0:
         return None
     try:
@@ -119,18 +146,29 @@ def _list_rulesets(repo: str) -> list[dict]:
     where no ruleset can be verified fails closed in :func:`main`.
     """
     safe_repo = _validate_repo(repo)
-    payload = subprocess.run(
-        [
-            "gh",
-            "api",
-            f"repos/{safe_repo}/rulesets",
-            "--paginate",
-            "--slurp",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+    try:
+        payload = subprocess.run(
+            [
+                "gh",
+                "api",
+                f"repos/{safe_repo}/rulesets",
+                "--paginate",
+                "--slurp",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=SUBPROCESS_TIMEOUT_SECONDS,
+        ).stdout
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("ruleset listing timed out") from error
+    except OSError as error:
+        # Missing or unlaunchable gh executable: fail closed with the same
+        # classified result used for detail fetching, so main() reports a
+        # controlled failure instead of an unhandled traceback.
+        raise GitResolutionError(
+            "could not run gh to list repository rulesets"
+        ) from error
     summaries = _flatten_pages(json.loads(payload))
     detailed = []
     for summary in summaries:
@@ -190,6 +228,9 @@ def main() -> int:
         return 1
     except ValueError as exc:
         print(f"FAIL: invalid repository argument: {exc}", file=sys.stderr)
+        return 1
+    except GitResolutionError as exc:
+        print(f"FAIL: could not run a required git/gh command: {exc}", file=sys.stderr)
         return 1
     except subprocess.CalledProcessError as exc:
         print(

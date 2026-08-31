@@ -76,9 +76,11 @@ The module computes the ETag value from the Markdown output using a hash functio
 The module ensures `Vary: Accept` is present on every representation selected
 through Accept negotiation:
 
-**Original Response**:
+**Original Response** (the original HTML is a representation selected through
+Accept negotiation, so it carries `Vary: Accept` too):
 ```http
 Content-Type: text/html
+Vary: Accept
 ```
 
 **Converted Response**:
@@ -144,14 +146,29 @@ location /docs/ {
 
 - `ims_only` (default): Skip module-side `If-None-Match` processing. NGINX
   may use `If-Modified-Since` only when the module passes through the original
-  response. A converted Markdown response clears the source `Last-Modified`
-  and returns a fresh 200.
+  response. A converted Markdown response never produces a 304 in this mode:
+  source `If-Modified-Since` and `If-None-Match` values do not validate the
+  transformed representation, and no Markdown ETag exists to revalidate
+  against. The module clears the source `Last-Modified` and returns a fresh
+  200 with a full body.
 - `full`: Support Markdown-variant `If-None-Match` (ETag). Converted
   responses use their Markdown ETag only. Source `If-Modified-Since` does not
   validate the transformed body.
 - `off`: No conditional request support for Markdown variants
 
 **Performance Note**: `full` requires conversion to generate a Markdown-variant ETag for comparison, which has performance implications for conditional requests.
+
+For a Markdown-negotiated GET or HEAD request, the module captures incoming
+`If-None-Match` and `If-Modified-Since` values before a static handler, proxy,
+or proxy cache can evaluate them against the source HTML representation.
+Only the captured `If-None-Match` validates a converted Markdown response,
+and only in `full` mode (against the Markdown ETag). The captured
+`If-Modified-Since` never validates a converted representation.
+When the request passes through as the original source representation
+(unconverted or fail-open passthrough), the module restores both captured
+validators — the `If-None-Match` and the `If-Modified-Since` — so
+source-only conditional behavior remains available against the original
+HTML response.
 
 ## Conditional Request Handling
 
@@ -201,7 +218,10 @@ Accept: text/markdown
 If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT
 ```
 
-NGINX core handles this before the module runs, so the module only processes requests that pass the time-based check.
+For a Markdown-negotiated request, the module suppresses the client validator
+before the content handler, proxy, or cache runs. This prevents a source HTML
+`304` from bypassing conversion. A source-only request is not captured and
+continues to use NGINX's normal source-representation conditional handling.
 
 **Semantic note**: an original-representation response may retain the
 upstream HTML timestamp and receive a source-based 304. A transformed

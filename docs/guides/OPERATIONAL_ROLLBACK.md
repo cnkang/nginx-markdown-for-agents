@@ -1,4 +1,10 @@
-# Rollback Guide — Disabling or Narrowing Markdown Conversion
+# Operational Rollback Guide — Disabling or Narrowing Markdown Conversion
+
+This document covers **runtime operational mitigation**: disabling or
+narrowing Markdown conversion with a configuration change and reload, without
+replacing the module binary. For a full **version downgrade** (binary +
+matching configuration), see
+[VERSION_ROLLBACK-0.9.2.md](VERSION_ROLLBACK-0.9.2.md).
 
 ## Table of Contents
 
@@ -21,11 +27,11 @@ flowchart TD
     Trigger["Rollback Trigger"] --> Type{"Trigger Type"}
     Type -->|High error rate| Disable["markdown_filter off"]
     Type -->|Conversion failures| Narrow["Narrow scope to<br/>specific paths only"]
-    Type -->|Performance issue| IncreaseLimit["Increase markdown_limits<br/>memory or timeout"]
+    Type -->|Performance issue| StreamOff["markdown_streaming off<br/>or disable on slow paths only"]
     Type -->|Streaming issues| DisableStream["markdown_streaming off"]
     Disable --> Verify["Verify HTML responses<br/>work correctly"]
     Narrow --> Verify
-    IncreaseLimit --> Verify
+    StreamOff --> Verify
     DisableStream --> Verify
     Verify --> Monitor["Monitor metrics<br/>and error logs"]
 
@@ -49,7 +55,7 @@ Use this guide when an [observation checkpoint](ROLLOUT_COOKBOOK.md#observation-
 - [ROLLOUT_COOKBOOK.md](ROLLOUT_COOKBOOK.md) — rollout stages, selective enablement patterns, observation guidance
 - [CONFIGURATION.md](CONFIGURATION.md) — full directive reference
 - [OPERATIONS.md](OPERATIONS.md) — operational guide and metrics reference
-- [ROLLBACK-0.9.2.md](ROLLBACK-0.9.2.md) — version downgrade and matching
+- [VERSION_ROLLBACK-0.9.2.md](VERSION_ROLLBACK-0.9.2.md) — version downgrade and matching
   configuration restore
 
 ---
@@ -427,19 +433,31 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 ```
 
 For Method C (restoring fail-open), trigger a known conversion failure first and
-confirm that the module returns the original HTML. Then verify the corresponding
-decision-log entries after the old workers drain:
+confirm that the module returns the original HTML. Then verify the
+corresponding decision-log entries after the old workers drain. Limit the
+log inspection to the entries written by the triggering request: record the
+log byte offset before the request and read only the bytes appended after
+it, instead of searching the whole log with a generic tail:
 
 ```bash
+# Record the offset so verification covers only the triggered request.
+LOG_OFFSET="$(stat -c %s /var/log/nginx/error.log 2>/dev/null \
+  || wc -c < /var/log/nginx/error.log)"
+
 curl -sS -H 'Accept: text/markdown' http://localhost/known-failing-path \
   | grep -F '<html'
 
-grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=failed_closed" | tail -10
-
-grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=failed_open" | tail -10
+# Inspect only entries appended after the trigger request.
+tail -c +"$((LOG_OFFSET + 1))" /var/log/nginx/error.log \
+  | grep "markdown decision:" \
+  | grep -E "reason=(failed_closed|failed_open)"
 ```
+
+The offset excludes earlier history but does not identify a single request.
+On a host with concurrent Markdown traffic, unrelated requests can satisfy
+the check. Trigger the request on a uniquely named path (for example
+`/known-failing-path?probe=<timestamp>`) and match that path in the grep, or
+quiesce competing traffic for the duration of the verification.
 
 ### 2. Confirm Metrics Stop Incrementing
 
@@ -500,8 +518,35 @@ grep "markdown decision:" /var/log/nginx/error.log | \
   grep "reason=disabled" | tail -5
 
 # 4. Verify: confirm conversion metrics stopped
-curl -s http://localhost/markdown-metrics | \
-  grep -E "conversions_(attempted|succeeded|failed)"
+# Stabilize before capturing the baseline so the before counters reflect
+# the quiesced state immediately before the comparison interval.
+sleep 5
+before=$(curl -fsS http://localhost/markdown-metrics | \
+  grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
+if [ -z "$before" ]; then
+  echo "FAIL: conversion metrics not present before rollback check"
+  exit 1
+fi
+curl -fsS -o /dev/null -H "Accept: text/markdown" http://localhost/test
+after=$(curl -fsS http://localhost/markdown-metrics | \
+  grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
+if [ -z "$after" ]; then
+  echo "FAIL: conversion metrics not present after rollback check"
+  exit 1
+fi
+# Capture disabled-request signal separately without changing the conversion metric comparison
+disabled=$(curl -fsS http://localhost/markdown-metrics | \
+  grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"')
+if [ -z "$disabled" ]; then
+  echo "FAIL: disabled signal not present after rollback check (expected requests_total outcome=skipped reason=disabled)"
+  exit 1
+fi
+if [ "$before" = "$after" ]; then
+  echo "OK: conversion counters stable after rollback"
+else
+  echo "FAIL: conversion counters still increasing after rollback"
+  exit 1
+fi
 
 # 5. Verify: confirm client receives HTML
 curl -sD - -o /dev/null \

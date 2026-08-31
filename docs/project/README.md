@@ -42,7 +42,7 @@ This directory contains project-level status and maintenance-oriented documentat
 `PROJECT_STATUS.md` and the dedicated pages summarize the harness-related
 repository posture. The details live in `docs/project/HARNESS_HISTORY.md`, `docs/harness/`,
 `docs/architecture/HARNESS_ARCHITECTURE.md`, and
-`docs/guides/HARNESS_MAINTENANCE.md`.
+`docs/harness/HARNESS_MAINTENANCE.md`.
 
 Use this section for repository-wide status and maintenance posture. Keep other project-level notes aligned with the current tracked codebase.
 

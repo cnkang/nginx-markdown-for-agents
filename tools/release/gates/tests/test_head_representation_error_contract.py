@@ -68,7 +68,7 @@ def test_streaming_snapshot_rollback_failure_bypasses_fallback() -> None:
         "ngx_http_markdown_streaming_handle_header_snapshot_failure",
         sentinel,
     )
-    fallback = handler.index("ERROR_STREAMING_FALLBACK", terminal)
+    fallback = handler.index("ERROR_STREAMING_FALLBACK", sentinel)
 
     assert terminal < fallback
 

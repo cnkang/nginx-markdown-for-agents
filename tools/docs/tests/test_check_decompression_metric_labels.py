@@ -24,7 +24,6 @@ def _inputs() -> tuple[dict, dict[Path, str]]:
         (ROOT / "schemas/metrics-v1.registry.json").read_text(encoding="utf-8")
     )
     paths = (
-        ROOT / "docs/features/AUTOMATIC_DECOMPRESSION.md",
         ROOT / "docs/features/DECOMPRESSION.md",
     )
     return registry, {path: path.read_text(encoding="utf-8") for path in paths}

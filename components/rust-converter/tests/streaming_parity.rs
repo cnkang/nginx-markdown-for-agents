@@ -29,7 +29,7 @@ use streaming_test_support::{
     convert_full_buffer, convert_streaming_chunked, convert_streaming_single,
     default_streaming_budget, default_streaming_options, discover_html_fixtures,
     evidence_output_path, fixture_relative_name, known_differences_path,
-    normalize_whitespace_tokens, read_fixture, read_fixture_meta,
+    normalize_whitespace_tokens, read_fixture, read_fixture_meta, single_byte_chunks,
 };
 
 fn discover_fixtures(corpus_dir: &Path) -> Vec<std::path::PathBuf> {
@@ -73,6 +73,72 @@ fn convert_streaming_chunked_entry(
         None,
     )?;
     Ok(run.markdown)
+}
+
+#[test]
+fn form_control_privacy_is_stable_across_streaming_boundaries() {
+    const SENTINEL: &str = "SENSITIVE_VALUE_SENTINEL";
+    let html = concat!(
+        r#"<form><label>Search</label>"#,
+        r#"<input type="PASSWORD" aria-label="PASSWORD_LABEL_SENTINEL" placeholder="PASSWORD_PLACEHOLDER_SENTINEL" value="SENSITIVE_VALUE_SENTINEL">"#,
+        r#"<input type="hidden" value="SENSITIVE_VALUE_SENTINEL">"#,
+        r#"<input type="image" value="SENSITIVE_VALUE_SENTINEL">"#,
+        r#"<input type="text" aria-label="" placeholder="Search *hint* [x]" value="SENSITIVE_VALUE_SENTINEL">"#,
+        r#"<input type="button" aria-label="" placeholder="" value="Button *label* [x]">"#,
+        r#"<input type="submit" value="Submit [now]">"#,
+        r#"<select><option value="SENSITIVE_VALUE_SENTINEL">Option A</option></select>"#,
+        r#"<textarea placeholder="Notes [hint]">SENSITIVE_VALUE_SENTINEL</textarea>"#,
+        r#"<textarea>SENSITIVE_VALUE_SENTINEL <b>UNBALANCED_DEFAULT</textarea>AFTER_TEXT"#,
+        r#"<datalist><option value="SENSITIVE_VALUE_SENTINEL">Suggestion</option></datalist>"#,
+        r#"<output value="SENSITIVE_VALUE_SENTINEL">Calculation result: 42</output></form>"#,
+    )
+    .as_bytes();
+
+    let full = convert_full_buffer(
+        html,
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+    )
+    .expect("full-buffer form conversion should succeed");
+    let single = convert_streaming_single(
+        html,
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+        default_streaming_budget(),
+        None,
+    )
+    .expect("single-chunk form conversion should succeed")
+    .markdown;
+    let chunked = convert_streaming_chunked(
+        html,
+        &single_byte_chunks(html.len()),
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+        default_streaming_budget(),
+        None,
+    )
+    .expect("cross-tag chunked form conversion should succeed")
+    .markdown;
+
+    assert_eq!(
+        full, single,
+        "single-chunk output must match full-buffer output"
+    );
+    assert_eq!(
+        full, chunked,
+        "cross-tag output must match full-buffer output"
+    );
+    assert!(
+        !full.contains(SENTINEL),
+        "control values must not reach Markdown"
+    );
+    assert!(!full.contains("PASSWORD_LABEL_SENTINEL"));
+    assert!(!full.contains("PASSWORD_PLACEHOLDER_SENTINEL"));
+    assert!(full.contains(r"Button \*label\* \[x\]"));
+    assert!(full.contains("Option A"));
+    assert!(full.contains(r"Notes \[hint\]"));
+    assert!(full.contains(r"AFTER\_TEXT"));
+    assert!(full.contains("Calculation result: 42"));
 }
 
 fn assert_fixture_parity(

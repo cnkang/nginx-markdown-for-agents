@@ -16,6 +16,51 @@ different customization approaches.
 | ingress-nginx (community) | 1.10+ | Custom image build | Verified |
 | F5 NGINX Ingress Controller | Latest | Dynamic module volume | Experimental |
 
+## F5 NGINX Ingress Controller
+
+**Feasible with limitations.** The F5 NGINX Ingress Controller supports
+dynamic module loading via volume mounts, but the approach requires careful
+version alignment.
+
+### Injection Method
+
+Mount the compiled `.so` file into the Ingress Controller pod via
+a ConfigMap or PersistentVolume, and add `load_module` via the
+`main-snippet` ConfigMap key.
+
+**Image prerequisite.** This flow requires a custom Ingress Controller
+image that already contains the module. A volume mount alone does not
+make the flow supported: the Controller must load a module binary whose
+ABI matches the NGINX inside the image, and managed deployments do not
+allow replacing the Controller image (see Known Limitations). Treat the
+example below as a feasibility sketch, not a supported deployment path.
+
+```yaml
+volumeMounts:
+  - name: markdown-module
+    mountPath: /etc/nginx/modules
+    readOnly: true
+```
+
+### Known Limitations
+
+1. **ABI binding**: The `.so` must compile against the exact NGINX
+   version inside the F5 Controller image, using a compatible build
+   configuration (matching `configure` arguments). Use `--with-compat`
+   only when the target binary also enables it; otherwise the module
+   binary must be built with the same configure arguments as the
+   Controller's NGINX.
+2. **No custom image**: F5 does not support replacing the Controller
+   image with a custom build in managed deployments.
+3. **Module updates**: Require rebuilding the `.so` when the Controller
+   image upgrades.
+
+### Alternative: Sidecar Proxy
+
+For environments where Ingress Controller modification is not feasible,
+deploy an NGINX sidecar with the markdown module in front of the
+application pods.
+
 ## Enable/Verify/Disable/Rollback
 
 ### Enable
@@ -32,17 +77,25 @@ separately compiled dynamic module.
 
 ```bash
 kubectl exec -n ingress-nginx <pod> -- nginx -T 2>&1 \
-  | grep -F 'load_module'
+  | grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so[[:space:]]*;'
+kubectl exec -n ingress-nginx <pod> -- nginx -T 2>&1 \
+  | grep -E '^[[:space:]]*markdown_filter[[:space:]]+on[[:space:]]*;'
 kubectl exec -n ingress-nginx <pod> -- nginx -t
-curl -fsS -H 'Accept: text/markdown' https://<ingress-host>/docs/example
+curl -fsS -D /tmp/markdown-smoke-headers.txt -H 'Accept: text/markdown' \
+  https://<ingress-host>/docs/example
+grep -i '^content-type: text/markdown' /tmp/markdown-smoke-headers.txt
 ```
 
-The first command must show the active module load, the second must parse the
-`markdown_filter` directive from the active configuration, and the request
-must return Markdown rather than the upstream HTML. For a negative control,
-temporarily remove the active `load_module` line and repeat `nginx -t`. The
-module-specific configuration must then fail. The smoke test must report that
-failure rather than treating it as successful.
+The first two commands must show an active, semicolon-terminated
+`load_module` directive and an active `markdown_filter on` directive. A
+comment mentioning the module filename must not satisfy them. `nginx -t`
+validates syntax only, so the directive greps are the load evidence. The
+request must return Markdown rather than the upstream HTML, and the final
+`grep` asserts that the response `Content-Type` header is `text/markdown`,
+failing when the header is missing or names another type. For a negative
+control, temporarily remove the active `load_module` line and repeat
+`nginx -t`. The module-specific configuration must then fail. The smoke test
+must report that failure rather than treating it as successful.
 
 ### Disable
 
@@ -180,7 +233,8 @@ After building the image, verify the module is correctly compiled and loaded:
 #### Check NGINX Version and Module
 
 ```bash
-docker run --rm my-ingress:latest nginx -T 2>&1 | grep -F 'load_module'
+docker run --rm my-ingress:latest nginx -T 2>&1 | \
+  grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so;'
 docker run --rm my-ingress:latest nginx -t
 ```
 
@@ -614,7 +668,6 @@ Exit code `0` means all checks passed. `1` means one or more failed.
 
 ### See Also
 
-- [F5 Ingress Controller Feasibility](F5_INGRESS_FEASIBILITY.md)
 - [Package Distribution Guide](PACKAGE_DISTRIBUTION.md)
 - [examples/kubernetes/manifest/](../../examples/kubernetes/manifest/) — K8s deployment manifests
 - [charts/nginx-markdown/](../../charts/nginx-markdown/) — Helm chart

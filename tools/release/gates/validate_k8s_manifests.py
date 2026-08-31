@@ -346,10 +346,22 @@ def _validate_helm_legacy_values(
 ) -> None:
     for key in sorted(HELM_LEGACY_VALUE_KEYS):
         yaml_key = re.compile(rf"(?m)^\s+{re.escape(key)}:")
-        schema_has_key = key in markdown_properties or key in {
-            "budget"
-        } and key in markdown_properties.get("streaming", {}).get(
-            "properties", {}
+        # Inspect the nested streaming schema only when it is a mapping; a
+        # non-mapping streaming value must not raise, and the parentheses
+        # make the intended grouping (budget lives under streaming)
+        # explicit instead of relying on and/or precedence.
+        streaming_schema = markdown_properties.get("streaming")
+        streaming_properties = (
+            streaming_schema.get("properties", {})
+            if isinstance(streaming_schema, dict)
+            else {}
+        )
+        if not isinstance(streaming_properties, dict):
+            # A schema may declare `properties: null`; normalize so the
+            # membership test below never inspects a non-mapping value.
+            streaming_properties = {}
+        schema_has_key = key in markdown_properties or (
+            key == "budget" and key in streaming_properties
         )
         template_has_key = any(
             reference in configmap

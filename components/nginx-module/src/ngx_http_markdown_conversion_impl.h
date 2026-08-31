@@ -823,6 +823,10 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
             markdown_result_free(conditional_result);
         }
 
+        if (rc == NGX_AGAIN) {
+            return NGX_AGAIN;
+        }
+
         if (rc != NGX_DONE) {
             ngx_http_markdown_record_system_failure(ctx);
             return rc;

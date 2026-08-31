@@ -44,6 +44,18 @@ http {
 Dynconf is off by default. Enable it only when operational workflows
 require hot-reload without restart.
 
+### File Security
+
+The dynconf file is a runtime trust input: it can change the effective
+configuration of live requests. It **MUST NOT be writable by untrusted
+local users** — root (or the account that owns the NGINX configuration)
+must own the file and every directory in its path, and none may be
+group/other-writable. A writable dynconf file is equivalent to a writable
+`nginx.conf`: any local user who can edit it can change conversion policy,
+limits, and error handling for live traffic. The module does not enforce
+this permission policy itself. That enforcement is an operator security
+assumption that the deployment must guarantee.
+
 ---
 
 ## Supported Runtime Keys

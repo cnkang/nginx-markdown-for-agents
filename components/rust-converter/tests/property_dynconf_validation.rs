@@ -580,13 +580,21 @@ fn test_property4_all_static_only_keys_rejected() {
 
 #[test]
 fn test_property4_nesting_at_exact_boundary() {
-    // Depth exactly at limit (8) should be OK if structure is otherwise valid
-    // The nested value is under the known `filter` key, so this exercises the
-    // parser's depth guard rather than an unknown top-level field.
-    let input = build_nested_json(9);
+    // Each `{"nested":` level consumes two depth steps (object at depth k,
+    // its value at depth k+1), so build_nested_json(7) parses with the
+    // innermost value at exactly depth 8 — the permitted boundary.  A
+    // nested object under `filter` cannot pass schema validation (filter
+    // must be a string), so a depth-guard pass surfaces as InvalidType.
+    let at_limit = build_nested_json(7);
+    assert_rejected_with(at_limit.as_bytes(), DynconfParseErrorKind::InvalidType);
 
-    let result = parse_dynconf(input.as_bytes());
-    assert!(result.is_err());
+    // build_nested_json(8) puts the innermost value at depth 9, which the
+    // parser depth guard rejects before schema validation runs.
+    let over_limit = build_nested_json(8);
+    assert_rejected_with(
+        over_limit.as_bytes(),
+        DynconfParseErrorKind::NestingDepthExceeded,
+    );
 }
 
 #[test]

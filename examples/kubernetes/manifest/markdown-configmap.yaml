@@ -3,9 +3,9 @@ kind: ConfigMap
 metadata:
   name: nginx-markdown-config
 data:
-  markdown-snippet: |
+  markdown-snippet.conf: |
     load_module modules/ngx_http_markdown_filter_module.so;
-  markdown-filter: |
+  markdown-filter.conf: |
     markdown_filter on;
     markdown_flavor gfm;
     markdown_auto_decompress on;

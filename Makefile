@@ -132,7 +132,7 @@ install:
 	install -m 0644 README.md "$(DESTDIR)$(DOC_INSTALL_DIR)/README.md"
 	install -m 0644 docs/guides/INSTALL.md "$(DESTDIR)$(DOC_INSTALL_DIR)/INSTALL.md"
 	install -m 0644 docs/guides/PACKAGE_INSTALLATION.md "$(DESTDIR)$(DOC_INSTALL_DIR)/PACKAGE_INSTALLATION.md"
-	install -m 0644 docs/COMPATIBILITY.md "$(DESTDIR)$(DOC_INSTALL_DIR)/COMPATIBILITY.md"
+	install -m 0644 docs/guides/PACKAGE_COMPATIBILITY.md "$(DESTDIR)$(DOC_INSTALL_DIR)/PACKAGE_COMPATIBILITY.md"
 	install -m 0644 LICENSE "$(DESTDIR)$(LICENSE_INSTALL_DIR)/LICENSE"
 
 # Default smoke test
@@ -352,7 +352,7 @@ docs-check: docs-check-base
 	$(MAKE) docs-style-check-regression
 
 # STE-inspired writing-style gates (non-native-reader friendly, see
-# docs/development/WRITING_GUIDE.md and harness Rule 63).
+# docs/WRITING_GUIDE.md and harness Rule 63).
 # Routine docs-check keeps the changed-file regression gate; the repository-wide
 # style budget is reserved for full Harness and release validation.
 # docs-style-check: advisory scan, never blocks.

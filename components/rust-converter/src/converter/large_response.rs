@@ -90,12 +90,17 @@ impl FusedNormalizer {
     /// request's controlled memory-error path.
     pub(crate) fn try_new(capacity: usize) -> Result<Self, ConversionError> {
         let mut output = String::new();
-        output.try_reserve_exact(capacity).map_err(|error| {
-            ConversionError::MemoryLimit(format!(
-                "unable to reserve {} bytes for normalized Markdown: {}",
-                capacity, error
-            ))
-        })?;
+        // Reserve one extra byte so finalize()'s guaranteed trailing
+        // newline never triggers a realloc when the normalized output
+        // exactly fills the charged capacity.
+        output
+            .try_reserve_exact(capacity.saturating_add(1))
+            .map_err(|error| {
+                ConversionError::MemoryLimit(format!(
+                    "unable to reserve {} bytes for normalized Markdown: {}",
+                    capacity, error
+                ))
+            })?;
         Ok(Self {
             output,
             prev_blank: false,
@@ -151,8 +156,7 @@ impl FusedNormalizer {
                 self.prev_blank = true;
             }
         } else {
-            let normalized = super::normalize::normalize_line_whitespace(trimmed);
-            self.output.push_str(&normalized);
+            super::normalize::normalize_line_whitespace_into(trimmed, &mut self.output);
             self.output.push('\n');
             self.prev_blank = false;
         }

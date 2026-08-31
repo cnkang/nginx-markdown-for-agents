@@ -39,13 +39,16 @@ limits="$(nginx -T 2>/dev/null | awk '
     }
   }
 ')"
+# Missing markdown_limits entries only print a note.  The validation must
+# not exit nonzero, or set -e would abort this diagnostic script before the
+# metrics capture below.
 printf '%s\n' "$limits" | awk '
   /conversion_memory=/ { conversion = 1 }
   /parser_memory=/ { parser = 1 }
   /streaming_buffer=/ { streaming = 1 }
   END {
     if (!conversion && !parser && !streaming) {
-      exit 1
+      print "note: no markdown_limits entries found in the active configuration" > "/dev/stderr"
     }
   }
 '

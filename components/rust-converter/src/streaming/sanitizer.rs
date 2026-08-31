@@ -8,16 +8,20 @@
 //! - Dangerous elements (script, style, etc.) and all their children are removed
 //! - Embedded content elements (iframe, object, embed) have tags stripped but
 //!   child content preserved; src/data URLs are extracted
-//! - Form elements have tags stripped but child content preserved
+//! - Form elements have tags stripped; labels and visible output text are
+//!   preserved while control values and textarea defaults are suppressed
 //! - Event handler attributes (on*) are removed
 //! - Dangerous URL schemes (javascript:, data:, etc.) are blocked
 //! - Nesting depth is limited to prevent stack exhaustion
 
 use crate::converter::pruning::{PruneConfig, should_prune_with_config};
 use crate::security::URL_ATTRIBUTES;
+use crate::security::escape_markdown_destination;
 use crate::security::escape_markdown_text;
 use crate::security::is_dangerous_url_value;
-use crate::streaming::emitter::escape_markdown_destination;
+use crate::security::normalize_input_type;
+use crate::security::sanitize_url_value;
+use crate::security::select_input_control_text;
 use crate::streaming::types::StreamEvent;
 
 /// HTML void elements that never have children.
@@ -98,7 +102,8 @@ const EMBEDDED_CONTENT_ELEMENTS: &[&str] = &["iframe", "object", "embed"];
 /// Media content elements: tags stripped, URL extracted from src/href.
 const MEDIA_CONTENT_ELEMENTS: &[&str] = &["video", "audio", "source", "track", "area"];
 
-/// Form elements: tags stripped, child text preserved.
+/// Form elements: tags stripped; labels, option text, and visible output text
+/// are preserved, while control values are handled by the shared policy.
 const FORM_ELEMENTS: &[&str] = &[
     "form", "button", "select", "textarea", "fieldset", "legend", "label", "option", "optgroup",
     "datalist", "output",
@@ -134,11 +139,13 @@ pub enum SanitizeDecision {
 /// Processes [`StreamEvent`] tokens and filters out dangerous content,
 /// maintaining state to track skip/strip regions across multiple events.
 pub struct StreamingSanitizer {
-    /// Nesting depth of elements inside a dangerous element being skipped.
-    /// When > 0, all events are suppressed.
+    /// Nesting depth of an element subtree being suppressed.
+    ///
+    /// This covers dangerous elements and privacy-sensitive textarea default
+    /// content. When greater than zero, all events are suppressed.
     skip_depth: usize,
-    /// Name of the outermost dangerous element that entered skip mode.
-    /// Used to ensure only the matching end tag can exit skip mode,
+    /// Name of the outermost element that entered subtree suppression.
+    /// Used to ensure only the matching end tag can exit suppression,
     /// preventing mismatched end tags (e.g. `</div>` inside `<noscript>`)
     /// from prematurely re-enabling content.
     skip_element: Option<String>,
@@ -296,7 +303,11 @@ impl StreamingSanitizer {
         effectively_self_closing: bool,
     ) -> Option<SanitizeDecision> {
         if self.skip_depth > 0 {
-            if !effectively_self_closing {
+            // The tokenizer is intentionally not a tree builder and may
+            // report markup-looking text inside textarea as nested tags.
+            // RCDATA ends only at the matching textarea end tag, so do not
+            // let those pseudo-children keep the suppression region open.
+            if !effectively_self_closing && self.skip_element.as_deref() != Some("textarea") {
                 self.skip_depth = self.skip_depth.saturating_add(1);
             }
             return Some(SanitizeDecision::Skip);
@@ -305,15 +316,8 @@ impl StreamingSanitizer {
         if self.prune_depth == 0 {
             self.close_optional_end_tags_for_start(tag);
         }
-        if DANGEROUS_VOID_ELEMENTS.contains(&tag) {
-            return Some(SanitizeDecision::Skip);
-        }
-        if DANGEROUS_CONTAINER_ELEMENTS.contains(&tag) {
-            if !effectively_self_closing {
-                self.skip_depth = 1;
-                self.skip_element = Some(tag.to_string());
-            }
-            return Some(SanitizeDecision::Skip);
+        if let Some(decision) = self.skip_dangerous_element(tag, effectively_self_closing) {
+            return Some(decision);
         }
         if self.prune_depth > 0 {
             if !effectively_self_closing {
@@ -336,6 +340,26 @@ impl StreamingSanitizer {
         None
     }
 
+    /// Skip dangerous void or container elements, entering the suppression
+    /// region for containers that are not self-closing.
+    fn skip_dangerous_element(
+        &mut self,
+        tag: &str,
+        effectively_self_closing: bool,
+    ) -> Option<SanitizeDecision> {
+        if DANGEROUS_VOID_ELEMENTS.contains(&tag) {
+            return Some(SanitizeDecision::Skip);
+        }
+        if DANGEROUS_CONTAINER_ELEMENTS.contains(&tag) {
+            if !effectively_self_closing {
+                self.skip_depth = 1;
+                self.skip_element = Some(tag.to_string());
+            }
+            return Some(SanitizeDecision::Skip);
+        }
+        None
+    }
+
     fn remember_stripped_tag(&mut self, tag: &str, effectively_self_closing: bool) {
         if !effectively_self_closing {
             self.strip_stack.push(tag.to_string());
@@ -344,14 +368,17 @@ impl StreamingSanitizer {
 
     fn url_decision(tag: &str, url: Option<String>) -> SanitizeDecision {
         match url {
-            Some(url_value) if !is_dangerous_url(&url_value) => {
-                let escaped = escape_markdown_destination(&url_value);
+            Some(url_value) => {
+                let Some(safe_url) = sanitize_url_value(&url_value) else {
+                    return SanitizeDecision::Skip;
+                };
+                let escaped = escape_markdown_destination(safe_url);
                 SanitizeDecision::PassGenerated(StreamEvent::Text(format!(
                     "[{}]({})",
                     tag, escaped
                 )))
             }
-            _ => SanitizeDecision::Skip,
+            None => SanitizeDecision::Skip,
         }
     }
 
@@ -405,27 +432,42 @@ impl StreamingSanitizer {
         if !FORM_ELEMENTS.contains(&tag) && !VOID_FORM_CONTROLS.contains(&tag) {
             return None;
         }
+
+        if tag == "textarea" {
+            // HTML treats textarea as a non-void RCDATA element, so retain
+            // subtree suppression even when malformed self-closing syntax is
+            // reported by the tokenizer.
+            let text = select_input_control_text(
+                "textarea",
+                attrs
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value.as_str())),
+            );
+            self.skip_depth = 1;
+            self.skip_element = Some(tag.to_string());
+            return Some(
+                match text.map(str::trim).filter(|value| !value.is_empty()) {
+                    Some(value) => SanitizeDecision::PassGenerated(StreamEvent::Text(format!(
+                        "{} ",
+                        escape_markdown_text(value)
+                    ))),
+                    None => SanitizeDecision::Skip,
+                },
+            );
+        }
+
         if tag == "input" {
-            let input_type = attrs
+            let raw_input_type = attrs
                 .iter()
                 .find(|(name, _)| name == "type")
-                .map(|(_, value)| value.to_ascii_lowercase())
-                .unwrap_or_else(|| "text".to_string());
-            let text = if matches!(input_type.as_str(), "hidden" | "image") {
-                None
-            } else if matches!(input_type.as_str(), "submit" | "reset") {
+                .map(|(_, value)| value.as_str());
+            let input_type = normalize_input_type(raw_input_type);
+            let text = select_input_control_text(
+                &input_type,
                 attrs
                     .iter()
-                    .find(|(name, _)| name == "value")
-                    .map(|(_, value)| value.as_str())
-            } else {
-                attrs
-                    .iter()
-                    .find(|(name, _)| name == "aria-label")
-                    .or_else(|| attrs.iter().find(|(name, _)| name == "placeholder"))
-                    .or_else(|| attrs.iter().find(|(name, _)| name == "value"))
-                    .map(|(_, value)| value.as_str())
-            };
+                    .map(|(name, value)| (name.as_str(), value.as_str())),
+            );
             return Some(
                 match text.map(str::trim).filter(|value| !value.is_empty()) {
                     Some(value) => SanitizeDecision::PassGenerated(StreamEvent::Text(format!(
@@ -854,6 +896,105 @@ mod tests {
         );
     }
 
+    #[test]
+    fn input_control_value_privacy_policy_is_shared() {
+        const SENTINEL: &str = "SENSITIVE_VALUE_SENTINEL";
+        let suppressed_types = [
+            "hidden",
+            "image",
+            "PASSWORD",
+            "text",
+            "email",
+            "number",
+            "search",
+            "tel",
+            "url",
+            "date",
+            "month",
+            "week",
+            "time",
+            "datetime-local",
+            "range",
+            "color",
+            "checkbox",
+            "radio",
+            "file",
+            "unknown",
+            " text ",
+        ];
+
+        for input_type in suppressed_types {
+            let mut sanitizer = StreamingSanitizer::new();
+            assert_eq!(
+                sanitizer.process_event(start_tag(
+                    "input",
+                    vec![("type", input_type), ("value", SENTINEL)],
+                )),
+                SanitizeDecision::Skip,
+                "value fallback must be denied for type {input_type:?}"
+            );
+        }
+
+        let mut sanitizer = StreamingSanitizer::new();
+        assert_eq!(
+            sanitizer.process_event(start_tag(
+                "input",
+                vec![
+                    ("type", "submit"),
+                    ("aria-label", "ignored"),
+                    ("value", "Send *now* [x]"),
+                ],
+            )),
+            SanitizeDecision::PassGenerated(StreamEvent::Text(r"Send \*now\* \[x\] ".to_string(),))
+        );
+        assert_eq!(
+            sanitizer.process_event(start_tag(
+                "input",
+                vec![("type", "reset"), ("value", "Clear")],
+            )),
+            SanitizeDecision::PassGenerated(StreamEvent::Text("Clear ".to_string(),))
+        );
+
+        assert_eq!(
+            sanitizer.process_event(start_tag(
+                "input",
+                vec![
+                    ("type", "BUTTON"),
+                    ("aria-label", ""),
+                    ("placeholder", ""),
+                    ("value", "Button *fallback* [label]"),
+                ],
+            )),
+            SanitizeDecision::PassGenerated(StreamEvent::Text(
+                r"Button \*fallback\* \[label\] ".to_string(),
+            ))
+        );
+        assert_eq!(
+            sanitizer.process_event(start_tag(
+                "input",
+                vec![
+                    ("type", "text"),
+                    ("aria-label", "   "),
+                    ("placeholder", "Placeholder"),
+                    ("value", SENTINEL),
+                ],
+            )),
+            SanitizeDecision::PassGenerated(StreamEvent::Text("Placeholder ".to_string(),))
+        );
+        assert_eq!(
+            sanitizer.process_event(start_tag(
+                "input",
+                vec![
+                    ("type", "PASSWORD"),
+                    ("aria-label", "PASSWORD_LABEL_SENTINEL"),
+                    ("placeholder", "PASSWORD_PLACEHOLDER_SENTINEL"),
+                    ("value", SENTINEL),
+                ],
+            )),
+            SanitizeDecision::Skip
+        );
+    }
+
     /// Creates a `StreamEvent::EndTag` for the given element name.
     ///
     /// # Examples
@@ -1101,7 +1242,8 @@ mod tests {
     #[test]
     fn test_form_elements_stripped() {
         for elem in &[
-            "form", "button", "select", "textarea", "fieldset", "label", "option",
+            "form", "button", "select", "fieldset", "legend", "label", "option", "optgroup",
+            "datalist", "output",
         ] {
             let mut san = StreamingSanitizer::new();
             assert_eq!(
@@ -1118,6 +1260,109 @@ mod tests {
                 elem
             );
         }
+    }
+
+    #[test]
+    fn textarea_default_text_is_suppressed_but_placeholder_is_preserved() {
+        let mut san = StreamingSanitizer::new();
+        assert_eq!(
+            san.process_event(start_tag(
+                "textarea",
+                vec![
+                    ("aria-label", "   "),
+                    ("placeholder", "Notes *hint*"),
+                    ("value", "SENSITIVE_VALUE_SENTINEL"),
+                ],
+            )),
+            SanitizeDecision::PassGenerated(StreamEvent::Text(r"Notes \*hint\* ".to_string(),))
+        );
+        assert!(san.is_skipping());
+        assert_eq!(
+            san.process_event(text("SENSITIVE_VALUE_SENTINEL")),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(
+            san.process_event(end_tag("textarea")),
+            SanitizeDecision::Skip
+        );
+        assert!(!san.is_skipping());
+        assert!(matches!(
+            san.process_event(text("after textarea")),
+            SanitizeDecision::Pass(_)
+        ));
+    }
+
+    #[test]
+    fn self_closing_textarea_does_not_reenable_default_text() {
+        let mut san = StreamingSanitizer::new();
+        assert_eq!(
+            san.process_event(StreamEvent::StartTag {
+                name: "textarea".to_string(),
+                attrs: vec![],
+                self_closing: true,
+            }),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(
+            san.process_event(text("SENSITIVE_VALUE_SENTINEL")),
+            SanitizeDecision::Skip
+        );
+    }
+
+    #[test]
+    fn option_values_are_suppressed_but_labels_and_output_text_pass() {
+        let mut san = StreamingSanitizer::new();
+        assert_eq!(
+            san.process_event(start_tag("select", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(
+            san.process_event(start_tag(
+                "option",
+                vec![("value", "SENSITIVE_VALUE_SENTINEL")],
+            )),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(
+            san.process_event(text("Visible option")),
+            SanitizeDecision::Pass(StreamEvent::Text("Visible option".to_string()))
+        );
+        assert_eq!(san.process_event(end_tag("option")), SanitizeDecision::Skip);
+        assert_eq!(san.process_event(end_tag("select")), SanitizeDecision::Skip);
+
+        assert_eq!(
+            san.process_event(start_tag("datalist", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(
+            san.process_event(start_tag(
+                "option",
+                vec![("value", "SENSITIVE_VALUE_SENTINEL")],
+            )),
+            SanitizeDecision::Skip
+        );
+        assert!(matches!(
+            san.process_event(text("Suggestion label")),
+            SanitizeDecision::Pass(_)
+        ));
+        assert_eq!(san.process_event(end_tag("option")), SanitizeDecision::Skip);
+        assert_eq!(
+            san.process_event(end_tag("datalist")),
+            SanitizeDecision::Skip
+        );
+
+        assert_eq!(
+            san.process_event(start_tag(
+                "output",
+                vec![("value", "SENSITIVE_VALUE_SENTINEL")],
+            )),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(
+            san.process_event(text("Calculation result: 42")),
+            SanitizeDecision::Pass(StreamEvent::Text("Calculation result: 42".to_string()))
+        );
+        assert_eq!(san.process_event(end_tag("output")), SanitizeDecision::Skip);
     }
 
     // --- Event handler attributes ---

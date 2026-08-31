@@ -15,7 +15,10 @@ mkdir -p "${FAKE_ROOT}/usr/sbin" "${FAKE_ROOT}/usr/bin" \
 
 # Link the fixed utility manifest the guard needs for its trusted-path
 # security checks (path canonicalization plus ownership/mode inspection).
-for util in grep readlink stat; do
+# The complete manifest matches the sibling trust tests: cat, grep, readlink,
+# rm, rmdir, sed, stat, and basename.  printf is a shell builtin, not an
+# external executable, so it must not be linked into the fake root.
+for util in cat grep readlink rm rmdir sed stat basename; do
     real_path="$(command -v "${util}" 2>/dev/null || true)"
     if [[ -n "${real_path}" ]]; then
         ln -sf "${real_path}" "${FAKE_ROOT}/usr/bin/${util}"
@@ -139,5 +142,19 @@ if ! printf '%s\n' "${run_case_output}" \
     exit 1
 fi
 printf 'PASS: no-nginx fallback blocks unverifiable configuration\n' >&2
+
+# No NGINX executable and no standard configuration file at all: nothing can
+# load the module, so removal is safe and must not be blocked.
+rm -f "${FAKE_ROOT}/usr/sbin/nginx"
+rm -rf "${FAKE_ROOT}/etc/nginx/conf.d" "${FAKE_ROOT}/etc/nginx/modules-enabled"
+rm -f "${FAKE_ROOT}/etc/nginx/nginx.conf"
+run_case_status=0
+run_case_output="$(${RUN_SCRIPT} remove 2>&1)" || run_case_status=$?
+if [[ "${run_case_status}" -ne 0 ]]; then
+    printf 'FAIL: empty-host removal returned %s, expected safe removal\n%s\n' \
+        "${run_case_status}" "${run_case_output}" >&2
+    exit 1
+fi
+printf 'PASS: no-nginx host without configuration files permits removal\n' >&2
 
 printf 'PASS: package removal guard lifecycle scenarios\n' >&2

@@ -265,7 +265,8 @@ echo "--- NC-1: postinstall.sh ---" >&2
 SOURCE_SCRIPT="${REPO_ROOT}/packaging/nfpm/scripts/postinstall.sh"
 if [[ -f "${SOURCE_SCRIPT}" ]]; then
     create_evil_dir "postinstall"
-    prepare_sandboxed_script "${SOURCE_SCRIPT}" "postinstall" "nfpm"
+    prepare_sandboxed_script "${SOURCE_SCRIPT}" "postinstall" "nfpm" \
+        || exit 1
     run_sandboxed_script bash configure
 
     assert_no_markers "postinstall.sh"
@@ -290,7 +291,8 @@ echo "--- NC-2: preremove.sh ---" >&2
 SOURCE_SCRIPT="${REPO_ROOT}/packaging/nfpm/scripts/preremove.sh"
 if [[ -f "${SOURCE_SCRIPT}" ]]; then
     create_evil_dir "preremove"
-    prepare_sandboxed_script "${SOURCE_SCRIPT}" "preremove" "nfpm"
+    prepare_sandboxed_script "${SOURCE_SCRIPT}" "preremove" "nfpm" \
+        || exit 1
     touch "${SANDBOX_ROOT}/usr/share/nginx/modules-available/mod-markdown.conf"
     ln -s "${SANDBOX_ROOT}/usr/share/nginx/modules-available/mod-markdown.conf" \
         "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
@@ -312,7 +314,8 @@ if [[ -f "${SOURCE_SCRIPT}" ]]; then
 
     echo "--- NC-2b: preremove.sh preserves an operator path ---" >&2
     create_evil_dir "preremove-regular-file"
-    prepare_sandboxed_script "${SOURCE_SCRIPT}" "preremove-regular-file" "nfpm"
+    prepare_sandboxed_script "${SOURCE_SCRIPT}" "preremove-regular-file" "nfpm" \
+        || exit 1
     touch "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
     run_sandboxed_script bash upgrade
 
@@ -339,7 +342,8 @@ echo "--- NC-3: preinstall.sh ---" >&2
 SOURCE_SCRIPT="${REPO_ROOT}/packaging/nfpm/scripts/preinstall.sh"
 if [[ -f "${SOURCE_SCRIPT}" ]]; then
     create_evil_dir "preinstall"
-    prepare_sandboxed_script "${SOURCE_SCRIPT}" "preinstall" "nfpm"
+    prepare_sandboxed_script "${SOURCE_SCRIPT}" "preinstall" "nfpm" \
+        || exit 1
     create_trusted_nginx
     run_sandboxed_script bash install
 

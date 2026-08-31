@@ -122,7 +122,7 @@ http {
 }
 ```
 
-如果你的上游可能返回压缩响应，`proxy_set_header Accept-Encoding "";` 是最容易验证的起步方式。等基础链路跑通后，再切换到模块内置的压缩响应处理能力，详见 [Automatic Decompression](docs/features/AUTOMATIC_DECOMPRESSION.md)。
+如果你的上游可能返回压缩响应，`proxy_set_header Accept-Encoding "";` 是最容易验证的起步方式。等基础链路跑通后，再切换到模块内置的压缩响应处理能力，详见 [Decompression](docs/features/DECOMPRESSION.md)。
 
 ### 3. 验证行为
 
@@ -415,7 +415,7 @@ make supply-chain
 - [系统架构](docs/architecture/README.md) — 双引擎模型、C + Rust 边界隔离设计。
 - [配置映射图](docs/architecture/CONFIG_BEHAVIOR_MAP.md) — 解析指令参数如何映射到底层执行逻辑。
 - [Harness 设计原理](docs/harness/README.md) — 为什么我们把自动化门禁校验作为仓库的一等资产。
-- [Harness 维护手册](docs/guides/HARNESS_MAINTENANCE.md) — 自定义代码审查规则和校验脚本编写。
+- [Harness 维护手册](docs/harness/HARNESS_MAINTENANCE.md) — 自定义代码审查规则和校验脚本编写。
 - [常见问题 (FAQ)](docs/FAQ.md) & [术语表](docs/glossary.md)。
 
 ## v0.9.2 新特性（开发候选版本）
@@ -436,7 +436,7 @@ v0.9.2 分支目前是开发候选版本，尚未发布。这是 v1.0 前最后�
 
 详见 [0.9.2 发布说明](docs/releases/0.9.2-release-notes.md)、
 [dynconf 指南](docs/guides/DYNAMIC_CONFIG.md) 和
-[回滚指南](docs/guides/ROLLBACK-0.9.2.md)。
+[回滚指南](docs/guides/VERSION_ROLLBACK-0.9.2.md)。
 
 ## v0.9.1 新特性
 

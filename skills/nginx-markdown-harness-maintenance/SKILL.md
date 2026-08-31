@@ -26,11 +26,11 @@ verification matrix with minimal guesswork.
 $ python3 skills/nginx-markdown-harness-maintenance/scripts/harness_route.py --from-git
 files: 2
   - docs/harness/README.md
-  - docs/guides/HARNESS_MAINTENANCE.md
+  - docs/harness/HARNESS_MAINTENANCE.md
 matched risk packs: 1
   - docs-tooling-drift (docs/harness/risk-packs/docs-tooling-drift.md)
     path hits:
-      - docs/guides/HARNESS_MAINTENANCE.md
+      - docs/harness/HARNESS_MAINTENANCE.md
       - docs/harness/README.md
     keyword hits:
       - docs

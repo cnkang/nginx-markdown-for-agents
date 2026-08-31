@@ -129,13 +129,18 @@ def _load_legacy_matrix_entries(entries: list[object]) -> List[dict]:
 def load_matrix(matrix_path: str) -> List[dict]:
     """
     Load qualifying release-binary entries from a release matrix JSON file.
-    
+
     Parameters:
         matrix_path (str): Filesystem path to the release matrix JSON file.
-    
+
     Returns:
         List[dict]: Qualifying entries from the current or legacy matrix schema,
         or an empty list when the file has no supported matrix structure.
+
+    Raises:
+        MatrixNormalizationError: When the matrix document is not a JSON
+            object, or when normalize_compatibility_document reports an
+            unsupported or invalid matrix structure.
     """
     resolved = validate_read_path(matrix_path, purpose="release matrix")
     data = json.loads(resolved.read_text(encoding="utf-8"))

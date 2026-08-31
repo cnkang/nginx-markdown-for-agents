@@ -82,7 +82,7 @@ NFPM_REQUIRED_SNIPPETS = [
     "/usr/share/doc/nginx-markdown-for-agents/README.md",
     "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md",
     "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md",
-    "/usr/share/doc/nginx-markdown-for-agents/COMPATIBILITY.md",
+    "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_COMPATIBILITY.md",
     "/usr/share/licenses/nginx-markdown-for-agents/LICENSE",
 ]
 # Semantic DEB dependency contract: the exact upstream NGINX version expressed
@@ -116,7 +116,7 @@ MODULE_NAME_SURFACES = [
     PROJECT_ROOT / "tools" / "release" / "gates" / "check_install_layout.sh",
     PROJECT_ROOT / "README.md",
     PROJECT_ROOT / "README_zh-CN.md",
-    PROJECT_ROOT / "docs" / "COMPATIBILITY.md",
+    PROJECT_ROOT / "docs" / "guides" / "PACKAGE_COMPATIBILITY.md",
     PACKAGE_INSTALLATION_DOC,
     RELEASE_PACKAGES_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
@@ -148,7 +148,7 @@ STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "docs/guides/INSTALL.md",
     "docs/guides/PACKAGE_INSTALLATION.md",
-    "docs/COMPATIBILITY.md",
+    "docs/guides/PACKAGE_COMPATIBILITY.md",
     '--define "nginx_version ${NGINX_VERSION}"',
     "tools/release/gates/check_install_layout.sh dist/*.rpm",
 ]
@@ -1192,8 +1192,18 @@ def _validate_release_binary_signing_security(result: ValidationResult) -> None:
         return
 
     start = workflow.find("\n  integrity-signing:")
-    end = workflow.find("\n  package-artifacts:", start)
-    if start == -1 or end == -1:
+    # Locate the next top-level job key after start (two-space indentation
+    # followed by a name and colon) rather than searching specifically for
+    # package-artifacts, so the boundary stays correct when the job list
+    # changes.  When integrity-signing is the final job, the boundary is
+    # the end of the file.
+    end = len(workflow)
+    for job_match in re.finditer(r"\n {2}[a-zA-Z0-9_-]+:", workflow[start + 1:]):
+        candidate = start + 1 + job_match.start()
+        if candidate > start:
+            end = candidate
+            break
+    if start == -1:
         result.fail(
             "release-signing-security:job",
             "release-binaries.yml must define a bounded integrity-signing job",

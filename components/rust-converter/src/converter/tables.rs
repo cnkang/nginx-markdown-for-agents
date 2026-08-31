@@ -36,12 +36,86 @@
 //! - Empty tables (no rows) produce no output.
 //! - Cell content is recursively converted, allowing inline Markdown within cells.
 
+use super::traversal::{append_char_with_context, append_str_with_context};
 use super::{
     ConversionContext, ConversionError, Handle, MarkdownConverter, MarkdownFlavor, NodeData,
     TableAlignment,
 };
 use html5ever::Attribute;
 use std::cell::Ref;
+
+struct TableVecGrowthPlan {
+    old_bytes: usize,
+    requested_bytes: usize,
+    additional: usize,
+    requested_growth: usize,
+}
+
+/// Collected table parts: header cells, column alignments, body rows, and
+/// colgroup-declared alignments.
+struct CollectedTableData {
+    headers: Vec<String>,
+    alignments: Vec<TableAlignment>,
+    rows: Vec<Vec<String>>,
+    col_alignments: Vec<Option<TableAlignment>>,
+}
+
+/// Output-capacity charge tracked across the table render.
+struct TableRenderCharge<'a> {
+    capacity: usize,
+    active: bool,
+    released: &'a mut bool,
+}
+
+fn table_vec_growth_plan<T>(
+    vec: &Vec<T>,
+    required_len: usize,
+) -> Result<TableVecGrowthPlan, ConversionError> {
+    let old_capacity = vec.capacity();
+    let doubled_capacity = old_capacity
+        .max(1)
+        .checked_mul(2)
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+    let requested_capacity = doubled_capacity.max(required_len);
+    let additional = requested_capacity
+        .checked_sub(vec.len())
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+    let element_size = std::mem::size_of::<T>();
+    let old_bytes = old_capacity
+        .checked_mul(element_size)
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+    let requested_bytes = requested_capacity
+        .checked_mul(element_size)
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+    let requested_growth = requested_bytes
+        .checked_sub(old_bytes)
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+
+    Ok(TableVecGrowthPlan {
+        old_bytes,
+        requested_bytes,
+        additional,
+        requested_growth,
+    })
+}
+
+fn reconcile_table_vec_charge(
+    context: &mut ConversionContext,
+    old_bytes: usize,
+    requested_growth: usize,
+    actual_bytes: usize,
+) -> Result<(), ConversionError> {
+    let actual_growth = actual_bytes
+        .checked_sub(old_bytes)
+        .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+
+    // Replace the provisional reservation with the allocator's actual
+    // capacity in one transaction. This also restores the old charge when
+    // the actual capacity cannot fit, so no failed extra reservation can
+    // leave a stale or partially released ledger.
+    context.release_working_set(requested_growth);
+    context.reserve_working_set(actual_growth)
+}
 
 impl MarkdownConverter {
     fn extract_table_body(
@@ -51,9 +125,10 @@ impl MarkdownConverter {
         headers: &mut Vec<String>,
         alignments: &mut Vec<TableAlignment>,
         rows: &mut Vec<Vec<String>>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         if !headers.is_empty() {
-            return self.extract_table_rows(tbody, ctx.as_deref_mut(), rows);
+            return self.extract_table_rows(tbody, ctx.as_deref_mut(), rows, table_scratch);
         }
 
         let children = tbody.children.borrow();
@@ -64,10 +139,16 @@ impl MarkdownConverter {
             )
         });
         let Some(first_tr) = first_tr else {
-            return self.extract_table_rows(tbody, ctx.as_deref_mut(), rows);
+            return self.extract_table_rows(tbody, ctx.as_deref_mut(), rows, table_scratch);
         };
 
-        self.extract_table_row_as_header(first_tr, ctx.as_deref_mut(), headers, alignments)?;
+        self.extract_table_row_as_header(
+            first_tr,
+            ctx.as_deref_mut(),
+            headers,
+            alignments,
+            table_scratch,
+        )?;
 
         let mut is_first = true;
         for tbody_child in children.iter() {
@@ -80,7 +161,13 @@ impl MarkdownConverter {
                 }
 
                 let mut row_cells = Vec::new();
-                self.extract_table_row(tbody_child, ctx.as_deref_mut(), &mut row_cells)?;
+                self.extract_table_row(
+                    tbody_child,
+                    ctx.as_deref_mut(),
+                    &mut row_cells,
+                    table_scratch,
+                )?;
+                Self::charge_vec_growth(&mut *rows, ctx, table_scratch)?;
                 rows.push(row_cells);
             }
         }
@@ -94,20 +181,34 @@ impl MarkdownConverter {
         headers: &mut Vec<String>,
         alignments: &mut Vec<TableAlignment>,
         rows: &mut Vec<Vec<String>>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         let NodeData::Element { ref name, .. } = child.data else {
             return Ok(());
         };
 
         match name.local.as_ref() {
-            "thead" => self.extract_table_header(child, ctx.as_deref_mut(), headers, alignments),
-            "tbody" => self.extract_table_body(child, ctx, headers, alignments, rows),
-            "tr" if headers.is_empty() => {
-                self.extract_table_row_as_header(child, ctx.as_deref_mut(), headers, alignments)
+            "thead" => self.extract_table_header(
+                child,
+                ctx.as_deref_mut(),
+                headers,
+                alignments,
+                table_scratch,
+            ),
+            "tbody" => {
+                self.extract_table_body(child, ctx, headers, alignments, rows, table_scratch)
             }
+            "tr" if headers.is_empty() => self.extract_table_row_as_header(
+                child,
+                ctx.as_deref_mut(),
+                headers,
+                alignments,
+                table_scratch,
+            ),
             "tr" => {
                 let mut row_cells = Vec::new();
-                self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells)?;
+                self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells, table_scratch)?;
+                Self::charge_vec_growth(&mut *rows, ctx, table_scratch)?;
                 rows.push(row_cells);
                 Ok(())
             }
@@ -129,77 +230,173 @@ impl MarkdownConverter {
             return self.traverse_children(node, output, depth + 1, ctx);
         }
 
-        Self::ensure_blank_line_before(output);
-
-        let mut headers: Vec<String> = Vec::new();
-        let mut alignments: Vec<TableAlignment> = Vec::new();
-        let mut rows: Vec<Vec<String>> = Vec::new();
-
-        let mut col_alignments: Vec<Option<TableAlignment>> = Vec::new();
-        self.extract_colgroup_alignments_from(node, &mut col_alignments);
-
         let mut ctx = ctx;
-        for child in node.children.borrow().iter() {
-            self.extract_table_child(child, &mut ctx, &mut headers, &mut alignments, &mut rows)?;
+        Self::ensure_blank_line_before(output, &mut ctx)?;
+
+        let output_capacity = output.capacity();
+        let mut output_charge_active = false;
+        if let Some(context) = ctx.as_deref_mut() {
+            context.reserve_working_set(output_capacity)?;
+            output_charge_active = true;
         }
+        let mut output_charge_released = false;
+        let mut table_scratch = 0usize;
+        let mut render_charge = TableRenderCharge {
+            capacity: output_capacity,
+            active: output_charge_active,
+            released: &mut output_charge_released,
+        };
+
+        let result = self.render_gfm_table_body(
+            node,
+            output,
+            &mut ctx,
+            &mut table_scratch,
+            &mut render_charge,
+        );
+
+        if let Some(context) = ctx {
+            if render_charge.active && !*render_charge.released {
+                context.release_working_set(render_charge.capacity);
+            }
+            context.release_working_set(table_scratch);
+        }
+        result
+    }
+
+    /// Collect, align, write, and terminate a GFM table body.
+    fn render_gfm_table_body(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+        render_charge: &mut TableRenderCharge<'_>,
+    ) -> Result<(), ConversionError> {
+        let collected = self.collect_table_data(node, ctx, table_scratch)?;
+        // Only the alignment vector is extended below (colgroup
+        // application and the default-fill loop); headers and rows
+        // are read-only from this point.
+        let (headers, mut alignments, rows) =
+            (collected.headers, collected.alignments, collected.rows);
+        let col_alignments = collected.col_alignments;
 
         if headers.is_empty() {
             return Ok(());
         }
 
         while alignments.len() < headers.len() {
+            Self::charge_vec_growth(&mut alignments, ctx, table_scratch)?;
             alignments.push(TableAlignment::Left);
         }
 
-        Self::apply_col_alignments(&mut alignments, &col_alignments);
+        Self::apply_col_alignments(&mut alignments, &col_alignments, ctx, table_scratch)?;
 
-        self.write_gfm_table(output, &headers, &alignments, &rows)?;
+        // The final output buffer was retained as working-set charge
+        // while cells were collected.  Release that charge before the
+        // table writer runs so capacity growth is checked against the
+        // actual live cell scratch only, not counted twice.
+        if render_charge.active {
+            if let Some(context) = ctx.as_deref_mut() {
+                context.release_working_set(render_charge.capacity);
+            }
+            *render_charge.released = true;
+        }
+
+        self.write_gfm_table(output, &headers, &alignments, &rows, ctx.as_deref_mut())?;
 
         if !output.ends_with("\n\n") {
-            output.push('\n');
+            append_char_with_context(output, '\n', ctx)?;
         }
 
         Ok(())
     }
 
-    fn ensure_blank_line_before(output: &mut String) {
+    /// Collect headers, alignments, colgroup aligns, and rows from the
+    /// table node, charging the working set as the cell vectors grow.
+    fn collect_table_data(
+        &self,
+        node: &Handle,
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+    ) -> Result<CollectedTableData, ConversionError> {
+        let mut headers: Vec<String> = Vec::new();
+        let mut alignments: Vec<TableAlignment> = Vec::new();
+        let mut rows: Vec<Vec<String>> = Vec::new();
+
+        let mut col_alignments: Vec<Option<TableAlignment>> = Vec::new();
+        self.extract_colgroup_alignments_from(node, ctx, &mut col_alignments, table_scratch)?;
+
+        for child in node.children.borrow().iter() {
+            self.extract_table_child(
+                child,
+                ctx,
+                &mut headers,
+                &mut alignments,
+                &mut rows,
+                table_scratch,
+            )?;
+        }
+        Ok(CollectedTableData {
+            headers,
+            alignments,
+            rows,
+            col_alignments,
+        })
+    }
+
+    fn ensure_blank_line_before(
+        output: &mut String,
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
         if !output.is_empty() && !output.ends_with("\n\n") {
             if output.ends_with('\n') {
-                output.push('\n');
+                append_char_with_context(output, '\n', ctx)?;
             } else {
-                output.push_str("\n\n");
+                append_str_with_context(output, "\n\n", ctx)?;
             }
         }
+        Ok(())
     }
 
     fn extract_colgroup_alignments_from(
         &self,
         node: &Handle,
+        ctx: &mut Option<&mut ConversionContext>,
         col_alignments: &mut Vec<Option<TableAlignment>>,
-    ) {
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
         for child in node.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data
                 && name.local.as_ref() == "colgroup"
             {
-                self.extract_colgroup_alignments(child, col_alignments);
+                self.extract_colgroup_alignments(child, ctx, col_alignments, table_scratch)?;
             }
         }
+        Ok(())
     }
 
     fn apply_col_alignments(
         alignments: &mut Vec<TableAlignment>,
         col_alignments: &[Option<TableAlignment>],
-    ) {
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
         for (i, col_align) in col_alignments.iter().enumerate() {
             if let Some(col_align) = col_align {
                 if i < alignments.len() {
                     alignments[i] = *col_align;
                 } else {
-                    alignments.resize(i + 1, TableAlignment::Left);
+                    let required_len = i.checked_add(1).ok_or_else(|| {
+                        ConversionError::MemoryLimit("table alignment size overflow".into())
+                    })?;
+                    Self::charge_vec_growth_to(alignments, required_len, ctx, table_scratch)?;
+                    alignments.resize(required_len, TableAlignment::Left);
                     alignments[i] = *col_align;
                 }
             }
         }
+        Ok(())
     }
 
     /// Extract column alignments from a `<colgroup>` element.
@@ -210,8 +407,10 @@ impl MarkdownConverter {
     pub(super) fn extract_colgroup_alignments(
         &self,
         colgroup: &Handle,
+        ctx: &mut Option<&mut ConversionContext>,
         col_alignments: &mut Vec<Option<TableAlignment>>,
-    ) {
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
         for child in colgroup.children.borrow().iter() {
             if let NodeData::Element {
                 ref name,
@@ -229,10 +428,12 @@ impl MarkdownConverter {
                     .clamp(1, 1_000);
                 let alignment = self.extract_explicit_alignment(&attrs_borrowed);
                 for _ in 0..span {
+                    Self::charge_vec_growth(col_alignments, ctx, table_scratch)?;
                     col_alignments.push(alignment);
                 }
             }
         }
+        Ok(())
     }
 
     /// Extract header cells from a `<thead>` section.
@@ -242,13 +443,20 @@ impl MarkdownConverter {
         ctx: Option<&mut ConversionContext>,
         headers: &mut Vec<String>,
         alignments: &mut Vec<TableAlignment>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
         for child in thead.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data
                 && name.local.as_ref() == "tr"
             {
-                self.extract_table_row_as_header(child, ctx.as_deref_mut(), headers, alignments)?;
+                self.extract_table_row_as_header(
+                    child,
+                    ctx.as_deref_mut(),
+                    headers,
+                    alignments,
+                    table_scratch,
+                )?;
                 break;
             }
         }
@@ -266,6 +474,7 @@ impl MarkdownConverter {
         ctx: Option<&mut ConversionContext>,
         headers: &mut Vec<String>,
         alignments: &mut Vec<TableAlignment>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
         for child in tr.children.borrow().iter() {
@@ -287,8 +496,12 @@ impl MarkdownConverter {
                         )?;
                     }
 
-                    headers.push(cell_output.trim().to_string());
+                    Self::trim_cell_output(&mut cell_output);
+                    Self::charge_cell_output(&cell_output, &mut ctx, table_scratch)?;
+                    Self::charge_vec_growth(&mut *headers, &mut ctx, table_scratch)?;
+                    headers.push(cell_output);
                     let attrs_borrowed = attrs.borrow();
+                    Self::charge_vec_growth(&mut *alignments, &mut ctx, table_scratch)?;
                     alignments.push(self.extract_alignment(&attrs_borrowed));
                 }
             }
@@ -303,6 +516,7 @@ impl MarkdownConverter {
         tbody: &Handle,
         ctx: Option<&mut ConversionContext>,
         rows: &mut Vec<Vec<String>>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
         for child in tbody.children.borrow().iter() {
@@ -310,7 +524,8 @@ impl MarkdownConverter {
                 && name.local.as_ref() == "tr"
             {
                 let mut row_cells = Vec::new();
-                self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells)?;
+                self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells, table_scratch)?;
+                Self::charge_vec_growth(&mut *rows, &mut ctx, table_scratch)?;
                 rows.push(row_cells);
             }
         }
@@ -324,6 +539,7 @@ impl MarkdownConverter {
         tr: &Handle,
         ctx: Option<&mut ConversionContext>,
         cells: &mut Vec<String>,
+        table_scratch: &mut usize,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
         for child in tr.children.borrow().iter() {
@@ -339,11 +555,133 @@ impl MarkdownConverter {
                             ctx.as_deref_mut(),
                         )?;
                     }
-                    cells.push(cell_output.trim().to_string());
+                    Self::trim_cell_output(&mut cell_output);
+                    Self::charge_cell_output(&cell_output, &mut ctx, table_scratch)?;
+                    Self::charge_vec_growth(&mut *cells, &mut ctx, table_scratch)?;
+                    cells.push(cell_output);
                 }
             }
         }
 
+        Ok(())
+    }
+
+    fn trim_cell_output(output: &mut String) {
+        let start = output.len() - output.trim_start().len();
+        let end = output.trim_end().len();
+        if start > 0 {
+            output.drain(..start);
+        }
+        output.truncate(end.saturating_sub(start));
+    }
+
+    fn charge_cell_output(
+        output: &String,
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
+        let capacity = output.capacity();
+        if let Some(context) = ctx.as_deref_mut() {
+            let next = table_scratch.checked_add(capacity).ok_or_else(|| {
+                ConversionError::MemoryLimit("table working-set size overflow".into())
+            })?;
+            context.reserve_working_set(capacity)?;
+            *table_scratch = next;
+        }
+        Ok(())
+    }
+
+    /// Charge the backing allocation of a container Vec before it grows.
+    ///
+    /// The table pipeline keeps several container Vecs alive while cells are
+    /// collected (headers, alignments, rows, per-row cell lists).  Their
+    /// backing allocations are not Markdown output, so they must be charged
+    /// against the working set explicitly; otherwise a table with many empty
+    /// cells can amplify memory far beyond the configured budget while
+    /// `working_set_bytes` stays low.
+    fn charge_vec_growth<T>(
+        vec: &mut Vec<T>,
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
+        let required_len = vec
+            .len()
+            .checked_add(1)
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()))?;
+        Self::charge_vec_growth_to(vec, required_len, ctx, table_scratch)
+    }
+
+    fn charge_vec_growth_to<T>(
+        vec: &mut Vec<T>,
+        required_len: usize,
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+    ) -> Result<(), ConversionError> {
+        if required_len <= vec.capacity() {
+            return Ok(());
+        }
+
+        let plan = table_vec_growth_plan(vec, required_len)?;
+        if plan.old_bytes > *table_scratch {
+            return Err(ConversionError::MemoryLimit(
+                "table container charge is inconsistent".into(),
+            ));
+        }
+        if let Some(context) = ctx.as_deref_mut() {
+            context.reserve_working_set(plan.requested_growth)?;
+        }
+
+        if let Err(error) = vec.try_reserve_exact(plan.additional) {
+            if let Some(context) = ctx.as_deref_mut() {
+                context.release_working_set(plan.requested_growth);
+            }
+            return Err(ConversionError::MemoryLimit(format!(
+                "unable to reserve {} bytes for table container: {}",
+                plan.requested_bytes, error
+            )));
+        }
+
+        let actual_capacity = vec.capacity();
+        let actual_bytes = actual_capacity
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()));
+        let actual_bytes = match actual_bytes {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                if let Some(context) = ctx.as_deref_mut() {
+                    context.release_working_set(plan.requested_growth);
+                }
+                return Err(error);
+            }
+        };
+        let updated_scratch = table_scratch
+            .checked_sub(plan.old_bytes)
+            .and_then(|base| base.checked_add(actual_bytes))
+            .ok_or_else(|| ConversionError::MemoryLimit("table container size overflow".into()));
+        let updated_scratch = match updated_scratch {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                if let Some(context) = ctx.as_deref_mut() {
+                    context.release_working_set(plan.requested_growth);
+                }
+                return Err(error);
+            }
+        };
+
+        if let Some(context) = ctx.as_deref_mut()
+            && let Err(error) = reconcile_table_vec_charge(
+                context,
+                plan.old_bytes,
+                plan.requested_growth,
+                actual_bytes,
+            )
+        {
+            return Err(ConversionError::MemoryLimit(format!(
+                "table container capacity {} bytes exceeds budget: {}",
+                actual_bytes, error
+            )));
+        }
+        *table_scratch = updated_scratch;
         Ok(())
     }
 
@@ -389,12 +727,27 @@ impl MarkdownConverter {
         None
     }
 
-    /// Escape row/cell content for safe GFM table rendering.
-    fn escape_gfm_table_cell(&self, cell: &str) -> String {
-        cell.replace("\r\n", "\n")
-            .replace('\r', "\n")
-            .replace('\n', "<br>")
-            .replace('|', "\\|")
+    fn append_gfm_table_cell(
+        &self,
+        output: &mut String,
+        cell: &str,
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        let mut chars = cell.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\r' => {
+                    if chars.peek() == Some(&'\n') {
+                        chars.next();
+                    }
+                    append_str_with_context(output, "<br>", ctx)?;
+                }
+                '\n' => append_str_with_context(output, "<br>", ctx)?,
+                '|' => append_str_with_context(output, "\\|", ctx)?,
+                _ => append_char_with_context(output, ch, ctx)?,
+            }
+        }
+        Ok(())
     }
 
     /// Render a normalized GitHub-Flavored Markdown table.
@@ -407,42 +760,44 @@ impl MarkdownConverter {
         headers: &[String],
         alignments: &[TableAlignment],
         rows: &[Vec<String>],
+        ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
         let max_cols = headers
             .len()
             .max(rows.iter().map(Vec::len).max().unwrap_or(0));
 
-        output.push('|');
+        append_char_with_context(output, '|', &mut ctx)?;
         for i in 0..max_cols {
-            output.push(' ');
+            append_char_with_context(output, ' ', &mut ctx)?;
             let header = headers.get(i).map(String::as_str).unwrap_or("");
-            output.push_str(&self.escape_gfm_table_cell(header));
-            output.push_str(" |");
+            self.append_gfm_table_cell(output, header, &mut ctx)?;
+            append_str_with_context(output, " |", &mut ctx)?;
         }
-        output.push('\n');
+        append_char_with_context(output, '\n', &mut ctx)?;
 
-        output.push('|');
+        append_char_with_context(output, '|', &mut ctx)?;
         for i in 0..max_cols {
-            output.push(' ');
+            append_char_with_context(output, ' ', &mut ctx)?;
             match alignments.get(i).unwrap_or(&TableAlignment::Left) {
-                TableAlignment::Left => output.push_str("---"),
-                TableAlignment::Center => output.push_str(":---:"),
-                TableAlignment::Right => output.push_str("---:"),
+                TableAlignment::Left => append_str_with_context(output, "---", &mut ctx)?,
+                TableAlignment::Center => append_str_with_context(output, ":---:", &mut ctx)?,
+                TableAlignment::Right => append_str_with_context(output, "---:", &mut ctx)?,
             }
-            output.push_str(" |");
+            append_str_with_context(output, " |", &mut ctx)?;
         }
-        output.push('\n');
+        append_char_with_context(output, '\n', &mut ctx)?;
 
         for row in rows {
-            output.push('|');
+            append_char_with_context(output, '|', &mut ctx)?;
             for i in 0..max_cols {
-                output.push(' ');
+                append_char_with_context(output, ' ', &mut ctx)?;
                 if let Some(cell) = row.get(i) {
-                    output.push_str(&self.escape_gfm_table_cell(cell));
+                    self.append_gfm_table_cell(output, cell, &mut ctx)?;
                 }
-                output.push_str(" |");
+                append_str_with_context(output, " |", &mut ctx)?;
             }
-            output.push('\n');
+            append_char_with_context(output, '\n', &mut ctx)?;
         }
 
         Ok(())
@@ -473,4 +828,192 @@ fn parse_text_align_from_style(style: &str) -> Option<TableAlignment> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{
+        ConversionContext, ConversionOptions, MarkdownConverter, MarkdownFlavor, TableAlignment,
+    };
+    use crate::error::ConversionError;
+    use crate::parser::parse_html;
+    use std::time::Duration;
+
+    #[test]
+    fn table_output_is_byte_identical_with_working_set_accounting() {
+        let html = "<table><thead><tr><th>Header</th><th align=\"right\">Count</th></tr></thead><tbody><tr><td>Item</td><td>2</td></tr></tbody></table>";
+        let dom = parse_html(html.as_bytes()).expect("test HTML should parse");
+        let converter = MarkdownConverter::with_options(ConversionOptions {
+            flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
+            ..ConversionOptions::default()
+        });
+        let expected = "| Header | Count |\n| --- | ---: |\n| Item | 2 |\n";
+
+        assert_eq!(
+            converter.convert(&dom).expect("conversion should succeed"),
+            expected
+        );
+
+        let mut context = ConversionContext::with_output_budget(Duration::ZERO, 4096);
+        let with_budget = converter
+            .convert_with_context(&dom, &mut context)
+            .expect("conversion should fit the budget");
+        assert_eq!(with_budget, expected);
+        assert_eq!(context.working_set_bytes, 0);
+    }
+
+    #[test]
+    fn table_vec_growth_replaces_old_capacity_charge() {
+        let element_size = std::mem::size_of::<String>();
+        let mut expected_values = Vec::<String>::new();
+        let mut expected_capacities = Vec::new();
+        for _ in 0..10 {
+            if expected_values.len() + 1 > expected_values.capacity() {
+                let requested_capacity = expected_values.capacity().max(1) * 2;
+                expected_values
+                    .try_reserve_exact(requested_capacity - expected_values.len())
+                    .expect("test capacity should be reservable");
+            }
+            expected_capacities.push(expected_values.capacity());
+            expected_values.push(String::new());
+        }
+        let final_capacity = *expected_capacities
+            .last()
+            .expect("capacity probe should have entries");
+        let initial_capacity = *expected_capacities
+            .first()
+            .expect("capacity probe should have an initial allocation");
+        assert!(final_capacity > initial_capacity);
+        let mut values = Vec::<String>::new();
+        let mut context =
+            ConversionContext::with_output_budget(Duration::ZERO, element_size * final_capacity);
+        let mut table_scratch = 0;
+
+        {
+            let mut context_slot = Some(&mut context);
+            for expected_capacity in expected_capacities {
+                MarkdownConverter::charge_vec_growth(
+                    &mut values,
+                    &mut context_slot,
+                    &mut table_scratch,
+                )
+                .expect("explicit table capacity should fit the budget");
+                assert_eq!(values.capacity(), expected_capacity);
+                assert_eq!(
+                    table_scratch,
+                    values.capacity() * std::mem::size_of::<String>()
+                );
+                values.push(String::new());
+            }
+        }
+
+        assert_eq!(context.working_set_bytes, element_size * final_capacity);
+    }
+
+    #[test]
+    fn table_vec_growth_to_respects_required_length_boundary() {
+        let element_size = std::mem::size_of::<TableAlignment>();
+        let mut expected_values = Vec::<TableAlignment>::new();
+        expected_values
+            .try_reserve_exact(5)
+            .expect("test capacity should be reservable");
+        let expected_capacity = expected_values.capacity();
+        let mut values = Vec::<TableAlignment>::new();
+        let mut context =
+            ConversionContext::with_output_budget(Duration::ZERO, element_size * expected_capacity);
+        let mut table_scratch = 0;
+
+        {
+            let mut context_slot = Some(&mut context);
+            MarkdownConverter::charge_vec_growth_to(
+                &mut values,
+                5,
+                &mut context_slot,
+                &mut table_scratch,
+            )
+            .expect("required table capacity should fit exactly");
+        }
+
+        assert!(values.capacity() >= 5);
+        assert_eq!(
+            table_scratch,
+            values.capacity() * std::mem::size_of::<TableAlignment>()
+        );
+        assert_eq!(values.capacity(), expected_capacity);
+        assert_eq!(table_scratch, element_size * expected_capacity);
+
+        assert_eq!(context.working_set_bytes, element_size * expected_capacity);
+    }
+
+    #[test]
+    fn table_vec_growth_reconciles_actual_capacity_after_provisional_charge() {
+        let element_size = std::mem::size_of::<String>();
+        let old_bytes = element_size;
+        let requested_growth = element_size;
+        let actual_bytes = element_size * 3;
+        let mut context = ConversionContext::with_output_budget(Duration::ZERO, actual_bytes + 8);
+        context
+            .reserve_working_set(old_bytes)
+            .expect("the existing table allocation should fit");
+        context
+            .reserve_working_set(requested_growth)
+            .expect("the provisional growth should fit");
+
+        super::reconcile_table_vec_charge(&mut context, old_bytes, requested_growth, actual_bytes)
+            .expect("actual allocator capacity should replace provisional growth");
+        assert_eq!(context.working_set_bytes, actual_bytes);
+
+        let mut tight_context =
+            ConversionContext::with_output_budget(Duration::ZERO, actual_bytes - 1);
+        tight_context
+            .reserve_working_set(old_bytes)
+            .expect("the existing table allocation should fit");
+        tight_context
+            .reserve_working_set(requested_growth)
+            .expect("the provisional growth should fit before reconciliation");
+        assert!(matches!(
+            super::reconcile_table_vec_charge(
+                &mut tight_context,
+                old_bytes,
+                requested_growth,
+                actual_bytes,
+            ),
+            Err(ConversionError::MemoryLimit(_))
+        ));
+        assert_eq!(tight_context.working_set_bytes, old_bytes);
+    }
+
+    #[test]
+    fn many_empty_table_cells_fail_and_release_working_set() {
+        let mut html = String::from(
+            "<table><colgroup><col span=\"64\" align=\"center\"></colgroup><thead><tr>",
+        );
+        for _ in 0..64 {
+            html.push_str("<th></th>");
+        }
+        html.push_str("</tr></thead><tbody>");
+        for _ in 0..64 {
+            html.push_str("<tr>");
+            for _ in 0..64 {
+                html.push_str("<td></td>");
+            }
+            html.push_str("</tr>");
+        }
+        html.push_str("</tbody></table>");
+
+        let dom = parse_html(html.as_bytes()).expect("test HTML should parse");
+        let converter = MarkdownConverter::with_options(ConversionOptions {
+            flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
+            ..ConversionOptions::default()
+        });
+        let mut context = ConversionContext::with_output_budget(Duration::ZERO, 32 * 1024);
+
+        let result = converter.convert_with_context(&dom, &mut context);
+
+        assert!(
+            matches!(result, Err(ConversionError::MemoryLimit(_))),
+            "large empty-cell table must fail with MemoryLimit, got: {result:?}"
+        );
+        assert_eq!(context.working_set_bytes, 0);
+    }
 }

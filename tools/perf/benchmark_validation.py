@@ -379,7 +379,13 @@ def merge_diagnostics_metrics(
     }
     for source_key, (target, target_key) in field_map.items():
         if source_key in module_metrics:
-            target[target_key] = module_metrics[source_key]
+            value = module_metrics[source_key]
+            if not _is_numeric_count(value):
+                raise ValueError(
+                    f"diagnostic counter {source_key} is not a finite "
+                    f"non-negative count: {value!r}"
+                )
+            target[target_key] = value
     return metrics
 
 
@@ -681,6 +687,23 @@ def _is_numeric_count(value) -> bool:
     return finite and value >= 0
 
 
+def _derive_fallback_rate(
+    requests_total: Any, streaming_failopen_total: Any
+) -> float | None:
+    """Derive the bounded fail-open rate when both counters are valid."""
+    if not _is_numeric_count(requests_total) or not _is_numeric_count(
+        streaming_failopen_total
+    ):
+        return None
+
+    assert requests_total is not None and streaming_failopen_total is not None
+    if requests_total == 0:
+        return 0.0 if streaming_failopen_total == 0 else None
+    if streaming_failopen_total > requests_total:
+        return None
+    return streaming_failopen_total / requests_total
+
+
 def _path_metrics(
     nginx_metrics: Mapping[str, Any],
 ) -> tuple[
@@ -706,22 +729,11 @@ def _path_metrics(
     streaming_fallback_total = streaming.get("fallback_total")
     streaming_failopen_total = streaming.get("precommit_failopen_total")
 
-    if _is_numeric_count(requests_total) and _is_numeric_count(
-        streaming_failopen_total
-    ):
-        # fallback_rate is the hard fail-open share:
-        # precommit_failopen_total / streaming_requests_total (1.0 when every
-        # streaming request fails open). Capability fallbacks are reported
-        # separately and must not affect the release gate.
-        assert requests_total is not None and streaming_failopen_total is not None
-        if requests_total > 0:
-            fallback_rate = streaming_failopen_total / requests_total
-        elif streaming_failopen_total == 0:
-            fallback_rate = 0.0
-        else:
-            fallback_rate = None
-    else:
-        fallback_rate = None
+    # fallback_rate is the hard fail-open share. Capability fallbacks are
+    # reported separately and must not affect the release gate.
+    fallback_rate = _derive_fallback_rate(
+        requests_total, streaming_failopen_total
+    )
     return (
         perf,
         streaming,
@@ -812,7 +824,10 @@ def _scenario_metrics(
         # The harness reports bytes per request and requests per second.  Keep
         # the derived value tied to those measured fields instead of a
         # placeholder so baseline evidence remains numerically meaningful.
-        "throughput_mbytes_per_sec": round(data.input_bytes * rps / 1_000_000.0, 6),
+        # A zero rps is missing evidence, not a zero measurement.
+        "throughput_mbytes_per_sec": (
+            round(data.input_bytes * rps / 1_000_000.0, 6) if rps > 0.0 else None
+        ),
         "decompression_streaming_total": decomp_streaming,
         "decompression_fullbuffer_total": decomp_fullbuffer,
         "pending_output_high_watermark_bytes": perf.get(

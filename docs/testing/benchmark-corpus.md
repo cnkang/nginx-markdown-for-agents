@@ -160,7 +160,7 @@ This builds the `test-corpus-conversion` binary, runs the converter on every cor
 make test-benchmark-compare
 ```
 
-Compares `perf/reports/corpus-baseline.json` against `perf/reports/corpus-report.json` using thresholds from `perf/quality-thresholds.json`. Produces a verdict JSON and exits with code 1 on failure.
+Compares the canonical committed baseline `perf/baselines/corpus-baseline.json` against the current run at `perf/reports/corpus-report.json` using thresholds from `perf/quality-thresholds.json`. Produces a verdict JSON and exits with code 1 on failure.
 
 ### Generate PR Summary
 

@@ -15,7 +15,7 @@ Each ADR follows this structure:
 
 ## Status
 
-[Proposed | Accepted | Deprecated | Superseded by ADR-YYYY]
+[Proposed | Accepted | Deprecated | Superseded by ADR-YYYY | `Superseded (removed in <release>)`]
 
 ## Context
 
@@ -94,7 +94,9 @@ What other options were considered and why were they not chosen?
 1. **Proposed**: Initial draft, under discussion
 2. **Accepted**: Decision has been made and implemented
 3. **Deprecated**: No longer recommended but still in use
-4. **Superseded**: Replaced by a newer decision (reference the new ADR)
+4. **Superseded**: Replaced by a newer decision (reference the new ADR).
+   When a release removes the covered feature outright with no
+   replacement ADR, record `Superseded (removed in <release>)` instead
 
 ## Guidelines
 

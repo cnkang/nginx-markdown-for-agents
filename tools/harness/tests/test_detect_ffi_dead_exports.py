@@ -82,3 +82,92 @@ def test_scanners_reject_parent_paths(scanner) -> None:
     """Directory inputs must be rejected before recursive traversal."""
     with pytest.raises(ValueError, match="Refusing path"):
         scanner(Path("../outside"))
+
+
+def test_block_comment_state_tracks_across_lines() -> None:
+    """Multi-line comment bodies are not scanned for callsites."""
+    code, state, _, _ = detector._mask_inline_comments(
+        "/* documentation example: markdown_convert(...)", False
+    )
+    assert state is True
+    assert "markdown_convert" not in code
+    code, state, _, _ = detector._mask_inline_comments(
+        "continued prose markdown_decompress(...)", state
+    )
+    assert state is True
+    assert "markdown_decompress" not in code
+    code, state, _, _ = detector._mask_inline_comments("*/", state)
+    assert state is False
+
+    # A pointer-store assignment is not a comment continuation.
+    code, state, _, _ = detector._mask_inline_comments("*p = markdown_convert(x);", False)
+    assert state is False
+    assert "markdown_convert" in code
+
+    # Open and close on the same line leaves the state untouched.
+    code, state, _, _ = detector._mask_inline_comments(
+        "fn /* markdown_convert */ markdown_decompress()", False
+    )
+    assert state is False
+    assert "markdown_convert" not in code
+    assert "markdown_decompress" in code
+
+
+def test_callsite_names_ignores_multiline_comment_body() -> None:
+    """A comment body line without a leading '*' must not count as a reference."""
+    text = (
+        "/*\n"
+        " * header\n"
+        "markdown_convert is documented here\n"
+        "markdown_decompress too\n"
+        " */\n"
+        "void real_call(void) { markdown_convert(NULL); }\n"
+    )
+    names = detector._callsite_names(text)
+    assert "markdown_convert" in names
+    assert "markdown_decompress" not in names
+
+
+def test_mask_keeps_string_literal_callsites() -> None:
+    """URLs and strings containing // or /* must not hide real callsites."""
+    code, state, _, _ = detector._mask_inline_comments(
+        'url = "http://example.com/x"; markdown_convert(NULL);', False
+    )
+    assert state is False
+    assert "markdown_convert" in code
+
+    code, state, _, _ = detector._mask_inline_comments(
+        's = "a/*b"; markdown_decompress(NULL);', False
+    )
+    assert state is False
+    assert "markdown_decompress" in code
+
+    code, state, _, _ = detector._mask_inline_comments(
+        "s = 'it\\'s // fine'; markdown_convert(NULL); // real comment", False
+    )
+    assert state is False
+    assert "markdown_convert" in code
+    # The trailing comment is masked, the single-quoted literal is not
+    # treated as a comment delimiter.
+    assert code.endswith("markdown_convert(NULL);                          ") or \
+        "markdown_convert(NULL);" in code
+
+
+def test_mask_keeps_string_state_across_continuation_lines() -> None:
+    """A backslash-continuation inside a string keeps the literal state."""
+    # Line 1: string literal opened, ends with a backslash continuation.
+    code, block, in_dq, in_sq = detector._mask_inline_comments(
+        'const char *s = "part1 \\', False
+    )
+    assert in_dq is True
+    assert "markdown_convert" not in code
+    # Line 2: still inside the string; a // here is literal, not a comment,
+    # and the string content is masked so it cannot be scanned as code.
+    code, block, in_dq, in_sq = detector._mask_inline_comments(
+        "part2 // still literal\"; markdown_convert(NULL);", block, in_dq, in_sq
+    )
+    assert in_dq is False
+    assert "markdown_convert" in code
+    # The string content (including the literal //) is masked, not treated
+    # as a comment delimiter that would hide the real callsite.
+    assert "part2" not in code

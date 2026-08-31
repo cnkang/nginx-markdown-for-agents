@@ -122,15 +122,20 @@ Required:
 - **ValueError propagation from validate_read_path**: When wrapping
   `validate_read_path()` in a try/except block, do NOT catch `ValueError`.
   `validate_read_path()` raises `ValueError` when the path validator catches a
-  traversal attempt (for example `..` components). Catching `ValueError` alongside
-  `ImportError` or `FileNotFoundError` silently swallows the traversal
-  rejection, allowing an attacker-controlled path to proceed to `open()`.
-  The correct exception tuple is `(ImportError, FileNotFoundError)` — these
-  cover the "path_validation module unavailable" and "directory does not
-  exist" fallback cases, while letting `ValueError` propagate as an
-  explicit rejection.  When refactoring a `try/except` around
-  `validate_read_path`, audit the caught exception types to ensure
-  `ValueError` is not in the tuple.
+  traversal attempt (for example `..` components). Catching `ValueError`
+  silently swallows the traversal rejection, allowing an attacker-controlled
+  path to proceed to `open()`.
+  The permitted fallback tuple is `(FileNotFoundError,)` — this covers only
+  the "directory does not exist" case. `ImportError` for a missing
+  `path_validation` module must **not** be in the tuple: a missing validation
+  module is a broken installation, not a fallback condition, so a missing
+  module must fail closed instead of degrading to unvalidated paths.
+  When refactoring a `try/except` around `validate_read_path`, audit the
+  caught exception types to ensure `ValueError` and `ImportError` are not in
+  the tuple.  `ImportError` must remain **fatal** during startup: a missing
+  `path_validation` module is a broken installation, not a fallback
+  condition, so the detector must not swallow it into a permissive fallback
+  path.
 - For single-artifact CLI tools, prefer emitting the artifact to stdout and
   letting the trusted caller redirect it. Do not accept a caller-controlled
   output path when the Python process does not need filesystem ownership of

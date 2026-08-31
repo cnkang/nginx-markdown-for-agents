@@ -1348,9 +1348,8 @@ fn test_parser_memory_budget_allows_small_input() {
 /// Uses a 1 ms parser deadline against a 500 KiB document.  The parser timer
 /// starts after FFI option decoding and input-budget setup, so total FFI call
 /// time can exceed the parser budget even when parsing itself finishes in
-/// time.  Allow a small setup/teardown margin when interpreting a successful
-/// call; a reported parser timeout must still be at least as old as its
-/// configured deadline.
+/// time.  Every run must report `ERROR_PARSE_TIMEOUT`; a parser that ignored
+/// the deadline would return `ERROR_SUCCESS` and fail the assertion.
 #[test]
 fn test_parse_timeout_enforced_when_overrun() {
     use std::time::{Duration, Instant};
@@ -1383,23 +1382,19 @@ fn test_parse_timeout_enforced_when_overrun() {
     );
     let elapsed = start.elapsed();
 
+    // The 512 KiB fixture cannot parse within a 1 ms parser sub-deadline,
+    // so this overrun conversion must report ERROR_PARSE_TIMEOUT
+    // deterministically.  A parser that ignored parse_timeout_ms would
+    // return ERROR_SUCCESS here and fail the assertion.
     let parser_deadline = Duration::from_millis(u64::from(options.parse_timeout_ms));
-    let total_call_margin = Duration::from_millis(100);
-    if result.error_code == ERROR_PARSE_TIMEOUT {
-        assert!(
-            elapsed >= parser_deadline,
-            "parser timeout reported before its configured deadline"
-        );
-    } else {
-        assert_eq!(
-            result.error_code, ERROR_SUCCESS,
-            "conversion must either time out in parsing or complete successfully"
-        );
-        assert!(
-            elapsed < parser_deadline + total_call_margin,
-            "successful conversion exceeded parser deadline plus setup margin"
-        );
-    }
+    assert_eq!(
+        result.error_code, ERROR_PARSE_TIMEOUT,
+        "overrun conversion must report the parser timeout"
+    );
+    assert!(
+        elapsed >= parser_deadline,
+        "parser timeout reported before its configured deadline"
+    );
 
     ffi_markdown_result_free(&mut result);
     ffi_markdown_converter_free(converter);

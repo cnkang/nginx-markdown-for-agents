@@ -126,7 +126,7 @@ http {
 }
 ```
 
-If your upstream may return compressed responses, `proxy_set_header Accept-Encoding "";` is the easiest way to get started. Once the basic pipeline works, switch to the module's built-in decompression support — see [Automatic Decompression](docs/features/AUTOMATIC_DECOMPRESSION.md).
+If your upstream may return compressed responses, `proxy_set_header Accept-Encoding "";` is the easiest way to get started. Once the basic pipeline works, switch to the module's built-in decompression support — see [Decompression](docs/features/DECOMPRESSION.md).
 
 ### 3. Verify behavior
 
@@ -421,7 +421,7 @@ make supply-chain
 - [Migration Guides](docs/guides/MIGRATION-0.9.2.md) — 0.9.2 breaking-change migration. See also:
   - [0.9.1+ → 0.9.2 Migration](docs/guides/MIGRATION-0.9.2.md)
   - [Upgrade to 0.9.2](docs/guides/UPGRADE-TO-0.9.2.md)
-  - [Rollback from 0.9.2](docs/guides/ROLLBACK-0.9.2.md)
+  - [Rollback from 0.9.2](docs/guides/VERSION_ROLLBACK-0.9.2.md)
   - [0.9.x → 0.9.1 Migration](docs/guides/MIGRATION-0.9.1.md)
   - [0.8.x → 0.9.x Migration](docs/guides/MIGRATION-0.9.md)
   - [0.7.x → 0.8.x Migration](docs/guides/MIGRATION-0.8.md)
@@ -431,7 +431,7 @@ make supply-chain
 - [System Architecture](docs/architecture/README.md) — Dual-engine model, C + Rust boundary design.
 - [Config Behavior Map](docs/architecture/CONFIG_BEHAVIOR_MAP.md) — Mapping configuration parameters to core modules.
 - [Harness & Spec Rationale](docs/harness/README.md) — Why we treat harness checks as first-class, repo-owned assets.
-- [Harness Maintenance SOP](docs/guides/HARNESS_MAINTENANCE.md) — Custom lint rules and validation scripting.
+- [Harness Maintenance SOP](docs/harness/HARNESS_MAINTENANCE.md) — Custom lint rules and validation scripting.
 - [Frequently Asked Questions (FAQ)](docs/FAQ.md) & [Glossary](docs/glossary.md).
 
 ## What's New in v0.9.2 (development candidate)
@@ -457,7 +457,7 @@ shrinks from 63 directives to 25, and the bundled FFI ABI advances to version 2.
 
 See the [0.9.2 release notes](docs/releases/0.9.2-release-notes.md),
 [dynconf guide](docs/guides/DYNAMIC_CONFIG.md), and
-[rollback guide](docs/guides/ROLLBACK-0.9.2.md) for the candidate contract.
+[rollback guide](docs/guides/VERSION_ROLLBACK-0.9.2.md) for the candidate contract.
 
 ## What's New in v0.9.1
 
