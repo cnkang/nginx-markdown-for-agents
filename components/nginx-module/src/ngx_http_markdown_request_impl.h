@@ -243,6 +243,14 @@ static ngx_int_t ngx_http_markdown_handle_preaccess_failure(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff);
+static ngx_int_t ngx_http_markdown_preaccess_capture(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    ngx_flag_t filter_enabled);
+static ngx_int_t ngx_http_markdown_handle_vary_accept_failure(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_int_t vary_rc, ngx_int_t *rc);
 static void ngx_http_markdown_request_cleanup(void *data);
 static ngx_int_t ngx_http_markdown_forward_prechecked_headers(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
@@ -895,7 +903,6 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
     ngx_http_markdown_effective_conf_t    eff;
     ngx_flag_t                       filter_enabled;
     ngx_uint_t                       accept_reason;
-    ngx_int_t                         capture_rc;
     ngx_int_t                         failure_rc;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
@@ -981,12 +988,27 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         }
     }
 
+    return ngx_http_markdown_preaccess_capture(
+        r, ctx, conf, &eff, filter_enabled);
+}
+
+/* Complete the preaccess validator capture and route the request. */
+static ngx_int_t
+ngx_http_markdown_preaccess_capture(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    ngx_flag_t filter_enabled)
+{
+    ngx_int_t  capture_rc;
+    ngx_int_t  failure_rc;
+
     capture_rc = ngx_http_markdown_capture_conditional_request(r, ctx);
     if (capture_rc == NGX_ERROR) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                       "markdown: conditional validator capture failed");
         failure_rc = ngx_http_markdown_handle_preaccess_failure(
-            r, ctx, conf, &eff);
+            r, ctx, conf, eff);
         if (failure_rc != NGX_DECLINED) {
             return failure_rc;
         }
@@ -995,7 +1017,7 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
          * The cached filter decision lets the body filter reach its existing
          * ineligible pass-through path without preparing conversion state. */
         ngx_http_markdown_establish_preaccess_bypass(
-            ctx, filter_enabled, &eff, 1);
+            ctx, filter_enabled, eff, 1);
         r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
         return NGX_DECLINED;
     }
@@ -1013,7 +1035,7 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
             && ngx_http_markdown_has_conditional_request(r))
         {
             ngx_http_markdown_establish_preaccess_bypass(
-                ctx, filter_enabled, &eff, 0);
+                ctx, filter_enabled, eff, 0);
         }
         r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
         return NGX_DECLINED;
@@ -1021,6 +1043,20 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
 
     r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
     return NGX_DECLINED;
+}
+
+/* Handle a Vary: Accept insertion failure during accept negotiation. */
+static ngx_int_t
+ngx_http_markdown_handle_vary_accept_failure(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_int_t vary_rc, ngx_int_t *rc)
+{
+    if (ctx != NULL) {
+        ctx->eligible = 0;
+        ngx_http_markdown_restore_conditional_request(r, ctx);
+    }
+    *rc = vary_rc;
+    return 1;
 }
 
 /* Forward headers after a precheck has selected source passthrough. */
@@ -1128,12 +1164,8 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
 
             vary_rc = ngx_http_markdown_add_vary_accept(r);
             if (vary_rc != NGX_OK) {
-                if (ctx != NULL) {
-                    ctx->eligible = 0;
-                    ngx_http_markdown_restore_conditional_request(r, ctx);
-                }
-                *rc = vary_rc;
-                return 1;
+                return ngx_http_markdown_handle_vary_accept_failure(
+                    r, ctx, vary_rc, rc);
             }
         }
         NGX_HTTP_MARKDOWN_METRIC_INC(skips.accept);
