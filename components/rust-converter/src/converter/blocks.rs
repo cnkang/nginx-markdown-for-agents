@@ -37,6 +37,7 @@ use super::traversal::{
     with_reserved_working_set,
 };
 use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData};
+use html5ever::Attribute;
 
 impl MarkdownConverter {
     /// Emit one list item while preserving multi-line/nested-item indentation.
@@ -89,21 +90,14 @@ impl MarkdownConverter {
 
             for (index, line) in trimmed.lines().enumerate() {
                 if index == 0 {
-                    append_str_with_context(output, &base_indent, ctx)?;
-                    append_str_with_context(output, marker, ctx)?;
-                    // If the content already starts with a list marker (from a
-                    // nested list that was converted earlier), emit a blank line
-                    // after our marker and then the content with continuation
-                    // indentation to avoid producing a malformed double-marker.
-                    if Self::list_line_is_nested(line) {
-                        append_char_with_context(output, '\n', ctx)?;
-                        Self::append_list_item_line(
-                            output,
-                            line,
-                            &base_indent,
-                            &continuation_indent,
-                            ctx,
-                        )?;
+                    if Self::write_list_item_first_line(
+                        output,
+                        ctx,
+                        line,
+                        &base_indent,
+                        marker,
+                        &continuation_indent,
+                    )? {
                         continue;
                     }
                 } else if !line.is_empty() && !Self::list_line_is_indented(line, &base_indent) {
@@ -117,6 +111,33 @@ impl MarkdownConverter {
             }
             Ok(())
         })
+    }
+
+    /// Write the marker and first payload line of a list item.
+    ///
+    /// Returns `true` when the line was fully emitted (nested-list case,
+    /// where the content follows on its own line); `false` when the caller
+    /// must emit the line itself after the marker.
+    fn write_list_item_first_line(
+        output: &mut String,
+        ctx: &mut Option<&mut ConversionContext>,
+        line: &str,
+        base_indent: &str,
+        marker: &str,
+        continuation_indent: &str,
+    ) -> Result<bool, ConversionError> {
+        append_str_with_context(output, base_indent, ctx)?;
+        append_str_with_context(output, marker, ctx)?;
+        // If the content already starts with a list marker (from a
+        // nested list that was converted earlier), emit a blank line
+        // after our marker and then the content with continuation
+        // indentation to avoid producing a malformed double-marker.
+        if Self::list_line_is_nested(line) {
+            append_char_with_context(output, '\n', ctx)?;
+            Self::append_list_item_line(output, line, base_indent, continuation_indent, ctx)?;
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Append one list-item payload line, aligning it with the item's own
@@ -634,6 +655,35 @@ impl MarkdownConverter {
         append_str_with_context(output, "\n\n", &mut ctx)
     }
 
+    /// Extract a safe `language-*` / `lang-*` class value from the code
+    /// element, appending it to the output and returning `true` on the
+    /// first match (first-wins, mirroring the prior inline loop).
+    fn append_safe_language_class(
+        &self,
+        attrs: &std::cell::RefCell<Vec<Attribute>>,
+        output: &mut String,
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<bool, ConversionError> {
+        let attrs_borrowed = attrs.borrow();
+        for attr in attrs_borrowed.iter() {
+            if attr.name.local.as_ref() != "class" {
+                continue;
+            }
+            for class in attr.value.split_whitespace() {
+                let candidate = class
+                    .strip_prefix("language-")
+                    .or_else(|| class.strip_prefix("lang-"));
+                if let Some(language) = candidate
+                    && Self::is_safe_code_language(language)
+                {
+                    append_str_with_context(output, language, ctx)?;
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     fn append_code_language(
         &self,
         node: &Handle,
@@ -647,24 +697,9 @@ impl MarkdownConverter {
                 ..
             } = child.data
                 && name.local.as_ref() == "code"
+                && self.append_safe_language_class(attrs, output, ctx)?
             {
-                let attrs_borrowed = attrs.borrow();
-                for attr in attrs_borrowed.iter() {
-                    if attr.name.local.as_ref() != "class" {
-                        continue;
-                    }
-                    for class in attr.value.split_whitespace() {
-                        let candidate = class
-                            .strip_prefix("language-")
-                            .or_else(|| class.strip_prefix("lang-"));
-                        if let Some(language) = candidate
-                            && Self::is_safe_code_language(language)
-                        {
-                            append_str_with_context(output, language, ctx)?;
-                            return Ok(());
-                        }
-                    }
-                }
+                break;
             }
         }
         Ok(())

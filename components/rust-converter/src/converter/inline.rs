@@ -120,20 +120,20 @@ impl MarkdownConverter {
                         .map(|attr| attr.value.as_ref());
 
                     if let Some(url) = href {
-                        if let Some(safe_url) = self.security_validator.sanitize_url(url)
-                            && !safe_url.is_empty()
-                        {
-                            let url_capacity = self.resolved_url_capacity(safe_url)?;
-                            with_reserved_working_set(output, ctx, url_capacity, |output, ctx| {
-                                let resolved_url = self.resolve_url(safe_url);
-                                append_char_with_context(output, '[', ctx)?;
+                        let url_capacity = self.sanitized_url_capacity(url)?;
+                        match url_capacity {
+                            Some((safe_url, capacity)) => {
+                                self.emit_link_with_destination(
+                                    output,
+                                    ctx,
+                                    &normalized_text,
+                                    safe_url,
+                                    capacity,
+                                )?;
+                            }
+                            None => {
                                 append_link_label(output, &normalized_text, ctx)?;
-                                append_str_with_context(output, "](", ctx)?;
-                                append_link_destination(output, &resolved_url, ctx)?;
-                                append_char_with_context(output, ')', ctx)
-                            })?;
-                        } else {
-                            append_link_label(output, &normalized_text, ctx)?;
+                            }
                         }
                     } else {
                         append_escaped_text_with_context(output, &normalized_text, ctx)?;
@@ -143,6 +143,44 @@ impl MarkdownConverter {
                 }
                 Ok(())
             })
+        })
+    }
+
+    /// Resolve the sanitized URL capacity for a candidate href.
+    ///
+    /// Returns `Some((safe_url, capacity))` when the URL is safe and
+    /// non-empty, or `None` when the destination must be omitted and the
+    /// link label emitted instead.
+    fn sanitized_url_capacity<'a>(
+        &self,
+        url: &'a str,
+    ) -> Result<Option<(&'a str, usize)>, ConversionError> {
+        let Some(safe_url) = self.security_validator.sanitize_url(url) else {
+            return Ok(None);
+        };
+        if safe_url.is_empty() {
+            return Ok(None);
+        }
+        let capacity = self.resolved_url_capacity(safe_url)?;
+        Ok(Some((safe_url, capacity)))
+    }
+
+    /// Emit `[label](destination)` for a safe, non-empty URL.
+    fn emit_link_with_destination(
+        &self,
+        output: &mut String,
+        ctx: &mut Option<&mut ConversionContext>,
+        label: &str,
+        safe_url: &str,
+        capacity: usize,
+    ) -> Result<(), ConversionError> {
+        with_reserved_working_set(output, ctx, capacity, |output, ctx| {
+            let resolved_url = self.resolve_url(safe_url);
+            append_char_with_context(output, '[', ctx)?;
+            append_link_label(output, label, ctx)?;
+            append_str_with_context(output, "](", ctx)?;
+            append_link_destination(output, &resolved_url, ctx)?;
+            append_char_with_context(output, ')', ctx)
         })
     }
 

@@ -316,15 +316,8 @@ impl StreamingSanitizer {
         if self.prune_depth == 0 {
             self.close_optional_end_tags_for_start(tag);
         }
-        if DANGEROUS_VOID_ELEMENTS.contains(&tag) {
-            return Some(SanitizeDecision::Skip);
-        }
-        if DANGEROUS_CONTAINER_ELEMENTS.contains(&tag) {
-            if !effectively_self_closing {
-                self.skip_depth = 1;
-                self.skip_element = Some(tag.to_string());
-            }
-            return Some(SanitizeDecision::Skip);
+        if let Some(decision) = self.skip_dangerous_element(tag, effectively_self_closing) {
+            return Some(decision);
         }
         if self.prune_depth > 0 {
             if !effectively_self_closing {
@@ -341,6 +334,26 @@ impl StreamingSanitizer {
             if !effectively_self_closing {
                 self.prune_depth = 1;
                 self.prune_element = Some(tag.to_string());
+            }
+            return Some(SanitizeDecision::Skip);
+        }
+        None
+    }
+
+    /// Skip dangerous void or container elements, entering the suppression
+    /// region for containers that are not self-closing.
+    fn skip_dangerous_element(
+        &mut self,
+        tag: &str,
+        effectively_self_closing: bool,
+    ) -> Option<SanitizeDecision> {
+        if DANGEROUS_VOID_ELEMENTS.contains(&tag) {
+            return Some(SanitizeDecision::Skip);
+        }
+        if DANGEROUS_CONTAINER_ELEMENTS.contains(&tag) {
+            if !effectively_self_closing {
+                self.skip_depth = 1;
+                self.skip_element = Some(tag.to_string());
             }
             return Some(SanitizeDecision::Skip);
         }
