@@ -182,13 +182,15 @@ decompress_streaming(const u_char *compressed, size_t compressed_len,
 
                 if (produced > 0) {
                     if (result_len + produced > result_cap) {
+                        u_char *new_buf;
                         result_cap = (result_len + produced) * 2;
-                        result_buf = (u_char *) realloc(
+                        new_buf = (u_char *) realloc(
                             result_buf, result_cap);
-                        if (result_buf == NULL) {
+                        if (new_buf == NULL) {
                             BrotliDecoderDestroyInstance(state);
                             return -1;
                         }
+                        result_buf = new_buf;
                     }
                     memcpy(result_buf + result_len,
                         tmp_out, produced);
@@ -227,13 +229,15 @@ decompress_streaming(const u_char *compressed, size_t compressed_len,
 
                 if (produced > 0) {
                     if (result_len + produced > result_cap) {
+                        u_char *new_buf;
                         result_cap = (result_len + produced) * 2;
-                        result_buf = (u_char *) realloc(
+                        new_buf = (u_char *) realloc(
                             result_buf, result_cap);
-                        if (result_buf == NULL) {
+                        if (new_buf == NULL) {
                             BrotliDecoderDestroyInstance(state);
                             return -1;
                         }
+                        result_buf = new_buf;
                     }
                     memcpy(result_buf + result_len,
                         tmp_out, produced);
@@ -445,13 +449,15 @@ decompress_streaming_single_byte(const u_char *compressed,
 
                 if (produced > 0) {
                     if (result_len + produced > result_cap) {
+                        u_char *new_buf;
                         result_cap = (result_len + produced) * 2;
-                        result_buf = (u_char *) realloc(
+                        new_buf = (u_char *) realloc(
                             result_buf, result_cap);
-                        if (result_buf == NULL) {
+                        if (new_buf == NULL) {
                             BrotliDecoderDestroyInstance(state);
                             return -1;
                         }
+                        result_buf = new_buf;
                     }
                     memcpy(result_buf + result_len,
                         tmp_out, produced);

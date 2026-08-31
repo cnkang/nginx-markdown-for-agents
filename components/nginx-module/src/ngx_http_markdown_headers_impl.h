@@ -221,8 +221,6 @@ ngx_http_markdown_invalidate_headers_in_part(const ngx_http_request_t *r,
                                              ngx_flag_t stop_after_first,
                                              const char *log_message)
 {
-    (void) r;
-
     while (part != NULL) {
         ngx_table_elt_t *headers;
         ngx_uint_t i;
@@ -249,7 +247,9 @@ ngx_http_markdown_invalidate_headers_in_part(const ngx_http_request_t *r,
             }
 
             headers[i].hash = 0;
-            if (log_message != NULL) {
+            if (log_message != NULL && r != NULL
+                && r->connection != NULL && r->connection->log != NULL)
+            {
                 ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, log_message);
             }
 

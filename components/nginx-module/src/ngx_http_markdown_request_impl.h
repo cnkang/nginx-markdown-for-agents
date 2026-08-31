@@ -1863,15 +1863,15 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
 
-    precheck_rc = ngx_http_markdown_handle_durable_bypass(r, ctx, conf);
-    if (precheck_rc != NGX_DECLINED) {
-        return precheck_rc;
-    }
-
     if (conf == NULL) {
         ngx_http_markdown_restore_conditional_request(r, ctx);
         /* Module not configured, pass through */
         return ngx_http_markdown_next_header_filter_with_auth(r, NULL);
+    }
+
+    precheck_rc = ngx_http_markdown_handle_durable_bypass(r, ctx, conf);
+    if (precheck_rc != NGX_DECLINED) {
+        return precheck_rc;
     }
 
     /* Header-filter re-entry must reuse the request context created by the

@@ -33,9 +33,14 @@ static ngx_atomic_uint_t ngx_http_markdown_pending_output_requests;
  * prevents attaching an incompatible old allocation after hot reload.
  *
  * v8: current aggregate conversion, streaming, and decompression counters.
+ * v9: 0.9.2 removes per_path/incremental/shadow counters and adds
+ *     backpressure_resume_failure_total/commit_total/terminal_aborted_total,
+ *     changing the struct layout vs 0.9.1's v8 zone.  The version bump
+ *     forces a fresh slab instead of reattaching a 0.9.1 allocation that
+ *     would be misread under the new layout.
  */
 static ngx_str_t ngx_http_markdown_metrics_shm_name =
-    ngx_string("nginx_markdown_metrics_v8");
+    ngx_string("nginx_markdown_metrics_v9");
 static u_char ngx_http_markdown_empty_string[] = "";
 
 /* Global dynamic config watcher for this worker process.

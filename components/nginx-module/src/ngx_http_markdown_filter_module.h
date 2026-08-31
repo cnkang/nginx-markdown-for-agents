@@ -598,15 +598,17 @@ typedef enum {
     NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN = MARKDOWN_FORMAT_BROTLI + 2
 } ngx_http_markdown_compression_type_e;
 
-_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
-                   == MARKDOWN_FORMAT_GZIP + 1,
-               "C compression enum must reserve NONE before FFI formats");
-_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
-                   == MARKDOWN_FORMAT_DEFLATE + 1,
-               "C deflate enum must match the FFI format offset");
-_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
-                   == MARKDOWN_FORMAT_BROTLI + 1,
-               "C Brotli enum must match the FFI format offset");
+/* The C compression enum offsets follow the FFI format codes, but the
+ * enum definition already encodes that relationship, making per-enum
+ * self-assertions tautological.  Verify the underlying FFI format values
+ * instead: NONE stays reserved as compression zero, GZIP is 0, and the
+ * remaining formats are contiguous in declaration order. */
+_Static_assert(MARKDOWN_FORMAT_GZIP == 0,
+               "FFI gzip format must reserve zero");
+_Static_assert(MARKDOWN_FORMAT_DEFLATE == MARKDOWN_FORMAT_GZIP + 1,
+               "FFI deflate format must follow gzip contiguously");
+_Static_assert(MARKDOWN_FORMAT_BROTLI == MARKDOWN_FORMAT_DEFLATE + 1,
+               "FFI brotli format must follow deflate contiguously");
 
 /*
  * Active location configuration structure
