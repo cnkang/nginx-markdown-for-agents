@@ -35,7 +35,7 @@ BOOLEAN_TRUSTED_PROXY_RE = re.compile(
     re.IGNORECASE,
 )
 UNRELEASED_CHANGELOG_RE = re.compile(
-    r"^[ ]{0,3}##[ \t]+\[(?P<version>\d+\.\d+\.\d+)\][ \t]*-[ \t]*Unreleased(?:[ \t]+candidate)?[ \t]*$",
+    r"^ {0,3}##[ \t]+\[(?P<version>\d+\.\d+\.\d+)\][ \t]*-[ \t]*Unreleased(?:[ \t]+candidate)?[ \t]*$",
     re.MULTILINE,
 )
 
@@ -244,7 +244,7 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
     version: str | None = None
     errors: list[str] = []
     for match in re.finditer(
-        r"^[ ]{0,3}##[ \t]+[^\n]*$",
+        r"^ {0,3}##[^\n]*$",
         changelog,
         re.MULTILINE,
     ):
