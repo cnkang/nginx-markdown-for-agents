@@ -231,8 +231,8 @@ impl MetadataExtractor {
 
     /// Resolve a metadata URL when configured, then filter dangerous schemes.
     fn resolve_and_sanitize_url(&self, url: &str) -> Option<String> {
-        Self::sanitize_metadata_url(url)?;
-        let resolved = self.resolve_url(url);
+        let sanitized = Self::sanitize_metadata_url(url)?;
+        let resolved = self.resolve_url(&sanitized);
         Self::sanitize_metadata_url(&resolved)
     }
 

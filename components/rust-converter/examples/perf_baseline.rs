@@ -1718,11 +1718,10 @@ fn main() {
                 eprintln!(
                     "warning: streaming engine requested but streaming feature is not enabled"
                 );
-                if let Some(ref path) = cli.json_output {
-                    let report =
-                        build_measurement_report(&ffi_results, &None, &[], &platform, cli.engine);
-                    write_json_report(path, &report);
-                }
+                /* Do not write a full-buffer-only report as if it were the
+                 * requested both-engine result: match the --single path and
+                 * fail the run instead. */
+                std::process::exit(1);
             }
         }
     }
