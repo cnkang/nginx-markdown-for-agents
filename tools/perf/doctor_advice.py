@@ -596,17 +596,37 @@ def evaluate_rules(
 # Metric validation
 # ---------------------------------------------------------------------------
 
+# RULE_METRICS references metrics by their diagnostic-JSON leaf keys (see the
+# rule evaluators), while metrics-schema.json names the public counter
+# families with the full nginx_markdown_* prefix.  Map the streaming leaf
+# keys to their schema names so validate_metric_names checks the real schema
+# surface without changing the rule reading paths.
+_SCHEMA_NAME_BY_LEAF = {
+    "fallback_total": "streaming_fallback_total",
+    "requests_total": "streaming_requests_total",
+    "backpressure_total": "backpressure_total",
+    "overload_total": "overload_total",
+    "decompression_fullbuffer_total": "decompression_fullbuffer_total",
+    "decompression_streaming_total": "decompression_streaming_total",
+    "decompression_budget_exceeded_total": "decompression_budget_exceeded_total",
+    "pending_output_high_watermark_bytes": "pending_output_high_watermark_bytes",
+    "streaming_buffer_budget": "streaming_buffer_budget",
+}
+
 
 def validate_metric_names(valid_names: set) -> List[str]:
     """Warn about metric keys not found in the schema."""
     warnings: List[str] = []
     # Check all rule-referenced metrics are in schema
     for rule_id, spec in RULE_METRICS.items():
-        warnings.extend(
-            f"Rule {rule_id} references '{metric_name}' not found in metrics-schema.json"
-            for metric_name in spec["required"] + spec.get("optional", [])
-            if metric_name not in valid_names
-        )
+        for metric_name in spec["required"] + spec.get("optional", []):
+            schema_name = _SCHEMA_NAME_BY_LEAF.get(metric_name, metric_name)
+            if schema_name not in valid_names:
+                warnings.append(
+                    f"Rule {rule_id} references '{metric_name}' "
+                    f"(schema name '{schema_name}') not found in "
+                    "metrics-schema.json"
+                )
     return warnings
 
 

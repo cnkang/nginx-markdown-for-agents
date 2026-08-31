@@ -1862,7 +1862,11 @@ if ! resolve_download_info "$ASSET_NAME" "$OS_TYPE" "$ARCH" "$NGINX_VERSION" "$s
     "${_json_suggestions[@]:-Install python3: apt-get install python3 / apk add python3}"
 fi
 
-mapfile -t RELEASE_INFO < "$RELEASE_INFO_FILE"
+_release_info_index=0
+while IFS= read -r _release_line || [[ -n "$_release_line" ]]; do
+  RELEASE_INFO[$_release_info_index]="$_release_line"
+  _release_info_index=$((_release_info_index + 1))
+done < "$RELEASE_INFO_FILE"
 "$RM_BIN" -f "$RELEASE_INFO_FILE" || true
 DOWNLOAD_URL="${RELEASE_INFO[0]:-}"
 EXPECTED_SHA256="${RELEASE_INFO[1]:-}"

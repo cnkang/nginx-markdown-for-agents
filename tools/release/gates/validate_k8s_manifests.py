@@ -412,12 +412,21 @@ def _validate_helm_image_digest(
     result: ValidationResult,
     schema: dict[str, object],
 ) -> None:
-    image_properties = schema.get("properties", {}).get("image", {}).get(
-        "properties", {}
+    schema_properties = schema.get("properties")
+    image_schema = (
+        schema_properties.get("image")
+        if isinstance(schema_properties, dict)
+        else None
+    )
+    image_properties = (
+        image_schema.get("properties")
+        if isinstance(image_schema, dict)
+        else None
     )
     deployment = read_safe(DEPLOYMENT_TEMPLATE)
     digest_contract = (
-        "digest" in image_properties
+        isinstance(image_properties, dict)
+        and "digest" in image_properties
         and 'contains "@" $imageRepo' in deployment
         and 'image: "{{ $imageRepo }}@{{ $imageDigest }}"' in deployment
     )

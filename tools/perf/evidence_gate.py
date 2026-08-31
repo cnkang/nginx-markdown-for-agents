@@ -800,7 +800,7 @@ def _read_benchmark_report(
 ) -> tuple[dict | None, int | None]:
     """Read a benchmark report and turn malformed JSON into gate evidence."""
     try:
-        return json.loads(report_path.read_text(encoding="utf-8")), None
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         return None, _report_integrity_failure(
             None,
@@ -810,6 +810,20 @@ def _read_benchmark_report(
             "  Regenerate the report with the benchmark harness.",
             exit_code=1 if blocking else 0,
         )
+    if not isinstance(payload, dict):
+        # A JSON value that is not an object (array, string, number, null)
+        # cannot be a benchmark report; reject it with the same integrity
+        # evidence as malformed JSON instead of crashing on .get() below.
+        typename = type(payload).__name__
+        return None, _report_integrity_failure(
+            None,
+            args,
+            [("benchmark_report", f"expected JSON object, got {typename}")],
+            heading,
+            "  Regenerate the report with the benchmark harness.",
+            exit_code=1 if blocking else 0,
+        )
+    return payload, None
 
 
 def _obtain_benchmark_report(

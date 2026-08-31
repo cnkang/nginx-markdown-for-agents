@@ -1281,7 +1281,10 @@ get_worker_pid() {
   fi
   # pgrep -P finds children of the master.  This harness configures exactly
   # one worker, so any other result is missing or ambiguous runtime evidence.
-  wpid="$(pgrep -P "${master_pid}" 2>/dev/null)"
+  # Guard the lookup: pgrep -P exits 1 when no child exists, which must not
+  # abort the function under set -e before the diagnostic below runs.
+  wpid=""
+  wpid="$(pgrep -P "${master_pid}" 2>/dev/null)" || true
   if [[ -z "${wpid}" || ! "${wpid}" =~ ^[0-9]+$ ]] \
       || ! kill -0 "${wpid}" 2>/dev/null; then
     echo "FAIL: unable to resolve the single NGINX worker PID" >&2

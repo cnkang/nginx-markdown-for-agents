@@ -574,7 +574,9 @@ def get_module_level_thresholds(thresholds_cfg):
             if isinstance(v, (int, float)) and not isinstance(v, bool)
         }
         if numeric:
-            return numeric
+            merged = dict(DEFAULT_MODULE_LEVEL_THRESHOLDS)
+            merged.update(numeric)
+            return merged
     return dict(DEFAULT_MODULE_LEVEL_THRESHOLDS)
 
 

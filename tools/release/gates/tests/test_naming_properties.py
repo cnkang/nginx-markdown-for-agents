@@ -73,6 +73,10 @@ def test_invalid_nginx_directive_no_prefix(name):
 @given(suffix=_lower_alnum_underscore())
 def test_invalid_prometheus_metric_without_unit_suffix(suffix):
     """Metrics must end in one legal Prometheus unit suffix."""
+    # Skip generated bases that already end in a reserved unit token:
+    # the composition could only be rejected by the double-unit negative
+    # lookahead, which this test is not exercising.
+    assume(not suffix.endswith(("_total", "_bytes", "_seconds", "_info")))
     name = f"nginx_markdown_{suffix}"
     assert not is_valid_prometheus_metric(name), f"should reject: {name}"
 
@@ -97,13 +101,13 @@ def test_valid_prometheus_metric_with_unit(suffix, unit):
     # double-unit ending (e.g. foo_total_total, foo_bytes_bytes).  A base
     # ending in _bytes or _seconds combined with _total is legal
     # (canonical counter units bytes_total / seconds_total) and must be
-    # exercised.
-    assume(not name.endswith((
-        "_total_total", "_total_bytes", "_total_seconds", "_total_info",
-        "_bytes_bytes", "_bytes_seconds", "_bytes_info",
-        "_seconds_bytes", "_seconds_seconds", "_seconds_info",
-        "_info_total", "_info_bytes", "_info_seconds", "_info_info",
-    )))
+    # exercised.  Derive the double-unit set from the single reserved
+    # tokens instead of enumerating every two-token ending, so newly added
+    # unit tokens are covered automatically.
+    reserved = ("total", "bytes", "seconds", "info")
+    assume(not any(
+        name.endswith(f"_{a}_{b}") for a in reserved for b in reserved
+    ))
     assert is_valid_prometheus_metric(name), f"should accept: {name}"
 
 

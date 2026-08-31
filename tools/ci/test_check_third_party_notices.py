@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -158,6 +159,8 @@ class ThirdPartyNoticesTests(unittest.TestCase):
             '[package]\nname = "e2e-fixture"\nversion = "0.1.0"\n\n[workspace]\n',
             encoding="utf-8",
         )
+        if shutil.which("cargo") is None:
+            self.skipTest("cargo is not available in this environment")
         subprocess.run(
             ["cargo", "generate-lockfile", "--manifest-path", str(e2e_manifest)],
             check=True,
