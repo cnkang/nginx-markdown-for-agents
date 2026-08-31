@@ -1372,6 +1372,59 @@ test_adopt_orphan_restores_repeated_validators(void)
 }
 
 static void
+test_adopt_orphan_skips_non_nul_terminated(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *valid;
+    ngx_table_elt_t *broken;
+    u_char *non_nul;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    valid = add_header(&r->headers_in.headers,
+                       "If-None-Match", "\"valid\"");
+    broken = add_header(&r->headers_in.headers,
+                        "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_none_match = valid;
+    r->headers_in.if_modified_since = broken;
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "both validators are captured and hidden");
+    TEST_ASSERT(valid->hash == 0 && broken->hash == 0,
+                "both entries are suppressed before redirect");
+
+    /* Corrupt the second entry so its value lacks a terminating NUL
+     * within the bounded scan.  The orphan-adopt helper must bound
+     * the scan with memchr and skip the entry instead of reading
+     * past the allocation. */
+    non_nul = ngx_palloc(r->pool, 8192);
+    if (non_nul == NULL) { TEST_FAIL("alloc non_nul failed"); return; }
+    memset(non_nul, 'A', 8192);
+    broken->value.data = non_nul;
+    broken->value.len = 0;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(valid->hash != 0
+                    && valid->value.len == sizeof("\"valid\"") - 1,
+                "NUL-terminated entry is restored with correct length");
+    TEST_ASSERT(broken->hash == 0,
+                "entry without NUL within bound remains hidden");
+    TEST_ASSERT(r->headers_in.if_none_match == valid,
+                "typed pointer for the restored entry is rebuilt");
+    TEST_ASSERT(r->headers_in.if_modified_since == NULL
+                    || r->headers_in.if_modified_since != broken,
+                "typed pointer for the skipped entry is not rebuilt");
+
+    TEST_PASS("orphan adoption skips entry without NUL terminator");
+}
+
+static void
 test_capture_conditional_headers_excludes_range(void)
 {
     ngx_http_request_t *r;
@@ -2038,6 +2091,7 @@ main(void)
     test_capture_restore_conditional_headers();
     test_adopt_orphan_conditional_headers();
     test_adopt_orphan_restores_repeated_validators();
+    test_adopt_orphan_skips_non_nul_terminated();
     test_capture_conditional_headers_excludes_range();
     test_subrequest_capture_does_not_mutate_shared_validators();
 
