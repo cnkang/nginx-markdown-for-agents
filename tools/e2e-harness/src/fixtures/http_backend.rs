@@ -487,6 +487,12 @@ fn md_html_response(
     let cookie = header_value(&headers, "Cookie").unwrap_or_default();
     let is_auth = cookie.contains("session_user=");
 
+    let vary = if is_auth {
+        Some("Cookie")
+    } else {
+        Some("Accept")
+    };
+
     let inm_matches =
         if_none_match == "*" || if_none_match == etag || if_none_match == format!("W/{etag}");
     let ims_not_modified = if_modified_since.contains("2030");
@@ -497,7 +503,7 @@ fn md_html_response(
             "",
             vec![
                 ("ETag".to_string(), etag.to_string()),
-                ("Vary".to_string(), "Accept".to_string()),
+                ("Vary".to_string(), vary.unwrap_or("Accept").to_string()),
             ],
             "",
         );
@@ -507,11 +513,6 @@ fn md_html_response(
         "private, max-age=0"
     } else {
         "public, max-age=60"
-    };
-    let vary = if is_auth {
-        Some("Cookie")
-    } else {
-        Some("Accept")
     };
 
     /* HEAD requests: the upstream serves its source representation

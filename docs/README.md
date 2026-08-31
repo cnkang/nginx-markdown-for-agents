@@ -17,7 +17,7 @@ This directory contains the maintained documentation supporting that landing pag
 | Operate and troubleshoot a deployment | [guides/OPERATIONS.md](guides/OPERATIONS.md) |
 | Understand the architecture and design rationale | [architecture/README.md](architecture/README.md) |
 | Understand agent routing, risk packs, and harness checks | [harness/README.md](harness/README.md) |
-| Maintain repo-owned harness rules and local adapter workflow | [harness/README.md](harness/README.md) |
+| Maintain repo-owned harness rules and local adapter workflow | [harness/HARNESS_MAINTENANCE.md](harness/HARNESS_MAINTENANCE.md) |
 | Understand implementation details | [features/README.md](features/README.md) |
 | Check standard terminology and naming style | [glossary.md](glossary.md) |
 | Review tests and validation references | [testing/README.md](testing/README.md) |
