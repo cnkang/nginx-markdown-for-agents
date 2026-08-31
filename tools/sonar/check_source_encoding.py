@@ -27,6 +27,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import codecs
 import json
 import subprocess
 import sys
@@ -153,8 +154,16 @@ def _context_hex(data: bytes, offset: int, width: int = 16) -> str:
 
 
 _WIDE_UTF_DECLARED = frozenset(
-    ("utf-16", "utf-16le", "utf-16be", "utf-32", "utf-32le", "utf-32be")
+    ("utf-16", "utf-16-le", "utf-16-be", "utf-32", "utf-32-le", "utf-32-be")
 )
+
+
+def _canonical_codec_name(declared: str) -> str:
+    """Return Python's canonical codec spelling, preserving unknown names."""
+    try:
+        return codecs.lookup(declared).name
+    except LookupError:
+        return declared.lower()
 
 
 def _declared_decode_failure(
@@ -208,7 +217,7 @@ def _validate_file(
     exc_info = manifest.get(rel)
     if exc_info is not None:
         declared = exc_info.get("encoding", "unknown")
-        if declared.lower() in _WIDE_UTF_DECLARED:
+        if _canonical_codec_name(declared) in _WIDE_UTF_DECLARED:
             # Declared UTF-16/UTF-32 files legitimately contain NUL bytes as
             # part of their encoding; bypass the binary-NUL rejection and
             # validate against the declared decoding instead.

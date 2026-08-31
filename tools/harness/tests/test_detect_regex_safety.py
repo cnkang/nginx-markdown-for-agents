@@ -765,6 +765,12 @@ class TestNestedQuantifier:
     def test_safe_not_flagged(self, pattern: str) -> None:
         assert _check_nested_quantifier(pattern) is None
 
+    def test_named_backreference_does_not_hide_outer_nested_group(self) -> None:
+        pattern = r"((?P<x>a+)(?P=x))+"
+        result = _check_nested_quantifier(pattern)
+        assert result is not None
+        assert "nested quantifier" in result
+
 
 class TestQuantifierAtomBinding:
     """Quantifier-to-atom binding preservation after _merge_literal_atoms fix."""
