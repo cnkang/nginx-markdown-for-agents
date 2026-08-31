@@ -40,13 +40,22 @@ def _split_row(line: str) -> list[str] | None:
     for index, char in enumerate(stripped[1:]):
         if char == "`":
             in_code = not in_code
-        if char == "|" and not in_code and not (
-            index > 0 and stripped[index] == "\\"
-        ):
-            cells.append("".join(current).strip())
-            current = []
-        else:
-            current.append(char)
+        if char == "|" and not in_code:
+            # A pipe is escaped only when an odd number of consecutive
+            # backslashes immediately precedes it; an even run (including
+            # zero) leaves the pipe active as a cell delimiter.  The
+            # enumeration offset is 1, so the character before the pipe
+            # sits at stripped[index].
+            backslashes = 0
+            j = index
+            while j >= 0 and stripped[j] == "\\":
+                backslashes += 1
+                j -= 1
+            if backslashes % 2 == 0:
+                cells.append("".join(current).strip())
+                current = []
+                continue
+        current.append(char)
     if current and current[-1] == "|":
         current.pop()
     cells.append("".join(current).strip())

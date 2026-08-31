@@ -216,8 +216,8 @@ def _workflow_naming_issue(wf_content: str) -> str | None:
         or re.search(r"nginx-\$\{\{.*nginx_version", wf_content)
     )
     has_rpm_naming = bool(
-        re.search(r"nginx\$\{?NGINX_VERSION", wf_content)
-        or re.search(r"nginx\$\{\{.*nginx_version", wf_content)
+        re.search(r"nginx-?\$\{?NGINX_VERSION", wf_content)
+        or re.search(r"nginx-?\$\{\{.*nginx_version", wf_content)
     )
     if has_deb_naming and has_rpm_naming:
         return None

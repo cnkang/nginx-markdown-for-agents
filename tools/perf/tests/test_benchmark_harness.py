@@ -1218,6 +1218,21 @@ class TestReportSchemaConformance:
 
         assert "memory_slope must be a dict" in errors
 
+    def test_memory_slope_optional_in_runtime_validator(self):
+        """A baseline without memory_slope passes the runtime validator.
+
+        No benchmark generator emits the regression object today, so
+        requiring it would reject every checked-in baseline.  The schema
+        JSON already lists it as optional; the runtime validator must
+        agree.
+        """
+        report = _build_valid_mock_report()
+        del report["module_benchmark"]["memory_slope"]
+
+        errors = validate_module_benchmark(report)
+
+        assert errors == []
+
     def test_valid_report_ttfb_nullable(self):
         """ttfb_p50_ms and ttfb_p95_ms accept null values per schema."""
         report = _build_valid_mock_report()

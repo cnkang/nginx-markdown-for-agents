@@ -83,7 +83,7 @@ def _is_awk_invocation(prev: str) -> bool:
     if _AWK_ASSIGN_RE.match(prev):
         return False
     return ("awk " in prev or "${AWK_BIN}" in prev
-            or "$AWK_BIN" in prev) and "'" in prev
+            or "$AWK_BIN" in prev) and ("'" in prev or '"' in prev)
 
 
 def _is_inside_helper_or_awk(lines: list[str], index: int) -> bool:
