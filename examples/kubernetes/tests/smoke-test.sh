@@ -227,6 +227,14 @@ test_markdown_conversion() {
     # Extract HTTP status code from response headers
     http_code="$(printf '%s\n' "$response" | head -1 | grep -o '[0-9][0-9][0-9]' | head -1)" || true
 
+    # A non-2xx response must fail regardless of Content-Type or body:
+    # an error page could otherwise carry markdown-looking content and
+    # pass the conversion check.
+    if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+        log_fail "Markdown conversion: unexpected HTTP status '$http_code' (expected 2xx)"
+        return 1
+    fi
+
     # Extract Content-Type header (case-insensitive)
     content_type="$(printf '%s\n' "$response" | grep -i '^content-type:' | head -1)" || true
 
@@ -236,18 +244,41 @@ test_markdown_conversion() {
             log_pass "Markdown conversion: response Content-Type contains markdown ($content_type)"
             ;;
         *)
-            # Check if the body looks like markdown (contains # headers or markdown syntax)
+            # Check if the body looks like markdown (contains # headers or markdown syntax).
+            # A raw text/html response whose visible text merely contains
+            # Markdown-like list markers must NOT pass: the Content-Type
+            # already failed the markdown check, so require a stronger
+            # signal (a heading) before accepting.
             local body
-            body="$(printf '%s' "$response" | sed -n '/^\r*$/,$p' | tail -n +2)" || true
-            case "$body" in
-                *"# "*|*"- "*|*"* "*)
-                    log_pass "Markdown conversion: response body contains markdown syntax"
-                    ;;
-                *)
-                    log_fail "Markdown conversion: response does not appear to be markdown (Content-Type: $content_type)"
-                    return 1
-                    ;;
-            esac
+            # Strip carriage returns first so the header/body split below
+            # works on any platform without relying on a non-portable
+            # "\r" pattern in sed.
+            body="$(printf '%s' "$response" | tr -d '\r' | sed -n '/^$/,$p' | tail -n +2)" || true
+            # Only a tag-shaped token counts as HTML markup: a '<' followed
+            # by a tag name whose next character is whitespace, '>', '/',
+            # a comment, or a doctype.  Plain angle-bracket comparisons
+            # such as "2 < 3 > 1" and Markdown autolinks such as
+            # "<https://example.com>" are valid Markdown and must pass.
+            # Doctype matches are case-insensitive (!DOCTYPE / !doctype).
+            if printf '%s' "$body" | grep -qiE '<[a-zA-Z][a-zA-Z0-9-]*([[:space:]]|/?>)|</[a-zA-Z][a-zA-Z0-9-]*[[:space:]]*>|<!--|<!doctype'; then
+                # The Content-Type already failed the markdown check;
+                # if the body carries HTML document/element markup
+                # (including an HTML-wrapped heading such as
+                # "<h1># Hello</h1>"), it is an HTML response, not
+                # converted markdown.
+                log_fail "Markdown conversion: response body contains HTML markup (Content-Type: $content_type)"
+                return 1
+            fi
+            # A line-anchored ATX heading (optional indentation, 1-6 '#'
+            # followed by whitespace or end of line) is the strong
+            # markdown signal required here — the Content-Type already
+            # failed, so bare list markers are not enough.
+            if printf '%s' "$body" | grep -qE '^[[:space:]]{0,3}#{1,6}([[:space:]]|$)'; then
+                log_pass "Markdown conversion: response body contains markdown syntax"
+            else
+                log_fail "Markdown conversion: response does not appear to be markdown (Content-Type: $content_type)"
+                return 1
+            fi
             ;;
     esac
 

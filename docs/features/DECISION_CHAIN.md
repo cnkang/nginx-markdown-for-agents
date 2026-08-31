@@ -11,6 +11,14 @@ lowercase snake_case strings** in both:
 - Decision log entries: `markdown: reason=<code> ...` (see `components/nginx-module/src/ngx_http_markdown_decision_log_impl.h`)
 - Prometheus metrics labels (`reason="<code>"`, see `components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h`)
 
+**Decompression metric-label exception**: the decompression metrics family
+(`nginx_markdown_decompression_events_total`) uses `reason=` labels that are
+decompression outcomes, not canonical reason codes. Only the **failure**
+labels (`budget_exceeded`, `format_error`, `truncated_input`, `io_error`)
+map to reason-registry keys. `ok` is a metric-only success sentinel with no
+reason-registry key. Do not treat those labels as canonical reason-code
+values.
+
 Streaming engine transitions are internal event names, not canonical reason
 codes or Prometheus label values. The logger emits them in the bounded
 `event=` field. See the boundary below.
@@ -22,7 +30,7 @@ and mirrors them in [Observability Schema v2](../architecture/observability-sche
 This document describes the check order, what each check evaluates, and how the
 module determines outcomes.
 Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md).
-Rollback procedures are in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
+Rollback procedures are in the [Rollback Guide](../guides/OPERATIONAL_ROLLBACK.md).
 
 ## Decision Chain Flowchart
 
@@ -40,7 +48,7 @@ flowchart TD
     H -->|No| J{"Content-Type<br/>text/html?"}
     J -->|No| K["not_eligible"]
     J -->|Yes| L{"Size within<br/>budget?"}
-    L -->|No| M["memory_budget_exceeded"]
+    L -->|No| M["not_eligible"]
     L -->|Yes| N{"Auth policy<br/>denies request?"}
     N -->|Yes| O["not_eligible"]
     N -->|No| P{"Accept header<br/>requests MD?"}
@@ -61,7 +69,8 @@ flowchart TD
 > visible in the decision log's structured metadata (`method`, `content_type`,
 > `status`) for diagnostics, but the reason code string is `not_eligible`.
 > The size check (check 6) is the exception: an over-limit response reports the
-> dedicated `memory_budget_exceeded` classification, as [Parser Budget](PARSER_BUDGET.md) documents.
+> dedicated `not_eligible` classification (the size check is an eligibility
+> gate, not a conversion failure), as [Parser Budget](PARSER_BUDGET.md) documents.
 
 ## Check Order
 
@@ -74,7 +83,7 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 | 3 | Response status | Is the upstream response status `200 OK`? A `206 Partial Content` status is classified as a range request (same reason code as check 4). Other non-200 responses (redirects, errors, etc.) are not eligible. | `not_eligible` |
 | 4 | Range request | Is this a range request (`Range` header present)? Range requests are not eligible because partial content cannot be converted. | `not_eligible` |
 | 5 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `not_eligible` |
-| 6 | Response size | Is the response body size within the configured `markdown_limits conversion_memory=` budget? This is a hard cumulative input-size cap applied to both buffered and streaming paths. The cap gates eligibility and blocks conversion before the FFI attempt. Oversized input is never truncated. | `memory_budget_exceeded` |
+| 6 | Response size | When the size is known from headers (Content-Length present): is the response within the configured `markdown_limits conversion_memory=` budget? This is a hard cumulative input-size cap checked before the FFI attempt; oversized input is never truncated. Responses whose size is not known at header time (chunked or missing Content-Length) enter buffering, and an overrun there is a failed conversion attempt governed by `markdown_error_policy`, not this eligibility gate. | `not_eligible` |
 | 7 | Auth policy | Is the request authenticated and `markdown_auth_policy` set to `deny`? Authenticated requests are detected through the existing `Authorization` header and auth-cookie checks. | `not_eligible` |
 | 8 | Accept negotiation | Does the `Accept` header indicate the client wants Markdown? Evaluated per `markdown_accept` (`strict` | `wildcard` | `force`). | `skipped_accept_reject` / `skipped_no_accept` / `skipped_accept` (see below) |
 | 9 | Conversion attempt | All checks passed. The module attempts HTML-to-Markdown conversion. | _(see outcome determination below)_ |
@@ -82,7 +91,8 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 ### Accept negotiation outcomes
 
 Checks 2–5 and 7 collapse to the canonical `not_eligible` reason when they
-reject a request, and the size check (6) reports `memory_budget_exceeded`.
+reject a request, and the size check (6) reports `not_eligible` as well
+(the size gate is an eligibility decision, not a conversion failure).
 Accept negotiation is the other exception: when the request is otherwise
 eligible but the `Accept` header does not resolve in favor of Markdown, the module emits one of three distinct skip
 reason codes (this is the one eligibility branch that preserves sub-case
@@ -146,11 +156,10 @@ When conversion fails (either `failed_open` or `failed_closed`), the module reco
 | Failure Reason Code | Meaning |
 |---------------------|---------|
 | `conversion_error` | HTML parse or conversion error — the input HTML could not be processed |
-| `memory_budget_exceeded` | Conversion-memory limit reached (`markdown_limits conversion_memory=`) |
-| `timeout` | The request exceeded the authoritative overall conversion deadline `markdown_limits conversion_timeout=`; `parser_timeout=` triggers an earlier parser checkpoint when nonzero and smaller than `conversion_timeout`, while `conversion_timeout=` remains the overall upper bound and is never extended by `parser_timeout=` |
-| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from `memory_budget_exceeded` and takes precedence for parser allocations |
+| `timeout` | In the full-buffer FFI path, the pre-parse and post-parse checkpoints check `parser_timeout=` before `conversion_timeout=`. The parser deadline starts at `conversion_start` before parsing and at `parse_start` after parsing. The overall deadline starts at `conversion_start` at both checkpoints and controls traversal/output afterward. If elapsed time exceeds both deadlines at one checkpoint, the converter reports parser timeout. A nonzero `parser_timeout=` still applies when `conversion_timeout=0`. The two are not collapsed into an earlier-of deadline. |
+| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from the `not_eligible` size gate and takes precedence for parser allocations |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
-| `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Automatic Decompression](../features/AUTOMATIC_DECOMPRESSION.md)) |
+| `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Decompression](../features/DECOMPRESSION.md)) |
 | `replay_error` | Fail-open replay buffer init/append failure |
 | `overload` | Inflight guard rejected the request |
 | `invalid_dynconf` / `degraded_snapshot` / `header_plan_apply_error` | Dynamic configuration or header-plan errors |
@@ -183,15 +192,17 @@ into `reason_code.rs`, C metadata, diagnostics lookup, and release artifacts.
 The projections mirror [Observability Schema v2](../architecture/observability-schema-v2.md).
 All `as_str()` values are lowercase snake_case. The table below maps the
 high-level decision outcomes described in this document to their reason codes.
-The full registry (including decompression, dynconf, and canonical streaming
-outcome codes) lives in the schema document. Streaming implementation events
-are not registry entries.
+The size gate is an eligibility decision: it emits `not_eligible` (request
+state SKIPPED) and never produces a conversion-failure reason. The full
+registry (including decompression, dynconf, and canonical
+streaming outcome codes) lives in the schema document. Streaming
+implementation events are not registry entries.
 
 | Decision Outcome | Reason Code | Request State | Description |
 |---|---|---|---|
 | Module disabled | `disabled` | NOT_ENABLED | Module disabled by configuration for this scope |
 | Not eligible (method/status/range/content-type/auth) | `not_eligible` | SKIPPED | Response not eligible for conversion |
-| Size gate blocked (`markdown_limits conversion_memory=` exceeded) | `memory_budget_exceeded` | SKIPPED (not eligible) | Hard cumulative input-size cap makes the request ineligible before the FFI attempt. The input is never truncated, and the primary outcome follows `markdown_error_policy` |
+| Size gate blocked (`markdown_limits conversion_memory=` exceeded) | `not_eligible` | SKIPPED (not eligible) | Hard cumulative input-size cap makes the request ineligible before the FFI attempt. The input is never truncated, and the outcome stays `not_eligible` with request state `SKIPPED`; `markdown_error_policy` does not govern this decision |
 | Accept negotiation — no match | `skipped_accept` | SKIPPED | Accept header present but does not request Markdown |
 | Accept negotiation — no header (strict) | `skipped_no_accept` | SKIPPED | No Accept header present and `markdown_accept` is `strict` |
 | Accept negotiation — explicit reject | `skipped_accept_reject` | SKIPPED | `Accept` explicitly rejects Markdown (`q=0`) |
@@ -205,7 +216,7 @@ are not registry entries.
 > such as `SKIP_METHOD`, `SKIP_STATUS`, `SKIP_CONFIG`, and `ELIGIBLE_CONVERTED`.
 > The 0.9.0 observability schema consolidated these: eligibility checks
 > 2–5 and 7 emit `not_eligible`, the size gate (6) emits
-> `memory_budget_exceeded`, scope-off emits `disabled`, and the conversion
+> `not_eligible` as well, scope-off emits `disabled`, and the conversion
 > outcomes are `converted` / `failed_open` / `failed_closed`. If you are
 > correlating old dashboards or alerts, update them to the lowercase codes above.
 
@@ -218,8 +229,9 @@ are not registry entries.
 | `decompression_format_error` | Compressed input has invalid format (not valid gzip/deflate/brotli) |
 | `decompression_truncated_input` | Compressed input was truncated (incomplete stream) |
 | `decompression_io_error` | I/O error during decompression operation |
-| `timeout` | Conversion exceeded the authoritative `markdown_limits conversion_timeout=` overall deadline; `parser_timeout=` may trigger an earlier checkpoint during the parse phase |
+| `timeout` | Conversion exceeded a deadline. In the full-buffer path, the converter checks `parser_timeout=` before `conversion_timeout=` at the pre-parse and post-parse checkpoints. It measures the parser deadline from `conversion_start` and `parse_start` respectively. Traversal and output then use only the remaining overall deadline. A nonzero `parser_timeout=` remains active when `conversion_timeout=0`. |
 | `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=` (default 32m) |
+| `memory_budget_exceeded` | `markdown_limits conversion_memory=` exceeded while buffering an unknown-size body, or another conversion working-set memory limit; the module records category `resource_limit` and increments `failures_resource_limit` |
 | `overload` | Inflight guard rejected the request |
 | `invalid_dynconf` / `degraded_snapshot` | Dynamic configuration error / degraded snapshot |
 | `header_plan_apply_error` | Header plan apply error |
@@ -254,7 +266,7 @@ for the full registry and FFI accessor list.
 ## Related Documentation
 
 - [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md) — staged rollout procedures with observation checkpoints
-- [Rollback Guide](../guides/ROLLBACK_GUIDE.md) — how to disable or narrow conversion scope
+- [Rollback Guide](../guides/OPERATIONAL_ROLLBACK.md) — how to disable or narrow conversion scope
 - [Configuration Guide](../guides/CONFIGURATION.md) — directive reference and configuration examples
 - [Content Negotiation](CONTENT_NEGOTIATION.md) — Accept header parsing and wildcard behavior
 - [Observability Schema v2](../architecture/observability-schema-v2.md) — authoritative reason code registry, metric families, label whitelist

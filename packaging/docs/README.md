@@ -52,7 +52,7 @@ For detailed installation and configuration instructions, see:
 - **Full documentation**: <https://github.com/cnkang/nginx-markdown-for-agents>
 - **Installation guide**: `PACKAGE_INSTALLATION.md` (included in this package)
 - **Documentation index**: `INSTALL.md` (included in this package)
-- **Compatibility info**: `COMPATIBILITY.md` (included in this package)
+- **Compatibility info**: `PACKAGE_COMPATIBILITY.md` (included in this package)
 
 ## Compatibility Warning
 
@@ -75,7 +75,7 @@ This package does **NOT** support:
 
 If your NGINX version is not supported by a prebuilt package, please build
 the module from source against your local NGINX source tree. See
-`COMPATIBILITY.md` for details.
+`PACKAGE_COMPATIBILITY.md` for details.
 
 ## License
 

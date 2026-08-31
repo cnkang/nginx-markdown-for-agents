@@ -120,8 +120,10 @@ python3 tools/docs/check_writing_style.py [--strict|--changed --base REF|--basel
 - The checker excludes code blocks, tables, headings, and inline code. It
   scans prose only. It ignores quoted text only on explicitly labeled
   `Source:`, `Citation:`, `Requirement:`, or `Reference:` lines.
-- Both gates run inside `make docs-check` via
-  `make docs-style-check-regression` and `make docs-style-check-baseline`.
+- Routine `make docs-check` runs only the changed-file regression gate
+  (`make docs-style-check-regression`). The repository-wide warning budget
+  (`make docs-style-check-baseline`) runs during full Harness and release
+  validation.
 
 ## 9. Reference
 

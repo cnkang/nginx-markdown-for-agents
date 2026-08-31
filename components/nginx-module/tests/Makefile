@@ -69,6 +69,7 @@ build/unit/%: unit/%_test.c include/test_common.h | build/unit build/generated
 	dynconf_production) extra_cflags="-Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  effective_conf) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  accept_production|auth_production|auth_deny_security|conditional_production) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+	  request_bypass_production) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-parameter" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  inflight) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	esac; \
 	$(CC) $(CFLAGS_COMMON) $(LDFLAGS_COMMON) $$extra_cflags -o "$@" "$<" $$extra_srcs $$extra_ldflags

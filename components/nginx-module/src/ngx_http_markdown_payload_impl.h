@@ -502,7 +502,16 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
     if (ngx_http_markdown_effective_error_policy(
             ctx->effective_conf, conf)
         == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
-        return NGX_ERROR;
+        /* Use ngx_http_filter_finalize_request to send the configured
+         * error status (429/503/502), matching
+         * ngx_http_markdown_reject_or_fail_open_buffered_response: in the
+         * body filter, returning a positive HTTP status code directly is
+         * unreliable — NGINX's upstream body output path only
+         * special-cases NGX_ERROR. */
+        return ngx_http_filter_finalize_request(r,
+            &ngx_http_markdown_filter_module,
+            (ngx_int_t) ngx_http_markdown_effective_error_status(
+                ctx->effective_conf, conf));
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -583,7 +592,16 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
     if (ngx_http_markdown_effective_error_policy(
             ctx->effective_conf, conf)
         == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
-        return NGX_ERROR;
+        /* Use ngx_http_filter_finalize_request to send the configured
+         * error status (429/503/502), matching
+         * ngx_http_markdown_reject_or_fail_open_buffered_response: in the
+         * body filter, returning a positive HTTP status code directly is
+         * unreliable — NGINX's upstream body output path only
+         * special-cases NGX_ERROR. */
+        return ngx_http_filter_finalize_request(r,
+            &ngx_http_markdown_filter_module,
+            (ngx_int_t) ngx_http_markdown_effective_error_status(
+                ctx->effective_conf, conf));
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -813,7 +831,7 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                              "markdown: linearize chain "
                              "input size overflow, "
-                             "category=resource");
+                             "category=resource_limit");
                 return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
             }
             total += len;
@@ -1638,6 +1656,10 @@ ngx_http_markdown_forward_headers_for(ngx_http_request_t *r,
 
     if (ctx == NULL || ctx->headers_forwarded) {
         return NGX_OK;
+    }
+
+    if (kind == NGX_HTTP_MARKDOWN_FORWARD_SOURCE_REPRESENTATION) {
+        ngx_http_markdown_restore_conditional_request(r, ctx);
     }
 
     /*

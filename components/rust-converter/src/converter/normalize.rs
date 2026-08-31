@@ -93,17 +93,29 @@ impl LineWhitespaceState {
     }
 }
 
-/// Normalize whitespace within a single line.
+/// Normalize whitespace within a single line for the allocating test
+/// reference implementation.
 ///
 /// Collapses runs of multiple spaces into a single space, while preserving:
 /// - Leading indentation (spaces at the start of the line).
 /// - Content inside inline code spans (backtick-delimited).
 ///
-/// This is the single canonical implementation used by both
-/// `MarkdownConverter::normalize_output` (small-document path) and
-/// `FusedNormalizer::push_line` (large-document path).
+/// Production paths use [`normalize_line_whitespace_into`] so a large line
+/// does not require a second temporary `String`.
+#[cfg(test)]
 pub(crate) fn normalize_line_whitespace(line: &str) -> String {
     let mut result = String::with_capacity(line.len());
+    normalize_line_whitespace_into(line, &mut result);
+    result
+}
+
+/// Normalize one line directly into an existing output buffer.
+///
+/// Keeping the canonical state machine separate from the allocating wrapper
+/// lets the large-response and full-buffer normalizers avoid a per-line
+/// temporary `String`.  The emitted bytes are identical to
+/// [`normalize_line_whitespace`].
+pub(crate) fn normalize_line_whitespace_into(line: &str, result: &mut String) {
     let mut spacing = LineWhitespaceState::new();
     let mut chars = line.char_indices().peekable();
 
@@ -128,8 +140,6 @@ pub(crate) fn normalize_line_whitespace(line: &str) -> String {
             }
         }
     }
-
-    result
 }
 
 fn consume_backtick_run(chars: &mut std::iter::Peekable<std::str::CharIndices>) -> usize {
@@ -147,8 +157,14 @@ fn consume_backtick_run(chars: &mut std::iter::Peekable<std::str::CharIndices>) 
 impl MarkdownConverter {
     /// Normalize text content.
     pub(super) fn normalize_text(&self, text: &str) -> String {
-        let words: Vec<&str> = text.split_whitespace().collect();
-        words.join(" ")
+        let mut normalized = String::with_capacity(text.len());
+        for word in text.split_whitespace() {
+            if !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            normalized.push_str(word);
+        }
+        normalized
     }
 
     /// Normalizes Markdown output for deterministic generation while preserving fenced-code content.
@@ -166,7 +182,11 @@ impl MarkdownConverter {
     ///
     /// The normalized Markdown text with consistent line endings, whitespace, blank lines, and one trailing newline.
     pub(super) fn normalize_output(&self, output: String) -> String {
-        let output = output.replace("\r\n", "\n");
+        let output = if output.contains("\r\n") {
+            output.replace("\r\n", "\n")
+        } else {
+            output
+        };
 
         let mut result = String::with_capacity(output.len());
         let mut prev_blank = false;
@@ -250,7 +270,7 @@ fn append_non_code_line(result: &mut String, line: &str, prev_blank: bool) -> bo
         }
         return true;
     }
-    result.push_str(&normalize_line_whitespace(trimmed));
+    normalize_line_whitespace_into(trimmed, result);
     result.push('\n');
     false
 }

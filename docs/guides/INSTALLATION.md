@@ -36,12 +36,15 @@ This guide covers every supported installation method. Methods range from a sing
 
 ## 2. Shortest Success Path
 
+> **Release publication note:** We have not published 0.9.2 yet (see `docs/releases/0.9.2-release-notes.md` Status: Unreleased). You can run the sequence only after we publish `v0.9.2`. Until then, replace `RELEASE_TAG` with the latest published tag (for example `v0.9.1`) or `<published-release-tag>`. The `v0.9.2` value serves as an example tag for post-publication.
+
 For a system with NGINX already installed (official build), the following
 release-bound sequence downloads and authenticates the installer before any
 privileged execution, then verifies both Markdown and HTML responses:
 
 ```bash
 # Step 1: Download and authenticate the versioned release installer
+# Publication-dependent: RELEASE_TAG must be a published tag; v0.9.2 is an example for post-publication
 set -euo pipefail; RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSL -o "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc" -o nginx-markdown-for-agents-release.asc "${RELEASE_BASE}/nginx-markdown-for-agents-release.asc"
 TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "$GNUPGHOME"' EXIT; gpg --batch --homedir "$GNUPGHOME" --import nginx-markdown-for-agents-release.asc; VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1; CHECKSUM_LINE="$(awk -v file="${INSTALLER}" '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"; printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -; sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"; sudo nginx -t; sudo nginx -s reload
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
@@ -67,11 +70,11 @@ Content-Type: text/html
 
 The install script auto-enables `markdown_filter on` and wires the `load_module` directive. When automatic wiring completes successfully, you do not need to edit the configuration manually. If the installer reports manual actions, follow its instructions to finish the wiring. The NGINX default welcome page (`/usr/share/nginx/html/index.html`) serves as the demo content source — no upstream or proxy configuration needed.
 
-The installation host must provide Bash and the standard release-verification
-utilities used by the script, including `awk`, `curl`, `gpg`, and `tar`.
-Debian/Ubuntu hosts can install `gawk` and `gnupg2`. Alpine hosts can install
-`gawk` and `gnupg`. The installer validates these commands before it performs
-any privileged operation.
+The installation host must provide Bash, curl, tar, and the standard
+release-verification utilities used by the script, including `awk`, `gpg`,
+and `tar`. Debian/Ubuntu hosts can install `gawk` and `gnupg2`. Alpine hosts
+can install `gawk` and `gnupg`. The installer validates these commands before
+it performs any privileged operation.
 
 > **Note:** If you need a standalone demo configuration file, see [`examples/nginx-configs/00-minimal-demo.conf`](../../examples/nginx-configs/00-minimal-demo.conf).
 
@@ -1345,7 +1348,7 @@ The upstream server sends a compressed response (gzip, brotli, or deflate). The 
    ```bash
    sudo nginx -t && sudo nginx -s reload
    ```
-4. For details on the module's built-in automatic decompression support (gzip, brotli, deflate), see [`docs/features/AUTOMATIC_DECOMPRESSION.md`](../features/AUTOMATIC_DECOMPRESSION.md).
+4. For details on the module's built-in automatic decompression support (gzip, brotli, deflate), see [`docs/features/DECOMPRESSION.md`](../features/DECOMPRESSION.md).
 
 ---
 

@@ -300,12 +300,11 @@ fn test_traversal_input_with_placeholder() {
     assert!(md.contains("Enter name"));
 }
 
-/// Verifies that input elements with `value` attributes produce that value as
-/// visible text.
+/// Verifies that ordinary input values are treated as user data.
 #[test]
 fn test_traversal_input_with_value() {
-    let md = convert_html(r#"<form><input type="text" value="default text"></form>"#);
-    assert!(md.contains("default text"));
+    let md = convert_html(r#"<form><input type="text" value="SENSITIVE_VALUE_SENTINEL"></form>"#);
+    assert!(!md.contains("SENSITIVE_VALUE_SENTINEL"));
 }
 
 /// Verifies that iframes with safe URLs extract the URL as a Markdown link and

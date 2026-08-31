@@ -207,6 +207,17 @@ export in `GPG_PRIVATE_KEY`:
 - Export the new signing subkey (`gpg --armor --export-secret-subkeys '<NEW_SIGNING_SUBKEY_FINGERPRINT>!' > private-signing-subkey.asc`, see Section 5 for the full command) and update the `GPG_PRIVATE_KEY` secret with that export
 - Update `GPG_PASSPHRASE` secret with new passphrase
 - Update `GPG_KEY_ID` secret with the new signing-subkey fingerprint
+- **Publish the new public key**: **append** the new key's armored
+  public export to `packaging/nginx-markdown-for-agents-release.asc`
+  (do not replace existing keys — prior public keys must remain so
+  historical signatures stay verifiable), and update the published
+  fingerprint in Section 3 ("Verify Key Fingerprint", the trust-anchor
+  paragraph that lists the signing-subkey fingerprint) so the active
+  fingerprint is unambiguous. Document both the active fingerprint and
+  the historical fingerprints. Verify before signing packages with the
+  new subkey: `gpg --show-keys packaging/nginx-markdown-for-agents-release.asc`
+  must list the new signing subkey fingerprint alongside the retained
+  historical keys
 
 #### Step 4: Update Repository Metadata Signatures
 

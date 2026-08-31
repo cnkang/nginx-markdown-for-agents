@@ -1422,7 +1422,7 @@ streaming, plus the harness and release-gate surfaces needed to operate it.
 - Durable open-source documentation for harness design and maintenance:
   - `docs/architecture/HARNESS_ARCHITECTURE.md`
   - `docs/architecture/ADR/0005-repo-owned-harness.md`
-  - `docs/guides/HARNESS_MAINTENANCE.md`
+  - `docs/harness/HARNESS_MAINTENANCE.md`
 - Executable harness tooling:
   - `tools/harness/check_harness_sync.py`
   - `tools/harness/state_store.py`
@@ -1460,7 +1460,7 @@ streaming, plus the harness and release-gate surfaces needed to operate it.
   binaries cannot silently lag behind the official nginx download page.
 - Updated harness optional-skill documentation to avoid hard local-link
   dependency in docs checks. The skill remains documented as an optional
-  repo-tracked path via `docs/guides/HARNESS_SKILL_SETUP.md`.
+  repo-tracked path via `docs/harness/HARNESS_SKILL_SETUP.md`.
 - Restored green `make harness-check-full` validation by aligning
   release-gate compatibility-matrix parsing with the 0.5.0 canonical document
   structure
@@ -1499,7 +1499,7 @@ This release focuses on operational visibility, rollout safety, and conversion p
 - Unified decision reason codes for logs and metrics (ELIGIBLE_CONVERTED, SKIP_METHOD, SKIP_STATUS, SKIP_CONTENT_TYPE, SKIP_SIZE, SKIP_STREAMING, SKIP_AUTH, SKIP_RANGE, SKIP_ACCEPT, SKIP_CONFIG, FAIL_OPEN, FAIL_CLOSED)
 - Structured decision logging with reason codes at configurable verbosity
 - Rollout cookbook (`docs/guides/ROLLOUT_COOKBOOK.md`) with selective enablement patterns (path, host, header, UA, canary)
-- Rollback guide (`docs/guides/ROLLBACK_GUIDE.md`) with trigger conditions and executable procedures
+- Rollback guide (`docs/guides/OPERATIONAL_ROLLBACK.md`) with trigger conditions and executable procedures
 - Benchmark corpus with page-type classification and unified report format
 - Evidence-based comparison tooling for regression detection
 - Before/after conversion examples generated from benchmark corpus

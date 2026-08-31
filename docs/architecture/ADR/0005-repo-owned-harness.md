@@ -95,7 +95,7 @@ before expanding into broader automation.
 - [../../harness/README.md](../../harness/README.md)
 - [../../harness/core.md](../../harness/core.md)
 - [../../harness/routing-manifest.json](../../harness/routing-manifest.json)
-- [../../guides/HARNESS_MAINTENANCE.md](../../guides/HARNESS_MAINTENANCE.md)
+- [../../harness/HARNESS_MAINTENANCE.md](../../harness/HARNESS_MAINTENANCE.md)
 
 ## Document Updates
 

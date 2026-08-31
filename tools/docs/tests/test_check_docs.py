@@ -182,3 +182,56 @@ def test_unreleased_release_line_cannot_have_stable_release_notes(tmp_path):
     errors = check_status(changelog, project_status, release_notes)
 
     assert any("release notes" in error for error in errors)
+
+
+def test_malformed_unreleased_heading_fails_closed(tmp_path):
+    """An unreleased heading with an unexpected suffix must fail the gate."""
+    check_status = getattr(
+        docs_checker,
+        "check_release_status_consistency",
+        None,
+    )
+    assert callable(check_status)
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(
+        "## [0.9.2] - Unreleased candidate (rc3)\n",
+        encoding="utf-8",
+    )
+    project_status = tmp_path / "PROJECT_STATUS.md"
+    project_status.write_text(
+        "### Current Release Line 0.9.2\n\n"
+        "**Status:** Unreleased development and release-candidate line.\n",
+        encoding="utf-8",
+    )
+
+    errors = check_status(changelog, project_status)
+
+    assert any("malformed unreleased heading" in error for error in errors)
+
+
+def test_malformed_unreleased_heading_after_valid_fails_closed(tmp_path):
+    """A malformed heading later in the changelog must not be masked by an
+    earlier valid unreleased heading."""
+    check_status = getattr(
+        docs_checker,
+        "check_release_status_consistency",
+        None,
+    )
+    assert callable(check_status)
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(
+        "## [0.9.2] - Unreleased candidate\n"
+        "\n"
+        "## [0.9.1] - Unreleased (draft)\n",
+        encoding="utf-8",
+    )
+    project_status = tmp_path / "PROJECT_STATUS.md"
+    project_status.write_text(
+        "### Current Release Line 0.9.2\n\n"
+        "**Status:** Unreleased development and release-candidate line.\n",
+        encoding="utf-8",
+    )
+
+    errors = check_status(changelog, project_status)
+
+    assert any("malformed unreleased heading" in error for error in errors)

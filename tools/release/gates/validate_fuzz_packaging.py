@@ -66,7 +66,7 @@ INSTALL_DOCS = [
 COMPAT_DOCS = [
     # One canonical compatibility reference; old guide paths remain only as
     # navigation stubs and must not become independent validation surfaces.
-    PROJECT_ROOT / "docs" / "COMPATIBILITY.md",
+    PROJECT_ROOT / "docs" / "guides" / "PACKAGE_COMPATIBILITY.md",
 ]
 
 # Required fuzz guide sections (keywords that must appear)

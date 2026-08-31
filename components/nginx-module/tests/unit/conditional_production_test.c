@@ -141,11 +141,14 @@ typedef struct ngx_connection_s ngx_connection_t;
 struct ngx_http_request_s {
     ngx_pool_t *pool;
     ngx_connection_t *connection;
+    ngx_http_request_t *parent;
     struct {
         ngx_list_t headers;
         ngx_table_elt_t *accept;
         ngx_table_elt_t *cookie;
         ngx_table_elt_t *authorization;
+        ngx_table_elt_t *if_none_match;
+        ngx_table_elt_t *if_modified_since;
     } headers_in;
     struct {
         ngx_uint_t status;
@@ -1124,6 +1127,23 @@ test_send_304_send_header_fails(void)
     TEST_PASS("send_304 header failure");
 }
 
+static void
+test_send_304_send_header_again(void)
+{
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_AGAIN;
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    struct MarkdownResult result;
+    memset(&result, 0, sizeof(result));
+
+    ngx_int_t rc = ngx_http_markdown_send_304(r, &result);
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "send_304 must preserve downstream NGX_AGAIN");
+    TEST_PASS("send_304 header backpressure");
+}
+
 /* ── find_request_header tests ───────────────────────────────── */
 
 static void
@@ -1188,6 +1208,370 @@ test_find_header_hash_zero_skipped(void)
     TEST_ASSERT(MEM_EQ(h->value.data, "\"valid\"", 7),
         "Correct value found");
     TEST_PASS("hash==0 skipped");
+}
+
+static void
+test_capture_restore_conditional_headers(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *inm;
+    ngx_table_elt_t *ims;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    inm = add_header(&r->headers_in.headers,
+                     "if-none-match", "\"source\"");
+    ims = add_header(&r->headers_in.headers,
+                     "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_none_match = inm;
+    r->headers_in.if_modified_since = ims;
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_has_conditional_request(r),
+        "active conditional validator is detected");
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+        "conditional validators are captured");
+    TEST_ASSERT(ctx.conditional.captured && ctx.conditional.suppressed,
+        "capture records suppressed state");
+    TEST_ASSERT(inm->hash == 0 && ims->hash == 0,
+        "captured validators are hidden from upstream processing");
+    TEST_ASSERT(inm->value.len == 0 && ims->value.len == 0,
+        "captured validator values are emptied for upstream forwarders");
+    TEST_ASSERT(r->headers_in.if_none_match == NULL
+                && r->headers_in.if_modified_since == NULL,
+        "typed validator pointers are hidden");
+
+    ngx_http_markdown_restore_conditional_request(r, &ctx);
+    TEST_ASSERT(!ctx.conditional.suppressed,
+        "restore clears suppressed state");
+    TEST_ASSERT(inm->hash != 0 && ims->hash != 0,
+        "captured validators regain their original hash state");
+    TEST_ASSERT(inm->value.len == sizeof("\"source\"") - 1
+                && ims->value.len
+                   == sizeof("Wed, 21 Oct 2015 07:28:00 GMT") - 1,
+        "captured validator values regain their original lengths");
+    TEST_ASSERT(r->headers_in.if_none_match == inm
+                && r->headers_in.if_modified_since == ims,
+        "typed validator pointers are restored");
+    TEST_PASS("capture and restore conditional headers");
+}
+
+static void
+test_adopt_orphan_conditional_headers(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *inm;
+    ngx_table_elt_t *ims;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    inm = add_header(&r->headers_in.headers,
+                     "if-none-match", "\"source\"");
+    ims = add_header(&r->headers_in.headers,
+                     "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_none_match = inm;
+    r->headers_in.if_modified_since = ims;
+    memset(&ctx, 0, sizeof(ctx));
+
+    /* First capture suppresses both validators (hash=0), as PREACCESS does
+     * before an internal redirect. */
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+        "conditional validators are captured");
+    TEST_ASSERT(inm->hash == 0 && ims->hash == 0,
+        "captured validators are hidden");
+
+    /* Internal redirect clears r->ctx (module context array) but leaves the
+     * suppressed request-header entries behind.  The orphan-adopt helper
+     * restores their visibility so the next PREACCESS pass can re-capture. */
+    memset(&ctx, 0, sizeof(ctx));  /* simulates the lost context */
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(inm->hash != 0 && ims->hash != 0,
+        "orphaned validators regain visibility after internal redirect");
+    TEST_ASSERT(inm->value.len == sizeof("\"source\"") - 1
+                && ims->value.len
+                   == sizeof("Wed, 21 Oct 2015 07:28:00 GMT") - 1,
+        "orphaned validator values remain intact");
+    TEST_ASSERT(r->headers_in.if_none_match == inm
+                && r->headers_in.if_modified_since == ims,
+        "orphan adoption rebuilds typed validator pointers");
+
+    /* A fresh capture on the re-adopted headers must succeed. */
+    TEST_ASSERT(ngx_http_markdown_has_conditional_request(r),
+        "re-adopted conditional validator is detected");
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+        "re-capture after orphan adoption succeeds");
+    TEST_ASSERT(inm->hash == 0 && ims->hash == 0,
+        "re-captured validators are hidden again");
+
+    TEST_PASS("adopt orphan conditional headers after internal redirect");
+}
+
+static void
+test_adopt_orphan_restores_repeated_validators(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *inm1;
+    ngx_table_elt_t *inm2;
+    ngx_table_elt_t *ims;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    /* Repeated If-None-Match fields: capture records a state entry for
+     * each one, so orphan adoption must restore every entry, not just
+     * the first match. */
+    inm1 = add_header(&r->headers_in.headers,
+                      "if-none-match", "\"first\"");
+    inm2 = add_header(&r->headers_in.headers,
+                      "if-none-match", "\"second\"");
+    ims = add_header(&r->headers_in.headers,
+                     "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_none_match = inm1;
+    r->headers_in.if_modified_since = ims;
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+        "repeated validators are captured");
+    TEST_ASSERT(inm1->hash == 0 && inm2->hash == 0 && ims->hash == 0,
+        "all repeated validator entries are suppressed");
+    TEST_ASSERT(inm1->value.len == 0 && inm2->value.len == 0,
+        "all repeated validator values are emptied");
+
+    /* Internal redirect loses the context; adoption must restore every
+     * suppressed entry and rebuild the typed pointer from the first one. */
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(inm1->hash != 0 && inm2->hash != 0 && ims->hash != 0,
+        "every repeated validator regains visibility");
+    TEST_ASSERT(inm1->value.len == sizeof("\"first\"") - 1
+                && inm2->value.len == sizeof("\"second\"") - 1,
+        "every repeated validator value length is rebuilt");
+    TEST_ASSERT(r->headers_in.if_none_match == inm1,
+        "typed pointer names the first restored entry");
+
+    /* A fresh capture re-owns all entries again. */
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+        "re-capture after adoption owns repeated entries");
+    TEST_ASSERT(inm1->hash == 0 && inm2->hash == 0,
+        "re-capture suppresses repeated entries again");
+
+    TEST_PASS("orphan adoption restores repeated validators");
+}
+
+static void
+test_adopt_orphan_skips_non_nul_terminated(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *valid;
+    ngx_table_elt_t *broken;
+    u_char *non_nul;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    valid = add_header(&r->headers_in.headers,
+                       "If-None-Match", "\"valid\"");
+    broken = add_header(&r->headers_in.headers,
+                        "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_none_match = valid;
+    r->headers_in.if_modified_since = broken;
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "both validators are captured and hidden");
+    TEST_ASSERT(valid->hash == 0 && broken->hash == 0,
+                "both entries are suppressed before redirect");
+
+    /* Corrupt the second entry so its value lacks a terminating NUL
+     * within the bounded scan.  The orphan-adopt helper must bound
+     * the scan with memchr and skip the entry instead of reading
+     * past the allocation. */
+    non_nul = ngx_palloc(r->pool, 8192);
+    if (non_nul == NULL) { TEST_FAIL("alloc non_nul failed"); return; }
+    memset(non_nul, 'A', 8192);
+    broken->value.data = non_nul;
+    broken->value.len = 0;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(valid->hash != 0
+                    && valid->value.len == sizeof("\"valid\"") - 1,
+                "NUL-terminated entry is restored with correct length");
+    TEST_ASSERT(broken->hash == 0,
+                "entry without NUL within bound remains hidden");
+    TEST_ASSERT(r->headers_in.if_none_match == valid,
+                "typed pointer for the restored entry is rebuilt");
+    TEST_ASSERT(r->headers_in.if_modified_since == NULL
+                    || r->headers_in.if_modified_since != broken,
+                "typed pointer for the skipped entry is not rebuilt");
+
+    TEST_PASS("orphan adoption skips entry without NUL terminator");
+}
+
+static void
+test_adopt_orphan_with_empty_headers(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(r->headers_in.if_none_match == NULL
+                && r->headers_in.if_modified_since == NULL,
+                "empty headers leave typed pointers NULL");
+    TEST_PASS("orphan adoption with empty headers");
+}
+
+static void
+test_adopt_orphan_skips_invalid_len(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *h;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    h = add_header(&r->headers_in.headers,
+                   "If-None-Match", "\"valid\"");
+    r->headers_in.if_none_match = h;
+    memset(&ctx, 0, sizeof(ctx));
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+                "capture succeeds");
+    h->value.len = 5;
+    h->value.data = (u_char *) "\"valid\"";
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(h->hash == 0,
+                "entry with non-zero len after hash clear is not adopted");
+    TEST_ASSERT(r->headers_in.if_none_match == NULL,
+                "typed pointer not rebuilt for invalid len entry");
+    TEST_PASS("orphan adoption skips entry with non-zero len");
+}
+
+static void
+test_adopt_orphan_skips_null_data(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *h;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    h = add_header(&r->headers_in.headers,
+                   "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_modified_since = h;
+    memset(&ctx, 0, sizeof(ctx));
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+                "capture succeeds");
+    h->value.data = NULL;
+    h->value.len = 0;
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(h->hash == 0,
+                "entry with NULL data remains hidden");
+    TEST_ASSERT(r->headers_in.if_modified_since == NULL,
+                "typed pointer not rebuilt for NULL data");
+    TEST_PASS("orphan adoption skips entry with NULL data");
+}
+
+static void
+test_capture_conditional_headers_excludes_range(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *ims;
+    ngx_table_elt_t *range;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    ims = add_header(&r->headers_in.headers,
+                     "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    range = add_header(&r->headers_in.headers, "Range", "bytes=0-10");
+    r->headers_in.if_modified_since = ims;
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(!ngx_http_markdown_has_conditional_request(r),
+        "range request is not a validator-capture candidate");
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_DECLINED,
+        "range request is declined by capture");
+    TEST_ASSERT(ims->hash != 0 && range->hash != 0,
+        "range request headers remain active");
+    TEST_PASS("range conditional request remains source-scoped");
+}
+
+static void
+test_subrequest_capture_does_not_mutate_shared_validators(void)
+{
+    ngx_http_request_t *parent;
+    ngx_http_request_t *subrequest;
+    ngx_http_markdown_ctx_t parent_ctx;
+    ngx_http_markdown_ctx_t subrequest_ctx;
+    ngx_table_elt_t *validator;
+
+    g_pool_offset = 0;
+    parent = make_req();
+    subrequest = make_req();
+    if (parent == NULL || subrequest == NULL) {
+        TEST_FAIL("alloc failed");
+        return;
+    }
+
+    validator = add_header(&parent->headers_in.headers,
+                           "If-None-Match", "\"parent-etag\"");
+    parent->headers_in.if_none_match = validator;
+    subrequest->headers_in.headers = parent->headers_in.headers;
+    subrequest->headers_in.if_none_match = validator;
+    subrequest->parent = parent;
+    memset(&parent_ctx, 0, sizeof(parent_ctx));
+    memset(&subrequest_ctx, 0, sizeof(subrequest_ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(
+                    parent, &parent_ctx) == NGX_OK,
+                "parent must capture the shared validator");
+    TEST_ASSERT(validator->hash == 0 && validator->value.len == 0,
+                "parent capture must suppress the shared validator");
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(
+                    subrequest, &subrequest_ctx) == NGX_DECLINED,
+                "subrequest capture must decline shared validators");
+    TEST_ASSERT(!subrequest_ctx.conditional.captured
+                && !subrequest_ctx.conditional.suppressed
+                && validator->hash == 0 && validator->value.len == 0,
+                "subrequest capture must not alter parent suppression");
+
+    ngx_http_markdown_restore_conditional_request(parent, &parent_ctx);
+    TEST_ASSERT(validator->hash != 0
+                && validator->value.len == sizeof("\"parent-etag\"") - 1,
+                "parent restore must remain responsible for shared headers");
+    TEST_PASS("subrequest capture preserves shared parent validators");
 }
 
 /* ── handle_if_none_match tests ──────────────────────────────── */
@@ -1676,6 +2060,47 @@ test_has_no_transform_no_cache_control(void)
     TEST_PASS("has_no_transform no header");
 }
 
+/* Verify every public conditional-request policy maps to its FFI value. */
+static void
+test_conditional_cache_validation_modes(void)
+{
+    TEST_ASSERT(ngx_http_markdown_conditional_cache_validation(
+                    NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED) == 0,
+                "disabled policy maps to no cache validation");
+    TEST_ASSERT(ngx_http_markdown_conditional_cache_validation(
+                    NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT) == 2,
+                "full policy maps to entity validation");
+    TEST_ASSERT(ngx_http_markdown_conditional_cache_validation(
+                    NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE) == 1,
+                "IMS policy maps to date validation");
+    TEST_ASSERT(ngx_http_markdown_conditional_cache_validation(99) == 1,
+                "unknown policy uses the IMS fallback");
+    TEST_PASS("conditional cache validation policy mapping");
+}
+
+/* Ensure invalidated headers are ignored and HTAB is a valid OWS separator. */
+static void
+test_has_no_transform_ignores_invalidated_and_accepts_htab(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t *invalidated;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    invalidated = add_header(&r->headers_out.headers, "Cache-Control",
+                             "no-transform");
+    add_header(&r->headers_out.headers, "Cache-Control",
+               "no-transform\t, max-age=0");
+    if (invalidated == NULL) { TEST_FAIL("header alloc failed"); return; }
+    invalidated->hash = 0;
+
+    TEST_ASSERT(ngx_http_markdown_has_no_transform(r) == 1,
+                "active Cache-Control uses HTAB as a valid separator");
+    TEST_PASS("no-transform skips invalidated headers and accepts HTAB");
+}
+
 /* ── last_modified_time fallback tests ──────────────────────── */
 
 /*
@@ -1770,6 +2195,7 @@ main(void)
     test_send_304_null_result();
     test_send_304_empty_etag();
     test_send_304_send_header_fails();
+    test_send_304_send_header_again();
     test_send_304_etag_failure_restores_headers();
     test_send_304_etag_value_failure_restores_headers();
     test_send_304_vary_failure_restores_headers();
@@ -1779,6 +2205,15 @@ main(void)
     test_find_header_found();
     test_find_header_not_found();
     test_find_header_hash_zero_skipped();
+    test_capture_restore_conditional_headers();
+    test_adopt_orphan_conditional_headers();
+    test_adopt_orphan_restores_repeated_validators();
+    test_adopt_orphan_skips_non_nul_terminated();
+    test_adopt_orphan_with_empty_headers();
+    test_adopt_orphan_skips_invalid_len();
+    test_adopt_orphan_skips_null_data();
+    test_capture_conditional_headers_excludes_range();
+    test_subrequest_capture_does_not_mutate_shared_validators();
 
     test_handle_inm_disabled();
     test_handle_inm_if_modified_since_only();
@@ -1799,6 +2234,8 @@ main(void)
     test_has_no_transform_in_comma_separated_list();
     test_has_no_transform_absent();
     test_has_no_transform_no_cache_control();
+    test_conditional_cache_validation_modes();
+    test_has_no_transform_ignores_invalidated_and_accepts_htab();
 
     test_handle_ims_only_scalar_time_not_consulted();
     test_handle_ims_only_no_last_modified_at_all();

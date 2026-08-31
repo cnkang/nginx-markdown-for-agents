@@ -295,7 +295,15 @@ def _merge_critical_path_records(
             resolved.read_text(encoding="utf-8", errors="replace")
         ).items():
             normalized = source_file.replace("\\", "/")
-            if "/components/" not in normalized or "/src/" not in normalized:
+            # Accept absolute component paths containing "/components/" and
+            # repository-relative paths beginning with "components/" (lcov
+            # reports may use either form); the "src/" segment is required
+            # in both cases.
+            in_component_tree = (
+                "/components/" in normalized
+                or normalized.startswith("components/")
+            )
+            if not in_component_tree or "/src/" not in normalized:
                 continue
             destination = merged.setdefault(normalized, (set(), set()))
             destination[0].update(found)

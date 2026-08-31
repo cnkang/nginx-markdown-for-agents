@@ -31,6 +31,7 @@ fi
 
 ARTIFACT="${WORKSPACE_ROOT}/dist/1.26.3-glibc-${TEST_ARCH}/ngx_http_markdown_filter_module-1.26.3-glibc-${TEST_ARCH}.tar.gz"
 MOCK_DIR=""
+MOCK_TLS_DIR=""
 SERVER_PID=""
 MOCK_PORT_FILE=""
 MOCK_CERT_FILE=""
@@ -82,6 +83,10 @@ cleanup() {
     rm -rf "$MOCK_DIR"
   fi
 
+  if [[ -n "$MOCK_TLS_DIR" ]] && [[ -d "$MOCK_TLS_DIR" ]]; then
+    rm -rf "$MOCK_TLS_DIR"
+  fi
+
   return 0
 }
 trap cleanup EXIT
@@ -99,8 +104,11 @@ if ! command -v openssl >/dev/null 2>&1; then
   echo "Missing prerequisite: openssl" >&2
   exit 1
 fi
-MOCK_CERT_FILE="${MOCK_DIR}/server.crt"
-MOCK_KEY_FILE="${MOCK_DIR}/server.key"
+# Keep the TLS key in a separate sibling directory so SimpleHTTPRequestHandler
+# (which serves the whole MOCK_DIR tree) can never serve the private key.
+MOCK_TLS_DIR="$(mktemp -d /tmp/mock_github_tls.XXXXXX)"
+MOCK_CERT_FILE="${MOCK_TLS_DIR}/server.crt"
+MOCK_KEY_FILE="${MOCK_TLS_DIR}/server.key"
 if ! openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout "$MOCK_KEY_FILE" -out "$MOCK_CERT_FILE" -days 1 \
   -subj "/CN=host.docker.internal" \

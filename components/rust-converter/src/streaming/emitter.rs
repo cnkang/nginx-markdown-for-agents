@@ -16,10 +16,10 @@
 
 use crate::error::ConversionError;
 use crate::security::{
-    MarkdownTextEscapeState, escape_link_label, escape_markdown_text_with_state,
+    MarkdownTextEscapeState, escape_link_label, escape_markdown_destination,
+    escape_markdown_text_with_state, sanitize_url_value,
 };
 use crate::streaming::budget::MemoryBudget;
-use crate::streaming::sanitizer::is_dangerous_url;
 use crate::streaming::state_machine::{
     StateMachineAction, StructuralContext, StructuralStateMachine,
 };
@@ -53,35 +53,6 @@ fn trailing_backtick_run(content: &str) -> usize {
         .rev()
         .take_while(|&byte| byte == b'`')
         .count()
-}
-
-/// Escape a URL for use as a Markdown link/image destination.
-///
-/// CommonMark requires that link destinations containing spaces, parentheses,
-/// or angle brackets be enclosed in angle brackets (`<…>`), with `>` and `\`
-/// backslash-escaped inside.  URLs without such characters are emitted bare
-/// for readability.
-pub(crate) fn escape_markdown_destination(url: &str) -> std::borrow::Cow<'_, str> {
-    let needs_escape = url
-        .bytes()
-        .any(|b| matches!(b, b' ' | b'(' | b')' | b'<' | b'>' | b'\\' | b'\n' | b'\r'));
-    if !needs_escape {
-        return std::borrow::Cow::Borrowed(url);
-    }
-    let mut out = String::with_capacity(url.len() + 4);
-    out.push('<');
-    for ch in url.chars() {
-        match ch {
-            '<' => out.push_str("\\<"),
-            '>' => out.push_str("\\>"),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            _ => out.push(ch),
-        }
-    }
-    out.push('>');
-    std::borrow::Cow::Owned(out)
 }
 
 /// Selected block-level tags whose closing triggers a flush point.
@@ -619,15 +590,17 @@ impl IncrementalEmitter {
             return Ok(());
         }
 
-        if href.trim().is_empty() || is_dangerous_url(href) {
+        if let Some(safe_href) = sanitize_url_value(href)
+            && !safe_href.is_empty()
+        {
+            let escaped = escape_markdown_destination(safe_href);
+            self.write_str(&format!("[{}]({})", text, escaped))?;
+        } else {
             /* `link_text` is assembled from escaped ordinary text plus
              * trusted structural markers (for example `**` from <strong>).
              * Escaping the complete buffer here would corrupt those markers
              * and change the intended inline formatting. */
             self.write_str(&text)?;
-        } else {
-            let escaped = escape_markdown_destination(href);
-            self.write_str(&format!("[{}]({})", text, escaped))?;
         }
         Ok(())
     }

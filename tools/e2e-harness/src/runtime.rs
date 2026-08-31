@@ -146,7 +146,8 @@ impl ScenarioRuntime {
 ///
 /// For the module-enabled scenarios (`brotli-streaming`, `encoding-chain`,
 /// `metrics-endpoint`, `conditional-requests`, `auth-cache`,
-/// `accept-negotiation`, and `status-codes`), produces a
+/// `accept-negotiation`, `status-codes`, and
+/// `representation-validator-e2e`), produces a
 /// module-enabled config with the routes needed by the scenario. For all
 /// other scenarios, writes a minimal proxy stub.
 ///
@@ -199,6 +200,15 @@ fn write_nginx_conf_stub(
             &error_log,
             &access_log,
             &pid_path,
+            nginx_bin,
+            port,
+            upstream_port,
+        ),
+        "representation-validator-e2e" => representation_validator_nginx_conf(
+            &error_log,
+            &access_log,
+            &pid_path,
+            runtime_dir,
             nginx_bin,
             port,
             upstream_port,
@@ -464,6 +474,115 @@ http {{\n\
 }}\n",
         error_log.display(),
         pid_path.display(),
+        access_log.display(),
+    )
+}
+
+fn representation_validator_nginx_conf(
+    error_log: &Path,
+    access_log: &Path,
+    pid_path: &Path,
+    runtime_dir: &Path,
+    nginx_bin: &Path,
+    port: u16,
+    upstream_port: u16,
+) -> String {
+    let load_module = find_module(nginx_bin)
+        .map(|path| format!("load_module {};\n", path.display()))
+        .unwrap_or_default();
+    let cache_dir = runtime_dir.join("representation-cache");
+    format!(
+        "{load_module}worker_processes 1;\n\
+error_log {} info;\n\
+pid {};\n\
+events {{ worker_connections 128; }}\n\
+http {{\n\
+    proxy_cache_path {} keys_zone=representation_cache:1m \
+        max_size=10m inactive=1m use_temp_path=off;\n\
+    access_log {};\n\
+    upstream fixture_backend {{ server 127.0.0.1:{upstream_port}; }}\n\
+    server {{\n\
+        listen 127.0.0.1:{port};\n\
+        location = /representation-proxy {{\n\
+            markdown_filter on;\n\
+            markdown_accept wildcard;\n\
+            markdown_streaming off;\n\
+            markdown_cache_validation full;\n\
+            markdown_limits conversion_memory=64m conversion_timeout=10s;\n\
+            markdown_error_policy pass;\n\
+            markdown_auth_policy allow;\n\
+            markdown_auth_cookies session* auth_token PHPSESSID rememberme;\n\
+            proxy_set_header Accept \"\";\n\
+            proxy_pass http://fixture_backend/md/html;\n\
+        }}\n\
+        location = /representation-source-only {{\n\
+            proxy_set_header Accept \"\";\n\
+            proxy_pass http://fixture_backend/md/html;\n\
+        }}\n\
+        location = /representation-cache {{\n\
+            markdown_filter on;\n\
+            markdown_accept wildcard;\n\
+            markdown_streaming off;\n\
+            markdown_cache_validation full;\n\
+            markdown_limits conversion_memory=64m conversion_timeout=10s;\n\
+            markdown_error_policy pass;\n\
+            proxy_cache representation_cache;\n\
+            proxy_cache_methods GET HEAD;\n\
+            proxy_cache_valid 200 1m;\n\
+            add_header X-Proxy-Cache $upstream_cache_status always;\n\
+            proxy_set_header Accept \"\";\n\
+            proxy_pass http://fixture_backend/md/html;\n\
+        }}\n\
+        location = /representation-internal {{\n\
+            markdown_filter on;\n\
+            markdown_accept wildcard;\n\
+            markdown_streaming off;\n\
+            markdown_cache_validation full;\n\
+            markdown_error_policy pass;\n\
+            proxy_set_header Accept \"\";\n\
+            try_files /representation-source-does-not-exist
+                /representation-internal-target;\n\
+        }}\n\
+        location = /representation-internal-target {{\n\
+            markdown_filter on;\n\
+            markdown_accept wildcard;\n\
+            markdown_streaming off;\n\
+            markdown_cache_validation full;\n\
+            markdown_error_policy pass;\n\
+            proxy_set_header Accept \"\";\n\
+            proxy_pass http://fixture_backend/md/html;\n\
+        }}\n\
+        location = /representation-subrequest {{\n\
+            markdown_filter on;\n\
+            markdown_accept wildcard;\n\
+            markdown_streaming off;\n\
+            markdown_cache_validation full;\n\
+            markdown_error_policy pass;\n\
+            auth_request /representation-subrequest-check;\n\
+            auth_request_set $representation_subrequest_status \
+                $upstream_status;\n\
+            add_header X-Representation-Subrequest\n\
+                $representation_subrequest_status always;\n\
+            proxy_set_header Accept \"\";\n\
+            proxy_pass http://fixture_backend/md/html;\n\
+        }}\n\
+        location = /representation-subrequest-check {{\n\
+            internal;\n\
+            markdown_filter on;\n\
+            markdown_accept wildcard;\n\
+            markdown_streaming off;\n\
+            markdown_cache_validation full;\n\
+            markdown_error_policy pass;\n\
+            proxy_set_header Accept \"\";\n\
+            proxy_set_header If-None-Match \"\";\n\
+            proxy_set_header If-Modified-Since \"\";\n\
+            proxy_pass http://fixture_backend/md/html;\n\
+        }}\n\
+    }}\n\
+}}\n",
+        error_log.display(),
+        pid_path.display(),
+        cache_dir.display(),
         access_log.display(),
     )
 }

@@ -3312,6 +3312,7 @@ test_sync_flush_bursts(void)
                     memcpy(actual + emitted, out, out_len);
                     emitted += out_len;
                 }
+                test_pool_free_tracked_allocations();
             }
         }
 

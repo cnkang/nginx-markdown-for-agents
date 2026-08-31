@@ -106,7 +106,7 @@ evidence references.
 | 4.1 | Helm chart lint | `helm lint charts/nginx-markdown` | Exit 0, no errors |
 | 4.2 | Helm chart render | `CANDIDATE_SHA="<candidate-sha>" && mkdir -p "release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests" && helm template gate4-test charts/nginx-markdown --namespace gate4-smoke > "release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests/rendered.yaml" && python3 tools/release/gates/validate_k8s_manifests.py "release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests/rendered.yaml"` | Exit 0. Assert that the rendered output at `release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests/rendered.yaml` contains the Deployment `metadata.name`, the container `image`, and the `nginx-markdown` ConfigMap |
 | 4.3 | Promoted cluster smoke | `tools/release/gates/gate4_local_k8s_smoke.sh` or the promoted-cluster equivalent | Evidence at `release-evidence/gate4/<candidate-sha>/cluster-smoke.json`; conversion, Accept, and metrics checks pass |
-| 4.4 | F5 feasibility assessment | Review `docs/guides/F5_INGRESS_FEASIBILITY.md` and record assessment | Evidence at `release-evidence/gate4/<candidate-sha>/f5-assessment.md` is complete |
+| 4.4 | F5 feasibility assessment | Review `docs/guides/KUBERNETES_DEPLOYMENT.md#f5-nginx-ingress-controller` and record assessment | Evidence at `release-evidence/gate4/<candidate-sha>/f5-assessment.md` is complete |
 
 **Fail action**: Block release. Resolve any lint, render, cluster-smoke, or F5 evidence gap before proceeding.
 

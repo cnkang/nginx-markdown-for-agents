@@ -1,19 +1,26 @@
-# FFI Zero/Default Initialization Strategy
+# FFI Initialization Contract
 
-> **Note**: This document originated in v0.7.0. Its zero/default
-> initialization safety goals remain in effect for v0.9.2, however, the FFI struct inventory
-> has evolved. See [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md)
-> for the current v0.9.2 FFI boundary.
+> **Note**: This document originated in v0.7.0 as the zero/default
+> initialization strategy. Its safety goals remain in effect for v0.9.2,
+> however the contract is now **semantic initializer first**. Zero
+> initialization is only a fallback. See
+> [FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) for the active ABI
+> contract and [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md) for
+> the migration history.
 
 ## Policy
 
 Every `#[repr(C)]` FFI result struct uses its matching production helper when
-one exists. Zero-initialization is only a fallback for a struct with no
-semantic defaults and no initializer. This ensures that:
+one exists. **Semantic initializer first**: the initializer establishes the
+struct's non-zero semantic defaults. Zero-initialization is only a fallback
+for a struct with no semantic defaults and no initializer. This ensures that:
 
 1. Every field has a defined value (no uninitialized memory across FFI)
 2. Pointer fields are NULL (safe to call `free` on)
 3. Length fields are 0 (safe for C code to check before dereference)
+4. Non-zero semantic defaults (flavor, policy, mode) come from the
+   initializer itself (it establishes them), and the zero-fallback path
+   never runs for those structs.
 
 ## Implementation
 
@@ -47,6 +54,7 @@ defaults. Stack-allocated FFI structs must call the matching initializer.
 | `FFIAcceptResult` | `should_convert=0, reason=0` | Zero-default; no dedicated initializer — the owning decision FFI call populates it directly |
 | `FFIHeaderPlan` | `markdown_header_plan_init` sets `handle=NULL`, `entries=NULL`, `count=0` | Must be released with `markdown_header_plan_free` after successful build |
 | `MarkdownOptions` | `markdown_options_init` applies semantic defaults as well as NULL/0 fields | Do not replace it with a blind memset |
+| `MarkdownDecompResult` | `markdown_decomp_result_init` sets pointer/length fields NULL/0 | Successfully filled results must be released with `markdown_decompress_free` after use |
 
 ## Safety Invariant
 

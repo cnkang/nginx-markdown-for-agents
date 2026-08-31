@@ -1384,7 +1384,9 @@ check_prometheus_response() {
   local status content_type
   local -a curl_args
 
-  curl_args=(-sS -D "${header_file}" -o "${body_file}")
+  # Bound both the connection phase and the overall request so an
+  # incomplete response fails instead of hanging the coverage run.
+  curl_args=(--connect-timeout 5 --max-time 30 -sS -D "${header_file}" -o "${body_file}")
   if [[ -n "${accept_header}" ]]; then
     curl_args+=(-H "${accept_header}")
   else
@@ -1404,7 +1406,9 @@ check_prometheus_response() {
   fi
   content_type="$(awk -F': ' 'tolower($1) == "content-type" { print tolower($2) }' \
     "${header_file}" | tr -d '\r' | tail -n 1)"
-  if [[ "${content_type}" != text/plain* ]]; then
+  # Accept exactly text/plain, optionally followed by parameters such as a
+  # charset; reject lookalikes like text/plain-invalid.
+  if [[ ! "${content_type}" =~ ^text/plain([[:space:]]*;.*)?[[:space:]]*$ ]]; then
     echo "ERROR: Prometheus ${case_label} content type was ${content_type}" >&2
     return 1
   fi

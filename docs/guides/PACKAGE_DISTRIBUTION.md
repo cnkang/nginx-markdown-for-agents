@@ -150,6 +150,7 @@ After downloading both the package and `SHA256SUMS`:
 ```bash
 set -euo pipefail
 # Verify the specific package; an absent matching entry is an error.
+VERSION="0.9.2"
 PACKAGE="nginx-module-markdown-for-agents_${VERSION}_nginx-1.26.3_amd64.deb"
 CHECKSUM_LINE="$(awk -v package="${PACKAGE}" '$2 == package { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"
 printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -
@@ -288,8 +289,11 @@ curl -fsSLO "${BASE_URL}/release-manifest.json"
 # 2. Verify GPG signature on the checksum file
 gpg --verify SHA256SUMS.asc SHA256SUMS
 
-# 3. Verify the package and manifest checksums
-sha256sum --check --ignore-missing SHA256SUMS
+# 3. Verify the package: require exactly one manifest entry for the
+#    requested package, then check its checksum (same awk validation as
+#    shown in "Verifying a Downloaded Package" above)
+CHECKSUM_LINE="$(awk -v package="${PACKAGE_FILE}" '$2 == package { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"
+printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -
 ```
 
 If all steps succeed and the imported key matches the independently

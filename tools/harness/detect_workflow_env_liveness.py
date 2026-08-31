@@ -66,7 +66,11 @@ def _mask_single_quoted_character(state, index):
     character = state.line[index]
     state.output[index] = " " if character != "\n" else "\n"
     if character == "'":
-        state.contexts[-1] = None
+        # Pop the closed quote frame so the enclosing context (command
+        # substitution, outer quote) resumes; leaving the frame in place
+        # would make the next ) pop the wrong frame and turn the next
+        # closing quote into an opening one.
+        state.contexts.pop()
     return index + 1
 
 
@@ -84,7 +88,7 @@ def _mask_double_quoted_character(state, index):
         state.contexts.append(None)
         return index + 2
     if character == '"':
-        state.contexts[-1] = None
+        state.contexts.pop()
     return index + 1
 
 

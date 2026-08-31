@@ -22,7 +22,7 @@ Start here, then branch out:
 | Release gate and source-build governance | [risk-packs/release-governance.md](risk-packs/release-governance.md) |
 | Static security and supply-chain gates | [risk-packs/security-static-supply-chain.md](risk-packs/security-static-supply-chain.md) |
 | System design and rationale for the harness itself | [../architecture/HARNESS_ARCHITECTURE.md](../architecture/HARNESS_ARCHITECTURE.md) |
-| Contributor maintenance workflow for evolving harness rules | [../guides/HARNESS_MAINTENANCE.md](../guides/HARNESS_MAINTENANCE.md) |
+| Contributor maintenance workflow for evolving harness rules | [HARNESS_MAINTENANCE.md](HARNESS_MAINTENANCE.md) |
 
 ## Harness Flow
 
@@ -68,7 +68,7 @@ flowchart LR
 ## Canonical References
 
 - [../architecture/HARNESS_ARCHITECTURE.md](../architecture/HARNESS_ARCHITECTURE.md)
-- [../guides/HARNESS_MAINTENANCE.md](../guides/HARNESS_MAINTENANCE.md)
+- [HARNESS_MAINTENANCE.md](HARNESS_MAINTENANCE.md)
 - [../architecture/ADR/0005-repo-owned-harness.md](../architecture/ADR/0005-repo-owned-harness.md)
 - [../architecture/README.md](../architecture/README.md)
 - [../testing/README.md](../testing/README.md)
@@ -80,7 +80,7 @@ For local agent workflows, a repo-tracked helper skill is available at:
 
 - `skills/nginx-markdown-harness-maintenance/SKILL.md`
 - Setup guide for contributors and local IDE/agent wiring:
-  [../guides/HARNESS_SKILL_SETUP.md](../guides/HARNESS_SKILL_SETUP.md)
+  [HARNESS_SKILL_SETUP.md](HARNESS_SKILL_SETUP.md)
 
 This skill is an execution choreographer only. It must route and verify against
 repo-owned truth surfaces (`AGENTS.md`, `docs/harness/`, `tools/harness/`,

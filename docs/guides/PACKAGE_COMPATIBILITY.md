@@ -289,8 +289,8 @@ the module from source against your local NGINX installation.
 ## References
 
 - [NGINX Dynamic Modules documentation](https://nginx.org/en/docs/ngx_core_module.html#load_module)
-- [FFI ABI Compatibility Assumptions](architecture/FFI_ABI_COMPATIBILITY.md)
-- [Installation Guide](guides/INSTALLATION.md)
+- [FFI ABI Compatibility Assumptions](../architecture/FFI_ABI_COMPATIBILITY.md)
+- [Installation Guide](../guides/INSTALLATION.md)
 
 ---
 

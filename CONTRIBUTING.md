@@ -79,7 +79,7 @@ Why `--full-depth`: this repository keeps skills under `skills/`, so the
 installer must discover skills recursively.
 
 For full setup details (project/global/manual symlink options and verification),
-see [docs/guides/HARNESS_SKILL_SETUP.md](docs/guides/HARNESS_SKILL_SETUP.md).
+see [docs/harness/HARNESS_SKILL_SETUP.md](docs/harness/HARNESS_SKILL_SETUP.md).
 
 ## Development Workflow
 
@@ -350,6 +350,8 @@ All contributions must include appropriate documentation:
 - Include examples
 - Provide context and rationale
 - Link to related documentation
+- Follow the [Writing Guide](docs/WRITING_GUIDE.md) for non-native-reader-friendly
+  prose (sentence length limits, STE-inspired style)
 
 ## Submitting Changes
 

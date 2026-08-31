@@ -475,11 +475,23 @@ fn md_html_response(
     method: Method,
     headers: HeaderMap,
 ) -> axum::response::Response {
-    let etag = "\"converted-etag-12345\"";
+    // The fixture serves its source representation under a source-scoped
+    // ETag.  A converted representation carries a module-generated ETag
+    // (rewritten by the header filter), so a client echo of the converted
+    // ETag can never match the fixture's own validator: a 304 for that
+    // echo can only be produced by the module's converted-representation
+    // decision, not by an upstream shortcut.
+    let etag = "\"source-etag-12345\"";
     let if_none_match = header_value(&headers, "If-None-Match").unwrap_or_default();
     let if_modified_since = header_value(&headers, "If-Modified-Since").unwrap_or_default();
     let cookie = header_value(&headers, "Cookie").unwrap_or_default();
     let is_auth = cookie.contains("session_user=");
+
+    let vary = if is_auth {
+        Some("Cookie, Accept")
+    } else {
+        Some("Accept")
+    };
 
     let inm_matches =
         if_none_match == "*" || if_none_match == etag || if_none_match == format!("W/{etag}");
@@ -491,7 +503,7 @@ fn md_html_response(
             "",
             vec![
                 ("ETag".to_string(), etag.to_string()),
-                ("Vary".to_string(), "Accept".to_string()),
+                ("Vary".to_string(), vary.unwrap_or("Accept").to_string()),
             ],
             "",
         );
@@ -501,11 +513,6 @@ fn md_html_response(
         "private, max-age=0"
     } else {
         "public, max-age=60"
-    };
-    let vary = if is_auth {
-        Some("Cookie")
-    } else {
-        Some("Accept")
     };
 
     /* HEAD requests: the upstream serves its source representation

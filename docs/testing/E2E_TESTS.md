@@ -45,6 +45,7 @@ owns their fixtures, requests, and assertions. They run via
 | `accept-negotiation` | `tools/e2e-harness/src/scenarios/accept_negotiation.rs` | `tools/e2e/verify_accept_negotiation_e2e.sh` |
 | `metrics-endpoint` | `tools/e2e-harness/src/scenarios/metrics_endpoint.rs` | `tools/e2e/verify_metrics_endpoint_e2e.sh` |
 | `conditional-requests` | `tools/e2e-harness/src/scenarios/conditional_requests.rs` | `tools/e2e/verify_conditional_requests_e2e.sh` |
+| `representation-validator-e2e` | `tools/e2e-harness/src/scenarios/representation_validator.rs` | *(new Rust-only scenario, no shell predecessor)* |
 | `auth-cache` | `tools/e2e-harness/src/scenarios/auth_cache.rs` | `tools/e2e/verify_auth_cache_e2e.sh` |
 | `status-codes` | `tools/e2e-harness/src/scenarios/status_codes.rs` | `tools/e2e/verify_status_codes_e2e.sh` |
 

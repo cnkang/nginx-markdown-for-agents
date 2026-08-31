@@ -158,11 +158,25 @@ the restart in the next step.
 
 ```bash
 sudo nginx -t
-# systemd-managed host:
-sudo systemctl restart nginx
-# If another supervisor owns NGINX, use its restart/reload operation instead.
-# For a directly managed master process, the equivalent is:
-# sudo nginx -s reload
+# systemd-managed host: verify the RUNNING nginx process is actually
+# owned by nginx.service before restarting through systemd.  A unit
+# file existing on disk is not proof of ownership — the process may be
+# started by another supervisor or directly.
+if command -v systemctl >/dev/null 2>&1 \
+    && systemctl is-active --quiet nginx.service; then
+  main_pid="$(systemctl show -p MainPID --value nginx.service)"
+  if [[ "$main_pid" =~ ^[0-9]+$ ]] \
+      && pgrep -x nginx | grep -qx "$main_pid"; then
+    sudo systemctl restart nginx
+  else
+    echo "ERROR: nginx.service is active but does not own the running NGINX master; refusing to reload" >&2
+    exit 1
+  fi
+else
+  # If another supervisor owns NGINX, use its restart/reload operation instead.
+  # For a directly managed master process, the equivalent is:
+  sudo nginx -s reload
+fi
 ```
 
 ---
@@ -224,12 +238,20 @@ if [[ -z "${MODULES_DIR}" || ! -d "${MODULES_DIR}" ]]; then
 fi
 sudo cp objs/ngx_http_markdown_filter_module.so "${MODULES_DIR}/"
 sudo nginx -t
-# Restart through the host's service manager when systemd owns NGINX. For a
-# directly managed master or another service manager, use the executable
-# fallback instead of assuming systemctl exists.
+# Restart through the host's service manager only when systemd actually
+# owns the running NGINX process.  A unit file existing on disk is not
+# proof of ownership — the process may be started by another supervisor
+# or directly.
 if command -v systemctl >/dev/null 2>&1 \
-    && sudo systemctl is-active --quiet nginx 2>/dev/null; then
-    sudo systemctl restart nginx
+    && systemctl is-active --quiet nginx.service; then
+    main_pid="$(systemctl show -p MainPID --value nginx.service)"
+    if [[ "$main_pid" =~ ^[0-9]+$ ]] \
+        && [ -x "/proc/$main_pid/exe" ] \
+        && pgrep -x nginx | grep -qx "$main_pid"; then
+        sudo systemctl restart nginx
+    else
+        sudo nginx -s reload
+    fi
 else
     sudo nginx -s reload
 fi
@@ -252,9 +274,16 @@ helm repo update
 ### 2. Upgrade the release
 
 ```bash
-helm upgrade nginx-markdown nginx-markdown/nginx-markdown-for-agents \
+# Use the chart source selected in Step 1.
+# In-tree chart (checked out at the 0.9.2 tag):
+helm upgrade nginx-markdown ./charts/nginx-markdown \
     --namespace nginx-markdown \
     --set markdown.image.tag=v0.9.2
+
+# Remote chart repository (added in Step 1):
+#   helm upgrade nginx-markdown nginx-markdown/nginx-markdown-for-agents \
+#       --namespace nginx-markdown \
+#       --set markdown.image.tag=v0.9.2
 ```
 
 ### 3. Verify

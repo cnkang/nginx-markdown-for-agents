@@ -167,6 +167,32 @@ else
         "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
 fi
 
+# 5. An explicitly provided directory is scanned without the default
+#    src/tests path filter, so files outside a src/ or tests/ subtree are
+#    still reported.
+custom_dir="${tmp_dir}/custom"
+mkdir -p "${custom_dir}"
+cat >"${custom_dir}/partial.c" <<'C'
+static void
+test_partial_init(void)
+{
+    ngx_conf_t  cf;
+
+    cf.pool = &g_pool;
+    cf.log = &g_log;
+}
+C
+
+output_file="${tmp_dir}/custom.out"
+exit_code=0
+bash "${DETECTOR}" --strict "${custom_dir}" >"${output_file}" 2>&1 || exit_code=$?
+if [[ "${exit_code}" -ne 0 ]] && grep -q "ngx_conf_t 'cf'" "${output_file}"; then
+    pass "scans explicit directories without the src/tests filter"
+else
+    fail "scans explicit directories without the src/tests filter" \
+        "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
+fi
+
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
     printf '\nFAIL: %s test(s) failed.\n' "${FAIL_COUNT}" >&2
     exit 1

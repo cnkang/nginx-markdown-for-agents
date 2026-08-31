@@ -72,7 +72,7 @@ you need a machine-readable value or count.
 | Frozen contract machine-readable | `docs/harness/public-surface-inventory.json` |
 | Full config contract tables | `config-contract.md` (this KB) |
 | Breaking changes & migration | `docs/guides/0.9.2-breaking-changes.md`, `docs/guides/MIGRATION-0.9.2.md` |
-| Rollback | `docs/guides/ROLLBACK-0.9.2.md` |
+| Rollback | `docs/guides/VERSION_ROLLBACK-0.9.2.md` |
 | Architecture / ADRs | `docs/architecture/ADR/` (0025 drift gate, 0026 dynconf restore, 0027 OTel removal) |
 | Release notes & checklist | `docs/releases/0.9.2-release-notes.md`, `docs/releases/0.9.2-release-checklist.md` |
 | History of changes | `CHANGELOG.md` (L3 — never copied here) |

@@ -70,8 +70,11 @@ ABORTED_SOURCE_FIELD = "terminal_aborted_total"
 # examined independently (the streaming and non-streaming branches both
 # assign failed_closed; a missing deduction in one branch must not be
 # masked by the other branch still containing the counter name).
+# Only direct assignment is accepted: additive updates (`+=`, `-=`) and
+# equality comparisons (`==`) are not derivation statements and must not
+# be treated as one (a `==` would otherwise match on its second `=`).
 FAILED_CLOSED_ASSIGN_RE = re.compile(
-    r"failed_closed[ \t]*=([^;]*);"
+    r"failed_closed[ \t]*(?<![+\-=])=(?!=)([^;]*);"
 )
 
 

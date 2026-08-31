@@ -36,7 +36,7 @@ Each sub-spec records its evaluation as a Markdown table in its completion artif
 2. Evaluate each checkpoint against the verification method in the Checkpoints table.
 3. Replace `✅/❌` with the actual status. Use ✅ only when the verification method is fully satisfied.
 4. Replace the bracketed placeholder in the Evidence column with a concrete reference. Use a CI run number, test file path, doc path, PR link, or review reference.
-5. If a checkpoint cannot pass, record ❌ with a brief explanation in the Evidence column. A documented Go/No-Go exception is eligible only for a non-critical, non-safety gate failure; a critical or safety-gate failure must remain No-Go.
+5. If a checkpoint cannot pass, record ❌ with a brief explanation in the Evidence column. A documented Go/No-Go exception is eligible only for a non-critical, non-safety gate failure; a critical or safety-gate failure must remain No-Go. Here "critical" maps to P0 (release-blocking) and "safety" covers any failure that could corrupt evidence, break the release artifact chain, or violate a hard contract — consistent with the Go/No-Go template's eligibility definition.
 6. The sub-spec is complete **only when all six checkpoints pass** (Requirement 5.2). A single ❌ means the sub-spec is not complete: the owner either fixes the gap and re-evaluates, or escalates only an eligible non-critical, non-safety exception to the Go/No-Go review. The team must not waive critical or safety failures. The team archives the evaluation as part of the 0.4.0 release record (Requirement 5.3).
 
 ## Document Updates

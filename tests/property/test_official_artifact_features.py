@@ -54,7 +54,26 @@ def _resolve_manifest_path() -> pathlib.Path:
 
     def _version_key(path: pathlib.Path) -> tuple:
         name = path.parent.name
-        base, separator, pre = name.partition("-")
+        # Validate the directory name as SemVer (2.0.0) before using it in
+        # sorting or artifact selection: reject names such as "backup-2027",
+        # "1.2.3.4", or "01.2.3" that are not valid release versions.
+        # Numeric identifiers (major/minor/patch and numeric prerelease
+        # identifiers) must not carry leading zeros.
+        if not re.fullmatch(
+            r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+            r"(?:-(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
+            r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?"
+            r"(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?",
+            name,
+        ):
+            raise ValueError(
+                f"release directory name is not a valid SemVer: {name!r}"
+            )
+        # Build metadata ("+build.7") is syntactically validated above but
+        # ignored for precedence: strip it before partitioning so it never
+        # contaminates the main or prerelease identifiers.
+        precedence_name = name.split("+", 1)[0]
+        base, separator, pre = precedence_name.partition("-")
         main = tuple(int(part) for part in re.findall(r"\d+", base))
         if not separator:
             # Stable release: ranks above every prerelease of the same

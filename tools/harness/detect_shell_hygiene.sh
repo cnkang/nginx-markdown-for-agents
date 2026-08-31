@@ -559,6 +559,7 @@ while IFS= read -r script_file; do
                 delete block_type[depth]
                 delete block_neg[depth]
                 delete block_active[depth]
+                delete block_cmd_seen[depth]
                 depth--
             }
         }
@@ -651,15 +652,44 @@ while IFS= read -r script_file; do
             has_do = (line ~ /(^|[;[:space:]])do([;[:space:]]|$)/)
 
             active = 0
+            unshadowed = 1
             for (i = 1; i <= depth; i++) {
                 if (block_neg[i] && block_active[i]) {
                     active = 1
+                    if (block_cmd_seen[i]) {
+                        unshadowed = 0
+                    }
                 }
             }
-            if (active && !is_comment && line ~ /\$\?/ \
+            # Assignment-only lines (var=..., local/export/readonly/declare
+            # var=...) read the still-pending negated status when they
+            # evaluate $?, so they are reportable.  Once any non-assignment
+            # command has executed inside the negated body, $? holds that
+            # command status and later reads are legitimate.
+            starts_assignment = (trimmed ~ /^([A-Za-z_][A-Za-z0-9_]*=|local[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=|export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=|readonly[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=|declare[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=)/)
+            if (active && unshadowed && !is_comment && starts_assignment \
+                && line ~ /\$\?/ \
                 && !(is_negopen || is_elifneg) \
                 && (line !~ /\|\|[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*\$\?/)) {
                 print NR ":" line
+            }
+            # A nested conditional or loop header executes its condition
+            # command, which overwrites $?; that refreshes the status for
+            # every enclosing negated block too.  An assignment whose right
+            # side runs a command substitution exits with the substitution
+            # status, so it refreshes $? the same way.  A plain assignment
+            # does not touch $? at all.
+            refreshes_status = (!is_comment && !is_fi && !is_done \
+                && !is_esac && !is_else && !is_elif) \
+                && ((is_if || is_loop \
+                     || (!starts_assignment && !has_then && !has_do)) \
+                    || line ~ /\$\(/ || line ~ /`/)
+            if (refreshes_status) {
+                for (i = 1; i <= depth; i++) {
+                    if (block_neg[i] && block_active[i]) {
+                        block_cmd_seen[i] = 1
+                    }
+                }
             }
 
             if (is_fi || is_done || is_esac) {
@@ -693,6 +723,7 @@ while IFS= read -r script_file; do
                 block_type[depth] = "if"
                 block_neg[depth] = is_negopen
                 block_active[depth] = has_then
+                block_cmd_seen[depth] = 0
                 close_same_line_terminators(line, "fi")
                 next
             }
@@ -701,6 +732,7 @@ while IFS= read -r script_file; do
                 block_type[depth] = "loop"
                 block_neg[depth] = is_negopen
                 block_active[depth] = has_do
+                block_cmd_seen[depth] = 0
                 close_same_line_terminators(line, "done")
                 next
             }

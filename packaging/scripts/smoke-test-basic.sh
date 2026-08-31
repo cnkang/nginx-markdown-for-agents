@@ -201,13 +201,20 @@ run_package_removal_lifecycle() {
         printf 'load_module "%s";\n' "$module_path"
         cat "$config_path"
     } > "$temp_path" || die "Failed to enable the module in the NGINX configuration"
+    # Mark the configuration mutated BEFORE the copy: if the copy fails
+    # part-way (non-atomic write), the cleanup trap must still restore the
+    # original configuration.
+    REMOVAL_CONFIG_MUTATED=1
     # Copy through the destination instead of replacing it.  Some
     # distributions make nginx.conf a symlink; replacing it would destroy
     # that packaging invariant and the cleanup path could not restore it.
     cp -p "$temp_path" "$config_path" \
         || die "Failed to enable the module in the NGINX configuration"
+    # The fixture content now lives in the active configuration; delete the
+    # temporary file immediately instead of deferring to the cleanup trap.
+    rm -f "$temp_path" \
+        || die "Failed to remove the NGINX configuration fixture"
     REMOVAL_CONFIG_TEMP=""
-    REMOVAL_CONFIG_MUTATED=1
 
     info "Checking the enabled module configuration before removal..."
     if ! "$NGINX_BIN" -t -c "$config_path" >"${INSTALL_LOG}" 2>&1; then

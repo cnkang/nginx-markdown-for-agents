@@ -18,6 +18,7 @@ sys.path.insert(
 from validate_workflow_matrix_consumers import (  # noqa: E402  # pylint: disable=import-error
     NGINX_VERSION_RE,
     _is_excluded_line,
+    _parse_block_needs,
     _has_top_level_workflow_call,
     _publish_job_needs,
     _uses_dynamic_resolution,
@@ -654,3 +655,19 @@ class TestOfficialDockerWorkflowCoverage:
 
         assert any("prepare job" in error for error in errors)
         assert any("build-and-verify" in error for error in errors)
+
+
+class TestParseBlockNeeds:
+    """Regression tests for the needs-block sequence parser."""
+
+    def test_parses_indented_sequence_items(self) -> None:
+        lines = ["    needs:", "      - build", "      - test"]
+        assert _parse_block_needs(lines, 0, 4) == {"build", "test"}
+
+    def test_parses_items_at_needs_indentation(self) -> None:
+        lines = ["    needs:", "    - build", "    - test"]
+        assert _parse_block_needs(lines, 0, 4) == {"build", "test"}
+
+    def test_glued_scalar_is_not_a_sequence_item(self) -> None:
+        lines = ["    needs:", "      -build"]
+        assert _parse_block_needs(lines, 0, 4) == set()

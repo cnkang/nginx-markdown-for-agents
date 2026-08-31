@@ -152,7 +152,10 @@ DEB_BASENAME="$(basename "$DEB_FILE")"
 if [[ "$DEB_BASENAME" =~ nginx-([0-9]+\.[0-9]+\.[0-9]+) ]]; then
     PKG_NGINX_VERSION="${BASH_REMATCH[1]}"
 fi
-INSTALLED_NGINX_VERSION="$(nginx -v 2>&1 | sed -n 's|.*nginx/||p')"
+# Capture only the numeric version token: distro builds append vendor
+# suffixes such as "(Ubuntu)" after the version, which must not leak into
+# the exact-match comparison against the package target.
+INSTALLED_NGINX_VERSION="$(nginx -v 2>&1 | sed -nE 's|.*nginx/([0-9]+\.[0-9]+\.[0-9]+).*|\1|p')"
 
 if [[ -n "$PKG_NGINX_VERSION" ]] && [ -n "$INSTALLED_NGINX_VERSION" ]; then
     if [[ "$PKG_NGINX_VERSION" = "$INSTALLED_NGINX_VERSION" ]]; then

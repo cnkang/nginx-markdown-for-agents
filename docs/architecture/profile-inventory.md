@@ -213,13 +213,13 @@ Implemented in `ngx_http_markdown_merge_conf()` at
 ```
 merge_conf(cf, parent, child):
   1. merge_enabled(child, parent)           — enabled/complex inheritance
-  2. Save explicit-set flags (max_size_set, stream_threshold_set, and similar)
+  2. Save explicit-set flags (max_size_set, and similar)
   3. merge_core_values(child, parent)       — standard ngx_conf_merge_*
      a. merge_core_base_values  — max_size, timeout, on_error, flavor,
                                   accept_policy, auth, generate_etag,
                                   conditional_requests, buffer_chunked,
                                   decompress fields
-     b. merge_core_ops_values   — trust_forwarded, metrics, otel
+     b. merge_core_ops_values   — trust_forwarded, metrics
      c. merge_core_ptr_values   — arrays, thresholds, max_inflight
   4. merge_stream_values(child, parent)     — NGX_MD_MERGE_STREAM macro
   5. Set *_explicit flags from saved pre-merge state

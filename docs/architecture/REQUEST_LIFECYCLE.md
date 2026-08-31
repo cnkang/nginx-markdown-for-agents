@@ -11,6 +11,8 @@ once.
 
 ```text
 request
+  -> preaccess: capture and suppress Markdown conditional validators
+  -> content handler, proxy, or cache obtains the source response
   -> header filter: method/status/type/Accept/cache gates
   -> bind one effective dynconf snapshot
   -> select passthrough, full-buffer, or streaming
@@ -22,16 +24,27 @@ request
 
 ## Header filter
 
+The preaccess handler runs after access checks for GET and HEAD requests that
+negotiate Markdown. It captures `If-None-Match` and `If-Modified-Since` from
+the client and temporarily removes them from the active request-header list.
+This prevents a static handler, proxy, or proxy cache from satisfying a source
+HTML validator before the module can obtain the source body. The header filter
+later evaluates the captured values against the Markdown representation. If
+the request is not converted, or a fail-open path forwards the source bytes,
+the module restores the captured headers before source delivery.
+
 The header filter rejects ineligible methods, statuses, ranges, content types,
-authentication cases, and `Accept` values before allocating conversion state.
+authentication cases, and `Accept` values before selecting a conversion path.
 It also captures the active dynamic-configuration snapshot once and builds the
 request's effective view. Later timer reloads cannot change that request's
 policy midway through processing.
 
 The effective view includes `enabled` (the `filter` field), `prune_noise`,
 `log_verbosity`, `error_policy`, and `streaming_buffer` as runtime-overridable
-fields. `memory_budget` and the other resource limits remain static safety
-constraints owned by the NGINX configuration lifecycle.
+fields. `conversion_memory`, `parser_memory`, `decompressed_size`,
+`decompression_ratio`, `conversion_timeout`, `parser_timeout`, and
+`max_inflight` remain static NGINX configuration constraints owned by the
+configuration lifecycle.
 
 ## Engine selection
 
@@ -39,8 +52,13 @@ constraints owned by the NGINX configuration lifecycle.
 bounded internal response-shape heuristic. It does not expose a threshold
 directive. `force` requests streaming after the hard eligibility gates pass.
 
-Full cache validation, unsupported encodings, excluded content types, and
-build-disabled streaming features can still select full-buffer or passthrough.
+Full cache validation, excluded content types, and build-disabled streaming
+features can still select full-buffer or passthrough. A known codec whose
+streaming decoder is unavailable in the build (for example Brotli without
+`NGX_HTTP_BROTLI`) uses bounded full-buffer decompression. A malformed,
+unknown, or excessively deep `Content-Encoding` chain follows the configured
+`markdown_error_policy` (`pass` forwards the original response, `fail_closed`
+and `status <code>` reject it).
 Combining `markdown_cache_validation full` with `markdown_streaming force`
 fails during `nginx -t` with a configuration error, since streaming cannot
 guarantee cache-validation semantics. The module latches the selected engine
@@ -55,9 +73,12 @@ responses use the decoder selected by `markdown_auto_decompress` and the
 encoding. `markdown_limits` configures the decompression limits:
 
 ```nginx
-markdown_limits conversion_memory=64m conversion_timeout=10s
-    parser_memory=32m parser_timeout=5s streaming_buffer=2m
-    decompressed_size=20m decompression_ratio=100 max_inflight=64;
+# Example values; the defaults are conversion_memory=64m,
+# conversion_timeout=30s, parser_memory=32m, parser_timeout=10s,
+# streaming_buffer=2m, decompressed_size=10m.
+markdown_limits conversion_memory=64m conversion_timeout=30s
+    parser_memory=32m parser_timeout=10s streaming_buffer=2m
+    decompressed_size=10m decompression_ratio=100 max_inflight=64;
 ```
 
 Decoder accounting is response-wide. Gzip member completion does not reset

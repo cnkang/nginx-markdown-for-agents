@@ -55,9 +55,9 @@ pending until the blocking gates pass.
 - **Release-gates-check-092**: Additive on 091, adds public-surface drift
   check, version consistency gate (0.9.2), and reason-code registry
   completeness gate.
-- **Streaming reason code normalization documentation**: C-only streaming
-  reason codes use UPPERCASE format. This is a documented known inconsistency
-  to resolve in 1.x when migrating to Rust enum (lowercase snake_case).
+- **Reason-code registry normalization**: one declarative lowercase registry
+  now drives Rust, C, logs, metrics, diagnostics, and generated projections.
+  The project removed the former C-only uppercase mirror.
 - **README consistency verification**: English and Chinese READMEs verified
   for version, directive, and default-value consistency.
 
@@ -426,7 +426,7 @@ breaking-release foundation.
   lifecycle management and cumulative budget enforcement.
 - **Full-buffer compressed copy reduction**: header accumulation helper and
   streaming-first routing reduce unnecessary copies for compressed responses.
-- **Performance evidence gate**: `make release-gates-check-092` (blocking for
+- **Performance evidence gate**: `make release-gates-check-091` (blocking for
   release tags) plus `make perf-evidence-check` (report-only), module
   benchmark harness exercises 8 scenarios including Brotli streaming.
 - **Doctor advice tool**: `make doctor` provides module-aware configuration
@@ -621,13 +621,13 @@ The project includes documentation covering:
 - [ADR/](../architecture/ADR/) - Architecture decision records
 
 ### Feature Documentation
-- [AUTOMATIC_DECOMPRESSION.md](../features/AUTOMATIC_DECOMPRESSION.md)
+- [DECOMPRESSION.md](../features/DECOMPRESSION.md)
 - [CACHE_AWARE_RESPONSES.md](../features/CACHE_AWARE_RESPONSES.md)
 - [CONTENT_NEGOTIATION.md](../features/CONTENT_NEGOTIATION.md)
 - [COOPERATIVE_TIMEOUT.md](../features/COOPERATIVE_TIMEOUT.md)
 - [TOKEN_ESTIMATOR.md](../features/TOKEN_ESTIMATOR.md)
 - [YAML_FRONT_MATTER.md](../features/YAML_FRONT_MATTER.md)
-- [security.md](../features/security.md)
+- [SECURITY_MODEL.md](../features/SECURITY_MODEL.md)
 - Additional features under [docs/features/](../features/)
 
 ### Testing Documentation

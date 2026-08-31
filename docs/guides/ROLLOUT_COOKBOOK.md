@@ -185,7 +185,11 @@ curl -sD - -o /dev/null \
 #### Safe to Continue
 
 - Conversion success rate > 95% (few or no `failed_open` / `failed_closed` request outcomes)
-- No decision-log failure categories (`ffi_panic`, `memory_budget_exceeded`, `timeout`, or `conversion_error`). Inspect the `category=` field in decision-log entries
+- No decision-log failure reasons. Inspect the `reason=` field for
+  specific reason-registry keys (`ffi_panic`, `memory_budget_exceeded`,
+  `timeout`, `conversion_error`, ...). Reserve the `category=` field for
+  high-level classes (`conversion`, `resource_limit`, `system`). The
+  reason values listed here are failure **reasons**, not categories
 - Conversion latency within the configured `markdown_limits`
 - No upstream error rate increase
 - No `not_eligible` reason codes for requests you expect to convert
@@ -1363,7 +1367,7 @@ When a trigger fires:
 1. Do not expand to the next rollout stage.
 2. Check the decision logs and metrics to understand the scope of the issue.
 3. If the issue appears on a single path only, consider narrowing your rollout scope to exclude that path. Isolated issues point to path-specific causes. Scope narrowing targets the affected path only. A single-path issue usually has a single cause. Exclude the path and observe.
-4. If the issue is widespread, consider rolling back — see the Rollback Guide (`ROLLBACK_GUIDE.md`) for procedures.
+4. If the issue is widespread, consider rolling back — see the Rollback Guide (`OPERATIONAL_ROLLBACK.md`) for procedures.
 5. Resolve the underlying issue before resuming rollout expansion.
 
 

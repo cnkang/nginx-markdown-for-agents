@@ -16,7 +16,7 @@ Use it when you need more than deployment guidance but less than source-level im
 | How the repo-owned harness is structured and why it exists | [HARNESS_ARCHITECTURE.md](HARNESS_ARCHITECTURE.md) |
 | How repo-owned agent routing and risk overlays are organized | [../harness/README.md](../harness/README.md) |
 | Why conversion lives in Rust | [ADR/0001-use-rust-for-conversion.md](ADR/0001-use-rust-for-conversion.md) |
-| Why v1 uses full buffering | [ADR/0002-full-buffering-approach.md](ADR/0002-full-buffering-approach.md) |
+| Historical full-buffer baseline and why it was originally chosen | [ADR/0002-full-buffering-approach.md](ADR/0002-full-buffering-approach.md) |
 | Why conversion runs at the origin-near layer | [ADR/0003-inline-origin-near-conversion.md](ADR/0003-inline-origin-near-conversion.md) |
 | Why the harness became a repo-owned system | [ADR/0005-repo-owned-harness.md](ADR/0005-repo-owned-harness.md) |
 | Why 0.6.3 E2E testing moved to a Rust-first hybrid architecture | [ADR/0009-rust-first-e2e-test-architecture.md](ADR/0009-rust-first-e2e-test-architecture.md) |
@@ -33,12 +33,17 @@ Use it when you need more than deployment guidance but less than source-level im
 | Inflight guard | [inflight-guard.md](inflight-guard.md) |
 | Observability schema v2 | [observability-schema-v2.md](observability-schema-v2.md) |
 | FFI ABI compatibility | [FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) |
-| FFI migration contract | [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md) |
-| FFI zero-initialization strategy | [FFI_ZERO_INIT_STRATEGY.md](FFI_ZERO_INIT_STRATEGY.md) |
-| Streaming security check order (0.7.x verification) | [streaming-check-order.md](streaming-check-order.md) |
+| FFI initialization contract | [FFI_INITIALIZATION_CONTRACT.md](FFI_INITIALIZATION_CONTRACT.md) |
 | Streaming eligibility audit (0.9.2) | [streaming-eligibility-audit.md](streaming-eligibility-audit.md) |
-| Profile field map (archived, removed in 0.9.2) | [profile-inventory.md](profile-inventory.md) |
-| Profile system design (retired) | [profiles.md](profiles.md) |
+
+## Historical / Retired Architecture
+
+| Topic | Read |
+|-------|------|
+| FFI migration contract (historical v0.9.1 → v0.9.2 record) | [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md) |
+| Streaming security check order (0.7.x verification) | [streaming-check-order.md](streaming-check-order.md) |
+| Profile field map (0.9.1 historical field inventory) | [profile-inventory.md](profile-inventory.md) |
+| Profile system design (retired profile-system rationale) | [profiles.md](profiles.md) |
 
 ## RFCs
 

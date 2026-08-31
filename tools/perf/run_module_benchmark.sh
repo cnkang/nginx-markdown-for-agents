@@ -103,11 +103,11 @@ readonly TRUSTED_TOOL_ROOTS=(
   # actions/setup-python installs the runner interpreter here on GitHub-hosted
   # Linux runners; the runner image owns this immutable toolcache.
   /opt/hostedtoolcache
-  # Python.framework install location (macOS Homebrew python3)
-  /Library/Frameworks/Python.framework/Versions
-  /Library/Frameworks
-  # Python.framework bin directory (specific version subdirectory)
-  /Library/Frameworks/Python.framework/Versions/*/bin
+  # Python.framework install location (python.org macOS installer).
+  # Trust only the framework's own subtree: a broad /Library/Frameworks root
+  # would trust unrelated frameworks, and a glob entry never matches because
+  # the roots are compared literally.
+  /Library/Frameworks/Python.framework
 )
 
 # is_trusted_tool_path returns 0 when the given path lives directly under one

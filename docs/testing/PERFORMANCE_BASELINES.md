@@ -14,8 +14,10 @@ benchmark.)
 1.30.4, archival only)
 **Scope:** The local record covers release-build microbenchmarks for the Rust
 converter FFI path and the C conditional-request handler (`If-None-Match`)
-using the standalone test harness with real Rust FFI. Real-NGINX HTTP E2E
-Only the canonical native Linux record reports real-NGINX HTTP E2E baselines.
+using the standalone test harness with real Rust FFI. Local real-NGINX HTTP
+measurements on this machine, including the NGINX 1.28.2 tables below, are
+diagnostic only. Only the canonical native Linux record is eligible for
+release baseline claims.
 
 ## Summary
 
@@ -295,15 +297,20 @@ Memory peak values in this document come from `tools/perf/memory_observer.sh`. T
 
 ### Linux — `os_reported_peak`
 
-On Linux, the observer reads `VmHWM` from `/proc/<pid>/status` **before the
-target process exits or the OS reaps it**: the observer stores the `VmHWM` value
-the first time the process status becomes unreadable (process gone) and
-reports that stored value as `os_reported_peak`. `VmHWM` is the
+On Linux, the observer reads `VmHWM` from `/proc/<pid>/status` and stores the
+last successfully read value **before the target process exits or the OS
+reaps it**: once the status file becomes unreadable (process gone), the
+observer reports that stored sample as `os_reported_peak`. `VmHWM` is the
 kernel-tracked high-water mark for resident set size over the entire process
 lifetime. The entry disappears once the OS reaps the process, so the observer
-captures the value at exit time, not after. The observer also polls `VmRSS`
+reports the last successful pre-exit sample, not a value captured at exit time. The observer also polls `VmRSS`
 during the run as a fallback when `VmHWM` cannot be read at exit (the caller
-has already reaped the process). This exact peak value comes from the OS.
+has already reaped the process). When the observer uses the fallback, the
+reported value is the last successfully sampled `VmRSS` reading — the last
+observed
+value, not an exact kernel-tracked peak (exactness applies only when the
+final allocation is known to precede that successful read and the `VmHWM`
+read succeeded).
 
 ### macOS — `sampled_peak`
 

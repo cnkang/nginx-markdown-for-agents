@@ -70,7 +70,10 @@ omits it when the new representation length is not known.
 
 - **Streaming**: deletes/omits `Content-Length`, generates **no** ordinary ETag
   (headers commit before the transformed body is known), `If-None-Match` not
-  supported, `If-Modified-Since` uses preserved `Last-Modified`.
+  supported, and the converted representation clears the source
+  `Last-Modified` (`last_modified_time = -1`), so `If-Modified-Since` never
+  validates a converted response — source IMS applies to pass-through
+  responses only.
 - **Full-buffer**: when `markdown_cache_validation full` and a transformed
   representation is computable, generates a transformed ETag.
 - HEAD / 304 / no-body / error-status paths follow a documented matrix.
@@ -110,8 +113,9 @@ the core plan commits and fall within the atomic scope boundary below
 - `Vary: Accept` add
 - `X-Markdown-Tokens` header
 - Auth `Cache-Control` modify
+- `Accept-Ranges` (post-plan classification, see the operation table)
 
-Any **new** exception requires ADR justification and an entry here. No other code may mutate `headers_out` in place outside HeaderPlan **for core fields** (Content-Type, Content-Encoding, Content-Length). The post-plan operations listed above (status, `last_modified_time`, ETag, Vary, X-Markdown-Tokens, Auth Cache-Control) are explicitly exempt from the HeaderPlan atomicity invariant. They execute after the plan commits under the pre-send best-effort boundary.
+Any **new** exception requires ADR justification and an entry here. No other code may mutate `headers_out` in place outside HeaderPlan **for core fields** (Content-Type, Content-Encoding, Content-Length). The post-plan operations listed above (status, `last_modified_time`, ETag, Vary, X-Markdown-Tokens, Auth `Cache-Control`, and `Accept-Ranges`) are explicitly exempt from the HeaderPlan atomicity invariant. They execute after the plan commits under the pre-send best-effort boundary.
 
 ### Post-commit error boundary
 
@@ -148,6 +152,7 @@ headers are sent).
 | `X-Markdown-Tokens` header | `NGX_ERROR` — abort before send |
 | `Accept-Ranges` removal | Scalar assignment — cannot fail |
 | Auth `Cache-Control` modify | `NGX_ERROR` — abort before send |
+| `Status` line / `Last-Modified` timestamp | Scalar field assignments — cannot fail; applied outside the HeaderPlan atomicity boundary, together with the other post-plan operations before send |
 
 **Rationale**: The atomicity invariant above applies only to core in-place
 mutations covered by HeaderPlan (Content-Type, Content-Encoding, and

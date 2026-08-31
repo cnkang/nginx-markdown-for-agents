@@ -119,7 +119,10 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
 
     meta = ngx_http_markdown_reason_meta_for(reason_code);
     if (meta == NULL) {
-        return 0;
+        /* An unknown reason code cannot be proven non-failure; treat it as
+         * a failure so the decision log fails closed instead of silently
+         * classifying an unrecognized outcome as success. */
+        return 1;
     }
 
     return ngx_strcmp(meta->outcome, "failed_open") == 0
