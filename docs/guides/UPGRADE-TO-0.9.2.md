@@ -175,6 +175,7 @@ the restart in the next step.
 > module-file replacement under reload.)
 
 ```bash
+set -euo pipefail
 sudo nginx -t
 # systemd-managed host: verify the RUNNING nginx process is actually
 # owned by nginx.service before restarting through systemd.  A unit
@@ -198,18 +199,22 @@ else
   # For a directly managed master: terminate the master so all workers
   # exit before the module file is swapped; then start fresh below.
   # (If the process is owned by another supervisor, use its stop/start.)
-  sudo nginx -s quit
-  # Wait for the master to exit, with a finite deadline: an indefinite
-  # poll can hang the upgrade if a worker refuses to terminate.
-  waited=0
-  while pgrep -x nginx >/dev/null 2>&1; do
-    if [[ "$waited" -ge 30 ]]; then
-      echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting upgrade" >&2
-      exit 1
-    fi
-    sleep 1
-    waited=$((waited + 1))
-  done
+  if pgrep -x nginx >/dev/null 2>&1; then
+    sudo nginx -s quit
+    # Wait for the master to exit, with a finite deadline: an indefinite
+    # poll can hang the upgrade if a worker refuses to terminate.
+    waited=0
+    while pgrep -x nginx >/dev/null 2>&1; do
+      if [[ "$waited" -ge 30 ]]; then
+        echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting upgrade" >&2
+        exit 1
+      fi
+      sleep 1
+      waited=$((waited + 1))
+    done
+  else
+    echo "INFO: no running NGINX master found; skipping 'nginx -s quit'"
+  fi
 fi
 
 # Swap the staged module into place atomically while NGINX is stopped.
@@ -274,6 +279,7 @@ make modules
 ### 5. Install and restart
 
 ```bash
+set -euo pipefail
 # Copy the module into the ACTIVE NGINX module directory.  Determine it
 # from the running binary: `nginx -V 2>&1 | grep modules-path` (for example
 # /usr/lib/nginx/modules on Debian/Ubuntu, /usr/lib64/nginx/modules on
@@ -306,16 +312,20 @@ if command -v systemctl >/dev/null 2>&1 \
         exit 1
     fi
 else
-    sudo nginx -s quit
-    waited=0
-    while pgrep -x nginx >/dev/null 2>&1; do
-        if [[ "$waited" -ge 30 ]]; then
-            echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting upgrade" >&2
-            exit 1
-        fi
-        sleep 1
-        waited=$((waited + 1))
-    done
+    if pgrep -x nginx >/dev/null 2>&1; then
+        sudo nginx -s quit
+        waited=0
+        while pgrep -x nginx >/dev/null 2>&1; do
+            if [[ "$waited" -ge 30 ]]; then
+                echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting upgrade" >&2
+                exit 1
+            fi
+            sleep 1
+            waited=$((waited + 1))
+        done
+    else
+        echo "INFO: no running NGINX master found; skipping 'nginx -s quit'"
+    fi
 fi
 sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
     "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
