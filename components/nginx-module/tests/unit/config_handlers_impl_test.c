@@ -508,9 +508,14 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
         } else if (*fmt == '%' && *(fmt + 1) == 'd') {
             int  val = va_arg(ap, int);
             int  written;
+            size_t  avail;
 
-            written = snprintf(p, (size_t) (end - p), "%d", val);
+            avail = (size_t) (end - p);
+            written = snprintf(p, avail, "%d", val);
             if (written > 0) {
+                if ((size_t) written >= avail) {
+                    written = (int) avail - 1;
+                }
                 p += written;
             }
             fmt += 2;

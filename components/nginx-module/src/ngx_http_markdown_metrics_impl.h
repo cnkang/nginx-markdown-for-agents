@@ -652,12 +652,24 @@ ngx_http_markdown_metrics_to_v1(
     latency_count = v1->duration_full_buffer.count
         + v1->duration_streaming.count;
     if (latency_count == 0) {
+        /* The renderer accumulates buckets into cumulative le-buckets, so
+         * the fallback must hold per-band deltas rather than the cumulative
+         * threshold counts: derive each successive band by subtracting the
+         * preceding cumulative threshold. */
         v1->duration_full_buffer.buckets[2] =
             snapshot->conversion_latency.le_10ms;
         v1->duration_full_buffer.buckets[5] =
-            snapshot->conversion_latency.le_100ms;
+            snapshot->conversion_latency.le_100ms
+            > snapshot->conversion_latency.le_10ms
+            ? snapshot->conversion_latency.le_100ms
+              - snapshot->conversion_latency.le_10ms
+            : 0;
         v1->duration_full_buffer.buckets[8] =
-            snapshot->conversion_latency.le_1000ms;
+            snapshot->conversion_latency.le_1000ms
+            > snapshot->conversion_latency.le_100ms
+            ? snapshot->conversion_latency.le_1000ms
+              - snapshot->conversion_latency.le_100ms
+            : 0;
         v1->duration_full_buffer.sum_us =
             ngx_http_markdown_metrics_ms_to_us(
                 snapshot->conversion_time_sum_ms);

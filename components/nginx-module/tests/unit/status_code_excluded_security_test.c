@@ -182,6 +182,17 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
  */
 #include "../../src/ngx_http_markdown_eligibility.c"
 
+/*
+ * Local FFI-entry stub: markdown_decide_eligibility is the thin
+ * FFI boundary shim (normally compiled in the Rust converter FFI
+ * layer).  This file links the production check_eligibility()
+ * implementation and provides the stub purely so the wrapper
+ * compiles standalone; the real FFI negotiation precedence
+ * contract is owned by the accept-negotiation unit tests
+ * (accept_production_test.c) and the C/Rust FFI integration
+ * tests.  Do not extend this stub with new decision logic —
+ * add it to the production eligibility implementation instead.
+ */
 uint8_t
 markdown_decide_eligibility(const struct FFIEligibilityInput *input)
 {
