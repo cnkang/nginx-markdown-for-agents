@@ -338,7 +338,7 @@ def _is_non_callsite_line(line: str) -> bool:
     # ("*p = ...") must NOT be treated as comment continuations.
     is_comment = stripped.startswith(("/*", "//")) or (
         bool(re.match(r"\*(?:\s|/|$)", stripped))
-        and not re.match(r"\*\s+[A-Za-z_][A-Za-z0-9_]*\s*=", stripped)
+        and not re.match(r"\*\s+[A-Za-z_]\w*\s*=", stripped)
     )
     return is_comment or bool(
         DECLARATION_LINE_RE.match(line)

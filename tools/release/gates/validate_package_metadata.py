@@ -1198,7 +1198,7 @@ def _validate_release_binary_signing_security(result: ValidationResult) -> None:
     # changes.  When integrity-signing is the final job, the boundary is
     # the end of the file.
     end = len(workflow)
-    for job_match in re.finditer(r"\n  [a-zA-Z0-9_-]+:", workflow[start + 1:]):
+    for job_match in re.finditer(r"\n {2}[a-zA-Z0-9_-]+:", workflow[start + 1:]):
         candidate = start + 1 + job_match.start()
         if candidate > start:
             end = candidate

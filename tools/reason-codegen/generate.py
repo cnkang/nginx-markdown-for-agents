@@ -1070,7 +1070,9 @@ def _check_generated_outputs(outputs):
     # Materialize every per-artifact result before computing the overall
     # status so a single drifted artifact cannot short-circuit the check
     # and hide drift in the remaining artifacts.
-    results = [check_drift(path, content) for path, content in outputs]
+    results: list[bool] = []
+    for path, content in outputs:
+        results.append(check_drift(path, content))
     all_ok = all(results)
     if not all_ok:
         print(

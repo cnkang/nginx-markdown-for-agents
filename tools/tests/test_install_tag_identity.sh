@@ -32,14 +32,16 @@ trap 'rm -f "$TRUNCATED_FILE"' EXIT
 
 # info prints an informational line to stderr.
 info() {
-  echo "$1" >&2
+  local msg="$1"
+  echo "$msg" >&2
   return 0
 }
 
 # pass records a passing assertion.
 pass() {
+  local msg="$1"
   PASS_COUNT=$((PASS_COUNT + 1))
-  echo "  PASS: $1"
+  echo "  PASS: $msg"
   return 0
 }
 
