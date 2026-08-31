@@ -257,6 +257,7 @@ else
     ld_opt="${ld_opt:+${ld_opt} }${LDFLAGS:-}"
     configure_args=(
       --with-http_ssl_module
+      --with-http_auth_request_module
       --without-http_rewrite_module
       --prefix="${RUNTIME}"
       --add-module="${WORKSPACE_ROOT}/components/nginx-module"

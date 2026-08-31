@@ -210,10 +210,20 @@ def _check_artifact_identity(
 
     artifact_id = artifact.get("artifact_id")
     if artifact_id is not None:
-        if artifact_id in seen_ids:
+        if not isinstance(artifact_id, (str, int, float, bool)) \
+                or artifact_id is None:
+            # Unhashable JSON values (lists/objects) cannot participate in
+            # set membership; report them as malformed instead of raising
+            # TypeError from the set operations below.
+            reasons.append(
+                f"malformed: artifacts[{index_pos}] artifact_id must be "
+                f"a scalar, got {type(artifact_id).__name__}"
+            )
+        elif artifact_id in seen_ids:
             reasons.append(
                 f"blocking-pending: duplicate artifact id {artifact_id!r}")
-        seen_ids.add(artifact_id)
+        else:
+            seen_ids.add(artifact_id)
 
     row_candidate_sha = artifact.get("candidate_sha")
     if row_candidate_sha is not None:

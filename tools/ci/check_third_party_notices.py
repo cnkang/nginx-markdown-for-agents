@@ -162,23 +162,34 @@ def collect_workspace_lock_issues() -> list[str]:
         if not cargo_lock.is_file():
             issues.append(f"Cargo.lock missing for {relative_manifest}")
             continue
-        completed = subprocess.run(
-            [
-                "cargo",
-                "metadata",
-                "--format-version",
-                "1",
-                "--locked",
-                "--manifest-path",
-                str(cargo_toml),
-            ],
-            cwd=ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                [
+                    "cargo",
+                    "metadata",
+                    "--format-version",
+                    "1",
+                    "--locked",
+                    "--manifest-path",
+                    str(cargo_toml),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            issues.append(
+                f"cargo is unavailable; cannot verify Cargo.lock for "
+                f"{relative_manifest}"
+            )
+            continue
         if completed.returncode != 0:
-            issues.append(f"Cargo.lock is stale for {relative_manifest}")
+            detail = (completed.stderr or completed.stdout or "").strip()
+            issues.append(
+                f"Cargo.lock is stale for {relative_manifest}"
+                + (f": {detail[-200:]}" if detail else "")
+            )
     return issues
 
 

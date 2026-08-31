@@ -1011,8 +1011,13 @@ class TestSchemaWellFormedness:
         """module_benchmark properties include identity and evidence fields."""
         props = _load_schema()["module_benchmark"]["report_schema"]["properties"]["module_benchmark"]
         self._assert_object_has_required_fields(
-            props, "version", "timestamp", "git_commit", "scenarios", "memory_slope"
+            props, "version", "timestamp", "git_commit", "scenarios"
         )
+        # memory_slope remains a declared property but is NOT required: no
+        # benchmark generator emits the regression object today, so requiring
+        # it would reject every checked-in baseline.  The property itself is
+        # still validated when present.
+        assert "memory_slope" in props.get("properties", {})
 
     def test_scenarios_schema_structure(self):
         """scenarios require the emitted configuration identity."""

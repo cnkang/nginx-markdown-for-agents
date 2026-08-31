@@ -240,7 +240,7 @@ def _validate_basic_entry(index: int, entry: dict[str, Any]) -> list[str]:
 
     errors: list[str] = []
     valid_tiers = {"supported", "experimental", "best-effort", "unsupported"}
-    valid_channels = {"stable", "mainline", "oldstable"}
+    valid_channels = {"stable", "mainline", "legacy"}
     tier = entry.get("support_tier", "")
     if tier not in valid_tiers:
         errors.append(

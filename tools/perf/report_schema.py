@@ -220,10 +220,17 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         validated_path = validate_read_path(argv[0], purpose="report input")
-        report = json.loads(validated_path.read_text(encoding="utf-8"))
+        payload = json.loads(validated_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
         return 1
+    if not isinstance(payload, dict):
+        print(
+            f"ERROR: report JSON must be an object, got {type(payload).__name__}",
+            file=sys.stderr,
+        )
+        return 1
+    report = payload
 
     # automatically determine whether it is module or corpus report and validate
     if "module_benchmark" in report:

@@ -1185,7 +1185,7 @@ def test_canonical_dynamic_entry_existing_row_preserves_arch_key():
         "artifact_type": "dynamic-module",
         "feature_manifest_digest": "sha256:abc",
         "abi_version": 2,
-        "nginx_channel": "oldstable",
+        "nginx_channel": "legacy",
         "test_level": "smoke-test",
         "support_tier": "supported",
         "release_blocking": True,

@@ -37,10 +37,12 @@ def _split_row(line: str) -> list[str] | None:
     cells: list[str] = []
     current: list[str] = []
     in_code = False
-    for char in stripped[1:]:
+    for index, char in enumerate(stripped[1:]):
         if char == "`":
             in_code = not in_code
-        if char == "|" and not in_code:
+        if char == "|" and not in_code and not (
+            index > 0 and stripped[index] == "\\"
+        ):
             cells.append("".join(current).strip())
             current = []
         else:
