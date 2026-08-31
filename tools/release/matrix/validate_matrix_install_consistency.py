@@ -41,11 +41,13 @@ EXPECTED_ASSET_TEMPLATE = (
 
 def load_matrix(path: Path) -> list[dict]:
     """
-    Load and validate the release matrix, returning install-script-compatible entries.
-    
-    Only supported dynamic-module entries for detectable libc and architecture values
-    are included. Architecture aliases are canonicalized before projection.
-    
+    Load and normalize the release matrix for install-script consistency checks.
+
+    All supported dynamic-module entries are projected so unrecognized libc or
+    architecture values remain visible to the consistency checks. Architecture
+    aliases are canonicalized before projection; non-string targets remain
+    invalid values for validation.
+
     Returns:
         list[dict]: Entries containing ``nginx``, ``os_type``, ``arch``, and
             ``support_tier`` fields.
@@ -115,8 +117,16 @@ def extract_matrix_values(matrix: list[dict]) -> tuple[set[str], set[str]]:
         tuple[set[str], set[str]]: A tuple with two sets: the first is the set of unique
         `os_type` strings found, the second is the set of unique `arch` strings found.
     """
-    os_types = {entry["os_type"] for entry in matrix if "os_type" in entry}
-    archs = {entry["arch"] for entry in matrix if "arch" in entry}
+    os_types = {
+        entry["os_type"]
+        for entry in matrix
+        if isinstance(entry.get("os_type"), str)
+    }
+    archs = {
+        entry["arch"]
+        for entry in matrix
+        if isinstance(entry.get("arch"), str)
+    }
     return os_types, archs
 
 

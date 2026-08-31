@@ -212,6 +212,22 @@ class TestCheckerAdversarialInputs:
         assert rc == 1
         assert count == 1
 
+    def test_utf16_codec_alias_bypasses_binary_nul_rejection(self, tmp_path: Path) -> None:
+        checker = load_checker_module()
+        checker.REPO_ROOT = tmp_path
+        fixture = tmp_path / "fixture.txt"
+        fixture.write_bytes("alias\n".encode("utf-16-be"))
+        failures: list[str] = []
+
+        checker._validate_file(
+            fixture,
+            {"fixture.txt": {"encoding": "utf_16_be", "reason": "test"}},
+            failures,
+            rel="fixture.txt",
+        )
+
+        assert failures == []
+
     def test_binary_multilayer_fuzz_seed_is_excluded(self) -> None:
         checker = load_checker_module()
         seed_path = Path(
