@@ -55,6 +55,25 @@ fn trailing_backtick_run(content: &str) -> usize {
         .count()
 }
 
+fn escape_link_fallback_brackets(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    let mut backslash_run = 0usize;
+
+    for ch in text.chars() {
+        if matches!(ch, '[' | ']') && backslash_run.is_multiple_of(2) {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+        if ch == '\\' {
+            backslash_run = backslash_run.saturating_add(1);
+        } else {
+            backslash_run = 0;
+        }
+    }
+
+    escaped
+}
+
 /// Selected block-level tags whose closing triggers a flush point.
 ///
 /// When the emitter encounters the closing of one of these elements,
@@ -599,8 +618,10 @@ impl IncrementalEmitter {
             /* `link_text` is assembled from escaped ordinary text plus
              * trusted structural markers (for example `**` from <strong>).
              * Escaping the complete buffer here would corrupt those markers
-             * and change the intended inline formatting. */
-            self.write_str(&text)?;
+             * and change the intended inline formatting.  Preserve existing
+             * bracket escapes while neutralizing any raw brackets. */
+            let escaped = escape_link_fallback_brackets(&text);
+            self.write_str(&escaped)?;
         }
         Ok(())
     }
@@ -2054,6 +2075,27 @@ mod tests {
         assert!(
             !output.contains("[Not a link]()"),
             "empty href must not emit markdown link, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_fallback_link_label_escapes_raw_brackets() {
+        let (mut emitter, mut sm) = make_pair();
+        let enter = StateMachineAction::Enter(StructuralContext::Link(String::new()));
+        emitter.process_action(&enter, &mut sm).unwrap();
+        emitter
+            .process_trusted_text("**trusted** ] `code` [")
+            .unwrap();
+        let exit = StateMachineAction::Exit(StructuralContext::Link(String::new()));
+        emitter.process_action(&exit, &mut sm).unwrap();
+
+        let mut output = emitter.take_flushed();
+        output.extend_from_slice(&emitter.finalize().unwrap());
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output.contains(r"**trusted** \] `code` \["),
+            "fallback link labels must escape raw brackets and preserve markers: {}",
             output
         );
     }

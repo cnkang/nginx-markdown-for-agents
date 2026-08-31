@@ -137,7 +137,9 @@ fn single_feed_vs_byte_by_byte_token_count() {
 
     // Byte-by-byte feeding may produce more tokens due to character token
     // splitting at chunk boundaries. The important invariant is that both
-    // counts are positive and the markdown output is semantically equivalent.
+    // counts are positive, the byte-by-byte count does not grow unboundedly,
+    // and the markdown output is semantically equivalent (chunk-boundary
+    // corruption would change the output text, not just the token count).
     assert!(
         tokens_single > 0 && tokens_byte > 0,
         "both should have positive token counts: single={}, byte={}",
@@ -150,6 +152,19 @@ fn single_feed_vs_byte_by_byte_token_count() {
         "byte-by-byte token count ({}) should not be wildly larger than single-feed ({})",
         tokens_byte,
         tokens_single
+    );
+    // Semantic equivalence: the rendered markdown from both feeding modes
+    // must match after whitespace normalization.
+    let norm = |s: &[u8]| -> String {
+        String::from_utf8_lossy(s)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert_eq!(
+        norm(&md1),
+        norm(&md2),
+        "single-feed and byte-by-byte markdown must be semantically equivalent"
     );
 }
 

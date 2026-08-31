@@ -1349,15 +1349,14 @@ pub unsafe extern "C" fn markdown_chain_decode_result_init(result: *mut FFIChain
 /// the output is a copy of the input (decode(identity, input) == input),
 /// allocated by Rust and released with `markdown_chain_decode_free`.
 ///
-/// **Empty-input contract (empty-input):** an empty wire body (`input_len == 0`)
-/// is a legal empty payload regardless of the declared chain — the call
-/// succeeds with an empty output (NULL pointer, zero length) instead of
-/// classifying the empty input as truncation. This intentionally differs
-/// from the single-format decompressors, which classify an empty compressed
-/// input as `DECOMP_CATEGORY_TRUNCATED_INPUT`; the chain decoder treats a
-/// zero-byte body as "no content" per HTTP semantics. Callers that need
-/// strict single-format truncation semantics must use the single-format
-/// entry points directly.
+/// **Empty-input contract (empty-input):** an empty wire body
+/// (`input_len == 0`) is treated as empty output only on the identity-only
+/// path (`layer_count == 0`): that branch is a successful no-op returning a
+/// zero-length output. With any non-zero layer count, a zero-length input
+/// reaches the chain decoder and is classified as truncated input
+/// (`DECOMP_CATEGORY_TRUNCATED_INPUT`), exactly like the single-format
+/// decompressors. Callers that need strict single-format truncation
+/// semantics must use the single-format entry points directly.
 ///
 /// # Return Value
 ///
