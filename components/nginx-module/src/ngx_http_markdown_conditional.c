@@ -134,9 +134,19 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
             }
 
             /* NGINX NUL-terminates parsed header values, so the byte
-             * length can be rebuilt after suppression zeroed it. */
-            headers[i].value.len =
-                (size_t) strlen((const char *) headers[i].value.data);
+             * length can be rebuilt after suppression zeroed it.
+             * Use a bounded scan (8k = default large_header_buffers)
+             * to avoid unbounded read if the NUL invariant changes. */
+            {
+                u_char  *data = headers[i].value.data;
+                u_char  *nul;
+
+                nul = memchr(data, '\0', 8192);
+                if (nul == NULL) {
+                    continue;
+                }
+                headers[i].value.len = (size_t) (nul - data);
+            }
             headers[i].hash = 1;
             ngx_http_markdown_adopt_first_restored(
                 first_restored, &headers[i]);
