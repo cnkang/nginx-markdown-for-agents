@@ -247,7 +247,7 @@ if command -v systemctl >/dev/null 2>&1 \
     main_pid="$(systemctl show -p MainPID --value nginx.service)"
     if [[ "$main_pid" =~ ^[0-9]+$ ]] \
         && [ -x "/proc/$main_pid/exe" ] \
-        && [ "$main_pid" = "$(pgrep -x nginx | head -1)" ]; then
+        && pgrep -x nginx | grep -qx "$main_pid"; then
         sudo systemctl restart nginx
     else
         sudo nginx -s reload

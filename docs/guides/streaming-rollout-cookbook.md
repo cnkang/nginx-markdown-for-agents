@@ -109,13 +109,13 @@ loopback address for snapshot capture:
 
 ```bash
 # Pick the uncompressed request as the single measured request.
-curl -s http://localhost/markdown-metrics \
+curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' http://localhost/markdown-metrics \
   > "$SNAPSHOT_DIR/metrics.before"
 # Send exactly one streaming-eligible request between the snapshots,
 # then capture the after snapshot without any other conversion request.
 curl -s -H 'Accept: text/markdown' http://localhost/docs/ \
   > /dev/null
-curl -s http://localhost/markdown-metrics \
+curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' http://localhost/markdown-metrics \
   > "$SNAPSHOT_DIR/metrics.after"
 ```
 

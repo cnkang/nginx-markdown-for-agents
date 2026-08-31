@@ -529,9 +529,9 @@ if [ -z "$before" ]; then
 fi
 curl -fsS -o /dev/null -H "Accept: text/markdown" http://localhost/test
 after=$(curl -fsS http://localhost/markdown-metrics | \
-  grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
+  grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"')
 if [ -z "$after" ]; then
-  echo "FAIL: conversion metrics not present after rollback check"
+  echo "FAIL: disabled signal not present after rollback check (expected requests_total outcome=skipped reason=disabled)"
   exit 1
 fi
 if [ "$before" = "$after" ]; then

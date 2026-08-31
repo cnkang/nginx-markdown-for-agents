@@ -303,7 +303,7 @@ reaps it**: once the status file becomes unreadable (process gone), the
 observer reports that stored sample as `os_reported_peak`. `VmHWM` is the
 kernel-tracked high-water mark for resident set size over the entire process
 lifetime. The entry disappears once the OS reaps the process, so the observer
-captures the value at exit time, not after. The observer also polls `VmRSS`
+reports the last successful pre-exit sample, not a value captured at exit time. The observer also polls `VmRSS`
 during the run as a fallback when `VmHWM` cannot be read at exit (the caller
 has already reaped the process). When the observer uses the fallback, the
 reported value is the last successfully sampled `VmRSS` reading — the last
