@@ -80,37 +80,56 @@ impl MarkdownConverter {
             // Continuation indent aligns with content after the marker (e.g. "- " → 2 chars).
             let continuation_indent = format!("{base_indent}{}", " ".repeat(marker.len()));
 
-            let trimmed = content.trim_matches('\n');
-            if trimmed.is_empty() {
-                append_str_with_context(output, &base_indent, ctx)?;
-                append_str_with_context(output, marker, ctx)?;
-                append_char_with_context(output, '\n', ctx)?;
-                return Ok(());
-            }
-
-            for (index, line) in trimmed.lines().enumerate() {
-                if index == 0 {
-                    if Self::write_list_item_first_line(
-                        output,
-                        ctx,
-                        line,
-                        &base_indent,
-                        marker,
-                        &continuation_indent,
-                    )? {
-                        continue;
-                    }
-                } else if !line.is_empty() && !Self::list_line_is_indented(line, &base_indent) {
-                    // Indent continuation lines unless they already carry
-                    // indentation (from pre-formatted or nested content).
-                    append_str_with_context(output, &continuation_indent, ctx)?;
-                }
-
-                append_str_with_context(output, line, ctx)?;
-                append_char_with_context(output, '\n', ctx)?;
-            }
-            Ok(())
+            Self::write_list_item_lines(
+                output,
+                ctx,
+                content,
+                &base_indent,
+                marker,
+                &continuation_indent,
+            )
         })
+    }
+
+    /// Write every payload line of a list item under its marker.
+    fn write_list_item_lines(
+        output: &mut String,
+        ctx: &mut Option<&mut ConversionContext>,
+        content: &str,
+        base_indent: &str,
+        marker: &str,
+        continuation_indent: &str,
+    ) -> Result<(), ConversionError> {
+        let trimmed = content.trim_matches('\n');
+        if trimmed.is_empty() {
+            append_str_with_context(output, base_indent, ctx)?;
+            append_str_with_context(output, marker, ctx)?;
+            append_char_with_context(output, '\n', ctx)?;
+            return Ok(());
+        }
+
+        for (index, line) in trimmed.lines().enumerate() {
+            if index == 0 {
+                if Self::write_list_item_first_line(
+                    output,
+                    ctx,
+                    line,
+                    base_indent,
+                    marker,
+                    continuation_indent,
+                )? {
+                    continue;
+                }
+            } else if !line.is_empty() && !Self::list_line_is_indented(line, base_indent) {
+                // Indent continuation lines unless they already carry
+                // indentation (from pre-formatted or nested content).
+                append_str_with_context(output, continuation_indent, ctx)?;
+            }
+
+            append_str_with_context(output, line, ctx)?;
+            append_char_with_context(output, '\n', ctx)?;
+        }
+        Ok(())
     }
 
     /// Write the marker and first payload line of a list item.

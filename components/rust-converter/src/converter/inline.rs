@@ -111,39 +111,50 @@ impl MarkdownConverter {
                 if normalized_text.is_empty() {
                     return Ok(());
                 }
-
-                if let NodeData::Element { ref attrs, .. } = node.data {
-                    let attrs_borrowed = attrs.borrow();
-                    let href = attrs_borrowed
-                        .iter()
-                        .find(|attr| attr.name.local.as_ref() == "href")
-                        .map(|attr| attr.value.as_ref());
-
-                    if let Some(url) = href {
-                        let url_capacity = self.sanitized_url_capacity(url)?;
-                        match url_capacity {
-                            Some((safe_url, capacity)) => {
-                                self.emit_link_with_destination(
-                                    output,
-                                    ctx,
-                                    &normalized_text,
-                                    safe_url,
-                                    capacity,
-                                )?;
-                            }
-                            None => {
-                                append_link_label(output, &normalized_text, ctx)?;
-                            }
-                        }
-                    } else {
-                        append_escaped_text_with_context(output, &normalized_text, ctx)?;
-                    }
-                } else {
-                    append_escaped_text_with_context(output, &normalized_text, ctx)?;
-                }
-                Ok(())
+                self.emit_link_body(node, output, ctx, &normalized_text)
             })
         })
+    }
+
+    /// Emit the normalized link content: either a Markdown link with a
+    /// safe destination or the plain escaped label/text fallback.
+    fn emit_link_body(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        ctx: &mut Option<&mut ConversionContext>,
+        normalized_text: &str,
+    ) -> Result<(), ConversionError> {
+        if let NodeData::Element { ref attrs, .. } = node.data {
+            let attrs_borrowed = attrs.borrow();
+            let href = attrs_borrowed
+                .iter()
+                .find(|attr| attr.name.local.as_ref() == "href")
+                .map(|attr| attr.value.as_ref());
+
+            if let Some(url) = href {
+                let url_capacity = self.sanitized_url_capacity(url)?;
+                match url_capacity {
+                    Some((safe_url, capacity)) => {
+                        self.emit_link_with_destination(
+                            output,
+                            ctx,
+                            normalized_text,
+                            safe_url,
+                            capacity,
+                        )?;
+                    }
+                    None => {
+                        append_link_label(output, normalized_text, ctx)?;
+                    }
+                }
+            } else {
+                append_escaped_text_with_context(output, normalized_text, ctx)?;
+            }
+        } else {
+            append_escaped_text_with_context(output, normalized_text, ctx)?;
+        }
+        Ok(())
     }
 
     /// Resolve the sanitized URL capacity for a candidate href.

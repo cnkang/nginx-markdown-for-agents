@@ -60,6 +60,13 @@ struct CollectedTableData {
     col_alignments: Vec<Option<TableAlignment>>,
 }
 
+/// Output-capacity charge tracked across the table render.
+struct TableRenderCharge<'a> {
+    capacity: usize,
+    active: bool,
+    released: &'a mut bool,
+}
+
 fn table_vec_growth_plan<T>(
     vec: &Vec<T>,
     required_len: usize,
@@ -234,59 +241,75 @@ impl MarkdownConverter {
         }
         let mut output_charge_released = false;
         let mut table_scratch = 0usize;
+        let mut render_charge = TableRenderCharge {
+            capacity: output_capacity,
+            active: output_charge_active,
+            released: &mut output_charge_released,
+        };
 
-        let result = (|| {
-            let collected = self.collect_table_data(node, &mut ctx, &mut table_scratch)?;
-            // Only the alignment vector is extended below (colgroup
-            // application and the default-fill loop); headers and rows
-            // are read-only from this point.
-            let (headers, mut alignments, rows) =
-                (collected.headers, collected.alignments, collected.rows);
-            let col_alignments = collected.col_alignments;
-
-            if headers.is_empty() {
-                return Ok(());
-            }
-
-            while alignments.len() < headers.len() {
-                Self::charge_vec_growth(&mut alignments, &mut ctx, &mut table_scratch)?;
-                alignments.push(TableAlignment::Left);
-            }
-
-            Self::apply_col_alignments(
-                &mut alignments,
-                &col_alignments,
-                &mut ctx,
-                &mut table_scratch,
-            )?;
-
-            // The final output buffer was retained as working-set charge
-            // while cells were collected.  Release that charge before the
-            // table writer runs so capacity growth is checked against the
-            // actual live cell scratch only, not counted twice.
-            if output_charge_active {
-                if let Some(context) = ctx.as_deref_mut() {
-                    context.release_working_set(output_capacity);
-                }
-                output_charge_released = true;
-            }
-
-            self.write_gfm_table(output, &headers, &alignments, &rows, ctx.as_deref_mut())?;
-
-            if !output.ends_with("\n\n") {
-                append_char_with_context(output, '\n', &mut ctx)?;
-            }
-
-            Ok(())
-        })();
+        let result = self.render_gfm_table_body(
+            node,
+            output,
+            &mut ctx,
+            &mut table_scratch,
+            &mut render_charge,
+        );
 
         if let Some(context) = ctx {
-            if output_charge_active && !output_charge_released {
-                context.release_working_set(output_capacity);
+            if render_charge.active && !*render_charge.released {
+                context.release_working_set(render_charge.capacity);
             }
             context.release_working_set(table_scratch);
         }
         result
+    }
+
+    /// Collect, align, write, and terminate a GFM table body.
+    fn render_gfm_table_body(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+        render_charge: &mut TableRenderCharge<'_>,
+    ) -> Result<(), ConversionError> {
+        let collected = self.collect_table_data(node, ctx, table_scratch)?;
+        // Only the alignment vector is extended below (colgroup
+        // application and the default-fill loop); headers and rows
+        // are read-only from this point.
+        let (headers, mut alignments, rows) =
+            (collected.headers, collected.alignments, collected.rows);
+        let col_alignments = collected.col_alignments;
+
+        if headers.is_empty() {
+            return Ok(());
+        }
+
+        while alignments.len() < headers.len() {
+            Self::charge_vec_growth(&mut alignments, ctx, table_scratch)?;
+            alignments.push(TableAlignment::Left);
+        }
+
+        Self::apply_col_alignments(&mut alignments, &col_alignments, ctx, table_scratch)?;
+
+        // The final output buffer was retained as working-set charge
+        // while cells were collected.  Release that charge before the
+        // table writer runs so capacity growth is checked against the
+        // actual live cell scratch only, not counted twice.
+        if render_charge.active {
+            if let Some(context) = ctx.as_deref_mut() {
+                context.release_working_set(render_charge.capacity);
+            }
+            *render_charge.released = true;
+        }
+
+        self.write_gfm_table(output, &headers, &alignments, &rows, ctx.as_deref_mut())?;
+
+        if !output.ends_with("\n\n") {
+            append_char_with_context(output, '\n', ctx)?;
+        }
+
+        Ok(())
     }
 
     /// Collect headers, alignments, colgroup aligns, and rows from the
