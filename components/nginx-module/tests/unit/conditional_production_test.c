@@ -268,6 +268,8 @@ static int g_cond_result_code;
 static int g_convert_error_code;
 static uint8_t *g_convert_etag;
 static uintptr_t g_convert_etag_len;
+static const uint8_t *g_decide_if_none_match;
+static uintptr_t g_decide_if_none_match_len;
 static uintptr_t g_decide_last_modified_len;
 static uintptr_t g_decide_if_modified_since_len;
 
@@ -368,6 +370,10 @@ void
 markdown_decide_conditional(const struct FFIConditionalInput *input,
     struct FFIConditionalDecision *out)
 {
+    g_decide_if_none_match = input == NULL
+                             ? NULL : input->if_none_match;
+    g_decide_if_none_match_len = input == NULL
+                                 ? 0 : input->if_none_match_len;
     g_decide_last_modified_len = input == NULL
                                  ? 0 : input->last_modified_len;
     g_decide_if_modified_since_len = input == NULL
@@ -1865,6 +1871,58 @@ test_handle_inm_etag_match_304(void)
 }
 
 static void
+test_handle_inm_repeated_fields_match_304(void)
+{
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+    static uint8_t etag_data[] = "\"abc123\"";
+    g_convert_etag = etag_data;
+    g_convert_etag_len = 8;
+    g_cond_result_code = 0;
+
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    ngx_table_elt_t *first = add_header(&r->headers_in.headers,
+                                        "If-None-Match", "\"different\"");
+    ngx_table_elt_t *second = add_header(&r->headers_in.headers,
+                                         "If-None-Match", "\"abc123\"");
+    r->headers_in.if_none_match = first;
+
+    ngx_http_markdown_conf_t conf;
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    ngx_http_markdown_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.buffer_initialized = 1;
+    ctx.buffer.size = 100;
+    ctx.buffer.data = (u_char *) "test data";
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+        "repeated If-None-Match fields are captured");
+
+    struct MarkdownConverterHandle converter;
+    struct MarkdownResult *result = NULL;
+    ngx_int_t rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    TEST_ASSERT(rc == NGX_HTTP_NOT_MODIFIED,
+        "a matching later If-None-Match field returns 304");
+    TEST_ASSERT(result != NULL, "Result is set for repeated validators");
+    TEST_ASSERT(g_decide_if_none_match_len
+                == sizeof("\"different\", \"abc123\"") - 1,
+        "all If-None-Match fields reach the decision input");
+    TEST_ASSERT(memcmp(g_decide_if_none_match,
+                       "\"different\", \"abc123\"",
+                       g_decide_if_none_match_len) == 0,
+        "If-None-Match fields are comma-combined in order");
+    TEST_ASSERT(first->hash == 0 && second->hash == 0,
+        "all repeated validators remain suppressed during conversion");
+    TEST_PASS("repeated If-None-Match fields match 304");
+}
+
+static void
 test_handle_inm_etag_mismatch(void)
 {
     g_pool_offset = 0;
@@ -2226,6 +2284,7 @@ main(void)
     test_handle_inm_prepare_options_fails();
     test_handle_inm_conversion_error();
     test_handle_inm_etag_match_304();
+    test_handle_inm_repeated_fields_match_304();
     test_handle_inm_etag_mismatch();
     test_handle_inm_with_ims_header();
 

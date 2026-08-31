@@ -1,6 +1,8 @@
 #include "../include/test_common.h"
 #include <strings.h>
 
+#define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
+
 #define MARKDOWN_STREAMING_ENABLED 1
 
 #include "../../src/ngx_http_markdown_filter_module.h"
@@ -153,6 +155,8 @@ ngx_list_push(ngx_list_t *list)
 
 static int g_ffi_should_convert;
 static int g_ffi_reason;
+static const uint8_t *g_ffi_accept_header;
+static uintptr_t g_ffi_accept_header_len;
 
 void
 markdown_negotiate_accept(const uint8_t *accept_header,
@@ -160,8 +164,8 @@ markdown_negotiate_accept(const uint8_t *accept_header,
                           uint8_t on_wildcard,
                           struct FFIAcceptResult *result)
 {
-    UNUSED(accept_header);
-    UNUSED(accept_header_len);
+    g_ffi_accept_header = accept_header;
+    g_ffi_accept_header_len = accept_header_len;
     UNUSED(on_wildcard);
     result->should_convert = (uint8_t) g_ffi_should_convert;
     result->reason = (uint8_t) g_ffi_reason;
@@ -480,6 +484,39 @@ test_get_accept_header_fallback(void)
 }
 
 static void
+test_should_convert_combines_multiple_accept_headers(void)
+{
+    ngx_http_request_t    r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_table_elt_t       *first;
+    ngx_uint_t             reason;
+    ngx_int_t              rc;
+    static const char      expected[] = "text/markdown, text/html";
+
+    memset(&r, 0, sizeof(r));
+    memset(&conf, 0, sizeof(conf));
+    g_pool_offset = 0;
+    r.headers_in.headers = *create_header_list();
+    first = add_header(&r.headers_in.headers, "Accept", "text/markdown");
+    add_header(&r.headers_in.headers, "Accept", "text/html");
+    r.headers_in.accept = first;
+
+    g_ffi_should_convert = 1;
+    g_ffi_reason = NEGOTIATE_REASON_CONVERT;
+    rc = ngx_http_markdown_should_convert(&r, &conf, &reason);
+
+    TEST_ASSERT(rc == 1, "multiple Accept fields still reach negotiation");
+    TEST_ASSERT(reason == NEGOTIATE_REASON_CONVERT,
+        "combined Accept negotiation preserves the FFI result");
+    TEST_ASSERT(g_ffi_accept_header != NULL
+                && g_ffi_accept_header_len == sizeof(expected) - 1
+                && memcmp(g_ffi_accept_header, expected,
+                          sizeof(expected) - 1) == 0,
+        "all Accept field-lines are passed as one comma-separated value");
+    TEST_PASS("multiple Accept field-lines are combined");
+}
+
+static void
 test_should_convert_null_conf(void)
 {
     ngx_uint_t reason = 99;
@@ -681,6 +718,7 @@ main(void)
     test_find_request_header_null_name();
     test_get_accept_header_null_request();
     test_get_accept_header_fallback();
+    test_should_convert_combines_multiple_accept_headers();
     test_should_convert_null_conf();
     test_should_convert_null_conf_null_reason();
     test_should_convert_no_accept_header();
