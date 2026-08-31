@@ -554,11 +554,11 @@ def _classify_one(
         )
         return classification, count, files, False
 
-    if name in test_references:
-        return "test_only", 0, [], False
-
     # Lifecycle pair: if the paired counterpart is production-called, infer
     # this function is also production-called and reuse the paired evidence.
+    # Evaluated BEFORE test_references so a production-called counterpart
+    # classifies the export as production_called even when it appears in
+    # tests (test-only usage must not hide production lifecycle evidence).
     # The inferred flag lets downstream consumers distinguish direct
     # callsite evidence from pair-based inference.
     paired = LIFECYCLE_PAIRS.get(name)
@@ -568,6 +568,9 @@ def _classify_one(
             "production_called", paired_callsites
         )
         return classification, count, files, True
+
+    if name in test_references:
+        return "test_only", 0, [], False
 
     return "dead", 0, [], False
 

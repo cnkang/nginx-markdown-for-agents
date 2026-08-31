@@ -80,6 +80,32 @@ strip_c_comments() {
                     continue
                 }
 
+                # Skip single-quoted character literals (the quote char,
+                # or an escaped backslash within them), including escape
+                # sequences inside, so an embedded double quote cannot flip
+                # in_string and later code such as ngx_alloc/ngx_pnalloc
+                # calls is not stripped as a comment.  The literal is
+                # emitted verbatim.  The quote char is matched via its octal
+                # escape (047) because a literal single quote would close
+                # the awk program string.
+                if (ch == "\047") {
+                    lit_start = i
+                    i++
+                    while (i <= length(line)) {
+                        c2 = substr(line, i, 1)
+                        if (c2 == "\\") {
+                            i += 2
+                        } else {
+                            i++
+                            if (c2 == "\047") {
+                                break
+                            }
+                        }
+                    }
+                    output = output substr(line, lit_start, i - lit_start)
+                    continue
+                }
+
                 if (pair == "/*") {
                     in_block = 1
                     i += 2

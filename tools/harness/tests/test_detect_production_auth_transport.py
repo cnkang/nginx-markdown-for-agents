@@ -153,7 +153,7 @@ class TestServerBlocks:
 # ---------------------------------------------------------------------------
 
 class TestCLI:
-    """CLI contract: the detector must exit 0 or 1."""
+    """CLI contract: the detector must exit exactly 0 on success."""
 
     def test_cli_runs_and_returns_valid_exit_code(self, tmp_path: Path):
         result = subprocess.run(
