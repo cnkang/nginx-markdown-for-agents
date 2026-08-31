@@ -275,7 +275,7 @@ After deploying the custom image to your cluster:
 
 ```bash
 kubectl exec -n ingress-nginx <pod-name> -- nginx -T 2>&1 \
-  | grep -F 'ngx_http_markdown_filter_module.so;'
+  | grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so;'
 kubectl exec -n ingress-nginx <pod-name> -- nginx -t
 ```
 

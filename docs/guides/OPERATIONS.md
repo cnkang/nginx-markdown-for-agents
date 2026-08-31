@@ -189,7 +189,7 @@ grep "conversion time" /var/log/nginx/error.log | awk '{print $NF}' | sort -n | 
 | Pattern | Severity | Meaning |
 |---------|----------|---------|
 | `markdown: outcome=failed_closed stage=... reason=conversion_error category=conversion` | WARN | HTML parsing or Markdown generation failed |
-| `markdown: outcome=failed_closed stage=... reason=memory_budget_exceeded category=resource_limit` | WARN | Memory limit reached (buffered path; the specific code is the category, e.g. `memory_budget_exceeded`) |
+| `markdown: outcome=failed_closed stage=... reason=memory_budget_exceeded category=resource_limit` | WARN | Memory limit reached (buffered path) |
 | `markdown: outcome=failed_closed stage=... reason=timeout category=resource_limit` | WARN | Parser or conversion deadline exceeded (buffered path) |
 | `markdown: outcome=failed_closed stage=... reason=ffi_panic category=system` | ERROR | Internal/system error (Rust↔C panic) |
 | `markdown: outcome=converted stage=... reason=converted event=...` | INFO | Successful conversion with timing |
@@ -368,7 +368,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 | Reason | Cause | Solution |
 |----------|-------|----------|
 | `conversion_error` | Malformed HTML | Investigate HTML source, improve error handling |
-| `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=...` or `parser_memory=...`) | Increase the relevant `markdown_limits` key, or exclude large/complex pages from conversion scope |
+| `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=...`) | Increase the relevant `markdown_limits` key, or exclude large/complex pages from conversion scope |
 | `timeout` | Parser execution exceeded `markdown_limits parser_timeout=...` | Increase `markdown_limits parser_timeout=...` or exclude slow pages |
 | `ffi_panic` | Internal/system error (Rust↔C panic) | Collect logs (`dmesg`) and report a bug |
 
@@ -936,7 +936,7 @@ same string for each reason code. Streaming path transitions use a separate
 bounded `event=` field. They are not a second reason-code taxonomy. You can
 correlate a log entry directly with a metric counter without translation. The
 request-level outcome classifications (`converted`, `failed_open`,
-`failed_closed`, `skipped`) appear in `nginx_markdown_requests_total` as
+`failed_closed`, `aborted`, `skipped`) appear in `nginx_markdown_requests_total` as
 `outcome` (the terminal classification) and `reason` (the outcome-specific
 code) label values. For `skipped`, the reason label uses the specific skip
 code (`disabled`, `not_eligible`, `skipped_accept`, and so on), not the
@@ -999,7 +999,7 @@ field, never a value of `category=`.
 | Category | Reason Code | Description | Suggested Operator Action |
 |---|---|---|---|
 | `conversion` | `conversion_error` | HTML parse or conversion error | Inspect the failing HTML with `curl`. Check if the upstream changed its HTML structure. Report a bug if the HTML is valid. |
-| `resource_limit` | `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=...` or `parser_memory=...`) | Increase the relevant `markdown_limits` key, or exclude large/complex pages from conversion scope. |
+| `resource_limit` | `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=...`) | Increase the relevant `markdown_limits` key, or exclude large/complex pages from conversion scope. |
 | `resource_limit` | `timeout` | Parser execution exceeded `markdown_limits parser_timeout=...` | Increase `markdown_limits parser_timeout=...` or exclude slow pages. |
 | `system` | `ffi_panic` | Internal/system error (Rust↔C panic) | Urgent — indicates an unexpected internal failure. Collect logs (`dmesg`) and report a bug. |
 
@@ -1098,7 +1098,7 @@ grep "markdown:" /var/log/nginx/error.log | grep -E "category=(conversion|resour
 
 # Example: you see failed_open or failed_closed samples increasing
 # Find the matching log entries (outcome is the terminal classification):
-grep "markdown:" /var/log/nginx/error.log | grep -E 'outcome=(failed_open|failed_closed)'
+grep "markdown:" /var/log/nginx/error.log | grep -E 'outcome=(failed_open|failed_closed|aborted)'
 
 # See the full reason code distribution:
 grep "markdown:" /var/log/nginx/error.log | \
@@ -1135,7 +1135,7 @@ Fields:
 
 | Field | Description | Example Values |
 |---|---|---|
-| `outcome` | Request-level terminal outcome from the canonical registry | `converted`, `failed_open`, `failed_closed`, `-` |
+| `outcome` | Request-level terminal outcome from the canonical registry | `converted`, `failed_open`, `failed_closed`, `aborted`, `-` |
 | `stage` | Decision-chain stage that emitted the entry | `eligibility`, `conversion`, `precommit`, `postcommit` |
 | `reason` | The [reason code](#reason-code-table) for this request's outcome | `converted`, `skipped_accept`, `failed_open` |
 | `event` | Bounded streaming implementation event, or `-` for a reason-only entry | `engine_streaming`, `streaming_convert`, `-` |
@@ -1198,7 +1198,7 @@ The `markdown_log_verbosity` directive controls which decision outcomes produce 
 | `info` (default) | All outcomes | Base | Recommended for rollout — full visibility into every decision |
 | `debug` | All outcomes | Extended (adds `filter_value`, `accept`, `status`) | Troubleshooting — maximum detail for diagnosing specific requests |
 
-At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, and `converted`) are silently suppressed. Both levels only emit failure outcomes such as `failed_open` and `failed_closed`. At `info` and `debug` levels, the full bounded outcome set is available. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`. The Prometheus `nginx_markdown_requests_total` family carries the terminal classification in its `outcome` label (`converted`, `failed_open`, `failed_closed`, `skipped`) and the outcome-specific code in its `reason` label. Specific failure reason codes such as `memory_budget_exceeded` and `timeout` appear in decision log entries, not in the `requests_total` `reason` label.
+At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, and `converted`) are silently suppressed. Both levels only emit failure outcomes such as `failed_open`, `failed_closed`, and `aborted`. At `info` and `debug` levels, the full bounded outcome set is available. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`. The Prometheus `nginx_markdown_requests_total` family carries the terminal classification in its `outcome` label (`converted`, `failed_open`, `failed_closed`, `aborted`, `skipped`) and the outcome-specific code in its `reason` label. Specific failure reason codes such as `memory_budget_exceeded` and `timeout` appear in decision log entries, not in the `requests_total` `reason` label.
 
 #### Configuration examples
 
@@ -1209,7 +1209,7 @@ markdown_log_verbosity info;
 # Production steady-state — log only failures
 markdown_log_verbosity warn;
 
-# Minimal — log only conversion failures (failed_open / failed_closed)
+# Minimal — log only conversion failures (failed_open / failed_closed / aborted)
 markdown_log_verbosity error;
 
 # Troubleshooting — log everything with extended fields
@@ -1262,7 +1262,7 @@ Example output:
 ```bash
 # Find all failures
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E 'outcome=(failed_open|failed_closed)'
+  grep -E 'outcome=(failed_open|failed_closed|aborted)'
 ```
 
 #### Extract URIs that failed conversion
@@ -1357,6 +1357,7 @@ plain-text metric fields are part of the 0.9.2 contract.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-01 | Hermes | Align failed-outcome queries and outcome field with aborted; memory_budget_exceeded refers only to conversion_memory; parser_memory maps to budget_exceeded |
 | 0.9.2 | 2026-08-24 | Hermes | memory_budget_exceeded log pattern description now refers only to memory-limit failures |
 | 0.9.2 | 2026-08-15 | Hermes | Update failure categories to conversion_error, memory_budget_exceeded, timeout, and ffi_panic |
 | 0.9.2 | 2026-08-08 | Kang | Added missing nginx_markdown_streaming_peak_memory_bytes metric row |

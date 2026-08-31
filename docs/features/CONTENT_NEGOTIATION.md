@@ -46,7 +46,7 @@ Accept: text/markdown
 
 **With Quality Values**:
 ```http
-Accept: text/html, text/markdown,q=0.9
+Accept: text/html, text/markdown;q=0.9
 ```
 
 **Multiple Types**:

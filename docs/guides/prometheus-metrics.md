@@ -93,7 +93,8 @@ inflight_requests == 0
 
 Compare deltas from the same baseline for every family. Raw cumulative
 values from different points in time are not comparable because the
-counters never reset.
+counters persist only for the lifetime of a running shared-memory
+instance.
 
 Counters persist across graceful reloads (`nginx -s reload` keeps the
 existing shared-memory counters), but they reset after a full NGINX stop

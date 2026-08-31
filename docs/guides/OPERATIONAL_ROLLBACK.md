@@ -537,6 +537,12 @@ if [ -z "$after" ]; then
   exit 1
 fi
 # Capture disabled-request signal separately without changing the conversion metric comparison
+# Trigger a unique request first so the disabled signal is guaranteed to be
+# emitted by this verification, not by unrelated traffic.
+curl -fsS -o /dev/null \
+  -H "Accept: text/markdown" \
+  "http://localhost/rollback-probe-$(date +%s)"
+sleep 1
 disabled=$(curl -fsS http://localhost/markdown-metrics | \
   grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"')
 if [ -z "$disabled" ]; then

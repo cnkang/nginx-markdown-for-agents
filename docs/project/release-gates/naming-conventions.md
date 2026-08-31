@@ -123,7 +123,7 @@ internal transition names, not a second operator-visible reason taxonomy:
   `ngx_http_markdown_get_reason_code_str()` (resolved from the Rust
   `ReasonCode` registry). Examples: `not_eligible`, `skipped_accept`,
   `skipped_conditional`, `disabled`, `converted`, `failed_open`, `failed_closed`,
-  `bypass_no_transform`.
+  `aborted`, `bypass_no_transform`.
 - **Streaming engine internal transition names** — lowercase snake_case in the
   structured `event=` field. Examples: `engine_streaming`,
   `streaming_convert`, `streaming_fallback_prebuffer`,

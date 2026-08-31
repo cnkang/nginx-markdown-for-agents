@@ -179,12 +179,16 @@ sudo nginx -t
 # systemd-managed host: verify the RUNNING nginx process is actually
 # owned by nginx.service before restarting through systemd.  A unit
 # file existing on disk is not proof of ownership — the process may be
-# started by another supervisor or directly.
+# started by another supervisor or directly.  Record the ownership
+# decision BEFORE stopping: after a successful stop, is-active is
+# false even on systemd-managed hosts, so it cannot be re-derived.
+systemd_managed=0
 if command -v systemctl >/dev/null 2>&1 \
     && systemctl is-active --quiet nginx.service; then
   main_pid="$(systemctl show -p MainPID --value nginx.service)"
   if [[ "$main_pid" =~ ^[0-9]+$ ]] \
       && pgrep -x nginx | grep -qx "$main_pid"; then
+    systemd_managed=1
     sudo systemctl stop nginx
   else
     echo "ERROR: nginx.service is active but does not own the running NGINX master; refusing to stop" >&2
@@ -195,7 +199,17 @@ else
   # exit before the module file is swapped; then start fresh below.
   # (If the process is owned by another supervisor, use its stop/start.)
   sudo nginx -s quit
-  while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done
+  # Wait for the master to exit, with a finite deadline: an indefinite
+  # poll can hang the upgrade if a worker refuses to terminate.
+  waited=0
+  while pgrep -x nginx >/dev/null 2>&1; do
+    if [[ "$waited" -ge 30 ]]; then
+      echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting upgrade" >&2
+      exit 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
 fi
 
 # Swap the staged module into place atomically while NGINX is stopped.
@@ -203,9 +217,9 @@ sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
     "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
 sudo nginx -t
 
-# Start a fresh master with the new module loaded.
-if command -v systemctl >/dev/null 2>&1 \
-    && systemctl is-active --quiet nginx.service; then
+# Start a fresh master with the new module loaded, using the ownership
+# decision recorded before the stop.
+if [[ "$systemd_managed" -eq 1 ]]; then
   sudo systemctl start nginx
 else
   sudo nginx
@@ -269,24 +283,47 @@ if [[ -z "${MODULES_DIR}" || ! -d "${MODULES_DIR}" ]]; then
     echo "ERROR: could not determine a valid --modules-path from 'nginx -V'" >&2
     exit 1
 fi
-sudo cp objs/ngx_http_markdown_filter_module.so "${MODULES_DIR}/"
+# Stage the rebuilt module, then swap it in with a full stop/start.
+# A plain `nginx -s reload` does NOT load a replaced module (see the
+# package upgrade note above), so the same stop/swap/start procedure
+# applies to source builds.
+sudo cp objs/ngx_http_markdown_filter_module.so \
+    "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new"
 sudo nginx -t
-# Restart through the host's service manager only when systemd actually
-# owns the running NGINX process.  A unit file existing on disk is not
-# proof of ownership — the process may be started by another supervisor
-# or directly.
+# Record the service-manager ownership decision BEFORE stopping: after
+# a successful stop, is-active is false even on systemd-managed hosts.
+systemd_managed=0
 if command -v systemctl >/dev/null 2>&1 \
     && systemctl is-active --quiet nginx.service; then
     main_pid="$(systemctl show -p MainPID --value nginx.service)"
     if [[ "$main_pid" =~ ^[0-9]+$ ]] \
         && [ -x "/proc/$main_pid/exe" ] \
         && pgrep -x nginx | grep -qx "$main_pid"; then
-        sudo systemctl restart nginx
+        systemd_managed=1
+        sudo systemctl stop nginx
     else
-        sudo nginx -s reload
+        echo "ERROR: nginx.service is active but does not own the running NGINX master; refusing to stop" >&2
+        exit 1
     fi
 else
-    sudo nginx -s reload
+    sudo nginx -s quit
+    waited=0
+    while pgrep -x nginx >/dev/null 2>&1; do
+        if [[ "$waited" -ge 30 ]]; then
+            echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting upgrade" >&2
+            exit 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+fi
+sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
+    "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+sudo nginx -t
+if [[ "$systemd_managed" -eq 1 ]]; then
+    sudo systemctl start nginx
+else
+    sudo nginx
 fi
 ```
 
@@ -313,13 +350,13 @@ helm repo update
 # image values live at the chart top level, not under markdown.image.
 helm upgrade nginx-markdown ./charts/nginx-markdown \
     --namespace nginx-markdown \
-    --set image.repository=<your-registry>/nginx-markdown \
+    --set "image.repository=<your-registry>/nginx-markdown" \
     --set image.tag=v0.9.2
 
 # Remote chart repository (added in Step 1):
 #   helm upgrade nginx-markdown nginx-markdown/nginx-markdown-for-agents \
 #       --namespace nginx-markdown \
-#       --set image.repository=<your-registry>/nginx-markdown \
+#       --set "image.repository=<your-registry>/nginx-markdown" \
 #       --set image.tag=v0.9.2
 ```
 
