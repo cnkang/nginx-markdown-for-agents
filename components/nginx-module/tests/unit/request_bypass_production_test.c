@@ -1692,20 +1692,23 @@ test_304_again_resumes_without_body(ngx_int_t resume_rc)
         &request, &ctx, &conf);
     TEST_ASSERT(rc == NGX_AGAIN,
                 "304 header NGX_AGAIN must remain pending");
-    TEST_ASSERT(ctx.headers_forwarded == 1
+    TEST_ASSERT(ctx.headers_forwarded == 0
                 && g_metrics.failures_system == 0,
-                "304 NGX_AGAIN must latch header state without failure");
+                "304 NGX_AGAIN must NOT latch headers_forwarded (header queued by write filter, not confirmed)");
     TEST_ASSERT(g_send_304_calls == 1,
                 "304 sender must run exactly once before resume");
 
+    /* NGX_AGAIN header is queued in r->out; body filter must not re-send.
+     * Next invocation should not trigger resume_pending_304 and should
+     * return NGX_OK (conversion already attempted, no pending data). */
     g_resume_send_header_rc = resume_rc;
     ngx_http_next_body_filter = test_next_body_filter;
     rc = ngx_http_markdown_body_filter(&request, NULL);
-    TEST_ASSERT(rc == NGX_DONE,
-                "304 resume must return terminal NGX_DONE");
-    TEST_ASSERT(g_resume_send_header_calls == 1
+    TEST_ASSERT(rc == NGX_OK,
+                "304 NGX_AGAIN resume must not re-enter header send; body filter returns NGX_OK");
+    TEST_ASSERT(g_resume_send_header_calls == 0
                 && g_next_body_calls == 0,
-                "304 resume must retry headers without sending body");
+                "304 NGX_AGAIN must not retry headers via resume_pending_304");
 }
 
 static void

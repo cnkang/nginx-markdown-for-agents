@@ -683,12 +683,11 @@ scenario_config_update() {
     log_scenario "2. Config Update — Update ConfigMap and verify module picks up new config"
 
     # Create or update a ConfigMap with module configuration
+    # P1-2 fix: keys use .conf extension so projected files match nginx include *.conf
     log_info "Applying updated ConfigMap '$CONFIGMAP_NAME'..."
     kubectl create configmap "$CONFIGMAP_NAME" \
         -n "$NAMESPACE" \
-        --from-literal=markdown_filter="on" \
-        --from-literal=markdown_streaming="auto" \
-        --from-literal=markdown_limits="conversion_memory=10m" \
+        --from-literal=markdown-filter.conf="markdown_filter on; markdown_streaming auto; markdown_limits conversion_memory=10m;" \
         --dry-run=client -o yaml \
         | kubectl apply -f - >&2 2>&1 || {
         log_error "Failed to apply ConfigMap"
@@ -720,6 +719,20 @@ scenario_config_update() {
     fi
 
     log_info "ConfigMap data verified: $cm_data"
+
+    # P1-2 fix: verify NGINX actually consumed the new config (not just ConfigMap existence)
+    local pod_name
+    pod_name="$(kubectl get pods -n "$NAMESPACE" -l "app=$DEPLOYMENT_NAME" \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)" || pod_name=""
+    if [[ -n "$pod_name" ]]; then
+        if ! kubectl exec -n "$NAMESPACE" "$pod_name" -- nginx -T 2>&1 | grep -q "markdown"; then
+            log_error "nginx -T does not contain expected markdown config after update"
+            return 1
+        fi
+        log_info "nginx -T verification passed for updated config"
+    else
+        log_warn "no pod found for nginx -T verification; skipping strict check"
+    fi
 
     # Run smoke test to verify functionality after config change
     run_smoke_test || return 1
