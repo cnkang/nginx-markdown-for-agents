@@ -187,6 +187,7 @@ decompress_streaming(const u_char *compressed, size_t compressed_len,
                         new_buf = (u_char *) realloc(
                             result_buf, result_cap);
                         if (new_buf == NULL) {
+                            free(result_buf);
                             BrotliDecoderDestroyInstance(state);
                             return -1;
                         }
@@ -234,6 +235,7 @@ decompress_streaming(const u_char *compressed, size_t compressed_len,
                         new_buf = (u_char *) realloc(
                             result_buf, result_cap);
                         if (new_buf == NULL) {
+                            free(result_buf);
                             BrotliDecoderDestroyInstance(state);
                             return -1;
                         }
@@ -454,6 +456,7 @@ decompress_streaming_single_byte(const u_char *compressed,
                         new_buf = (u_char *) realloc(
                             result_buf, result_cap);
                         if (new_buf == NULL) {
+                            free(result_buf);
                             BrotliDecoderDestroyInstance(state);
                             return -1;
                         }
