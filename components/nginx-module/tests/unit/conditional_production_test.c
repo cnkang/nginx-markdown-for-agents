@@ -1425,6 +1425,82 @@ test_adopt_orphan_skips_non_nul_terminated(void)
 }
 
 static void
+test_adopt_orphan_with_empty_headers(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(r->headers_in.if_none_match == NULL
+                && r->headers_in.if_modified_since == NULL,
+                "empty headers leave typed pointers NULL");
+    TEST_PASS("orphan adoption with empty headers");
+}
+
+static void
+test_adopt_orphan_skips_invalid_len(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *h;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    h = add_header(&r->headers_in.headers,
+                   "If-None-Match", "\"valid\"");
+    r->headers_in.if_none_match = h;
+    memset(&ctx, 0, sizeof(ctx));
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+                "capture succeeds");
+    h->value.len = 5;
+    h->value.data = (u_char *) "\"valid\"";
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(h->hash == 0,
+                "entry with non-zero len after hash clear is not adopted");
+    TEST_ASSERT(r->headers_in.if_none_match == NULL,
+                "typed pointer not rebuilt for invalid len entry");
+    TEST_PASS("orphan adoption skips entry with non-zero len");
+}
+
+static void
+test_adopt_orphan_skips_null_data(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *h;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    h = add_header(&r->headers_in.headers,
+                   "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_modified_since = h;
+    memset(&ctx, 0, sizeof(ctx));
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                == NGX_OK,
+                "capture succeeds");
+    h->value.data = NULL;
+    h->value.len = 0;
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(h->hash == 0,
+                "entry with NULL data remains hidden");
+    TEST_ASSERT(r->headers_in.if_modified_since == NULL,
+                "typed pointer not rebuilt for NULL data");
+    TEST_PASS("orphan adoption skips entry with NULL data");
+}
+
+static void
 test_capture_conditional_headers_excludes_range(void)
 {
     ngx_http_request_t *r;
@@ -1984,6 +2060,47 @@ test_has_no_transform_no_cache_control(void)
     TEST_PASS("has_no_transform no header");
 }
 
+/* Verify every public conditional-request policy maps to its FFI value. */
+static void
+test_conditional_cache_validation_modes(void)
+{
+    TEST_ASSERT(ngx_http_markdown_conditional_cache_validation(
+                    NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED) == 0,
+                "disabled policy maps to no cache validation");
+    TEST_ASSERT(ngx_http_markdown_conditional_cache_validation(
+                    NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT) == 2,
+                "full policy maps to entity validation");
+    TEST_ASSERT(ngx_http_markdown_conditional_cache_validation(
+                    NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE) == 1,
+                "IMS policy maps to date validation");
+    TEST_ASSERT(ngx_http_markdown_conditional_cache_validation(99) == 1,
+                "unknown policy uses the IMS fallback");
+    TEST_PASS("conditional cache validation policy mapping");
+}
+
+/* Ensure invalidated headers are ignored and HTAB is a valid OWS separator. */
+static void
+test_has_no_transform_ignores_invalidated_and_accepts_htab(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t *invalidated;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    invalidated = add_header(&r->headers_out.headers, "Cache-Control",
+                             "no-transform");
+    add_header(&r->headers_out.headers, "Cache-Control",
+               "no-transform\t, max-age=0");
+    if (invalidated == NULL) { TEST_FAIL("header alloc failed"); return; }
+    invalidated->hash = 0;
+
+    TEST_ASSERT(ngx_http_markdown_has_no_transform(r) == 1,
+                "active Cache-Control uses HTAB as a valid separator");
+    TEST_PASS("no-transform skips invalidated headers and accepts HTAB");
+}
+
 /* ── last_modified_time fallback tests ──────────────────────── */
 
 /*
@@ -2092,6 +2209,9 @@ main(void)
     test_adopt_orphan_conditional_headers();
     test_adopt_orphan_restores_repeated_validators();
     test_adopt_orphan_skips_non_nul_terminated();
+    test_adopt_orphan_with_empty_headers();
+    test_adopt_orphan_skips_invalid_len();
+    test_adopt_orphan_skips_null_data();
     test_capture_conditional_headers_excludes_range();
     test_subrequest_capture_does_not_mutate_shared_validators();
 
@@ -2114,6 +2234,8 @@ main(void)
     test_has_no_transform_in_comma_separated_list();
     test_has_no_transform_absent();
     test_has_no_transform_no_cache_control();
+    test_conditional_cache_validation_modes();
+    test_has_no_transform_ignores_invalidated_and_accepts_htab();
 
     test_handle_ims_only_scalar_time_not_consulted();
     test_handle_ims_only_no_last_modified_at_all();
