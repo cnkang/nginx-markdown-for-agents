@@ -16,6 +16,16 @@
 
 static u_char  ngx_http_markdown_hdr_accept[] = "Accept";
 
+#define NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX  8192
+
+
+static ngx_flag_t ngx_http_markdown_is_accept_header(
+    const ngx_table_elt_t *header);
+static ngx_int_t ngx_http_markdown_count_accept_headers(
+    ngx_http_request_t *r, ngx_uint_t *count);
+static ngx_int_t ngx_http_markdown_collect_accept_header(
+    ngx_http_request_t *r, ngx_str_t *out);
+
 /*
  * Find a request header by name in nginx's generic linked-list container.
  *
@@ -59,6 +69,234 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r,
     return NULL;
 }
 
+
+static ngx_flag_t
+ngx_http_markdown_is_accept_header(const ngx_table_elt_t *header)
+{
+    return header != NULL
+           && header->hash != 0
+           && header->key.data != NULL
+           && header->key.len == sizeof(ngx_http_markdown_hdr_accept) - 1
+           && ngx_strncasecmp(header->key.data,
+                              ngx_http_markdown_hdr_accept,
+                              sizeof(ngx_http_markdown_hdr_accept) - 1) == 0;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_count_accept_headers(ngx_http_request_t *r,
+    ngx_uint_t *count)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *headers;
+
+    if (r == NULL || count == NULL) {
+        return NGX_ERROR;
+    }
+
+    *count = 0;
+    for (part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (!ngx_http_markdown_is_accept_header(&headers[i])) {
+                continue;
+            }
+
+            (*count)++;
+            if (*count > 1) {
+                return NGX_OK;
+            }
+        }
+    }
+
+    return NGX_OK;
+}
+
+
+/*
+ * Compute the combined Accept field length and entry count.
+ *
+ * Walks the header list once, validating each Accept field-line and
+ * accumulating the combined length (RFC 9110 section 5.2: multiple
+ * field-lines combine with ", ").  Falls back to the typed
+ * r->headers_in.accept singleton when the list scan found nothing.
+ *
+ * Returns:
+ *   NGX_OK       - at least one field-line found; *count / *total_len set
+ *   NGX_DECLINED - no Accept field-line present
+ *   NGX_ERROR    - malformed entry or combined length above the cap
+ */
+static ngx_int_t
+ngx_http_markdown_accept_fields(ngx_http_request_t *r,
+    ngx_uint_t *count, size_t *total_len, ngx_table_elt_t **single_out)
+{
+    ngx_table_elt_t  *single;
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *headers;
+
+    *count = 0;
+    *total_len = 0;
+    single = NULL;
+
+    for (part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (!ngx_http_markdown_is_accept_header(&headers[i])) {
+                continue;
+            }
+            if (headers[i].value.len > 0
+                && headers[i].value.data == NULL)
+            {
+                return NGX_ERROR;
+            }
+
+            if (*count != 0) {
+                if (*total_len > (size_t) -1 - 2) {
+                    return NGX_ERROR;
+                }
+                *total_len += 2;
+            }
+            if (*total_len > NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX
+                || headers[i].value.len
+                   > NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX - *total_len)
+            {
+                return NGX_ERROR;
+            }
+            *total_len += headers[i].value.len;
+
+            if (single == NULL) {
+                single = &headers[i];
+            }
+            (*count)++;
+        }
+    }
+
+#if (NGX_HTTP_HEADERS)
+    if (*count == 0 && r->headers_in.accept != NULL) {
+        if (r->headers_in.accept->value.len > 0
+            && r->headers_in.accept->value.data == NULL)
+        {
+            return NGX_ERROR;
+        }
+        single = r->headers_in.accept;
+        *count = 1;
+        *total_len = single->value.len;
+        if (*total_len > NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX) {
+            return NGX_ERROR;
+        }
+    }
+#endif
+
+    if (*count == 0) {
+        return NGX_DECLINED;
+    }
+    if (single_out != NULL) {
+        *single_out = single;
+    }
+    return NGX_OK;
+}
+
+
+/* Collect all active Accept field-lines in wire order. */
+static ngx_int_t
+ngx_http_markdown_collect_accept_header(ngx_http_request_t *r,
+    ngx_str_t *out)
+{
+    ngx_table_elt_t  *headers;
+    ngx_table_elt_t  *single;
+    ngx_list_part_t  *part;
+    ngx_uint_t        count;
+    ngx_int_t         rc;
+    size_t            total_len;
+    size_t            written;
+    u_char           *data;
+
+    if (r == NULL || out == NULL) {
+        return NGX_ERROR;
+    }
+
+    out->data = NULL;
+    out->len = 0;
+    count = 0;
+    total_len = 0;
+    single = NULL;
+
+    /* Pass 1: validate and measure the combined value. */
+    rc = ngx_http_markdown_accept_fields(r, &count, &total_len, &single);
+    if (rc == NGX_DECLINED) {
+        /* No Accept field-line present; propagate so the caller reports
+         * NO_ACCEPT rather than an internal error. */
+        return NGX_DECLINED;
+    }
+    if (rc != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    if (count == 1) {
+        /* Single field-line fast path: alias the stored value directly. */
+        out->data = single->value.data;
+        out->len = single->value.len;
+        return NGX_OK;
+    }
+
+    /* Re-walk the list to combine the field-lines into the pool buffer. */
+    data = ngx_pnalloc(r->pool, total_len);
+    if (data == NULL) {
+        return NGX_ERROR;
+    }
+
+    written = 0;
+    count = 0;
+    for (part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (!ngx_http_markdown_is_accept_header(&headers[i])) {
+                continue;
+            }
+
+            if (count != 0) {
+                data[written++] = ',';
+                data[written++] = ' ';
+            }
+            if (headers[i].value.len != 0) {
+                ngx_memcpy(data + written, headers[i].value.data,
+                           headers[i].value.len);
+                written += headers[i].value.len;
+            }
+            count++;
+        }
+    }
+
+    if (written != total_len) {
+        return NGX_ERROR;
+    }
+
+    out->data = data;
+    out->len = total_len;
+    return NGX_OK;
+}
+
 /*
  * Retrieve the Accept header from the request.
  *
@@ -71,20 +309,29 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r,
 static ngx_table_elt_t *
 ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
 {
+    ngx_table_elt_t  *header;
+    ngx_uint_t        count;
+
     if (r == NULL) {
+        return NULL;
+    }
+
+    if (ngx_http_markdown_count_accept_headers(r, &count) != NGX_OK) {
         return NULL;
     }
 
 #if (NGX_HTTP_HEADERS)
     if (r->headers_in.accept != NULL) {
-        return r->headers_in.accept;
+        return (count <= 1) ? r->headers_in.accept : NULL;
     }
 #endif
 
-    return ngx_http_markdown_find_request_header(
+    header = ngx_http_markdown_find_request_header(
         r,
         (u_char *) ngx_http_markdown_hdr_accept,
         sizeof(ngx_http_markdown_hdr_accept) - 1);
+
+    return (count == 1) ? header : NULL;
 }
 
 /*
@@ -117,6 +364,8 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
 {
     const ngx_table_elt_t   *accept_header;
     struct FFIAcceptResult   result;
+    ngx_int_t                accept_rc;
+    ngx_str_t                accept_value;
     uint8_t                  on_wildcard;
 
     if (conf == NULL) {
@@ -143,8 +392,35 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
         return 1;
     }
 
+    if (r == NULL) {
+        if (out_reason != NULL) {
+            *out_reason = NEGOTIATE_REASON_NO_ACCEPT;
+        }
+        return 0;
+    }
+
     accept_header = ngx_http_markdown_get_accept_header(r);
-    if (accept_header == NULL || accept_header->value.len == 0) {
+    if (accept_header != NULL) {
+        accept_value.data = accept_header->value.data;
+        accept_value.len = accept_header->value.len;
+    } else {
+        accept_rc = ngx_http_markdown_collect_accept_header(
+            r, &accept_value);
+        if (accept_rc == NGX_DECLINED) {
+            if (out_reason != NULL) {
+                *out_reason = NEGOTIATE_REASON_NO_ACCEPT;
+            }
+            return 0;
+        }
+        if (accept_rc != NGX_OK) {
+            if (out_reason != NULL) {
+                *out_reason = NEGOTIATE_REASON_INTERNAL_ERROR;
+            }
+            return 0;
+        }
+    }
+
+    if (accept_value.len == 0) {
         if (out_reason != NULL) {
             *out_reason = NEGOTIATE_REASON_NO_ACCEPT;
         }
@@ -155,8 +431,8 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
         ((conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD) ? 1 : 0);
 
     markdown_negotiate_accept(
-        accept_header->value.data,
-        accept_header->value.len,
+        accept_value.data,
+        accept_value.len,
         on_wildcard,
         &result);
 
