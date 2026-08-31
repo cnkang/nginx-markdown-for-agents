@@ -138,8 +138,8 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
              * Use a bounded scan (8k = default large_header_buffers)
              * to avoid unbounded read if the NUL invariant changes. */
             {
-                u_char  *data = headers[i].value.data;
-                u_char  *nul;
+                const u_char  *data = headers[i].value.data;
+                const u_char  *nul;
 
                 nul = memchr(data, '\0', 8192);
                 if (nul == NULL) {
