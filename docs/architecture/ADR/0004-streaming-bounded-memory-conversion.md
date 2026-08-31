@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Historical baseline (v0.8.0). The bounded streaming engine described here is
+the active second engine in current releases. See
+[ADR-0011](./0011-true-streaming-contract.md) and the streaming
+configuration guide for the current defaults and policy (`markdown_streaming
+auto` with per-buffer limits).
 
 ## Context
 

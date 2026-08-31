@@ -4,6 +4,9 @@
 # The diagnostics endpoint is read-only. This test models operator restore by
 # replacing the watched file atomically, while preserving caller-owned files.
 # DYNCONF_FILE must point to the file configured in the running NGINX instance.
+# Invocations that pass an external DYNCONF_FILE (outside the test directory)
+# also require ALLOW_EXTERNAL_DYNCONF_TEST=1 alongside the PID sources
+# (NGINX_PID / NGINX_PID_FILE / HARNESS_NGINX_PID / NGINX_PID_PREFIX).
 
 set -e
 

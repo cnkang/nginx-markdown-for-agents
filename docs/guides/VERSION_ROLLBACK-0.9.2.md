@@ -323,9 +323,12 @@ reference removed or renamed families must update their alert rules, and
 operators must re-test the alerts against the downgraded binary before
 they consider the rollback complete.
 
-Metric counters are **not reset** on a graceful reload. They continue accumulating
-from their current values under the downgraded module. A full NGINX stop and
-subsequent start resets shared-memory counters. A graceful reload preserves them.
+Metric counters are **not reset** on a graceful reload (`nginx -s reload`
+signals a same-version HUP). They continue accumulating from their current
+values under the downgraded module. A full NGINX stop and subsequent start
+(the quit → swap → start procedure used by this rollback guide) resets
+shared-memory counters, so delta calculations must establish a new baseline
+after the rollback restart. A graceful reload preserves them.
 
 ---
 

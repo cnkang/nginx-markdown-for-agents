@@ -51,7 +51,9 @@ as "true streaming."
 
 - Post-commit irreversibility means conversion errors discovered late cannot
   retract bytes that downstream filters have already accepted. The request
-  must finish through the configured safe-finish or abort path
+  must finish through the configured safe-finish or abort path. Safe-finish
+  is an incomplete terminal state: it preserves the aborted or incomplete
+  status rather than reporting normal completion.
 - Increases implementation complexity for the converter state machine
 - Requires careful handling of HTML structures that span chunk boundaries
 

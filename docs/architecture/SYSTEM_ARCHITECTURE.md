@@ -196,7 +196,10 @@ The architecture supports two conversion engines:
     `markdown_limits streaming_buffer=<size>`). This value is a total budget,
     not a network chunk size.
   - first Markdown bytes available before upstream finishes
-  - more complex state machine (fallback to full-buffer or passthrough on errors)
+  - more complex state machine (fallback to full-buffer or passthrough on
+  errors only before the response commits. After Markdown
+  headers or body bytes are sent, the outcome restricts to Rust
+  safe-finish or abort)
 
 The full-buffer tradeoff appears in [ADR-0002](ADR/0002-full-buffering-approach.md). The streaming contract is in [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) and [ADR-0011](ADR/0011-true-streaming-contract.md).
 

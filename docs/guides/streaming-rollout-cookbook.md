@@ -113,6 +113,10 @@ curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' http://localhos
   > "$SNAPSHOT_DIR/metrics.before"
 # Send exactly one streaming-eligible request between the snapshots,
 # then capture the after snapshot without any other conversion request.
+# Eligibility is confirmed through diagnostics/decision log (the request
+# must be marked engine=streaming), not assumed from force alone, which
+# may still fall back to full-buffer for hard incompatibilities (e.g.
+# build-disabled streaming decoders or excluded content types).
 curl -s -H 'Accept: text/markdown' http://localhost/docs/ \
   > /dev/null
 curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' http://localhost/markdown-metrics \

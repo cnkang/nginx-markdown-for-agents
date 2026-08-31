@@ -129,8 +129,9 @@ Conversion succeeded. The client receives the Markdown representation of the HTM
 The module attempted conversion but failed before it committed the response
 (HTML parse error, timeout, resource limit, decompression error, or internal/
 system error). Because `markdown_error_policy` is set to `pass` (the default),
-the module replays the complete original HTML response unchanged. The reason
-code is `failed_open` and the request state becomes FAILED.
+the module replays the original upstream representation unchanged — its
+encoding and headers included — rather than a regenerated HTML variant. The
+reason code is `failed_open` and the request state becomes FAILED.
 
 This is the recommended configuration for production rollouts. Conversion
 failures before commit do not break client responses.
@@ -156,7 +157,7 @@ When conversion fails (either `failed_open` or `failed_closed`), the module reco
 | Failure Reason Code | Meaning |
 |---------------------|---------|
 | `conversion_error` | HTML parse or conversion error — the input HTML could not be processed |
-| `timeout` | In the full-buffer FFI path, the pre-parse and post-parse checkpoints check `parser_timeout=` before `conversion_timeout=`. The parser deadline starts at `conversion_start` before parsing and at `parse_start` after parsing. The overall deadline starts at `conversion_start` at both checkpoints and controls traversal/output afterward. If elapsed time exceeds both deadlines at one checkpoint, the converter reports parser timeout. A nonzero `parser_timeout=` still applies when `conversion_timeout=0`. The two are not collapsed into an earlier-of deadline. |
+| `timeout` | In the full-buffer FFI path, the pre-parse and post-parse checkpoints check `parser_timeout=` before `conversion_timeout=`. The parser deadline starts at `conversion_start` before parsing and at `parse_start` after parsing. The overall deadline starts at `conversion_start` at both checkpoints and controls traversal/output afterward. If elapsed time exceeds both deadlines at one checkpoint, the converter reports parser timeout. A nonzero `parser_timeout=` still applies when `conversion_timeout` is unset (an explicit `0` is rejected by the config handler). The two are not collapsed into an earlier-of deadline. |
 | `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from the `not_eligible` size gate and takes precedence for parser allocations |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
 | `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Decompression](../features/DECOMPRESSION.md)) |
@@ -229,7 +230,7 @@ implementation events are not registry entries.
 | `decompression_format_error` | Compressed input has invalid format (not valid gzip/deflate/brotli) |
 | `decompression_truncated_input` | Compressed input was truncated (incomplete stream) |
 | `decompression_io_error` | I/O error during decompression operation |
-| `timeout` | Conversion exceeded a deadline. In the full-buffer path, the converter checks `parser_timeout=` before `conversion_timeout=` at the pre-parse and post-parse checkpoints. It measures the parser deadline from `conversion_start` and `parse_start` respectively. Traversal and output then use only the remaining overall deadline. A nonzero `parser_timeout=` remains active when `conversion_timeout=0`. |
+| `timeout` | Conversion exceeded a deadline. In the full-buffer path, the converter checks `parser_timeout=` before `conversion_timeout=` at the pre-parse and post-parse checkpoints. It measures the parser deadline from `conversion_start` and `parse_start` respectively. Traversal and output then use only the remaining overall deadline. A nonzero `parser_timeout=` remains active when `conversion_timeout` is unset (an explicit `0` is rejected by the config handler). |
 | `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=` (default 32m) |
 | `memory_budget_exceeded` | `markdown_limits conversion_memory=` exceeded while buffering an unknown-size body, or another conversion working-set memory limit; the module records category `resource_limit` and increments `failures_resource_limit` |
 | `overload` | Inflight guard rejected the request |

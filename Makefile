@@ -617,6 +617,7 @@ TRIVY_LOCAL_SKIP_DIRS := \
 	--skip-dirs temp \
 	--skip-dirs .test-tmp \
 	--skip-dirs coverage \
+	--skip-dirs reports \
 	--skip-dirs test-output \
 	--skip-dirs test-results \
 	--skip-dirs '**/target' \
@@ -1475,7 +1476,10 @@ coverage-gate: coverage-c coverage-rust
 clean:
 	cd $(RUST_DIR) && cargo clean
 	$(MAKE) -C $(NGINX_TEST_DIR) clean || true
-	find "$(NGINX_MODULE_DIR_CANONICAL)" -type d -name '*.dSYM' -prune -exec rm -rf {} +
+	# Remove only the known generated build-output directories; never scan
+	# the whole module tree, which may contain developer-owned directories.
+	rm -rf build
+	rm -rf $(NGINX_TEST_DIR)/build
 	rm -rf coverage
 
 help:

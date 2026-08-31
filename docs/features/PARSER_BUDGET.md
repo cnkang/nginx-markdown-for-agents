@@ -198,9 +198,11 @@ At both parser-boundary checkpoints, the parser check runs before the overall
 check. If elapsed time exceeds both deadlines at the same checkpoint, the
 converter reports the parser timeout (`ERROR_PARSE_TIMEOUT`). This is
 call-order precedence, not a minimum or an "earlier of" calculation. When
-`conversion_timeout=0` reaches the FFI layer, the FFI layer disables the
+`conversion_timeout` is left unset, the FFI layer disables the
 overall deadline but keeps a nonzero `parser_timeout` active at the two
-parser checkpoints.
+parser checkpoints. (An explicit `conversion_timeout=0` fails config
+validation — the handler rejects zero, and the disabled state is
+reachable only by omitting the key.)
 
 #### Checkpoint Frequency
 
@@ -355,7 +357,11 @@ claim that the overall deadline triggers before the parser deadline.
 1. Input size (`markdown_limits conversion_memory=<size>`) — checked first, before FFI call
 2. Overall FFI deadline (`markdown_limits conversion_timeout=<time>`) — the authoritative upper bound, measured from `conversion_start`. The converter checks it after `parser_timeout` at the pre-parse and post-parse checkpoints. The converter uses it as the only deadline for DOM traversal and output processing. A zero value disables this deadline.
 3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — when nonzero, the converter measures it from `conversion_start` for the pre-parse check and from `parse_start` for the post-parse check. The converter evaluates it before the overall deadline at both parser checkpoints. If elapsed time exceeds both deadlines, the converter reports the parser timeout. The two checks are separately configured, not an earlier-of/minimum deadline. When `conversion_timeout` is 0, a nonzero parser deadline still applies.
-4. Memory budget (`markdown_limits parser_memory=<size>`) — checked on each allocation
+4. Memory budget (`markdown_limits parser_memory=<size>`) — enforced per
+   parsing path: streaming parsing applies allocation preflight/checkpoints
+   as the parser grows its buffers. Full-buffer parsing uses a conservative
+   pre-parse estimate before the FFI call, then allocation checkpoints as
+   the converter produces output.
 
 ### Fail-Open Behavior
 

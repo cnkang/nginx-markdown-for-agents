@@ -306,12 +306,17 @@ For authenticated requests, the module adjusts cache control:
 ```nginx
 location /private/ {
     markdown_filter on;
-    markdown_auth_policy deny;
+    markdown_auth_policy allow;
     markdown_auth_cookies "session_id auth_token";
 
     proxy_pass http://backend;
 }
 ```
+
+> **Note**: `markdown_auth_policy deny` bypasses conversion for authenticated
+> requests (the client receives the original HTML). The example above uses
+> `allow`, which keeps converting and lets the module rewrite the cache-control
+> headers below.
 
 When the module detects authentication:
 - `Cache-Control: public` → `Cache-Control: private`

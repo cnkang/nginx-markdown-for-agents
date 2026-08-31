@@ -95,6 +95,11 @@ Compare deltas from the same baseline for every family. Raw cumulative
 values from different points in time are not comparable because the
 counters never reset.
 
+Counters persist across graceful reloads (`nginx -s reload` keeps the
+existing shared-memory counters), but they reset after a full NGINX stop
+and start. After any full restart, establish a new baseline before
+computing deltas so the comparison interval never spans the reset.
+
 HTML passthrough, failed-open HTML, failed-closed responses, and abort-terminal
 responses do not increment `conversion_deliveries_total`. They appear
 by their terminal request outcome instead.

@@ -63,8 +63,10 @@ the structure above and rejects cross-key violations before mutation:
 - `parser_memory <= conversion_memory`
 - `streaming_buffer <= conversion_memory`
 
-Zero handling: `conversion_timeout=0` disables the overall conversion
-deadline and removes that upper-bound comparison. A nonzero `parser_timeout`
+Zero handling: an unset `conversion_timeout` leaves the overall conversion
+deadline disabled. An explicit `conversion_timeout=0` is **rejected by the
+config handler** (must be a positive duration). Operators cannot opt into
+the disabled state by writing 0 — they leave the key unset. A nonzero `parser_timeout`
 stays valid beside it and keeps its parser-phase deadline, including when
 both keys are explicitly configured. When `conversion_timeout` is nonzero and
 both keys are explicitly configured, `nginx -t` fails if

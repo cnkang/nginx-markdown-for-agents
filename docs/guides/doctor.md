@@ -271,7 +271,7 @@ The doctor tool runs as a smoke test in CI via
 3. The tool reports at least 3 checks
 4. JSON schema structure is correct
 
-## Remediation Hints (0.9.1)
+## Remediation Hints (0.9.2)
 
 When a check reports `fail` or `warn` status, it includes a `hint` field
 with an actionable remediation suggestion:
@@ -284,7 +284,7 @@ with an actionable remediation suggestion:
 | `module_signature` (fail) | The module file may be corrupt or built for a different nginx version |
 | `rust_linkage` (warn) | Module may be missing Rust converter linkage or built without FFI exports |
 
-## Artifact Recommendation (0.9.1)
+## Artifact Recommendation (0.9.2)
 
 Based on the detected OS, architecture, and libc, the tool recommends the
 appropriate release artifact. The recommendation appears in:

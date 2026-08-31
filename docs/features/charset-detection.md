@@ -173,7 +173,8 @@ decoding.
 
 - Meta tag scanning limits to the first 1024 bytes for performance
 - This is sufficient as meta charset tags should appear in the `<head>` section
-- Content-Type parameter scanning is a bounded byte-level walk (no regex)
+- Content-Type parameter scanning is a bounded byte-level walk (no regex).
+  Regex applies only to HTML meta charset scanning
 
 ## Integration Points
 
