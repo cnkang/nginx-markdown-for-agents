@@ -488,7 +488,7 @@ fn md_html_response(
     let is_auth = cookie.contains("session_user=");
 
     let vary = if is_auth {
-        Some("Cookie")
+        Some("Cookie, Accept")
     } else {
         Some("Accept")
     };

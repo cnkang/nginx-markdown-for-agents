@@ -687,6 +687,7 @@ scenario_config_update() {
     log_info "Applying updated ConfigMap '$CONFIGMAP_NAME'..."
     kubectl create configmap "$CONFIGMAP_NAME" \
         -n "$NAMESPACE" \
+        --from-literal=markdown-snippet.conf="load_module modules/ngx_http_markdown_filter_module.so;" \
         --from-literal=markdown-filter.conf="markdown_filter on; markdown_streaming auto; markdown_limits conversion_memory=10m;" \
         --dry-run=client -o yaml \
         | kubectl apply -f - >&2 2>&1 || {
@@ -725,7 +726,7 @@ scenario_config_update() {
     pod_name="$(kubectl get pods -n "$NAMESPACE" -l "app=$DEPLOYMENT_NAME" \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)" || pod_name=""
     if [[ -n "$pod_name" ]]; then
-        if ! kubectl exec -n "$NAMESPACE" "$pod_name" -- nginx -T 2>&1 | grep -q "markdown"; then
+        if ! kubectl exec -n "$NAMESPACE" "$pod_name" -- nginx -T 2>&1 | grep -q "markdown_filter on"; then
             log_error "nginx -T does not contain expected markdown config after update"
             return 1
         fi
