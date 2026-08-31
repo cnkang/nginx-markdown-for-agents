@@ -51,6 +51,15 @@ struct TableVecGrowthPlan {
     requested_growth: usize,
 }
 
+/// Collected table parts: header cells, column alignments, body rows, and
+/// colgroup-declared alignments.
+struct CollectedTableData {
+    headers: Vec<String>,
+    alignments: Vec<TableAlignment>,
+    rows: Vec<Vec<String>>,
+    col_alignments: Vec<Option<TableAlignment>>,
+}
+
 fn table_vec_growth_plan<T>(
     vec: &Vec<T>,
     required_len: usize,
@@ -227,28 +236,13 @@ impl MarkdownConverter {
         let mut table_scratch = 0usize;
 
         let result = (|| {
-            let mut headers: Vec<String> = Vec::new();
-            let mut alignments: Vec<TableAlignment> = Vec::new();
-            let mut rows: Vec<Vec<String>> = Vec::new();
-
-            let mut col_alignments: Vec<Option<TableAlignment>> = Vec::new();
-            self.extract_colgroup_alignments_from(
-                node,
-                &mut ctx,
-                &mut col_alignments,
-                &mut table_scratch,
-            )?;
-
-            for child in node.children.borrow().iter() {
-                self.extract_table_child(
-                    child,
-                    &mut ctx,
-                    &mut headers,
-                    &mut alignments,
-                    &mut rows,
-                    &mut table_scratch,
-                )?;
-            }
+            let collected = self.collect_table_data(node, &mut ctx, &mut table_scratch)?;
+            // Only the alignment vector is extended below (colgroup
+            // application and the default-fill loop); headers and rows
+            // are read-only from this point.
+            let (headers, mut alignments, rows) =
+                (collected.headers, collected.alignments, collected.rows);
+            let col_alignments = collected.col_alignments;
 
             if headers.is_empty() {
                 return Ok(());
@@ -293,6 +287,39 @@ impl MarkdownConverter {
             context.release_working_set(table_scratch);
         }
         result
+    }
+
+    /// Collect headers, alignments, colgroup aligns, and rows from the
+    /// table node, charging the working set as the cell vectors grow.
+    fn collect_table_data(
+        &self,
+        node: &Handle,
+        ctx: &mut Option<&mut ConversionContext>,
+        table_scratch: &mut usize,
+    ) -> Result<CollectedTableData, ConversionError> {
+        let mut headers: Vec<String> = Vec::new();
+        let mut alignments: Vec<TableAlignment> = Vec::new();
+        let mut rows: Vec<Vec<String>> = Vec::new();
+
+        let mut col_alignments: Vec<Option<TableAlignment>> = Vec::new();
+        self.extract_colgroup_alignments_from(node, ctx, &mut col_alignments, table_scratch)?;
+
+        for child in node.children.borrow().iter() {
+            self.extract_table_child(
+                child,
+                ctx,
+                &mut headers,
+                &mut alignments,
+                &mut rows,
+                table_scratch,
+            )?;
+        }
+        Ok(CollectedTableData {
+            headers,
+            alignments,
+            rows,
+            col_alignments,
+        })
     }
 
     fn ensure_blank_line_before(
