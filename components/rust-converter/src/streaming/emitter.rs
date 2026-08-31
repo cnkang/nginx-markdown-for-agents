@@ -55,8 +55,7 @@ fn trailing_backtick_run(content: &str) -> usize {
         .count()
 }
 
-fn escape_link_fallback_brackets(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
+fn escape_link_fallback_text(text: &str, escaped: &mut String) {
     let mut backslash_run = 0usize;
 
     for ch in text.chars() {
@@ -70,6 +69,60 @@ fn escape_link_fallback_brackets(text: &str) -> String {
             backslash_run = 0;
         }
     }
+}
+
+fn find_backtick_run(text: &str, start: usize, fence_len: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut cursor = start;
+
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'`' {
+            cursor += 1;
+            continue;
+        }
+
+        let run_start = cursor;
+        while cursor < bytes.len() && bytes[cursor] == b'`' {
+            cursor += 1;
+        }
+        if cursor - run_start == fence_len {
+            return Some(run_start);
+        }
+    }
+
+    None
+}
+
+fn escape_link_fallback_brackets(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let mut plain_start = 0usize;
+    let mut cursor = 0usize;
+
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'`' || (cursor > 0 && bytes[cursor - 1] == b'`') {
+            cursor += 1;
+            continue;
+        }
+
+        let opening_start = cursor;
+        while cursor < bytes.len() && bytes[cursor] == b'`' {
+            cursor += 1;
+        }
+        let fence_len = cursor - opening_start;
+
+        let Some(closing_start) = find_backtick_run(text, cursor, fence_len) else {
+            continue;
+        };
+        let closing_end = closing_start + fence_len;
+
+        escape_link_fallback_text(&text[plain_start..opening_start], &mut escaped);
+        escaped.push_str(&text[opening_start..closing_end]);
+        cursor = closing_end;
+        plain_start = cursor;
+    }
+
+    escape_link_fallback_text(&text[plain_start..], &mut escaped);
 
     escaped
 }
@@ -2075,6 +2128,29 @@ mod tests {
         assert!(
             !output.contains("[Not a link]()"),
             "empty href must not emit markdown link, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_empty_href_fallback_preserves_inline_code_brackets() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag_with_attrs("a", vec![("href", "")]),
+            start_tag("code"),
+            text("items[0]"),
+            end_tag("code"),
+            end_tag("a"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("`items[0]`"),
+            "inline-code brackets must remain literal in fallback labels: {}",
+            output
+        );
+        assert!(
+            !output.contains(r"`items\[0\]`"),
+            "fallback escaping must not corrupt inline-code content: {}",
             output
         );
     }

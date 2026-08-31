@@ -64,6 +64,10 @@ fn parse_if_none_match(header: &str) -> Vec<(bool, String)> {
     // (they would require quoted-string parsing per RFC 7230 §3.2.6).
     for part in trimmed.split(',') {
         let part = part.trim();
+        if part == "*" {
+            etags.push((false, "*".to_string()));
+            continue;
+        }
         if let Some((weak, value)) = parse_etag(part) {
             etags.push((weak, value.to_string()));
         }
@@ -365,6 +369,18 @@ mod tests {
     fn test_if_none_match_wildcard() {
         let r = evaluate_conditional(Some("*"), Some("\"abc\""), None, None);
         assert_eq!(r, ConditionalResult::NotModified);
+    }
+
+    #[test]
+    fn test_if_none_match_repeated_wildcard_preserves_match_any() {
+        for header in ["*, *", "*, \"other\""] {
+            let r = evaluate_conditional(Some(header), Some("\"abc\""), None, None);
+            assert_eq!(
+                r,
+                ConditionalResult::NotModified,
+                "wildcard member must preserve match-any semantics: {header}"
+            );
+        }
     }
 
     #[test]
