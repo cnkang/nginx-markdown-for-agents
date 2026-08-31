@@ -529,8 +529,15 @@ if [ -z "$before" ]; then
 fi
 curl -fsS -o /dev/null -H "Accept: text/markdown" http://localhost/test
 after=$(curl -fsS http://localhost/markdown-metrics | \
-  grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"')
+  grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
 if [ -z "$after" ]; then
+  echo "FAIL: conversion metrics not present after rollback check"
+  exit 1
+fi
+# Capture disabled-request signal separately without changing the conversion metric comparison
+disabled=$(curl -fsS http://localhost/markdown-metrics | \
+  grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"')
+if [ -z "$disabled" ]; then
   echo "FAIL: disabled signal not present after rollback check (expected requests_total outcome=skipped reason=disabled)"
   exit 1
 fi
