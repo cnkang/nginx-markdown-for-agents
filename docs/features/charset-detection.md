@@ -49,7 +49,7 @@ The main charset detection module with the following functions:
 
 - `extract_charset_from_content_type(content_type: &str) -> Option<String>`
   - Parses Content-Type header for charset parameter
-  - Uses regex for robust parsing
+  - Uses a bounded byte-level scan (no regex)
   - Handles various formats (quoted, unquoted, with/without spaces)
 
 - `extract_charset_from_html(html: &[u8]) -> Option<String>`

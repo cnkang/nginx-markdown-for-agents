@@ -589,6 +589,8 @@
         ".clusterfuzzlite/Dockerfile",
         "examples/docker/Dockerfile.official-nginx-source-build",
         "tools/build_release/Dockerfile.install-example",
+        "tools/build_release/Dockerfile.musl",
+        "tools/build_release/Dockerfile.glibc",
         "packaging/**/*.sh",
         "packaging/**/*.py",
         "packaging/**/*.rb",

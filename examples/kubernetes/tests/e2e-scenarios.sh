@@ -732,7 +732,7 @@ scenario_config_update() {
         fi
         log_info "nginx -T verification passed for updated config"
     else
-        log_error "no pod found for nginx -T verification; skipping strict check"
+        log_info "no pod found for nginx -T verification; skipping strict check"
     fi
 
     # Run smoke test to verify functionality after config change
