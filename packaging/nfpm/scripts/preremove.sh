@@ -225,6 +225,7 @@ check_active_configuration() {
     local nginx_dump
     local nginx_status=0
     local config_status=0
+    local standard_config_present=0
 
     nginx_candidate="$(command -v nginx 2>/dev/null || true)"
     if [[ -n "$nginx_candidate" ]]; then
@@ -271,26 +272,16 @@ check_active_configuration() {
     done
 
     if [[ "$standard_config_present" -eq 0 ]]; then
-        # No NGINX executable on the trusted PATH and no standard
-        # configuration file exists.  This package installs the module only
-        # for a packaged NGINX (the preinstall ABI gate requires a distro
-        # nginx at install time), so nothing the package supports can load
-        # the module in this state.  A custom NGINX build outside the
-        # supported packages is unverifiable by design; the persistent
-        # force-removal sentinel is the explicit operator path for hosts
-        # that run one.
-        info "No NGINX executable and no standard configuration file found."
-        info "If a custom NGINX build uses this module, verify it manually or"
-        info "create ${FORCE_REMOVE_SENTINEL} to acknowledge forced removal."
-        return 1
+        info "No trusted NGINX executable or standard configuration file found."
+    else
+        info "Standard NGINX configuration files contain no module reference."
     fi
-
-    # A missing executable with every present standard configuration file
-    # successfully read is evidence that the module is not loaded: the
-    # fixed package configuration graph was inspected and contains no
-    # load_module reference. Only an unreadable configuration entry (the
-    # config_status == 2 branch above) remains unverifiable.
-    return 1
+    # Without the executable, the complete include graph and active
+    # configuration cannot be verified. The persistent force-removal sentinel
+    # is the explicit operator path for an out-of-band verification.
+    info "The complete NGINX include graph could not be verified."
+    info "Create ${FORCE_REMOVE_SENTINEL} to acknowledge forced removal."
+    return 2
 }
 
 ##############################################################################
