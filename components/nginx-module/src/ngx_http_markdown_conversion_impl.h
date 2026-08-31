@@ -824,9 +824,6 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
         }
 
         if (rc == NGX_AGAIN) {
-            /* The header chain owns the pending 304 send.  Preserve a
-             * header-forwarded latch so the body filter can resume it. */
-            ctx->headers_forwarded = 1;
             return NGX_AGAIN;
         }
 
