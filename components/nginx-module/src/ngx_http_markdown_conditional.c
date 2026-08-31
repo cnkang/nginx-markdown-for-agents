@@ -81,6 +81,15 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
  * the first occurrence.
  */
 static void
+ngx_http_markdown_adopt_first_restored(
+    ngx_table_elt_t **first_restored, ngx_table_elt_t *header)
+{
+    if (*first_restored == NULL) {
+        *first_restored = header;
+    }
+}
+
+static void
 ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
     u_char *name, size_t name_len, ngx_table_elt_t **first_restored)
 {
@@ -109,9 +118,8 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
              * It is still a valid entry, so it remains a candidate for
              * the typed pointer when no orphan was restored. */
             if (headers[i].hash != 0) {
-                if (*first_restored == NULL) {
-                    *first_restored = &headers[i];
-                }
+                ngx_http_markdown_adopt_first_restored(
+                    first_restored, &headers[i]);
                 continue;
             }
 
@@ -130,9 +138,8 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
             headers[i].value.len =
                 (size_t) strlen((const char *) headers[i].value.data);
             headers[i].hash = 1;
-            if (*first_restored == NULL) {
-                *first_restored = &headers[i];
-            }
+            ngx_http_markdown_adopt_first_restored(
+                first_restored, &headers[i]);
         }
     }
 }
@@ -389,9 +396,8 @@ static void
 ngx_http_markdown_suppress_captured_conditional_headers(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
 {
-    ngx_http_markdown_conditional_header_state_t  *state;
-
-    for (state = ctx->conditional.header_states;
+    for (ngx_http_markdown_conditional_header_state_t *state =
+             ctx->conditional.header_states;
          state != NULL;
          state = state->next)
     {
@@ -414,9 +420,8 @@ static void
 ngx_http_markdown_restore_captured_conditional_headers(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
 {
-    ngx_http_markdown_conditional_header_state_t  *state;
-
-    for (state = ctx->conditional.header_states;
+    for (ngx_http_markdown_conditional_header_state_t *state =
+             ctx->conditional.header_states;
          state != NULL;
          state = state->next)
     {
@@ -437,13 +442,12 @@ static size_t
 ngx_http_markdown_conditional_value_len(
     const ngx_http_markdown_ctx_t *ctx, const ngx_table_elt_t *header)
 {
-    const ngx_http_markdown_conditional_header_state_t  *state;
-
     if (header == NULL || ctx == NULL || !ctx->conditional.captured) {
         return (header == NULL) ? 0 : header->value.len;
     }
 
-    for (state = ctx->conditional.header_states;
+    for (const ngx_http_markdown_conditional_header_state_t *state =
+             ctx->conditional.header_states;
          state != NULL;
          state = state->next)
     {
@@ -490,8 +494,6 @@ ngx_http_markdown_capture_conditional_request(
     ngx_http_markdown_conditional_header_state_t  *state;
     ngx_http_markdown_conditional_header_state_t  *tail;
     ngx_table_elt_t  *headers;
-    ngx_list_part_t  *part;
-    ngx_uint_t        i;
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
@@ -528,12 +530,12 @@ ngx_http_markdown_capture_conditional_request(
 
     ctx->conditional.header_states = NULL;
     tail = NULL;
-    for (part = &r->headers_in.headers.part;
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
     {
         headers = part->elts;
-        for (i = 0; i < part->nelts; i++) {
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0
                 || !ngx_http_markdown_is_captured_conditional_name(
                        &headers[i].key))
@@ -558,8 +560,8 @@ ngx_http_markdown_capture_conditional_request(
         }
     }
 
-    ctx->conditional.if_none_match = (ngx_table_elt_t *) inm_header;
-    ctx->conditional.if_modified_since = (ngx_table_elt_t *) ims_header;
+    ctx->conditional.if_none_match = inm_header;
+    ctx->conditional.if_modified_since = ims_header;
     ctx->conditional.captured = 1;
 
     ngx_http_markdown_suppress_captured_conditional_headers(r, ctx);

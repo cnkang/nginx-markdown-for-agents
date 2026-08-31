@@ -967,8 +967,6 @@ typedef struct ngx_http_markdown_conditional_header_state_s {
 
 typedef struct {
     ngx_http_request_t          *request;
-    ngx_chain_t                 *in;           /* Input chain */
-    ngx_chain_t                 *out;          /* Output chain */
     ngx_http_markdown_buffer_t   buffer;       /* Response buffer */
     ngx_flag_t                   filter_enabled; /* Cached markdown_filter decision from header phase */
     ngx_flag_t                   buffer_initialized;
