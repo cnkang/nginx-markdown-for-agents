@@ -1,10 +1,12 @@
 # Config Contract: nginx-markdown-for-agents 0.9.2
 
-Frozen public-surface contract for 0.9.2. **Ground truth source:**
+Frozen public-surface contract for 0.9.2. The machine ground truth is
 `docs/harness/public-surface-inventory.json` (validated by the drift gate
-`make public-surface-drift-check`). Prose guidance lives in
-`docs/guides/CONFIGURATION.md` — this file is the table-of-record, not a
-tutorial.
+`make public-surface-drift-check`). This file is the checked-in prose
+projection of that inventory for operator reference, not an independent
+source of truth. When the two disagree, the JSON inventory wins and this
+projection is stale. Prose guidance lives in
+`docs/guides/CONFIGURATION.md`.
 
 ## Active Directives (25)
 

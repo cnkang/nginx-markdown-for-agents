@@ -254,7 +254,7 @@ sed -i 's/reason="SKIP_/reason="skipped_/g' dashboard.json
 sed -i 's/reason="FAIL_/reason="failed_/g' dashboard.json
 
 # Step 3: Replace old metric names with new unified families
-sed -i 's/markdown_skipped_accept_total/markdown_skipped_total{reason="skipped_accept"}/g' dashboard.json
+sed -i 's/markdown_skipped_accept_total/nginx_markdown_skips_total{reason="skipped_accept"}/g' dashboard.json
 jq 'walk(if type == "string" then gsub("nginx_markdown_parse_timeouts_total"; "nginx_markdown_failures_total{reason=\\"timeout\\"}") else . end)' dashboard.json > dashboard.json.tmp
 mv dashboard.json.tmp dashboard.json
 # Parse a representative dashboard fixture after the migration.
@@ -267,7 +267,7 @@ jq empty dashboard.json
 |-------------------|-------------------|
 | `rate(markdown_parse_timeouts_total[5m]) > 0` | `rate(nginx_markdown_failures_total{reason="timeout"}[5m]) > 0` |
 | `rate(markdown_failed_open_total[5m]) > 0.01` | `rate(nginx_markdown_failopen_total[5m]) > 0.01` |
-| `sum(rate(markdown_ffi_call_errors_total[5m]))` | `rate(nginx_markdown_failures_total{reason="system_error"}[5m])` |
+| `sum(rate(markdown_ffi_call_errors_total[5m]))` | `rate(nginx_markdown_failures_total{reason="ffi_panic"}[5m])` |
 | `nginx_markdown_skips_total{reason="SKIP_ACCEPT"}` | `nginx_markdown_skips_total{reason="skipped_accept"}` |
 
 #### Key Changes for Alert Authors

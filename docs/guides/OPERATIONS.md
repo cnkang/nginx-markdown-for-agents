@@ -188,10 +188,10 @@ grep "conversion time" /var/log/nginx/error.log | awk '{print $NF}' | sort -n | 
 
 | Pattern | Severity | Meaning |
 |---------|----------|---------|
-| `markdown: outcome=failed_closed stage=... reason=failed_closed category=conversion` | WARN | HTML parsing or Markdown generation failed |
-| `markdown: outcome=failed_closed stage=... reason=failed_closed category=resource_limit` | WARN | Memory limit reached (buffered path; the specific code is the category, e.g. `memory_budget_exceeded`) |
-| `markdown: outcome=failed_closed stage=... reason=failed_closed category=resource_limit` | WARN | Parser or conversion deadline exceeded (buffered path) |
-| `markdown: outcome=failed_closed stage=... reason=failed_closed category=system` | ERROR | Internal/system error (Rust↔C panic) |
+| `markdown: outcome=failed_closed stage=... reason=conversion_error category=conversion` | WARN | HTML parsing or Markdown generation failed |
+| `markdown: outcome=failed_closed stage=... reason=memory_budget_exceeded category=resource_limit` | WARN | Memory limit reached (buffered path; the specific code is the category, e.g. `memory_budget_exceeded`) |
+| `markdown: outcome=failed_closed stage=... reason=timeout category=resource_limit` | WARN | Parser or conversion deadline exceeded (buffered path) |
+| `markdown: outcome=failed_closed stage=... reason=ffi_panic category=system` | ERROR | Internal/system error (Rust↔C panic) |
 | `markdown: outcome=converted stage=... reason=converted event=...` | INFO | Successful conversion with timing |
 
 `category=` is the high-level failure class (`conversion`, `resource_limit`,
@@ -717,7 +717,7 @@ systemctl restart nginx
 5. **Prevent recurrence:**
 ```nginx
 # Reduce resource limits
-    markdown_limits conversion_memory=5m conversion_timeout=3s parser_timeout=3s;
+    markdown_limits conversion_memory=5m parser_memory=5m conversion_timeout=3s parser_timeout=3s;
 
 # Enable fail-open
 markdown_error_policy pass;
@@ -1012,7 +1012,7 @@ Every request ends in one of four mutually exclusive states, derived from its re
 | NOT_ENABLED | `disabled` | Module is disabled for this scope. The request was never evaluated. |
 | SKIPPED | `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_accept_reject`, `skipped_conditional`, `bypass_no_transform` | Module is enabled but the request did not pass an eligibility check. |
 | CONVERTED | `converted` | All checks passed and conversion succeeded. |
-| FAILED | `failed_open`, `failed_closed` | All checks passed, conversion was attempted, but it did not succeed. |
+| FAILED | `failed_open`, `failed_closed`, `aborted` | All checks passed, conversion was attempted, but it did not succeed. `aborted` covers streaming conversions terminated as an incomplete terminal state. |
 
 #### Deriving Request State Counts from Metrics
 
@@ -1028,6 +1028,7 @@ CONVERTED   = sum(nginx_markdown_requests_total{outcome="converted"})
 SKIPPED     = sum(nginx_markdown_requests_total{outcome="skipped",reason=~"not_eligible|skipped_.*|bypass_no_transform"})
 
 FAILED      = sum(nginx_markdown_requests_total{outcome=~"failed_.*"})
+            + sum(nginx_markdown_requests_total{outcome="aborted"})
 ```
 
 > **Note:** The outcome, stage, and reason labels are the authoritative request-level classification. They stay bounded and do not include a path or URI dimension.
@@ -1064,7 +1065,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 grep "markdown:" /var/log/nginx/error.log | grep -c "reason=converted"
 
 # Count FAILED from logs
-grep "markdown:" /var/log/nginx/error.log | grep -cE 'outcome=(failed_open|failed_closed)'
+grep "markdown:" /var/log/nginx/error.log | grep -cE 'outcome=(failed_open|failed_closed|aborted)'
 ```
 
 ### Reason Code and Metrics Label Alignment

@@ -169,11 +169,11 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
   grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check decision log entries
-grep "markdown decision:" /var/log/nginx/error.log | tail -10
+grep "markdown:" /var/log/nginx/error.log | tail -10
 
 # Check for failure reason codes
-grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -c "reason=failed_open\|reason=failed_closed"
+grep "markdown:" /var/log/nginx/error.log | \
+  grep -cE "outcome=(failed_open|failed_closed|aborted)"
 
 # Verify a test request converts
 curl -sD - -o /dev/null \
@@ -267,11 +267,11 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
   grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check reason code distribution
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 
 # Check for failures across all enabled paths
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open\|reason=failed_closed" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c
 ```
@@ -364,11 +364,11 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
   grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check for failure reason codes in the last 24 hours
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open\|reason=failed_closed" | wc -l
 
 # Check reason code distribution
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 
 # Verify conversion latency samples are present; use histogram_quantile in PromQL
@@ -458,16 +458,16 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics
 
 # Reason code distribution
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 
 # Path-specific failure check
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open\|reason=failed_closed" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c
 
 # Verify no internal system-failure categories
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -c "category=system"
 ```
 
@@ -1052,7 +1052,7 @@ http {
 
 The `map` approach is easier to maintain as your rollout scope grows. You add or remove paths in the `map` block without creating new `location` blocks. Combine it with explicit `location` overrides for critical exclusions (like `/api`) as a safety net. NGINX `map` evaluation is not simple declaration order. Exact matches and masked prefixes or suffixes take precedence over regular expressions, and competing regular expressions apply in declaration order. Place critical map exclusions so they win under those rules. A specific exclusion that appears after a broad regex that matches it never reaches its branch.
 
-Note: Even if a risky page type is accidentally included in your conversion scope, the module's eligibility checks provide a safety net. The module skips unsupported or unbounded response types via `not_eligible` (for example non-HTML content types, error statuses, or responses the module cannot convert). Large or chunked responses are a separate case: they may enter `markdown_streaming` and produce `STREAMING_*` outcomes rather than `not_eligible`. However, relying on eligibility checks alone adds noise to your decision logs and metrics. Explicit exclusions keep your rollout scope clean and your observation data meaningful. The safety net catches accidental scope mistakes. It does not replace explicit scope control.
+Note: Even if a risky page type is accidentally included in your conversion scope, the module's eligibility checks provide a safety net. The module skips unsupported or unbounded response types via `not_eligible` (for example non-HTML content types, error statuses, or responses the module cannot convert). Large or chunked responses are a separate case: they may enter `markdown_streaming` and transition through bounded lowercase `event` values such as `engine_streaming` or `streaming_convert` — never `STREAMING_*` outcomes. The terminal outcome set stays `converted`, `failed_open`, `failed_closed`, and `skipped`. However, relying on eligibility checks alone adds noise to your decision logs and metrics. Explicit exclusions keep your rollout scope clean and your observation data meaningful. The safety net catches accidental scope mistakes. It does not replace explicit scope control.
 
 ---
 
@@ -1181,11 +1181,11 @@ Decision log entries use the format `markdown decision: reason=<REASON_CODE> ...
 
 ```bash
 # Count all conversion failures
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open\|reason=failed_closed" -c
 
 # Show the most recent failures with full context
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open\|reason=failed_closed" | tail -10
 ```
 
@@ -1193,7 +1193,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ```bash
 # category=system indicates internal errors — these should never appear
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -c "category=system"
 ```
 
@@ -1201,7 +1201,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ```bash
 # See the distribution of all reason codes
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[A-Za-z_]+' | sort | uniq -c | sort -rn
 ```
 
@@ -1209,7 +1209,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ```bash
 # Show all eligibility and Accept skip reasons; disabled is intentionally excluded.
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=(not_eligible|skipped_[a-z_]+)" | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 ```
@@ -1219,7 +1219,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 ```bash
 # Break down failures by category (conversion, resource_limit, system)
 # The category= field appears in decision log entries for failure outcomes
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'category=\K[a-z_]+' | sort | uniq -c
 ```
 
@@ -1227,7 +1227,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ```bash
 # Identify which URIs are failing most often
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open|reason=failed_closed" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c | sort -rn | head -10
 ```
@@ -1282,7 +1282,7 @@ diff -u /tmp/metrics-before.prom /tmp/metrics-after.prom
 # Show all skip reason codes from decision log
 # (skip reasons are not in the metrics endpoint;
 # use decision log grep patterns instead)
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=not_eligible|reason=skipped_" | \
   grep -oP 'reason=\K[A-Za-z_]+' | sort | uniq -c
 ```

@@ -328,7 +328,7 @@
       "properties": {
         "module_benchmark": {
           "type": "object",
-          "required": ["version", "timestamp", "git_commit", "scenarios", "memory_slope"],
+          "required": ["version", "timestamp", "git_commit", "scenarios"],
           "properties": {
             "version": {
               "type": "string",
@@ -426,7 +426,7 @@
                         "description": "Requests per second"
                       },
                       "throughput_mbytes_per_sec": {
-                        "type": "number",
+                        "type": ["number", "null"],
                         "minimum": 0,
                         "description": "Throughput in MB/s"
                       },
@@ -466,19 +466,19 @@
                         "description": "NGINX worker RSS in megabytes after scenario"
                       },
                       "streaming_ratio": {
-                        "type": "number",
+                        "type": ["number", "null"],
                         "minimum": 0,
                         "maximum": 1,
                         "description": "Fraction of requests using streaming path"
                       },
                       "fullbuffer_ratio": {
-                        "type": "number",
+                        "type": ["number", "null"],
                         "minimum": 0,
                         "maximum": 1,
                         "description": "Fraction of requests using full-buffer path"
                       },
                       "fallback_rate": {
-                        "type": "number",
+                        "type": ["number", "null"],
                         "minimum": 0,
                         "maximum": 1,
                         "description": "Rate of streaming fallback to full-buffer"

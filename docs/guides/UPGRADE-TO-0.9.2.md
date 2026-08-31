@@ -52,7 +52,7 @@ set -euo pipefail
 # The signing key fingerprint is defined by the GPG key management contract;
 # import it through an independently authenticated channel before verifying.
 # See docs/guides/GPG_KEY_MANAGEMENT.md for the authoritative fingerprint.
-TRUSTED_FINGERPRINT="<project-signing-key-fingerprint-from-GPG_KEY_MANAGEMENT.md>"
+TRUSTED_FINGERPRINT="15C792438EAA762B421E60D21E8D41E7D19A8A75"  # from docs/guides/GPG_KEY_MANAGEMENT.md (authoritative)
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${EXPECTED_FINGERPRINT}" =~ ^[A-F0-9]{40}$ ]] || {
   printf 'missing or invalid trusted fingerprint\n' >&2
@@ -122,10 +122,19 @@ fi
 
 ### 4. Replace the module
 
+> **Warning — do not overwrite a running module in place.** Copying over
+> the `.so` while old workers still have it mapped can serve mixed or stale
+> code (and risks SIGBUS on some platforms). Replace the module file
+> only between a full stop and the next start, below.
+
 ```bash
 tar -xzf "${MODULE_ARCHIVE}"
-sudo cp ngx_http_markdown_filter_module.so \
-    "$MODULES_DIR/ngx_http_markdown_filter_module.so"
+mkdir -p "${MODULES_DIR}"
+# Stage the new module beside the running one, then atomically rename it
+# into place while NGINX is stopped (step 6).  A plain cp over the live
+# file is NOT atomic and may tear the mapping for active workers.
+sudo install -m 0755 ngx_http_markdown_filter_module.so \
+    "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new"
 ```
 
 ### 5. Migrate the configuration
@@ -154,7 +163,16 @@ A 0.9.1 configuration fails `nginx -t` under the 0.9.2 binary (removed
 directives produce errors), so configuration migration must happen before
 the restart in the next step.
 
-### 6. Validate and restart with the active service manager
+### 6. Full stop, swap the module, and start
+
+> **A plain `nginx -s reload` does NOT load a replaced module.** NGINX
+> keeps the previously loaded module when both old and new configs
+> reference the same `load_module` directive — an operator can believe the
+> upgrade landed while workers still run the old code. The upgrade below
+> therefore uses a full stop, an atomic rename of the staged module into
+> place, and a fresh start. (For a truly in-place online upgrade, NGINX
+> binary upgrade via `kill -USR2` + `kill -QUIT` is the supported path, not
+> module-file replacement under reload.)
 
 ```bash
 sudo nginx -t
@@ -167,15 +185,30 @@ if command -v systemctl >/dev/null 2>&1 \
   main_pid="$(systemctl show -p MainPID --value nginx.service)"
   if [[ "$main_pid" =~ ^[0-9]+$ ]] \
       && pgrep -x nginx | grep -qx "$main_pid"; then
-    sudo systemctl restart nginx
+    sudo systemctl stop nginx
   else
-    echo "ERROR: nginx.service is active but does not own the running NGINX master; refusing to reload" >&2
+    echo "ERROR: nginx.service is active but does not own the running NGINX master; refusing to stop" >&2
     exit 1
   fi
 else
-  # If another supervisor owns NGINX, use its restart/reload operation instead.
-  # For a directly managed master process, the equivalent is:
-  sudo nginx -s reload
+  # For a directly managed master: terminate the master so all workers
+  # exit before the module file is swapped; then start fresh below.
+  # (If the process is owned by another supervisor, use its stop/start.)
+  sudo nginx -s quit
+  while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done
+fi
+
+# Swap the staged module into place atomically while NGINX is stopped.
+sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
+    "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+sudo nginx -t
+
+# Start a fresh master with the new module loaded.
+if command -v systemctl >/dev/null 2>&1 \
+    && systemctl is-active --quiet nginx.service; then
+  sudo systemctl start nginx
+else
+  sudo nginx
 fi
 ```
 
@@ -276,14 +309,18 @@ helm repo update
 ```bash
 # Use the chart source selected in Step 1.
 # In-tree chart (checked out at the 0.9.2 tag):
+# The chart requires an explicit image.repository plus tag (or digest);
+# image values live at the chart top level, not under markdown.image.
 helm upgrade nginx-markdown ./charts/nginx-markdown \
     --namespace nginx-markdown \
-    --set markdown.image.tag=v0.9.2
+    --set image.repository=<your-registry>/nginx-markdown \
+    --set image.tag=v0.9.2
 
 # Remote chart repository (added in Step 1):
 #   helm upgrade nginx-markdown nginx-markdown/nginx-markdown-for-agents \
 #       --namespace nginx-markdown \
-#       --set markdown.image.tag=v0.9.2
+#       --set image.repository=<your-registry>/nginx-markdown \
+#       --set image.tag=v0.9.2
 ```
 
 ### 3. Verify

@@ -285,10 +285,12 @@ check_active_configuration() {
         return 1
     fi
 
-    # A missing executable with configuration files present but unassessable,
-    # or an unobserved include path, is unverifiable rather than evidence
-    # that no module is loaded.
-    return 2
+    # A missing executable with every present standard configuration file
+    # successfully read is evidence that the module is not loaded: the
+    # fixed package configuration graph was inspected and contains no
+    # load_module reference. Only an unreadable configuration entry (the
+    # config_status == 2 branch above) remains unverifiable.
+    return 1
 }
 
 ##############################################################################

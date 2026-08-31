@@ -25,11 +25,12 @@ authenticated trust anchor.
 > **Availability check:** A release candidate and its compatibility-matrix
 > entry do not make a DEB or RPM package downloadable. Before using the
 > commands below, confirm that the selected GitHub Release contains the exact
-> package, `SHA256SUMS`, and `SHA256SUMS.asc`. The current repository does not
-> publish an independently authenticated release-key fingerprint. Do not
-> treat a same-release key file, key ID, or checksum as project authenticity.
-> Obtain the complete fingerprint through an independently authenticated
-> operator/project channel before proceeding. Otherwise use the
+> package, `SHA256SUMS`, and `SHA256SUMS.asc`. The release signing-key
+> fingerprint appears in [GPG_KEY_MANAGEMENT.md](./GPG_KEY_MANAGEMENT.md).
+> Import the key through an independently authenticated channel and verify
+> against that authoritative fingerprint. Do not treat a same-release key
+> file, key ID, or checksum as project authenticity on its own. If you cannot
+> authenticate the key through an independent channel, use the
 > [Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
 
 ## Select the Matching Artifact
@@ -42,12 +43,14 @@ architecture. The target NGINX version must match the installed NGINX ABI.
 | Platform | Format | Source |
 |----------|--------|--------|
 | glibc-based Linux (Ubuntu, Debian, RHEL, AlmaLinux, Amazon Linux) | DEB/RPM | `release-packages.yml` (GitHub Releases) |
-| musl-based Linux (Alpine, etc.) | Static binary tarball | `release-binaries.yml` (GitHub Releases) |
+| musl-based Linux (Alpine, etc.) | Dynamic-module tarball | `release-binaries.yml` (GitHub Releases) — pair it with an ABI-compatible NGINX binary per the compatibility matrix |
 
 DEB and RPM packages are built on glibc-based build images and target
 glibc-based distributions only. For musl-based environments (Alpine Linux,
-and so on), use the pre-built binary tarball from the Release Binaries workflow or
-build from source.
+and so on), use the pre-built dynamic-module tarball from the Release
+Binaries workflow (it is a loadable module artifact, not a static server
+binary — pair it with an ABI-compatible NGINX executable, see the
+compatibility matrix in COMPATIBILITY.md) or build from source.
 
 DEB format:
 
@@ -85,9 +88,12 @@ curl -fsSL -o SHA256SUMS "${BASE_URL}/SHA256SUMS"
 curl -fsSL -o SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
 curl -fsSL -o "${PKG}" "${BASE_URL}/${PKG}"
 # Supply both values through an independently authenticated channel. Do not
-# import a key from this repository or from the same release asset set.
-: "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to an independently authenticated public-key file}"
-: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
+# import a key from the same release asset set. The checked-in project key
+# (packaging/nginx-markdown-for-agents-release.asc in the git repository) is
+# the transport; the fingerprint published in docs/guides/GPG_KEY_MANAGEMENT.md
+# is the trust anchor — confirm the imported key matches it exactly.
+: "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to the project public-key file (packaging/nginx-markdown-for-agents-release.asc, from the git repository, not the release assets)}"
+: "${TRUSTED_FINGERPRINT:?set TRUSTED_FINGERPRINT to the fingerprint published in docs/guides/GPG_KEY_MANAGEMENT.md}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
 GNUPGDIR="$(mktemp -d)"
 trap 'rm -rf "${GNUPGDIR}"' EXIT
@@ -118,9 +124,12 @@ curl -fsSL -o SHA256SUMS "${BASE_URL}/SHA256SUMS"
 curl -fsSL -o SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
 curl -fsSL -o "${PKG}" "${BASE_URL}/${PKG}"
 # Supply both values through an independently authenticated channel. Do not
-# import a key from this repository or from the same release asset set.
-: "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to an independently authenticated public-key file}"
-: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
+# import a key from the same release asset set. The checked-in project key
+# (packaging/nginx-markdown-for-agents-release.asc in the git repository) is
+# the transport; the fingerprint published in docs/guides/GPG_KEY_MANAGEMENT.md
+# is the trust anchor — confirm the imported key matches it exactly.
+: "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to the project public-key file (packaging/nginx-markdown-for-agents-release.asc, from the git repository, not the release assets)}"
+: "${TRUSTED_FINGERPRINT:?set TRUSTED_FINGERPRINT to the fingerprint published in docs/guides/GPG_KEY_MANAGEMENT.md}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
 GNUPGDIR="$(mktemp -d)"
 trap 'rm -rf "${GNUPGDIR}"' EXIT
@@ -130,7 +139,7 @@ VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
-grep " ${PKG}$" SHA256SUMS | sha256sum -c -
+awk -v pkg=" ${PKG}$" '$0 ~ pkg { count++; line=$0 } END { if (count == 1) print line; else exit 1 }' SHA256SUMS | sha256sum -c -
 sudo rpm -Uvh "./${PKG}"
 ```
 

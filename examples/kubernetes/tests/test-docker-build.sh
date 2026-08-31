@@ -303,7 +303,7 @@ http {
     }
 }
 EOF
-nginx -c /tmp/markdown-http.conf -g "daemon off;"
+nginx -c /tmp/markdown-http.conf
 ' >/dev/null 2>&1 || run_rc=$?
 
     if [[ "$run_rc" -ne 0 ]]; then

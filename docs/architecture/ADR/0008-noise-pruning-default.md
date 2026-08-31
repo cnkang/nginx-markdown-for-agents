@@ -58,9 +58,10 @@ Tag-name-only selectors apply to **all** elements matching the selected tag name
 ### Empty-Output Fallback (Deferred)
 
 Not implemented in 0.9.x. If pruning removes all content from the output, the
-module delivers the empty Markdown string as a converted result. The decision
-chain reports no dedicated skip or failure reason for this outcome, and the
-reason registry defines no prune-specific reason code.
+module delivers the empty Markdown string as a converted result and reports
+the normal `converted` outcome. The delivered zero-length body and the
+conversion metrics make the emptied output observable, but the reason
+registry defines no prune-specific reason code.
 
 The fallback design below stays deferred because it needs all three of the
 following, and none fits the 0.9.2 freeze:

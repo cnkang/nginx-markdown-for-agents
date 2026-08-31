@@ -44,7 +44,7 @@
           "streaming_fallback_total": 0,
           "streaming_requests_total": 1030,
           "precommit_failopen_total": 0,
-          "throughput_mbytes_per_sec": 0.0,
+          "throughput_mbytes_per_sec": null,
           "decompression_streaming_total": 1030,
           "decompression_fullbuffer_total": 0,
           "zero_copy_output_total": 12360,

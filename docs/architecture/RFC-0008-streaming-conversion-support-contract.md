@@ -278,7 +278,7 @@ Original-HTML passthrough is available **only while the replay buffer still
 covers every upstream byte read so far** (see §3.1). When replay is
 incomplete and headers are not yet committed, the module MUST NOT pass
 through: it must continue safe streaming conversion or apply
-`markdown_error_policy` (reject) before committing headers.
+`markdown_error_policy fail_closed` before committing headers.
 
 #### `markdown_error_policy fail_closed`
 

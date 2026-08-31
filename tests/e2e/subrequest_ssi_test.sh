@@ -275,8 +275,18 @@ auth_terminals_before="$(converted_terminal_total "$auth_metrics_before")"
 # (401, 500, ...) mean the fixture exists but misbehaves.
 auth_body_file="$(mktemp)"
 auth_http_status=""
+auth_curl_rc=0
 auth_http_status="$(curl -sS -o "${auth_body_file}" -w '%{http_code}' \
-    "${NGINX_URL}${AUTH_PAGE_PATH}" 2>/dev/null)" || auth_http_status=""
+    "${NGINX_URL}${AUTH_PAGE_PATH}" 2>/dev/null)" || auth_curl_rc=$?
+if [[ "${auth_curl_rc}" -ne 0 ]]; then
+    # A transport error (connection refused, timeout, ...) is not fixture
+    # absence: fail immediately instead of treating the missing status as
+    # an absent fixture.
+    rm -f "${auth_body_file}"
+    fail "auth_request fixture probe failed with curl exit ${auth_curl_rc} (transport error, not a 404)"
+    exit 1
+fi
+auth_http_status="${auth_http_status:-000}"
 auth_body=""
 if [[ -n "${auth_http_status}" && -s "${auth_body_file}" ]]; then
     auth_body="$(cat "${auth_body_file}")"
