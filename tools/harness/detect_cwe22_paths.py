@@ -182,7 +182,7 @@ def _is_safe_open_context(
     if path_open_receiver and (
         path_open_receiver in hardcoded_vars
         or _path_root(path_open_receiver) in hardcoded_vars
-        or _path_root(path_open_receiver) in validated_vars
+        or path_open_receiver in validated_vars
     ):
         return True
     return _is_safe_open_line_context(line, lines, lineno)

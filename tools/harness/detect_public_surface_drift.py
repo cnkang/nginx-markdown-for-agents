@@ -747,8 +747,12 @@ def _reason_metrics(text):
         pending_variants.extend(re.findall(r"ReasonCode::(\w+)", lhs))
         if not separator:
             continue
-        metric_match = re.match(r'\s*"([^\"]+)"', rhs)
+        metric_match = re.match(r'\s*"([^"]+)"', rhs)
         if metric_match is None:
+            # An arm contains the separator but no string literal on the
+            # right-hand side: pending variants must not carry over to the
+            # next arm, or they would be attributed to the wrong metric.
+            pending_variants = []
             continue
         for variant in pending_variants:
             metrics[variant] = metric_match.group(1)

@@ -1785,12 +1785,36 @@ def _handle_group_open(pattern: str, i: int, n: int) -> tuple[_Token, int]:
     return _Token(_TKind.GROUP_OPEN, pattern[i], i), i + 1
 
 
+def _consume_delimited(pattern: str, k: int, n: int, close: str) -> int:
+    """Consume through the closing delimiter, or to end-of-string."""
+    end = pattern.find(close, k)
+    return n if end == -1 else end + 1
+
+
+def _consume_named_group_prefix(pattern: str, k: int, n: int) -> int:
+    """Consume '(?P<name>', '(?P=name)', '(?<name>' forms fully."""
+    if k + 1 < n and pattern[k] == "P" and pattern[k + 1] in "<=":
+        if pattern[k + 1] == "<":
+            return _consume_delimited(pattern, k + 2, n, ">")
+        return _consume_delimited(pattern, k + 2, n, ")")
+    if k < n and pattern[k] == "<" and k + 1 < n and pattern[k + 1] not in "=!":
+        return _consume_delimited(pattern, k + 1, n, ">")
+    return k
+
+
 def _handle_special_group(pattern: str, i: int, n: int) -> tuple[_Token, int]:
     k = i + 2
     if k < n and pattern[k] == "#":
         end = pattern.find(")", k)
         new_i = n if end == -1 else end + 1
         return _Token(_TKind.GROUP_OPEN, "(", new_i), new_i
+    # Named group definition (?P<name>...) or (?<name>...): consume the
+    # complete prefix including the group name and its closing '>' so the
+    # group body tokenizes as real content (nested quantifiers analyzed).
+    # (?<= and (?<! are lookbehind, not named groups.
+    consumed = _consume_named_group_prefix(pattern, k, n)
+    if consumed != k:
+        return _Token(_TKind.GROUP_OPEN, pattern[i], i), consumed
     while k < n and pattern[k] in ":=!<>(?P":
         k += 1
     return _Token(_TKind.GROUP_OPEN, pattern[i], i), k
