@@ -152,7 +152,7 @@ def validate_module_benchmark(report: dict) -> list[str]:
     if not isinstance(mb, dict):
         return ["'module_benchmark' must be a dict"]
 
-    required_top = {"version", "timestamp", "git_commit", "scenarios", "memory_slope"}
+    required_top = {"version", "timestamp", "git_commit", "scenarios"}
     errors.extend(validate_required_fields(mb, required_top, "module_benchmark"))
 
     scenarios = mb.get("scenarios", [])
@@ -161,12 +161,15 @@ def validate_module_benchmark(report: dict) -> list[str]:
     else:
         _validate_module_scenarios(scenarios, errors)
 
-    if "memory_slope" in mb and not isinstance(mb["memory_slope"], dict):
-        errors.append("memory_slope must be a dict")
-    else:
-        ms = mb.get("memory_slope", {})
-        required_ms = {"rss_per_input_mb", "r_squared"}
-        errors.extend(validate_required_fields(ms, required_ms, "memory_slope"))
+    # memory_slope is optional: no benchmark generator emits the regression
+    # object today, so requiring it would reject every checked-in baseline.
+    # The property itself is still validated when present.
+    if "memory_slope" in mb:
+        if not isinstance(mb["memory_slope"], dict):
+            errors.append("memory_slope must be a dict")
+        else:
+            required_ms = {"rss_per_input_mb", "r_squared"}
+            errors.extend(validate_required_fields(mb["memory_slope"], required_ms, "memory_slope"))
 
     return errors
 
