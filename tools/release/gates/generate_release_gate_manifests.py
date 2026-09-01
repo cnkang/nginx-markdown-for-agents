@@ -290,17 +290,17 @@ def build_fuzz_manifests(candidate_sha: str, created_at: str) -> tuple[dict, dic
 def build_artifact_index(candidate_sha: str, created_at: str, artifact_root: Path) -> dict:
     """
     Build an artifact index that binds each downloaded DEB or RPM artifact to a release candidate.
-    
+
     Parameters:
-    	candidate_sha (str): Full Git SHA identifying the release candidate.
-    	created_at (str): Timestamp recorded in the generated index.
-    	artifact_root (Path): Repository-contained directory containing downloaded artifacts.
-    
+        candidate_sha (str): Full Git SHA identifying the release candidate.
+        created_at (str): Timestamp recorded in the generated index.
+        artifact_root (Path): Repository-contained directory containing downloaded artifacts.
+
     Returns:
-    	dict: Artifact index containing each artifact's relative path, type, SHA-256 digest, candidate identity, ABI version, and verification metadata.
-    
+        dict: Artifact index containing each artifact's relative path, type, SHA-256 digest, candidate identity, ABI version, and verification metadata.
+
     Raises:
-    	ValueError: If the artifact directory is outside the repository, contains no DEB or RPM artifacts, includes symlinks or paths escaping the repository, has an inconsistent artifact type, or the ABI version cannot be read.
+        ValueError: If the artifact directory is outside the repository, contains no DEB or RPM artifacts, includes symlinks or paths escaping the repository, has an inconsistent artifact type, or the ABI version cannot be read.
     """
     try:
         artifact_root = artifact_root.resolve()

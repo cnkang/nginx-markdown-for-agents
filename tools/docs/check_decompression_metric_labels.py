@@ -19,13 +19,13 @@ REASON_RE = re.compile(r'(?m)^\s*reason="([^"]+)"\s*$')
 def canonical_reason_values(registry: dict) -> tuple[str, ...]:
     """
     Extract the canonical values for the decompression metric's `reason` label.
-    
+
     Parameters:
         registry (dict): Metrics registry containing family and label definitions.
-    
+
     Returns:
         tuple[str, ...]: The configured `reason` label values.
-    
+
     Raises:
         ValueError: If the metric family or its valid `reason` label values are missing.
     """
@@ -47,11 +47,11 @@ def validate_documents(
 ) -> list[str]:
     """
     Validate documented decompression reason values against the metrics registry.
-    
+
     Parameters:
         registry (dict): Metrics registry containing the canonical reason values.
         documents (dict[Path, str]): Decompression documents keyed by their paths.
-    
+
     Returns:
         list[str]: Validation error messages for documents with missing, duplicated, or mismatched reason contracts.
     """
@@ -73,9 +73,9 @@ def validate_documents(
 
 def main() -> int:
     """Validate documented decompression metric labels and report the result.
-    
+
     Returns:
-    	int: 1 if validation errors are found, otherwise 0.
+        int: 1 if validation errors are found, otherwise 0.
     """
     registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
     documents = {

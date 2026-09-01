@@ -2058,6 +2058,18 @@ if [[ "$TAR_MEMBERS" != "$EXPECTED_MEMBER" ]]; then
         "Archive member mismatch: expected \"$EXPECTED_MEMBER\", got \"$TAR_MEMBERS\"." \
         "The archive may be corrupted or built for a different purpose."
 fi
+# Require the member to be a regular file: `[[ -f ]]` follows symlinks, so a
+# crafted archive could point the expected name at a directory or device.
+# `tar -tvzf` typeflags: '-' = regular file. BSD tar prints no typeflag for
+# regular files; GNU tar prints '-' — accept both, reject anything else.
+TAR_TYPEFLAG="$( "$TAR_BIN" -tvzf "$ASSET_NAME" 2>/dev/null \
+    | awk -v member="$EXPECTED_MEMBER" '$NF == member { print substr($0, 1, 1) }' \
+    | head -1)"
+if [[ -n "$TAR_TYPEFLAG" && "$TAR_TYPEFLAG" != "-" ]]; then
+    die_with_error "extraction" \
+        "Archive member ${EXPECTED_MEMBER} is not a regular file (type flag '${TAR_TYPEFLAG}')." \
+        "Refusing to extract a non-regular-file member."
+fi
 # Check for absolute paths or path traversal in member names (defense-in-depth)
 if echo "$TAR_MEMBERS" | grep -qE '^/|(^|/)\.\./'; then
     die_with_error "extraction" \

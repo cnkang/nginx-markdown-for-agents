@@ -37,6 +37,8 @@ import pytest
 from tools.perf.report_schema import validate_module_benchmark
 from tools.perf.upstream_mock import MockUpstreamHandler
 from tools.perf.benchmark_validation import (
+    _ab_performance,
+    _hey_performance,
     ScenarioResultInput,
     attach_response_probe,
     build_scenario_result,
@@ -276,6 +278,67 @@ def test_ab_rejects_non_2xx_and_incomplete_results():
     assert non_2xx["verdict"] == "fail"
     assert non_2xx["non_2xx_responses"] == 1
     assert incomplete["verdict"] == "fail"
+
+
+def test_ab_missing_performance_profile_fails_scenario_closed():
+    """Missing percentile lines must fail the scenario, not yield zero rps."""
+    partial = (
+        "Complete requests:      10\n"
+        "Failed requests:        0\n"
+        "Requests per second:    100.00 [#/sec] (mean)\n"
+    )
+    assert _ab_performance(partial) is None
+    assert _ab_performance(VALID_AB_OUTPUT) == (100.0, 2.0, 4.0, 5.0)
+
+    result = build_scenario_result(
+        ScenarioResultInput(
+            raw_content=partial,
+            name="streaming-first",
+            profile="streaming_first",
+            compression="none",
+            transfer_encoding="chunked",
+            concurrency=1,
+            worker_rss_kb=1,
+            load_generator="ab",
+            ttfb={"ttfb_p50_ms": 1.0, "ttfb_p95_ms": 2.0},
+            nginx_metrics={},
+            input_bytes=1,
+            baseline_rss_kb=1,
+            peak_rss_kb=1,
+            iterations=10,
+            load_exit_code=0,
+        )
+    )
+    assert result["status"] == "failed"
+    assert "load_result_unparseable: performance fields" in result["reason"]
+
+
+def test_hey_missing_performance_profile_fails_scenario_closed():
+    """Empty or malformed hey CSV must fail the scenario, not yield zero rps."""
+    assert _hey_performance("not,valid,csv\n") is None
+    assert _hey_performance("") is None
+
+    result = build_scenario_result(
+        ScenarioResultInput(
+            raw_content="",
+            name="streaming-first",
+            profile="streaming_first",
+            compression="none",
+            transfer_encoding="chunked",
+            concurrency=1,
+            worker_rss_kb=1,
+            load_generator="hey",
+            ttfb={"ttfb_p50_ms": 1.0, "ttfb_p95_ms": 2.0},
+            nginx_metrics={},
+            input_bytes=1,
+            baseline_rss_kb=1,
+            peak_rss_kb=1,
+            iterations=2,
+            load_exit_code=0,
+        )
+    )
+    assert result["status"] == "failed"
+    assert "load_result_unparseable" in result["reason"]
 
 
 def test_hey_rejects_non_2xx_transport_errors_and_short_results():
@@ -1493,13 +1556,11 @@ class TestPortCleanupOnSignals:
     def test_trap_declaration_in_script(self):
         """Verify the script declares traps for EXIT, INT, and TERM signals."""
         script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
-        # The trap line should register the cleanup function for these signals
-        assert "trap cleanup EXIT INT TERM" in script_content or (
-            "trap" in script_content
-            and "EXIT" in script_content
-            and "INT" in script_content
-            and "TERM" in script_content
-        ), "Script must declare traps for EXIT, INT, and TERM"
+        assert re.search(
+            r"^trap[ \t]+cleanup[ \t]+(EXIT|INT|TERM)([ \t]+(EXIT|INT|TERM)){2}[ \t]*$",
+            script_content,
+            re.M,
+        ), "Script must declare a single trap line registering cleanup for EXIT, INT, and TERM"
 
     def test_cleanup_removes_temp_directory(self):
         """Temp working directory is removed during cleanup."""
@@ -1545,12 +1606,12 @@ class TestPortCleanupOnSignals:
     def _spawn_benchmark_process(self, tmpdir):
         """
         Start a benchmark subprocess configured to run the plain-small scenario with a temporary stub server.
-        
+
         Parameters:
-        	tmpdir (str or os.PathLike): Directory used for temporary benchmark files.
-        
+            tmpdir (str or os.PathLike): Directory used for temporary benchmark files.
+
         Returns:
-        	subprocess.Popen: The running benchmark process with captured standard output and error streams.
+            subprocess.Popen: The running benchmark process with captured standard output and error streams.
         """
         tmpdir_path = Path(tmpdir)
         stub = self._create_stub_nginx(tmpdir_path)
