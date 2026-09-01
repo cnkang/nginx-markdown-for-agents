@@ -1436,13 +1436,15 @@ test_adopt_orphan_rejects_value_beyond_scan_limit(void)
         r, scan_limit, NULL);
     TEST_ASSERT(rc == NGX_ERROR,
                 "value beyond the configured scan limit must be rejected");
-    TEST_ASSERT(valid->hash != 0
-                    && valid->value.len == sizeof("\"valid\"") - 1,
-                "NUL-terminated entry is restored with correct length");
+    TEST_ASSERT(valid->hash == 0,
+                "cross-name atomicity: a healthy entry is NOT restored when "
+                "the other name fails validation (request stays unchanged)");
+    TEST_ASSERT(valid->value.len == 0,
+                "the healthy entry's suppressed length is preserved");
     TEST_ASSERT(broken->hash == 0,
                 "entry without NUL within bound remains hidden");
-    TEST_ASSERT(r->headers_in.if_none_match == valid,
-                "typed pointer for the restored entry is rebuilt");
+    TEST_ASSERT(r->headers_in.if_none_match == NULL,
+                "no typed pointer is rebuilt on a failed adoption");
     TEST_ASSERT(r->headers_in.if_modified_since == NULL
                     || r->headers_in.if_modified_since != broken,
                 "typed pointer for the skipped entry is not rebuilt");

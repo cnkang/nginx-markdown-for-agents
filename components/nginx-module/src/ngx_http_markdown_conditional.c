@@ -88,6 +88,58 @@ ngx_http_markdown_adopt_first_restored(
     }
 }
 
+/*
+ * Validate every suppressed candidate of one header name without
+ * mutating anything.  Returns NGX_OK when all candidates (if any) are
+ * safely adoptable, NGX_ERROR when any candidate's value lacks a
+ * terminating NUL within the bounded scan.  Used to make cross-name
+ * adoption atomic: both name sets must validate before either is
+ * committed.
+ */
+static ngx_int_t
+ngx_http_markdown_validate_conditional_candidates(ngx_http_request_t *r,
+    u_char *name, size_t name_len, size_t scan_limit)
+{
+    if (r == NULL || name == NULL || name_len == 0) {
+        return NGX_ERROR;
+    }
+    if (r->headers_in.headers.part.nelts == 0) {
+        return NGX_OK;
+    }
+
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].key.len != name_len
+                || ngx_strncasecmp(headers[i].key.data, name, name_len) != 0)
+            {
+                continue;
+            }
+
+            if (headers[i].hash != 0) {
+                continue;
+            }
+
+            if (headers[i].value.len != 0
+                || headers[i].value.data == NULL)
+            {
+                continue;
+            }
+
+            if (memchr(headers[i].value.data, '\0', scan_limit) == NULL) {
+                return NGX_ERROR;
+            }
+        }
+    }
+
+    return NGX_OK;
+}
+
 static ngx_int_t
 ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
     u_char *name, size_t name_len, size_t scan_limit,
@@ -204,6 +256,23 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     ngx_int_t        ims_rc;
 
     if (r == NULL) {
+        return NGX_ERROR;
+    }
+
+    /*
+     * Cross-name atomic adoption: validate BOTH suppressed sets before
+     * committing either.  A failure in one name must leave the request
+     * headers entirely unchanged — restoring If-None-Match and then
+     * failing on If-Modified-Since would expose a partially re-owned
+     * validator set to the next PREACCESS pass.
+     */
+    inm_rc = ngx_http_markdown_validate_conditional_candidates(
+        r, inm_name, sizeof(inm_name) - 1, scan_limit);
+    ims_rc = ngx_http_markdown_validate_conditional_candidates(
+        r, ims_name, sizeof(ims_name) - 1, scan_limit);
+    if (inm_rc != NGX_OK || ims_rc != NGX_OK) {
+        r->headers_in.if_none_match = NULL;
+        r->headers_in.if_modified_since = NULL;
         return NGX_ERROR;
     }
 
