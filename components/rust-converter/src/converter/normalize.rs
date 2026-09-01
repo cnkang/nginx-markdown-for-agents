@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn leading_indent_columns_saturates_on_extreme_prefix() {
+    fn leading_indent_columns_counts_large_bounded_prefix() {
         // A pathological line of spaces must count columns without
         // overflowing in debug builds; the counter saturates at
         // usize::MAX. Exercise the loop with a large (but finite)

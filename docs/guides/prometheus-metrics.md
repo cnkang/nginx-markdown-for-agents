@@ -45,7 +45,6 @@ path, URI, host, profile, and per-path dimensions are not emitted.
 | `nginx_markdown_conversion_duration_seconds` | histogram | `engine` | Conversion duration with ten fixed boundaries, `_bucket`, `_sum`, and `_count`. |
 | `nginx_markdown_input_bytes_total` | counter | — | Input bytes read for conversion. |
 | `nginx_markdown_output_bytes_total` | counter | — | Converted bytes successfully delivered downstream. |
-| `nginx_markdown_inflight_requests` | gauge | — | Requests currently undergoing conversion. |
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | Peak working-set estimate from the most recent streaming conversion; not process RSS. |
 | `nginx_markdown_streaming_events_total` | counter | `transition`, `reason` | Closed streaming lifecycle transitions. |
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | Decompression completion and failure events. |
@@ -76,7 +75,7 @@ The frozen event model is:
    outcome.
 2. A request starts at most one conversion attempt.
 3. A successful attempt produces at most one request-level successful delivery.
-4. `inflight_requests` returns to zero after quiescence.
+4. The diagnostics in-flight counter returns to zero after quiescence.
 
 Therefore, after the system is quiescent (no in-flight requests, so the
 counters have stopped advancing), the conservation equations hold on
@@ -88,7 +87,6 @@ delta(sum(requests_total)) == requests entering the decision chain during the wi
 delta(sum(conversion_attempts_total)) <= delta(sum(requests_total))
 delta(sum(conversion_deliveries_total)) <= delta(sum(conversion_attempts_total))
 delta(conversion_duration_seconds_count) <= delta(sum(conversion_attempts_total))
-inflight_requests == 0
 ```
 
 Compare deltas from the same baseline for every family. Raw cumulative

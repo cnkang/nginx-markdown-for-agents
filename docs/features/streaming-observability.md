@@ -19,7 +19,6 @@ observability comes through:
 | `nginx_markdown_conversion_attempts_total` | `engine` | At-most-once conversion attempts. |
 | `nginx_markdown_conversion_deliveries_total` | `engine` | Successful downstream delivery only. |
 | `nginx_markdown_output_bytes_total` | none | Converted bytes accepted downstream. |
-| `nginx_markdown_inflight_requests` | none | Requests still in the conversion pipeline. |
 | `nginx_markdown_requests_total` | `outcome`, `stage`, `reason` | Exactly one terminal outcome per decision-chain request. |
 
 The renderer emits a fixed transition allowlist: `commit`, `fallback`,
@@ -66,7 +65,8 @@ The counters follow these conservation rules:
   downstream filter accepts the converted response.
 - failed-open, failed-closed, terminal abort, and client-abort paths do not
   count as successful deliveries.
-- `inflight_requests` returns to zero after cleanup and quiescence.
+- the in-flight counter (diagnostics-only, not a Prometheus family) returns
+  to zero after cleanup and quiescence.
 - `NGX_AGAIN` records pending work, not delivery.
 
 ## Diagnostics

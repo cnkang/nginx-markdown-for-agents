@@ -72,8 +72,8 @@ converted buffer. It treats `NGX_AGAIN` as a suspension, not delivery.
 - Successful delivery: `nginx_markdown_conversion_deliveries_total`.
 - Streaming transitions: `nginx_markdown_streaming_events_total`.
 - Decoder terminal events: `nginx_markdown_decompression_events_total`.
-- Bounded resource state: `nginx_markdown_inflight_requests` and the
-  `markdown_limits` configuration.
+- Bounded resource state: the diagnostics-only in-flight counter (not a
+  Prometheus family) and the `markdown_limits` configuration.
 
 The drift gate checks the public metric registry and diagnostics schema
 release gates. This document must remain explanatory and must not introduce a

@@ -66,8 +66,7 @@ Monitor these frozen families while tuning:
 - `nginx_markdown_conversion_deliveries_total`,
 - `nginx_markdown_conversion_duration_seconds`,
 - `nginx_markdown_streaming_events_total`,
-- `nginx_markdown_decompression_events_total`,
-- `nginx_markdown_inflight_requests`.
+- `nginx_markdown_decompression_events_total`.
 
 ## Memory and backpressure
 
