@@ -41,10 +41,10 @@ pending until the blocking gates pass.
 - **OTel removal**: The experimental OTel directives and implementation are
   absent from the 0.9.2 production surface. ADR-0027 records conditions for a
   possible future redesign.
-- **Metrics freeze**: The twelve-family v1 contract replaces the production
+- **Metrics freeze**: The eleven-family v1 contract replaces the production
   metrics endpoint (`requests_total`, `conversion_attempts_total`,
   `conversion_deliveries_total`, `conversion_duration_seconds`,
-  `input_bytes_total`, `output_bytes_total`, `inflight_requests`,
+  `input_bytes_total`, `output_bytes_total`,
   `streaming_events_total`, `streaming_peak_memory_bytes`,
   `decompression_events_total`, `dynconf_reloads_total`, `build_info`).
   This replaces the legacy multi-format, per-path, shadow, and debug families.
@@ -411,7 +411,7 @@ development version is 0.9.2. 0.9.1 remains the latest released patch until
 the 0.9.2 release tag and release gates are complete. It is a
 breaking surface-freeze release that consolidates the configuration surface
 to the 25-directive contract (removing profile presets and per-path metrics),
-freezes the observability surface (twelve v1 metric families, reason registry,
+freezes the observability surface (eleven v1 metric families, reason registry,
 diagnostics JSON v1), advances the bundled FFI boundary to ABI 2, and moves
 the musl dynamic-module build before publication, on top of the 0.9.1
 streaming-decompression and zero-copy foundation.

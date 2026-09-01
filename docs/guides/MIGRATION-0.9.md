@@ -251,10 +251,12 @@ For Grafana dashboards and alert rules, apply these transformations:
 
 # Step 2: Lowercase all reason label values in existing queries.
 # sed operates byte-wise without word boundaries: SKIP_/FAIL_ prefixes are
-# ASCII-only, so these substitutions are case-safe for JSON string values.
-# Use case-sensitive exact-prefix patterns (never [Ss][Kk]... classes) — a
-# case-insensitive replace would also rewrite already-lowercase values.
+# ASCII-only. dashboard.json stores PromQL strings as JSON, where the
+# quotes around label values are escaped (\"SKIP_ACC...) — match both the
+# escaped and unescaped forms so the rewrite survives either encoding.
+sed -i 's/reason=\"SKIP_/reason=\"skipped_/g' dashboard.json
 sed -i 's/reason="SKIP_/reason="skipped_/g' dashboard.json
+sed -i 's/reason=\"FAIL_/reason=\"failed_/g' dashboard.json
 sed -i 's/reason="FAIL_/reason="failed_/g' dashboard.json
 
 # Step 3: Replace old metric names with new unified families

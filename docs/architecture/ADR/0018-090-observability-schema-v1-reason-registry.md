@@ -41,7 +41,8 @@ Allowed labels: `reason`, `engine`, `profile`, `path_mode`, `cache_validation`
 actually selected at runtime (`full_buffer`/`streaming`, see ADR-0023). It is
 not a configuration selector. **Forbidden** as labels: URL, path, host, IP, User
 -Agent, raw header values, or any unbounded request-derived string. Per-path
-metrics keep their existing cardinality cap (`markdown_metrics_per_path_cardinality`).
+metrics no longer exist after 0.9.2 — the cardinality cap directive
+(`markdown_metrics_per_path_cardinality`) is gone too.
 
 ### Diagnostics JSON schema v1
 
