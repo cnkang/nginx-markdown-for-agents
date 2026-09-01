@@ -146,6 +146,8 @@ def load_corpus_version(corpus_dir: Path) -> str:
     version_file = corpus_dir / "corpus-version.json"
     validated_version = validate_read_path(version_file, purpose="corpus version")
     data = json.loads(validated_version.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("version"), str):
+        raise ValueError("corpus-version.json must contain a string 'version'")
     return data["version"]
 
 

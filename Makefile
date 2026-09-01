@@ -331,7 +331,7 @@ test-all:
 test-all-e2e:
 	@test -n "$(NGINX_BIN)" -o -n "$(NGINX_URL)" || { \
 		echo "FAIL: test-all-e2e requires NGINX_BIN (module-enabled nginx) or NGINX_URL (running fixture)" >&2; \
-		echo "  The verification host kang@10.99.0.2 provides a built binary; sync and use:" >&2; \
+		echo "  A module-enabled nginx binary is required; sync one from the verification host and use:" >&2; \
 		echo "    make test-all-e2e NGINX_BIN=/tmp/nginx-ims-verify.XXXX/objs/nginx" >&2; \
 		exit 2; \
 	}
@@ -1409,7 +1409,13 @@ test-production-examples-e2e-smoke:
 	@bash tools/e2e/verify_profile_smoke_e2e.sh || { \
 		rc=$$?; \
 		case "$$rc" in \
-			2) echo "SKIP: E2E smoke requires NGINX_BIN environment (deferred to CI)" ;; \
+			2) \
+				if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
+					echo "SKIP: E2E smoke requires NGINX_BIN environment (deferred to CI; RELEASE_GATE_ALLOW_SKIP_MODULE=1)"; \
+				else \
+					echo "FAIL: E2E smoke requires NGINX_BIN environment (set NGINX_BIN to a module-enabled nginx)" >&2; \
+					exit "$$rc"; \
+				fi ;; \
 			*) exit "$$rc" ;; \
 		esac; \
 	}

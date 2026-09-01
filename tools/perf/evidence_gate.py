@@ -68,8 +68,13 @@ _RELEASE_TAG_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+(?:\.\d+)?$")
 
 def _report_scenarios(report: dict) -> list:
     """Extract the scenarios list from a benchmark report."""
+    if not isinstance(report, dict):
+        return []
+    module_benchmark = report.get("module_benchmark", {})
+    if not isinstance(module_benchmark, dict):
+        module_benchmark = {}
     return (
-        report.get("module_benchmark", {}).get("scenarios", [])
+        module_benchmark.get("scenarios", [])
         or report.get("scenarios", [])
     )
 
@@ -2607,9 +2612,14 @@ def _validate_benchmark_evidence(
     # 5. Environment identity fields must be present and non-empty;
     #    nginx_version must also not use the legacy "unknown" placeholder.
     mb = report.get("module_benchmark", {})
+    if not isinstance(mb, dict):
+        violations.append(
+            (f"{role}.module_benchmark", "module_benchmark must be an object")
+        )
+        mb = {}
     for field in ("platform", "load_generator", "nginx_version"):
         val = mb.get(field, "")
-        if not val:
+        if not val or not isinstance(val, str):
             violations.append(
                 (f"{role}.{field}", f"missing or empty {field}")
             )

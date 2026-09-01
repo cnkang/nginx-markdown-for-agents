@@ -199,10 +199,10 @@ def audit_dir(directory: Path) -> tuple[list[str], list[str]]:
 def _strip_literals_and_comments(text: str) -> str:
     """
     Replace comments and string or character literals with spaces while preserving text length and character positions.
-    
+
     Parameters:
         text (str): Source text to sanitize.
-    
+
     Returns:
         str: Text with comments and literals blanked out.
     """
@@ -246,12 +246,12 @@ def _control_condition_is_closed(prefix: str, control_prefix: re.Match[str]) -> 
 def _access_prefix_is_conditional(prefix: str) -> bool:
     """
     Determine whether the code prefix places an access call on a conditional path.
-    
+
     Parameters:
-    	prefix (str): Source text preceding the access call.
-    
+        prefix (str): Source text preceding the access call.
+
     Returns:
-    	bool: `True` if control flow can skip the access call, `False` otherwise.
+        bool: `True` if control flow can skip the access call, `False` otherwise.
     """
     stripped_prefix = prefix.lstrip()
     if re.match(r"(?:else|do)\b", stripped_prefix):
@@ -283,7 +283,7 @@ def _access_prefix_is_conditional(prefix: str) -> bool:
 def _unconditional_access_positions(body: str) -> list[int]:
     """
     Identify access-control calls that execute unconditionally at the handler body level.
-    
+
     Returns:
         list[int]: Source offsets of unconditional access-control calls.
     """
@@ -302,12 +302,12 @@ def _unconditional_access_positions(body: str) -> list[int]:
 def audit_file(path: Path) -> tuple[list[str], list[str]]:
     """
     Audit a source file for access-control ordering issues in HTTP handlers.
-    
+
     Parameters:
-    	path (Path): Path to the C/C++ source file to audit.
-    
+        path (Path): Path to the C/C++ source file to audit.
+
     Returns:
-    	tuple[list[str], list[str]]: Violations and advisory reviews identified in the file.
+        tuple[list[str], list[str]]: Violations and advisory reviews identified in the file.
     """
     violations: list[str] = []
     reviews: list[str] = []

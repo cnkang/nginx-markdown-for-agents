@@ -195,6 +195,11 @@ resolve_trusted_nginx() {
 
 MODULE_REFERENCE_PATTERN='^[[:space:]]*load_module[[:space:]]+"?[^;]*ngx_http_markdown_filter_module\.so"?[[:space:]]*;'
 FORCE_REMOVE_SENTINEL="/etc/nginx/markdown-module-force-remove"
+# One-shot, content-bound forced-removal acknowledgement: the sentinel file
+# must contain exactly this token (operator-written when acknowledging a
+# forced removal) and is consumed on use, so a stale sentinel from a prior
+# install/remove cycle can never silently re-authorize a later removal.
+FORCE_REMOVE_TOKEN='nginx-markdown-module force-remove v1'
 
 ##############################################################################
 # Helpers
@@ -202,6 +207,19 @@ FORCE_REMOVE_SENTINEL="/etc/nginx/markdown-module-force-remove"
 
 info() {
     printf '[preremove] %s\n' "$1" >&2
+}
+
+# force_remove_acknowledged returns 0 when the sentinel file exists and its
+# content matches the required token byte-for-byte.  A mismatched or stale
+# sentinel is rejected (the guard stays active).
+force_remove_acknowledged() {
+    local expected
+    local actual
+
+    [[ -f "$FORCE_REMOVE_SENTINEL" ]] || return 1
+    expected="$FORCE_REMOVE_TOKEN"
+    actual="$(cat "$FORCE_REMOVE_SENTINEL" 2>/dev/null || true)"
+    [[ "$actual" == "$expected" ]]
 }
 
 configuration_loads_module() {
@@ -296,9 +314,14 @@ main() {
             ;;
         remove|0)
             if [[ -f "$FORCE_REMOVE_SENTINEL" ]]; then
-                info "WARNING: forced removal acknowledged (${FORCE_REMOVE_SENTINEL} present); skipping active-configuration verification."
-                info "WARNING: delete $FORCE_REMOVE_SENTINEL after removal to re-enable the guard."
-                return 0
+                if force_remove_acknowledged; then
+                    info "WARNING: forced removal acknowledged (${FORCE_REMOVE_SENTINEL} present); skipping active-configuration verification."
+                    info "WARNING: one-shot sentinel consumed; a future removal requires a fresh acknowledgement."
+                    rm -f "$FORCE_REMOVE_SENTINEL" \
+                        || info "WARNING: could not remove ${FORCE_REMOVE_SENTINEL}; delete it manually."
+                    return 0
+                fi
+                info "WARNING: ${FORCE_REMOVE_SENTINEL} exists but its content does not match the required token; ignoring it."
             fi
             ;;
         *)

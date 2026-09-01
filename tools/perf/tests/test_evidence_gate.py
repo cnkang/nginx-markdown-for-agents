@@ -1280,19 +1280,52 @@ class TestEvidenceMetricExtraction:
 
         result = evaluate_module_level(current, baseline, cfg, has_baseline=False)
 
-        # Verdict should still be GO because there are no breaches,
-        # just skipped percentage thresholds
-        assert result["verdict"] == "GO"
+        # Without a baseline, percentage thresholds cannot be compared and
+        # must surface as missing evidence instead of silently passing.
+        assert result["verdict"] == "MISSING_EVIDENCE"
 
         # Absolute caps like fallback_rate_abs should still be evaluated and pass
         fallback_entry = next(r for r in result["results"] if r["metric"] == "fallback_rate_abs")
         assert fallback_entry["status"] == "pass"
 
         # Percentage deviation metrics like p50_latency_small_pct
-        # should be skipped with explanations
+        # should be marked as missing evidence with explanations
         p50_entry = next(r for r in result["results"] if r["metric"] == "p50_latency_small_pct")
-        assert p50_entry["status"] == "skipped"
+        assert p50_entry["status"] == "missing_evidence"
         assert "missing baseline" in p50_entry["reason"]
+
+
+def test_report_scenarios_handles_non_dict_reports():
+    """Non-dict inputs must produce an empty scenario list, not raise."""
+    assert evidence_gate._report_scenarios({}) == []
+    assert evidence_gate._report_scenarios(None) == []
+    assert evidence_gate._report_scenarios("not a dict") == []
+    assert evidence_gate._report_scenarios({"scenarios": [{"name": "a"}]}) == [
+        {"name": "a"}
+    ]
+
+
+def test_environment_identity_fields_reject_non_string_values():
+    """Non-string environment fields fail cleanly instead of raising on .startswith."""
+    report = {
+        "module_benchmark": {
+            "platform": "ubuntu-latest",
+            "load_generator": None,
+            "nginx_version": 12345,
+        }
+    }
+    violations = evidence_gate._validate_benchmark_evidence(report, "candidate")
+    reasons = " ".join(reason for _, reason in violations)
+    assert "load_generator" in reasons or "nginx_version" in reasons
+
+
+def test_report_scenarios_ignores_malformed_module_benchmark():
+    """A non-dict module_benchmark must be reported, not crash later checks."""
+    violations = evidence_gate._validate_benchmark_evidence(
+        {"module_benchmark": ["not", "a", "dict"]},
+        "candidate",
+    )
+    assert any("module_benchmark" in v[0] for v in violations)
 
 
 class TestSkippedCriticalScenarios:

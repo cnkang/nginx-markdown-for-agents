@@ -276,6 +276,13 @@ def build_summary(parity: dict[str, object], *, allow_dirty: bool) -> dict[str, 
         parity["known_difference_observation_ids"]
     )
     commit = _git_output("rev-parse", "HEAD")
+    # The pass verdict must follow from the measured parity outcome instead
+    # of being hard-coded: any unknown difference or error-parity mismatch
+    # invalidates the candidate evidence even though the parity command ran.
+    parity_ok = (
+        parity.get("unknown_difference_count", 0) == 0
+        and parity.get("error_parity_mismatch_count", 0) == 0
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "verified_by": VERIFIED_BY,
@@ -296,12 +303,12 @@ def build_summary(parity: dict[str, object], *, allow_dirty: bool) -> dict[str, 
         ],
         "unknown_difference_count": parity["unknown_difference_count"],
         "error_parity_mismatch_count": parity["error_parity_mismatch_count"],
-        "pass": True,
+        "pass": parity_ok,
         "known_differences_registry": EXPECTED_REGISTRY_PATH,
         "known_differences_registry_total_entries": registry_total,
         "corpus_root": EXPECTED_CORPUS_ROOT,
         "verification_command": VERIFICATION_COMMAND,
-        "verification_result": "PASS",
+        "verification_result": "PASS" if parity_ok else "FAIL",
         "candidate_sha": commit,
         "source_git_commit": commit,
         "source_tree_clean": not bool(status),

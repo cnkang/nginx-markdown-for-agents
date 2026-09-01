@@ -210,14 +210,20 @@ def check_release_workflow(result: ValidationResult) -> None:
 
 
 def _workflow_naming_issue(wf_content: str) -> str | None:
-    """Return a description of the naming gap, or None when both formats carry the version."""
+    """Return a description of the naming gap, or None when both formats carry the version.
+
+    The deb and rpm patterns are intentionally mutually exclusive: the deb
+    filename form separates the product name with a hyphen (``nginx-<version>``)
+    while the rpm form appends the version directly (``nginx<version>``).
+    A shared ``nginx-?`` prefix would let the deb row satisfy the rpm check.
+    """
     has_deb_naming = bool(
-        re.search(r"nginx-.*\$\{?NGINX_VERSION", wf_content)
+        re.search(r"nginx-\$\{?NGINX_VERSION", wf_content)
         or re.search(r"nginx-\$\{\{.*nginx_version", wf_content)
     )
     has_rpm_naming = bool(
-        re.search(r"nginx-?\$\{?NGINX_VERSION", wf_content)
-        or re.search(r"nginx-?\$\{\{.*nginx_version", wf_content)
+        re.search(r"nginx\$\{?NGINX_VERSION", wf_content)
+        or re.search(r"nginx\$\{\{.*nginx_version", wf_content)
     )
     if has_deb_naming and has_rpm_naming:
         return None

@@ -273,6 +273,23 @@ def check_bindings(normalized: dict) -> None:
         raise SystemExit("ERROR: matrix binding drift:\n  " + "\n  ".join(errors))
 
 
+def check_source_bool_fields(source: dict) -> None:
+    """Validate policy-matrix boolean metadata that normalization drops.
+
+    ``release_blocking`` is dropped during normalization and consumed later
+    through strict ``is True`` checks; a non-boolean value would therefore
+    silently disable release blocking instead of failing validation.
+    """
+    entries = source.get("entries", [])
+    for index, entry in enumerate(entries):
+        value = entry.get("release_blocking")
+        if value is not None and not isinstance(value, bool):
+            raise SystemExit(
+                f"ERROR: policy matrix entry {index}: release_blocking must "
+                f"be a boolean, got {type(value).__name__}"
+            )
+
+
 def check_source_projection(matrix: dict) -> None:
     """Reject a release-contract document that is not generated from policy."""
     source = _load_json(SOURCE_MATRIX_PATH, "policy release matrix")
@@ -305,6 +322,8 @@ def main() -> int:
             "remove legacy aliases and dropped metadata"
         )
     check_bindings(normalized)
+    source = _load_json(SOURCE_MATRIX_PATH, "policy release matrix")
+    check_source_bool_fields(source)
     check_source_projection(matrix)
 
     digest = "sha256:" + hashlib.sha256(MATRIX_PATH.read_bytes()).hexdigest()

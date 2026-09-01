@@ -120,10 +120,19 @@ run_case reference-failed remove 1 >/dev/null
 run_case clear remove 0 >/dev/null
 run_case unreadable remove 1 >/dev/null
 
-touch "${FORCE_REMOVE_SENTINEL}"
-run_case unreadable remove 0 >/dev/null
-rm -f "${FORCE_REMOVE_SENTINEL}"
-printf 'PASS: persistent force-removal sentinel permits removal\n' >&2
+# One-shot, content-bound sentinel: an empty or mismatched file must NOT
+# authorize removal; the exact token authorizes it once and is then consumed.
+: > "${FORCE_REMOVE_SENTINEL}"
+run_case unreadable remove 1 >/dev/null  # empty content is rejected
+printf 'wrong-token\n' > "${FORCE_REMOVE_SENTINEL}"
+run_case unreadable remove 1 >/dev/null  # stale/mismatched content is rejected
+printf '%s\n' 'nginx-markdown-module force-remove v1' > "${FORCE_REMOVE_SENTINEL}"
+run_case unreadable remove 0 >/dev/null # exact token authorizes removal
+if [[ -f "${FORCE_REMOVE_SENTINEL}" ]]; then
+    printf 'FAIL: one-shot sentinel was not consumed after use\n' >&2
+    exit 1
+fi
+printf 'PASS: content-bound one-shot force-removal sentinel verified\n' >&2
 
 rm -f "${FAKE_ROOT}/usr/sbin/nginx"
 mkdir -p "${FAKE_ROOT}/etc/nginx/conf.d"
