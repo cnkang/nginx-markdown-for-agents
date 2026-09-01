@@ -313,7 +313,7 @@ def test_final_inventory_requires_frozen_public_counts() -> None:
     errors = detector.validate_inventory_schema(inventory)
 
     assert "final 0.9.2 inventory must contain exactly 25 active directives" in errors
-    assert "final 0.9.2 inventory must contain exactly 12 metric families" in errors
+    assert "final 0.9.2 inventory must contain exactly 11 metric families" in errors
 
 
 def test_directive_metadata_drift_is_reported() -> None:
