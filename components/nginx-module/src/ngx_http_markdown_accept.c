@@ -85,8 +85,7 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r,
 static ngx_flag_t
 ngx_http_markdown_is_accept_header(const ngx_table_elt_t *header)
 {
-    return header != NULL
-           && header->hash != 0
+    return ngx_http_markdown_header_is_active(header)
            && header->key.data != NULL
            && header->key.len == sizeof(ngx_http_markdown_hdr_accept) - 1
            && ngx_strncasecmp(header->key.data,
@@ -228,7 +227,7 @@ ngx_http_markdown_accept_fields(ngx_http_request_t *r,
 
 #if (NGX_HTTP_HEADERS)
     accept = r->headers_in.accept;
-    if (*count == 0 && accept != NULL) {
+    if (*count == 0 && ngx_http_markdown_header_is_active(accept)) {
         if (accept->value.len > 0 && accept->value.data == NULL)
         {
             return NGX_ERROR;
@@ -377,7 +376,7 @@ ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
     }
 
 #if (NGX_HTTP_HEADERS)
-    if (r->headers_in.accept != NULL) {
+    if (ngx_http_markdown_header_is_active(r->headers_in.accept)) {
         return (count <= 1) ? r->headers_in.accept : NULL;
     }
 #endif

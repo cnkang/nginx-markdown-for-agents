@@ -484,6 +484,24 @@ test_get_accept_header_fallback(void)
 }
 
 static void
+test_get_accept_header_skips_inactive_typed_header(void)
+{
+    ngx_http_request_t  r;
+    ngx_table_elt_t    *typed;
+
+    memset(&r, 0, sizeof(r));
+    g_pool_offset = 0;
+    r.headers_in.headers = *create_header_list();
+    typed = add_header(&r.headers_in.headers, "Accept", "text/html");
+    typed->hash = 0;
+    r.headers_in.accept = typed;
+
+    TEST_ASSERT(ngx_http_markdown_get_accept_header(&r) == NULL,
+                "inactive typed Accept header must be ignored");
+    TEST_PASS("inactive typed Accept header is skipped");
+}
+
+static void
 test_should_convert_combines_multiple_accept_headers(void)
 {
     ngx_http_request_t    r;
@@ -824,6 +842,7 @@ main(void)
     test_find_request_header_null_name();
     test_get_accept_header_null_request();
     test_get_accept_header_fallback();
+    test_get_accept_header_skips_inactive_typed_header();
     test_should_convert_combines_multiple_accept_headers();
     test_should_convert_malformed_accept_field();
     test_accept_header_caps_and_copy_errors();

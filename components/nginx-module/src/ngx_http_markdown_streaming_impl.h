@@ -16,6 +16,7 @@
 #ifdef MARKDOWN_STREAMING_ENABLED
 
 #include "ngx_http_markdown_streaming_decomp_impl.h"
+#include "ngx_http_markdown_durable_bypass.h"
 #include "ngx_http_markdown_inflight_impl.h"
 #include "ngx_http_markdown_stream_postcommit.h"
 #include "ngx_http_markdown_stream_commit.h"
@@ -5341,7 +5342,10 @@ ngx_http_markdown_streaming_body_filter(
 
     ctx = ngx_http_get_module_ctx(r,
         ngx_http_markdown_filter_module);
-    if (ctx == NULL) {
+    if (ctx == NULL
+        || ngx_http_markdown_durable_bypass_kind(ctx)
+           != NGX_HTTP_MARKDOWN_DURABLE_BYPASS_NONE)
+    {
         return ngx_http_next_body_filter(r, in);
     }
 

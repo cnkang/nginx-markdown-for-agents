@@ -89,7 +89,8 @@ fi
 if [ -z "$ngx_markdown_rust_lib" ] || [ ! -f "$ngx_markdown_rust_lib" ]; then
     echo "configuration error: cannot locate the Rust converter static library" >&2
     echo "  (libnginx_markdown_converter.a) for platform: $(uname -s 2>/dev/null || echo unknown)/$(uname -m 2>/dev/null || echo unknown)" >&2
-    echo "  Build the Rust library first: cargo build --release (in rust-converter/)" >&2
+    echo "  Build the Rust library first with the module Makefile:" >&2
+    echo "    make rust-lib   (uses --target \$(RUST_TARGET) and writes target/<triple>/release/)" >&2
     echo "  or set RUST_TARGET=<triple> to select an existing archive explicitly." >&2
     echo "  Refusing to fall back to an arbitrary target/release archive that may" >&2
     echo "  belong to a different platform." >&2

@@ -18,79 +18,7 @@
 #include "ngx_http_markdown_exports.h"
 #include "ngx_http_markdown_diagnostics.h"
 #include "ngx_http_markdown_decompression_route.h"
-
-typedef enum {
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_NONE = 0,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED
-} ngx_http_markdown_durable_bypass_kind_t;
-
-typedef struct {
-    ngx_http_markdown_durable_bypass_kind_t kind;
-} ngx_http_markdown_durable_bypass_marker_t;
-
-/*
- * These marker addresses occupy the request context slot when a request
- * context cannot be allocated.  State transitions replace the address, so
- * no mutable state is shared between requests.  The objects are never
- * written through: the context slot is a `void *`, so the markers stay
- * non-const to avoid casts that drop a qualifier; only their addresses
- * are ever compared.
- */
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_failopen_header_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER
-    };
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_failopen_body_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY
-    };
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_failopen_completed_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED
-    };
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_subrequest_header_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER
-    };
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_subrequest_body_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY
-    };
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_subrequest_completed_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED
-    };
-
-static ngx_http_markdown_durable_bypass_kind_t
-ngx_http_markdown_durable_bypass_kind(const void *value)
-{
-    if (value == (const void *) &ngx_http_markdown_failopen_header_marker) {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER;
-    }
-    if (value == (const void *) &ngx_http_markdown_failopen_body_marker) {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY;
-    }
-    if (value == (const void *) &ngx_http_markdown_failopen_completed_marker) {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED;
-    }
-    if (value == (const void *) &ngx_http_markdown_subrequest_header_marker) {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER;
-    }
-    if (value == (const void *) &ngx_http_markdown_subrequest_body_marker) {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY;
-    }
-    if (value
-        == (const void *) &ngx_http_markdown_subrequest_completed_marker)
-    {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED;
-    }
-    return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_NONE;
-}
+#include "ngx_http_markdown_durable_bypass.h"
 
 static void
 ngx_http_markdown_publish_durable_bypass(
@@ -717,7 +645,7 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_skip_accept());
         dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_SKIP;
-        dp.reason_code = "skipped_accept_internal_error";
+        dp.reason_code = "skipped_accept";
         break;
 
     default:
@@ -902,7 +830,11 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
     ngx_http_markdown_dynconf_snapshot_t  snap_copy;
     ngx_http_markdown_effective_conf_t    eff;
     ngx_flag_t                       filter_enabled;
+    ngx_flag_t                       adopt_orphans;
     ngx_uint_t                       accept_reason;
+    size_t                            adoption_scan_limit;
+    ngx_http_markdown_conditional_ownership_t ownership;
+    ngx_int_t                         adoption_rc;
     ngx_int_t                         failure_rc;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
@@ -921,14 +853,26 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
 
+    adopt_orphans = r->parent == NULL && ctx == NULL;
+    adoption_scan_limit = conf->limits.streaming_buffer;
+    if (adoption_scan_limit == NGX_CONF_UNSET_SIZE
+        || adoption_scan_limit == 0)
+    {
+        adoption_scan_limit =
+            NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT;
+    }
+    ngx_memzero(&ownership, sizeof(ownership));
+    adoption_rc = NGX_OK;
+
     /* Internal redirects clear the module context but leave suppressed
      * request headers (hash == 0) behind.  Re-adopt those orphan entries
      * on the main request only: a subrequest shares the parent's
      * headers_in, so restoring visibility there would un-suppress the
      * parent's validators mid-flight.  Only run when no live context
      * exists (a live ctx still owns the suppression). */
-    if (r->parent == NULL && ctx == NULL) {
-        ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    if (adopt_orphans) {
+        adoption_rc = ngx_http_markdown_adopt_orphan_conditional_headers(
+            r, adoption_scan_limit, &ownership);
     }
 
     if ((r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)) == 0) {
@@ -954,6 +898,20 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         if (ctx != NULL) {
             ngx_http_markdown_restore_conditional_request(r, ctx);
         }
+        return NGX_DECLINED;
+    }
+
+    if (adoption_rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: conditional validator adoption "
+                      "exceeded the configured request buffer limit");
+        failure_rc = ngx_http_markdown_handle_preaccess_failure(
+            r, ctx, conf, &eff);
+        if (failure_rc != NGX_DECLINED) {
+            return failure_rc;
+        }
+        ngx_http_markdown_publish_durable_bypass(
+            r, NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER);
         return NGX_DECLINED;
     }
 
@@ -986,6 +944,10 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
                 r, NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER);
             return NGX_DECLINED;
         }
+    }
+
+    if (adopt_orphans && ownership.entry_count != 0) {
+        ctx->conditional.ownership = ownership;
     }
 
     return ngx_http_markdown_preaccess_capture(

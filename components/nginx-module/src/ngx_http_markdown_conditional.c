@@ -91,15 +91,19 @@ ngx_http_markdown_adopt_first_restored(
     }
 }
 
-static void
+static ngx_int_t
 ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
-    u_char *name, size_t name_len, ngx_table_elt_t **first_restored)
+    u_char *name, size_t name_len, size_t scan_limit,
+    ngx_table_elt_t **first_restored, ngx_uint_t *adopted_count)
 {
     *first_restored = NULL;
     if (r == NULL || name == NULL || name_len == 0
-        || r->headers_in.headers.part.nelts == 0)
+        || adopted_count == NULL)
     {
-        return;
+        return NGX_ERROR;
+    }
+    if (r->headers_in.headers.part.nelts == 0) {
+        return NGX_OK;
     }
     for (ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
@@ -137,40 +141,67 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
 
             /* NGINX NUL-terminates parsed header values, so the byte
              * length can be rebuilt after suppression zeroed it.
-             * Use a bounded scan (8k = default large_header_buffers)
-             * to avoid unbounded read if the NUL invariant changes. */
+             * Use the configured request buffer limit to avoid an unbounded
+             * read if the NUL invariant changes. */
             {
                 const u_char  *data = headers[i].value.data;
                 const u_char  *nul;
 
-                nul = memchr(data, '\0', 8192);
+                nul = memchr(data, '\0', scan_limit);
                 if (nul == NULL) {
-                    continue;
+                    return NGX_ERROR;
                 }
                 headers[i].value.len = (size_t) (nul - data);
             }
             headers[i].hash = 1;
+            (*adopted_count)++;
             ngx_http_markdown_adopt_first_restored(
                 first_restored, &headers[i]);
         }
     }
+
+    return NGX_OK;
 }
 
-void
-ngx_http_markdown_adopt_orphan_conditional_headers(ngx_http_request_t *r)
+ngx_int_t
+ngx_http_markdown_adopt_orphan_conditional_headers(
+    ngx_http_request_t *r, size_t scan_limit,
+    ngx_http_markdown_conditional_ownership_t *ownership)
 {
     static u_char  inm_name[] = "If-None-Match";
     static u_char  ims_name[] = "If-Modified-Since";
     ngx_table_elt_t  *inm;
     ngx_table_elt_t  *ims;
+    ngx_uint_t       adopted_count;
+    ngx_int_t        inm_rc;
+    ngx_int_t        ims_rc;
 
-    ngx_http_markdown_adopt_one_conditional_headers(
-        r, inm_name, sizeof(inm_name) - 1, &inm);
-    ngx_http_markdown_adopt_one_conditional_headers(
-        r, ims_name, sizeof(ims_name) - 1, &ims);
+    if (r == NULL) {
+        return NGX_ERROR;
+    }
+
+    adopted_count = 0;
+    inm_rc = ngx_http_markdown_adopt_one_conditional_headers(
+        r, inm_name, sizeof(inm_name) - 1, scan_limit,
+        &inm, &adopted_count);
+    ims_rc = ngx_http_markdown_adopt_one_conditional_headers(
+        r, ims_name, sizeof(ims_name) - 1, scan_limit,
+        &ims, &adopted_count);
 
     r->headers_in.if_none_match = inm;
     r->headers_in.if_modified_since = ims;
+
+    if (ownership != NULL) {
+        ngx_memzero(ownership, sizeof(*ownership));
+        if (adopted_count != 0) {
+            ownership->adopter =
+                NGX_HTTP_MARKDOWN_CONDITIONAL_ADOPTER_PREACCESS;
+            ownership->phase = NGX_HTTP_MARKDOWN_CONDITIONAL_PHASE_PREACCESS;
+            ownership->entry_count = adopted_count;
+        }
+    }
+
+    return (inm_rc == NGX_OK && ims_rc == NGX_OK) ? NGX_OK : NGX_ERROR;
 }
 
 static uint8_t
@@ -246,6 +277,12 @@ ngx_http_markdown_header_has_cache_directive(const ngx_table_elt_t *header,
 {
     const u_char  *p;
     const u_char  *end;
+
+    if (header == NULL || header->value.data == NULL
+        || header->value.len == 0)
+    {
+        return 0;
+    }
 
     p = header->value.data;
     end = p + header->value.len;

@@ -592,6 +592,15 @@ ngx_http_markdown_apply_max_inflight_limit(ngx_conf_t *cf,
 {
     ngx_uint_t  n;
 
+    if (cf == NULL || cf->cmd_type != NGX_HTTP_MAIN_CONF) {
+        if (cf != NULL) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "\"max_inflight\" may only be configured in the "
+                "http context");
+        }
+        return NGX_CONF_ERROR;
+    }
+
     if (seen->max_inflight) {
         return "has a duplicate \"max_inflight\" key";
     }

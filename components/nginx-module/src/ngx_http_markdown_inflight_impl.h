@@ -58,8 +58,8 @@ typedef struct ngx_http_markdown_inflight_cleanup_s {
     ngx_flag_t                     decremented;
 } ngx_http_markdown_inflight_cleanup_t;
 
-/* Per-worker global counter instance. */
-static ngx_http_markdown_inflight_t  ngx_http_markdown_g_inflight;
+/* Per-worker global counter instance, defined by the module main TU. */
+extern ngx_http_markdown_inflight_t  ngx_http_markdown_g_inflight;
 
 static ngx_inline void
 ngx_http_markdown_inflight_update_high_watermark(ngx_atomic_int_t new_val)

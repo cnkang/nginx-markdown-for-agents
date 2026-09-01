@@ -82,7 +82,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Any subset of keys may be given; unspecified keys inherit
      * (per-key inheritance).
      * Public default: (per-key inheritance)
-     * Context: http, server, location
+     * Context: http, server, location (max_inflight is http-only)
      *
      * Example:
      *   markdown_limits conversion_timeout=30s conversion_memory=64m;

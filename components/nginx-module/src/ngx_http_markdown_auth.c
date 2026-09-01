@@ -777,8 +777,8 @@ ngx_http_markdown_cookie_matches_any_pattern(const ngx_str_t *cookie_name,
 static ngx_int_t
 ngx_http_markdown_has_authorization_header(const ngx_http_request_t *r)
 {
-    if (r == NULL || r->headers_in.authorization == NULL
-        || r->headers_in.authorization->hash == 0)
+    if (r == NULL
+        || !ngx_http_markdown_header_is_active(r->headers_in.authorization))
     {
         return 0;
     }
@@ -893,6 +893,10 @@ ngx_http_markdown_has_auth_cookies(const ngx_http_request_t *r,
     for (; cookie_header != NULL; cookie_header = cookie_header->next) {
         u_char        *p;
         const u_char  *end;
+
+        if (!ngx_http_markdown_header_is_active(cookie_header)) {
+            continue;
+        }
 
         p = cookie_header->value.data;
         end = p + cookie_header->value.len;
