@@ -23,8 +23,16 @@ static ngx_flag_t ngx_http_markdown_is_accept_header(
     const ngx_table_elt_t *header);
 static ngx_int_t ngx_http_markdown_count_accept_headers(
     ngx_http_request_t *r, ngx_uint_t *count);
+static ngx_int_t ngx_http_markdown_process_accept_field(
+    ngx_table_elt_t *header, ngx_uint_t *count, size_t *total_len,
+    ngx_table_elt_t **single);
+static ngx_int_t ngx_http_markdown_scan_accept_fields(
+    ngx_http_request_t *r, ngx_uint_t *count, size_t *total_len,
+    ngx_table_elt_t **single);
 static ngx_int_t ngx_http_markdown_collect_accept_header(
     ngx_http_request_t *r, ngx_str_t *out);
+static ngx_int_t ngx_http_markdown_copy_accept_fields(
+    ngx_http_request_t *r, u_char *data, size_t total_len);
 
 /*
  * Find a request header by name in nginx's generic linked-list container.
@@ -87,18 +95,17 @@ static ngx_int_t
 ngx_http_markdown_count_accept_headers(ngx_http_request_t *r,
     ngx_uint_t *count)
 {
-    ngx_list_part_t  *part;
-    ngx_table_elt_t  *headers;
-
     if (r == NULL || count == NULL) {
         return NGX_ERROR;
     }
 
     *count = 0;
-    for (part = &r->headers_in.headers.part;
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
     {
+        ngx_table_elt_t  *headers;
+
         headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
             return NGX_ERROR;
@@ -112,6 +119,69 @@ ngx_http_markdown_count_accept_headers(ngx_http_request_t *r,
             (*count)++;
             if (*count > 1) {
                 return NGX_OK;
+            }
+        }
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_process_accept_field(ngx_table_elt_t *header,
+    ngx_uint_t *count, size_t *total_len, ngx_table_elt_t **single)
+{
+    if (!ngx_http_markdown_is_accept_header(header)) {
+        return NGX_DECLINED;
+    }
+
+    if (header->value.len > 0 && header->value.data == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (*count != 0 && *total_len > (size_t) -1 - 2) {
+        return NGX_ERROR;
+    }
+    if (*count != 0) {
+        *total_len += 2;
+    }
+    if (*total_len > NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX
+        || header->value.len
+           > NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX - *total_len)
+    {
+        return NGX_ERROR;
+    }
+    *total_len += header->value.len;
+
+    if (*count == 0) {
+        *single = header;
+    }
+    (*count)++;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_scan_accept_fields(ngx_http_request_t *r,
+    ngx_uint_t *count, size_t *total_len, ngx_table_elt_t **single)
+{
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (ngx_http_markdown_process_accept_field(
+                    &headers[i], count, total_len, single) == NGX_ERROR)
+            {
+                return NGX_ERROR;
             }
         }
     }
@@ -137,62 +207,29 @@ static ngx_int_t
 ngx_http_markdown_accept_fields(ngx_http_request_t *r,
     ngx_uint_t *count, size_t *total_len, ngx_table_elt_t **single_out)
 {
+#if (NGX_HTTP_HEADERS)
+    ngx_table_elt_t  *accept;
+#endif
     ngx_table_elt_t  *single;
-    ngx_list_part_t  *part;
-    ngx_table_elt_t  *headers;
 
     *count = 0;
     *total_len = 0;
     single = NULL;
 
-    for (part = &r->headers_in.headers.part;
-         part != NULL;
-         part = part->next)
+    if (ngx_http_markdown_scan_accept_fields(
+            r, count, total_len, &single) != NGX_OK)
     {
-        headers = part->elts;
-        if (headers == NULL && part->nelts != 0) {
-            return NGX_ERROR;
-        }
-
-        for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (!ngx_http_markdown_is_accept_header(&headers[i])) {
-                continue;
-            }
-            if (headers[i].value.len > 0
-                && headers[i].value.data == NULL)
-            {
-                return NGX_ERROR;
-            }
-
-            if (*count != 0) {
-                if (*total_len > (size_t) -1 - 2) {
-                    return NGX_ERROR;
-                }
-                *total_len += 2;
-            }
-            if (*total_len > NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX
-                || headers[i].value.len
-                   > NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX - *total_len)
-            {
-                return NGX_ERROR;
-            }
-            *total_len += headers[i].value.len;
-
-            if (single == NULL) {
-                single = &headers[i];
-            }
-            (*count)++;
-        }
+        return NGX_ERROR;
     }
 
 #if (NGX_HTTP_HEADERS)
-    if (*count == 0 && r->headers_in.accept != NULL) {
-        if (r->headers_in.accept->value.len > 0
-            && r->headers_in.accept->value.data == NULL)
+    accept = r->headers_in.accept;
+    if (*count == 0 && accept != NULL) {
+        if (accept->value.len > 0 && accept->value.data == NULL)
         {
             return NGX_ERROR;
         }
-        single = r->headers_in.accept;
+        single = accept;
         *count = 1;
         *total_len = single->value.len;
         if (*total_len > NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX) {
@@ -211,18 +248,57 @@ ngx_http_markdown_accept_fields(ngx_http_request_t *r,
 }
 
 
+static ngx_int_t
+ngx_http_markdown_copy_accept_fields(ngx_http_request_t *r, u_char *data,
+    size_t total_len)
+{
+    ngx_uint_t  count;
+    size_t      written;
+
+    count = 0;
+    written = 0;
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (!ngx_http_markdown_is_accept_header(&headers[i])) {
+                continue;
+            }
+
+            if (count != 0) {
+                data[written++] = ',';
+                data[written++] = ' ';
+            }
+            if (headers[i].value.len != 0) {
+                ngx_memcpy(data + written, headers[i].value.data,
+                           headers[i].value.len);
+                written += headers[i].value.len;
+            }
+            count++;
+        }
+    }
+
+    return (written == total_len) ? NGX_OK : NGX_ERROR;
+}
+
+
 /* Collect all active Accept field-lines in wire order. */
 static ngx_int_t
 ngx_http_markdown_collect_accept_header(ngx_http_request_t *r,
     ngx_str_t *out)
 {
-    ngx_table_elt_t  *headers;
     ngx_table_elt_t  *single;
-    ngx_list_part_t  *part;
     ngx_uint_t        count;
     ngx_int_t         rc;
     size_t            total_len;
-    size_t            written;
     u_char           *data;
 
     if (r == NULL || out == NULL) {
@@ -247,6 +323,11 @@ ngx_http_markdown_collect_accept_header(ngx_http_request_t *r,
     }
 
     if (count == 1) {
+        if (single == NULL
+            || (single->value.len != 0 && single->value.data == NULL))
+        {
+            return NGX_ERROR;
+        }
         /* Single field-line fast path: alias the stored value directly. */
         out->data = single->value.data;
         out->len = single->value.len;
@@ -259,36 +340,7 @@ ngx_http_markdown_collect_accept_header(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    written = 0;
-    count = 0;
-    for (part = &r->headers_in.headers.part;
-         part != NULL;
-         part = part->next)
-    {
-        headers = part->elts;
-        if (headers == NULL && part->nelts != 0) {
-            return NGX_ERROR;
-        }
-
-        for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (!ngx_http_markdown_is_accept_header(&headers[i])) {
-                continue;
-            }
-
-            if (count != 0) {
-                data[written++] = ',';
-                data[written++] = ' ';
-            }
-            if (headers[i].value.len != 0) {
-                ngx_memcpy(data + written, headers[i].value.data,
-                           headers[i].value.len);
-                written += headers[i].value.len;
-            }
-            count++;
-        }
-    }
-
-    if (written != total_len) {
+    if (ngx_http_markdown_copy_accept_fields(r, data, total_len) != NGX_OK) {
         return NGX_ERROR;
     }
 

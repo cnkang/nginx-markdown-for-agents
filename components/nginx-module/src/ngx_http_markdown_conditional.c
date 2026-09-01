@@ -524,10 +524,10 @@ ngx_http_markdown_measure_captured_if_none_match(
     const ngx_http_markdown_ctx_t *ctx,
     ngx_http_markdown_if_none_match_measurement_t *measurement)
 {
-    const ngx_http_markdown_conditional_header_state_t  *state;
-    ngx_int_t                                            rc;
+    ngx_int_t  rc;
 
-    for (state = ctx->conditional.header_states;
+    for (const ngx_http_markdown_conditional_header_state_t *state =
+             ctx->conditional.header_states;
          state != NULL;
          state = state->next)
     {
@@ -556,20 +556,62 @@ ngx_http_markdown_measure_captured_if_none_match(
     return NGX_OK;
 }
 
+/* Measure captured If-None-Match entries and the typed fallback. */
+static ngx_int_t
+ngx_http_markdown_measure_captured_if_none_match_with_fallback(
+    const ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_if_none_match_measurement_t *measurement)
+{
+    ngx_table_elt_t  *fallback;
+    ngx_int_t          rc;
+
+    rc = ngx_http_markdown_measure_captured_if_none_match(
+        ctx, measurement);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    if (measurement->match_count != 0
+        || ctx->conditional.if_none_match == NULL)
+    {
+        return NGX_OK;
+    }
+
+    fallback = ctx->conditional.if_none_match;
+    measurement->single_data = fallback->value.data;
+    measurement->single_len =
+        ngx_http_markdown_conditional_value_len(ctx, fallback);
+    if (measurement->single_len != 0
+        && measurement->single_data == NULL)
+    {
+        return NGX_ERROR;
+    }
+
+    rc = ngx_http_markdown_add_if_none_match_length(
+        measurement, measurement->single_len);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+    measurement->match_count = 1;
+
+    return NGX_OK;
+}
+
+
 /* Measure all active If-None-Match entries in request-list order. */
 static ngx_int_t
 ngx_http_markdown_measure_request_if_none_match(
     const ngx_http_request_t *r,
     ngx_http_markdown_if_none_match_measurement_t *measurement)
 {
-    const ngx_list_part_t  *part;
-    const ngx_table_elt_t  *headers;
-    ngx_int_t                rc;
+    ngx_int_t  rc;
 
-    for (part = &r->headers_in.headers.part;
+    for (const ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
     {
+        const ngx_table_elt_t  *headers;
+
         headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
             return NGX_ERROR;
@@ -609,13 +651,13 @@ static u_char *
 ngx_http_markdown_copy_captured_if_none_match(
     const ngx_http_markdown_ctx_t *ctx, u_char *data)
 {
-    const ngx_http_markdown_conditional_header_state_t  *state;
-    ngx_uint_t                                           copied;
-    u_char                                               *p;
+    ngx_uint_t  copied;
+    u_char      *p;
 
     copied = 0;
     p = data;
-    for (state = ctx->conditional.header_states;
+    for (const ngx_http_markdown_conditional_header_state_t *state =
+             ctx->conditional.header_states;
          state != NULL;
          state = state->next)
     {
@@ -641,17 +683,17 @@ static u_char *
 ngx_http_markdown_copy_request_if_none_match(
     const ngx_http_request_t *r, u_char *data)
 {
-    const ngx_list_part_t  *part;
-    const ngx_table_elt_t  *headers;
-    ngx_uint_t              copied;
-    u_char                  *p;
+    ngx_uint_t  copied;
+    u_char      *p;
 
     copied = 0;
     p = data;
-    for (part = &r->headers_in.headers.part;
+    for (const ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
     {
+        const ngx_table_elt_t  *headers;
+
         headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
             return data;
@@ -684,7 +726,6 @@ ngx_http_markdown_collect_if_none_match_value(
     ngx_str_t *out)
 {
     ngx_http_markdown_if_none_match_measurement_t  measurement;
-    ngx_table_elt_t                                *fallback;
     ngx_int_t                                       rc;
     u_char                                         *end;
 
@@ -697,37 +738,14 @@ ngx_http_markdown_collect_if_none_match_value(
     out->len = 0;
 
     if (ctx != NULL && ctx->conditional.captured) {
-        rc = ngx_http_markdown_measure_captured_if_none_match(
+        rc = ngx_http_markdown_measure_captured_if_none_match_with_fallback(
             ctx, &measurement);
-        if (rc != NGX_OK) {
-            return rc;
-        }
-
-        if (measurement.match_count == 0
-            && ctx->conditional.if_none_match != NULL)
-        {
-            fallback = ctx->conditional.if_none_match;
-            measurement.single_data = fallback->value.data;
-            measurement.single_len =
-                ngx_http_markdown_conditional_value_len(ctx, fallback);
-            if (measurement.single_len != 0
-                && measurement.single_data == NULL)
-            {
-                return NGX_ERROR;
-            }
-            rc = ngx_http_markdown_add_if_none_match_length(
-                &measurement, measurement.single_len);
-            if (rc != NGX_OK) {
-                return rc;
-            }
-            measurement.match_count = 1;
-        }
     } else {
         rc = ngx_http_markdown_measure_request_if_none_match(
             r, &measurement);
-        if (rc != NGX_OK) {
-            return rc;
-        }
+    }
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     if (measurement.match_count == 0) {
