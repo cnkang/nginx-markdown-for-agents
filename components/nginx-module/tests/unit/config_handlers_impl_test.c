@@ -698,6 +698,9 @@ setup_cf(ngx_conf_t *cf, ngx_array_t *args, ngx_str_t *values,
 
     cf->pool = &g_pool;
     cf->args = args;
+    /* Direct handler dispatch runs as if in an http {} context unless a
+     * test overrides cmd_type explicitly after setup_cf(). */
+    cf->cmd_type = NGX_HTTP_MAIN_CONF;
 }
 
 /*
