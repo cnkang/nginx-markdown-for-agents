@@ -486,7 +486,15 @@ impl StreamingConverter {
         }
 
         let initial_flush_count = self.emitter.flush_count();
-        self.process_utf8_bytes(transcoded.as_ref(), false)?;
+        let processed = self.process_utf8_bytes(transcoded.as_ref(), false);
+
+        // The transcoded output buffer is about to be dropped on both the
+        // success and the error return (the owned variant's Vec is freed
+        // when `transcoded` goes out of scope). Clear the accounting at the
+        // conversion boundary on both paths so subsequent peak-memory
+        // estimates never over-count a buffer that no longer exists.
+        self.charset_transcoded_bytes = 0;
+        processed?;
 
         // 6. Collect flushed output
         let flushed = self.emitter.take_flushed();
@@ -504,13 +512,6 @@ impl StreamingConverter {
         }
 
         self.stats.chunks_processed = self.stats.chunks_processed.saturating_add(1);
-
-        // The transcoded output buffer is about to be dropped (it was
-        // borrowed as Cow and the owned variant's Vec is freed when
-        // `transcoded` goes out of scope at the end of this function).
-        // Clear the accounting so subsequent peak-memory estimates
-        // don't over-count a buffer that no longer exists.
-        self.charset_transcoded_bytes = 0;
 
         Ok(ChunkOutput {
             markdown: flushed,
@@ -590,10 +591,12 @@ impl StreamingConverter {
         // length, and recover a pending UTF-8 tail without copying the whole
         // decoder output into a second Vec.
         self.charset_transcoded_bytes = remaining_charset.capacity();
-        self.process_utf8_bytes(&remaining_charset, true)?;
+        let processed = self.process_utf8_bytes(&remaining_charset, true);
 
-        // The decoder flush result is about to be dropped.
+        // The decoder flush result is about to be dropped; clear the
+        // accounting on both the success and the error exit.
         self.charset_transcoded_bytes = 0;
+        processed?;
 
         // 3. Finish tokenizer (signal end-of-input)
         self.check_parser_timeout()?;
@@ -1451,8 +1454,8 @@ impl StreamingConverter {
     }
 
     fn resolve_and_sanitize_metadata_url(&self, url: &str) -> Option<String> {
-        Self::sanitize_metadata_url(url)?;
-        let resolved = self.resolve_url(url);
+        let sanitized = Self::sanitize_metadata_url(url)?;
+        let resolved = self.resolve_url(&sanitized);
         Self::sanitize_metadata_url(&resolved)
     }
 
@@ -2948,6 +2951,49 @@ mod tests {
         assert_eq!(
             conv.metadata().image.as_deref(),
             Some("https://example.com/safe.png")
+        );
+    }
+
+    /// Streaming and full-buffer metadata extraction must apply the same
+    /// sanitize -> resolve -> sanitize chain to `og:image`, so a URL whose
+    /// raw form would resolve differently from its sanitized form yields the
+    /// identical metadata value on both paths.
+    #[test]
+    fn test_metadata_image_streaming_matches_full_buffer_for_hostile_url() {
+        let html: &[u8] = b"<html><head>\
+              <meta property=\"og:image\" content=\"  /img safe.png  \">\
+              </head><body><p>x</p></body></html>";
+        let base_url = "https://example.com/docs/page.html".to_string();
+
+        // Streaming path.
+        let opts = ConversionOptions {
+            extract_metadata: true,
+            base_url: Some(base_url.clone()),
+            flavor: crate::converter::MarkdownFlavor::CommonMark,
+            include_front_matter: false,
+            simplify_navigation: true,
+            preserve_tables: true,
+            resolve_relative_urls: true,
+            prune_config: crate::converter::pruning::PruneConfig::default_enabled(),
+        };
+        let mut streaming = StreamingConverter::new(opts, MemoryBudget::default());
+        streaming.set_content_type(Some("text/html; charset=UTF-8".to_string()));
+        streaming.feed_chunk(html).unwrap();
+        let streaming_image = streaming.metadata().image.clone();
+
+        // Full-buffer path.
+        let dom = crate::parser::parse_html(html).expect("test HTML should parse");
+        let extractor = crate::metadata::MetadataExtractor::new(Some(base_url.clone()), true);
+        let full_buffer = extractor.extract(&dom).unwrap().image;
+
+        assert_eq!(
+            streaming_image, full_buffer,
+            "streaming and full-buffer metadata image must agree for the same HTML"
+        );
+        assert_eq!(
+            full_buffer.as_deref(),
+            Some("https://example.com/img safe.png"),
+            "resolution must run on the trimmed URL, not the raw attribute"
         );
     }
 
@@ -4536,6 +4582,46 @@ mod tests {
         assert!(
             working_set > 0,
             "working set should be non-zero after processing HTML"
+        );
+    }
+
+    /// Regression: a failed feed_chunk must not leave the previous chunk's
+    /// transcoded-output accounting behind, so a subsequent conversion over
+    /// the same converter starts from a clean charset boundary.
+    ///
+    /// The first feed converts a Latin-1 document (non-zero-copy charset
+    /// path, which charges `charset_transcoded_bytes`), and the same chunk
+    /// carries an unsupported `<svg>` structure so the feed returns a
+    /// fallback error mid-conversion. The next feed must observe a working
+    /// set with zero transcoded bytes, not the freed buffer's capacity.
+    #[test]
+    fn test_charset_transcoded_accounting_reset_at_conversion_boundary() {
+        let mut conv = make_converter();
+        conv.set_content_type(Some("text/html; charset=ISO-8859-1".to_string()));
+
+        // First chunk: content is transcoded (Owned), then a table triggers
+        // a pre-commit fallback error inside the same feed call.
+        let first = conv.feed_chunk(b"<h1>Latin caf\xE9</h1><table><tr><td>x</td></tr></table>");
+        assert!(first.is_err(), "table fallback should abort this chunk");
+
+        // The transcoded buffer from the failed chunk is freed with the
+        // chunk; the accounting must not retain its capacity.
+        assert_eq!(
+            conv.charset_transcoded_bytes, 0,
+            "failed feed must reset the charset transcoded accounting"
+        );
+
+        // A subsequent conversion over the same converter starts clean:
+        // the working-set estimate no longer carries the dropped buffer.
+        let second = conv.feed_chunk(b"<p>second conversion</p>");
+        assert!(
+            second.is_ok(),
+            "a later feed must not inherit a stale charset charge: {:?}",
+            second.err()
+        );
+        assert_eq!(
+            conv.charset_transcoded_bytes, 0,
+            "the next feed must not inherit the previous buffer's charge"
         );
     }
 }

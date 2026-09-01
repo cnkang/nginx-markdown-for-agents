@@ -360,6 +360,8 @@ fn deflate_decode_into(
         let status = decoder
             .decompress(&input[consumed..], &mut buf, flush)
             .map_err(classify_deflate_error)?;
+        let consumed_after = usize::try_from(decoder.total_in())
+            .map_err(|_| DecompError::IoError("deflate input byte counter overflow".to_string()))?;
         let consumed_now = decoder.total_in().saturating_sub(before_in);
         let produced_now = usize::try_from(decoder.total_out().saturating_sub(before_out))
             .map_err(|_| DecompError::BudgetExceeded)?;
@@ -369,7 +371,14 @@ fn deflate_decode_into(
         }
 
         match status {
-            Status::StreamEnd => return Ok(()),
+            Status::StreamEnd => {
+                if consumed_after < input.len() {
+                    return Err(DecompError::FormatError(
+                        "trailing data after deflate stream".to_string(),
+                    ));
+                }
+                return Ok(());
+            }
             Status::Ok | Status::BufError => {
                 if consumed_now == 0 && produced_now == 0 {
                     return Err(DecompError::TruncatedInput(
@@ -522,6 +531,16 @@ mod tests {
         let result = decompress_bounded(&compressed, Format::Gzip, 1024, 0);
 
         assert_eq!(result.unwrap_err().error_category(), 103);
+    }
+
+    #[test]
+    fn gzip_rejects_trailing_bytes() {
+        let mut compressed = gzip_compress(b"complete gzip member");
+        compressed.extend_from_slice(b"trailing bytes");
+
+        let result = decompress_bounded(&compressed, Format::Gzip, 1024, 0);
+
+        assert_eq!(result.unwrap_err().error_category(), 102);
     }
 
     #[test]
@@ -707,6 +726,16 @@ mod tests {
         );
         let result = decompress_bounded(&zlib, Format::Deflate, 4096, 0).unwrap();
         assert_eq!(result.output, original);
+    }
+
+    #[test]
+    fn deflate_rejects_trailing_bytes() {
+        let mut compressed = deflate_compress(b"complete deflate stream");
+        compressed.extend_from_slice(b"trailing bytes");
+
+        let result = decompress_bounded(&compressed, Format::Deflate, 1024, 0);
+
+        assert_eq!(result.unwrap_err().error_category(), 102);
     }
 
     #[test]
