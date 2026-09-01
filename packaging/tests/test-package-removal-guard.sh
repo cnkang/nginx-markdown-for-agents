@@ -121,13 +121,16 @@ run_case clear remove 0 >/dev/null
 run_case unreadable remove 1 >/dev/null
 
 # One-shot, content-bound sentinel: an empty or mismatched file must NOT
-# authorize removal; the exact token authorizes it once and is then consumed.
+# authorize removal; the exact token (no trailing newline) authorizes it
+# once and is then consumed; a newline-terminated token is rejected.
 : > "${FORCE_REMOVE_SENTINEL}"
 run_case unreadable remove 1 >/dev/null  # empty content is rejected
 printf 'wrong-token\n' > "${FORCE_REMOVE_SENTINEL}"
 run_case unreadable remove 1 >/dev/null  # stale/mismatched content is rejected
 printf '%s\n' 'nginx-markdown-module force-remove v1' > "${FORCE_REMOVE_SENTINEL}"
-run_case unreadable remove 0 >/dev/null # exact token authorizes removal
+run_case unreadable remove 1 >/dev/null  # newline-terminated token is rejected
+printf '%s' 'nginx-markdown-module force-remove v1' > "${FORCE_REMOVE_SENTINEL}"
+run_case unreadable remove 0 >/dev/null # exact byte token authorizes removal
 if [[ -f "${FORCE_REMOVE_SENTINEL}" ]]; then
     printf 'FAIL: one-shot sentinel was not consumed after use\n' >&2
     exit 1

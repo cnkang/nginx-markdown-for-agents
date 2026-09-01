@@ -1404,7 +1404,7 @@ def validate_nfpm_preremove_lifecycle(result: ValidationResult) -> None:
             "run_case reference upgrade 0",
             "run_case clear remove 0",
             "run_case unreadable remove 1",
-            "persistent force-removal sentinel",
+            "content-bound one-shot force-removal sentinel",
             "No NGINX configuration was modified automatically",
         ],
         "nfpm-preremove:test",

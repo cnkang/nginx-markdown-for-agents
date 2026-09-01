@@ -410,14 +410,12 @@ mod tests {
 
     #[test]
     fn leading_indent_columns_saturates_on_extreme_prefix() {
-        // A pathological line of billions of leading spaces must saturate
-        // instead of overflowing the column counter in debug builds. The
-        // giant prefix is not materialized; the counter is exercised
-        // through the same loop shape by feeding spaces in chunks is not
-        // possible for a borrowed slice, so verify saturation semantics
-        // directly against near-limit realistic inputs.
-        let long_prefix = " ".repeat(1 << 30);
-        assert_eq!(leading_indent_columns(&long_prefix), 1 << 30);
+        // A pathological line of spaces must count columns without
+        // overflowing in debug builds; the counter saturates at
+        // usize::MAX. Exercise the loop with a large (but finite)
+        // prefix instead of materializing a multi-gigabyte string.
+        let long_prefix = " ".repeat(4 * 1024 * 1024); // 4 MiB of spaces
+        assert_eq!(leading_indent_columns(&long_prefix), 4 * 1024 * 1024);
         assert_eq!(leading_indent_columns("\t```"), 4);
         assert_eq!(leading_indent_columns(""), 0);
         assert_eq!(leading_indent_columns("  \tx"), 4);

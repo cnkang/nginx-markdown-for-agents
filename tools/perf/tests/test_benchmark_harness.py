@@ -1554,13 +1554,20 @@ class TestPortCleanupOnSignals:
         assert "Workdir:" not in result.stderr.decode(errors="replace")
 
     def test_trap_declaration_in_script(self):
-        """Verify the script declares traps for EXIT, INT, and TERM signals."""
+        """Verify the script registers cleanup for exactly EXIT, INT, and TERM."""
         script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
-        assert re.search(
+        match = re.search(
             r"^trap[ \t]+cleanup[ \t]+(EXIT|INT|TERM)([ \t]+(EXIT|INT|TERM)){2}[ \t]*$",
             script_content,
             re.M,
-        ), "Script must declare a single trap line registering cleanup for EXIT, INT, and TERM"
+        )
+        assert match is not None, (
+            "Script must declare a single trap line registering cleanup for EXIT, INT, and TERM"
+        )
+        signals = set(match.group(0).split()[2:])
+        assert signals == {"EXIT", "INT", "TERM"}, (
+            f"trap must register exactly EXIT/INT/TERM, got {sorted(signals)}"
+        )
 
     def test_cleanup_removes_temp_directory(self):
         """Temp working directory is removed during cleanup."""

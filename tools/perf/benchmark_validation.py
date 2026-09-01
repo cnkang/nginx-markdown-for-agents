@@ -671,7 +671,11 @@ def _load_result(data: ScenarioResultInput) -> tuple[dict, float, float, float, 
         )
         performance = None
     if performance is None:
-        load = _failure(load, "load_result_unparseable: performance fields")
+        # Only overwrite a still-passing load verdict: a load that already
+        # failed (parse_ab_result/parse_hey_result strict checks) carries a
+        # more specific failure_reason that must be preserved.
+        if load.get("verdict") == "pass":
+            load = _failure(load, "load_result_unparseable: performance fields")
     elif data.load_exit_code != 0:
         load = _failure(load, f"load_generator_exit: {data.load_exit_code}")
     if performance is None:
