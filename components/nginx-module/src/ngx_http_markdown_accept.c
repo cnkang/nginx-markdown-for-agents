@@ -33,6 +33,10 @@ static ngx_int_t ngx_http_markdown_collect_accept_header(
     ngx_http_request_t *r, ngx_str_t *out);
 static ngx_int_t ngx_http_markdown_copy_accept_fields(
     ngx_http_request_t *r, u_char *data, size_t total_len);
+static ngx_int_t ngx_http_markdown_get_accept_value(
+    ngx_http_request_t *r, ngx_str_t *out);
+static void ngx_http_markdown_set_accept_reason(
+    ngx_uint_t *out_reason, ngx_uint_t reason);
 
 /*
  * Find a request header by name in nginx's generic linked-list container.
@@ -104,7 +108,7 @@ ngx_http_markdown_count_accept_headers(ngx_http_request_t *r,
          part != NULL;
          part = part->next)
     {
-        ngx_table_elt_t  *headers;
+        const ngx_table_elt_t  *headers;
 
         headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
@@ -261,7 +265,7 @@ ngx_http_markdown_copy_accept_fields(ngx_http_request_t *r, u_char *data,
          part != NULL;
          part = part->next)
     {
-        ngx_table_elt_t  *headers;
+        const ngx_table_elt_t  *headers;
 
         headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
@@ -386,6 +390,36 @@ ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
     return (count == 1) ? header : NULL;
 }
 
+
+static ngx_int_t
+ngx_http_markdown_get_accept_value(ngx_http_request_t *r, ngx_str_t *out)
+{
+    const ngx_table_elt_t  *accept_header;
+
+    if (r == NULL || out == NULL) {
+        return NGX_ERROR;
+    }
+
+    accept_header = ngx_http_markdown_get_accept_header(r);
+    if (accept_header != NULL) {
+        out->data = accept_header->value.data;
+        out->len = accept_header->value.len;
+        return NGX_OK;
+    }
+
+    return ngx_http_markdown_collect_accept_header(r, out);
+}
+
+
+static void
+ngx_http_markdown_set_accept_reason(ngx_uint_t *out_reason,
+    ngx_uint_t reason)
+{
+    if (out_reason != NULL) {
+        *out_reason = reason;
+    }
+}
+
 /*
  * Determine if request should be converted to Markdown.
  *
@@ -414,16 +448,14 @@ ngx_int_t
 ngx_http_markdown_should_convert(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf, ngx_uint_t *out_reason)
 {
-    const ngx_table_elt_t   *accept_header;
     struct FFIAcceptResult   result;
     ngx_int_t                accept_rc;
     ngx_str_t                accept_value;
     uint8_t                  on_wildcard;
 
     if (conf == NULL) {
-        if (out_reason != NULL) {
-            *out_reason = NEGOTIATE_REASON_NO_ACCEPT;
-        }
+        ngx_http_markdown_set_accept_reason(
+            out_reason, NEGOTIATE_REASON_NO_ACCEPT);
         return 0;
     }
 
@@ -433,9 +465,8 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
      * before the header lookup so a missing Accept still converts.
      */
     if (conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_FORCE) {
-        if (out_reason != NULL) {
-            *out_reason = NEGOTIATE_REASON_CONVERT;
-        }
+        ngx_http_markdown_set_accept_reason(
+            out_reason, NEGOTIATE_REASON_CONVERT);
         if (r != NULL) {
             ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                          "markdown: Accept negotiation: convert "
@@ -445,37 +476,22 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
     }
 
     if (r == NULL) {
-        if (out_reason != NULL) {
-            *out_reason = NEGOTIATE_REASON_NO_ACCEPT;
-        }
+        ngx_http_markdown_set_accept_reason(
+            out_reason, NEGOTIATE_REASON_NO_ACCEPT);
         return 0;
     }
 
-    accept_header = ngx_http_markdown_get_accept_header(r);
-    if (accept_header != NULL) {
-        accept_value.data = accept_header->value.data;
-        accept_value.len = accept_header->value.len;
-    } else {
-        accept_rc = ngx_http_markdown_collect_accept_header(
-            r, &accept_value);
-        if (accept_rc == NGX_DECLINED) {
-            if (out_reason != NULL) {
-                *out_reason = NEGOTIATE_REASON_NO_ACCEPT;
-            }
-            return 0;
-        }
-        if (accept_rc != NGX_OK) {
-            if (out_reason != NULL) {
-                *out_reason = NEGOTIATE_REASON_INTERNAL_ERROR;
-            }
-            return 0;
-        }
+    accept_rc = ngx_http_markdown_get_accept_value(r, &accept_value);
+    if (accept_rc == NGX_DECLINED
+        || (accept_rc == NGX_OK && accept_value.len == 0))
+    {
+        ngx_http_markdown_set_accept_reason(
+            out_reason, NEGOTIATE_REASON_NO_ACCEPT);
+        return 0;
     }
-
-    if (accept_value.len == 0) {
-        if (out_reason != NULL) {
-            *out_reason = NEGOTIATE_REASON_NO_ACCEPT;
-        }
+    if (accept_rc != NGX_OK) {
+        ngx_http_markdown_set_accept_reason(
+            out_reason, NEGOTIATE_REASON_INTERNAL_ERROR);
         return 0;
     }
 
@@ -488,9 +504,8 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
         on_wildcard,
         &result);
 
-    if (out_reason != NULL) {
-        *out_reason = (ngx_uint_t) result.reason;
-    }
+    ngx_http_markdown_set_accept_reason(
+        out_reason, (ngx_uint_t) result.reason);
 
     if (result.should_convert) {
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,

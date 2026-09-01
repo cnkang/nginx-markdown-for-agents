@@ -727,7 +727,7 @@ ngx_http_markdown_collect_if_none_match_value(
 {
     ngx_http_markdown_if_none_match_measurement_t  measurement;
     ngx_int_t                                       rc;
-    u_char                                         *end;
+    const u_char                                   *end;
 
     if (r == NULL || out == NULL) {
         return NGX_ERROR;
