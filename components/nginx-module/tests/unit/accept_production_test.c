@@ -535,6 +535,43 @@ test_should_convert_combines_multiple_accept_headers(void)
 }
 
 static void
+test_should_convert_combines_empty_accept_field(void)
+{
+    ngx_http_request_t    r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_table_elt_t       *first;
+    ngx_uint_t             reason;
+    ngx_int_t              rc;
+    static const char      expected[] = ", text/markdown";
+
+    memset(&r, 0, sizeof(r));
+    memset(&conf, 0, sizeof(conf));
+    g_pool_offset = 0;
+    r.headers_in.headers = *create_header_list();
+    /* An empty Accept field-line (value.len == 0) must flow through the
+     * merge branch without being dropped: it contributes only the
+     * comma+space separator to the combined value. */
+    first = add_header(&r.headers_in.headers, "Accept", "");
+    add_header(&r.headers_in.headers, "Accept", "text/markdown");
+    r.headers_in.accept = first;
+
+    g_ffi_should_convert = 1;
+    g_ffi_reason = NEGOTIATE_REASON_CONVERT;
+    rc = ngx_http_markdown_should_convert(&r, &conf, &reason);
+
+    TEST_ASSERT(rc == 1, "empty Accept field still reaches negotiation");
+    TEST_ASSERT(reason == NEGOTIATE_REASON_CONVERT,
+        "combined Accept negotiation preserves the FFI result");
+    TEST_ASSERT(g_ffi_accept_header != NULL
+                && g_ffi_accept_header_len == sizeof(expected) - 1
+                && memcmp(g_ffi_accept_header, expected,
+                          sizeof(expected) - 1) == 0,
+        "an empty field-line contributes only its separator to the "
+        "combined value, preserving field-line count");
+    TEST_PASS("empty Accept field-line merges without being dropped");
+}
+
+static void
 test_should_convert_null_conf(void)
 {
     ngx_uint_t reason = 99;
@@ -844,6 +881,7 @@ main(void)
     test_get_accept_header_fallback();
     test_get_accept_header_skips_inactive_typed_header();
     test_should_convert_combines_multiple_accept_headers();
+    test_should_convert_combines_empty_accept_field();
     test_should_convert_malformed_accept_field();
     test_accept_header_caps_and_copy_errors();
     test_accept_collection_error_guards();
