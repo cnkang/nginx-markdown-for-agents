@@ -1085,6 +1085,14 @@ test_gzip_later_member_grows_at_member_boundary(void)
     TEST_ASSERT(inflateInit2(&stream, MAX_WBITS + 16) == Z_OK,
                 "member-boundary inflate init");
 
+    stream.total_in = 123;
+    stream.total_out = 456;
+    rc = ngx_http_markdown_reset_gzip_member(
+        &r, &stream, output_data, output_size, 0, output_data);
+    TEST_ASSERT(rc == NGX_OK && stream.total_in == 0
+                && stream.total_out == 0,
+                "gzip member reset clears per-member byte counters");
+
     rc = ngx_http_markdown_inflate_loop(&r, &stream,
         &output_data, &output_size, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
         g_conf.decompress.max_size,

@@ -85,6 +85,7 @@ struct MarkdownConverterHandle { int dummy; };
     do { (void)(level); (void)(log); (void)(err); } while (0)
 
 #define ngx_memcpy(dst, src, n)    memcpy(dst, src, n)
+#define ngx_memzero(dst, n)        memset((dst), 0, (n))
 #define ngx_cpymem(dst, src, n)    (((u_char *) memcpy(dst, src, (n))) + (n))
 #define ngx_strncmp(s1, s2, n)     strncmp((const char *) (s1), \
                                             (const char *) (s2), (n))
@@ -1271,8 +1272,10 @@ test_adopt_orphan_conditional_headers(void)
 {
     ngx_http_request_t *r;
     ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conditional_ownership_t ownership;
     ngx_table_elt_t *inm;
     ngx_table_elt_t *ims;
+    ngx_int_t rc;
 
     g_pool_offset = 0;
     r = make_req();
@@ -1298,7 +1301,15 @@ test_adopt_orphan_conditional_headers(void)
      * suppressed request-header entries behind.  The orphan-adopt helper
      * restores their visibility so the next PREACCESS pass can re-capture. */
     memset(&ctx, 0, sizeof(ctx));  /* simulates the lost context */
-    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    memset(&ownership, 0, sizeof(ownership));
+    rc = ngx_http_markdown_adopt_orphan_conditional_headers(
+        r, NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT, &ownership);
+    TEST_ASSERT(rc == NGX_OK && ownership.entry_count == 2
+                && ownership.adopter
+                   == NGX_HTTP_MARKDOWN_CONDITIONAL_ADOPTER_PREACCESS
+                && ownership.phase
+                   == NGX_HTTP_MARKDOWN_CONDITIONAL_PHASE_PREACCESS,
+                "orphan adoption records its owner and phase");
     TEST_ASSERT(inm->hash != 0 && ims->hash != 0,
         "orphaned validators regain visibility after internal redirect");
     TEST_ASSERT(inm->value.len == sizeof("\"source\"") - 1
@@ -1358,7 +1369,10 @@ test_adopt_orphan_restores_repeated_validators(void)
     /* Internal redirect loses the context; adoption must restore every
      * suppressed entry and rebuild the typed pointer from the first one. */
     memset(&ctx, 0, sizeof(ctx));
-    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(ngx_http_markdown_adopt_orphan_conditional_headers(
+                    r, NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT,
+                    NULL) == NGX_OK,
+                "repeated orphan validators are adopted");
     TEST_ASSERT(inm1->hash != 0 && inm2->hash != 0 && ims->hash != 0,
         "every repeated validator regains visibility");
     TEST_ASSERT(inm1->value.len == sizeof("\"first\"") - 1
@@ -1378,13 +1392,15 @@ test_adopt_orphan_restores_repeated_validators(void)
 }
 
 static void
-test_adopt_orphan_skips_non_nul_terminated(void)
+test_adopt_orphan_rejects_value_beyond_scan_limit(void)
 {
     ngx_http_request_t *r;
     ngx_http_markdown_ctx_t ctx;
     ngx_table_elt_t *valid;
     ngx_table_elt_t *broken;
     u_char *non_nul;
+    const size_t scan_limit = 8192;
+    ngx_int_t rc;
 
     g_pool_offset = 0;
     r = make_req();
@@ -1406,16 +1422,20 @@ test_adopt_orphan_skips_non_nul_terminated(void)
 
     /* Corrupt the second entry so its value lacks a terminating NUL
      * within the bounded scan.  The orphan-adopt helper must bound
-     * the scan with memchr and skip the entry instead of reading
+     * the scan with memchr and reject the request instead of reading
      * past the allocation. */
-    non_nul = ngx_palloc(r->pool, 8192);
+    non_nul = ngx_palloc(r->pool, scan_limit + 1);
     if (non_nul == NULL) { TEST_FAIL("alloc non_nul failed"); return; }
-    memset(non_nul, 'A', 8192);
+    memset(non_nul, 'A', scan_limit + 1);
+    non_nul[scan_limit] = '\0';
     broken->value.data = non_nul;
     broken->value.len = 0;
 
     memset(&ctx, 0, sizeof(ctx));
-    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    rc = ngx_http_markdown_adopt_orphan_conditional_headers(
+        r, scan_limit, NULL);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "value beyond the configured scan limit must be rejected");
     TEST_ASSERT(valid->hash != 0
                     && valid->value.len == sizeof("\"valid\"") - 1,
                 "NUL-terminated entry is restored with correct length");
@@ -1427,7 +1447,7 @@ test_adopt_orphan_skips_non_nul_terminated(void)
                     || r->headers_in.if_modified_since != broken,
                 "typed pointer for the skipped entry is not rebuilt");
 
-    TEST_PASS("orphan adoption skips entry without NUL terminator");
+    TEST_PASS("orphan adoption rejects values beyond the scan limit");
 }
 
 static void
@@ -1441,7 +1461,10 @@ test_adopt_orphan_with_empty_headers(void)
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
 
     memset(&ctx, 0, sizeof(ctx));
-    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(ngx_http_markdown_adopt_orphan_conditional_headers(
+                    r, NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT,
+                    NULL) == NGX_OK,
+                "empty headers are accepted");
     TEST_ASSERT(r->headers_in.if_none_match == NULL
                 && r->headers_in.if_modified_since == NULL,
                 "empty headers leave typed pointers NULL");
@@ -1469,7 +1492,10 @@ test_adopt_orphan_skips_invalid_len(void)
     h->value.len = 5;
     h->value.data = (u_char *) "\"valid\"";
     memset(&ctx, 0, sizeof(ctx));
-    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(ngx_http_markdown_adopt_orphan_conditional_headers(
+                    r, NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT,
+                    NULL) == NGX_OK,
+                "invalidated value length is skipped");
     TEST_ASSERT(h->hash == 0,
                 "entry with non-zero len after hash clear is not adopted");
     TEST_ASSERT(r->headers_in.if_none_match == NULL,
@@ -1498,7 +1524,10 @@ test_adopt_orphan_skips_null_data(void)
     h->value.data = NULL;
     h->value.len = 0;
     memset(&ctx, 0, sizeof(ctx));
-    ngx_http_markdown_adopt_orphan_conditional_headers(r);
+    TEST_ASSERT(ngx_http_markdown_adopt_orphan_conditional_headers(
+                    r, NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT,
+                    NULL) == NGX_OK,
+                "invalidated NULL value is skipped");
     TEST_ASSERT(h->hash == 0,
                 "entry with NULL data remains hidden");
     TEST_ASSERT(r->headers_in.if_modified_since == NULL,
@@ -2509,6 +2538,16 @@ test_conditional_helper_guards(void)
     memset(&state, 0, sizeof(state));
     memset(&header, 0, sizeof(header));
     header.value.len = 99;
+    TEST_ASSERT(ngx_http_markdown_header_has_cache_directive(
+                    &header, (const u_char *) "private", 7) == 0,
+                "cache directive helper rejects NULL value data");
+    header.value.data = (u_char *) "private";
+    header.value.len = 0;
+    TEST_ASSERT(ngx_http_markdown_header_has_cache_directive(
+                    &header, (const u_char *) "private", 7) == 0,
+                "cache directive helper rejects empty values");
+    header.value.data = NULL;
+    header.value.len = 99;
     state.header = &header;
     state.original_value_len = 7;
     ctx.conditional.captured = 1;
@@ -2702,7 +2741,7 @@ main(void)
     test_capture_restore_conditional_headers();
     test_adopt_orphan_conditional_headers();
     test_adopt_orphan_restores_repeated_validators();
-    test_adopt_orphan_skips_non_nul_terminated();
+    test_adopt_orphan_rejects_value_beyond_scan_limit();
     test_adopt_orphan_with_empty_headers();
     test_adopt_orphan_skips_invalid_len();
     test_adopt_orphan_skips_null_data();

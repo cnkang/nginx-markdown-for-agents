@@ -32,7 +32,7 @@ static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
  *
  * On reload, nginx may pass previous zone data (`data != NULL`), which is
  * reattached instead of allocating a fresh counter block.  The SHM zone
- * name is versioned (v5) so an incompatible layout after hot reload
+ * name is versioned (v9) so an incompatible layout after hot reload
  * allocates a fresh slab instead of reattaching stale data.
  */
 static ngx_int_t

@@ -70,7 +70,7 @@ build/unit/%: unit/%_test.c include/test_common.h | build/unit build/generated
 	  effective_conf) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  accept_production|auth_production|auth_deny_security|conditional_production) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  request_bypass_production) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-parameter" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-	  inflight) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+	  inflight) extra_srcs="helpers/inflight_peer.c"; extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	esac; \
 	$(CC) $(CFLAGS_COMMON) $(LDFLAGS_COMMON) $$extra_cflags -o "$@" "$<" $$extra_srcs $$extra_ldflags
 

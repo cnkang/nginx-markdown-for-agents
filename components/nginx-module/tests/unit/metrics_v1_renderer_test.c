@@ -98,7 +98,6 @@ test_renderer_emits_frozen_families(void)
     snapshot.duration_full_buffer.count = 9;
     snapshot.input_bytes = 10;
     snapshot.output_bytes = 11;
-    snapshot.inflight = 12;
     snapshot.streaming_peak_memory_bytes = 13;
     snapshot.streaming_events.resume_failure = 14;
     snapshot.decompression.gzip_failure_format = 15;
@@ -128,6 +127,9 @@ test_renderer_emits_frozen_families(void)
     TEST_ASSERT(contains((char *) buffer,
                          "# TYPE nginx_markdown_build_info gauge"),
                 "renderer must emit build information");
+    TEST_ASSERT(!contains((char *) buffer,
+                          "nginx_markdown_inflight_requests"),
+                "renderer must not export the worker-local inflight gauge");
 
     TEST_PASS("frozen Prometheus families are emitted");
 }

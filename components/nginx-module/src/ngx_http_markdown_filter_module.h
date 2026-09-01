@@ -28,6 +28,9 @@ struct MarkdownOptions;
 struct MarkdownResult;
 struct ngx_table_elt_s;
 
+#define ngx_http_markdown_header_is_active(header) \
+    ((header) != NULL && (header)->hash != 0)
+
 /* Forward declaration: defined in ngx_http_markdown_inflight_impl.h
  * (included after this header).  The request context stores a pointer
  * to the per-request inflight release data (subrequest subrequest lifecycle). */
@@ -475,9 +478,9 @@ typedef enum {
 #define NGX_HTTP_MARKDOWN_ACCEPT_FORCE     2  /* convert regardless of Accept */
 
 /*
- * Default for markdown_limits max_inflight.  The value is parsed and stored
- * in the location configuration; enforcement is
- * implemented by the worker inflight guard.  Zero is rejected at config
+ * Default for markdown_limits max_inflight.  The value is parsed in the
+ * http configuration and inherited by location configurations; enforcement
+ * is implemented by the worker inflight guard.  Zero is rejected at config
  * parse time (must be 1..65535) — there is no "unlimited" sentinel.
  */
 #define NGX_HTTP_MARKDOWN_MAX_INFLIGHT_DEFAULT  64
@@ -967,6 +970,22 @@ typedef struct ngx_http_markdown_conditional_header_state_s {
     struct ngx_http_markdown_conditional_header_state_s *next;
 } ngx_http_markdown_conditional_header_state_t;
 
+typedef enum {
+    NGX_HTTP_MARKDOWN_CONDITIONAL_ADOPTER_NONE = 0,
+    NGX_HTTP_MARKDOWN_CONDITIONAL_ADOPTER_PREACCESS
+} ngx_http_markdown_conditional_adopter_t;
+
+typedef enum {
+    NGX_HTTP_MARKDOWN_CONDITIONAL_PHASE_NONE = 0,
+    NGX_HTTP_MARKDOWN_CONDITIONAL_PHASE_PREACCESS
+} ngx_http_markdown_conditional_phase_t;
+
+typedef struct {
+    ngx_http_markdown_conditional_adopter_t  adopter;
+    ngx_http_markdown_conditional_phase_t    phase;
+    ngx_uint_t                               entry_count;
+} ngx_http_markdown_conditional_ownership_t;
+
 typedef struct {
     ngx_http_request_t          *request;
     ngx_http_markdown_buffer_t   buffer;       /* Response buffer */
@@ -995,6 +1014,7 @@ typedef struct {
         struct ngx_table_elt_s      *if_none_match;
         struct ngx_table_elt_s      *if_modified_since;
         ngx_http_markdown_conditional_header_state_t *header_states;
+        ngx_http_markdown_conditional_ownership_t ownership;
         ngx_flag_t                  captured;
         ngx_flag_t                  suppressed;
         /* One-shot latch: set when a pending 304 header send completes;
@@ -1929,7 +1949,9 @@ void ngx_http_markdown_restore_conditional_request(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
 /* Re-adopt suppressed validators orphaned by an internal redirect that
  * cleared the module context. */
-void ngx_http_markdown_adopt_orphan_conditional_headers(ngx_http_request_t *r);
+ngx_int_t ngx_http_markdown_adopt_orphan_conditional_headers(
+    ngx_http_request_t *r, size_t scan_limit,
+    ngx_http_markdown_conditional_ownership_t *ownership);
 
 /* Send 304 Not Modified response */
 ngx_int_t ngx_http_markdown_send_304(ngx_http_request_t *r,

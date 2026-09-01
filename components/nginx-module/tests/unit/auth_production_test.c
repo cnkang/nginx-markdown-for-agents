@@ -762,6 +762,40 @@ test_is_authenticated_auth_cookie(void)
 }
 
 static void
+test_is_authenticated_skips_inactive_cookie_header(void)
+{
+    ngx_http_request_t  *r;
+    ngx_table_elt_t     *inactive;
+    ngx_table_elt_t     *active;
+    ngx_int_t             rc;
+
+    reset_pool();
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    inactive = (ngx_table_elt_t *) ngx_pcalloc(NULL, sizeof(*inactive));
+    active = (ngx_table_elt_t *) ngx_pcalloc(NULL, sizeof(*active));
+    if (inactive == NULL || active == NULL) {
+        TEST_FAIL("alloc failed");
+        return;
+    }
+
+    inactive->hash = 0;
+    inactive->value.data = (u_char *) "session_id=inactive";
+    inactive->value.len = sizeof("session_id=inactive") - 1;
+    active->hash = 1;
+    active->value.data = (u_char *) "session_id=active";
+    active->value.len = sizeof("session_id=active") - 1;
+    inactive->next = active;
+    r->headers_in.cookie = inactive;
+
+    rc = ngx_http_markdown_is_authenticated(r, NULL);
+    TEST_ASSERT(rc == 1,
+                "inactive cookie header must be skipped before active one");
+    TEST_PASS("inactive cookie header is skipped");
+}
+
+static void
 test_is_authenticated_no_auth(void)
 {
     reset_pool();
@@ -1215,6 +1249,7 @@ main(void)
     test_is_authenticated_null_request();
     test_is_authenticated_authorization();
     test_is_authenticated_auth_cookie();
+    test_is_authenticated_skips_inactive_cookie_header();
     test_is_authenticated_no_auth();
     test_is_authenticated_non_auth_cookie();
 

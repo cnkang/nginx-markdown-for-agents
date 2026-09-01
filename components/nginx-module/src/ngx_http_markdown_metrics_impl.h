@@ -47,9 +47,6 @@ typedef struct {
  * values have been copied into a request-local snapshot.
  */
 typedef struct {
-    struct {
-        ngx_atomic_uint_t current;
-    } inflight;
     ngx_atomic_uint_t backpressure_resume_total;
     ngx_atomic_uint_t backpressure_resume_failure_total;
 } ngx_http_markdown_metrics_performance_snapshot_t;
@@ -503,8 +500,6 @@ ngx_http_markdown_collect_performance_snapshot(
     ngx_http_markdown_metrics_snapshot_t *snapshot,
     const ngx_http_markdown_metrics_t *metrics)
 {
-    snapshot->perf.inflight.current =
-        (ngx_atomic_uint_t) ngx_http_markdown_inflight_current();
     snapshot->perf.backpressure_resume_total =
         metrics->perf.backpressure_resume_total;
     snapshot->perf.backpressure_resume_failure_total =
@@ -668,7 +663,7 @@ ngx_http_markdown_metrics_to_v1(
         v1->duration_full_buffer.count = snapshot->conversions_succeeded
             + snapshot->conversions_failed;
     }
-    /* Preserve byte and inflight gauges after the histogram conversion. */
+    /* Preserve byte and streaming gauges after the histogram conversion. */
     v1->input_bytes = snapshot->input_bytes;
     v1->output_bytes = snapshot->output_bytes;
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -676,8 +671,6 @@ ngx_http_markdown_metrics_to_v1(
     v1->streaming_peak_memory_bytes =
         snapshot->streaming.last_peak_memory_bytes;
 #endif
-    v1->inflight = snapshot->perf.inflight.current;
-
 #ifdef MARKDOWN_STREAMING_ENABLED
     v1->streaming_events.commit = snapshot->streaming.commit_total;
     v1->streaming_events.fallback = snapshot->streaming.fallback_total;
