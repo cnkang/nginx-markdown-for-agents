@@ -140,69 +140,29 @@ ngx_http_markdown_validate_conditional_candidates(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/*
+ * Commit adoption for one validator name after the caller has validated all
+ * suppressed candidates.  Returns NGX_ERROR if the NUL-termination invariant
+ * no longer holds while committing; otherwise records the first visible
+ * entry and increments the number of adopted entries.
+ */
 static ngx_int_t
-ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
+ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
     u_char *name, size_t name_len, size_t scan_limit,
     ngx_table_elt_t **first_restored, ngx_uint_t *adopted_count)
 {
-    *first_restored = NULL;
+    u_char  *value_end;
+
     if (r == NULL || name == NULL || name_len == 0
-        || adopted_count == NULL)
+        || first_restored == NULL || adopted_count == NULL)
     {
         return NGX_ERROR;
     }
+    *first_restored = NULL;
     if (r->headers_in.headers.part.nelts == 0) {
         return NGX_OK;
     }
 
-    /* Pass 1: validate every candidate before mutating anything.  A
-     * failure here (unterminated value) must leave the header list
-     * untouched so the caller never observes a partially adopted set,
-     * even when no context exists to roll back into. */
-    for (ngx_list_part_t *part = &r->headers_in.headers.part;
-         part != NULL;
-         part = part->next)
-    {
-        ngx_table_elt_t  *headers;
-
-        headers = part->elts;
-        for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].key.len != name_len
-                || ngx_strncasecmp(headers[i].key.data, name, name_len) != 0)
-            {
-                continue;
-            }
-
-            /* A hash that survived was never suppressed by this module
-             * (suppression clears hash and length together); it remains
-             * a candidate for the typed pointer, no validation needed. */
-            if (headers[i].hash != 0) {
-                continue;
-            }
-
-            /* Module suppression clears hash AND length together.  An
-             * entry with hash == 0 but a non-zero length was invalidated
-             * by other code, not by this module, and must not be adopted
-             * (its value bytes may not be NUL-terminated). */
-            if (headers[i].value.len != 0
-                || headers[i].value.data == NULL)
-            {
-                continue;
-            }
-
-            /* NGINX NUL-terminates parsed header values, so the byte
-             * length can be rebuilt after suppression zeroed it.
-             * Use the configured request buffer limit to avoid an unbounded
-             * read if the NUL invariant changes. */
-            if (memchr(headers[i].value.data, '\0', scan_limit) == NULL) {
-                return NGX_ERROR;
-            }
-        }
-    }
-
-    /* Pass 2: commit the validated adoption.  No failure can occur here
-     * (every length was already proven NUL-terminated), so the commit is
-     * atomic: either every candidate is adopted or none is. */
     for (ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
@@ -229,8 +189,12 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
                 continue;
             }
 
-            headers[i].value.len = (size_t) ((u_char *) memchr(
-                headers[i].value.data, '\0', scan_limit)
+            value_end = (u_char *) memchr(
+                headers[i].value.data, '\0', scan_limit);
+            if (value_end == NULL) {
+                return NGX_ERROR;
+            }
+            headers[i].value.len = (size_t) (value_end
                 - headers[i].value.data);
             headers[i].hash = 1;
             (*adopted_count)++;
@@ -277,10 +241,10 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     }
 
     adopted_count = 0;
-    inm_rc = ngx_http_markdown_adopt_one_conditional_headers(
+    inm_rc = ngx_http_markdown_commit_one_conditional_headers(
         r, inm_name, sizeof(inm_name) - 1, scan_limit,
         &inm, &adopted_count);
-    ims_rc = ngx_http_markdown_adopt_one_conditional_headers(
+    ims_rc = ngx_http_markdown_commit_one_conditional_headers(
         r, ims_name, sizeof(ims_name) - 1, scan_limit,
         &ims, &adopted_count);
 
