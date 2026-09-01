@@ -68,7 +68,6 @@ The conservation checks to use after the system is quiescent are:
 sum(requests_total) >= sum(conversion_attempts_total)
 sum(conversion_attempts_total) >= sum(conversion_deliveries_total)
 conversion_duration_seconds_count <= sum(conversion_attempts_total)
-inflight_requests == 0
 ```
 
 
@@ -1341,7 +1340,6 @@ tail -f /var/log/nginx/error.log | grep "markdown:"
 | `nginx_markdown_conversion_duration_seconds` | Histogram | Conversion duration by engine |
 | `nginx_markdown_input_bytes_total` | Counter | Input bytes read for conversion |
 | `nginx_markdown_output_bytes_total` | Counter | Converted bytes delivered downstream |
-| `nginx_markdown_inflight_requests` | Gauge | Current in-flight conversions |
 | `nginx_markdown_streaming_peak_memory_bytes` | Gauge | Peak streaming working-memory high-water mark |
 | `nginx_markdown_streaming_events_total` | Counter | Bounded streaming transitions |
 | `nginx_markdown_decompression_events_total` | Counter | Bounded decompression events |

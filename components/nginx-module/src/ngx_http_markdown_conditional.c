@@ -105,6 +105,11 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
     if (r->headers_in.headers.part.nelts == 0) {
         return NGX_OK;
     }
+
+    /* Pass 1: validate every candidate before mutating anything.  A
+     * failure here (unterminated value) must leave the header list
+     * untouched so the caller never observes a partially adopted set,
+     * even when no context exists to roll back into. */
     for (ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
@@ -120,12 +125,9 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
             }
 
             /* A hash that survived was never suppressed by this module
-             * (suppression clears hash and length together); leave it.
-             * It is still a valid entry, so it remains a candidate for
-             * the typed pointer when no orphan was restored. */
+             * (suppression clears hash and length together); it remains
+             * a candidate for the typed pointer, no validation needed. */
             if (headers[i].hash != 0) {
-                ngx_http_markdown_adopt_first_restored(
-                    first_restored, &headers[i]);
                 continue;
             }
 
@@ -143,16 +145,44 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
              * length can be rebuilt after suppression zeroed it.
              * Use the configured request buffer limit to avoid an unbounded
              * read if the NUL invariant changes. */
-            {
-                const u_char  *data = headers[i].value.data;
-                const u_char  *nul;
-
-                nul = memchr(data, '\0', scan_limit);
-                if (nul == NULL) {
-                    return NGX_ERROR;
-                }
-                headers[i].value.len = (size_t) (nul - data);
+            if (memchr(headers[i].value.data, '\0', scan_limit) == NULL) {
+                return NGX_ERROR;
             }
+        }
+    }
+
+    /* Pass 2: commit the validated adoption.  No failure can occur here
+     * (every length was already proven NUL-terminated), so the commit is
+     * atomic: either every candidate is adopted or none is. */
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].key.len != name_len
+                || ngx_strncasecmp(headers[i].key.data, name, name_len) != 0)
+            {
+                continue;
+            }
+
+            if (headers[i].hash != 0) {
+                ngx_http_markdown_adopt_first_restored(
+                    first_restored, &headers[i]);
+                continue;
+            }
+
+            if (headers[i].value.len != 0
+                || headers[i].value.data == NULL)
+            {
+                continue;
+            }
+
+            headers[i].value.len = (size_t) ((u_char *) memchr(
+                headers[i].value.data, '\0', scan_limit)
+                - headers[i].value.data);
             headers[i].hash = 1;
             (*adopted_count)++;
             ngx_http_markdown_adopt_first_restored(

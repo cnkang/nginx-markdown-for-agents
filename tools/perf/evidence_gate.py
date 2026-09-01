@@ -2576,14 +2576,18 @@ def _validate_benchmark_evidence(
     violations: list[tuple[str, str]] = []
     # 1. The module_benchmark container must be an object before any
     #    downstream consumer calls .get() on it (scenario source env,
-    #    baseline fallback, identity fields).  Normalize early and record
-    #    the violation once.
+    #    baseline fallback, identity fields).  Normalize early, record
+    #    the violation once, and hand a *copy* of the normalized report
+    #    to every downstream validator so all of them see the same
+    #    clean value (never mutate the caller's dict).
     mb = report.get("module_benchmark", {})
     if not isinstance(mb, dict):
         violations.append(
             (f"{role}.module_benchmark", "module_benchmark must be an object")
         )
         mb = {}
+        report = dict(report)
+        report["module_benchmark"] = mb
 
     # 2. Critical scenarios must exist
     missing = _check_missing_scenarios(report)
