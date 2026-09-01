@@ -15,9 +15,6 @@
 #include <string.h>
 
 
-#define NGX_HTTP_MARKDOWN_HTTP_DATE_LEN \
-    (sizeof("Mon, 28 Sep 1970 06:00:00 GMT") - 1)
-
 #define NGX_HTTP_MARKDOWN_IF_NONE_MATCH_MAX  8192
 
 
