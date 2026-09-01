@@ -57,7 +57,7 @@ MODULE_SO ?= build/ngx_http_markdown_filter_module.so
 PREFIX ?= /usr
 LIBDIR ?= $(PREFIX)/lib
 DESTDIR ?=
-STYLE_BASE ?= HEAD
+STYLE_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD)
 SCHEMA_RELEASE_VERSION ?= 0.9.2
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
@@ -293,6 +293,8 @@ TEST_ALL_CORE := \
 	test-rust \
 	test-nginx-unit \
 	test-nginx-unit-streaming \
+	test-nginx-unit-clang-smoke \
+	test-nginx-unit-sanitize-smoke \
 	test-property \
 	docs-check \
 	kb-contract-check \
