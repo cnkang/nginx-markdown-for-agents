@@ -701,6 +701,112 @@ test_markdown_options_init_null(void)
     TEST_PASS("markdown_options_init(NULL) does not crash");
 }
 
+static void
+test_should_convert_malformed_accept_field(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    ngx_table_elt_t *malformed;
+    ngx_uint_t reason;
+
+    memset(&r, 0, sizeof(r));
+    memset(&conf, 0, sizeof(conf));
+    g_pool_offset = 0;
+    r.headers_in.headers = *create_header_list();
+    add_header(&r.headers_in.headers, "Accept", "text/html");
+    malformed = add_header(&r.headers_in.headers, "Accept", "x");
+    malformed->value.data = NULL;
+    malformed->value.len = 1;
+    r.headers_in.accept = NULL;
+
+    TEST_ASSERT(ngx_http_markdown_should_convert(
+                    &r, &conf, &reason) == 0,
+                "malformed Accept field does not convert");
+    TEST_ASSERT(reason == NEGOTIATE_REASON_INTERNAL_ERROR,
+                "malformed Accept field reports an internal error");
+    TEST_PASS("malformed Accept field path exercised");
+}
+
+static void
+test_accept_header_caps_and_copy_errors(void)
+{
+    static char oversized[NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX + 2];
+    static u_char copied[NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX + 32];
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    ngx_table_elt_t *oversized_header;
+    ngx_uint_t reason;
+
+    memset(oversized, 'x', sizeof(oversized));
+    oversized[sizeof(oversized) - 1] = '\0';
+    memset(&r, 0, sizeof(r));
+    memset(&conf, 0, sizeof(conf));
+    g_pool_offset = 0;
+    r.headers_in.headers = *create_header_list();
+    add_header(&r.headers_in.headers, "Accept", "text/html");
+    oversized_header = add_header(&r.headers_in.headers, "Accept",
+                                  oversized);
+    r.headers_in.accept = NULL;
+
+    TEST_ASSERT(ngx_http_markdown_should_convert(
+                    &r, &conf, &reason) == 0,
+                "oversized Accept fields do not convert");
+    TEST_ASSERT(reason == NEGOTIATE_REASON_INTERNAL_ERROR,
+                "oversized Accept fields report an internal error");
+
+    TEST_ASSERT(ngx_http_markdown_copy_accept_fields(
+                    &r, copied, NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX)
+                    == NGX_ERROR,
+                "Accept copy detects a length mismatch");
+    TEST_ASSERT(oversized_header->value.len
+                    == NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX + 1,
+                "oversized Accept fixture retains its full value length");
+    TEST_PASS("Accept cap and copy error paths exercised");
+}
+
+static void
+test_accept_collection_error_guards(void)
+{
+    ngx_http_request_t r;
+    ngx_http_request_t allocation_request;
+    ngx_http_markdown_conf_t conf;
+    ngx_str_t out;
+    ngx_uint_t reason;
+    u_char copied[8];
+
+    memset(&r, 0, sizeof(r));
+    memset(&conf, 0, sizeof(conf));
+    r.headers_in.headers.part.elts = NULL;
+    r.headers_in.headers.part.nelts = 1;
+    TEST_ASSERT(ngx_http_markdown_should_convert(
+                    &r, &conf, &reason) == 0,
+                "malformed Accept list does not convert");
+    TEST_ASSERT(reason == NEGOTIATE_REASON_INTERNAL_ERROR,
+                "malformed Accept list reports an internal error");
+    TEST_ASSERT(ngx_http_markdown_copy_accept_fields(&r, copied, 0)
+                    == NGX_ERROR,
+                "Accept copy rejects a malformed list part");
+    TEST_ASSERT(ngx_http_markdown_collect_accept_header(NULL, &out)
+                    == NGX_ERROR,
+                "Accept collection rejects a NULL request");
+    TEST_ASSERT(ngx_http_markdown_collect_accept_header(&r, NULL)
+                    == NGX_ERROR,
+                "Accept collection rejects a NULL output");
+
+    memset(&allocation_request, 0, sizeof(allocation_request));
+    g_pool_offset = 0;
+    allocation_request.headers_in.headers = *create_header_list();
+    add_header(&allocation_request.headers_in.headers,
+               "Accept", "text/html");
+    add_header(&allocation_request.headers_in.headers,
+               "Accept", "text/markdown");
+    g_pool_offset = sizeof(g_pool_buf) - 1;
+    TEST_ASSERT(ngx_http_markdown_collect_accept_header(
+                    &allocation_request, &out) == NGX_ERROR,
+                "combined Accept collection propagates pool failure");
+    TEST_PASS("Accept collection error guards exercised");
+}
+
 int
 main(void)
 {
@@ -719,6 +825,9 @@ main(void)
     test_get_accept_header_null_request();
     test_get_accept_header_fallback();
     test_should_convert_combines_multiple_accept_headers();
+    test_should_convert_malformed_accept_field();
+    test_accept_header_caps_and_copy_errors();
+    test_accept_collection_error_guards();
     test_should_convert_null_conf();
     test_should_convert_null_conf_null_reason();
     test_should_convert_no_accept_header();

@@ -2238,6 +2238,442 @@ test_handle_ims_only_no_last_modified_at_all(void)
     TEST_PASS("ims_only no last_modified falls through");
 }
 
+static void
+test_collect_inm_request_list_branches(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *inactive;
+    ngx_table_elt_t *empty;
+    struct MarkdownConverterHandle converter;
+    struct MarkdownResult *result;
+
+    g_pool_offset = 0;
+    g_cond_result_code = 1;
+    g_convert_error_code = 0;
+    g_convert_etag = NULL;
+    g_convert_etag_len = 0;
+
+    r = make_req();
+    if (r == NULL) {
+        TEST_FAIL("request allocation failed");
+        return;
+    }
+
+    inactive = add_header(&r->headers_in.headers, "X-Irrelevant", "skip");
+    inactive->hash = 0;
+    add_header(&r->headers_in.headers, "If-None-Match", "\"first\"");
+    empty = add_header(&r->headers_in.headers, "If-None-Match", "");
+    empty->value.data = NULL;
+    add_header(&r->headers_in.headers, "X-Other", "skip");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.buffer_initialized = 1;
+    ctx.buffer.size = 1;
+    ctx.buffer.data = (u_char *) "x";
+    result = NULL;
+
+    TEST_ASSERT(ngx_http_markdown_handle_if_none_match(
+                    r, &conf, &ctx, &converter, &result) == NGX_DECLINED,
+                "request-list If-None-Match mismatch is declined");
+    TEST_ASSERT(g_decide_if_none_match_len == sizeof("\"first\", ") - 1,
+                "request-list values include the empty-field separator");
+    TEST_ASSERT(memcmp(g_decide_if_none_match, "\"first\", ",
+                       g_decide_if_none_match_len) == 0,
+                "request-list values preserve order and skip other headers");
+    TEST_PASS("request If-None-Match list branches exercised");
+}
+
+static void
+test_collect_inm_request_list_error_guards(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_if_none_match_measurement_t measurement;
+    ngx_str_t out;
+    u_char copied[8];
+
+    memset(&r, 0, sizeof(r));
+    r.headers_in.headers.part.elts = NULL;
+    r.headers_in.headers.part.nelts = 1;
+    memset(&measurement, 0, sizeof(measurement));
+
+    TEST_ASSERT(ngx_http_markdown_measure_request_if_none_match(
+                    &r, &measurement) == NGX_ERROR,
+                "request measurement rejects a malformed list part");
+    TEST_ASSERT(ngx_http_markdown_copy_request_if_none_match(&r, copied)
+                    == copied,
+                "request copy returns its input on a malformed list part");
+
+    out.data = (u_char *) "stale";
+    out.len = 5;
+    TEST_ASSERT(ngx_http_markdown_collect_if_none_match_value(
+                    &r, NULL, &out) == NGX_ERROR,
+                "request collection propagates a malformed list part");
+    TEST_ASSERT(out.data == NULL && out.len == 0,
+                "failed request collection clears its output");
+    TEST_ASSERT(ngx_http_markdown_collect_if_none_match_value(
+                    NULL, NULL, &out) == NGX_ERROR,
+                "request collection rejects a NULL request");
+    TEST_ASSERT(ngx_http_markdown_collect_if_none_match_value(
+                    &r, NULL, NULL) == NGX_ERROR,
+                "request collection rejects a NULL output");
+    TEST_PASS("request If-None-Match list error guards exercised");
+}
+
+static void
+test_collect_inm_captured_fallback_paths(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conditional_header_state_t state;
+    ngx_table_elt_t fallback;
+    ngx_str_t out;
+
+    memset(&r, 0, sizeof(r));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&state, 0, sizeof(state));
+    memset(&fallback, 0, sizeof(fallback));
+
+    fallback.key.data = (u_char *) "If-Modified-Since";
+    fallback.key.len = sizeof("If-Modified-Since") - 1;
+    fallback.value.data = (u_char *) "date";
+    fallback.value.len = 4;
+    state.header = &fallback;
+    state.original_value_len = 4;
+    ctx.conditional.captured = 1;
+    ctx.conditional.header_states = &state;
+    ctx.conditional.if_none_match = &fallback;
+
+    TEST_ASSERT(ngx_http_markdown_collect_if_none_match_value(
+                    &r, &ctx, &out) == NGX_OK,
+                "captured typed fallback is collected");
+    TEST_ASSERT(out.data == fallback.value.data && out.len == 4,
+                "captured value length comes from its saved state");
+
+    fallback.value.data = NULL;
+    TEST_ASSERT(ngx_http_markdown_collect_if_none_match_value(
+                    &r, &ctx, &out) == NGX_ERROR,
+                "captured fallback rejects a missing non-empty value");
+
+    fallback.value.data = (u_char *) "date";
+    state.original_value_len = NGX_HTTP_MARKDOWN_IF_NONE_MATCH_MAX + 1;
+    TEST_ASSERT(ngx_http_markdown_collect_if_none_match_value(
+                    &r, &ctx, &out) == NGX_ERROR,
+                "captured fallback rejects an oversized value");
+
+    ctx.conditional.if_none_match = NULL;
+    TEST_ASSERT(ngx_http_markdown_collect_if_none_match_value(
+                    &r, &ctx, &out) == NGX_DECLINED,
+                "captured collection declines without a typed fallback");
+
+    fallback.key.data = (u_char *) "If-None-Match";
+    fallback.key.len = sizeof("If-None-Match") - 1;
+    fallback.value.data = NULL;
+    fallback.value.len = 4;
+    state.original_value_len = 4;
+    ctx.conditional.if_none_match = &fallback;
+    TEST_ASSERT(ngx_http_markdown_collect_if_none_match_value(
+                    &r, &ctx, &out) == NGX_ERROR,
+                "captured measurement errors reach the fallback helper");
+    TEST_PASS("captured If-None-Match fallback paths exercised");
+}
+
+static void
+test_collect_inm_captured_copy_and_alloc_failure(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conditional_header_state_t first_state;
+    ngx_http_markdown_conditional_header_state_t second_state;
+    ngx_http_markdown_if_none_match_measurement_t measurement;
+    ngx_table_elt_t first;
+    ngx_table_elt_t second;
+    ngx_str_t out;
+
+    g_pool_offset = 0;
+    g_pool_allocations = 0;
+    g_pool_fail_at = (size_t) -1;
+    memset(&r, 0, sizeof(r));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&first_state, 0, sizeof(first_state));
+    memset(&second_state, 0, sizeof(second_state));
+    memset(&first, 0, sizeof(first));
+    memset(&second, 0, sizeof(second));
+
+    first.key.data = (u_char *) "If-None-Match";
+    first.key.len = sizeof("If-None-Match") - 1;
+    first.value.data = (u_char *) "one";
+    first.value.len = 3;
+    second.key.data = (u_char *) "If-None-Match";
+    second.key.len = sizeof("If-None-Match") - 1;
+    second.value.data = NULL;
+    second.value.len = 0;
+    first_state.header = &first;
+    first_state.original_value_len = 3;
+    first_state.next = &second_state;
+    second_state.header = &second;
+    second_state.original_value_len = 0;
+    ctx.conditional.captured = 1;
+    ctx.conditional.header_states = &first_state;
+    ctx.conditional.if_none_match = &first;
+
+    TEST_ASSERT(ngx_http_markdown_collect_if_none_match_value(
+                    &r, &ctx, &out) == NGX_OK,
+                "captured values are copied into a combined buffer");
+    TEST_ASSERT(out.len == sizeof("one, ") - 1
+                && memcmp(out.data, "one, ", out.len) == 0,
+                "captured copy preserves separators and empty values");
+
+    first.value.data = NULL;
+    memset(&measurement, 0, sizeof(measurement));
+    TEST_ASSERT(ngx_http_markdown_measure_captured_if_none_match(
+                    &ctx, &measurement) == NGX_ERROR,
+                "captured measurement rejects a missing non-empty value");
+
+    first.value.data = (u_char *) "one";
+    g_pool_fail_at = g_pool_allocations;
+    TEST_ASSERT(ngx_http_markdown_collect_if_none_match_value(
+                    &r, &ctx, &out) == NGX_ERROR,
+                "captured collection propagates pool allocation failure");
+    TEST_PASS("captured If-None-Match copy and allocation paths exercised");
+}
+
+static void
+test_capture_conditional_state_paths(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_request_t *failed_request;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_ctx_t failed_ctx;
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(NULL, NULL)
+                    == NGX_ERROR,
+                "capture rejects NULL request and context");
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) {
+        TEST_FAIL("request allocation failed");
+        return;
+    }
+    add_header(&r->headers_in.headers, "If-None-Match", "\"one\"");
+    add_header(&r->headers_in.headers, "If-Modified-Since", "date");
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "initial conditional capture succeeds");
+    ngx_http_markdown_restore_conditional_request(r, &ctx);
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "repeated conditional capture reuses its state chain");
+
+    g_pool_offset = 0;
+    failed_request = make_req();
+    if (failed_request == NULL) {
+        TEST_FAIL("failed-request allocation failed");
+        return;
+    }
+    ngx_table_elt_t *failed_header = add_header(
+        &failed_request->headers_in.headers, "If-None-Match", "\"one\"");
+    memset(&failed_ctx, 0, sizeof(failed_ctx));
+    g_pool_fail_at = g_pool_allocations;
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(
+                    failed_request, &failed_ctx) == NGX_ERROR,
+                "conditional capture propagates state allocation failure");
+    TEST_ASSERT(failed_header->hash != 0,
+                "failed capture leaves the request header unsuppressed");
+    TEST_PASS("conditional capture state-chain paths exercised");
+}
+
+static void
+test_conditional_helper_guards(void)
+{
+    ngx_http_markdown_if_none_match_measurement_t measurement;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conditional_header_state_t state;
+    ngx_table_elt_t header;
+    ngx_str_t key;
+    struct FFIConditionalDecision decision;
+
+    memset(&key, 0, sizeof(key));
+    TEST_ASSERT(ngx_http_markdown_is_captured_conditional_name(NULL) == 0,
+                "captured-name helper rejects NULL key");
+    TEST_ASSERT(ngx_http_markdown_is_captured_conditional_name(&key) == 0,
+                "captured-name helper rejects NULL key data");
+
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&state, 0, sizeof(state));
+    memset(&header, 0, sizeof(header));
+    header.value.len = 99;
+    state.header = &header;
+    state.original_value_len = 7;
+    ctx.conditional.captured = 1;
+    ctx.conditional.header_states = &state;
+    TEST_ASSERT(ngx_http_markdown_conditional_value_len(&ctx, &header) == 7,
+                "captured value length uses the saved original length");
+    TEST_ASSERT(ngx_http_markdown_conditional_value_len(NULL, &header) == 99,
+                "uncaptured value length uses the live header length");
+
+    memset(&measurement, 0, sizeof(measurement));
+    measurement.match_count = 1;
+    measurement.total_len = (size_t) -1;
+    TEST_ASSERT(ngx_http_markdown_add_if_none_match_length(
+                    &measurement, 0) == NGX_ERROR,
+                "If-None-Match separator overflow is rejected");
+
+    memset(&measurement, 0, sizeof(measurement));
+    measurement.total_len = NGX_HTTP_MARKDOWN_IF_NONE_MATCH_MAX;
+    TEST_ASSERT(ngx_http_markdown_add_if_none_match_length(
+                    &measurement, 1) == NGX_ERROR,
+                "If-None-Match value cap overflow is rejected");
+
+    TEST_ASSERT(ngx_http_markdown_has_conditional_request(NULL) == 0,
+                "conditional-request helper rejects NULL request");
+
+    memset(&decision, 0, sizeof(decision));
+    decision.outcome = 0;
+    TEST_ASSERT(ngx_http_markdown_conditional_early_outcome(&decision)
+                    == NGX_HTTP_NOT_MODIFIED,
+                "early outcome maps match to 304");
+    decision.outcome = 2;
+    TEST_ASSERT(ngx_http_markdown_conditional_early_outcome(&decision)
+                    == NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT,
+                "early outcome maps bypass to the module sentinel");
+    decision.outcome = 1;
+    TEST_ASSERT(ngx_http_markdown_conditional_early_outcome(&decision)
+                    == NGX_DECLINED,
+                "early outcome maps pending decisions to declined");
+    TEST_PASS("conditional helper guards and early outcomes exercised");
+}
+
+static void
+test_304_snapshot_multiple_headers(void)
+{
+    ngx_http_request_t *r;
+    ngx_list_part_t second_part;
+    ngx_table_elt_t second_entries[1];
+    ngx_http_markdown_304_list_snapshot_t snapshot;
+    ngx_table_elt_t *first;
+    ngx_table_elt_t *second;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) {
+        TEST_FAIL("request allocation failed");
+        return;
+    }
+    first = add_header(&r->headers_out.headers, "ETag", "\"one\"");
+    second = add_header(&r->headers_out.headers, "Vary", "Accept");
+    memset(&second_part, 0, sizeof(second_part));
+    memset(second_entries, 0, sizeof(second_entries));
+    second_entries[0].hash = 1;
+    second_entries[0].key.data = (u_char *) "Cache-Control";
+    second_entries[0].key.len = sizeof("Cache-Control") - 1;
+    second_entries[0].value.data = (u_char *) "public";
+    second_entries[0].value.len = sizeof("public") - 1;
+    second_part.elts = second_entries;
+    second_part.nelts = 1;
+    r->headers_out.headers.part.next = &second_part;
+    r->headers_out.headers.last = &second_part;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    TEST_ASSERT(ngx_http_markdown_304_snapshot_list(
+                    r->pool, &r->headers_out.headers, &snapshot) == NGX_OK,
+                "304 snapshot saves headers across multiple list parts");
+    TEST_ASSERT(snapshot.entry_count == 3
+                && snapshot.original_last == &second_part,
+                "304 snapshot records every header and the list tail");
+
+    first->hash = 0;
+    first->value.data = (u_char *) "changed";
+    second->hash = 0;
+    second->value.data = (u_char *) "changed";
+    second_entries[0].hash = 0;
+    second_entries[0].value.data = (u_char *) "changed";
+    r->headers_out.headers.last = &r->headers_out.headers.part;
+    second_part.next = &r->headers_out.headers.part;
+
+    ngx_http_markdown_304_restore_list(&r->headers_out.headers, &snapshot);
+    TEST_ASSERT(r->headers_out.headers.last == &second_part
+                && second_part.next == NULL,
+                "304 restore reinstates the original list tail linkage");
+    TEST_ASSERT(first->hash == 1 && first->value.len == sizeof("\"one\"") - 1,
+                "304 restore reinstates the first header");
+    TEST_ASSERT(second->hash == 1 && second->value.len == sizeof("Accept") - 1,
+                "304 restore reinstates the second header");
+    TEST_ASSERT(second_entries[0].hash == 1
+                && second_entries[0].value.len == sizeof("public") - 1,
+                "304 restore reinstates headers in the next list part");
+    TEST_PASS("304 multi-part snapshot and restore exercised");
+}
+
+static void
+test_304_snapshot_error_guards(void)
+{
+    ngx_http_markdown_304_list_snapshot_t snapshot;
+    ngx_http_markdown_304_list_snapshot_t restore_snapshot;
+    ngx_http_markdown_304_snapshot_entry_t saved_entry;
+    ngx_list_t list;
+    ngx_list_part_t part;
+    ngx_table_elt_t entry;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(&restore_snapshot, 0, sizeof(restore_snapshot));
+    memset(&saved_entry, 0, sizeof(saved_entry));
+    memset(&list, 0, sizeof(list));
+    memset(&part, 0, sizeof(part));
+    memset(&entry, 0, sizeof(entry));
+    list.part = part;
+
+    TEST_ASSERT(ngx_http_markdown_304_snapshot_list(
+                    NULL, NULL, &snapshot) == NGX_ERROR,
+                "304 snapshot rejects a NULL list");
+    TEST_ASSERT(ngx_http_markdown_304_snapshot_list(
+                    NULL, &list, NULL) == NGX_ERROR,
+                "304 snapshot rejects a NULL snapshot");
+    TEST_ASSERT(ngx_http_markdown_304_snapshot_list(
+                    NULL, &list, &snapshot) == NGX_OK,
+                "304 snapshot accepts an empty list");
+    ngx_http_markdown_304_restore_list(&list, &snapshot);
+    ngx_http_markdown_304_restore_list(NULL, &snapshot);
+    ngx_http_markdown_304_restore_list(&list, NULL);
+
+    list.part.nelts = NGX_HTTP_MARKDOWN_304_SNAPSHOT_MAX_ENTRIES + 1;
+    TEST_ASSERT(ngx_http_markdown_304_snapshot_list(
+                    NULL, &list, &snapshot) == NGX_ERROR,
+                "304 snapshot rejects too many entries");
+
+    g_pool_offset = 0;
+    g_pool_allocations = 0;
+    g_pool_fail_at = (size_t) -1;
+    list.part.nelts = 1;
+    list.part.elts = NULL;
+    TEST_ASSERT(ngx_http_markdown_304_snapshot_list(
+                    NULL, &list, &snapshot) == NGX_ERROR,
+                "304 snapshot rejects NULL entry storage");
+
+    list.part.elts = &entry;
+    g_pool_fail_at = g_pool_allocations;
+    TEST_ASSERT(ngx_http_markdown_304_snapshot_list(
+                    NULL, &list, &snapshot) == NGX_ERROR,
+                "304 snapshot propagates entry allocation failure");
+
+    restore_snapshot.entry_count = 1;
+    restore_snapshot.entries = &saved_entry;
+    g_pool_fail_at = (size_t) -1;
+    list.part.elts = NULL;
+    list.part.nelts = 1;
+    ngx_http_markdown_304_restore_list(&list, &restore_snapshot);
+    list.part.elts = &entry;
+    list.part.nelts = 2;
+    ngx_http_markdown_304_restore_list(&list, &restore_snapshot);
+    TEST_PASS("304 snapshot and restore error guards exercised");
+}
+
 int
 main(void)
 {
@@ -2285,6 +2721,12 @@ main(void)
     test_handle_inm_conversion_error();
     test_handle_inm_etag_match_304();
     test_handle_inm_repeated_fields_match_304();
+    test_collect_inm_request_list_branches();
+    test_collect_inm_request_list_error_guards();
+    test_collect_inm_captured_fallback_paths();
+    test_collect_inm_captured_copy_and_alloc_failure();
+    test_capture_conditional_state_paths();
+    test_conditional_helper_guards();
     test_handle_inm_etag_mismatch();
     test_handle_inm_with_ims_header();
 
@@ -2295,6 +2737,8 @@ main(void)
     test_has_no_transform_no_cache_control();
     test_conditional_cache_validation_modes();
     test_has_no_transform_ignores_invalidated_and_accepts_htab();
+    test_304_snapshot_multiple_headers();
+    test_304_snapshot_error_guards();
 
     test_handle_ims_only_scalar_time_not_consulted();
     test_handle_ims_only_no_last_modified_at_all();
