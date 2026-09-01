@@ -4,103 +4,46 @@
 
 [English](README.md) | 简体中文
 
-让 NGINX 为你已经在提供的 HTML 页面增加一份更适合机器消费的 Markdown 变体。
+> HTML 进，Markdown 出。
+> 客户端请求时返回，或者由你决定何时提供。
 
-> HTML 保持原样，Markdown 按需返回——客户端主动请求，或者你指定哪些 bot 自动获得。
+> 当前版本线：v0.9.2 是开发候选版本，尚未发布。
+> 这是 v1.0 前最后一次破坏性版本。v0.9.2 发布前，请使用已发布的标签安装。
 
-客户端发送 `Accept: text/markdown` 时得到 Markdown；浏览器和普通调用方仍然拿到原始 HTML。你也可以通过 `$markdown_for_bot` 按 User-Agent 精确控制哪些爬虫走 `markdown_filter`；`markdown_accept` 只参与模块内部的内容协商与 Markdown 选择，模块不会改写 Accept 请求头。匹配的 bot 即使没有主动请求 Markdown，也能在模块内部协商后收到转换后的内容。你不需要改造业务应用，不需要额外维护一套抓取器，也不需要单独部署一个转换服务。
+NGINX Markdown for Agents 为现有 HTML 页面增加适合机器消费的 Markdown
+表示。发送 `Accept: text/markdown` 的客户端会收到 Markdown。浏览器和其他
+客户端仍然收到原始 HTML。
 
-这是一种很务实的接入方式：在不动现有站点内容生产流程的前提下，把 Agent 友好能力放到团队已经熟悉的 NGINX 层里完成。
+模块在 NGINX 边缘层完成转换。不需要改造应用、维护第二套内容 API 或运行
+额外的抓取服务。你也可以通过 User-Agent 匹配只为指定 bot 开启转换。
 
-> 灵感来自 Cloudflare 的 [Markdown for Agents](https://blog.cloudflare.com/markdown-for-agents/)。本项目把同样的思路带到你自己可控的 NGINX 部署中，在更靠近源站的反向代理层完成转换。
+## 功能概览
 
-## 这个项目解决什么问题
+| 请求 | 结果 |
+|------|------|
+| `Accept: text/markdown` | 返回带有 `Content-Type: text/markdown` 的 Markdown |
+| `Accept: text/html` | 返回原始 HTML |
+| 匹配的 User-Agent 与 `markdown_accept force` | 返回 Markdown，且不修改发往上游的 `Accept` 请求头 |
 
-AI Agent 和 LLM 工具抓网页时，经常面对的是为浏览器而不是为机器设计的 HTML：
-
-- 导航、布局、脚本等噪音会额外消耗 token。
-- 真正有价值的正文内容和大量标记混在一起。
-- 每个客户端都要自己维护一套 HTML 抽取或清洗逻辑。
-
-与传统搜索爬虫为关键词排序建立索引不同，AI 爬虫的目标是提取知识用于生成答案。它们对 token 成本和语义清晰度更敏感——一个典型 HTML 页面的 token 数量可以是其 Markdown 等价内容的 3 倍甚至更多，而多出来的 token 大部分不携带有用信息。对于大规模运行的 AI 系统，这个成本差异会显著累积。
-
-这个模块把转换工作前移到 Web 层。NGINX 根据内容协商决定是否返回 Markdown；匹配的 User-Agent 可以通过 `markdown_accept force` 在模块内部强制选择 Markdown，而不是改写请求头。这样即使爬虫本身不会发送 `text/markdown`，也能拿到干净、省 token 的 Markdown 内容。很多站点——技术文档、博客、开发者 Wiki——本身就是用 Markdown 编写内容再渲染成 HTML 发布的。对这类站点来说，这个转换实际上是在恢复内容的原始编写格式。
-
-这遵循的是 HTTP 协议一直以来就有的内容协商模型：同一个 URL 根据客户端的请求为不同消费方提供不同的表示。
-
-```text
-浏览器       -> Accept: text/html      -> HTML（保持不变）
-AI Agent     -> Accept: text/markdown  -> Markdown
-AI 爬虫（按 User-Agent 匹配）          -> Markdown（通过 NGINX 配置）
-```
-
-## 为什么值得尝试
-
-- 复用现有页面和上游服务，不必再造一条平行的内容 API。
-- 可以渐进式上线，先对一个路径、一个站点或一个 location 启用。
-- 基于标准 HTTP 内容协商，缓存与回源行为仍然容易理解和运维。
-- 仍然是 NGINX 模块的部署模型，不需要额外引入一个新的常驻服务。
-- 在最靠近应用的反向代理层做转换，对 HTML 来源和转换配置有完整的控制权。
-- 为 AI 消费方提供更干净、更省 token 的内容表示，减少生成式回答引用你的站点时出现误解或信息丢失的风险。
+模块会在 Agent 消费页面前移除面向浏览器的噪声。这可以减少 token 使用量，
+也让页面结构更容易理解。同一个 URL 仍然可以为浏览器提供 HTML。
 
 ## 快速上手
 
-第一次试用只要三步：
-
-1. 安装模块。
-2. 在一个 location 上启用。
-3. 验证 Markdown 与 HTML 两种返回都符合预期。
-
 ### 1. 安装模块
 
-```bash
-set -euo pipefail
-# 下面的 RELEASE_TAG 以 v0.9.2 为示例。请在该版本正式发布后再执行这些命令；
-# 在此之前请替换为最新已发布的 release 标签
-# （见 https://github.com/cnkang/nginx-markdown-for-agents/releases）。
-RELEASE_TAG=v0.9.2
-RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
-INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"
-curl -fsSLo "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}"
-curl -fsSLo SHA256SUMS "${RELEASE_BASE}/SHA256SUMS"
-curl -fsSLo SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc"
-curl -fsSLo nginx-markdown-for-agents-release.asc \
-  "${RELEASE_BASE}/nginx-markdown-for-agents-release.asc"
-TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75
-GNUPGHOME="$(mktemp -d)"
-trap 'rm -rf "$GNUPGHOME"' EXIT
-gpg --batch --homedir "$GNUPGHOME" --import nginx-markdown-for-agents-release.asc
-VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 \
-  --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
-  | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
-[[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1
-CHECKSUM_LINE="$(awk -v file="${INSTALLER}" \
-  '$2 == file { count++; line = $0 } END { if (count == 1) print line }' \
-  SHA256SUMS)"
-[[ -n "$CHECKSUM_LINE" ]] || { echo "缺少唯一的校验和记录" >&2; exit 1; }
-if command -v sha256sum >/dev/null 2>&1; then
-  printf '%s\n' "$CHECKSUM_LINE" | sha256sum -c -
-else
-  printf '%s\n' "$CHECKSUM_LINE" | shasum -a 256 -c -
-fi
-sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
-sudo nginx -t && sudo nginx -s reload
-```
+请参阅[安装指南](docs/guides/INSTALLATION.md#2-shortest-success-path)，
+其中包含签名 release 安装器和各平台安装包的使用方法。该指南也覆盖
+Docker、源码构建、Homebrew 和安装故障排查。
 
-安装脚本会识别本机 NGINX 版本，下载匹配的模块制品，并自动接入 `load_module` 与 `markdown_filter on`，无需手动编辑配置。默认会强制进行 SHA-256 制品完整性校验。
-
-其他安装方式（源码构建、Docker、自定义 NGINX 构建）、故障排查和详细说明见 [安装指南](docs/guides/INSTALLATION.md)。
-
-如果你在 macOS 上通过项目 Homebrew tap 安装（基于 release tag 制品）：
+macOS 用户可以使用项目 Homebrew tap 安装基于 release tag 的软件包：
 
 ```bash
 brew tap cnkang/nginx-markdown
 brew install cnkang/nginx-markdown/nginx-markdown-module
 ```
 
-tap 发布与 GitHub macOS 发布后校验流程见 [docs/guides/HOMEBREW_TAP_RELEASE.md](docs/guides/HOMEBREW_TAP_RELEASE.md)。
-
-### 2. 在一个路由上开启 Markdown
+### 2. 在一个 location 上启用 Markdown
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
@@ -115,40 +58,28 @@ http {
 
         location / {
             markdown_filter on;
-            proxy_set_header Accept-Encoding "";
+            markdown_streaming auto;
+            markdown_auto_decompress on;
             proxy_pass http://backend;
         }
     }
 }
 ```
 
-如果你的上游可能返回压缩响应，`proxy_set_header Accept-Encoding "";` 是最容易验证的起步方式。等基础链路跑通后，再切换到模块内置的压缩响应处理能力，详见 [Decompression](docs/features/DECOMPRESSION.md)。
-
-### 3. 验证行为
+### 3. 验证两种表示
 
 ```bash
-# Markdown 变体
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
-
-# HTML 保持原样
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 ```
 
-预期结果：
+第一个请求应返回 `Content-Type: text/markdown`。第二个请求应保留上游的
+HTML 响应。如果结果不符合预期，请查看[安装故障排查指南](docs/guides/INSTALLATION.md#10-troubleshooting)。
 
-- `Accept: text/markdown` 返回 `Content-Type: text/markdown; charset=utf-8`
-- `Accept: text/html` 仍返回原始 HTML
+## 0.9.2 配置要点
 
-如果行为不符合预期，请查看安装指南里的 [Troubleshooting](docs/guides/INSTALLATION.md#10-troubleshooting) 小节。
-
-如果你想先看面向生产环境的实用配置，直接跳到 [部署示例](docs/guides/DEPLOYMENT_EXAMPLES.md)。
-
-如果你想直接查看使用冻结显式指令面的完整生产配置模板，参见 [生产示例](examples/production/) 目录。
-
-## 显式生产配置
-
-0.9.2 已移除不透明的 profile。请显式配置行为，使 `nginx -T` 能展示每个
-运维可见的设置：
+0.9.2 将公共配置冻结为 25 条有效指令。请显式配置行为，使 `nginx -T`
+能展示运维人员选择的设置。
 
 ```nginx
 http {
@@ -159,37 +90,39 @@ http {
 
     server {
         listen 80;
+
         location /docs/ {
             markdown_filter on;
+            markdown_accept strict;
             proxy_pass http://backend;
         }
     }
 }
 ```
 
-需要严格缓存校验时使用 `markdown_cache_validation full` 与
-`markdown_streaming off`；面向大文档的 Agent 响应可使用
-`markdown_accept wildcard` 与 `markdown_streaming force`。完整替换关系见
-[迁移指南](docs/guides/MIGRATION-0.9.2.md)。
+- `markdown_streaming off` 选择全缓冲转换。`auto` 使用有界的响应形态判断。
+  `force` 会在缓存和准入检查通过后请求流式转换。
+- `markdown_limits` 限制转换内存、处理时间、解压、流式缓冲区和并发工作量。
+- `markdown_accept strict` 适合分阶段上线。只有在明确需要时才使用
+  `wildcard` 或 `force`。
+- `markdown_error_policy` 决定转换失败时透传原响应，或返回指定状态码。
 
-## 针对特定 Bot 返回 Markdown
+完整指令表见[配置参考](docs/guides/CONFIGURATION.md)。修改现有 0.9.1
+配置前，请先阅读[0.9.2 迁移指南](docs/guides/MIGRATION-0.9.2.md)。
 
-大多数 AI 爬虫不会发送 `Accept: text/markdown`，它们使用和浏览器类似的 Accept 头。可以用 NGINX 的 `map` 指令只为指定 User-Agent 启用模块，并在该范围设置 `markdown_accept force`。`proxy_set_header Accept` 只会修改发往上游的请求，不会修改本模块实际判断的请求头。
+## 针对指定 bot
+
+许多 AI 爬虫发送浏览器风格的 `Accept` 请求头。可以用 NGINX 的 `map`
+匹配已知 User-Agent，再为该 location 设置 `markdown_accept force`。
+模块不会改写发往上游的 `Accept` 请求头。
 
 ```nginx
-load_module modules/ngx_http_markdown_filter_module.so;
-
 http {
-    # 不改写上游请求，只为已知 AI bot 启用 Markdown 转换
     map $http_user_agent $markdown_for_bot {
-        default         off;
-        "~*ClaudeBot"   on;
-        "~*GPTBot"      on;
-        "~*Googlebot"   on;
-    }
-
-    upstream backend {
-        server 127.0.0.1:8080;
+        default       off;
+        "~*ClaudeBot" on;
+        "~*GPTBot"    on;
+        "~*Googlebot" on;
     }
 
     server {
@@ -205,35 +138,45 @@ http {
 ```
 
 ```bash
-# 模拟 ClaudeBot — 即使带浏览器式 Accept 头也返回 Markdown
-curl -sD - -o /dev/null -A "ClaudeBot/1.0" -H "Accept: text/html" http://localhost/docs/
-# 预期: Content-Type: text/markdown; charset=utf-8
-
-# 普通浏览器请求 — 仍然返回 HTML
-curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
+curl -sS -D - -o /dev/null \
+    -A "ClaudeBot/1.0" -H "Accept: text/html" http://localhost/docs/
 ```
 
-原理是 `markdown_filter $markdown_for_bot` 选中匹配的 Bot 流量，`markdown_accept force` 则无视客户端声明的接受类型、强制选择 Markdown——Bot 无需发送 `Accept: text/markdown`。模块不会改写 Accept 请求头，只参与模块内部的协商与 Markdown 选择。所有其他准入检查（状态码、Content-Type、大小限制等）仍然正常生效。浏览器和不匹配的客户端完全不受影响。
+[Bot 定向示例](examples/nginx-configs/06-bot-targeted-conversion.conf)包含
+更完整的 User-Agent map。状态码、Content-Type、大小和其他准入检查仍然生效。
 
-完整的配置模板（包含更多 bot 模式）见 [examples/nginx-configs/06-bot-targeted-conversion.conf](examples/nginx-configs/06-bot-targeted-conversion.conf)。详细说明见 [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user-agent-based)。
+## 0.9.2 的变化
 
-## 核心功能与能力
+0.9.2 是破坏性发布候选版本。升级前请阅读[发布说明](docs/releases/0.9.2-release-notes.md)。
 
-| 功能特性 | 说明 |
-|------------|--------------|
-| **内容协商** | 客户端请求 `text/markdown` 时触发转换，也支持按 User-Agent 针对特定 bot 自动转换。 |
-| **HTML 透传** | 浏览器和普通客户端流量完全保持原样，无任何行为影响。 |
-| **自动解压缩** | 自动处理 gzip、brotli、deflate 上游压缩响应，免除手动编写解压管道的繁琐。 |
-| **缓存友好变体** | 自动生成对应 Markdown 变体的 ETags 并完美支持标准的 HTTP 条件请求。 |
-| **失败策略可控** | 支持配置失败透传或失败拦截（Fail-open / Fail-closed），完美融入生产 SLA。 |
-| **资源限制** | 通过 `markdown_limits` 限制单次转换的最大大小、处理超时、流式缓冲区和进行中工作上限。 |
-| **安全加固** | 强制校验输出链接、默认拒绝不安全的 forwarded-host，限制解析/解压资源，防范拒绝服务攻击。 |
-| **可选元数据** | 支持自动估算并插入 Markdown Token 数及干净的 YAML front matter。 |
-| **指标监控端点** | 暴露 Prometheus 兼容的转换计数与运行时指标，助力集群可观测性建设。 |
-| **双引擎模式** | 典型大小响应走全缓冲（默认），大响应/分块响应支持自动或强制路由到流式引擎。 |
-| **有界内存流式** | 使用 `markdown_streaming` 选择流式路径，并由 `markdown_limits streaming_buffer=` 设定上限。 |
+- 公共配置从 63 条指令减少到 25 条。profile、OTel、按路径指标、
+  shadow mode 和其他已移除的旧指令不再接受。迁移后运行 `nginx -t`。
+- 动态配置现在只接受 JSON schema v1 和五个运行时键。重载失败时，
+  active 与 last-known-good 快照保持不变。恢复文件时请原子替换文件。
+- Diagnostics 使用只读 JSON schema v2，并且只接受 `GET` 和 `HEAD`。
+  内置访问边界仅允许 loopback。Prometheus 指标使用冻结的 v1 合同。
+- 内部 C/Rust FFI ABI 升级到 v2。请同时重新构建模块和转换器。
+  FFI 只供内部使用，不保证跨版本兼容。
+
+[升级指南](docs/guides/UPGRADE-TO-0.9.2.md)介绍二进制替换、配置迁移、服务
+重启和升级后检查。需要降级时请使用[回滚指南](docs/guides/VERSION_ROLLBACK-0.9.2.md)。
+
+## 核心能力
+
+| 能力 | 说明 |
+|------|------|
+| 内容协商 | 按请求或按指定 bot 返回 Markdown |
+| HTML 透传 | 浏览器和不符合条件的响应保持不变 |
+| 压缩处理 | 处理上游 gzip、deflate 和 Brotli 响应 |
+| 有界转换 | 支持全缓冲转换和有界流式转换 |
+| 缓存感知响应 | 为不同表示支持 ETag 和条件请求 |
+| 输出控制 | 清洗链接、删除噪声并添加可选元数据 |
+| 失败策略与可观测性 | 配置错误策略、Diagnostics 和 Prometheus 指标 |
 
 ## 平台支持
+
+下面的矩阵由 release policy 源文件生成，列出经过测试的 NGINX 版本、
+平台、制品和支持级别。安装细节请参阅[软件包兼容性指南](docs/guides/PACKAGE_COMPATIBILITY.md)。
 
 <!-- BEGIN:release-matrix:support-matrix -->
 
@@ -291,200 +234,61 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 | 1.24.0 | legacy | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 <!-- END:release-matrix:support-matrix -->
 
-## 工作原理
-
-```mermaid
-flowchart TD
-    client["Agent 或工具<br/>Accept: text/markdown"]
-    bot["AI 爬虫（如 ClaudeBot）<br/>NGINX 按 User-Agent 匹配"]
-
-    subgraph edge["NGINX 请求路径"]
-        ingress["请求进入 NGINX"]
-        rewrite["markdown_accept 协商<br/>（针对匹配的 User-Agent）"]
-        filter["Markdown 过滤模块 (C)<br/>准入判断<br/>响应缓冲<br/>头部策略"]
-        passthrough["普通 HTML 响应<br/>给浏览器和普通客户端"]
-    end
-
-    subgraph engine["转换引擎"]
-        rust["Rust 转换器<br/>HTML 解析<br/>安全清洗<br/>Markdown 生成"]
-    end
-
-    markdown["Markdown 响应<br/>Content-Type: text/markdown"]
-
-    client --> ingress
-    bot --> ingress
-    ingress --> rewrite
-    rewrite --> filter
-    filter -->|符合 Markdown 转换条件| rust
-    rust --> markdown
-    ingress -.->|Accept: text/html 或请求不符合条件| passthrough
-
-    classDef client fill:#eef6ff,stroke:#1d4ed8,color:#0f172a,stroke-width:2px;
-    classDef bot fill:#eef6ff,stroke:#7c3aed,color:#0f172a,stroke-width:2px;
-    classDef nginx fill:#f7fee7,stroke:#65a30d,color:#1f2937,stroke-width:2px;
-    classDef module fill:#fff7ed,stroke:#ea580c,color:#1f2937,stroke-width:2px;
-    classDef engine fill:#fef2f2,stroke:#dc2626,color:#1f2937,stroke-width:2px;
-    classDef output fill:#ecfeff,stroke:#0891b2,color:#0f172a,stroke-width:2px;
-    classDef passthrough fill:#f8fafc,stroke:#94a3b8,color:#334155,stroke-dasharray: 5 3;
-
-    class client client;
-    class bot bot;
-    class ingress nginx;
-    class rewrite nginx;
-    class filter module;
-    class rust engine;
-    class markdown output;
-    class passthrough passthrough;
-```
-
-NGINX 模块负责请求是否可转换、响应缓冲和头部管理。对于按 bot 定向转换的场景，模块的 `markdown_accept` 协商决定是否转换。NGINX 不会改写 Accept 头。Rust 转换器负责 HTML 解析、安全清洗、确定性 Markdown 生成等核心逻辑。
-
-### 为什么是 C + Rust
-
-这个拆分是沿着真实的问题边界做的。
-
-- C 负责直接接入 NGINX 模块 API、过滤链、缓冲区和请求生命周期。
-- Rust 负责解析不可信 HTML、规范化输出并随时间安全演进。
-- FFI 边界保持得很小，这样 NGINX 侧的 HTTP 逻辑和转换逻辑可以相对独立演进。
-- 项目将 FFI 边界标记为仅供内部使用（`INTERNAL_ONLY`）。结构体布局、函数签名和常量可能在任意两个版本之间变更，且不另行通知；四元组 ABI 握手会阻止不匹配的 C/Rust 二进制启动。
-
-如果你想看完整的设计理由，而不只是这里的简版说明，可以继续读 [docs/architecture/SYSTEM_ARCHITECTURE.md](docs/architecture/SYSTEM_ARCHITECTURE.md)、[docs/architecture/ADR/0001-use-rust-for-conversion.md](docs/architecture/ADR/0001-use-rust-for-conversion.md) 与 [docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md](docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md)。
-
-## 本地开发与测试
-
-```bash
-# 快速构建 + 冒烟测试
-make test
-
-# 完整 Rust 测试
-make test-rust
-
-# 完整 NGINX 模块单元测试
-make test-nginx-unit
-
-# 流式专项测试
-make test-rust-streaming
-make verify-chunked-native-e2e-smoke
-
-# 运行时集成与 canonical E2E 检查
-make test-nginx-integration
-make test-e2e-rust
-make test-e2e
-make test-rust-fuzz-smoke
-```
-
-`make test-nginx-integration`、`make test-e2e` 和 `make verify-chunked-native-e2e-smoke` 需要真实的 `nginx` 运行时。如果 `nginx` 不在 `PATH` 中，设置 `NGINX_BIN=/absolute/path/to/nginx` 以便这些命令能找到 nginx 二进制文件。
-
-更完整的集成测试、E2E 与性能基线说明见 [docs/testing/README.md](docs/testing/README.md) 与 [docs/testing/E2E_TESTS.md](docs/testing/E2E_TESTS.md)。
-
-如果你修改的是仓库 contract、文档校验器或 agent 工作流规则，还需要运行 harness 检查：
-
-```bash
-# 仓库级 harness 真相面的廉价阻断检查
-make harness-check
-
-# 包含文档与 release-gate 的完整 harness 校验
-make harness-check-full
-```
-
-把 harness 检查当作仓库 contract 和 release-gate 变更的主入口：
-
-```bash
-# workflow、shell、secret、Semgrep 与 Rust 依赖策略的静态安全检查
-make security-static
-
-# 面向发布辅助的供应链可见性检查
-make supply-chain
-```
-
 ## 文档导航
 
-### 快速起步与安装
-- [安装指南](docs/guides/INSTALLATION.md) — 预构建包、手动配置、Homebrew tap (`brew install cnkang/nginx-markdown/nginx-markdown-module`)。
-- [源码构建](docs/guides/BUILD_INSTRUCTIONS.md) — 完整的源码编译说明。
-- [配置指令参考](docs/guides/CONFIGURATION.md) — 详细的指令语法和运行时行为。
-- [部署示例](docs/guides/DEPLOYMENT_EXAMPLES.md) — 面向生产环境的 NGINX 配置模版。
+| 需求 | 规范文档 |
+|------|----------|
+| 安装或构建 | [安装指南](docs/guides/INSTALLATION.md)、[构建说明](docs/guides/BUILD_INSTRUCTIONS.md) |
+| 配置指令 | [配置参考](docs/guides/CONFIGURATION.md) |
+| 部署与运维 | [部署示例](docs/guides/DEPLOYMENT_EXAMPLES.md)、[运维指南](docs/guides/OPERATIONS.md) |
+| 升级或回滚 0.9.2 | [迁移](docs/guides/MIGRATION-0.9.2.md)、[升级](docs/guides/UPGRADE-TO-0.9.2.md)、[回滚](docs/guides/VERSION_ROLLBACK-0.9.2.md) |
+| 了解功能 | [功能索引](docs/features/README.md)、[解压缩](docs/features/DECOMPRESSION.md)、[流式转换](docs/features/STREAMING_COMPATIBILITY.md) |
+| 了解架构 | [架构索引](docs/architecture/README.md)、[系统架构](docs/architecture/SYSTEM_ARCHITECTURE.md) |
+| 验证或贡献 | [测试索引](docs/testing/README.md)、[Harness 索引](docs/harness/README.md) |
 
-### 生产部署与运维
-- [流式上线指引](docs/guides/streaming-rollout-cookbook.md) — 渐进式引入、安全开启有界流式转换的运维指南。
-- [运维排障指南](docs/guides/OPERATIONS.md) — 状态监控、日志调整和运行时故障诊断。
-- [迁移升级指引](docs/guides/MIGRATION-0.9.2.md) — 升级指南 ([0.9.1+ → 0.9.2 迁移](docs/guides/MIGRATION-0.9.2.md) / [0.9.x → 0.9.1 迁移](docs/guides/MIGRATION-0.9.1.md) / [0.8.x → 0.9.x 迁移升级](docs/guides/MIGRATION-0.9.md) / [0.7.x → 0.8.x 迁移升级](docs/guides/MIGRATION-0.8.md))。
-- [动态热重载](docs/guides/DYNAMIC_CONFIG.md) — 热更新动态变量及 live config 配置。
+## 开发与验证
 
-### 系统架构与自动化 Harness
-- [系统架构](docs/architecture/README.md) — 双引擎模型、C + Rust 边界隔离设计。
-- [配置映射图](docs/architecture/CONFIG_BEHAVIOR_MAP.md) — 解析指令参数如何映射到底层执行逻辑。
-- [Harness 设计原理](docs/harness/README.md) — 为什么我们把自动化门禁校验作为仓库的一等资产。
-- [Harness 维护手册](docs/harness/HARNESS_MAINTENANCE.md) — 自定义代码审查规则和校验脚本编写。
-- [常见问题 (FAQ)](docs/FAQ.md) & [术语表](docs/glossary.md)。
+针对变更运行最小的相关检查：
 
-## v0.9.2 新特性（开发候选版本）
+```bash
+make test
+make test-rust
+make test-nginx-unit
+make test-e2e-rust
+```
 
-v0.9.2 分支目前是开发候选版本，尚未发布。这是 v1.0 前最后一次破坏性
-发布：公共配置从 63 条指令收敛为 25 条，绑定的 FFI ABI 升级到版本 2。
+涉及文档和仓库 contract 的变更还需要运行：
 
-- **只读诊断接口**：支持 `GET`/`HEAD`，包括 `action=rollback` 在内的
-  变更请求都会被拒绝。恢复 dynconf 应原子替换被监视文件；LKG 继续用于
-  失败重载保护。原子 rename 保证读取者看到完整的旧文件或新文件，
-  但每个 worker 通过各自的 watcher cycle 收敛；应通过 diagnostics 或请求
-  行为验证收敛，需要强同步边界时执行受控 NGINX reload。
-- **移除 OTel 表面**：实验性的 OTel 指令和实现已从 0.9.2 移除。需要
-  tracing 的部署应使用 NGINX 原生 OTel 集成或其他外部观测方案。
-- **公共表面源元数据与 ABI 漂移门禁**：`make public-surface-drift-check`
-  将指令、dynconf、metrics、reason code 和 FFI 的源元数据与声明的清单
-  进行校验。运行时行为由 unit、integration 和 E2E 测试套件验证，而非仅靠此门禁。
+```bash
+make docs-check
+make harness-check
+```
 
-详见 [0.9.2 发布说明](docs/releases/0.9.2-release-notes.md)、
-[dynconf 指南](docs/guides/DYNAMIC_CONFIG.md) 和
-[回滚指南](docs/guides/VERSION_ROLLBACK-0.9.2.md)。
+运行时集成测试和 native E2E 检查需要真实的 NGINX 二进制文件。
+如果 NGINX 不在 `PATH` 中，请设置 `NGINX_BIN=/absolute/path/to/nginx`。
+完整测试矩阵见[测试文档](docs/testing/README.md)。
 
-## v0.9.1 新特性
+## 较早版本
 
-v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能就绪工作的基础上，完成 v1.0 冻结前最后一轮有意的源码构建与公共契约清理。v0.9.0 发布时原计划作为最后一个破坏性版本；由于 v1.0 尚未发布且采用规模仍有限，兼容性冻结窗口现明确延长至 v0.9.1。
+0.9.1 是 0.9.2 的直接兼容性基线。升级时请使用
+[0.9.2 迁移指南](docs/guides/MIGRATION-0.9.2.md)。
+0.9.0 及更早版本请查看 [CHANGELOG](CHANGELOG.md) 和对应的版本迁移指南。
+本 README 不重复维护历史版本日志。
 
-- **Rust 基线重置**：源码构建现在要求 Rust 1.97+；仓库、CI 和发布构建使用精确的 Rust 1.97.1 (MSRV 1.97)。预构建模块的用户不需要安装 Rust。
-- **单一流式控制**：`markdown_streaming off|auto|force` 现在是唯一处理路径选择器。重复的 `markdown_streaming_engine` 已移除；旧配置由 NGINX 标准 unknown-directive 错误识别。
-- **明确支持的 flavor**：`markdown_flavor` 仅支持 `commonmark` 和 `gfm`。实验性的 `mdx` 与 `org-mode` 从未有独立生产语义，现会被明确拒绝。
-- **自动零拷贝流式输出**：由缓冲区所有权和背压状态在内部选择安全的交付路径。显式 `markdown_streaming_zero_copy` 指令于 v0.9.1 引入、v0.9.2 移除，交付路径选择改为内部实现。
-- **流式解压路由（gzip + deflate + Brotli）**：设置 `markdown_streaming force`、`markdown_auto_decompress on`，且 `markdown_cache_validation` 不为 `full`。
-  此时流式引擎会增量解压 gzip、zlib 封装 RFC 1950 deflate 及 Brotli 响应。模块同时接受 zlib 封装 RFC 1950 与原始 RFC 1951 deflate（raw 帧为兼容旧服务器的回退支持），不会强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`。`NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制该依赖。官方构件默认启用。
-- **全缓冲拷贝减少**：内部优化（默认开启，无配置项），通过将连续缓冲区直接传递给解压器并通过指针赋值交换输出，消除全缓冲压缩路径中冗余的 memcpy。
-- **`markdown_auto_decompress` 指令**：现已正式注册为可配置指令（默认开启）。此前仅为内部字段，无法通过 `nginx.conf` 设置。
-- **性能证据门禁**：模块级基准测试工具（`tools/perf/run_module_benchmark.sh`）与 0.9.2 合并发布门禁在发布前强制验证延迟、TTFB、内存斜率和回退率阈值。
-- **Doctor 诊断工具**：`python3 tools/perf/doctor_advice.py` 分析运行时指标，为运维人员提供可操作的调优建议。
-- **新增 ADR**：[0020](docs/architecture/ADR/0020-hybrid-zero-copy-pool-cleanup.md)、[0021](docs/architecture/ADR/0021-gzip-deflate-streaming-decompression-routing.md)、[0022](docs/architecture/ADR/0022-performance-evidence-release-gate.md)、[0023](docs/architecture/ADR/0023-single-streaming-policy.md) 和 [0024](docs/architecture/ADR/0024-brotli-streaming-decompression.md)。
+## 路线图
 
-关于更早版本的完整变更记录（包括 v0.9.0 引入的突破性配置改动），请参阅 [CHANGELOG.md](CHANGELOG.md)。
-
-## 未来规划
-
-v0.9.2 发布后迈向 v1.0.0 正式版的演进方向：
-
-- **可观测性互操作**：保持冻结的 Prometheus 与 Diagnostics 合同兼容外部监控系统，不再增加模块专用 OTel 指令。
-- **分发渠道拓宽**：将 APT 与 YUM 打包发布整合至标准的 Linux 发行版包索引中。
-- **诊断系统增强**：扩展 `nginx-markdown-doctor` CLI 工具与监控指标，提供实时转换监控。
+- 保持冻结的 Prometheus 与 Diagnostics 合同兼容外部监控系统。
+- 扩展官方 APT 与 YUM 分发渠道。
+- 扩展 `nginx-markdown-doctor` 和运行时监控指南。
 
 ## 许可证
 
 BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
-## Document Updates
+## 文档更新
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 0.9.2 | 2026-08-24 | Kang | 快速上手安装命令补充说明：示例标签对应的版本发布后方可执行，此前应替换为最新已发布版本 |
-| 0.9.2 | 2026-08-15 | Hermes | 移除流程图与 bot 定向段落中陈旧的 Accept 头改写说法；协商仅由 markdown_accept 完成 |
-| 0.9.2 | 2026-08-08 | Hermes | 非母语读者友好改写：拆分长句、移除正文分号、主动语态，遵循 WRITING_GUIDE 的 STE 风格 |
-| 0.9.2 | 2026-08-07 | Kang | 新增 v0.9.2 新特性段、生产显式配置段、0.9.2/0.9.1 迁移指南链接，并同步文档更新记录 |
-| 0.9.1 | 2026-07-29 | Kang | 发布基线同步：完成 CHANGELOG 日期收口、发布说明状态更新、PROJECT_STATUS 当前版本线更新、版本规划、Harness 规则表 (Rules 52-60) 与 build-safety 域对齐。 |
-| 0.9.1 | 2026-07-19 | Codex | 完成 v0.9.1 正式发布摘要，补充 Brotli 流式解压、构建控制和发布证据说明。 |
-| 0.9.1 | 2026-07-17 | Kang | 优化 README 文档组织，移除旧版本的 What's New 日志，合并核心功能特性表，并梳理文档导航结构以适配 v0.9.1。 |
-| 0.9.0 | 2026-07-02 | Kang | 文档审查：新增 v0.9.0 新特性段落、MIGRATION-0.9 链接、reason code 数量修正、CHANGELOG 同步分支提交 |
-| 0.8.3 | 2026-06-26 | Kang | v0.8.3 收口：流式状态机修复、ExitMany 批量解上下文、解压缓冲区内存安全、快照容量提升、FFI Box::into_raw 修复、完整发布门禁验证 |
-| 0.8.2 | 2026-06-25 | Kang | v0.8.2 发布：流式解压加固、FFI panic 安全、隐式闭合正确性、解压预算强制执行、安全扫描范围限定、版本线文档收口 |
-| 0.8.0 | 2026-06-16 | Codex | 同步中英文 README 结构、Quick Start 示例、本地测试命令、平台支持标题和 v0.8.0 路线说明 |
-| 0.8.0 | 2026-06-16 | Kang | 0.8.0 正式发布文档就绪：双引擎流式转换（auto 默认）、有界内存增量处理、提交前安全回退、旧阈值指令兼容、新流式指令、可观测性与 release-gates-check-080 |
-| 0.7.0 | 2026-06-03 | Kang | P0 正确性修复、Rust-first 架构、独立解压预算、Accept 协商、解析超时/预算、DEB/RPM 包分发、K8s 示例、运行时诊断、dynconf dry-run/回滚 |
-| 0.6.3 | 2026-05-14 | Kang | 版本号更新至 0.6.3，并补充 release matrix 与发布前最终加固说明 |
-| 0.6.2 | 2026-05-08 | Kang | 版本号更新至 0.6.2 |
-| 0.5.0 | 2026-04-21 | docs-standardization | 同步中英文 README 快速上手步骤；新增更新追踪段落 |
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| 0.9.2 | 2026-09-01 | 围绕 0.9.2 合同重组入口文档，并链接规范指南。 |
+
+更早的 README 修改记录请查看 Git 历史。
