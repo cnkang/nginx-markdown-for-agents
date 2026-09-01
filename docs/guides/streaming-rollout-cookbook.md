@@ -130,10 +130,11 @@ during the measurement window** — no other conversion requests (including
 scheduled crawlers, health probes, or other tenants on a shared instance).
 With concurrent traffic, the cumulative counter cannot attribute deliveries to
 this request. Use request-correlated evidence instead: issue the probe with a
-**unique probe token** (for example a random query parameter such as
-`?probe=<uuid>` or a generated header value) so the decision-log entry's URI
-field identifies exactly this request. The bare path is not a correlation key
-because unrelated requests share it. Confirm the probe token appears in the
+**unique probe token** — a random query parameter (for example `?probe=<uuid>`)
+so the decision-log entry's URI field identifies exactly this request. A
+generated request header only helps if a decision-log field records it, which
+the schema does not do today. Prefer the query parameter. The bare path is not
+a correlation key because unrelated requests share it. Confirm the probe token
 decision-log entry for the delivered engine, and note that
 `streaming_events_total` has no URI/path label, so you cannot scope it to
 a probe path. If you need byte accounting, compare the delta of
@@ -178,10 +179,13 @@ location /docs {
 
 Apply with `nginx -t && nginx -s reload`, then wait for the graceful reload to
 drain. The diagnostics inflight field returns to zero when the request
-population is quiescent, but it is not proof that pre-reload requests have
-drained: it only shows that no request is currently mid-conversion, and new
-requests admitted after the reload keep it at or above one while they convert.
-To verify pre-reload drain, record a baseline of the diagnostics inflight
+population is quiescent, but it is **supplemental evidence only, not proof**.
+It shows that no request is currently mid-conversion. New requests
+admitted after the reload keep it at or above one while they convert. Treat
+inflight values and conversion-counter deltas as supporting signals. The
+decisive signal is the diagnostics/error log showing the pre-reload requests
+reaching terminal. To verify pre-reload drain, record a baseline of the
+diagnostics inflight
 field and the conversion counters immediately before the reload, then compare
 **deltas after quiescence**, or wait until the diagnostics/error logs show the
 pre-reload requests reaching terminal. Do not poll the cumulative
