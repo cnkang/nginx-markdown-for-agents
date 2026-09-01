@@ -209,17 +209,23 @@ info() {
     printf '[preremove] %s\n' "$1" >&2
 }
 
-# force_remove_acknowledged returns 0 when the sentinel file exists and its
-# content matches the required token byte-for-byte.  A mismatched or stale
-# sentinel is rejected (the guard stays active).
+# force_remove_acknowledged returns 0 when the sentinel file content
+# matches the required token byte-for-byte with no trailing newline.
+# A newline-terminated file, a longer file, an empty file, or an
+# unreadable file is a non-match (the guard stays active).
 force_remove_acknowledged() {
-    local expected
-    local actual
+    local line
+    local read_status
 
     [[ -f "$FORCE_REMOVE_SENTINEL" ]] || return 1
-    expected="$FORCE_REMOVE_TOKEN"
-    actual="$(cat "$FORCE_REMOVE_SENTINEL" 2>/dev/null || true)"
-    [[ "$actual" == "$expected" ]]
+    IFS= read -r line < "$FORCE_REMOVE_SENTINEL" 2>/dev/null
+    read_status=$?
+    # read returns 0 when the line ended with a newline (reject: the
+    # token must not carry a trailing newline), 1 at EOF without a
+    # newline (the exact-token shape), and 2 on read failure.
+    [[ "$read_status" -eq 0 ]] && return 1
+    [[ "$read_status" -eq 2 || -z "$line" ]] && return 1
+    [[ "$line" == "$FORCE_REMOVE_TOKEN" ]]
 }
 
 configuration_loads_module() {
@@ -317,8 +323,10 @@ main() {
                 if force_remove_acknowledged; then
                     info "WARNING: forced removal acknowledged (${FORCE_REMOVE_SENTINEL} present); skipping active-configuration verification."
                     info "WARNING: one-shot sentinel consumed; a future removal requires a fresh acknowledgement."
-                    rm -f "$FORCE_REMOVE_SENTINEL" \
-                        || info "WARNING: could not remove ${FORCE_REMOVE_SENTINEL}; delete it manually."
+                    rm -f "$FORCE_REMOVE_SENTINEL" || {
+                        info "ERROR: could not remove ${FORCE_REMOVE_SENTINEL}; delete it manually and retry removal."
+                        return 1
+                    }
                     return 0
                 fi
                 info "WARNING: ${FORCE_REMOVE_SENTINEL} exists but its content does not match the required token; ignoring it."

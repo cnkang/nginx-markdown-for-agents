@@ -905,6 +905,14 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: conditional validator adoption "
                       "exceeded the configured request buffer limit");
+        /* A partially adopted set (one validator restored, the other
+         * still suppressed) must not flow through the error handlers or
+         * the durable bypass with mismatched visibility.  Restore the
+         * captured validators first so every exit below observes the
+         * same state as a plain pass-through request. */
+        if (ctx != NULL) {
+            ngx_http_markdown_restore_conditional_request(r, ctx);
+        }
         failure_rc = ngx_http_markdown_handle_preaccess_failure(
             r, ctx, conf, &eff);
         if (failure_rc != NGX_DECLINED) {

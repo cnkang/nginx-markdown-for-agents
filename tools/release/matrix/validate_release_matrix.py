@@ -281,9 +281,21 @@ def check_source_bool_fields(source: dict) -> None:
     silently disable release blocking instead of failing validation.
     """
     entries = source.get("entries", [])
+    if not isinstance(entries, list):
+        raise SystemExit(
+            "ERROR: policy matrix 'entries' must be a list, "
+            f"got {type(entries).__name__}"
+        )
     for index, entry in enumerate(entries):
-        value = entry.get("release_blocking")
-        if value is not None and not isinstance(value, bool):
+        if not isinstance(entry, dict):
+            raise SystemExit(
+                f"ERROR: policy matrix entry {index} must be an object, "
+                f"got {type(entry).__name__}"
+            )
+        if "release_blocking" not in entry:
+            continue  # omission is allowed; only present non-bools fail
+        value = entry["release_blocking"]
+        if not isinstance(value, bool):
             raise SystemExit(
                 f"ERROR: policy matrix entry {index}: release_blocking must "
                 f"be a boolean, got {type(value).__name__}"

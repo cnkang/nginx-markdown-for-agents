@@ -67,16 +67,19 @@ _RELEASE_TAG_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+(?:\.\d+)?$")
 
 
 def _report_scenarios(report: dict) -> list:
-    """Extract the scenarios list from a benchmark report."""
+    """Extract the scenarios list from a benchmark report.
+
+    Only list-shaped values are returned; any other shape (string, dict,
+    None) normalizes to an empty list so downstream iteration and
+    validation never operate on a non-list.
+    """
     if not isinstance(report, dict):
         return []
     module_benchmark = report.get("module_benchmark", {})
     if not isinstance(module_benchmark, dict):
         module_benchmark = {}
-    return (
-        module_benchmark.get("scenarios", [])
-        or report.get("scenarios", [])
-    )
+    scenarios = module_benchmark.get("scenarios", []) or report.get("scenarios", [])
+    return scenarios if isinstance(scenarios, list) else []
 
 # Exit code for SKIP_NOT_PRESENT (matches run_module_benchmark.sh)
 EX_SKIP_NOT_PRESENT = 75
@@ -2570,13 +2573,25 @@ def _validate_benchmark_evidence(
     Returns a list of (check_name, reason) violations.  Empty list
     means the report passes all integrity checks.
     """
-    # 1. Critical scenarios must exist
+    violations: list[tuple[str, str]] = []
+    # 1. The module_benchmark container must be an object before any
+    #    downstream consumer calls .get() on it (scenario source env,
+    #    baseline fallback, identity fields).  Normalize early and record
+    #    the violation once.
+    mb = report.get("module_benchmark", {})
+    if not isinstance(mb, dict):
+        violations.append(
+            (f"{role}.module_benchmark", "module_benchmark must be an object")
+        )
+        mb = {}
+
+    # 2. Critical scenarios must exist
     missing = _check_missing_scenarios(report)
-    violations: list[tuple[str, str]] = [
+    violations.extend(
         (f"{role}.scenario", f"missing critical scenario: {name}")
         for name in missing
-    ]
-    # 2. Critical scenarios must be completed (not skipped, not other)
+    )
+    # 3. Critical scenarios must be completed (not skipped, not other)
     incomplete = _check_scenario_completion(report)
     violations.extend(
         (
@@ -2585,14 +2600,14 @@ def _validate_benchmark_evidence(
         )
         for name, status in incomplete
     )
-    # 3. Skipped critical scenarios (redundant with #2 but preserves the
+    # 4. Skipped critical scenarios (redundant with #3 but preserves the
     #    existing skipped-with-reason message format for diagnostics)
     skipped = _check_skipped_scenarios(report)
     violations.extend(
         (f"{role}.scenario", f"skipped: {name}: {reason}")
         for name, reason in skipped
     )
-    # 4. Path-coverage invariants
+    # 5. Path-coverage invariants
     path_violations = _check_path_coverage(report)
     violations.extend(
         (f"{role}.path_coverage", f"{name}: {label} (metric={metric})")
@@ -2609,14 +2624,8 @@ def _validate_benchmark_evidence(
     violations.extend(_scenario_source_environment_violations(report, role))
     violations.extend(_raw_artifact_binding_violations(report, role))
 
-    # 5. Environment identity fields must be present and non-empty;
+    # 6. Environment identity fields must be present and non-empty;
     #    nginx_version must also not use the legacy "unknown" placeholder.
-    mb = report.get("module_benchmark", {})
-    if not isinstance(mb, dict):
-        violations.append(
-            (f"{role}.module_benchmark", "module_benchmark must be an object")
-        )
-        mb = {}
     for field in ("platform", "load_generator", "nginx_version"):
         val = mb.get(field, "")
         if not val or not isinstance(val, str):
@@ -2628,7 +2637,7 @@ def _validate_benchmark_evidence(
                 (f"{role}.nginx_version", "missing or 'unknown' nginx_version")
             )
 
-    # 6. Memory evidence completeness: at least 2 valid memory points
+    # 7. Memory evidence completeness: at least 2 valid memory points
     scenarios = _report_scenarios(report)
     memory_points = _extract_memory_points(scenarios)
     if len(memory_points) < 2:
