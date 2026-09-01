@@ -270,9 +270,10 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
 grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 
-# Check for failures across all enabled paths
+# Check for failures across all enabled paths (outcome is a decision-log
+# field; failed_open/failed_closed are outcome values, not reason codes)
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "reason=failed_open\|reason=failed_closed" | \
+  grep -E "outcome=failed_open|outcome=failed_closed" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c
 ```
 

@@ -35,7 +35,9 @@ This project draws inspiration from Cloudflare's announcement but provides a sel
 - **Rust**: repository builds use the pinned 1.97.1 toolchain; the public
   source-build MSRV is 1.97 (for source builds only)
 - **Operating System**: macOS or Linux (x86_64 or aarch64)
-- **Memory**: Minimum 512MB RAM per worker (more for large documents)
+- **Memory**: Minimum 512MB RAM per worker (more for large documents;
+  a practical sizing floor for typical deployments — not a hard upper
+  bound, see `markdown_limits conversion_memory`)
 
 Your distro may ship an older NGINX, such as 1.22.x or earlier. Upgrade NGINX to 1.24.0 or higher first. Custom source builds below 1.24.0 are not supported.
 
@@ -202,6 +204,12 @@ Yes, but you may need to:
 ### What about compressed responses?
 
 The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`). This happens as part of the conversion path via the `markdown_auto_decompress` directive (default: on). The decompression budget comes from `markdown_limits decompressed_size=<size>` and `decompression_ratio=<N>`. The module applies these limits to prevent zip-bomb amplification. This covers all three common encodings.
+
+Decoding runs in both processing paths: the full-buffer path and the
+streaming path (members stream through gzip/deflate/Brotli decoders with
+cumulative budget enforcement and truncation rejection). See
+[DECOMPRESSION.md](features/DECOMPRESSION.md) for the member-lifecycle and
+budget model.
 
 **Recommended decompression strategies** (in order of preference):
 

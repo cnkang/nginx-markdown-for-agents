@@ -136,7 +136,9 @@ pub struct PruneConfig {
 7. Empty-output fallback (deferred, see Empty-Output Fallback above): a future line would implement it with a `prune_empty_fallback` reason code and metric outside the frozen v1 set
 8. Update `ngx_http_markdown_prepare_conversion_options()` to set FFI fields
 9. Update `decode_options()` in Rust to read new fields
-10. Add unit tests for selector matching, protection priority, empty-output fallback
+10. Add unit tests for selector matching and protection priority (the
+    empty-output fallback stays deferred, see Empty-Output Fallback above,
+    and the tests exclude it)
 11. Add E2E tests for pruning with custom/protection selectors
 
 ## Relationship to Other ADRs

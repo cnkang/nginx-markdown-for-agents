@@ -61,7 +61,8 @@ and public documentation.
 
 ### Required Baseline
 
-- Rust 1.97.0 is the exact repository and release compiler.
+- Rust 1.97.1 is the exact repository and release compiler (pinned in
+  `rust-toolchain.toml`).
 - Rust 1.97 is the minimum supported compiler for every first-party Rust
   package.
 - Source-build packaging and current contributor/install documentation use the

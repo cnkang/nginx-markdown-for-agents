@@ -10,6 +10,12 @@ five-key JSON overlay.
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
+# Minimal upstream used by the example proxy_pass below.
+# Replace with your actual origin service (or proxy to a socket/port).
+upstream backend {
+    server 127.0.0.1:8080;
+}
+
 http {
     markdown_filter on;
     markdown_streaming auto;

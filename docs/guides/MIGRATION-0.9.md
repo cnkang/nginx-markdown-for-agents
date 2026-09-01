@@ -249,7 +249,11 @@ For Grafana dashboards and alert rules, apply these transformations:
 # Step 1: Replace old per-reason metric names with unified family + label
 # Example: markdown_skipped_accept_total → markdown_skipped_total{reason="skipped_accept"}
 
-# Step 2: Lowercase all reason label values in existing queries
+# Step 2: Lowercase all reason label values in existing queries.
+# sed operates byte-wise without word boundaries: SKIP_/FAIL_ prefixes are
+# ASCII-only, so these substitutions are case-safe for JSON string values.
+# Use case-sensitive exact-prefix patterns (never [Ss][Kk]... classes) — a
+# case-insensitive replace would also rewrite already-lowercase values.
 sed -i 's/reason="SKIP_/reason="skipped_/g' dashboard.json
 sed -i 's/reason="FAIL_/reason="failed_/g' dashboard.json
 

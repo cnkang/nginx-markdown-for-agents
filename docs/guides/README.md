@@ -35,6 +35,10 @@ Use these documents when you need decisions and procedures you can act on direct
 | [VERSION_ROLLBACK-0.9.2.md](VERSION_ROLLBACK-0.9.2.md) | Version downgrade: 0.9.2 binary + matching configuration |
 | [UPGRADE-TO-0.9.2.md](UPGRADE-TO-0.9.2.md) | Operational upgrade sequence to 0.9.2 |
 | [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) | Configuration migration 0.9.1 → 0.9.2 |
+| [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) | Configuration migration 0.9.0 → 0.9.1 |
+| [MIGRATION-0.9.md](MIGRATION-0.9.md) | Configuration migration 0.8.x → 0.9.0 (historical) |
+| [MIGRATION-0.8.md](MIGRATION-0.8.md) | Configuration migration 0.7.x → 0.8.x (historical) |
+| [PACKAGE_COMPATIBILITY.md](PACKAGE_COMPATIBILITY.md) | Supported package/platform compatibility matrix |
 | [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) | Compact breaking-change reference for 0.9.2 |
 | [doctor.md](doctor.md) | nginx-markdown-doctor diagnostics tool |
 | [prometheus-metrics.md](prometheus-metrics.md) | Prometheus metrics contract |

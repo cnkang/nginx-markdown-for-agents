@@ -36,8 +36,10 @@ transition details separately in the structured `event=` field.
 
 ### Metrics label whitelist (no high cardinality)
 
-Allowed labels: `reason`, `profile`, `path_mode`, `cache_validation` — all
-low-cardinality enumerations. **Forbidden** as labels: URL, path, host, IP, User
+Allowed labels: `reason`, `engine`, `profile`, `path_mode`, `cache_validation`
+— all low-cardinality enumerations. `engine` reports the processing engine
+actually selected at runtime (`full_buffer`/`streaming`, see ADR-0023). It is
+not a configuration selector. **Forbidden** as labels: URL, path, host, IP, User
 -Agent, raw header values, or any unbounded request-derived string. Per-path
 metrics keep their existing cardinality cap (`markdown_metrics_per_path_cardinality`).
 
@@ -52,7 +54,11 @@ untrusted header values.
 
 Frozen response-header behavior: `Content-Type: text/markdown` on conversion,
 `Vary: Accept` (deduped), `Content-Length` invalidated for streaming,
-`Last-Modified` preserved from source. ETag only as defined by ADR-0017
+`Last-Modified` preserved from source except in the converted-representation
+paths documented in ADR-0017 (streaming clears the source `Last-Modified`,
+and a 304 of a converted response clears it as well, `last_modified_time = -1`
+in the conversion decision path, because the transformed representation's
+validator must not describe the source HTML mtime). ETag only as defined by ADR-0017
 (full-buffer transformed ETag under `cache_validation full`, none in streaming).
 
 ### Single-source enforcement

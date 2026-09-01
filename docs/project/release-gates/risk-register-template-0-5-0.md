@@ -39,7 +39,7 @@ The following risk categories must be explicitly registered:
 |---|-----------------|------------|--------|---------------------|
 | R1 | Streaming/full-buffer semantic divergence: streaming path output differs semantically from full-buffer path | Medium | High | Diff test coverage over test corpus; divergence threshold defined in Evidence Pack |
 | R2 | Bounded-memory constraint violation: streaming path memory consumption grows linearly with document size | Medium | High | Bounded-memory benchmark testing; memory budget hard limit enforced in Rust engine |
-| R3 | Post-commit failure handling: streaming path encounters error after partial output sent | Medium | High | Fail-closed semantics defined; error reason code recorded; operator can observe via metrics |
+| R3 | Post-commit failure handling: streaming path encounters error after partial output sent | Medium | High | On post-commit failure the stream is **terminated**: the module stops sending the converted representation and truncates the response at the commit boundary, with the `streaming_mid_flight_error` reason recorded and the failure observable via the `deliveries`/`fallback` metric split. Required test evidence covers a mid-flight error under real downstream backpressure (termination behavior, client-visible truncation, reason code, and operator metric deltas) |
 | R4 | Chunk-boundary edge cases: HTML tags split across chunks cause parsing errors | Low | High | Chunk-boundary fuzzing tests; random split points do not change semantic output |
 
 ## Usage

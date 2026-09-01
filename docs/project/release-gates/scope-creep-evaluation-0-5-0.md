@@ -54,7 +54,11 @@ The following topics are explicitly out of scope for 0.5.0 (referenced from `doc
    and recorded as a 0.6.x+ candidate before any sub-spec coverage check.
    Only proposals that do not match the non-goals proceed to the sub-spec
    coverage check against the 0.5.0 goal boundary. Check before work begins
-2. The process rejects proposals matching non-goals and records them as 0.6.x+ candidates
+2. The process rejects proposals matching non-goals and records them as
+   0.6.x+ candidates. A **rejected** record carries only the rejection
+   rationale: the streaming evidence fields (streaming path, streaming
+   test, rollback boundary) apply to *approved* scope expansions
+   only, never to rejected non-goal proposals
 3. Ambiguous proposals require evaluation using the Boundary Description template followed by review
 4. The reviewer approves a proposal only after recording all three streaming evidence fields in the scope-expansion record (see the template below). The three fields are the affected streaming path, the streaming test, and the rollback boundary. A record missing any of the three fields does not authorize approval, regardless of the evaluation result
 5. Approved scope expansions must record rationale and reflect in affected sub-spec documents
