@@ -147,9 +147,12 @@ markdown_options_t options = {
 markdown_convert(handle, html, html_len, &options, &result);
 ```
 
-The overall conversion deadline is authoritative. A zero value disables that
-deadline, while a nonzero `parser_timeout` may add an earlier parser
-checkpoint deadline but can never extend the overall deadline.
+The overall conversion deadline is authoritative. At the FFI layer, a zero
+`timeout_ms` disables that deadline, while a nonzero `parser_timeout` may add
+an earlier parser checkpoint deadline but can never extend the overall
+deadline. (At the NGINX configuration layer the config handler rejects an
+explicit `conversion_timeout=0`, so operators leave the key unset instead —
+see CONFIGURATION_STRUCTURE.md.)
 
 ## Public Configuration Surface
 

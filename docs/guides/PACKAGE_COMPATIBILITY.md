@@ -104,6 +104,17 @@ release pipeline. After upgrading NGINX, install the package built for the new
 NGINX version before reloading the module, then run `nginx -t` to validate that
 the module still loads with the active NGINX binary.
 
+### Musl dynamic-module release path
+
+The compatibility matrix in this document lists `release-binaries.yml` as the owner
+workflow of the musl dynamic-module rows (that workflow remains the manual
+rebuild tool for existing releases). For the 0.9.2 release cycle the
+`musl-build` job of `release-packages.yml` builds the musl tarballs
+**before** publication (tag + `workflow_dispatch` triggers). `release-binaries.yml`
+never runs on release publication. Both workflows consume the same
+`tools/release-matrix.json` rows, so the matrix rows are the single source of
+truth for which musl versions and architectures ship.
+
 ---
 
 ## Unsupported Environments

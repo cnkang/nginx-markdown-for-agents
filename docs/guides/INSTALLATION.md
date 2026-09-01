@@ -467,8 +467,11 @@ make
 ```bash
 cd components/rust-converter
 
-# Build release version
-cargo build --release
+# Build release version for the current platform triple.
+# The module configure script only accepts target/<triple>/release/ archives,
+# so pass the platform triple explicitly (or run `make rust-lib`, which does
+# this and also copies the header):
+cargo build --release --target "$(rustc -vV | sed -n 's/^host: //p')"
 
 # Generate C header file
 cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
@@ -1431,7 +1434,7 @@ cp include/markdown_converter.h ../nginx-module/src/
 # Rebuild Rust library
 cd components/rust-converter
 cargo clean
-cargo build --release
+cargo build --release --target "$(rustc -vV | sed -n 's/^host: //p')"
 
 # Verify library exists
 find target -path '*/release/libnginx_markdown_converter.a' -maxdepth 4
@@ -1493,7 +1496,7 @@ rustc --version
 # Clean and rebuild
 cd components/rust-converter
 cargo clean
-cargo build --release --verbose
+cargo build --release --verbose --target "$(rustc -vV | sed -n 's/^host: //p')"
 ```
 
 ### Issue: Module Not Loading

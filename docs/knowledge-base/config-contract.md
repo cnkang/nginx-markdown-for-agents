@@ -54,7 +54,7 @@ equal `1`.
 | `streaming_buffer` | size | (size: 64 KiB – 1 GiB) | inherited | per-key |
 | `schema_version` | version | `1` | required | none |
 
-## Metric Families (12)
+## Metric Families (11)
 
 Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 `fixed` = no labels.
@@ -67,7 +67,6 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 | `nginx_markdown_conversion_duration_seconds` | histogram | `engine` | bounded |
 | `nginx_markdown_input_bytes_total` | counter | — | fixed |
 | `nginx_markdown_output_bytes_total` | counter | — | fixed |
-| `nginx_markdown_inflight_requests` | gauge | — | fixed |
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | fixed |
 | `nginx_markdown_streaming_events_total` | counter | `reason`, `transition` | bounded |
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | bounded |
@@ -123,8 +122,9 @@ The generic `markdown_limits` directive is not parsed by the atomic dynconf
 path. Dynconf has its own supported-key schema and validation.
 Explicit zero values fail validation. This includes `max_inflight=0`.
 Configured `max_inflight` values must be integers greater than 0. The internal zero value
-for an unset or inherited `max_inflight` means unlimited. Defaults are
-inheritance-based (`NGX_CONF_UNSET`). 0.9.2 documents no explicit defaults.
+for an unset or inherited `max_inflight` means unlimited. The `markdown_limits` keys
+themselves declare no explicit per-key defaults (inheritance-based `NGX_CONF_UNSET`).
+CONFIGURATION_STRUCTURE.md documents the effective module defaults.
 
 | Key | Meaning |
 |---|---|

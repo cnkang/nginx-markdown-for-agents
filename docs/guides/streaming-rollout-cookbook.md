@@ -125,7 +125,13 @@ curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' http://localhos
 
 Assert that `nginx_markdown_conversion_deliveries_total{engine="streaming"}`
 increases by exactly one between the two snapshots for that single request.
-If you need byte accounting, compare the delta of
+**This assertion is valid only when the instance has no concurrent traffic
+during the measurement window** — no other conversion requests (including
+scheduled crawlers, health probes, or other tenants on a shared instance).
+With concurrent traffic, the cumulative counter cannot attribute deliveries to
+this request. Use request-correlated evidence (decision-log entry for this
+request's URI, or a `streaming_events_total` delta scoped by a probe path)
+instead. If you need byte accounting, compare the delta of
 `nginx_markdown_output_bytes_total`. Never use a delivery count as a byte
 measurement. A downstream `NGX_AGAIN` is a suspension, not a successful
 delivery.

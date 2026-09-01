@@ -409,10 +409,12 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 The 0.9.x release line is the current maintained line. The current
 development version is 0.9.2. 0.9.1 remains the latest released patch until
 the 0.9.2 release tag and release gates are complete. It is a
-baseline-consolidation and compatibility-reset release that adds
-hybrid zero-copy streaming output, gzip/deflate/Brotli streaming decompression,
-performance evidence gates, and a doctor advice tool, on top of the 0.9.0
-breaking-release foundation.
+breaking surface-freeze release that consolidates the configuration surface
+to the 25-directive contract (removing profile presets and per-path metrics),
+freezes the observability surface (twelve v1 metric families, reason registry,
+diagnostics JSON v1), advances the bundled FFI boundary to ABI 2, and moves
+the musl dynamic-module build before publication, on top of the 0.9.1
+streaming-decompression and zero-copy foundation.
 
 #### 0.9.1 (previous release)
 

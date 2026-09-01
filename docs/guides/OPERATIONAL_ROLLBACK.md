@@ -376,10 +376,10 @@ curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics
   grep -E "nginx_markdown_conversion_attempts_total|nginx_markdown_conversion_deliveries_total|nginx_markdown_requests_total"
 ```
 
-If the failed `nginx_markdown_requests_total{outcome=~"failed_.*"}` count grows
+If the failed `nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}` count grows
 faster than expected relative to `nginx_markdown_conversion_attempts_total`,
 roll back. Compare the two counters using PromQL rates (for example
-`rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m])` against
+`rate(nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}[5m])` against
 `rate(nginx_markdown_conversion_attempts_total[5m])`) or before-and-after
 counter deltas over the same window, rather than comparing instantaneous
 snapshots.

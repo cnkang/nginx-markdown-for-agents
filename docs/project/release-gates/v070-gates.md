@@ -3,15 +3,17 @@
 | Field | Value |
 |-------|-------|
 | Version | 0.7.0 |
-| Status | ACTIVE |
+| Status | HISTORICAL |
 | Created | 2026-05-17 |
+| Superseded by | 0.9.2 release gates (`validate_release_gates_070.py`/`_092` are versioned separately) |
 | Source | design.md §14.0 |
 | Detailed Gates | [0.7.0-release-gates.md](./0.7.0-release-gates.md) |
 
-> This document defines the 6 release gates for v0.7.0 as specified in the
-> technical design (§14.0). Each gate must pass before the release can proceed.
-> For detailed check items, verification commands, and Go/No-Go criteria, see
-> [0.7.0-release-gates.md](./0.7.0-release-gates.md).
+> **Historical record.** This document defines the 6 release gates for v0.7.0
+> as specified in the technical design (§14.0). We retain it as a verifiable
+> record of the 0.7.0 cycle and it is **not** the active release line: current
+> Go/No-Go review enforces the 0.9.2 gates, never these. The
+> release-blocking statements below apply to 0.7.0 GA only.
 
 ---
 

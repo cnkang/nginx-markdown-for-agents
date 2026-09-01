@@ -110,6 +110,11 @@ The decompressor implements a two-layer error model:
 | `brotli_no_progress` | Decoder stall (no input consumed, no output produced) |
 | `brotli_budget_exceeded` | Cumulative output exceeds `markdown_decompress_max_size` |
 
+The ALLOCATION and INTERNAL origins (Layer 1 rows above) log
+`class=allocation`/`class=internal` with `category=system` and map to the
+canonical `decompression_error` reason in the reason registry (allowed origin
+`internal`). They never report corrupt input (the `format` origin).
+
 **Three-way error classifier (frozen):**
 
 ```c

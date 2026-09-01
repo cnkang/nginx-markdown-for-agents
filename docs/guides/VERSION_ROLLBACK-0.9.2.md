@@ -111,7 +111,9 @@ Publication and artifact availability are separate release gates.
    # before checking out.  Each step fails the script on error, so a
    # failed signature or a commit mismatch stops before checkout:
    set -euo pipefail
-   git fetch origin tag v0.9.1
+   # Force the fetch so a stale or re-signed tag cannot survive locally:
+   # without --force, git keeps an existing tag when the remote moved.
+   git fetch --force origin tag v0.9.1
    git tag -v v0.9.1
    expected_sha="<SHA from independently authenticated release evidence>"
    resolved_sha="$(git rev-parse v0.9.1^{commit})"
@@ -120,7 +122,7 @@ Publication and artifact availability are separate release gates.
      exit 1
    fi
    git checkout v0.9.1
-   cd components/rust-converter && cargo build --release && cd ../..
+   cd components/rust-converter && cargo build --release --target "$(rustc -vV | sed -n 's/^host: //p')" && cd ../..
    # Rebuild NGINX module per your build procedure
    ```
 
