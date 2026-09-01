@@ -268,6 +268,8 @@ make harness-check
 如果 NGINX 不在 `PATH` 中，请设置 `NGINX_BIN=/absolute/path/to/nginx`。
 完整测试矩阵见[测试文档](docs/testing/README.md)。
 
+从源码构建需要 Rust 1.97.1（MSRV 1.97，由 `rust-toolchain.toml` 固定）。
+
 ## 较早版本
 
 0.9.1 是 0.9.2 的直接兼容性基线。升级时请使用

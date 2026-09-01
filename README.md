@@ -286,6 +286,9 @@ Runtime integration and native E2E checks require a real NGINX binary. Set
 `NGINX_BIN=/absolute/path/to/nginx` when NGINX is not on `PATH`. See the
 [testing documentation](docs/testing/README.md) for the full test matrix.
 
+Building from source requires Rust 1.97.1 (MSRV 1.97, pinned in
+`rust-toolchain.toml`).
+
 ## Earlier releases
 
 The 0.9.1 line is the immediate compatibility baseline for 0.9.2. Use the
