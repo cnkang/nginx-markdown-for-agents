@@ -151,7 +151,7 @@ ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
     u_char *name, size_t name_len, size_t scan_limit,
     ngx_table_elt_t **first_restored, ngx_uint_t *adopted_count)
 {
-    u_char  *value_end;
+    const u_char  *value_end;
 
     if (r == NULL || name == NULL || name_len == 0
         || first_restored == NULL || adopted_count == NULL)
@@ -189,7 +189,7 @@ ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
                 continue;
             }
 
-            value_end = (u_char *) memchr(
+            value_end = (const u_char *) memchr(
                 headers[i].value.data, '\0', scan_limit);
             if (value_end == NULL) {
                 return NGX_ERROR;

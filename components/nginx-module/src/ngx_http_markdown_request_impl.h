@@ -810,16 +810,6 @@ ngx_http_markdown_handle_preaccess_failure(
     return NGX_DECLINED;
 }
 
-/* Restore context-owned conditional headers before a preaccess early return. */
-static void
-ngx_http_markdown_restore_preaccess_conditional(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
-{
-    if (ctx != NULL) {
-        ngx_http_markdown_restore_conditional_request(r, ctx);
-    }
-}
-
 /*
  * Decide whether this pass may adopt orphaned validators and, for a main
  * request without a context, perform the bounded atomic adoption.
@@ -901,7 +891,7 @@ ngx_http_markdown_handle_preaccess_adoption_failure(
                   "exceeded the configured request buffer limit");
     /* Restore captured validators before exposing a uniform pass-through
      * state to the error handlers or durable bypass. */
-    ngx_http_markdown_restore_preaccess_conditional(r, ctx);
+    ngx_http_markdown_restore_conditional_request(r, ctx);
     failure_rc = ngx_http_markdown_handle_preaccess_failure(
         r, ctx, conf, eff);
     if (failure_rc != NGX_DECLINED) {
@@ -977,7 +967,7 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
     }
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     if (conf == NULL) {
-        ngx_http_markdown_restore_preaccess_conditional(r, ctx);
+        ngx_http_markdown_restore_conditional_request(r, ctx);
         return NGX_DECLINED;
     }
 
@@ -989,14 +979,14 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         r, conf, ctx, &adopt_orphans, &ownership);
 
     if ((r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)) == 0) {
-        ngx_http_markdown_restore_preaccess_conditional(r, ctx);
+        ngx_http_markdown_restore_conditional_request(r, ctx);
         return NGX_DECLINED;
     }
 
     if (!ngx_http_markdown_prepare_preaccess_eligibility(
             r, conf, &eff, &filter_enabled))
     {
-        ngx_http_markdown_restore_preaccess_conditional(r, ctx);
+        ngx_http_markdown_restore_conditional_request(r, ctx);
         return NGX_DECLINED;
     }
 
