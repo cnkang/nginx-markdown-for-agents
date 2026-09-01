@@ -103,16 +103,19 @@ has always reached the configured limit at that point.
 
 ## Metrics
 
-The frozen Prometheus surface exposes the current gauge and request outcome:
+The frozen Prometheus surface does **not** export an inflight gauge: the
+worker-local in-flight counter remains an internal guard (and diagnostics
+field) so its semantics stay unambiguous and scrape-independent. The frozen
+surface exposes request outcomes:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `nginx_markdown_inflight_requests` | gauge | Currently in-flight conversions |
-| `nginx_markdown_requests_total{outcome=...,stage=...,reason=...}` | counter | Terminal request outcomes, including inflight-limit decisions |
+| `nginx_markdown_requests_total{outcome=...,stage=...,reason=...}` | counter | Terminal request outcomes, including inflight-limit decisions (`overload`) |
 
-The module aggregates counters and gauges in its shared metrics zone and
-exposes them at the configured `markdown_metrics` location. There is no
-separate `overload_total` metric family.
+The module aggregates counters in its shared metrics zone and exposes them at
+the configured `markdown_metrics` location. There is no separate
+`overload_total` metric family. The in-flight counter is observable through
+the diagnostics endpoint, not Prometheus.
 
 ## Implementation Files
 
