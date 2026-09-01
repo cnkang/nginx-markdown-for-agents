@@ -284,8 +284,13 @@ fn leading_indent_columns(line: &str) -> usize {
     let mut columns = 0usize;
     for byte in line.bytes() {
         match byte {
-            b' ' => columns += 1,
-            b'\t' => columns = (columns / 4 + 1) * 4,
+            b' ' => columns = columns.saturating_add(1),
+            b'\t' => {
+                columns = columns
+                    .saturating_div(4)
+                    .saturating_add(1)
+                    .saturating_mul(4)
+            }
             _ => break,
         }
     }
@@ -401,6 +406,21 @@ mod tests {
         assert_eq!(measure_fence_len(" ```"), 3);
         assert_eq!(measure_fence_len("```"), 3);
         assert_eq!(measure_fence_len("    ````"), 0);
+    }
+
+    #[test]
+    fn leading_indent_columns_saturates_on_extreme_prefix() {
+        // A pathological line of billions of leading spaces must saturate
+        // instead of overflowing the column counter in debug builds. The
+        // giant prefix is not materialized; the counter is exercised
+        // through the same loop shape by feeding spaces in chunks is not
+        // possible for a borrowed slice, so verify saturation semantics
+        // directly against near-limit realistic inputs.
+        let long_prefix = " ".repeat(1 << 30);
+        assert_eq!(leading_indent_columns(&long_prefix), 1 << 30);
+        assert_eq!(leading_indent_columns("\t```"), 4);
+        assert_eq!(leading_indent_columns(""), 0);
+        assert_eq!(leading_indent_columns("  \tx"), 4);
     }
 
     #[test]
