@@ -55,7 +55,9 @@ def _default_version() -> str:
         if isinstance(version, str) and version:
             return version
     except (OSError, tomllib.TOMLDecodeError):
-        pass
+        # Keep the release fallback when package metadata is unavailable or
+        # malformed.
+        return "0.9.2"
     return "0.9.2"
 
 
