@@ -327,6 +327,34 @@ fn retry_raw_deflate(
     Ok(DecompResult { output })
 }
 
+/// Classify one flate2 status and report whether the stream is complete.
+fn deflate_decode_status(
+    status: flate2::Status,
+    consumed_after: usize,
+    input_len: usize,
+    consumed_now: u64,
+    produced_now: usize,
+) -> Result<bool, DecompError> {
+    match status {
+        flate2::Status::StreamEnd => {
+            if consumed_after < input_len {
+                return Err(DecompError::FormatError(
+                    "trailing data after deflate stream".to_string(),
+                ));
+            }
+            Ok(true)
+        }
+        flate2::Status::Ok | flate2::Status::BufError => {
+            if consumed_now == 0 && produced_now == 0 {
+                return Err(DecompError::TruncatedInput(
+                    "deflate stream ended before final block".to_string(),
+                ));
+            }
+            Ok(false)
+        }
+    }
+}
+
 /// Run a bounded flate2 decode (wrapped or raw) appending into `output`.
 fn deflate_decode_into(
     input: &[u8],
@@ -335,7 +363,7 @@ fn deflate_decode_into(
     ratio: u64,
     output: &mut Vec<u8>,
 ) -> Result<(), DecompError> {
-    use flate2::{Decompress, FlushDecompress, Status};
+    use flate2::{Decompress, FlushDecompress};
 
     let mut decoder = Decompress::new(zlib_wrapped);
     let chunk_size = 8192.min(budget.saturating_add(1)).max(1);
@@ -370,22 +398,14 @@ fn deflate_decode_into(
             append_deflate_output(output, &buf[..produced_now], budget, ratio, input.len())?;
         }
 
-        match status {
-            Status::StreamEnd => {
-                if consumed_after < input.len() {
-                    return Err(DecompError::FormatError(
-                        "trailing data after deflate stream".to_string(),
-                    ));
-                }
-                return Ok(());
-            }
-            Status::Ok | Status::BufError => {
-                if consumed_now == 0 && produced_now == 0 {
-                    return Err(DecompError::TruncatedInput(
-                        "deflate stream ended before final block".to_string(),
-                    ));
-                }
-            }
+        if deflate_decode_status(
+            status,
+            consumed_after,
+            input.len(),
+            consumed_now,
+            produced_now,
+        )? {
+            return Ok(());
         }
     }
 }
