@@ -95,6 +95,10 @@ Section A: C / NGINX Module Dependencies
 
 Section B: Rust Conversion Engine Dependencies
 
+These crates are linked into or distributed with the conversion binary.
+Development-only crates (test reports, property-testing harnesses) are
+covered in Section C even when they also appear in this engine's Cargo.lock.
+
 ================================================================================
 
 4.  html5ever 0.39.0
@@ -191,15 +195,24 @@ Section B: Rust Conversion Engine Dependencies
     License: MIT OR Apache-2.0
     Copyright (c) 2014 The serde-rs Developers
 
+    Resolved transitively through the toml parser used by the test/evidence
+    harnesses; it is not a direct runtime dependency of the conversion
+    binary. Listed here for license completeness because it is resolved in
+    the converter workspace's Cargo.lock.
+
     Licensed under the Apache License, Version 2.0 or the MIT license, at your
     option.
 
 --------------------------------------------------------------------------------
 
-14. serde_json 1.0.151
+14. serde_json 1.0.151 (development/test dependency only)
     https://github.com/serde-rs/json
     License: MIT OR Apache-2.0
     Copyright (c) 2014 The serde-rs Developers
+
+    serde_json is declared under [dev-dependencies] and is used only by
+    examples and test/evidence harnesses; it is not linked into or
+    distributed with the final binary.
 
     Licensed under the Apache License, Version 2.0 or the MIT license, at your
     option.

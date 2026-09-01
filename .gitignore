@@ -38,7 +38,9 @@ components/rust-converter/fuzz/target/
 .clusterfuzzlite/build/
 .clusterfuzzlite/out/
 
-# Proptest old-style regression files (superseded by proptest-regressions/ dirs)
+# Proptest regression seeds live exclusively under proptest-regressions/
+# directories (SourceParallel default layout); old-style sibling files are
+# ignored because they are never read by proptest anymore.
 **/*.proptest-regressions
 
 # Generated C header mirror (copy from Rust include)
