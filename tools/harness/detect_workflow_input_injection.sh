@@ -137,8 +137,11 @@ while IFS= read -r -d '' file; do
         # shallower) ends the run block even when it has no list dash —
         # e.g. an unprefixed `if:` or `env:` continuation key.  Without
         # this boundary the scanner carries run state into wiring keys
-        # that are not shell source.
-        if [[ $in_run_block -eq 1 && $indent_len -le $run_indent ]]; then
+        # that are not shell source.  Blank lines never end the block:
+        # a blank line inside a block scalar is content, and a blank
+        # line between steps must not clear run state before the next
+        # step's keys are seen.
+        if [[ $in_run_block -eq 1 && $indent_len -le $run_indent && -n "$line" ]]; then
             in_run_block=0
         fi
 

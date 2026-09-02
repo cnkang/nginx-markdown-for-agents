@@ -393,6 +393,32 @@ else
 fi
 rm -f "${wf_dir}/reusable-with.yml"
 
+# Test 13: A blank line inside a run block must not clear run state: the
+# interpolation after the blank line is still shell source and must be
+# detected (regression: blank lines used to terminate the block early).
+cat >"${wf_dir}/blank-line-run.yml" <<'Y'
+name: blank-line-run
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build
+        run: |
+          echo "first line"
+
+          PKG_VERSION="${{ inputs.version }}"
+          echo "Building ${PKG_VERSION}"
+Y
+${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] && grep -Fq 'inputs.version' "${output_file}"; then
+    pass "blank line inside run block does not clear run state"
+else
+    fail "blank line inside run block does not clear run state" "expected exit 1 + diagnostic, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/blank-line-run.yml"
+
 printf '\n%d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ ${FAIL_COUNT} -gt 0 ]]; then
     exit 1
