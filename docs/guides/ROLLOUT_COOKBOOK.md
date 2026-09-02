@@ -1391,6 +1391,36 @@ contract and may leave the client with a truncated Markdown response. Use
 `markdown_streaming force` only for paths whose response size, cache
 requirements, and compressed encodings have completed testing.
 
+Start with explicit, bounded settings:
+
+```nginx
+http {
+    markdown_filter off;
+    markdown_streaming auto;
+    markdown_auto_decompress on;
+    markdown_cache_validation ims_only;
+    markdown_error_policy pass;
+    markdown_limits conversion_memory=64m conversion_timeout=10s
+        parser_memory=32m parser_timeout=5s streaming_buffer=2m
+        decompressed_size=20m decompression_ratio=100 max_inflight=64;
+
+    server {
+        # Required before collecting the baseline. Keep the endpoint local-only.
+        location = /markdown-metrics {
+            allow 127.0.0.1;
+            allow ::1;
+            deny all;
+            markdown_metrics;
+        }
+
+        location /docs {
+            markdown_filter on;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
 Baseline snapshot (loopback only):
 
 ```bash
@@ -1433,6 +1463,20 @@ Eligibility is confirmed through diagnostics/decision log (the request must
 be marked `engine=streaming`), not assumed from `force` alone, which may
 still fall back to full-buffer for hard incompatibilities (for example
 build-disabled streaming decoders or excluded content types).
+
+The metrics endpoint runs on the NGINX host itself, so target the loopback
+address for snapshot capture:
+
+```bash
+# Pick the uncompressed request as the single measured request.
+curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics > "$SNAPSHOT_DIR/metrics.before"
+# Send exactly one streaming-eligible request between the snapshots,
+# then capture the after snapshot without any other conversion request.
+curl -s -H 'Accept: text/markdown' http://localhost/docs/ > /dev/null
+curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics > "$SNAPSHOT_DIR/metrics.after"
+```
 
 Assert that `nginx_markdown_conversion_deliveries_total{engine="streaming"}`
 increases by exactly one between the two snapshots for that single request.
