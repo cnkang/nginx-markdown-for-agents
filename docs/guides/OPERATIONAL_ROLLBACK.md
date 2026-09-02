@@ -463,6 +463,13 @@ quiesce competing traffic for the duration of the verification.
 
 For Methods A and B, conversion metrics for the affected scope should stop incrementing:
 
+> **Scope note**: the counters below are **instance-wide** cumulative
+> counters. A flat comparison cannot prove that a *specific scope* stopped
+> converting — unrelated traffic on the same instance also moves them. For
+> scope-specific verification use the decision-log probe from Step 1
+> (uniquely named path + timestamp match); the metrics comparison below is
+> supporting, instance-wide evidence only.
+
 ```bash
 # Take a snapshot of the frozen metric families.
 curl -s -H 'Accept: text/plain; version=0.0.4' \

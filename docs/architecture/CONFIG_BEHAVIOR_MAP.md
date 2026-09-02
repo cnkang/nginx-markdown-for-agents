@@ -250,7 +250,7 @@ flowchart LR
 | Behavior | Enables a dedicated metrics endpoint at a location |
 | Lifecycle impact | Separate location-handler path, not the normal conversion filter chain |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h`, `components/nginx-module/src/ngx_http_markdown_config_directives_impl.h`, `components/nginx-module/src/ngx_http_markdown_metrics_impl.h` |
-| Practical note | The wire format is exclusively Prometheus text 0.0.4 with exactly twelve bounded families; Accept negotiation cannot restore removed JSON or legacy text output. |
+| Practical note | The wire format is exclusively Prometheus text 0.0.4 with exactly eleven bounded families; Accept negotiation cannot restore removed JSON or legacy text output. |
 
 ## Transfer and Streaming-Oriented Controls
 

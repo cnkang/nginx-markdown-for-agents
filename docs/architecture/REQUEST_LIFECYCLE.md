@@ -116,5 +116,5 @@ record at their own bounded event points.
 
 Use diagnostics JSON to inspect the effective configuration and provenance.
 Use the Prometheus endpoint with `Accept: text/plain; version=0.0.4` to inspect
-the twelve frozen metric families. The schema, renderer, reason-code,
+the eleven frozen metric families. The schema, renderer, reason-code,
 and conservation gates are the authoritative compatibility checks.

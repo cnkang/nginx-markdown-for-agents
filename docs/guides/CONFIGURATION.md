@@ -198,7 +198,7 @@ location = /markdown-metrics {
 ```
 
 Scrape with `Accept: text/plain; version=0.0.4`. The endpoint emits exactly
-the twelve frozen Prometheus families documented in
+the eleven frozen Prometheus families documented in
 [`prometheus-metrics.md`](prometheus-metrics.md). `markdown_diagnostics` is a
 read-only JSON endpoint for effective configuration, provenance, decisions,
 and bounded runtime state. Its built-in access boundary is loopback-only.
@@ -270,6 +270,12 @@ python3 tools/release/gates/validate_schema_drift.py
 
 Historical migrations retain examples for removed directives under their
 versioned documents. Do not copy those examples into a 0.9.2 configuration.
+
+The authoritative removal table for 0.8.x-era directives is
+[MIGRATION-0.9.0.md](MIGRATION-0.9.0.md#directive-mapping-table); the
+mapping rows below that only appeared in later removals are listed here
+for quick reference. All removals are also rejected by `nginx -t` with a
+pointer to the migration guide.
 
 ## Removed directives
 

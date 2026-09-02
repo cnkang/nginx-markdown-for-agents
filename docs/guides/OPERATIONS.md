@@ -55,12 +55,13 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 
 ### Key Metrics to Monitor
 
-The endpoint emits exactly the twelve bounded Prometheus families defined in
+The endpoint emits exactly the eleven bounded Prometheus families defined in
 the [Prometheus Metrics Guide](prometheus-metrics.md). Monitor the labeled
 request outcomes, conversion attempts and successful deliveries, the duration
-histogram, byte counters, inflight gauge, streaming/decompression/dynconf
-events, and `build_info`. Do not derive dashboards from removed JSON fields or
-legacy family names.
+histogram, byte counters, streaming/decompression/dynconf
+events, and `build_info`. The diagnostics endpoint (`markdown_diagnostics`)
+additionally exposes the per-worker in-flight counter. Do not derive
+dashboards from removed JSON fields or legacy family names.
 
 The conservation checks to use after the system is quiescent are:
 
@@ -114,7 +115,7 @@ scrape_configs:
 
 ```promql
 # Failed request rate (denominator: all request samples, including skipped)
-sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
+sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}[5m]))
 / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-10) * 100
 
 # Slow conversion bucket share (> 1s)
@@ -333,7 +334,7 @@ tail -100 /var/log/nginx/error.log | grep markdown
 #### Issue 2: High Failure Rate
 
 **Symptoms:**
-- `nginx_markdown_requests_total{outcome=~"failed_.*"}` increasing rapidly
+- `nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}` increasing rapidly
 - Alert: Failure rate > 5%
 
 **Diagnostic Steps:**
@@ -572,7 +573,7 @@ Variable-driven `markdown_filter` support is new in 0.2.0. Existing static `on`/
 1. **Assess impact:**
 ```bash
 curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}"
-# Check: nginx_markdown_requests_total{outcome=~"failed_.*"}
+# Check: nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}
 ```
 
 2. **Identify failure category:**

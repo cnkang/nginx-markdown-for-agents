@@ -374,7 +374,7 @@ surface before the 1.0 LTS compatibility freeze:
   conversion_memory, parser_memory, streaming_buffer, decompressed_size,
   decompression_ratio, and max_inflight replace the former standalone
   limit directives.
-- **Metrics freeze**: The production endpoint emits the twelve-family v1
+- **Metrics freeze**: The production endpoint emits the eleven-family v1
   contract (see [observability-schema-v2.md](observability-schema-v2.md)).
   Legacy multi-format, per-path, shadow, and debug families no longer exist.
 - **Streaming threshold**: The streaming auto-route threshold stays fixed

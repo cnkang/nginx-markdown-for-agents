@@ -42,6 +42,6 @@ to the cleartext backend listener.
 
 - [Configuration Reference](../guides/CONFIGURATION.md)
 - [Deployment Examples](../guides/DEPLOYMENT_EXAMPLES.md)
-- [Migration Guide: 0.9.0](../guides/MIGRATION-0.9.md)
+- [Migration Guide: 0.9.0](../guides/MIGRATION-0.9.0.md)
 - [Migration Guide: 0.9.2](../guides/MIGRATION-0.9.2.md)
 - [Operations Guide](../guides/OPERATIONS.md)

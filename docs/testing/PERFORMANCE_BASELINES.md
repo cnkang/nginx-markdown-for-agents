@@ -342,11 +342,14 @@ The output JSON includes a `memory_peak_method` field (`os_reported_peak` or `sa
 ## Brotli Streaming Decompression — Performance Evidence
 
 The `brotli-streaming-first` scenario exercises Brotli streaming decompression
-with a 1 MiB chunked response compressed at Brotli quality 6. The retained run
-used the exact implementation commit `9734d12e`, NGINX 1.30.4, Rust 1.97.0,
-and Debian 12's libbrotlidec 1.0.9 on `linux-x86_64`.
+with a 1 MiB chunked response compressed at Brotli quality 6. The retained
+archival run used the exact implementation commit `9734d12e`, NGINX 1.30.4,
+Rust 1.97.0, and Debian 12's libbrotlidec 1.0.9 on `linux-x86_64`. This
+record is the 2026-07-19 historical measurement flagged as archival at the
+top of this document — the 2026-07-31 native Linux (NGINX 1.24.0) record is
+the canonical source of truth for release baseline claims.
 
-The canonical 1000-request run completed with zero failed or non-2xx requests,
+The archival 1000-request run completed with zero failed or non-2xx requests,
 zero pre-commit fail-open events, 1030 streaming decompressions (including
 warm-up and probes), and byte-complete Markdown output. The retained raw report
 at `perf/baselines/module-baseline-brotli-091-raw.json` records the response

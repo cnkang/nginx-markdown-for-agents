@@ -243,7 +243,8 @@ the module from source against your local NGINX installation.
    cd nginx-<version>
    ```
 
-2. **Clone the module source**:
+2. **Clone the module source** (before entering the NGINX source tree, so
+   the module lives outside it):
 
    ```bash
    git clone https://github.com/cnkang/nginx-markdown-for-agents.git
@@ -252,6 +253,7 @@ the module from source against your local NGINX installation.
 3. **Configure NGINX with the module**:
 
    ```bash
+   cd nginx-<version>
    ./configure --with-compat --add-dynamic-module=../nginx-markdown-for-agents
    ```
 
