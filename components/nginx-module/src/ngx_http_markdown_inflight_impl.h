@@ -153,6 +153,15 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
     cur = ngx_http_markdown_g_inflight.current;
 
     /*
+     * Single-worker-thread note: NGINX workers run event loops on one
+     * thread, so the plain read followed by atomic_fetch_add below is not
+     * a race.  ngx_atomic_t here only guarantees tear-free metric
+     * snapshot reads, not cross-thread CAS semantics — do not replace
+     * this sequence with a full CAS unless a threaded execution model is
+     * introduced.
+     */
+
+    /*
      * max_inflight is validated > 0 at config parse time
      * (markdown_limits rejects zero), so the limit check below is
      * always reachable with a positive bound.
