@@ -241,17 +241,10 @@ echo "=== Scenario 5: auth_request subrequest_in_memory conversion ===" >&2
 # set (the response body is captured in memory, not streamed).  When the
 # fixture exposes an auth-protected page, the internal subrequest target
 # must still be converted and the inflight slot released at its terminal.
-auth_metrics_before=""
-auth_metrics_before="$(metrics_snapshot)" || {
-    fail "initial auth_request metrics snapshot failed"
-    auth_metrics_before=""
-}
-auth_attempts_before="$(conversion_attempts_total "$auth_metrics_before")"
-auth_terminals_before="$(converted_terminal_total "$auth_metrics_before")"
+auth_body_file="$(mktemp)"
 # Probe the fixture without curl's fail-on-error flag: any HTTP status is a
 # real observation.  Only 404 counts as fixture absence; other error statuses
 # (401, 500, ...) mean the fixture exists but misbehaves.
-auth_body_file="$(mktemp)"
 auth_http_status=""
 auth_curl_rc=0
 auth_http_status="$(curl -sS -o "${auth_body_file}" -w '%{http_code}' \
@@ -280,7 +273,17 @@ if [[ "${auth_http_status}" == "200" ]]; then
     fi
     # Terminal-release check for the internal subrequest path: prove with
     # the conversion counters (the inflight gauge no longer exists in the
-    # frozen 0.9.2 surface).
+    # frozen 0.9.2 surface).  Snapshot immediately after the first auth page
+    # request (the probe above already converted) and use it as the
+    # repeat-request baseline, so the counters below prove the repeat
+    # request produced a fresh conversion and terminal delivery.
+    auth_metrics_before=""
+    auth_metrics_before="$(metrics_snapshot)" || {
+        fail "repeat-request auth metrics baseline failed"
+        auth_metrics_before=""
+    }
+    auth_attempts_before="$(conversion_attempts_total "$auth_metrics_before")"
+    auth_terminals_before="$(converted_terminal_total "$auth_metrics_before")"
     if ! curl -fsS "${NGINX_URL}${AUTH_PAGE_PATH}" >/dev/null; then
         fail "auth_request conversion recovery request failed"
     else
@@ -297,19 +300,6 @@ if [[ "${auth_http_status}" == "200" ]]; then
         else
             fail "auth_request counters did not prove a fresh conversion and terminal delivery"
         fi
-    fi
-    auth_metrics_after=""
-    auth_metrics_after="$(metrics_snapshot)" || {
-        fail "post-auth_request metrics snapshot failed"
-        auth_metrics_after=""
-    }
-    auth_attempts_after="$(conversion_attempts_total "$auth_metrics_after")"
-    auth_terminals_after="$(converted_terminal_total "$auth_metrics_after")"
-    if counter_increased "$auth_attempts_before" "$auth_attempts_after" \
-        && counter_increased "$auth_terminals_before" "$auth_terminals_after"; then
-        pass "auth_request conversion and terminal counters advanced"
-    else
-        fail "auth_request counters did not prove conversion and terminal delivery"
     fi
 elif [[ "${auth_http_status}" != "404" && -n "${auth_http_status}" ]]; then
     # A fixture that answers with any status other than 200/404 exists but
