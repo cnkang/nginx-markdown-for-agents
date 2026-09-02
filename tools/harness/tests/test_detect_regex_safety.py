@@ -2178,3 +2178,200 @@ class TestPythonAstAdversarial:
         # ``re`` is shadowed by the parameter → not the module alias → no ERROR.
         errors_found = [f for f in findings if f.severity == Severity.ERROR]
         assert not errors_found
+
+
+# ---------------------------------------------------------------------------
+# S8786: implicit partial-match overlap (unanchored open-ended repetitions)
+# ---------------------------------------------------------------------------
+
+class TestImplicitPartialMatch:
+    """S8786-style detection: open-ended repetitions overlapping the
+    implicit leading .* of partial-match APIs (re.search/findall/split/
+    sub/subn) with a continuation that can fail."""
+
+    def test_search_unanchored_digit_plus_metric(self, tmp_path: Path) -> None:
+        """re.search(r'(\\d+)\\s*metric\\s+famili', ...) → ERROR (S8786)."""
+        content = (
+            "import re\n"
+            "m = re.search(r'(\\d+)\\s*metric\\s+famili', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert "S8786" in errors_found[0].reason
+
+    def test_search_unanchored_digit_plus_word(self, tmp_path: Path) -> None:
+        """re.search(r'(\\d+)\\s*famili', ...) → ERROR (S8786)."""
+        content = (
+            "import re\n"
+            "m = re.search(r'(\\d+)\\s*famili', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_search_anchored_start_is_safe(self, tmp_path: Path) -> None:
+        """re.search(r'^(\\d+)\\s*metric', ...) → no ERROR (anchored)."""
+        content = (
+            "import re\n"
+            "m = re.search(r'^(\\d+)\\s*metric', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not [f for f in findings if f.severity == Severity.ERROR]
+
+    def test_search_anchored_start_escape_is_safe(self, tmp_path: Path) -> None:
+        """re.search(r'\\A(\\d+)\\s*metric', ...) → no ERROR (anchored)."""
+        content = (
+            "import re\n"
+            "m = re.search(r'\\A(\\d+)\\s*metric', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not [f for f in findings if f.severity == Severity.ERROR]
+
+    def test_search_bounded_quantifier_is_safe(self, tmp_path: Path) -> None:
+        """re.search(r'(\\d{1,12})\\s*metric', ...) → no ERROR (bounded)."""
+        content = (
+            "import re\n"
+            "m = re.search(r'(\\d{1,12})\\s*metric', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not [f for f in findings if f.severity == Severity.ERROR]
+
+    def test_match_api_is_not_flagged(self, tmp_path: Path) -> None:
+        """re.match(r'(\\d+)\\s*metric', ...) → no ERROR (match is not a
+        partial-match API; Sonar's RedosMatchTypeHelper excludes match)."""
+        content = (
+            "import re\n"
+            "m = re.match(r'(\\d+)\\s*metric', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not [f for f in findings if f.severity == Severity.ERROR]
+
+    def test_fullmatch_api_is_not_flagged(self, tmp_path: Path) -> None:
+        """re.fullmatch(r'(\\d+)\\s*metric', ...) → no ERROR (FULL match)."""
+        content = (
+            "import re\n"
+            "m = re.fullmatch(r'(\\d+)\\s*metric', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not [f for f in findings if f.severity == Severity.ERROR]
+
+    def test_findall_unanchored_is_flagged(self, tmp_path: Path) -> None:
+        """re.findall(r'x*yx*', ...) → ERROR (S8786)."""
+        content = (
+            "import re\n"
+            "m = re.findall(r'x*yx*', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_split_unanchored_whitespace_comma(self, tmp_path: Path) -> None:
+        """re.split(r'\\s*,', ...) → ERROR (S8786)."""
+        content = (
+            "import re\n"
+            "parts = re.split(r'\\s*,', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_sub_unanchored_is_flagged(self, tmp_path: Path) -> None:
+        """re.sub(r'(ab)*a(ba)*', '', text) → ERROR (S8786)."""
+        content = (
+            "import re\n"
+            "out = re.sub(r'(ab)*a(ba)*', '', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_compiled_search_unanchored_is_flagged(self, tmp_path: Path) -> None:
+        """compiled pattern used with .search → ERROR (S8786)."""
+        content = (
+            "import re\n"
+            "pat = re.compile(r'(\\d+)\\s*metric\\s+famili')\n"
+            "m = pat.search(text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_compiled_match_is_not_flagged(self, tmp_path: Path) -> None:
+        """compiled pattern used with .match → no ERROR (not partial)."""
+        content = (
+            "import re\n"
+            "pat = re.compile(r'(\\d+)\\s*metric\\s+famili')\n"
+            "m = pat.match(text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not [f for f in findings if f.severity == Severity.ERROR]
+
+    def test_no_hard_continuation_is_safe(self, tmp_path: Path) -> None:
+        """re.search(r'x*x*', ...) → no ERROR (continuation can reach end)."""
+        content = (
+            "import re\n"
+            "m = re.search(r'x*x*', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not [f for f in findings if f.severity == Severity.ERROR]
+
+    def test_intersecting_inner_repetition_is_safe(self, tmp_path: Path) -> None:
+        """re.search(r'(.*,)*X', ...) → no S8786 finding (Sonar reports this
+        as QUADRATIC_WHEN_OPTIMIZED, not S8786 ALWAYS_QUADRATIC).  The
+        existing nested-quantifier check may still flag it."""
+        content = (
+            "import re\n"
+            "m = re.search(r'(.*,)*X', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        s8786 = [f for f in findings if "S8786" in f.reason]
+        assert not s8786
+
+    def test_leading_hard_content_is_safe(self, tmp_path: Path) -> None:
+        """re.search(r',\\s*+,', ...) → no ERROR (leading ',' blocks the
+        implicit .* prefix)."""
+        content = (
+            "import re\n"
+            "m = re.search(r',\\s*+,', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not [f for f in findings if f.severity == Severity.ERROR]
+
+    def test_suppression_comment_exempts(self, tmp_path: Path) -> None:
+        """# nosec:regex-safety -- <reason> suppresses the S8786 finding."""
+        content = (
+            "import re\n"
+            "# nosec:regex-safety -- bounded input, max_input_bytes=128\n"
+            "m = re.search(r'(\\d+)\\s*metric\\s+famili', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not [f for f in findings if f.severity == Severity.ERROR]
+
+    def test_shell_pcre_unanchored_is_flagged(self, tmp_path: Path) -> None:
+        """grep -P with an unanchored open-ended repetition → ERROR."""
+        content = (
+            "#!/bin/sh\n"
+            "grep -P '(\\d+)\\s*metric\\s+famili' file.txt\n"
+        )
+        f = _make_py_file(content, tmp_path, name="test.sh")
+        findings, errors = _scan_shell_file(f, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
