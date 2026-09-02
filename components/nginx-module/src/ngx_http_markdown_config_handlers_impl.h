@@ -845,7 +845,7 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
     if (!(cf->cmd_type & NGX_HTTP_MAIN_CONF)) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
             "\"%V\" directive is only valid in the http context, not in "
-            "server or location (see docs/guides/MIGRATION-0.9.md)",
+            "server or location (see docs/guides/MIGRATION-0.9.0.md)",
             &cmd->name);
         return NGX_CONF_ERROR;
     }
