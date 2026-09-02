@@ -1752,7 +1752,8 @@ def _tokenize_regex(pattern: str) -> list["_Token"]:
         handler = _CHAR_HANDLERS.get(ch)
         if handler is not None:
             token, i = handler(pattern, i, n)
-            raw_tokens.append(token)
+            if token is not None:
+                raw_tokens.append(token)
             continue
         # Default literal atom.
         raw_tokens.append(_Token(_TKind.ATOM, ch, i))
@@ -1779,7 +1780,9 @@ def _handle_class(pattern: str, i: int, n: int) -> tuple[_Token, int]:
     return _Token(_TKind.ATOM, pattern[i:j], i), j
 
 
-def _handle_group_open(pattern: str, i: int, n: int) -> tuple[_Token, int]:
+def _handle_group_open(
+    pattern: str, i: int, n: int
+) -> tuple[_Token | None, int]:
     if i + 1 < n and pattern[i + 1] == "?":
         return _handle_special_group(pattern, i, n)
     return _Token(_TKind.GROUP_OPEN, pattern[i], i), i + 1
@@ -1800,12 +1803,18 @@ def _consume_named_group_prefix(pattern: str, k: int, n: int) -> int:
     return k
 
 
-def _handle_special_group(pattern: str, i: int, n: int) -> tuple[_Token, int]:
+def _handle_special_group(
+    pattern: str, i: int, n: int
+) -> tuple[_Token | None, int]:
     k = i + 2
     if k < n and pattern[k] == "#":
+        # (?#...) is a pure comment group: it contributes no tokens to the
+        # structure analysis, so consume it fully and emit nothing.  A
+        # GROUP_OPEN here would leave an unmatched open paren on the stack
+        # and corrupt pairing of every later group.
         end = pattern.find(")", k)
         new_i = n if end == -1 else end + 1
-        return _Token(_TKind.GROUP_OPEN, "(", new_i), new_i
+        return None, new_i
     if k + 1 < n and pattern[k] == "P" and pattern[k + 1] == "=":
         consumed = _consume_delimited(pattern, k + 2, n, ")")
         return _Token(_TKind.ATOM, pattern[i:consumed], i), consumed

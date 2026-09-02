@@ -621,12 +621,32 @@ def _validate_nfpm_deb_interval_version(
 def _parse_nfpm_deb_depends(content: str) -> list[str]:
     """Extract the DEB `depends` entries of the deb: overrides block."""
     depends: list[str] = []
+    in_deb = False
+    deb_indent = 0
     in_depends = False
     for line in content.splitlines():
+        indent_len = len(line) - len(line.lstrip(" \t"))
         stripped = line.strip()
-        if stripped.startswith("depends:"):
-            in_depends = True
+        if not stripped or stripped.startswith("#"):
             continue
+        if stripped == "deb:" or stripped.startswith("deb: "):
+            in_deb = True
+            deb_indent = indent_len
+            in_depends = False
+            continue
+        if in_deb:
+            # A depends key opens the DEB collection regardless of its
+            # indentation (nfpm nests it under deb:).
+            if stripped.startswith("depends:"):
+                in_depends = True
+                continue
+            # A key at the same indent as deb: (or shallower) starts the
+            # next overrides sibling (rpm:) or leaves overrides entirely;
+            # both end the deb block and must not leak its depends.
+            if indent_len <= deb_indent:
+                in_deb = False
+                in_depends = False
+                continue
         if in_depends:
             if stripped.startswith("- "):
                 match = _DEB_DEP_LINE_RE.match(line)

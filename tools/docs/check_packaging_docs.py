@@ -408,6 +408,13 @@ def main() -> int:
         print(f"ERROR: Installation guide not found at {INSTALL_GUIDE}")
         return 1
 
+    if not PACKAGE_DISTRIBUTION_GUIDE.exists():
+        print(
+            f"ERROR: Package distribution guide not found at "
+            f"{PACKAGE_DISTRIBUTION_GUIDE}"
+        )
+        return 1
+
     text = _read_text(INSTALL_GUIDE)
     package_distribution_text = _read_text(PACKAGE_DISTRIBUTION_GUIDE)
     errors: list[str] = []

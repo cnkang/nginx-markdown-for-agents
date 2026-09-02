@@ -595,7 +595,7 @@ def _build_args(value: object) -> dict[str, str]:
     for line in value.splitlines():
         key, separator, argument = line.partition("=")
         if separator:
-            result[key] = argument
+            result[key.strip()] = argument.strip()
     return result
 
 
