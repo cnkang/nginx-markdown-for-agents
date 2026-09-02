@@ -33,7 +33,9 @@ Required:
   ```c
   headers = part->elts;
   if (headers == NULL && part->nelts != 0) {
-      return NGX_ERROR;  /* or continue — do not index a NULL elts */
+      return NGX_ERROR;  /* do not index a NULL elts; a bare `continue`
+                            skips part = part->next and loops forever —
+                            advance part first if the flow must continue */
   }
   ```
   The guard must return the function's appropriate error or empty value

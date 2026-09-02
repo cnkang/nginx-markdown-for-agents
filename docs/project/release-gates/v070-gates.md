@@ -214,7 +214,7 @@ make release-gates-check-070
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-24 | Kang | Gate 3.6 upgrade/rollback evidence independence defined (separate environment, runner, actor, or provenance); validator matrix rows annotated as 0.7.0-era names retired by the twelve-family freeze |
+| 0.9.2 | 2026-08-24 | Kang | Gate 3.6 upgrade/rollback evidence independence defined (separate environment, runner, actor, or provenance); validator matrix rows annotated as 0.7.0-era names retired by the eleven-family freeze |
 | 0.9.2 | 2026-08-15 | Kang | Helm chart render gate uses validate_k8s_manifests.py and defines the required rendered fields |
 | 0.7.0-int | 2026-05-20 | Kang | Add Gate 6 (Fuzz & Packaging Infrastructure) with validate_fuzz_packaging.py checks |
 | 0.7.0-draft | 2026-05-17 | spec-agent | Initial v0.7.0 gate definitions from design.md §14.0 |

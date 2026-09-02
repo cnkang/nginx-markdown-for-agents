@@ -76,9 +76,9 @@ It is not a delivery success. Delivery counters advance only after the
 downstream filter accepts the terminal converted buffer. An internal handoff
 is not delivery.
 
-If the inflight gauge does not return to zero after traffic drains, stop the
-rollout and collect diagnostics before changing limits. Never solve an
-allocation failure by removing a bound.
+If the diagnostics in-flight counter does not return to zero after traffic
+drains, stop the rollout and collect diagnostics before changing limits. Never
+solve an allocation failure by removing a bound.
 
 ## Historical note
 

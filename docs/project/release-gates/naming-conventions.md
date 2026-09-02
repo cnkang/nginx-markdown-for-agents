@@ -67,7 +67,7 @@ New directives introduced in 0.4.0 must follow the same `markdown_` prefix and l
 
 ### Defined metrics
 
-The authoritative metric families are the twelve-family v1 freeze defined in
+The authoritative metric families are the eleven-family v1 freeze defined in
 `schemas/metrics-v1.registry.json` (0.9.2). Legacy families such as
 `nginx_markdown_conversions_total`, `nginx_markdown_failures_total`, and
 `nginx_markdown_failopen_total` no longer exist. The v1 renderer partitions
