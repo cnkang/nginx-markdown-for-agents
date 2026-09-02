@@ -1346,7 +1346,7 @@ fn test_parser_memory_budget_allows_small_input() {
 /// `ERROR_PARSE_TIMEOUT` rather than returning partial output.
 ///
 /// Uses a 1 ms parser deadline against a 15,000-paragraph document
-/// (approximately 1 MiB).  The parser timer starts after FFI option
+/// (1 MiB capacity).  The parser timer starts after FFI option
 /// decoding and input-budget setup, so total FFI call time can exceed the
 /// parser budget even when parsing itself finishes in time.  Every run must
 /// report `ERROR_PARSE_TIMEOUT`; a parser that ignored the deadline would

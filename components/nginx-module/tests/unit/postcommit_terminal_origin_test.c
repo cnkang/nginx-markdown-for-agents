@@ -173,12 +173,14 @@ test_expand_buf_max_size_below_old_size(void)
 {
     u_char    *heap_buf;
     u_char    *buf;
+    u_char     expected[64];
     size_t     buf_size;
     ngx_int_t  rc;
 
     heap_buf = malloc(64);
     TEST_ASSERT(heap_buf != NULL, "setup");
     memset(heap_buf, 0x42, 64);
+    memcpy(expected, heap_buf, 64);
     buf = heap_buf;
     buf_size = 64;
 
@@ -188,7 +190,7 @@ test_expand_buf_max_size_below_old_size(void)
     TEST_ASSERT(buf_size == 64,
         "max_size below old_size must keep old_size");
     TEST_ASSERT(heap_buf != NULL, "heap must be non-NULL");
-    TEST_ASSERT(memcmp(heap_buf, buf, 64) == 0,
+    TEST_ASSERT(memcmp(expected, buf, 64) == 0,
         "old content must survive the copy");
 
     free(heap_buf);
