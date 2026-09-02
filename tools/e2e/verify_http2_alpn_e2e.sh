@@ -49,6 +49,7 @@ Options:
 Environment:
   NGINX_BIN             Reusable module-enabled NGINX binary (optional)
 EOF
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do
@@ -82,13 +83,14 @@ done
 nginx_has_http_v2() {
   local nginx_bin="$1"
   "${nginx_bin}" -V 2>&1 | grep -q -- '--with-http_v2_module'
+  return $?
 }
 
 for cmd in curl openssl grep awk sed; do
   markdown_need_cmd "${cmd}"
 done
 
-if [ -n "${NGINX_BIN:-}" ] && ! nginx_has_http_v2 "${NGINX_BIN}"; then
+if [[ -n "${NGINX_BIN:-}" ]] && ! nginx_has_http_v2 "${NGINX_BIN}"; then
   echo "==> Reusable NGINX binary lacks --with-http_v2_module; self-building" >&2
   NGINX_BIN=""
 fi
@@ -101,7 +103,7 @@ mkdir -p "${RUNTIME}/conf" "${RUNTIME}/logs" "${RAW_DIR}" "${TLS_DIR}"
 
 cleanup() {
   local rc=$?
-  if [ -n "${NGINX_PID}" ] && kill -0 "${NGINX_PID}" 2>/dev/null; then
+  if [[ -n "${NGINX_PID}" ]] && kill -0 "${NGINX_PID}" 2>/dev/null; then
     kill "${NGINX_PID}" 2>/dev/null || true
     wait "${NGINX_PID}" 2>/dev/null || true
     sleep 1
@@ -235,6 +237,7 @@ fi
 fail() {
   echo "FAIL: $*" >&2
   exit 1
+  return 1
 }
 
 echo "==> HTTP/2 ALPN negotiation assertions"
