@@ -455,7 +455,7 @@ def _document_update_rows_are_sorted(table_lines: list[str]) -> bool:
                 row[0][0],
                 (
                     0
-                    if row[0][1].lower().startswith("rc")
+                    if row[0][1].lstrip("-").lower().startswith("rc")
                     else (1 if row[0][1] == "" else 2)
                 ),
                 row[0][1],

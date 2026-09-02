@@ -92,6 +92,34 @@ def test_document_updates_rejects_rc_above_release(tmp_path):
     assert any("descending chronological order" in error for error in errors)
 
 
+def test_document_updates_orders_release_above_dash_rc(tmp_path):
+    f = tmp_path / "doc.md"
+    f.write_text(
+        "## Document Updates\n\n"
+        "| Version | Date | Notes |\n"
+        "|---------|------|-------|\n"
+        "| 0.9.2 | 2026-09-02 | Release |\n"
+        "| 0.9.2-rc5 | 2026-09-01 | Candidate |\n",
+        encoding="utf-8",
+    )
+    errors = docs_checker.check_document_updates_order([f])
+    assert errors == []
+
+
+def test_document_updates_rejects_dash_rc_above_release(tmp_path):
+    f = tmp_path / "doc.md"
+    f.write_text(
+        "## Document Updates\n\n"
+        "| Version | Date | Notes |\n"
+        "|---------|------|-------|\n"
+        "| 0.9.2-rc5 | 2026-09-01 | Candidate |\n"
+        "| 0.9.2 | 2026-09-02 | Release |\n",
+        encoding="utf-8",
+    )
+    errors = docs_checker.check_document_updates_order([f])
+    assert any("descending chronological order" in error for error in errors)
+
+
 def test_document_updates_does_not_consume_a_later_section_table():
     content = (
         "## Document Updates\n\n"
