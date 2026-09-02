@@ -66,7 +66,7 @@ _RC_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+-rc(?:\.\d+)?$")
 _RELEASE_TAG_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+(?:\.\d+)?$")
 
 
-def _report_scenarios(report: dict) -> list:
+def _report_scenarios(report: dict | None) -> list:
     """Extract the scenarios list from a benchmark report.
 
     Only list-shaped values are returned; any other shape (string, dict,
@@ -610,15 +610,7 @@ def _build_evidence_pack(  # pylint: disable=too-many-arguments,too-many-positio
         "breaches": breaches,
         "results": results,
         "evidence": {
-            "module_benchmark_tiers": (
-                report["module_benchmark"]["scenarios"]
-                if (
-                    report
-                    and isinstance(report.get("module_benchmark"), dict)
-                    and isinstance(report["module_benchmark"].get("scenarios"), list)
-                )
-                else []
-            ),
+            "module_benchmark_tiers": _report_scenarios(report),
             "decompression_coverage": (
                 report.get("decompression_coverage", {})
                 if report else {}
