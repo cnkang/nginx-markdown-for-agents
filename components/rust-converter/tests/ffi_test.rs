@@ -1345,11 +1345,12 @@ fn test_parser_memory_budget_allows_small_input() {
 /// Regression (TEST-2): a parse that overruns `parse_timeout` must fail with
 /// `ERROR_PARSE_TIMEOUT` rather than returning partial output.
 ///
-/// Uses a 1 ms parser deadline against a 500 KiB document.  The parser timer
-/// starts after FFI option decoding and input-budget setup, so total FFI call
-/// time can exceed the parser budget even when parsing itself finishes in
-/// time.  Every run must report `ERROR_PARSE_TIMEOUT`; a parser that ignored
-/// the deadline would return `ERROR_SUCCESS` and fail the assertion.
+/// Uses a 1 ms parser deadline against a 15,000-paragraph document
+/// (approximately 1 MiB).  The parser timer starts after FFI option
+/// decoding and input-budget setup, so total FFI call time can exceed the
+/// parser budget even when parsing itself finishes in time.  Every run must
+/// report `ERROR_PARSE_TIMEOUT`; a parser that ignored the deadline would
+/// return `ERROR_SUCCESS` and fail the assertion.
 #[test]
 fn test_parse_timeout_enforced_when_overrun() {
     use std::time::{Duration, Instant};
@@ -1357,7 +1358,7 @@ fn test_parse_timeout_enforced_when_overrun() {
     let converter = markdown_converter_new();
     assert!(!converter.is_null(), "Converter should not be NULL");
 
-    let mut large_html = Vec::with_capacity(512 * 1024);
+    let mut large_html = Vec::with_capacity(1024 * 1024);
     large_html.extend_from_slice(b"<html><body>");
     for i in 0..15000 {
         large_html.extend_from_slice(

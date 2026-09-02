@@ -167,10 +167,13 @@ Streaming ships behind feature flags and progressive rollout:
 
 ## Implementation Notes
 
-### Proposed Configuration Surface (initial)
+### Proposed Configuration Surface (initial) — historical v0.8.0 notes
 
-Implementation review can refine the exact naming, but the behavior should
-include:
+> These are the initial v0.8.0 configuration notes, kept for design
+> history. They do not describe current behavior. The active streaming
+> contract is `markdown_streaming off|auto|force` (default `auto`), a
+> per-request streaming memory budget, and stream failure policy with
+> pre-commit/post-commit semantics at location scope.
 
 1. streaming enable/disable switch (default off)
 2. per-request streaming memory budget
