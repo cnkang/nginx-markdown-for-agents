@@ -510,7 +510,7 @@ def _claimed_family_count(line: str) -> int | None:
         return 11
     if re.search(r"\btwelve\b", line, re.IGNORECASE):
         return 12
-    claimed = re.search(r"(\d+)\s*(?:metric\s+)?famil", line)
+    claimed = re.search(r"(\d+)(?>\s*(?:metric\s+)?)famil", line)
     if not claimed:
         return None
     return int(claimed.group(1))
