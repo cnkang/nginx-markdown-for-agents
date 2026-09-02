@@ -389,15 +389,31 @@ def check_internal_reference_policy(
 
 def _parse_document_update_version(
     version: str,
-) -> tuple[int, ...] | tuple[int, int, int, str]:
-    """Return a sortable key for a document-update version cell."""
+) -> tuple[tuple[int, ...], str]:
+    """Return a sortable key for a document-update version cell.
+
+    Every version maps to the same key shape (numeric parts, trailing
+    suffix), so descending sort comparisons never mix int and str
+    elements.  Numeric-only versions produce an empty suffix, which
+    orders a release after its release-candidate build while preserving
+    full numeric ordering for four-component versions.
+    """
     normalized = version.strip().strip("`*[]()\"'")
     if normalized.startswith("v"):
         normalized = normalized[1:]
-    try:
-        return tuple(int(part) for part in normalized.split("."))
-    except ValueError:
-        return (0, 0, 0, normalized)
+    numeric: list[int] = []
+    remainder = normalized
+    while remainder:
+        match = re.match(r"(\d+)", remainder)
+        if match is None:
+            break
+        numeric.append(int(match.group(1)))
+        remainder = remainder[match.end():]
+        if remainder.startswith("."):
+            remainder = remainder[1:]
+            continue
+        break
+    return (tuple(numeric), remainder)
 
 
 def _document_update_table_lines(content: str) -> list[str]:

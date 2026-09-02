@@ -60,7 +60,11 @@ fi
 
 # Test 5: Suppression contract — valid suppression suppresses finding
 echo "Test 5: Suppression contract..."
-TMPDIR_TEST="$(mktemp -d)"
+TMPDIR_TEST="$(mktemp -d)" || {
+    echo "FAIL: mktemp -d failed" >&2
+    exit 1
+}
+trap 'rm -rf "${TMPDIR_TEST}"' EXIT
 cat > "${TMPDIR_TEST}/test_suppress.py" <<'PYEOF'
 import re
 # nosec:regex-safety -- trusted generated token, max_input_bytes=64
@@ -98,9 +102,6 @@ if python3 "${DETECTOR}" --path "${SPACED_DIR}" 2>&1 | grep -q "OK"; then
 else
     fail "path with spaces failed"
 fi
-
-# Cleanup
-rm -rf "${TMPDIR_TEST}"
 
 echo "---"
 if [[ "$FAILURES" -eq 0 ]]; then

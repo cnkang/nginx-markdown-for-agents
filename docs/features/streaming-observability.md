@@ -30,10 +30,12 @@ The internal C path-selection enum is not used for this family.
 The table above is the production label inventory. Lifecycle events use the
 `transition`/`reason` labels. The terminal request family uses the
 `outcome`/`stage`/`reason` labels. The `engine` label is the sole intentional
-label on the conversion-attempt and conversion-delivery families. Output bytes and
-inflight requests are intentionally unlabelled to keep series cardinality
-bounded. Rust helper-event names and enums are implementation details and do
-not expand this Prometheus label contract.
+label on the conversion-attempt and conversion-delivery families. Output
+bytes are intentionally unlabelled to keep series cardinality bounded. The
+per-worker in-flight counter is diagnostics-only: it is exposed through the
+`markdown_diagnostics` endpoint and is not a Prometheus family in the
+metrics catalog. Rust helper-event names and enums are implementation
+details and do not expand this Prometheus label contract.
 
 The `nginx_markdown_streaming_events_total` counter uses `transition` and
 `reason` labels. The six rows below are the label-value combinations emitted by

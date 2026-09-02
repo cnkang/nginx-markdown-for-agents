@@ -97,7 +97,8 @@ Section B: Rust Conversion Engine Dependencies
 
 These crates are linked into or distributed with the conversion binary.
 Development-only crates (test reports, property-testing harnesses) are
-covered in Section C even when they also appear in this engine's Cargo.lock.
+listed at the end of this section with their development-only scope noted;
+they are not distributed with the converter binary unless stated otherwise.
 
 ================================================================================
 

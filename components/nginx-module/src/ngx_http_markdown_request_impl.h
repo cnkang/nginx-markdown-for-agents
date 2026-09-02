@@ -1289,6 +1289,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
 
     if (inflight_rc == NGX_ERROR) {
         /* Cleanup alloc failed — treat as system error */
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
         NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
 

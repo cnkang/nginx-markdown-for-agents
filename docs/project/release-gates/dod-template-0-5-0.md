@@ -28,7 +28,7 @@ Each sub-spec fills in the following table upon completion, recorded as part of 
 | Observable | PASS/FAIL | [metrics test coverage description] |
 | Rollbackable | PASS/FAIL | [rollback doc link, streaming-to-full-buffer rollback verification] |
 | Documentable | PASS/FAIL | [docs-check result] |
-| Auditable | PASS/FAIL | [PR link] |
+| Auditable | PASS/FAIL | [direct CI artifact link to test results; direct benchmark evidence link where applicable] |
 | Default-compatible | PASS/FAIL | [backward compatibility review link] |
 ```
 
