@@ -15,6 +15,7 @@ Environment variables:
 
 import argparse
 import json
+import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -682,6 +683,16 @@ def _evaluate_single_module_metric(metric_name, threshold_value, direction,
             "metric": metric_name,
             "status": "missing_evidence",
             "reason": f"critical metric '{metric_name}' not numeric: {cur_val!r}",
+        }
+    # NaN and infinities are float instances but are not valid performance
+    # evidence: NaN comparisons are always false (which would misreport a
+    # breach) and infinities poison deviation math.  Reject them before any
+    # threshold comparison.
+    if isinstance(cur_val, float) and not math.isfinite(cur_val):
+        return {
+            "metric": metric_name,
+            "status": "missing_evidence",
+            "reason": f"critical metric '{metric_name}' not finite: {cur_val!r}",
         }
 
     if direction == "absolute_cap":

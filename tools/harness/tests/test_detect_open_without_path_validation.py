@@ -420,4 +420,3 @@ def test_gzip_open_validated_path_is_safe(det):
     errors, warnings = _check_source(det, src)
     assert errors == []
     assert warnings == []
-
