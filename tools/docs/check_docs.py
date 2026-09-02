@@ -499,6 +499,43 @@ HISTORICAL_FAMILY_CONTEXT_RE = re.compile(
 )
 
 
+def _claimed_family_count(line: str) -> int | None:
+    """Extract the metric-family count claimed by a doc line.
+
+    Spelled-out numbers take precedence: a line may also contain
+    version-like digits (e.g. "eleven v1 metric families") that
+    a numeric extractor would misread as a small count.
+    """
+    if re.search(r"\beleven\b", line, re.IGNORECASE):
+        return 11
+    if re.search(r"\btwelve\b", line, re.IGNORECASE):
+        return 12
+    claimed = re.search(r"(\d+)\s*(?:metric\s+)?famil", line)
+    if not claimed:
+        return None
+    return int(claimed.group(1))
+
+
+def _family_count_mismatch(
+    path: Path, line_no: int, line: str, family_count: int
+) -> str | None:
+    """Return a failure message when a doc line claims a wrong count."""
+    if not FAMILY_COUNT_RE.search(line):
+        return None
+    claimed_count = _claimed_family_count(line)
+    if claimed_count is None:
+        return None
+    if claimed_count == family_count:
+        return None
+    # historical context is allowed to mention other counts
+    if HISTORICAL_FAMILY_CONTEXT_RE.search(line):
+        return None
+    return (
+        f"{path.relative_to(ROOT)}:{line_no}: claims {claimed_count} "
+        f"metric families but the registry defines {family_count}"
+    )
+
+
 def check_metric_family_count(files: list[Path]) -> list[str]:
     """Metric-family counts claimed in docs must match the registry.
 
@@ -525,28 +562,9 @@ def check_metric_family_count(files: list[Path]) -> list[str]:
         for line_no, line in enumerate(
             path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
         ):
-            if not FAMILY_COUNT_RE.search(line):
-                continue
-            # Spelled-out numbers take precedence: a line may also contain
-            # version-like digits (e.g. "eleven v1 metric families") that
-            # a numeric extractor would misread as a small count.
-            if re.search(r"\beleven\b", line, re.IGNORECASE):
-                claimed_count = 11
-            elif re.search(r"\btwelve\b", line, re.IGNORECASE):
-                claimed_count = 12
-            else:
-                claimed = re.search(r"(\d+)\s*(?:metric\s+)?famil", line)
-                if not claimed:
-                    continue
-                claimed_count = int(claimed.group(1))
-            if claimed_count != family_count:
-                # historical context is allowed to mention other counts
-                if HISTORICAL_FAMILY_CONTEXT_RE.search(line):
-                    continue
-                failures.append(
-                    f"{path.relative_to(ROOT)}:{line_no}: claims {claimed_count} "
-                    f"metric families but the registry defines {family_count}"
-                )
+            failure = _family_count_mismatch(path, line_no, line, family_count)
+            if failure is not None:
+                failures.append(failure)
     return failures
 
 

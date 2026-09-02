@@ -443,6 +443,19 @@ def _validate_helm_image_digest(
         )
 
 
+def _indent_of(line: str) -> int:
+    """Return the leading whitespace width of a line."""
+    return len(line) - len(line.lstrip(" \t"))
+
+
+def _limits_entry(line: str) -> tuple[str, str] | None:
+    """Return (key, value) when a line is a limits block entry."""
+    match = re.match(r"^(\w+):\s*\"?([^\"#]*)\"?\s*(?:#.*)?$", line.strip())
+    if not match or not match.group(2).strip():
+        return None
+    return match.group(1), match.group(2).strip()
+
+
 def _chart_limit_defaults(values: str) -> dict[str, str]:
     """Return chart values that restate a module frozen default (if any)."""
     defaults: dict[str, str] = {}
@@ -452,20 +465,19 @@ def _chart_limit_defaults(values: str) -> dict[str, str]:
         stripped = line.strip()
         if stripped == "limits:":
             in_limits = True
-            limits_indent = len(line) - len(line.lstrip(" \t"))
+            limits_indent = _indent_of(line)
             continue
         if in_limits:
             if stripped.startswith("#"):
                 continue
-            indent_len = len(line) - len(line.lstrip(" \t"))
-            if indent_len <= limits_indent and ":" in stripped:
+            if _indent_of(line) <= limits_indent and ":" in stripped:
                 # a sibling key at the same or shallower indent ends the
                 # limits block
                 in_limits = False
                 continue
-            match = re.match(r"^(\w+):\s*\"?([^\"#]*)\"?\s*(?:#.*)?$", stripped)
-            if match and match.group(2).strip():
-                defaults[match.group(1)] = match.group(2).strip()
+            entry = _limits_entry(line)
+            if entry is not None:
+                defaults[entry[0]] = entry[1]
     return defaults
 
 
