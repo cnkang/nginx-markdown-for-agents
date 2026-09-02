@@ -635,17 +635,17 @@ def _parse_nfpm_deb_depends(content: str) -> list[str]:
             in_depends = False
             continue
         if in_deb:
-            # A depends key opens the DEB collection regardless of its
-            # indentation (nfpm nests it under deb:).
-            if stripped.startswith("depends:"):
-                in_depends = True
-                continue
             # A key at the same indent as deb: (or shallower) starts the
             # next overrides sibling (rpm:) or leaves overrides entirely;
             # both end the deb block and must not leak its depends.
             if indent_len <= deb_indent:
                 in_deb = False
                 in_depends = False
+                continue
+            # A depends key opens the DEB collection (nfpm nests it under
+            # deb:, so it is always deeper-indented than the deb: key).
+            if stripped.startswith("depends:"):
+                in_depends = True
                 continue
         if in_depends:
             if stripped.startswith("- "):

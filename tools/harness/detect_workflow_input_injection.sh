@@ -63,10 +63,19 @@ while IFS= read -r -d '' file; do
     in_run_block=0
     inline_run_command=0
     line_num=0
+    run_indent=0
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         line_num=$((line_num + 1))
         inline_run_command=0
+
+        # Compute the line's leading whitespace (tabs count as one column
+        # for boundary purposes; YAML block content is always indented
+        # deeper than its key, so the comparison stays conservative).
+        indent_len=0
+        while [[ "${line:indent_len:1}" == " " || "${line:indent_len:1}" == $'\t' ]]; do
+            indent_len=$((indent_len + 1))
+        done
 
         # Detect start/end of run: blocks (line starts with "run:" or contains "run: |")
         # YAML structure: we look for lines with "run:" that start a multiline block
@@ -78,6 +87,7 @@ while IFS= read -r -d '' file; do
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]*$ ]] || \
            [[ "$line" =~ $block_scalar_re ]]; then
             in_run_block=1
+            run_indent=$indent_len
             continue
         fi
 
@@ -92,7 +102,10 @@ while IFS= read -r -d '' file; do
             inline_run_command=1
         fi
 
-        # Detect env: blocks (which are safe for input interpolation)
+        # Detect env: blocks (which are safe for input interpolation).
+        # A step-level env: key (with or without the list dash) ends any
+        # preceding run block; a job-level env: key is a sibling of the
+        # step list and also ends it.
         if [[ "$line" =~ ^[[:space:]]*env:[[:space:]]*$ ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*env:[[:space:]]*$ ]]; then
             in_run_block=0
@@ -118,6 +131,15 @@ while IFS= read -r -d '' file; do
            [[ "$line" =~ ^[[:space:]]*jobs: ]]; then
             in_run_block=0
             continue
+        fi
+
+        # A sibling key at the same indentation as the run key (or
+        # shallower) ends the run block even when it has no list dash —
+        # e.g. an unprefixed `if:` or `env:` continuation key.  Without
+        # this boundary the scanner carries run state into wiring keys
+        # that are not shell source.
+        if [[ $in_run_block -eq 1 && $indent_len -le $run_indent ]]; then
+            in_run_block=0
         fi
 
         # A reusable-workflow job uses a plain `uses:` key (without the
