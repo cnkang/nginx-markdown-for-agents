@@ -226,6 +226,12 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
+if ! curl -sk --max-time 1 "https://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
+  echo "FAIL: NGINX did not become ready on port ${PORT}" >&2
+  cat "${RAW_DIR}/nginx.log" >&2 2>/dev/null || true
+  exit 1
+fi
+
 fail() {
   echo "FAIL: $*" >&2
   exit 1

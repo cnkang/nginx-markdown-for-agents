@@ -447,19 +447,20 @@ def _chart_limit_defaults(values: str) -> dict[str, str]:
     """Return chart values that restate a module frozen default (if any)."""
     defaults: dict[str, str] = {}
     in_limits = False
+    limits_indent = 0
     for line in values.splitlines():
         stripped = line.strip()
         if stripped == "limits:":
             in_limits = True
+            limits_indent = len(line) - len(line.lstrip(" \t"))
             continue
         if in_limits:
             if stripped.startswith("#"):
                 continue
-            if stripped and not stripped[0].isdigit() and ":" not in stripped:
-                # a non-indented sibling key ends the limits block
-                if not line.startswith("    "):
-                    in_limits = False
-                    continue
+            indent_len = len(line) - len(line.lstrip(" \t"))
+            if indent_len <= limits_indent and ":" in stripped:
+                # a sibling key at the same or shallower indent ends the
+                # limits block
                 in_limits = False
                 continue
             match = re.match(r"^(\w+):\s*\"?([^\"#]*)\"?\s*(?:#.*)?$", stripped)
