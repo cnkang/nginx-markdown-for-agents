@@ -240,12 +240,20 @@ class TestCheckerAdversarialInputs:
             "fuzz seed must exist; the exclusion must cover the real seed"
         )
         assert checker._should_skip_path(seed_path)
+        # The resolved auditable files under the corpus root must not
+        # contain the binary fuzz seed; only the explicit seed exclusion
+        # keeps it out of the audit.
+        assert seed_path not in checker._generated_files_under(
+            Path("components/rust-converter/fuzz/corpus")
+        ), "binary fuzz seed must be excluded from generated files"
         # Exercise the audit entry point with the real seed path under a
         # Sonar root: the binary seed must be skipped, producing no finding.
         checker.SONAR_ROOTS = [Path("components/rust-converter/fuzz/corpus")]
         rc, count = checker._audit_generated({})
         assert rc == 0, "binary fuzz seed must be excluded from the audit"
-        assert count >= 1, "audit must have scanned the corpus directory"
+        assert count == len(checker._generated_files_under(
+            Path("components/rust-converter/fuzz/corpus")
+        )), "audit count must match the resolved auditable file set"
 
 
 class TestSonarConfiguration:

@@ -243,13 +243,60 @@ buffered_failopen_send(buffered_failopen_ctx_t *ctx, int downstream_rc)
         ctx->latch = 1;
         return;
     }
-    if ((downstream_rc == NGX_OK || downstream_rc == NGX_DONE)
-        && ctx->latch && !ctx->completed)
-    {
-        ctx->failopen_count++;
-        ctx->completed = 1;
+    if (downstream_rc == NGX_OK || downstream_rc == NGX_DONE) {
+        if (!ctx->completed) {
+            ctx->failopen_count++;
+            ctx->completed = 1;
+        }
         ctx->latch = 0;
     }
+}
+
+static void
+test_buffered_failopen_direct_ok_counts(void)
+{
+    buffered_failopen_ctx_t ctx;
+
+    TEST_SUBSECTION("Buffered fail-open direct NGX_OK counts once");
+
+    memset(&ctx, 0, sizeof(ctx));
+
+    /* Initial send confirms delivery without backpressure. */
+    buffered_failopen_send(&ctx, NGX_OK);
+    TEST_ASSERT(ctx.failopen_count == 1,
+        "direct NGX_OK counts as confirmed delivery");
+    TEST_ASSERT(ctx.completed == 1, "completed set on direct OK");
+    TEST_ASSERT(ctx.latch == 0, "latch remains clear");
+
+    /* Later OK must not double count. */
+    buffered_failopen_send(&ctx, NGX_OK);
+    TEST_ASSERT(ctx.failopen_count == 1,
+        "no double count on repeated direct OK");
+
+    TEST_PASS("buffered fail-open direct NGX_OK counts once");
+}
+
+static void
+test_buffered_failopen_direct_done_counts(void)
+{
+    buffered_failopen_ctx_t ctx;
+
+    TEST_SUBSECTION("Buffered fail-open direct NGX_DONE counts once");
+
+    memset(&ctx, 0, sizeof(ctx));
+
+    /* Initial send terminates via NGX_DONE without backpressure. */
+    buffered_failopen_send(&ctx, NGX_DONE);
+    TEST_ASSERT(ctx.failopen_count == 1,
+        "direct NGX_DONE counts as confirmed delivery");
+    TEST_ASSERT(ctx.completed == 1, "completed set on direct DONE");
+
+    /* Direct OK after DONE must not double count. */
+    buffered_failopen_send(&ctx, NGX_OK);
+    TEST_ASSERT(ctx.failopen_count == 1,
+        "no double count after direct DONE");
+
+    TEST_PASS("buffered fail-open direct NGX_DONE counts once");
 }
 
 static void
@@ -312,6 +359,8 @@ main(void)
     test_failopen_error_no_delivery();
     test_multiple_failopen_divergence();
     test_failopen_completed_idempotent();
+    test_buffered_failopen_direct_ok_counts();
+    test_buffered_failopen_direct_done_counts();
     test_buffered_failopen_again_defers_count();
     test_buffered_failopen_error_never_counts();
 

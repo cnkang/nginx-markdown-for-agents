@@ -1482,6 +1482,7 @@ test_handle_inflate_stall_direct(void)
                 "stall growth setup should allocate a heap buffer");
     output_size = 256;
     g_conf.decompress.max_size = 4096;
+    ctx.output_limit = g_conf.decompress.max_size;
     memset(&stream, 0, sizeof(stream));
     stream.avail_out = 0;
     stream.avail_in = 10;

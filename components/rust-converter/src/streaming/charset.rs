@@ -386,7 +386,8 @@ impl CharsetState {
                 *self = state;
                 return Ok(Cow::Owned(result));
             }
-            Self::append_to_sniff_buffer(&mut sniff_buffer, data)?;
+            Self::append_to_sniff_buffer(&mut sniff_buffer, data)
+                .inspect_err(|error| self.mark_failed(error))?;
             if matches!(&state, CharsetState::Resolved { decoder: None }) {
                 *self = state;
                 return Ok(Cow::Owned(sniff_buffer));
@@ -411,7 +412,8 @@ impl CharsetState {
         let sniff_bytes = data
             .len()
             .min(sniff_limit.saturating_sub(sniff_buffer.len()));
-        Self::append_to_sniff_buffer(&mut sniff_buffer, &data[..sniff_bytes])?;
+        Self::append_to_sniff_buffer(&mut sniff_buffer, &data[..sniff_bytes])
+            .inspect_err(|error| self.mark_failed(error))?;
         if sniff_buffer.len() < sniff_limit {
             *self = CharsetState::Pending {
                 header_charset,
@@ -425,7 +427,8 @@ impl CharsetState {
         let mut state = self.resolve_for_feed(&detected)?;
         let remainder = &data[sniff_bytes..];
         if matches!(&state, CharsetState::Resolved { decoder: None }) {
-            Self::append_to_sniff_buffer(&mut sniff_buffer, remainder)?;
+            Self::append_to_sniff_buffer(&mut sniff_buffer, remainder)
+                .inspect_err(|error| self.mark_failed(error))?;
             *self = state;
             return Ok(Cow::Owned(sniff_buffer));
         }
@@ -438,7 +441,8 @@ impl CharsetState {
                     ConversionError::MemoryLimit(
                         "charset transcoded output allocation failed".to_string(),
                     )
-                })?;
+                })
+                .inspect_err(|error| self.mark_failed(error))?;
             result.extend_from_slice(&remainder_output);
         }
         *self = state;

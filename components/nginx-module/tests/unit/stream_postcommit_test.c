@@ -884,6 +884,8 @@ static void test_subrequest_terminal_delivery_lifecycle(void)
                 "subrequest terminal must not latch main terminal state");
     TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 1,
                 "subrequest terminal should latch after confirmed delivery");
+    TEST_ASSERT(test_output_filter_buf != NULL,
+                "subrequest terminal chain must be present");
     TEST_ASSERT(test_output_filter_buf->last_buf == 0,
                 "subrequest terminal must not carry last_buf");
     TEST_ASSERT(test_output_filter_buf->last_in_chain == 1,
