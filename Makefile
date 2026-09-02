@@ -343,6 +343,7 @@ test-all-e2e:
 	$(MAKE) verify-chunked-native-e2e-smoke
 	$(MAKE) verify-large-e2e
 	$(MAKE) verify-brotli-streaming-e2e
+	$(MAKE) verify-http2-alpn-e2e
 	@echo "=== test-all-e2e: ALL E2E SCENARIOS PASSED ==="
 
 # Coverage gate — coverage-gate from ci.yml.  Requires lcov and a
@@ -1464,6 +1465,9 @@ verify-chunked-native-e2e-stress:
 
 verify-brotli-streaming-e2e:
 	./tools/e2e/verify_brotli_streaming_e2e.sh
+
+verify-http2-alpn-e2e:
+	./tools/e2e/verify_http2_alpn_e2e.sh
 
 verify-encoding-chain-e2e:
 	./tools/e2e/verify_encoding_chain_e2e.sh
