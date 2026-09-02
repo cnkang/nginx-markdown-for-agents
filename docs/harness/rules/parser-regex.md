@@ -32,6 +32,23 @@ Required:
   - Unbounded repetition inside repeated groups: `(.*,)+`
   - Overlapping alternation with quantifiers: `(a|ab)+`
   - Repeated nullable groups: `(a?)+`, `(a*)+`
+  - Unanchored open-ended repetitions overlapping the implicit leading `.*`
+    of partial-match APIs (SonarCloud S8786 ALWAYS_QUADRATIC): a repetition
+    with an open-ended quantifier (`+`, `*`, `{n,}`) that is reachable from
+    the pattern start without consuming input and without crossing a
+    boundary anchor (`^`, `$`, `\A`, `\Z`, `\b`, `\B`), and whose
+    continuation can fail (a hard literal, group, or `$`/`\Z` anchor
+    follows), causes guaranteed quadratic backtracking.  Examples:
+    `(\d+)\s*metric\s+famili`, `x*yx*`, `\s*,`, `(ab)*a(ba)*`.  Only
+    partial-match APIs are checked (`re.search`, `re.findall`,
+    `re.finditer`, `re.split`, `re.sub`, `re.subn`, and the same compiled
+    methods); `re.match`/`re.fullmatch` are not partial matches and are
+    exempt, matching Sonar's `RedosMatchTypeHelper`.  Bounded quantifiers
+    (`{m,n}`), anchored patterns, and repetitions whose element contains an
+    intersecting inner repetition (Sonar reports those as
+    QUADRATIC_WHEN_OPTIMIZED, not S8786) are not flagged.  PCRE shell
+    contexts (`grep -P`, `rg -P`, `perl`) are inherently partial matches
+    and get the same check.
   - Dynamic regex injection: CLI args, env vars, file content as patterns
   - `re.DOTALL` with an unescaped greedy `.*` over full documents.  Lazy
     `.*?`, possessive `.*+`, escaped dots, and character-class literals do
