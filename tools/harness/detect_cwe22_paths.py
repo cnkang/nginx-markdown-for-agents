@@ -54,9 +54,9 @@ VALIDATED_VAR_RE = re.compile(
 )
 
 VALIDATED_ASSIGN_RE = re.compile(
-    r"(\w+)\s*=\s*validate_read_path\s*\("
-    r"|(\w+)\s*=\s*validate_write_path_within_root\s*\("
-    r"|(\w+)\s*=\s*_resolve_repo_write_path\s*\(",
+    r"(?m)^\s*(\w+)\s*=\s*validate_read_path\s*\("
+    r"|^\s*(\w+)\s*=\s*validate_write_path_within_root\s*\("
+    r"|^\s*(\w+)\s*=\s*_resolve_repo_write_path\s*\(",
 )
 
 OPEN_CALL_RE = re.compile(
@@ -391,7 +391,7 @@ def _extract_regex_groups(match: re.Match, target: set[str]) -> None:
 
 
 _PATH_WRAPPED_RE = re.compile(
-    r"(\w+)\s*=\s*Path\s*\(\s*(\w+)\s*\)",
+    r"(?m)^\s*(\w+)\s*=\s*Path\s*\(\s*(\w+)\s*\)",
 )
 
 
