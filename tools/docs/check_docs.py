@@ -394,9 +394,10 @@ def _parse_document_update_version(
 
     Every version maps to the same key shape (numeric parts, trailing
     suffix), so descending sort comparisons never mix int and str
-    elements.  Numeric-only versions produce an empty suffix, which
-    orders a release after its release-candidate build while preserving
-    full numeric ordering for four-component versions.
+    elements.  Numeric-only versions produce an empty suffix, which the
+    table sorter ranks above any release-candidate suffix so a release
+    orders above its rc builds while preserving full numeric ordering
+    for four-component versions.
     """
     normalized = version.strip().strip("`*[]()\"'")
     if normalized.startswith("v"):
@@ -442,11 +443,26 @@ def _document_update_rows_are_sorted(table_lines: list[str]) -> bool:
     for line in data_lines:
         cells = [cell.strip() for cell in line.split("|")]
         if len(cells) >= 3:
-            rows.append((_parse_document_update_version(cells[1]), cells[2], line))
+            version_key = _parse_document_update_version(cells[1])
+            rows.append((version_key, cells[2], line))
 
     retained_rows = [row[2] for row in rows]
     expected = [
-        row[2] for row in sorted(rows, key=lambda row: row[:2], reverse=True)
+        row[2]
+        for row in sorted(
+            rows,
+            key=lambda row: (
+                row[0][0],
+                (
+                    0
+                    if row[0][1].lower().startswith("rc")
+                    else (1 if row[0][1] == "" else 2)
+                ),
+                row[0][1],
+                row[1],
+            ),
+            reverse=True,
+        )
     ]
     return expected == retained_rows
 
