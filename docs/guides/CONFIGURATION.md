@@ -273,10 +273,14 @@ versioned documents. Do not copy those examples into a 0.9.2 configuration.
 
 The authoritative removal table for 0.8.x-era directives is
 [MIGRATION-0.9.0.md](MIGRATION-0.9.0.md#directive-mapping-table).  The
-mapping rows below cover only removals that appeared after that table.
-`nginx -t` rejects removed directives with NGINX's standard "unknown
-directive" error.  The migration-guide pointer in the error message
-exists only for the 0.9.0 and 0.9.1 removals.
+mapping rows below cover only removals that appeared after that table
+(`markdown_streaming_auto_threshold`, `markdown_decompress_max_size`,
+`markdown_parse_timeout`, `markdown_parser_budget`,
+`markdown_stream_threshold`, `markdown_stream_precommit_buffer`,
+`markdown_stream_flush_min`).  `nginx -t` rejects removed directives
+with NGINX's standard "unknown directive" error.  The migration-guide
+pointer in the error message exists only for the 0.9.0 and 0.9.1
+removals.
 
 ## Removed directives
 

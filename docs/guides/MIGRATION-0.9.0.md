@@ -251,9 +251,10 @@ For Grafana dashboards and alert rules, apply these transformations:
 
 # Step 2: Rewrite reason values that have explicit mapping-table rows
 # before the generic prefix replacement, so FAIL_CONVERSION and
-# FAIL_REJECT become conversion_error and rejected (not failed_*).
+# SKIPPED_ACCEPT_REJECT become conversion_error and
+# skipped_accept_reject (not failed_*).
 sed -i 's/reason="FAIL_CONVERSION"/reason="conversion_error"/g' dashboard.json
-sed -i 's/reason="FAIL_REJECT"/reason="rejected"/g' dashboard.json
+sed -i 's/reason="SKIPPED_ACCEPT_REJECT"/reason="skipped_accept_reject"/g' dashboard.json
 
 # Step 3: Lowercase all remaining reason label values in existing queries.
 # sed operates byte-wise without word boundaries: SKIP_/FAIL_ prefixes are
@@ -269,7 +270,7 @@ sed -i 's/reason="FAIL_/reason="failed_/g' dashboard.json
 # names carry the nginx_ prefix (see the mapping table above), so match
 # the full name to avoid duplicating the prefix in the replacement.
 sed -i 's/nginx_markdown_skipped_accept_total/nginx_markdown_skips_total{reason="skipped_accept"}/g' dashboard.json
-jq 'walk(if type == "string" then gsub("nginx_markdown_parse_timeouts_total"; "nginx_markdown_failures_total{reason=\\"timeout\\"}") else . end)' dashboard.json > dashboard.json.tmp
+jq 'walk(if type == "string" then gsub("nginx_markdown_parse_timeouts_total"; "nginx_markdown_failures_total{reason=\"timeout\"}") else . end)' dashboard.json > dashboard.json.tmp
 mv dashboard.json.tmp dashboard.json
 # Parse a representative dashboard fixture after the migration.
 jq empty dashboard.json
@@ -281,10 +282,10 @@ jq empty dashboard.json
 
 | 0.8.x Alert Query | 0.9.0 Alert Query |
 |-------------------|-------------------|
-| `rate(markdown_parse_timeouts_total[5m]) > 0` | `rate(nginx_markdown_failures_total{reason="timeout"}[5m]) > 0` |
-| `rate(markdown_failed_open_total[5m]) > 0.01` | `rate(nginx_markdown_failopen_total[5m]) > 0.01` |
+| `rate(nginx_markdown_parse_timeouts_total[5m]) > 0` | `rate(nginx_markdown_failures_total{reason="timeout"}[5m]) > 0` |
+| `rate(nginx_markdown_failed_open_total[5m]) > 0.01` | `rate(nginx_markdown_failopen_total[5m]) > 0.01` |
 | `sum(rate(nginx_markdown_ffi_call_errors_total[5m]))` | `rate(nginx_markdown_failures_total{reason="ffi_panic"}[5m])` |
-| `nginx_markdown_skips_total{reason="SKIP_ACCEPT"}` | `nginx_markdown_skips_total{reason="skipped_accept"}` |
+| `nginx_markdown_skipped_accept_total` | `nginx_markdown_skips_total{reason="skipped_accept"}` |
 
 #### Key Changes for Alert Authors
 
