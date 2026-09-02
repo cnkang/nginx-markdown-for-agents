@@ -464,7 +464,7 @@ _OPEN_CTOR_NAMES = {"open"}
 
 # Module-level open helpers whose *first positional argument* is the path.
 # Their receiver (the module name) must not be mistaken for the path: for
-# `gzip.open(hdl, path)` the path is `path`, not the `gzip` name.
+# `gzip.open(path, hdl)` the path is `path`, not the `gzip` name.
 _OPEN_MODULE_RECEIVERS = {"os", "gzip", "io", "codecs", "tarfile", "bz2", "lzma"}
 
 # ``urllib.request.build_opener().open()`` performs network I/O, not
