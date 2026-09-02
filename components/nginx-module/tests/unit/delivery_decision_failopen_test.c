@@ -243,6 +243,11 @@ buffered_failopen_send(buffered_failopen_ctx_t *ctx, int downstream_rc)
         ctx->latch = 1;
         return;
     }
+    /* Delivery counter model: a direct NGX_OK/NGX_DONE is a confirmed
+     * delivery and counts once even without a prior NGX_AGAIN latch;
+     * repeated OKs must not double count.  This mirrors the production
+     * fail-open delivery counter (Rule 38/47): count only after a
+     * successful downstream return, never on NGX_AGAIN. */
     if (downstream_rc == NGX_OK || downstream_rc == NGX_DONE) {
         if (!ctx->completed) {
             ctx->failopen_count++;
