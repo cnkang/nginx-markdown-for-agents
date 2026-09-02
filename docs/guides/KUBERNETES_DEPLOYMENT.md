@@ -383,6 +383,27 @@ not create a `hostPath` mount from that value. If a deployment needs additional
 volumes or mounts, use the explicit opt-in `extraVolumes` and
 `extraVolumeMounts` values.
 
+### Graceful shutdown and rolling updates
+
+The 0.9.2 chart renders a termination contract so a rolled-out pod finishes
+its in-flight conversions instead of being killed mid-stream:
+
+- `terminationGracePeriodSeconds` (default `30`) bounds the total drain window.
+- The container `lifecycle.preStop` hook sends `SIGQUIT` to the NGINX master
+  process (`/var/run/nginx.pid`). NGINX then stops accepting new connections
+  and drains in-flight requests, which lets the markdown module complete
+  active streaming conversions and emit their terminal outcomes.
+
+During a `helm upgrade`, the Deployment controller marks old pods
+`Terminating`, Kubelet delivers the preStop hook, and NGINX drains within the
+grace period; traffic is removed from the Service via readiness gates as pods
+become unready. If workloads run conversions longer than 30s, raise
+`terminationGracePeriodSeconds` rather than disabling the hook.
+
+When the container entrypoint is not NGINX (custom images that start
+sidecar-style processes), set `lifecycle: {}` and manage shutdown signals at
+the application level instead.
+
 ---
 
 ## Testing

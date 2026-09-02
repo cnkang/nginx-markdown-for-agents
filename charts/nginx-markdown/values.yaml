@@ -87,6 +87,18 @@ startupProbe:
   timeoutSeconds: 3
   failureThreshold: 30
 
+# Graceful shutdown contract (0.9.2): NGINX master drains in-flight requests
+# on SIGQUIT.  The default preStop sends SIGQUIT to the container's nginx
+# master so a rolled-out pod finishes its in-flight conversions instead of
+# being killed mid-stream.  terminationGracePeriodSeconds bounds the total
+# drain window; raise it for long-running streaming conversions.  Override
+# lifecycle entirely (set to {}) when using a non-nginx entrypoint.
+terminationGracePeriodSeconds: 30
+lifecycle:
+  preStop:
+    exec:
+      command: ["/bin/sh", "-c", "kill -QUIT $(cat /var/run/nginx.pid 2>/dev/null) 2>/dev/null || true"]
+
 # NGINX Markdown module configuration
 markdown:
   # Disabled by default so the chart can run with a stock NGINX image.
@@ -119,15 +131,20 @@ markdown:
   # Content-type routing
   contentTypes: []
 
-  # markdown_limits keys (all optional; omitted keys keep module defaults)
+  # markdown_limits keys (all optional; empty values are omitted from the
+  # rendered config; when every key is empty the directive is not emitted at
+  # all and the module's frozen 0.9.2 defaults apply:
+  # conversion_memory=64m, conversion_timeout=30s, streaming_buffer=2m,
+  # parser_memory=32m, parser_timeout=10s, decompressed_size=10m,
+  # decompression_ratio=100, max_inflight=64)
   limits:
     # The chart exposes only the canonical markdown_limits vocabulary.
-    conversionMemory: "10m"
-    conversionTimeout: "5s"
+    conversionMemory: ""
+    conversionTimeout: ""
     # streamingBuffer: "2m"
     # parserMemory: "32m"
     # parserTimeout: "10s"
-    # decompressedSize: "64m"
+    # decompressedSize: "10m"
     # decompressionRatio: 100
     # maxInflight: 64
 
