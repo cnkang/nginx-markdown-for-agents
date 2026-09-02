@@ -272,10 +272,11 @@ Historical migrations retain examples for removed directives under their
 versioned documents. Do not copy those examples into a 0.9.2 configuration.
 
 The authoritative removal table for 0.8.x-era directives is
-[MIGRATION-0.9.0.md](MIGRATION-0.9.0.md#directive-mapping-table); the
-mapping rows below that only appeared in later removals are listed here
-for quick reference. All removals are also rejected by `nginx -t` with a
-pointer to the migration guide.
+[MIGRATION-0.9.0.md](MIGRATION-0.9.0.md#directive-mapping-table).  The
+mapping rows below cover only removals that appeared after that table.
+`nginx -t` rejects removed directives with NGINX's standard "unknown
+directive" error.  The migration-guide pointer in the error message
+exists only for the 0.9.0 and 0.9.1 removals.
 
 ## Removed directives
 

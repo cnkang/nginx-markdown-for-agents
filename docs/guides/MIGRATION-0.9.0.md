@@ -247,9 +247,15 @@ For Grafana dashboards and alert rules, apply these transformations:
 
 ```bash
 # Step 1: Replace old per-reason metric names with unified family + label
-# Example: markdown_skipped_accept_total → markdown_skipped_total{reason="skipped_accept"}
+# Example: nginx_markdown_skipped_accept_total → nginx_markdown_skips_total{reason="skipped_accept"}
 
-# Step 2: Lowercase all reason label values in existing queries.
+# Step 2: Rewrite reason values that have explicit mapping-table rows
+# before the generic prefix replacement, so FAIL_CONVERSION and
+# FAIL_REJECT become conversion_error and rejected (not failed_*).
+sed -i 's/reason="FAIL_CONVERSION"/reason="conversion_error"/g' dashboard.json
+sed -i 's/reason="FAIL_REJECT"/reason="rejected"/g' dashboard.json
+
+# Step 3: Lowercase all remaining reason label values in existing queries.
 # sed operates byte-wise without word boundaries: SKIP_/FAIL_ prefixes are
 # ASCII-only. dashboard.json stores PromQL strings as JSON, where the
 # quotes around label values are escaped (\"SKIP_ACC...) — match both the
@@ -259,16 +265,16 @@ sed -i 's/reason="SKIP_/reason="skipped_/g' dashboard.json
 sed -i 's/reason=\"FAIL_/reason=\"failed_/g' dashboard.json
 sed -i 's/reason="FAIL_/reason="failed_/g' dashboard.json
 
-# Step 3: Replace old metric names with new unified families
-sed -i 's/markdown_skipped_accept_total/nginx_markdown_skips_total{reason="skipped_accept"}/g' dashboard.json
+# Step 4: Replace old metric names with new unified families.  The old
+# names carry the nginx_ prefix (see the mapping table above), so match
+# the full name to avoid duplicating the prefix in the replacement.
+sed -i 's/nginx_markdown_skipped_accept_total/nginx_markdown_skips_total{reason="skipped_accept"}/g' dashboard.json
 jq 'walk(if type == "string" then gsub("nginx_markdown_parse_timeouts_total"; "nginx_markdown_failures_total{reason=\\"timeout\\"}") else . end)' dashboard.json > dashboard.json.tmp
 mv dashboard.json.tmp dashboard.json
 # Parse a representative dashboard fixture after the migration.
 jq empty dashboard.json
-# Legacy reason values like FAIL_CONVERSION and FAIL_REJECT become
-# lowercase canonical reasons (conversion_error, rejected); the prefix sed
-# above covers every FAIL_/SKIP_ value that does not have an explicit row
-# in the reason-mapping table.
+# The prefix sed above covers every remaining FAIL_/SKIP_ value that does
+# not have an explicit row in the reason-mapping table.
 ```
 
 #### Alert Migration Tips

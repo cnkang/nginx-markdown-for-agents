@@ -341,13 +341,13 @@ tail -100 /var/log/nginx/error.log | grep markdown
 
 1. **Check failure categories:**
 ```bash
-curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}" | grep 'outcome="failed_'
+curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}" | grep -E 'outcome="(failed_|aborted)'
 ```
 
 2. **Analyze error logs:**
 ```bash
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "outcome=failed_(open|closed)" | tail -50
+  grep -E "outcome=(failed_(open|closed)|aborted)" | tail -50
 ```
 
 3. **Identify failure patterns:**

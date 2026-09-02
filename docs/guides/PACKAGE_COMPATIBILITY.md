@@ -240,7 +240,6 @@ the module from source against your local NGINX installation.
    nginx -v  # note the version number
    # Download matching source from https://nginx.org/en/download.html
    tar xzf nginx-<version>.tar.gz
-   cd nginx-<version>
    ```
 
 2. **Clone the module source** (before entering the NGINX source tree, so
