@@ -64,3 +64,19 @@ def test_dotted_unvalidated_open_receiver_is_reported(tmp_path):
     assert len(errors) == 1
     assert "args.input_path" in errors[0]
     assert warnings == []
+
+
+def test_comment_open_call_is_not_reported(tmp_path):
+    """A commented-out open() example must not be treated as a sink."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(path):\n"
+        "    # gzip.open(path, hdl) — the path is the second argument\n"
+        "    return path\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert warnings == []

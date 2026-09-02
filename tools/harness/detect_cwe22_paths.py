@@ -517,6 +517,9 @@ def _scan_open_calls(
         if not OPEN_CALL_RE.search(line):
             continue
 
+        if COMMENT_RE.match(line.lstrip()):
+            continue
+
         if NON_FILE_OPEN_RE.search(line):
             continue
 
