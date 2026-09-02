@@ -121,6 +121,8 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
     const struct FFIStr  *stream_types;
     uint8_t               code;
 
+    ngx_memzero(&input, sizeof(input));
+
     /*
      * Guard NULL here because marshalling dereferences r and conf.  A
      * disabled filter is reported through filter_enabled and decided by the

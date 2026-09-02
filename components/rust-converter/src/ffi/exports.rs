@@ -1147,10 +1147,12 @@ pub unsafe extern "C" fn markdown_decompress_free(result: *mut FFIDecompResult) 
         // SAFETY: `result` was validated as non-NULL above.
         let result_ref = unsafe { &mut *result };
         if !result_ref.output.is_null() && result_ref.output_len > 0 {
-            // Reconstruct the Box<[u8]> from the raw parts and drop it
-            let slice =
-                unsafe { std::slice::from_raw_parts_mut(result_ref.output, result_ref.output_len) };
-            unsafe { drop(Box::from_raw(slice)) };
+            // Reconstruct the Box<[u8]> from the raw parts and drop it.
+            // Raw-pointer form (no intermediate &mut, no redundant unsafe
+            // block) matches free_buffer in ffi/memory.rs for a consistent
+            // aliasing story.
+            let raw = ptr::slice_from_raw_parts_mut(result_ref.output, result_ref.output_len);
+            unsafe { drop(Box::from_raw(raw)) };
         }
         result_ref.output = ptr::null_mut();
         result_ref.output_len = 0;

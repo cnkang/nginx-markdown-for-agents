@@ -777,6 +777,25 @@ pub enum FFIErrorClass {
     StreamingMidFlightError = 9,
 }
 
+/// Compile-time guard: `FFIErrorClass` discriminants must stay in sync with
+/// the internal `ErrorClass` mirror in `error/classification.rs`.  The two
+/// enums are hand-matched (same values, same order) and nothing else
+/// enforces the pairing — this assert fails the build if they drift.
+const _: () = {
+    use crate::error::classification::ErrorClass;
+
+    assert!(ErrorClass::ConversionError as u8 == FFIErrorClass::ConversionError as u8);
+    assert!(ErrorClass::Timeout as u8 == FFIErrorClass::Timeout as u8);
+    assert!(ErrorClass::MemoryBudgetExceeded as u8 == FFIErrorClass::MemoryBudgetExceeded as u8);
+    assert!(ErrorClass::FfiPanic as u8 == FFIErrorClass::FfiPanic as u8);
+    assert!(ErrorClass::DecompressionError as u8 == FFIErrorClass::DecompressionError as u8);
+    assert!(ErrorClass::Overload as u8 == FFIErrorClass::Overload as u8);
+    assert!(ErrorClass::InvalidDynconf as u8 == FFIErrorClass::InvalidDynconf as u8);
+    assert!(ErrorClass::DegradedSnapshot as u8 == FFIErrorClass::DegradedSnapshot as u8);
+    assert!(ErrorClass::HeaderPlanApplyError as u8 == FFIErrorClass::HeaderPlanApplyError as u8);
+    assert!(ErrorClass::StreamingMidFlightError as u8 == FFIErrorClass::StreamingMidFlightError as u8);
+};
+
 #[cfg(test)]
 mod layout_tests {
     use super::*;
