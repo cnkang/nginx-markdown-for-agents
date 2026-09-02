@@ -25,6 +25,11 @@
 
 #define MARKDOWN_STREAMING_ENABLED 1
 
+/* Test-stub ngx_memzero: not provided by the NGINX test stubs, and
+ * production NGINX defines it. Several unit files follow this same
+ * local-define pattern (see buf_len_safe_test.c). */
+#define ngx_memzero(buf, n)  memset(buf, 0, n)
+
 #include "../../src/ngx_http_markdown_filter_module.h"
 
 #ifndef NGX_HTTP_GET
