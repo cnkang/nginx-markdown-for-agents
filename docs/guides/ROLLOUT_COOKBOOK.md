@@ -1376,7 +1376,7 @@ When a trigger fires:
 
 This section is the streaming-specific supplement folded in from the former
 Streaming Rollout Cookbook. It assumes the general stages and observation
-guidance above; it adds the verification-request, go/no-go, and emergency
+guidance above, and it adds the verification-request, go/no-go, and emergency
 rollback signals specific to the 0.9.2 frozen streaming surface
 (`markdown_streaming off|auto|force`, bounded streaming buffer, and the
 streaming counters).
@@ -1386,7 +1386,7 @@ streaming counters).
 Keep `markdown_error_policy pass` during the initial streaming rollout so
 conversion errors that occur before headers commit can preserve the upstream
 response. After NGINX commits headers or converted bytes, the original HTML
-is no longer replayable; a later failure follows the safe-finish/abort
+is no longer replayable, and a later failure follows the safe-finish/abort
 contract and may leave the client with a truncated Markdown response. Use
 `markdown_streaming force` only for paths whose response size, cache
 requirements, and compressed encodings have completed testing.
@@ -1440,9 +1440,9 @@ curl -fsS -H 'Accept: application/json' \
 5. Expand only after the counters and logs remain stable.
 
 For each stage, record `nginx_markdown_requests_total` by `outcome`, `stage`,
-and `reason`; conversion attempts and deliveries by `engine`; streaming
-transitions by `transition`; decompression events by `encoding`, `outcome`,
-and `reason`; and the diagnostics `configuration.effective` object.
+and `reason`, conversion attempts and deliveries by `engine`, streaming
+transitions by `transition`, decompression events by `encoding`, `outcome`,
+and `reason`, plus the diagnostics `configuration.effective` object.
 
 ### Streaming verification requests
 
@@ -1459,8 +1459,8 @@ The expected converted response has `Content-Type: text/markdown` and valid
 Markdown output.
 
 Measure one known streaming-eligible request per before/after snapshot pair.
-Eligibility is confirmed through diagnostics/decision log (the request must
-be marked `engine=streaming`), not assumed from `force` alone, which may
+The diagnostics/decision log confirms eligibility (the request must
+carry `engine=streaming`), not assumed from `force` alone, which may
 still fall back to full-buffer for hard incompatibilities (for example
 build-disabled streaming decoders or excluded content types).
 
@@ -1488,10 +1488,10 @@ to this request. Use request-correlated evidence instead: issue the probe
 with a **unique probe token** — a random query parameter (for example
 `?probe=<uuid>`) so the decision-log entry's URI field identifies exactly
 this request. A generated request header only helps if a decision-log field
-records it, which the schema does not do today. Prefer the query parameter;
-the bare path is not a correlation key because unrelated requests share it.
+records it, which the schema does not do today. Prefer the query parameter,
+because the bare path is not a correlation key since unrelated requests share it.
 Confirm the probe token decision-log entry for the delivered engine. Note
-that `streaming_events_total` has no URI/path label, so it cannot be scoped
+that `streaming_events_total` has no URI/path label, so it cannot scope
 to a probe path. For byte accounting compare deltas of
 `nginx_markdown_output_bytes_total`. Never use a delivery count as a byte
 measurement. A downstream `NGX_AGAIN` is a suspension, not a successful

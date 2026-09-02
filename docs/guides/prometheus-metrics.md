@@ -97,8 +97,8 @@ instance.
 Counters persist across graceful reloads (`nginx -s reload` keeps the
 existing shared-memory counters) **only while the metrics zone size stays
 unchanged**. Changing `markdown_metrics_shm_size` makes NGINX recreate the
-shared-memory zone on the next reload (the old segment is unmapped and a new
-one allocated), which resets all counters to zero and invalidates any
+shared-memory zone on the next reload (the old segment unmaps and a new
+one replaces it), which resets all counters to zero and invalidates any
 baseline taken before the change. Treat a `shm_size` change like a full
 restart: establish a new baseline after the reload. After any full restart,
 establish a new baseline before
