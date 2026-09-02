@@ -81,6 +81,7 @@ NFPM_REQUIRED_SNIPPETS = [
     "packager: rpm",
     "/usr/share/doc/nginx-markdown-for-agents/README.md",
     "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md",
+    "/usr/share/doc/nginx-markdown-for-agents/INSTALLATION.md",
     "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md",
     "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_COMPATIBILITY.md",
     "/usr/share/licenses/nginx-markdown-for-agents/LICENSE",

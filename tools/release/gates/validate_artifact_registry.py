@@ -418,7 +418,11 @@ def _check_registry_artifact(artifact: dict, index: int, seen_ids: set,
     _check_required_strings(artifact, index, reasons)
 
     artifact_id = artifact.get("id")
-    if artifact_id is not None:
+    # Only hashable, string ids participate in duplicate detection.
+    # _check_required_strings already flags non-string ids as malformed;
+    # guarding here keeps a non-hashable id (e.g. a list) from raising
+    # TypeError inside the set membership test and aborting the gate.
+    if isinstance(artifact_id, str):
         if artifact_id in seen_ids:
             reasons.append(
                 f"blocking-pending: duplicate artifact id "
