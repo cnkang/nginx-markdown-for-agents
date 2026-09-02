@@ -328,7 +328,7 @@ markdown_stream_excluded_types text/csv application/atom+xml;
 
 ## Unchanged Behavior
 
-> **Note for v0.9.0+ operators:** The directives marked 'unchanged' below (including `markdown_on_error`, `markdown_on_wildcard`, `markdown_conditional_requests`, `markdown_trust_forwarded_headers`) were subsequently removed or renamed in v0.9.0. Please refer to [MIGRATION-0.9.md](MIGRATION-0.9.md) for current directive names.
+> **Note for v0.9.0+ operators:** The directives marked 'unchanged' below (including `markdown_on_error`, `markdown_on_wildcard`, `markdown_conditional_requests`, `markdown_trust_forwarded_headers`) were subsequently removed or renamed in v0.9.0. Please refer to [MIGRATION-0.9.0.md](MIGRATION-0.9.0.md) for current directive names.
 
 The following behaviors are identical between 0.7.x and 0.8.0. These areas
 require no operator action.

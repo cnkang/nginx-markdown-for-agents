@@ -69,7 +69,7 @@ following, and none fits the 0.9.2 freeze:
 1. A `prune_empty_fallback` reason code in the reason registry with a
    `log_decision()` callsite
 2. A `prune_empty_fallback_total` metric family outside the frozen v1 set of
-   exactly 12 families
+   exactly 11 families
 3. Replay-capable rollback: return the unpruned conversion result only when
    the converter has not committed output and all consumed input remains
    fully replayable

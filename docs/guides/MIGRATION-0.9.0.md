@@ -95,7 +95,7 @@ The module honors these headers only for matching source IPs.
 ```
 nginx: [emerg] "markdown_trust_forwarded_headers" directive has been removed
 in 0.9.0; use "markdown_trusted_proxies <CIDR>..." instead
-(see docs/guides/MIGRATION-0.9.md)
+(see docs/guides/MIGRATION-0.9.0.md)
 ```
 
 **Migration:**
@@ -130,7 +130,7 @@ http {
 
   ```
   nginx: [emerg] "markdown_trusted_proxies" directive is only valid in the
-  http context, not in server or location (see docs/guides/MIGRATION-0.9.md)
+  http context, not in server or location (see docs/guides/MIGRATION-0.9.0.md)
   ```
 
 - **CIDR-gated trust.** Only requests whose direct source IP matches a
@@ -265,6 +265,10 @@ jq 'walk(if type == "string" then gsub("nginx_markdown_parse_timeouts_total"; "n
 mv dashboard.json.tmp dashboard.json
 # Parse a representative dashboard fixture after the migration.
 jq empty dashboard.json
+# Legacy reason values like FAIL_CONVERSION and FAIL_REJECT become
+# lowercase canonical reasons (conversion_error, rejected); the prefix sed
+# above covers every FAIL_/SKIP_ value that does not have an explicit row
+# in the reason-mapping table.
 ```
 
 #### Alert Migration Tips
@@ -303,6 +307,13 @@ jq empty dashboard.json
 | `markdown_trust_forwarded_headers on` | `markdown_trusted_proxies <CIDR>...` | Now CIDR-based; http context only |
 | `markdown_trust_forwarded_headers off` | _(omit directive)_ | Default ignores forwarded headers |
 | `markdown_on_wildcard` | `markdown_accept wildcard` | Different syntax; controls wildcard Accept matching |
+| `markdown_decompress_max_size` | `markdown_limits decompressed_size=` key | Removed directive (0.9.x) |
+| `markdown_parse_timeout` | `markdown_limits parser_timeout=` key | Removed directive (0.9.x) |
+| `markdown_parser_budget` | `markdown_limits parser_memory=` key | Removed directive (0.9.x) |
+| `markdown_stream_threshold` | _(no replacement)_ | Internal 1 MiB routing heuristic |
+| `markdown_stream_flush_min` | _(no replacement)_ | Internal flush heuristic |
+| `markdown_streaming_auto_threshold` | `markdown_streaming off\|auto\|force` | Removed directive; explicit policy replaces the heuristic |
+| `markdown_stream_precommit_buffer` | `markdown_limits streaming_buffer=` key | Removed directive (0.9.x) |
 | _(new)_ | `markdown_profile balanced\|strict_cache\|streaming_first` | One-line production defaults |
 | _(new)_ | `markdown_limits memory=64m timeout=5s max_inflight=64` | Key-value resource limits |
 
@@ -439,7 +450,7 @@ http {
 ```
 nginx: [emerg] "markdown_on_error" directive has been removed in 0.9.0;
 use "markdown_error_policy pass|fail_closed" instead
-(see docs/guides/MIGRATION-0.9.md)
+(see docs/guides/MIGRATION-0.9.0.md)
 ```
 
 **Fix:** Replace `markdown_on_error pass` with `markdown_error_policy pass`,
@@ -450,7 +461,7 @@ or `markdown_on_error reject` with `markdown_error_policy fail_closed`.
 ```
 nginx: [emerg] "markdown_trusted_proxies" directive is only valid in the
 http context, not in server or location
-(see docs/guides/MIGRATION-0.9.md)
+(see docs/guides/MIGRATION-0.9.0.md)
 ```
 
 **Fix:** Move `markdown_trusted_proxies` to the `http {}` block. Per-server
