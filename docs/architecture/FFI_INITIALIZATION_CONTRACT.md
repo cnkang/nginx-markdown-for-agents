@@ -73,5 +73,5 @@ pointer fields may be NULL.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.9.2 | 2026-08-08 | Kang | Updated version references to v0.9.2 |
-| 0.7.0 | 2026-05-17 | Kang | Initial zero/default initialization strategy document |
 | 0.7.0-impl | 2026-05-18 | codex | Add FFIHeaderPlan zero-init and free lifecycle rule |
+| 0.7.0 | 2026-05-17 | Kang | Initial zero/default initialization strategy document |
