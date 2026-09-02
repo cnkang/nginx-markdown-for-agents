@@ -51,7 +51,7 @@ does not have an operator toggle:
 ### Related Documents
 
 - [OPERATIONAL_ROLLBACK.md](OPERATIONAL_ROLLBACK.md) — general module rollback procedures
-- [streaming-rollout-cookbook.md](streaming-rollout-cookbook.md) — streaming engine rollout
+- [Rollout Cookbook — Streaming-Focused Rollout](ROLLOUT_COOKBOOK.md#streaming-focused-rollout)
 - [CONFIGURATION.md](CONFIGURATION.md) — full directive reference
 - [OPERATIONS.md](OPERATIONS.md) — metrics reference
 

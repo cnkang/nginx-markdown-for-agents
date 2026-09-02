@@ -70,7 +70,7 @@ than inferring these values from unrelated Prometheus labels.
 
 ## Prometheus Metrics v1
 
-The endpoint emits Prometheus text format 0.0.4 and exactly these twelve
+The endpoint emits Prometheus text format 0.0.4 and exactly these eleven
 families:
 
 ```text

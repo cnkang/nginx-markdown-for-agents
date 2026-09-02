@@ -7,7 +7,7 @@ switches.
 
 Related docs:
 
-- [Streaming Rollout Cookbook](streaming-rollout-cookbook.md)
+- [Rollout Cookbook — Streaming-Focused Rollout](ROLLOUT_COOKBOOK.md#streaming-focused-rollout)
 - [Configuration Reference](CONFIGURATION.md)
 - [Prometheus Metrics Guide](prometheus-metrics.md)
 
