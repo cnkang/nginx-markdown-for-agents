@@ -125,6 +125,7 @@ HELM_RENDER_REQUIRED_SNIPPETS = [
 HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS = [
     "load_module",
     "markdown_filter on;",
+    "markdown_limits",
     "markdown_metrics",
 ]
 HELM_MODULE_LOAD_PATH = "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
@@ -439,6 +440,71 @@ def _validate_helm_image_digest(
         result.fail(
             "helm:public-surface:image-digest",
             "main image digest precedence contract is incomplete",
+        )
+
+
+def _chart_limit_defaults(values: str) -> dict[str, str]:
+    """Return chart values that restate a module frozen default (if any)."""
+    defaults: dict[str, str] = {}
+    in_limits = False
+    for line in values.splitlines():
+        stripped = line.strip()
+        if stripped == "limits:":
+            in_limits = True
+            continue
+        if in_limits:
+            if stripped.startswith("#"):
+                continue
+            if stripped and not stripped[0].isdigit() and ":" not in stripped:
+                # a non-indented sibling key ends the limits block
+                if not line.startswith("    "):
+                    in_limits = False
+                    continue
+                in_limits = False
+                continue
+            match = re.match(r"^(\w+):\s*\"?([^\"#]*)\"?\s*(?:#.*)?$", stripped)
+            if match and match.group(2).strip():
+                defaults[match.group(1)] = match.group(2).strip()
+    return defaults
+
+
+def validate_helm_frozen_defaults(result: ValidationResult) -> None:
+    """Module frozen limits must not be silently overridden by chart values."""
+    values = read_safe(VALUES_YAML)
+    configmap = read_safe(CONFIGMAP_TEMPLATE)
+    if not values or not configmap:
+        result.fail(
+            "helm:frozen-defaults:files",
+            "Helm values and configmap files are required",
+        )
+        return
+    chart_defaults = _chart_limit_defaults(values)
+
+    for chart_key, _directive_key in HELM_CANONICAL_LIMIT_KEYS.items():
+        chart_value = chart_defaults.get(chart_key)
+        if chart_value is None:
+            result.pass_(
+                f"helm:frozen-defaults:{chart_key}",
+                f"{chart_key} has no chart-level default (module frozen default applies)",
+            )
+            continue
+        result.fail(
+            f"helm:frozen-defaults:{chart_key}",
+            f"{chart_key} restates a default ({chart_value!r}) that must live in "
+            "the module frozen contract; set it to \"\" to inherit module defaults",
+        )
+
+    if "{{- if or .Values.markdown.limits" in configmap:
+        result.pass_(
+            "helm:frozen-defaults:directive-guard",
+            "configmap template wraps the whole markdown_limits directive in "
+            "a conditional so an all-empty render omits it entirely",
+        )
+    else:
+        result.fail(
+            "helm:frozen-defaults:directive-guard",
+            "configmap template must wrap the whole markdown_limits directive "
+            "in a conditional so an all-empty render omits it entirely",
         )
 
 
@@ -812,17 +878,19 @@ def _validate_module_enabled_render(
     if (
         f"load_module {HELM_MODULE_LOAD_PATH};" in rendered.stdout
         and "markdown_filter on;" in rendered.stdout
-        and len(limits_lines) == 1
+        and len(limits_lines) == 0
     ):
         result.pass_(
             _CHECK_HELM_RENDER_MODULE_ENABLED,
-            "module-enabled Helm render includes load_module and one markdown_limits directive",
+            "module-enabled Helm render includes module directives and omits "
+            "markdown_limits so the frozen module defaults apply",
         )
     else:
         result.fail(
             _CHECK_HELM_RENDER_MODULE_ENABLED,
-            "module-enabled Helm render must include load_module, markdown directives, "
-            f"and exactly one markdown_limits directive (found {len(limits_lines)})",
+            "module-enabled Helm render must include load_module and markdown directives "
+            "and must omit markdown_limits unless limits are configured "
+            f"(found {len(limits_lines)})",
         )
 
 
@@ -1004,6 +1072,7 @@ def main() -> int:
     result = ValidationResult()
     validate_chart_yaml(result)
     validate_k8s_manifests(result)
+    validate_helm_frozen_defaults(result)
     validate_helm_secure_defaults(result)
     validate_gate4_local_smoke(result)
     validate_helm_render(result)
