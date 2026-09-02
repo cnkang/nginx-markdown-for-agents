@@ -578,7 +578,7 @@ curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/mar
 
 2. **Identify failure category:**
 ```bash
-grep "markdown:" /var/log/nginx/error.log | grep -E "outcome=failed_(open|closed)" | tail -50
+grep "markdown:" /var/log/nginx/error.log | grep -E "outcome=failed_(open|closed)|outcome=aborted" | tail -50
 # Look for: reason=conversion_error|memory_budget_exceeded|timeout|ffi_panic
 ```
 

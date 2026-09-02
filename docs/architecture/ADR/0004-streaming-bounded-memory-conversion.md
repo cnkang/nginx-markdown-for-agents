@@ -175,7 +175,9 @@ Streaming ships behind feature flags and progressive rollout:
 > per-request streaming memory budget, and stream failure policy with
 > pre-commit/post-commit semantics at location scope.
 
-1. streaming enable/disable switch (default off)
+1. streaming enable/disable switch (default off) — historical v0.8.0
+   default.  The current contract is `markdown_streaming off|auto|force`
+   with default `auto`
 2. per-request streaming memory budget
 3. stream failure policy with pre-commit/post-commit semantics
 4. scope controls (location-level gradual rollout)
