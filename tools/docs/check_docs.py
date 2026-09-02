@@ -511,16 +511,17 @@ def check_metric_family_count(files: list[Path]) -> list[str]:
         ):
             if not FAMILY_COUNT_RE.search(line):
                 continue
-            claimed = re.search(r"(\d+)\s*famil", line)
-            if not claimed:
-                # spelled-out numbers: eleven/twelve
-                if re.search(r"\btwelve\b", line, re.IGNORECASE):
-                    claimed_count = 12
-                elif re.search(r"\beleven\b", line, re.IGNORECASE):
-                    claimed_count = 11
-                else:
-                    continue
+            # Spelled-out numbers take precedence: a line may also contain
+            # version-like digits (e.g. "eleven v1 metric families") that
+            # a numeric extractor would misread as a small count.
+            if re.search(r"\beleven\b", line, re.IGNORECASE):
+                claimed_count = 11
+            elif re.search(r"\btwelve\b", line, re.IGNORECASE):
+                claimed_count = 12
             else:
+                claimed = re.search(r"(\d+)\s*(?:metric\s+)?famil", line)
+                if not claimed:
+                    continue
                 claimed_count = int(claimed.group(1))
             if claimed_count != family_count:
                 # historical context is allowed to mention other counts
