@@ -216,7 +216,7 @@ EOF
   cat "${RAW_DIR}/nginx-t.log" >&2
   exit 1
 }
-"${NGINX_EXECUTABLE}" -p "${RUNTIME}/" -c "conf/nginx.conf" > "${RAW_DIR}/nginx.log" 2>&1 &
+"${NGINX_EXECUTABLE}" -p "${RUNTIME}/" -c "conf/nginx.conf" -g "daemon off;" > "${RAW_DIR}/nginx.log" 2>&1 &
 NGINX_PID=$!
 
 for _ in $(seq 1 50); do

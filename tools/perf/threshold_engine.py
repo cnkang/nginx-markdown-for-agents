@@ -668,7 +668,15 @@ def _evaluate_single_module_metric(metric_name, threshold_value, direction,
 
     # Non-numeric metric values (e.g. a malformed string in a JSON report)
     # must be rejected before any comparison or deviation math, which
-    # would otherwise raise TypeError and abort the whole gate.
+    # would otherwise raise TypeError and abort the whole gate.  Booleans
+    # are int subclasses in Python, so JSON true/false must be rejected
+    # explicitly before the int/float check.
+    if isinstance(cur_val, bool):
+        return {
+            "metric": metric_name,
+            "status": "missing_evidence",
+            "reason": f"critical metric '{metric_name}' not numeric: {cur_val!r}",
+        }
     if not isinstance(cur_val, (int, float)):
         return {
             "metric": metric_name,
