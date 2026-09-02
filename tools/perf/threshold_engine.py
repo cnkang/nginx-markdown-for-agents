@@ -666,6 +666,16 @@ def _evaluate_single_module_metric(metric_name, threshold_value, direction,
             "reason": f"critical metric '{metric_name}' not present in current measurements",
         }
 
+    # Non-numeric metric values (e.g. a malformed string in a JSON report)
+    # must be rejected before any comparison or deviation math, which
+    # would otherwise raise TypeError and abort the whole gate.
+    if not isinstance(cur_val, (int, float)):
+        return {
+            "metric": metric_name,
+            "status": "missing_evidence",
+            "reason": f"critical metric '{metric_name}' not numeric: {cur_val!r}",
+        }
+
     if direction == "absolute_cap":
         passed = cur_val <= threshold_value
         return {

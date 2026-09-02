@@ -12,6 +12,7 @@ untracked non-ignored Markdown files.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -456,6 +457,66 @@ def check_document_updates_order(files: list[Path]) -> list[str]:
     return errors
 
 
+FAMILY_COUNT_RE = re.compile(
+    r"twelve|eleven|exactly 11|exactly 12|11 famil|12 famil",
+    re.IGNORECASE,
+)
+HISTORICAL_FAMILY_CONTEXT_RE = re.compile(
+    r"historical|legacy|renamed|removed|retired|0\.9\.1|previous|earlier|older",
+    re.IGNORECASE,
+)
+
+
+def check_metric_family_count(files: list[Path]) -> list[str]:
+    """Metric-family counts claimed in docs must match the registry.
+
+    The frozen 0.9.2 surface is the family list in
+    schemas/metrics-v1.registry.json; docs must not restate a different count.
+    Lines describing historical/pre-freeze surfaces are allowed to reference
+    removed families, so only claims about the current contract are checked.
+    """
+    registry_path = ROOT / "schemas/metrics-v1.registry.json"
+    try:
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [f"cannot read metrics registry {registry_path}"]
+    families = [
+        entry
+        for entry in registry.get("families", [])
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+    ]
+    family_count = len(families)
+    failures: list[str] = []
+    for path in files:
+        if not path.is_relative_to(ROOT / "docs"):
+            continue
+        for line_no, line in enumerate(
+            path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
+        ):
+            if not FAMILY_COUNT_RE.search(line):
+                continue
+            claimed = re.search(r"(\d+)\s*famil", line)
+            if not claimed:
+                # spelled-out numbers: eleven/twelve
+                if re.search(r"\btwelve\b", line, re.IGNORECASE):
+                    claimed_count = 12
+                elif re.search(r"\beleven\b", line, re.IGNORECASE):
+                    claimed_count = 11
+                else:
+                    continue
+            else:
+                claimed_count = int(claimed.group(1))
+            if claimed_count != family_count:
+                # historical context is allowed to mention other counts
+                if HISTORICAL_FAMILY_CONTEXT_RE.search(line):
+                    continue
+                failures.append(
+                    f"{path.relative_to(ROOT)}:{line_no}: claims {claimed_count} "
+                    f"metric families but the registry defines {family_count}"
+                )
+    return failures
+
+
 def main() -> int:
     """Entry point: run all doc consistency checks and print a report.
 
@@ -491,6 +552,7 @@ def main() -> int:
     )
     failures.extend(check_duplicate_sync())
     failures.extend(check_document_updates_order(files))
+    failures.extend(check_metric_family_count(files))
 
     if failures:
         print("Documentation checks failed:")

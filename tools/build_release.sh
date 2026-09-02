@@ -162,6 +162,10 @@ raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
 print("sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest())
 PY
 )"
+if [[ ! "${FEATURE_MANIFEST_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "Unable to compute the official feature manifest digest; release build aborted." >&2
+    exit 1
+fi
 
 DOCKERFILE="tools/build_release/Dockerfile.$OS_TYPE"
 OUT_DIR="dist/${NGINX_VERSION}-${OS_TYPE}-${ARCH}"

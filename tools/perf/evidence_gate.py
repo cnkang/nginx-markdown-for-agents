@@ -71,7 +71,9 @@ def _report_scenarios(report: dict) -> list:
 
     Only list-shaped values are returned; any other shape (string, dict,
     None) normalizes to an empty list so downstream iteration and
-    validation never operate on a non-list.
+    validation never operate on a non-list.  Non-dict list elements are
+    filtered out here so every consumer (name lookups, metrics reads)
+    can use `.get(...)` without AttributeError on malformed entries.
     """
     if not isinstance(report, dict):
         return []
@@ -79,7 +81,9 @@ def _report_scenarios(report: dict) -> list:
     if not isinstance(module_benchmark, dict):
         module_benchmark = {}
     scenarios = module_benchmark.get("scenarios", []) or report.get("scenarios", [])
-    return scenarios if isinstance(scenarios, list) else []
+    if not isinstance(scenarios, list):
+        return []
+    return [s for s in scenarios if isinstance(s, dict)]
 
 # Exit code for SKIP_NOT_PRESENT (matches run_module_benchmark.sh)
 EX_SKIP_NOT_PRESENT = 75
@@ -607,8 +611,13 @@ def _build_evidence_pack(  # pylint: disable=too-many-arguments,too-many-positio
         "results": results,
         "evidence": {
             "module_benchmark_tiers": (
-                report.get("module_benchmark", {}).get("scenarios", [])
-                if report else []
+                report["module_benchmark"]["scenarios"]
+                if (
+                    report
+                    and isinstance(report.get("module_benchmark"), dict)
+                    and isinstance(report["module_benchmark"].get("scenarios"), list)
+                )
+                else []
             ),
             "decompression_coverage": (
                 report.get("decompression_coverage", {})

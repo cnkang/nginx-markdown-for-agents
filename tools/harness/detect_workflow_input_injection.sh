@@ -99,10 +99,21 @@ while IFS= read -r -d '' file; do
             continue
         fi
 
-        # Detect new step or job boundary (dedent to job/step level)
+        # Detect new step or job boundary (dedent to job/step level).
+        # Subsequent step-level keys (if:, with:, shell:, working-directory:,
+        # timeout-minutes:, continue-on-error:, env:) end any preceding run
+        # block even when the step has no name/uses/id header — otherwise a
+        # prior step's run state is carried into wiring keys like with: and
+        # safe ${{ inputs.* }} expressions there are misreported.
         if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*name: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*uses: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*id: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*if: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*with: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*shell: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*working-directory: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*timeout-minutes: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*continue-on-error: ]] || \
            [[ "$line" =~ ^[[:space:]]*steps: ]] || \
            [[ "$line" =~ ^[[:space:]]*jobs: ]]; then
             in_run_block=0
@@ -122,7 +133,7 @@ while IFS= read -r -d '' file; do
         # Check for input interpolation inside run blocks
         if [[ $in_run_block -eq 1 || $inline_run_command -eq 1 ]]; then
             # Flag ${{ inputs.* }} inside run blocks
-            if [[ "$line" =~ \$\{\{[[:space:]]*inputs\.[a-zA-Z_]+[[:space:]]*\}\} ]]; then
+            if [[ "$line" =~ \$\{\{[[:space:]]*inputs\.[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*\}\} ]]; then
                 echo "ERROR: ${rel_path}:${line_num}: inputs.* directly interpolated in run block" >&2
                 echo "  ${line}" >&2
                 echo "  Fix: route through env: INPUT_VAR: \${{ inputs.var }} and use \${INPUT_VAR} in shell" >&2
@@ -131,7 +142,7 @@ while IFS= read -r -d '' file; do
 
             # Flag ${{ github.event.* }} inside run blocks (except release.created_at etc)
             # github.event.inputs.* is user-controlled
-            if [[ "$line" =~ \$\{\{[[:space:]]*github\.event\.inputs\.[a-zA-Z_]+[[:space:]]*\}\} ]]; then
+            if [[ "$line" =~ \$\{\{[[:space:]]*github\.event\.inputs\.[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*\}\} ]]; then
                 echo "ERROR: ${rel_path}:${line_num}: github.event.inputs.* directly interpolated in run block" >&2
                 echo "  ${line}" >&2
                 echo "  Fix: route through env: INPUT_VAR: \${{ github.event.inputs.var }} and use \${INPUT_VAR}" >&2

@@ -462,6 +462,11 @@ def _is_safe_attr_expr(
 
 _OPEN_CTOR_NAMES = {"open"}
 
+# Module-level open helpers whose *first positional argument* is the path.
+# Their receiver (the module name) must not be mistaken for the path: for
+# `gzip.open(hdl, path)` the path is `path`, not the `gzip` name.
+_OPEN_MODULE_RECEIVERS = {"os", "gzip", "io", "codecs", "tarfile", "bz2", "lzma"}
+
 # ``urllib.request.build_opener().open()`` performs network I/O, not
 # filesystem I/O.  Keep the heuristic from treating the conventional
 # receiver name as a path sink.
@@ -549,6 +554,9 @@ def _resolve_path_arg(node: ast.Call) -> ast.expr | None:
 
     For method-style calls (``p.open()``, ``p.write_text(...)``,
     ``p.read_text(...)``) the path is the receiver.
+    For module-level open helpers (``os.open``, ``gzip.open``, ``io.open``,
+    ``codecs.open``, ``tarfile.open``, ``bz2.open``, ``lzma.open``) the path
+    is the first positional argument — the module receiver is not a path.
     For builtin ``open(...)`` the path is the first positional argument.
     Returns ``None`` when no path argument can be determined.
     """
@@ -558,10 +566,12 @@ def _resolve_path_arg(node: ast.Call) -> ast.expr | None:
         # Path IO methods: receiver IS the path
         if attr in _PATH_IO_METHODS:
             return func.value
-        # Method-style open: receiver IS the path (unless os.open)
+        # Method-style open: receiver IS the path, unless the receiver is a
+        # module-level open helper (os.open, gzip.open, ...) where the path
+        # is the first positional argument.
         if attr == "open" and not (
             isinstance(func.value, ast.Name)
-            and func.value.id == "os"
+            and func.value.id in _OPEN_MODULE_RECEIVERS
         ):
             return func.value
     if node.args:
