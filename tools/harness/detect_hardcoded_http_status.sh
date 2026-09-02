@@ -75,7 +75,7 @@ while IFS= read -r -d '' file || [[ -n "$file" ]]; do
 
         # Skip comment lines (starting with /* or * or //)
         case "$trimmed" in
-            /*|\\**|//*) continue ;;
+            /*|\**|//*) continue ;;
             *) ;;
         esac
 

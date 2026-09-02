@@ -101,13 +101,25 @@ def test_valid_prometheus_metric_with_unit(suffix, unit):
     # double-unit ending (e.g. foo_total_total, foo_bytes_bytes).  A base
     # ending in _bytes or _seconds combined with _total is legal
     # (canonical counter units bytes_total / seconds_total) and must be
-    # exercised.  Derive the double-unit set from the single reserved
-    # tokens instead of enumerating every two-token ending, so newly added
-    # unit tokens are covered automatically.
+    # exercised.  Evaluate the base suffix combined with the FIRST token
+    # of the unit rather than the fully composed name, so compound units
+    # such as _bytes_total and _seconds_total are not excluded by the
+    # double-unit lookahead.  Mirror the validator's two lookaheads:
+    # forbidden first-token pairs, and a reserved single token followed
+    # by a compound bytes_total/seconds_total unit.
     reserved = ("total", "bytes", "seconds", "info")
-    assume(not any(
-        name.endswith(f"_{a}_{b}") for a in reserved for b in reserved
-    ))
+    unit_tokens = unit.strip("_").split("_")
+    base_last = suffix.rsplit("_", 1)[-1]
+    if len(unit_tokens) == 1:
+        forbidden_second = {
+            "total": reserved,
+            "bytes": ("bytes", "seconds", "info"),
+            "seconds": ("bytes", "seconds", "info"),
+            "info": reserved,
+        }
+        assume(unit_tokens[0] not in forbidden_second.get(base_last, ()))
+    else:
+        assume(base_last not in reserved)
     assert is_valid_prometheus_metric(name), f"should accept: {name}"
 
 

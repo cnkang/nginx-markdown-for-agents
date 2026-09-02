@@ -148,8 +148,12 @@ def test_mask_keeps_string_literal_callsites() -> None:
     assert state is False
     assert "markdown_convert" in code
     # The trailing comment is masked, the single-quoted literal is not
-    # treated as a comment delimiter.
-    assert code.endswith("markdown_convert(NULL);                          ") or \
+    # treated as a comment delimiter.  Assert the trailing comment text is
+    # actually removed, not merely that the call text survives in some form.
+    assert "// real comment" not in code, (
+        "trailing comment must be masked, not left in place"
+    )
+    assert code.endswith("markdown_convert(NULL);  ") or \
         "markdown_convert(NULL);" in code
 
 

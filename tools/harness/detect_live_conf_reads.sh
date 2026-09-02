@@ -338,7 +338,7 @@ while IFS= read -r match; do
     echo "  ERROR   ${file}:${line} — request-path reads live conf->: ${content}" >&2
     errors=$((errors + 1))
     hits=$((hits + 1))
-done < <(grep -rnE "conf->(${MUTABLE_FIELDS})[^_a-zA-Z]" "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+done < <(grep -rnE "conf->(${MUTABLE_FIELDS})([^_a-zA-Z0-9]|$)" "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
 if [[ "$hits" -eq 0 ]]; then
     echo "  (none found)" >&2

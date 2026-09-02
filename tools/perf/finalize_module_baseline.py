@@ -603,7 +603,7 @@ def _finalize_report(
 
     try:
         _atomic_write_json(output_path, finalized)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         print(f"ERROR: failed to write finalized baseline: {exc}", file=sys.stderr)
         return 1
 
