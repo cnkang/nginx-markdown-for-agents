@@ -72,6 +72,9 @@ contents:
   - src: "./packaging/docs/README.md"
     dst: "/usr/share/doc/nginx-markdown-for-agents/README.md"
 
+  - src: "./docs/guides/INSTALLATION.md"
+    dst: "/usr/share/doc/nginx-markdown-for-agents/INSTALLATION.md"
+
   - src: "./docs/guides/INSTALL.md"
     dst: "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md"
 
