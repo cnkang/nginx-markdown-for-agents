@@ -793,7 +793,9 @@ const _: () = {
     assert!(ErrorClass::InvalidDynconf as u8 == FFIErrorClass::InvalidDynconf as u8);
     assert!(ErrorClass::DegradedSnapshot as u8 == FFIErrorClass::DegradedSnapshot as u8);
     assert!(ErrorClass::HeaderPlanApplyError as u8 == FFIErrorClass::HeaderPlanApplyError as u8);
-    assert!(ErrorClass::StreamingMidFlightError as u8 == FFIErrorClass::StreamingMidFlightError as u8);
+    assert!(
+        ErrorClass::StreamingMidFlightError as u8 == FFIErrorClass::StreamingMidFlightError as u8
+    );
 };
 
 #[cfg(test)]
