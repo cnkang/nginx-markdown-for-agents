@@ -467,7 +467,7 @@ For Methods A and B, conversion metrics for the affected scope should stop incre
 > counters. A flat comparison cannot prove that a *specific scope* stopped
 > converting — unrelated traffic on the same instance also moves them. For
 > scope-specific verification use the decision-log probe from Step 1
-> (uniquely named path + timestamp match); the metrics comparison below is
+> (uniquely named path + timestamp match), and the metrics comparison below is
 > supporting, instance-wide evidence only.
 
 ```bash
