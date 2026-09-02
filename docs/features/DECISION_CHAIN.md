@@ -187,7 +187,7 @@ Operators can determine request state counts from metrics and logs:
 
 ## Reason Code Reference
 
-The registry declares the complete set of 28 reason codes in
+The registry declares the complete set of 27 reason codes in
 `components/rust-converter/reason_registry.toml`. The generator projects it
 into `reason_code.rs`, C metadata, diagnostics lookup, and release artifacts.
 The projections mirror [Observability Schema v2](../architecture/observability-schema-v2.md).

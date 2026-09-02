@@ -400,9 +400,10 @@ With `full` mode:
 - Benefit: Saves bandwidth if ETag matches
 
 With `ims_only` mode:
-- Conditional requests skip module processing
-- No conversion or ETag generation
-- Cost: Minimal
+- Markdown-negotiated requests still convert and return a fresh Markdown body
+- No Markdown ETag generation or validation (source If-Modified-Since applies
+  to pass-through responses only)
+- Cost: Conversion cost only; no ETag bookkeeping
 - Limitation: No ETag-based validation for Markdown variants
 
 ### Caching Benefits

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check decompression metric labels in the two operator-facing contracts."""
+"""Check decompression metric labels in the operator-facing contract."""
 
 from __future__ import annotations
 

@@ -34,7 +34,7 @@ canonical key — never reuse the same ID for different tuples.
 ```
 
 These two rows illustrate the format only. They are not counted toward the
-required cross-product coverage or the 144 required tuples.
+required cross-product coverage or the 240 required tuples.
 
 ## Gap Record Format
 

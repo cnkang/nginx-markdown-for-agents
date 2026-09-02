@@ -433,10 +433,11 @@ location /docs {
 nginx -t && nginx -s reload
 ```
 
-This configuration produces behavior equivalent to pre-0.9.1 (full-buffer path
-only, pool-copy output, no streaming decompression). The full-buffer copy
-reduction remains active (internal optimization) but has no observable effect
-when decompression routes through the standard full-buffer path.
+This configuration disables the streaming controls (streaming engine,
+zero-copy and streaming decompression are off), so behavior is equivalent
+to pre-0.9.1 for those controls. Full-buffer copy reduction remains active
+(internal optimization) and the full-buffer path is not byte-identical to
+pre-0.9.1, so equivalence applies only to the disabled streaming controls.
 
 ---
 
