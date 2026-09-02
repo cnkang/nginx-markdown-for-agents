@@ -450,7 +450,7 @@ def _indent_of(line: str) -> int:
 
 def _limits_entry(line: str) -> tuple[str, str] | None:
     """Return (key, value) when a line is a limits block entry."""
-    match = re.match(r"^(\w+):\s*\"?([^\"#]*)\"?\s*(?:#.*)?$", line.strip())
+    match = re.match(r"^(\w+):\s*\"?((?>[^\"#]*))\"?\s*(?:#.*)?$", line.strip())
     if not match or not match.group(2).strip():
         return None
     return match.group(1), match.group(2).strip()
