@@ -446,12 +446,17 @@ typedef enum {
 /*
  * Configuration constants for on_error / error_policy directive.
  *
- * The C runtime uses a two-field model:
- *   conf->on_error  = PASS (0) or REJECT (1)
- *   conf->error_status = actual HTTP status code (429/503; 502 is fail_closed default)
+ * The runtime uses a two-value model everywhere:
+ *   conf->on_error          = NGX_HTTP_MARKDOWN_ON_ERROR_PASS (0)
+ *                             or NGX_HTTP_MARKDOWN_ON_ERROR_REJECT (1)
+ *   conf->error_status      = actual HTTP status code for the reject
+ *                             branch (default 502; 429/503 via dynconf)
  *
- * The unified C error-policy path uses the same three-value semantic model:
- *   0 = pass, 1 = status, 2 = fail_closed.
+ * The effective configuration carries the same two-value encoding in
+ * eff->error_policy (either the static conf value or the dynconf
+ * snapshot value).  Dynconf status variants (429/503) select REJECT
+ * and pair it with the corresponding error_status; there is no third
+ * policy value.
  */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0  /* fail-open: return original HTML */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return error status */
