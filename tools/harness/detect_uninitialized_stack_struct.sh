@@ -83,7 +83,9 @@ while IFS= read -r -d '' file; do
     esac
 
     for type in "${WHOLE_INIT_TYPES[@]}"; do
-        # Stack declaration: TYPE name;  or  TYPE name = ...;  or TYPE *name
+        # Stack declaration: TYPE name;  or  TYPE name = ...;  or TYPE *name.
+        # `|| true` keeps pipefail from aborting the audit when grep finds
+        # no declarations in a file (grep exits 1 on no match).
         grep -nE "^[[:space:]]*${type}[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(=|;)" "$file" 2>/dev/null | \
             while IFS=: read -r line_num content; do
             [[ -z "$line_num" ]] && continue
@@ -126,7 +128,9 @@ while IFS= read -r -d '' file; do
             if echo "$tail_code" | grep -qE "${var_name}\.[a-zA-Z_]+[[:space:]]*="; then
                 echo "CANDIDATE: $file:$line_num — stack ${type} '${var_name}' assigned field-by-field without whole-struct initialization (memset/zero-init/helper); uninitialized members may carry stack garbage past NULL guards" >> "$tmp_violations"
             fi
-        done
+        # `|| true` keeps pipefail from aborting the audit when grep finds
+        # no declarations in a file (grep exits 1 on no match).
+        done || true
     done
 done < <(if [[ "$explicit_scan_dir" -eq 1 ]]; then
     # An explicitly provided directory is scanned without the src/tests

@@ -56,7 +56,9 @@ trap 'rm -f "$tmp_violations"' EXIT
 
 while IFS= read -r -d '' file; do
     for api in "${NGX_AGAIN_APIS[@]}"; do
-        # Find every call site of this API (matches "api(" as a call)
+        # Find every call site of this API (matches "api(" as a call).
+        # `|| true` keeps pipefail from aborting the audit when grep finds
+        # no calls in a file (grep exits 1 on no match).
         grep -n "${api}[[:space:]]*(" "$file" 2>/dev/null | \
             while IFS=: read -r line_num content; do
             [[ -z "$line_num" ]] && continue
@@ -143,7 +145,9 @@ while IFS= read -r -d '' file; do
             if [[ "$has_again_branch" -eq 0 && ( -n "$fold_pattern" || "$immediate_return" -eq 1 ) ]]; then
                 echo "VIOLATION: $file:$line_num — call to $api() returns NGX_AGAIN but the call site has no explicit NGX_AGAIN branch (folded into error path or immediate return)" >> "$tmp_violations"
             fi
-        done
+        # `|| true` keeps pipefail from aborting the audit when grep finds
+        # no calls in a file (grep exits 1 on no match).
+        done || true
     done
 done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f -print0)
 

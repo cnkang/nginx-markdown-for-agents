@@ -1472,6 +1472,8 @@ void markdown_converter_free(struct MarkdownConverterHandle *handle);
  * - `accept_header` either points to `accept_header_len` readable bytes
  *   or is NULL when `accept_header_len == 0`
  * - `result` points to writable storage for a `FFIAcceptResult`
+ * - `result` is thread-locally owned by the calling thread and not shared
+ *   concurrently across threads without external synchronization
  */
 void markdown_negotiate_accept(const uint8_t *accept_header,
                                uintptr_t accept_header_len,
