@@ -68,6 +68,30 @@ install -d %{buildroot}/usr/libexec/nginx-markdown-for-agents
 install -m 0755 preremove.sh \
     %{buildroot}/usr/libexec/nginx-markdown-for-agents/preremove.sh
 
+%pre
+# Guard: the running NGINX executable must match the exact version this
+# module was built against.  The RPM dependency bounds (Requires floor +
+# Conflicts ceiling) describe the compatible EVR interval, but a distro-
+# rebuilt, vendor-patched, or mismatched binary can still satisfy RPM EVR
+# comparison while failing the dynamic-module ABI check at load time.
+# Fail the transaction here with an explicit message instead of leaving
+# the operator with a module NGINX refuses to load.
+# $1==1 during upgrade, $1==2 during erase — run the guard only for
+# install/upgrade (not erase), and tolerate a missing nginx binary
+# (the RPM dependency still enforces the floor/ceiling).
+if [ "$1" -ne 0 ]; then
+    if command -v nginx >/dev/null 2>&1; then
+        GUARD_NGINX_VERSION="$(nginx -v 2>&1 | sed -n 's/.*nginx version: nginx\/\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+        if [ -n "${GUARD_NGINX_VERSION}" ] && [ "${GUARD_NGINX_VERSION}" != "%{nginx_version}" ]; then
+            echo "ERROR: installed NGINX version ${GUARD_NGINX_VERSION} does not match the exact version %{nginx_version} this module was built for" >&2
+            echo "  This package provides a dynamic module for nginx.org %{nginx_version} ONLY." >&2
+            echo "  The NGINX core loader rejects any other version (including a patch release)." >&2
+            echo "  Install nginx-%{nginx_version} and retry." >&2
+            exit 1
+        fi
+    fi
+fi
+
 %post
 PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH
 cat >&2 <<'EOF'

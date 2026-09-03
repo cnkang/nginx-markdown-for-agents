@@ -59,6 +59,10 @@ else
     sed "s/%%NGINX_VERSION%%/${NGINX_VERSION}/g" "$SOURCE_PATH" \
         > "$OUTPUT_PATH"
 fi
+if grep -Fq '%%TRUSTED_EXEC_PRELUDE%%' "$OUTPUT_PATH"; then
+    printf 'ERROR: nFPM template still contains an unresolved trusted-exec prelude placeholder in %s\n' "$OUTPUT_PATH" >&2
+    exit 1
+fi
 if grep -Fq '%%NGINX_VERSION%%' "$OUTPUT_PATH"; then
     printf 'ERROR: nFPM template still contains an unresolved version placeholder\n' >&2
     exit 1
