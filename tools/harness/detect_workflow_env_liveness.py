@@ -286,13 +286,16 @@ def extract_shell_definitions(run_text):
     if not isinstance(run_text, str):
         return defined
     text = _merge_continuations(run_text)
+    # Mask comments and quoted literals before pattern matching so that
+    # `echo 'read -r X'` or `# read -r Y` cannot register a definition.
+    masked = _mask_shell_non_expanding(text)
     sourced_os_release = bool(
         re.search(r"(?:^|[\s;(])(?:\.|source)\s+/etc/os-release\b", text,
                   re.MULTILINE)
     )
     if sourced_os_release:
         defined |= OS_RELEASE_VARS
-    for line in text.splitlines():
+    for line in masked.splitlines():
         stripped = line.strip()
         name = _match_assignment(stripped)
         if name is not None:

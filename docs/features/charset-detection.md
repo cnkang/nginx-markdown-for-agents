@@ -220,9 +220,10 @@ wins.
 
 ## Dependencies
 
-- `regex = "1.10"` - For Content-Type and HTML meta tag parsing
+- `regex = "1.10"` - Used by the decision engine for reason-code validation
 - `encoding_rs = "0.8"` - For decoding non-UTF-8 encodings to UTF-8
 - `html5ever = "0.39"` - For HTML DOM construction
+- Charset detection itself performs bounded byte-level scans (no regex)
 
 ## Future Enhancements
 

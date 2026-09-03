@@ -8,6 +8,7 @@ URL:            https://github.com/cnkang/nginx-markdown-for-agents
 Source0:        %{name}-%{version}.tar.gz
 
 Requires:       nginx >= 1:%{nginx_version}
+Conflicts:      nginx >= 1:%{nginx_version_ceil}
 
 %description
 NGINX dynamic filter module that converts HTML responses to Markdown
@@ -18,7 +19,8 @@ Built against nginx.org stable %{nginx_version}.
 WARNING: This module is built for nginx.org %{nginx_version} ONLY. NGINX
 dynamic modules require an exact version match — the core loader rejects
 any version difference (including a patch release) before signature
-checks. The RPM dependency enforces that exact version at install time.
+checks. The RPM dependency allows the exact build version (with a ceiling
+at the next patch) but rejects any other NGINX version or distro build.
 It will NOT work with distro-provided, vendor-patched, OpenResty, Tengine,
 or custom-built NGINX binaries, or with any other NGINX version.
 

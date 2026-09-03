@@ -1407,10 +1407,23 @@ def check_trivy_local_scan_scope() -> CheckResult:
             "trivy-local-scope", FAIL, f"Makefile unreadable: {exc}"
         )
 
+    # A Trivy invocation may list one directory per --skip-dirs option
+    # (current Makefile form) or several whitespace-separated directories
+    # under a single option.  Normalize line continuations first, then
+    # collect the value set of every option so both forms are recognized.
+    flattened = content.replace("\\\n", " ")
+    marked = flattened.replace("--skip-dirs", "\x00")
+    skip_dirs_values: set[str] = set()
+    for entry in marked.split("\x00")[1:]:
+        values = entry.split("\n", 1)[0].strip()
+        skip_dirs_values.update(
+            value.strip("\"'") for value in values.split()
+        )
+
     missing = [
         directory
         for directory in TRIVY_REQUIRED_LOCAL_EXCLUSIONS
-        if re.search(rf"--skip-dirs\s+{re.escape(directory)}\b", content) is None
+        if directory not in skip_dirs_values
     ]
     if missing:
         return _result(
