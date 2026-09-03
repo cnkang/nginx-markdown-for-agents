@@ -762,7 +762,10 @@ def main() -> int:
         except ValueError:
             rel = filepath
         rel_str = str(rel)
-        if any(rel_str.startswith(exempt) for exempt in EXEMPT_DIRS):
+        if any(
+            rel_str == exempt or rel_str.startswith(exempt.rstrip("/") + "/")
+            for exempt in EXEMPT_DIRS
+        ):
             continue
         if _display_path(filepath) in EXEMPT_FILES:
             continue

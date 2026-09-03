@@ -277,15 +277,12 @@ def extract_shell_definitions(run_text):
             defined.add(match.group(1))
             continue
         # while IFS= read -r NAME  (loop variable is in scope in the body)
-        match = re.match(r"^while\s+.*\bread\s+(?:-[a-zA-Z]+\s+)*"
-                         r"([A-Za-z_]\w*)", stripped)
+        match = re.search(r"\bread\s+(?:-[a-zA-Z]+\s+)*([A-Za-z_][A-Za-z0-9_\s]*)", stripped)
         if match:
-            defined.add(match.group(1))
+            for var in match.group(1).split():
+                if re.match(r"^[A-Za-z_]\w*$", var) and var not in ("do", "done", "then", "fi"):
+                    defined.add(var)
             continue
-        match = re.match(r"^read\s+(?:-[a-zA-Z]+\s+)*([A-Za-z_]\w*)",
-                         stripped)
-        if match:
-            defined.add(match.group(1))
     return defined
 
 

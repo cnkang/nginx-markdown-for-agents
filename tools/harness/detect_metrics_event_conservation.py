@@ -235,6 +235,10 @@ def _audit_failed_closed(
         # 0` initializer in an include guard or struct block is not a
         # derivation branch.
         if not any("snapshot" in stmt for stmt in block_stmts):
+            reviews.append(
+                f"{name}: failed_closed assignment found in block without "
+                "snapshot source; derivation not evaluated for this block"
+            )
             continue
         if not any("failopen_count" in stmt for stmt in block_stmts):
             violations.append(
