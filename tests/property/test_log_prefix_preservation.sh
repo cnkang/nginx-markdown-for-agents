@@ -58,7 +58,9 @@ echo ""
 # Updated 2026-09-02: 352 — fail-closed logging added by reviewed fixes:
 # 68cc50e5 (+2 NGX_LOG_CRIT: conditional validator context allocation and
 # capture failures) and d42971f5 (+1 NGX_LOG_ERR: inflight guard rejection).
-BASELINE_LOG_SITES=352
+# Updated 2026-09-03: 353 — 59e7b41c (rollback-safe orphan conditional
+# header adoption) adds +2 NGX_LOG_DEBUG0 while removing one, net +1.
+BASELINE_LOG_SITES=353
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=0
