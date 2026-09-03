@@ -289,8 +289,11 @@ def extract_shell_definitions(run_text):
     # Mask comments and quoted literals before pattern matching so that
     # `echo 'read -r X'` or `# read -r Y` cannot register a definition.
     masked = _mask_shell_non_expanding(text)
+    # Source-detection must use the same masked text: a comment or quoted
+    # literal mentioning `source /etc/os-release` must not mark every
+    # OS-release variable as defined.
     sourced_os_release = bool(
-        re.search(r"(?:^|[\s;(])(?:\.|source)\s+/etc/os-release\b", text,
+        re.search(r"(?:^|[\s;(])(?:\.|source)\s+/etc/os-release\b", masked,
                   re.MULTILINE)
     )
     if sourced_os_release:

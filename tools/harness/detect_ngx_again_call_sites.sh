@@ -52,7 +52,8 @@ NGX_AGAIN_APIS=(
 )
 
 tmp_violations=$(mktemp)
-trap 'rm -f "$tmp_violations"' EXIT
+GREP_TEMPS=()
+trap 'rm -f "$tmp_violations" "${GREP_TEMPS[@]}"' EXIT
 
 while IFS= read -r -d '' file; do
     for api in "${NGX_AGAIN_APIS[@]}"; do
@@ -61,6 +62,7 @@ while IFS= read -r -d '' file; do
         # no-match result.  Any other grep failure (exit 2) or a failure
         # inside the loop body must propagate under set -euo pipefail.
         grep_matches="$(mktemp)"
+        GREP_TEMPS+=("$grep_matches")
         grep_rc=0
         grep -n "${api}[[:space:]]*(" "$file" 2>/dev/null > "$grep_matches" || grep_rc=$?
         if [[ "$grep_rc" -eq 2 ]]; then

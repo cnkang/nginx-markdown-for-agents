@@ -140,21 +140,51 @@ ngx_http_markdown_validate_conditional_candidates(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* Bounded rollback stack for cross-name atomic adoption (Rule 39):
+ * if any commit step fails midway, every mutated entry must return to
+ * its suppressed state.  The stack capacity is fixed; the validation
+ * pass runs first, so a realistic commit failure is a defensive
+ * TOCTOU check, and the bounded snapshot must fail BEFORE mutating
+ * anything rather than silently truncating rollback state. */
+#define NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX  16
+
+typedef struct {
+    ngx_table_elt_t  *entry;
+} ngx_http_markdown_adopt_rollback_t;
+
+/* Roll back every adopted entry recorded so far: restored hash and
+ * length both return to their suppressed-candidate values (0). */
+static void
+ngx_http_markdown_adopt_rollback_all(
+    ngx_http_markdown_adopt_rollback_t *rollback, ngx_uint_t count)
+{
+    ngx_uint_t  i;
+
+    for (i = 0; i < count; i++) {
+        rollback[i].entry->hash = 0;
+        rollback[i].entry->value.len = 0;
+    }
+}
+
 /*
  * Commit adoption for one validator name after the caller has validated all
  * suppressed candidates.  Returns NGX_ERROR if the NUL-termination invariant
  * no longer holds while committing; otherwise records the first visible
- * entry and increments the number of adopted entries.
+ * entry and increments the number of adopted entries.  Every mutation is
+ * appended to the rollback stack, which fails before mutating anything
+ * when it is full.
  */
 static ngx_int_t
 ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
     u_char *name, size_t name_len, size_t scan_limit,
-    ngx_table_elt_t **first_restored, ngx_uint_t *adopted_count)
+    ngx_table_elt_t **first_restored, ngx_uint_t *adopted_count,
+    ngx_http_markdown_adopt_rollback_t *rollback, ngx_uint_t *rollback_count)
 {
     const u_char  *value_end;
 
     if (r == NULL || name == NULL || name_len == 0
-        || first_restored == NULL || adopted_count == NULL)
+        || first_restored == NULL || adopted_count == NULL
+        || rollback == NULL || rollback_count == NULL)
     {
         return NGX_ERROR;
     }
@@ -194,9 +224,16 @@ ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
             if (value_end == NULL) {
                 return NGX_ERROR;
             }
+            if (*rollback_count >= NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX) {
+                /* Snapshot capacity exhausted: fail before mutating this
+                 * entry so the caller's rollback stays complete. */
+                return NGX_ERROR;
+            }
             headers[i].value.len = (size_t) (value_end
                 - headers[i].value.data);
             headers[i].hash = 1;
+            rollback[*rollback_count].entry = &headers[i];
+            (*rollback_count)++;
             (*adopted_count)++;
             ngx_http_markdown_adopt_first_restored(
                 first_restored, &headers[i]);
@@ -220,6 +257,9 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     ngx_table_elt_t  *im;
     ngx_table_elt_t  *ius;
     ngx_uint_t       adopted_count;
+    ngx_uint_t       rollback_count;
+    ngx_http_markdown_adopt_rollback_t  rollback[
+        NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX];
     ngx_int_t        inm_rc;
     ngx_int_t        ims_rc;
     ngx_int_t        im_rc;
@@ -230,8 +270,8 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     }
 
     /*
-     * Cross-name atomic adoption: validate BOTH suppressed sets before
-     * committing either.  A failure in one name must leave the request
+     * Cross-name atomic adoption: validate ALL suppressed sets before
+     * committing any.  A failure in one name must leave the request
      * headers entirely unchanged — restoring If-None-Match and then
      * failing on If-Modified-Since would expose a partially re-owned
      * validator set to the next PREACCESS pass.
@@ -255,18 +295,32 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     }
 
     adopted_count = 0;
+    rollback_count = 0;
     inm_rc = ngx_http_markdown_commit_one_conditional_headers(
         r, inm_name, sizeof(inm_name) - 1, scan_limit,
-        &inm, &adopted_count);
+        &inm, &adopted_count, rollback, &rollback_count);
     ims_rc = ngx_http_markdown_commit_one_conditional_headers(
         r, ims_name, sizeof(ims_name) - 1, scan_limit,
-        &ims, &adopted_count);
+        &ims, &adopted_count, rollback, &rollback_count);
     im_rc = ngx_http_markdown_commit_one_conditional_headers(
         r, im_name, sizeof(im_name) - 1, scan_limit,
-        &im, &adopted_count);
+        &im, &adopted_count, rollback, &rollback_count);
     ius_rc = ngx_http_markdown_commit_one_conditional_headers(
         r, ius_name, sizeof(ius_name) - 1, scan_limit,
-        &ius, &adopted_count);
+        &ius, &adopted_count, rollback, &rollback_count);
+
+    if (inm_rc != NGX_OK || ims_rc != NGX_OK
+        || im_rc != NGX_OK || ius_rc != NGX_OK)
+    {
+        /* Undo every entry already adopted by the failing pass so the
+         * request headers are left exactly as they were (Rule 39). */
+        ngx_http_markdown_adopt_rollback_all(rollback, rollback_count);
+        r->headers_in.if_none_match = NULL;
+        r->headers_in.if_modified_since = NULL;
+        r->headers_in.if_match = NULL;
+        r->headers_in.if_unmodified_since = NULL;
+        return NGX_ERROR;
+    }
 
     r->headers_in.if_none_match = inm;
     r->headers_in.if_modified_since = ims;

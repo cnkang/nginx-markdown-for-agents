@@ -74,7 +74,8 @@ WHOLE_INIT_TYPES=(
 )
 
 tmp_violations=$(mktemp)
-trap 'rm -f "$tmp_violations"' EXIT
+GREP_TEMPS=()
+trap 'rm -f "$tmp_violations" "${GREP_TEMPS[@]}"' EXIT
 
 while IFS= read -r -d '' file; do
     case "$file" in
@@ -88,6 +89,7 @@ while IFS= read -r -d '' file; do
         # (exit 2, or an error inside the loop body) must propagate under
         # set -euo pipefail instead of being suppressed.
         grep_matches="$(mktemp)"
+        GREP_TEMPS+=("$grep_matches")
         grep_rc=0
         grep -nE "^[[:space:]]*${type}[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(=|;)" "$file" 2>/dev/null > "$grep_matches" || grep_rc=$?
         if [[ "$grep_rc" -eq 2 ]]; then
