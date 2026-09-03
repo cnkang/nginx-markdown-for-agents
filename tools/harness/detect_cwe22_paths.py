@@ -512,8 +512,10 @@ def _extract_method_open_first_arg(line: str) -> str | None:
 def _extract_builtin_open_first_arg(line: str) -> str | None:
     """Extract the first positional argument from a builtin open() call.
 
-    Returns None if no positional path arg is found or if the first
-    arg is a keyword argument.
+    Returns the identifier when the argument is a simple variable, or
+    None for keyword-only calls and for expressions the identifier
+    regex cannot resolve (f-strings, concatenations, calls).  An
+    f-string's ``f``/``rf`` prefix is not a variable name.
     """
     m = OPEN_ARG_RE.search(line)
     if not m:
@@ -526,7 +528,148 @@ def _extract_builtin_open_first_arg(line: str) -> str | None:
         if KEYWORD_ARG_RE.match(after_paren):
             return None
 
+    # A bare f/r/b/u prefix followed by a quote is the start of an
+    # f-string or literal, not an identifier argument.
+    tail = line[m.end():].lstrip(" \t")
+    if re.match(r"^'|\"", tail):
+        return None
+
     return first_arg
+
+
+_STRING_PREFIX_RE = re.compile(r"^([fFrRbBuU]{0,2})(['\"])")
+
+def _classify_open_argument(inner: str) -> str:
+    """Classify a builtin open() argument expression.
+
+    Returns one of:
+      - "identifier"  — simple bare identifier (normal classification path)
+      - "literal"     — plain string literal (hardcoded path; not a sink)
+      - "fstring"     — interpolated string (f/rf prefix or ``{}``)
+      - "complex"     — any other dynamic expression (concat, call, wrap)
+    """
+    if re.match(r"^\w+\s*$", inner):
+        return "identifier"
+    prefix_match = _STRING_PREFIX_RE.match(inner)
+    if prefix_match:
+        prefix = prefix_match.group(1)
+        rest = inner[prefix_match.end():]
+        if "f" in prefix or "F" in prefix or "{" in rest:
+            return "fstring"
+        return "literal"
+    return "complex"
+
+
+def _try_close_quote(line: str, idx: int, quote: str) -> int | None:
+    """Return the next index when the open ``quote`` closes at ``idx``."""
+    if quote in ('"""', "'''"):
+        return idx + 3 if line.startswith(quote, idx) else None
+    return idx + 1 if line[idx] == quote else None
+
+
+def _try_open_quote(line: str, idx: int) -> tuple[str, int] | None:
+    """Open a single- or triple-quoted delimiter at ``idx``."""
+    ch = line[idx]
+    if ch not in ("'", '"'):
+        return None
+    if line.startswith(ch * 3, idx):
+        return ch * 3, idx + 3
+    return ch, idx + 1
+
+
+def _multiline_quote_after(
+    line: str, initial_quote: str | None = None,
+) -> str | None:
+    """Return the quote delimiter still open after scanning the whole line.
+
+    Tracks quote pairing, backslash escapes, and triple-quoted
+    delimiters (docstrings).  ``initial_quote`` carries the quote state
+    from a previous line of a multiline string, without which docstring
+    lines cannot be distinguished from source text.
+
+    The returned delimiter distinguishes single-quoted (``'`` / ``"``)
+    from triple-quoted (``'''`` / ``\"\"\"``) strings so that a lone
+    quote character inside a docstring continuation line cannot close
+    the string early.
+    """
+    quote: str | None = initial_quote
+    escaped = False
+    idx = 0
+    while idx < len(line):
+        ch = line[idx]
+        if escaped:
+            escaped = False
+            idx += 1
+            continue
+        if ch == "\\":
+            escaped = True
+            idx += 1
+            continue
+        if quote is not None:
+            next_idx = _try_close_quote(line, idx, quote)
+            if next_idx is not None:
+                quote = None
+                idx = next_idx
+            else:
+                idx += 1
+            continue
+        opened = _try_open_quote(line, idx)
+        if opened is not None:
+            quote, idx = opened
+        else:
+            idx += 1
+    return quote
+
+
+def _is_position_inside_string(
+    line: str, pos: int, initial_quote: str | None = None,
+) -> bool:
+    """True when ``pos`` falls inside a string literal on ``line``.
+
+    Scans the prefix through the same quote-state machine as
+    ``_multiline_quote_after``; if a quote is still open at ``pos`` the
+    position is inside a string (including triple-quoted docstrings).
+    """
+    return _multiline_quote_after(line[:pos], initial_quote) is not None
+
+
+def _has_complex_open_argument(
+    line: str, initial_quote: str | None = None,
+) -> bool:
+    """True when a *builtin* open() call passes an argument that the
+    simple-identifier extractor cannot resolve (f-string, string
+    concatenation, call result, splat, Path() wrap).
+
+    Returns False for method calls (``receiver.open(...)``), keyword-only
+    calls, bare ``open()`` with no argument, plain string literals
+    (hardcoded paths), and `open(` text embedded inside string
+    literals.  True arguments are statically unresolved: the caller must
+    treat them as unaudited rather than silently skipping the sink.
+    """
+    for match in re.finditer(r"(?<![\w.])open\s*\(([^)]*)", line):
+        if _is_position_inside_string(line, match.start(), initial_quote):
+            continue
+        inner = match.group(1).strip()
+        if not inner:
+            continue
+        if KEYWORD_ARG_RE.match(inner):
+            continue
+        if _classify_open_argument(inner) == "identifier":
+            continue
+        if _classify_open_argument(inner) == "literal":
+            continue
+        return True
+    return False
+
+
+def _emit_unaudited_warning(warnings: list[str], rel: str, lineno: int) -> None:
+    """Report an unresolved dynamic open() argument as unaudited."""
+    warnings.append(
+        f"  WARNING {rel}:{lineno} — open() path argument is a "
+        f"dynamic expression the detector cannot statically "
+        f"resolve; review the expression for user-derived "
+        f"components and pass it through validate_read_path()"
+    )
 
 
 def _scan_open_calls(
@@ -542,30 +685,47 @@ def _scan_open_calls(
     errors: list[str] = []
     warnings: list[str] = []
 
+    # Quote state carried across lines for multiline strings/docstrings.
+    open_quote: str | None = None
+
     for lineno, line in enumerate(lines, start=1):
         if not OPEN_CALL_RE.search(line):
+            # Keep tracking docstring state even without open() text.
+            open_quote = _multiline_quote_after(line, open_quote)
             continue
 
-        if COMMENT_RE.match(line.lstrip()):
-            continue
-
-        if NON_FILE_OPEN_RE.search(line):
+        in_string = _is_position_inside_string(line, len(line), open_quote)
+        if COMMENT_RE.match(line.lstrip()) or NON_FILE_OPEN_RE.search(line):
+            # A comment line cannot contain a live call; still update state.
+            open_quote = _multiline_quote_after(line, open_quote)
             continue
 
         first_arg = _resolve_open_first_arg(line)
         if first_arg is None:
+            # A builtin open() whose path argument the simple-identifier
+            # extractor cannot resolve (f-string, concatenation, call
+            # result, Path() wrap) is an unaudited sink, not a skip: a
+            # dynamic expression may embed user-derived components.
+            if _has_complex_open_argument(line, open_quote):
+                _emit_unaudited_warning(warnings, rel, lineno)
+            open_quote = _multiline_quote_after(line, open_quote)
             continue
 
-        call_errors, call_warnings = _classify_open_call(
-            OpenCallContext(
-                first_arg=first_arg, line=line, lines=lines, lineno=lineno,
-                has_validation_import=has_validation_import,
-                validated_vars=validated_vars, hardcoded_vars=hardcoded_vars,
-                filepath=filepath, rel=rel, strict=strict,
+        if in_string and first_arg:
+            # A simple identifier inside a docstring is still not a call.
+            open_quote = _multiline_quote_after(line, open_quote)
+        else:
+            call_errors, call_warnings = _classify_open_call(
+                OpenCallContext(
+                    first_arg=first_arg, line=line, lines=lines, lineno=lineno,
+                    has_validation_import=has_validation_import,
+                    validated_vars=validated_vars, hardcoded_vars=hardcoded_vars,
+                    filepath=filepath, rel=rel, strict=strict,
+                )
             )
-        )
-        errors.extend(call_errors)
-        warnings.extend(call_warnings)
+            errors.extend(call_errors)
+            warnings.extend(call_warnings)
+            open_quote = _multiline_quote_after(line, open_quote)
 
     return errors, warnings
 

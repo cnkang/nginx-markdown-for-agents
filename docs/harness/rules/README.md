@@ -7,7 +7,7 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 
 | Rule IDs | Domain | File | Primary Surfaces |
 |----------|--------|------|-----------------|
-| 1, 2, 38, 47, 51, 52, 64, 69 | Streaming & Backpressure | [streaming-backpressure.md](streaming-backpressure.md) | backpressure, fail-open, replay buffer, auth cache-control, derived-state reconciliation, NGX_AGAIN call-site audit |
+| 1, 2, 38, 47, 51, 52, 64, 72 | Streaming & Backpressure | [streaming-backpressure.md](streaming-backpressure.md) | backpressure, fail-open, replay buffer, auth cache-control, derived-state reconciliation, NGX_AGAIN call-site audit |
 | 3, 43 | Memory & Budget | [memory-budget.md](memory-budget.md) | allocations, budget enforcement, pool vs heap |
 | 4, 44 | Encoding & Charset | [encoding-charset.md](encoding-charset.md) | UTF-8 chunk boundaries, gzip/deflate/Brotli streaming lifecycle |
 | 5, 6, 27 | HTML Sanitizer & Output Safety | [html-sanitizer.md](html-sanitizer.md) | void elements, emitter, escaping, fence language |

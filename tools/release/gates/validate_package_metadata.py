@@ -74,7 +74,7 @@ NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
-    "nginx = ${RPM_NGINX_EVR}",
+    "nginx >= ${RPM_NGINX_EVR}",
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
     "packager: deb",
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
@@ -182,7 +182,7 @@ RELEASE_BINARY_SIGNING_FORBIDDEN_SNIPPETS = [
 ]
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
-    "Requires:       nginx = 1:%{nginx_version}",
+    "Requires:       nginx >= 1:%{nginx_version}",
     "Source0:        %{name}-%{version}.tar.gz",
     f"%setup -q -n {CANONICAL_PACKAGE_NAME}-%{{version}}",
     "# No-op: release-rpm.yml packages a prebuilt dynamic module.",
