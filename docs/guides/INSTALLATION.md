@@ -45,8 +45,8 @@ privileged execution, then verifies both Markdown and HTML responses:
 ```bash
 # Step 1: Download and authenticate the versioned release installer
 # Publication-dependent: RELEASE_TAG must be a published tag; v0.9.2 is an example for post-publication
-set -euo pipefail; RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSL -o "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc" -o nginx-markdown-for-agents-release.asc "${RELEASE_BASE}/nginx-markdown-for-agents-release.asc"
-TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "$GNUPGHOME"' EXIT; gpg --batch --homedir "$GNUPGHOME" --import nginx-markdown-for-agents-release.asc; VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1; CHECKSUM_LINE="$(awk -v file="${INSTALLER}" '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"; printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -; sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"; sudo nginx -t; sudo nginx -s reload
+set -euo pipefail; RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSL -o "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc"; RELEASE_KEY_PATH="${RELEASE_KEY_PATH:-packaging/nginx-markdown-for-agents-release.asc}"
+TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "$GNUPGHOME"' EXIT; gpg --batch --homedir "$GNUPGHOME" --import "${RELEASE_KEY_PATH}"; VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1; CHECKSUM_LINE="$(awk -v file="${INSTALLER}" '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"; printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -; sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"; sudo nginx -t; sudo nginx -s reload
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 ```
@@ -1202,9 +1202,9 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    wget "${BASE_URL}/ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz"
    wget "${BASE_URL}/SHA256SUMS"
    wget "${BASE_URL}/SHA256SUMS.asc"
-   wget "${BASE_URL}/nginx-markdown-for-agents-release.asc"
+   : "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to packaging/nginx-markdown-for-agents-release.asc from git repository}"
    TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75
-   gpg --import nginx-markdown-for-agents-release.asc
+   gpg --import "${RELEASE_KEY_PATH}"
    VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
      | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
    [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1

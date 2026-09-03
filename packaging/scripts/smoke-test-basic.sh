@@ -292,6 +292,7 @@ run_module_behavior_smoke() {
         || die "Failed to create module smoke document root"
     smoke_prefix="$(mktemp -d "${TMPDIR:-/tmp}/markdown-smoke-prefix.XXXXXX")" \
         || die "Failed to create module smoke NGINX prefix"
+    chmod 0755 "$smoke_root" "$smoke_prefix"
     smoke_conf="${smoke_prefix}/nginx.conf"
     negative_conf="${smoke_prefix}/negative.conf"
     headers_file="${smoke_prefix}/response.headers"

@@ -254,7 +254,7 @@ case "$ACTION" in
         fi
         INSTALLED_NGINX_VERSION="$(printf '%s\n' "${NGINX_VERSION_OUTPUT}" \
             | sed -n 's|.*nginx/||p' \
-            | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+            | { grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || true; } | head -1)"
 
         if [[ -z "${INSTALLED_NGINX_VERSION}" ]]; then
             warn "Could not determine installed NGINX version from 'nginx -v'."

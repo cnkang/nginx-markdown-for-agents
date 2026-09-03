@@ -59,6 +59,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TRIGGER_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
@@ -73,6 +75,14 @@ jobs:
 
           git fetch --force --depth=1 origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
           tag_commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+
+          if [[ "${EVENT_NAME}" == "release" && -n "${TRIGGER_SHA}" ]]; then
+            expected_commit="$(git rev-parse --verify "${TRIGGER_SHA}^{commit}" 2>/dev/null || echo "${TRIGGER_SHA}")"
+            if [[ "${tag_commit}" != "${expected_commit}" ]]; then
+              echo "::error::Tag commit ${tag_commit} does not match trigger commit ${expected_commit}." >&2
+              exit 1
+            fi
+          fi
           tag_version="$(
             git show "${tag_commit}:components/rust-converter/Cargo.toml" \
               | sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
