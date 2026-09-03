@@ -2375,3 +2375,119 @@ class TestImplicitPartialMatch:
         assert not errors
         errors_found = [f for f in findings if f.severity == Severity.ERROR]
         assert len(errors_found) == 1
+
+    def test_alternation_nullable_branch_is_flagged(self, tmp_path: Path) -> None:
+        """re.search(r'foo|a*b', ...) → ERROR: the nullable branch a*b is
+        reachable from the pattern start without consuming input."""
+        content = (
+            "import re\n"
+            "m = re.search(r'foo|a*b', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert "S8786" in errors_found[0].reason
+
+    def test_alternation_group_nullable_branch_is_flagged(self, tmp_path: Path) -> None:
+        """re.search(r'(?:foo|a*b)c', ...) → ERROR (branch inside group)."""
+        content = (
+            "import re\n"
+            "m = re.search(r'(?:foo|a*b)c', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_scoped_inline_flags_are_flagged(self, tmp_path: Path) -> None:
+        """re.search(r'(?s:a+b)', ...) → ERROR: scoped flags are zero-width."""
+        content = (
+            "import re\n"
+            "m = re.search(r'(?s:a+b)', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_lookahead_does_not_block_prefix(self, tmp_path: Path) -> None:
+        """re.search(r'(?=a)a*b', ...) → ERROR: lookahead is zero-width."""
+        content = (
+            "import re\n"
+            "m = re.search(r'(?=a)a*b', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_negative_lookahead_does_not_block_prefix(self, tmp_path: Path) -> None:
+        """re.search(r'(?!b)a*b', ...) → ERROR (negative lookahead)."""
+        content = (
+            "import re\n"
+            "m = re.search(r'(?!b)a*b', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_atomic_group_is_not_flagged(self, tmp_path: Path) -> None:
+        """re.search(r'(?>a*)b', ...) → no ERROR: atomic groups do not
+        backtrack, so Sonar's RedosFinder does not flag them."""
+        content = (
+            "import re\n"
+            "m = re.search(r'(?>a*)b', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not [f for f in findings if f.severity == Severity.ERROR]
+
+    def test_possessive_quantifier_is_flagged(self, tmp_path: Path) -> None:
+        """re.search(r'a*+b', ...) → ERROR: possessive quantifiers are still
+        flagged by Sonar (RedosFinderPartial.yml lines 36-46)."""
+        content = (
+            "import re\n"
+            "m = re.search(r'a*+b', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_dynamic_concat_static_segment_is_flagged(self, tmp_path: Path) -> None:
+        """re.search(r'a*b' + suffix, ...) → ERROR: the static segment a*b
+        is itself a complete dangerous pattern."""
+        content = (
+            "import re\n"
+            "suffix = get_suffix()\n"
+            "m = re.search(r'a*b' + suffix, text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_finditer_unanchored_is_flagged(self, tmp_path: Path) -> None:
+        """re.finditer(r'x*yx*', ...) → ERROR (finditer is partial-match)."""
+        content = (
+            "import re\n"
+            "for m in re.finditer(r'x*yx*', text):\n"
+            "    pass\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_subn_unanchored_is_flagged(self, tmp_path: Path) -> None:
+        """re.subn(r'x*yx*', 'z', text) → ERROR (subn is partial-match)."""
+        content = (
+            "import re\n"
+            "out, count = re.subn(r'x*yx*', 'z', text)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
