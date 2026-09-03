@@ -2085,3 +2085,91 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
 
     return NGX_DONE;
 }
+
+/*
+ * Send 412 Precondition Failed.
+ *
+ * Mirrors the 304 path's failure contract: snapshot both outgoing lists and
+ * every dedicated field touched before any mutation, so a failed header
+ * operation restores the exact upstream representation.  The 412 carries no
+ * body: Content-Length, representation digests, Accept-Ranges, and trailers
+ * of the source HTML representation are cleared.  Vary: Accept is retained
+ * because the representation is still negotiated.
+ */
+ngx_int_t
+ngx_http_markdown_send_412(ngx_http_request_t *r)
+{
+    ngx_int_t                           rc;
+    ngx_http_markdown_304_snapshot_t    snapshot;
+
+    if (r == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_304_snapshot_prepare(r, &snapshot) != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: 412 header snapshot prepare failed");
+        return NGX_ERROR;
+    }
+
+    r->headers_out.status = NGX_HTTP_PRECONDITION_FAILED;
+    r->headers_out.status_line.len = 0;
+
+    ngx_http_clear_content_length(r);
+    r->headers_out.content_length_n = -1;
+
+    /* The 412 describes the transformed Markdown representation: clear
+     * byte-range and representation-digest headers of the upstream HTML
+     * body, and any upstream trailers. */
+    r->allow_ranges = 0;
+    r->headers_out.accept_ranges = NULL;
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Accept-Ranges", sizeof("Accept-Ranges") - 1);
+    r->headers_out.content_encoding = NULL;
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Content-Encoding", sizeof("Content-Encoding") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Content-MD5", sizeof("Content-MD5") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Digest", sizeof("Digest") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Content-Digest", sizeof("Content-Digest") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Repr-Digest", sizeof("Repr-Digest") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "X-Markdown-Tokens", sizeof("X-Markdown-Tokens") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Trailer", sizeof("Trailer") - 1);
+    ngx_http_markdown_clear_trailers(r);
+
+    /* The 412 describes the Markdown representation; the weak validator
+     * must not reference the source HTML mtime. */
+    r->headers_out.last_modified_time = (time_t) -1;
+    r->headers_out.last_modified = NULL;
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Last-Modified", sizeof("Last-Modified") - 1);
+
+    ngx_http_markdown_set_representation_content_type(r);
+
+    rc = ngx_http_markdown_add_vary_accept(r);
+    if (rc != NGX_OK) {
+        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        return NGX_ERROR;
+    }
+
+    rc = ngx_http_send_header(r);
+    if (rc == NGX_AGAIN) {
+        /* Same NGX_AGAIN contract as the 304 path: the prepared
+         * representation stays prepared and the header chain resumes
+         * it on the next filter invocation. */
+        return NGX_AGAIN;
+    }
+    if (rc != NGX_OK && rc != NGX_DONE) {
+        return rc;
+    }
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: 412 Precondition Failed response sent");
+
+    return NGX_DONE;
+}

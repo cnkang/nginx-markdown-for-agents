@@ -15,6 +15,13 @@
 #include <limits.h>
 #include "ngx_http_markdown_diagnostics.h"
 
+/* The 412 status constant is used by the conditional-result resolver.
+ * Production builds get it from ngx_http.h; standalone test binaries that
+ * include this implementation header without NGINX headers need a fallback. */
+#ifndef NGX_HTTP_PRECONDITION_FAILED
+#define NGX_HTTP_PRECONDITION_FAILED  412
+#endif
+
 /*
  * Forward declarations for helpers referenced before their definitions
  * are visible through implementation-header include order.
@@ -823,6 +830,34 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
             markdown_result_free(conditional_result);
         }
 
+        if (rc == NGX_AGAIN) {
+            return NGX_AGAIN;
+        }
+
+        if (rc != NGX_DONE) {
+            ngx_http_markdown_record_system_failure(ctx);
+            return rc;
+        }
+
+        return NGX_DONE;
+    }
+
+    if (rc == NGX_HTTP_PRECONDITION_FAILED) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: If-Match/If-Unmodified-Since failed, "
+                      "sending 412 Precondition Failed");
+
+        /* Decision: a failed precondition is a terminal protocol outcome,
+         * not a conversion error.  It must NOT go through
+         * markdown_error_policy: even when on_error == REJECT, the 412
+         * describes the transformed representation and is the correct
+         * response.  Release the inflight slot before emitting output,
+         * mirroring the 304 path. */
+        ngx_http_markdown_release_inflight_for_request(r);
+
+        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+
+        rc = ngx_http_markdown_send_412(r);
         if (rc == NGX_AGAIN) {
             return NGX_AGAIN;
         }

@@ -22,6 +22,9 @@
 #ifndef NGX_HTTP_NOT_MODIFIED
 #define NGX_HTTP_NOT_MODIFIED 304
 #endif
+#ifndef NGX_HTTP_PRECONDITION_FAILED
+#define NGX_HTTP_PRECONDITION_FAILED 412
+#endif
 
 #ifndef NGX_LOG_INFO
 #define NGX_LOG_INFO  6
@@ -869,6 +872,16 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     g_send_304_calls++;
     if (r != NULL) {
         r->headers_out.status = NGX_HTTP_NOT_MODIFIED;
+    }
+    return g_send_304_rc;
+}
+
+ngx_int_t
+ngx_http_markdown_send_412(ngx_http_request_t *r)
+{
+    g_send_304_calls++;
+    if (r != NULL) {
+        r->headers_out.status = NGX_HTTP_PRECONDITION_FAILED;
     }
     return g_send_304_rc;
 }

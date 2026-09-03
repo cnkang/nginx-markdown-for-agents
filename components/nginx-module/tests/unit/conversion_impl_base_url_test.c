@@ -933,6 +933,13 @@ ngx_http_markdown_send_304(
     return g_send_304_rc;
 }
 
+ngx_int_t
+ngx_http_markdown_send_412(ngx_http_request_t *r)
+{
+    UNUSED(r);
+    return g_send_304_rc;
+}
+
 /*
  * subrequest: conversion_impl.h calls ngx_http_markdown_buffer_release() at the
  * conversion terminal.  The implementation lives in buffer.c; include it

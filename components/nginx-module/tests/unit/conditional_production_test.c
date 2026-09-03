@@ -854,6 +854,74 @@ test_send_304_appends_accept_to_upstream_vary(void)
     TEST_PASS("304 appends Accept to an existing foreign Vary header");
 }
 
+/* A 412 for a failed If-Match/If-Unmodified-Since precondition must
+ * describe the transformed Markdown representation: status 412, no body
+ * headers, no source-HTML trailers, and Vary: Accept retained. */
+static void
+test_send_412_success_clears_body_headers(void)
+{
+    ngx_http_request_t *r;
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    r->headers_out.trailers = *create_header_list();
+    add_header(&r->headers_out.headers, "Content-Length", "123");
+    add_header(&r->headers_out.headers, "Accept-Ranges", "bytes");
+    add_header(&r->headers_out.headers, "Trailer", "X-Checksum");
+    r->headers_out.content_length_n = 123;
+    r->allow_ranges = 1;
+
+    TEST_ASSERT(ngx_http_markdown_send_412(r) == NGX_DONE,
+                "send_412 succeeds");
+    TEST_ASSERT(r->headers_out.status == NGX_HTTP_PRECONDITION_FAILED,
+                "412 status is set");
+    TEST_ASSERT(r->headers_out.content_length_n == -1,
+                "Content-Length cleared on 412");
+    TEST_ASSERT(r->allow_ranges == 0,
+                "range state cleared on 412");
+    TEST_ASSERT(count_vary_headers(r) == 1,
+                "Vary: Accept retained on 412");
+
+    TEST_PASS("412 clears body headers and retains Vary: Accept");
+}
+
+/* A failed header operation during 412 preparation must restore the exact
+ * upstream representation (same failure contract as the 304 path). */
+static void
+test_send_412_failure_restores_headers(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *original_etag;
+    ngx_uint_t          original_header_count;
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    r->headers_out.trailers = *create_header_list();
+    original_etag = fill_response_headers(r);
+    original_header_count = r->headers_out.headers.part.nelts;
+
+    TEST_ASSERT(ngx_http_markdown_send_412(r) == NGX_ERROR,
+                "Vary allocation failure returns NGX_ERROR");
+    TEST_ASSERT(r->headers_out.status == 200,
+                "412 failure restores status");
+    TEST_ASSERT(r->headers_out.content_length_n == 123,
+                "412 failure restores Content-Length");
+    TEST_ASSERT(r->allow_ranges == 1,
+                "412 failure restores range state");
+    TEST_ASSERT(original_etag->hash == 1,
+                "412 failure restores ETag");
+    TEST_ASSERT(r->headers_out.headers.part.nelts == original_header_count,
+                "412 failure restores header list length");
+
+    TEST_PASS("412 failure restores the upstream representation");
+}
+
 static void
 assert_304_failure_restored(ngx_http_request_t *r,
     ngx_table_elt_t *original_etag, ngx_table_elt_t *original_trailer,
@@ -3088,6 +3156,8 @@ main(void)
     test_send_304_with_etag();
     test_send_304_does_not_duplicate_upstream_vary();
     test_send_304_appends_accept_to_upstream_vary();
+    test_send_412_success_clears_body_headers();
+    test_send_412_failure_restores_headers();
     test_send_304_replaces_existing_etag();
     test_auth_ignores_invalidated_authorization();
     test_send_304_null_result();
