@@ -61,7 +61,7 @@ OFFICIAL_DOCKER_WORKFLOW_REF = "./.github/workflows/official-nginx-docker.yml"
 # Candidate semantic versions are classified as NGINX versions only when the
 # same workflow line explicitly associates them with NGINX. This avoids numeric
 # range guesses that eventually misclassify Rust, Python, or tool releases.
-NGINX_VERSION_RE = re.compile(r"(?<![0-9.])\d+\.\d+\.\d+(?![0-9.])")
+NGINX_VERSION_RE = re.compile(r"(?<![0-9.])\d{1,3}\.\d{1,3}\.\d{1,3}(?![0-9.])")
 NGINX_CONTEXT_RE = re.compile(r"\bnginx\b|\bnginx[_-]", re.IGNORECASE)
 NGINX_BLOCK_KEY_RE = re.compile(
     r"^(?P<indent>\s*)nginx(?:[_-]versions?)?\s*:", re.IGNORECASE
