@@ -74,6 +74,7 @@ import json
 import re
 import shlex
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -1413,27 +1414,32 @@ class RegexASTVisitor(ast.NodeVisitor):
         )
 
         if has_escaped and not has_unescaped_dynamic:
-            representative = "".join(
-                segment.value
-                if segment.kind == _SegKind.STATIC and segment.value is not None
-                else "x"
-                for segment in segments
-            )
-            reason, _, severity = _analyze_static_pattern(representative)
-            if reason is not None and severity == Severity.ERROR:
-                self._emit_error(ctx, representative, reason)
-                return
-            if _api_is_partial_match(ctx.api):
-                reason = _check_implicit_partial_match(representative)
-                if reason is not None:
-                    self._emit_error(ctx, representative, reason)
-                    return
+            self._emit_escaped_composition_finding(ctx, segments)
             return
 
         if has_unescaped_dynamic:
             self._emit_dynamic_review(ctx)
         elif pattern_source == PatternSource.UNKNOWN:
             self._emit_unknown_review(ctx)
+
+    def _emit_escaped_composition_finding(
+        self, ctx: _FindingCtx, segments: list[_Segment],
+    ) -> None:
+        """Emit finding for an all-escaped composition (static + re.escape)."""
+        representative = "".join(
+            segment.value
+            if segment.kind == _SegKind.STATIC and segment.value is not None
+            else "x"
+            for segment in segments
+        )
+        reason, _, severity = _analyze_static_pattern(representative)
+        if reason is not None and severity == Severity.ERROR:
+            self._emit_error(ctx, representative, reason)
+            return
+        if _api_is_partial_match(ctx.api):
+            reason = _check_implicit_partial_match(representative)
+            if reason is not None:
+                self._emit_error(ctx, representative, reason)
 
     def _lookup_compile_line(self, node: ast.Call, api: str) -> int | None:
         if not api.startswith(_COMPILED_API_PREFIX):
@@ -1844,17 +1850,9 @@ def _handle_special_group(
     if k + 1 < n and pattern[k] == "P" and pattern[k + 1] == "=":
         consumed = _consume_delimited(pattern, k + 2, n, ")")
         return _Token(_TKind.ATOM, pattern[i:consumed], i), consumed
-    # Lookahead (?=...) / (?!...): zero-width, does not consume input.
-    if k < n and pattern[k] in "=!":
-        return _Token(_TKind.GROUP_OPEN, pattern[i:i + 3], i), k + 1
-    # Lookbehind (?<=...) / (?<!...): zero-width, does not consume input.
-    if k + 1 < n and pattern[k] == "<" and pattern[k + 1] in "=!":
-        return _Token(_TKind.GROUP_OPEN, pattern[i:i + 4], i), k + 2
-    # Atomic group (?>...): no backtracking into the group; Sonar visits
-    # its contents with a non-partial visitor, so repetitions inside are
-    # not S8786-flagged.
-    if k < n and pattern[k] == ">":
-        return _Token(_TKind.GROUP_OPEN, pattern[i:i + 3], i), k + 1
+    zero_width = _zero_width_group_prefix(pattern, k, n)
+    if zero_width is not None:
+        return zero_width(i)
     # Scoped inline flags (?imsxau-+:...): the flag prefix is zero-width.
     m = re.match(r"[imsxau-]+:", pattern[k:])
     if m:
@@ -1876,6 +1874,35 @@ def _handle_special_group(
     if k < n and pattern[k] == ":":
         k += 1
     return _Token(_TKind.GROUP_OPEN, pattern[i], i), k
+
+
+def _zero_width_group_prefix(
+    pattern: str, k: int, n: int,
+) -> Callable[[int], tuple[_Token, int]] | None:
+    """Return a token factory for zero-width group prefixes, or None.
+
+    Zero-width groups (lookahead, lookbehind, atomic) consume no input;
+    Sonar's canFail model treats them as skippable, so repetitions inside
+    them are not S8786-flagged.
+    """
+    # Lookahead (?=...) / (?!...): zero-width, does not consume input.
+    if k < n and pattern[k] in "=!":
+        return lambda i: (
+            _Token(_TKind.GROUP_OPEN, pattern[i:i + 3], i), k + 1,
+        )
+    # Lookbehind (?<=...) / (?<!...): zero-width, does not consume input.
+    if k + 1 < n and pattern[k] == "<" and pattern[k + 1] in "=!":
+        return lambda i: (
+            _Token(_TKind.GROUP_OPEN, pattern[i:i + 4], i), k + 2,
+        )
+    # Atomic group (?>...): no backtracking into the group; Sonar visits
+    # its contents with a non-partial visitor, so repetitions inside are
+    # not S8786-flagged.
+    if k < n and pattern[k] == ">":
+        return lambda i: (
+            _Token(_TKind.GROUP_OPEN, pattern[i:i + 3], i), k + 1,
+        )
+    return None
 
 
 def _handle_close(pattern: str, i: int, _n: int) -> tuple[_Token, int]:
@@ -2750,64 +2777,101 @@ def _branch_is_nullable(
 ) -> bool:
     j = 0
     while j < len(branch):
-        idx = branch[j]
-        tok = tokens[idx]
-        if tok.kind == _TKind.QUANT:
-            j += 1
-            continue
-        if tok.kind == _TKind.ANCHOR:
-            # Boundary anchors (^, $, \A, \Z, \b, \B) block epsilon
-            # reachability: Sonar's canReachWithoutConsumingInputNorCrossing-
-            # Boundaries stops at BoundaryTree nodes, so a branch containing
-            # an anchor cannot serve as a zero-input path.
+        tok = tokens[branch[j]]
+        step = _branch_step(tok, branch, j, tokens, open_to_close)
+        if step is None:
             return False
-        if tok.kind == _TKind.ATOM:
-            if tok.text in (r"\b", r"\B", r"\A", r"\Z"):
-                return False
-            # Inline flag prefix of a group (e.g. ``s:`` in ``(?s:...)``)
-            # does not consume input.
-            if (
-                idx > 0
-                and tokens[idx - 1].kind == _TKind.GROUP_OPEN
-                and len(tok.text) >= 2
-                and tok.text.endswith(":")
-                and tok.text[:-1].isalpha()
-            ):
-                j += 1
-                continue
-            # An atom followed by a quantifier that allows zero repetitions
-            # (e.g. ``.*``, ``a?``) can match the empty string.
-            if (
-                j + 1 < len(branch)
-                and tokens[branch[j + 1]].kind == _TKind.QUANT
-                and _quant_min_is_zero(tokens[branch[j + 1]].text)
-            ):
-                j += 2
-                continue
-            return False
-        if tok.kind == _TKind.GROUP_OPEN:
-            close_idx = open_to_close.get(idx)
-            if close_idx is None:
-                return False
-            # Lookaround groups ((?=...), (?!...), (?<=...), (?<!...)) are
-            # zero-width assertions: they consume no input, so a branch
-            # containing one is nullable as long as the rest is.
-            if tok.text in ("(?=", "(?!", "(?<=", "(?<!"):
-                while j < len(branch) and branch[j] <= close_idx:
-                    j += 1
-                continue
-            if not _group_with_quant_is_nullable(
-                idx, close_idx, tokens, open_to_close,
-            ):
-                return False
-            while j < len(branch) and branch[j] <= close_idx:
-                j += 1
-            continue
-        if tok.kind in (_TKind.GROUP_CLOSE, _TKind.ALT):
-            j += 1
-            continue
-        j += 1
+        j = step
     return True
+
+
+def _branch_step(
+    tok: _Token, branch: list[int], j: int, tokens: list[_Token],
+    open_to_close: dict[int, int],
+) -> int | None:
+    """Next branch index after skipping ``tok``, or None if it blocks."""
+    if tok.kind == _TKind.QUANT:
+        return j + 1
+    if tok.kind == _TKind.ANCHOR:
+        # Boundary anchors (^, $, \A, \Z, \b, \B) block epsilon
+        # reachability: Sonar's canReachWithoutConsumingInputNorCrossing-
+        # Boundaries stops at BoundaryTree nodes, so a branch containing
+        # an anchor cannot serve as a zero-input path.
+        return None
+    if tok.kind == _TKind.ATOM:
+        if _atom_is_nullable(tok, branch, j, tokens):
+            return j + (2 if _atom_has_zero_min_quant(branch, j, tokens) else 1)
+        return None
+    if tok.kind == _TKind.GROUP_OPEN:
+        close_idx = open_to_close.get(branch[j])
+        if close_idx is None:
+            return None
+        if _group_is_skippable(
+            tok, branch[j], close_idx, tokens, open_to_close,
+        ):
+            return _skip_group_tokens(branch, j, close_idx)
+        return None
+    return j + 1
+
+
+def _group_is_skippable(
+    tok: _Token, idx: int, close_idx: int, tokens: list[_Token],
+    open_to_close: dict[int, int],
+) -> bool:
+    """True if the group can be skipped without consuming input.
+
+    Lookaround groups ((?=...), (?!...), (?<=...), (?<!...)) are zero-width
+    assertions: they consume no input, so a branch containing one is
+    nullable as long as the rest is.  Other groups are skippable only when
+    their content (with any trailing quantifier) can match empty.
+    """
+    if tok.text in ("(?=", "(?!", "(?<=", "(?<!"):
+        return True
+    return _group_with_quant_is_nullable(
+        idx, close_idx, tokens, open_to_close,
+    )
+
+
+def _atom_is_nullable(
+    tok: _Token, branch: list[int], j: int, tokens: list[_Token],
+) -> bool:
+    """True if the atom can be skipped without consuming input."""
+    if tok.text in (r"\b", r"\B", r"\A", r"\Z"):
+        return False  # boundary anchors block epsilon reachability
+    # Inline flag prefix of a group (e.g. ``s:`` in ``(?s:...)``)
+    # does not consume input.
+    idx = branch[j]
+    if (
+        idx > 0
+        and tokens[idx - 1].kind == _TKind.GROUP_OPEN
+        and len(tok.text) >= 2
+        and tok.text.endswith(":")
+        and tok.text[:-1].isalpha()
+    ):
+        return True
+    # An atom followed by a quantifier that allows zero repetitions
+    # (e.g. ``.*``, ``a?``) can match the empty string.
+    return _atom_has_zero_min_quant(branch, j, tokens)
+
+
+def _atom_has_zero_min_quant(
+    branch: list[int], j: int, tokens: list[_Token],
+) -> bool:
+    """True if the atom at branch[j] is followed by a zero-min quantifier."""
+    return (
+        j + 1 < len(branch)
+        and tokens[branch[j + 1]].kind == _TKind.QUANT
+        and _quant_min_is_zero(tokens[branch[j + 1]].text)
+    )
+
+
+def _skip_group_tokens(
+    branch: list[int], j: int, close_idx: int,
+) -> int:
+    """Advance past all branch tokens up to and including close_idx."""
+    while j < len(branch) and branch[j] <= close_idx:
+        j += 1
+    return j
 
 
 def _group_with_quant_is_nullable(
@@ -2834,77 +2898,101 @@ def _first_hard_token(
     i = start
     while i < end:
         tok = tokens[i]
-        if tok.kind == _TKind.QUANT:
-            i += 1
-            continue
-        if tok.kind == _TKind.ANCHOR:
-            # ``$`` / ``\\Z`` are end boundaries.  In partial-match mode
-            # Sonar's canFail treats them as hard: isAnchoredAtEnd makes
-            # succeedOnEnd=false, so a repetition followed by ``$`` is
-            # flagged (``x*$`` reports ALWAYS_QUADRATIC).
-            if tok.text in ("$", r"\Z"):
-                return i
-            i += 1
-            continue
-        if tok.kind == _TKind.ATOM:
-            if tok.text == r"\Z":
-                return i
-            if tok.text in (r"\b", r"\B", r"\A"):
-                i += 1
-                continue
-            # Inline flag prefix of a group (e.g. ``s:`` in ``(?s:...)``)
-            # does not consume input.
-            if (
-                i > 0
-                and tokens[i - 1].kind == _TKind.GROUP_OPEN
-                and len(tok.text) >= 2
-                and tok.text.endswith(":")
-                and tok.text[:-1].isalpha()
-            ):
-                i += 1
-                continue
-            # An atom followed by a quantifier that allows zero repetitions
-            # can be skipped entirely (e.g. ``\w*``, ``a?``).
-            if i + 1 < end and tokens[i + 1].kind == _TKind.QUANT:
-                if _quant_min_is_zero(tokens[i + 1].text):
-                    i += 2
-                    continue
+        step = _hard_token_step(tok, tokens, i, end, open_to_close)
+        if step is None:
             return i
-        if tok.kind == _TKind.GROUP_OPEN:
-            close_idx = open_to_close.get(i)
-            if close_idx is None or close_idx >= end:
-                return i
-            # Lookaround groups ((?=...), (?!...), (?<=...), (?<!...)) are
-            # zero-width assertions: they consume no input and, in Sonar's
-            # canFail model, can reach the end without consuming, so they
-            # never make a repetition's continuation hard.
-            if tok.text in ("(?=", "(?!", "(?<=", "(?<!"):
-                i = close_idx + 1
-                if i < end and tokens[i].kind == _TKind.QUANT:
-                    i += 1
-                continue
-            if _group_with_quant_is_nullable(
-                i, close_idx, tokens, open_to_close,
-            ):
-                i = close_idx + 1
-                if i < end and tokens[i].kind == _TKind.QUANT:
-                    i += 1
-                continue
-            return i
-        if tok.kind == _TKind.GROUP_CLOSE:
-            i += 1
-            continue
-        if tok.kind == _TKind.ALT:
-            # Skip the branch content up to the next branch boundary; the
-            # disjunction's own continuation is what matters for canFail.
-            i += 1
-            while i < end and tokens[i].kind not in (
-                _TKind.ALT, _TKind.GROUP_CLOSE,
-            ):
-                i += 1
-            continue
-        i += 1
+        i = step
     return None
+
+
+def _hard_token_step(
+    tok: _Token, tokens: list[_Token], i: int, end: int,
+    open_to_close: dict[int, int],
+) -> int | None:
+    """Next index after skipping ``tok``, or None when it is hard."""
+    if tok.kind == _TKind.QUANT:
+        return i + 1
+    if tok.kind == _TKind.ANCHOR:
+        # ``$`` / ``\\Z`` are end boundaries.  In partial-match mode
+        # Sonar's canFail treats them as hard: isAnchoredAtEnd makes
+        # succeedOnEnd=false, so a repetition followed by ``$`` is
+        # flagged (``x*$`` reports ALWAYS_QUADRATIC).
+        if tok.text in ("$", r"\Z"):
+            return None
+        return i + 1
+    if tok.kind == _TKind.ATOM:
+        if _atom_hardness(tok, tokens, i, end) is not None:
+            return None
+        return i + 1
+    if tok.kind == _TKind.GROUP_OPEN:
+        return _group_skip_step(tok, tokens, i, end, open_to_close)
+    if tok.kind == _TKind.GROUP_CLOSE:
+        return i + 1
+    if tok.kind == _TKind.ALT:
+        # Skip the branch content up to the next branch boundary; the
+        # disjunction's own continuation is what matters for canFail.
+        return _skip_alt_branch(tokens, i, end)
+    return i + 1
+
+
+def _group_skip_step(
+    tok: _Token, tokens: list[_Token], i: int, end: int,
+    open_to_close: dict[int, int],
+) -> int | None:
+    """Next index after a group, or None when the group is hard."""
+    close_idx = open_to_close.get(i)
+    if close_idx is None or close_idx >= end:
+        return None
+    if _group_is_skippable(
+        tok, i, close_idx, tokens, open_to_close,
+    ):
+        nxt = close_idx + 1
+        if nxt < end and tokens[nxt].kind == _TKind.QUANT:
+            nxt += 1
+        return nxt
+    return None
+
+
+def _skip_alt_branch(tokens: list[_Token], i: int, end: int) -> int:
+    """Advance past the alternation branch starting at token ``i``."""
+    i += 1
+    while i < end and tokens[i].kind not in (
+        _TKind.ALT, _TKind.GROUP_CLOSE,
+    ):
+        i += 1
+    return i
+
+
+def _atom_hardness(
+    tok: _Token, tokens: list[_Token], i: int, end: int,
+) -> int | None:
+    """Return the token index when the atom is hard, else None (skippable).
+
+    Boundary escapes (``\\b``, ``\\B``, ``\\A``) and inline flag prefixes
+    (``s:`` in ``(?s:...)``) consume no input.  An atom followed by a
+    zero-min quantifier (``\\w*``, ``a?``) can be skipped entirely.
+    ``\\Z`` is an end boundary and is hard.
+    """
+    if tok.text == r"\Z":
+        return i
+    if tok.text in (r"\b", r"\B", r"\A"):
+        return None
+    # Inline flag prefix of a group (e.g. ``s:`` in ``(?s:...)``)
+    # does not consume input.
+    if (
+        i > 0
+        and tokens[i - 1].kind == _TKind.GROUP_OPEN
+        and len(tok.text) >= 2
+        and tok.text.endswith(":")
+        and tok.text[:-1].isalpha()
+    ):
+        return None
+    # An atom followed by a quantifier that allows zero repetitions
+    # can be skipped entirely (e.g. ``\w*``, ``a?``).
+    if i + 1 < end and tokens[i + 1].kind == _TKind.QUANT:
+        if _quant_min_is_zero(tokens[i + 1].text):
+            return None
+    return i
 
 
 def _prefix_reaches_without_consuming(
@@ -2931,91 +3019,107 @@ def _prefix_reaches_without_consuming(
     i = 0
     while i < limit:
         tok = tokens[i]
-        if tok.kind == _TKind.QUANT:
-            i += 1
-            continue
-        if tok.kind == _TKind.ANCHOR:
-            # ^ or $ boundary blocks the implicit .* prefix — unless the
-            # anchor belongs to an alternation branch, in which case the
-            # engine can choose a different branch.
-            next_alt = _next_top_level_alt(tokens, i + 1, limit)
-            if next_alt is not None:
-                i = next_alt + 1
-                continue
+        step = _prefix_step(tok, tokens, i, limit, open_to_close)
+        if step is None:
             return False
-        if tok.kind == _TKind.ATOM:
-            if tok.text in (r"\A", r"\Z", r"\b", r"\B"):
-                return False  # boundary anchor blocks
-            # An atom followed by a quantifier that allows zero repetitions
-            # can be skipped entirely (e.g. ``!?``, ``x*``).
-            if i + 1 < limit and tokens[i + 1].kind == _TKind.QUANT:
-                if _quant_min_is_zero(tokens[i + 1].text):
-                    i += 2
-                    continue
-            # The atom is hard content.  If it belongs to an alternation
-            # branch (a top-level ALT follows before the repetition), the
-            # engine can choose a different branch, so skip to the next
-            # branch instead of blocking the prefix.
-            next_alt = _next_top_level_alt(tokens, i + 1, limit)
-            if next_alt is not None:
-                i = next_alt + 1
-                continue
-            return False  # any consuming atom blocks
-        if tok.kind == _TKind.GROUP_OPEN:
-            close_idx = open_to_close.get(i)
-            if close_idx is None:
-                return False
-            # Lookaround groups ((?=...), (?!...), (?<=...), (?<!...)) are
-            # zero-width: they do not consume input, so they never block
-            # the implicit .* prefix.
-            if tok.text in ("(?=", "(?!", "(?<=", "(?<!"):
-                i = close_idx + 1
-                if i < limit and tokens[i].kind == _TKind.QUANT:
-                    i += 1
-                continue
-            if close_idx >= limit:
-                # The repetition sits inside this group: keep scanning the
-                # group body so hard content before the repetition (e.g.
-                # ``ngx_command_t\s+``) blocks the implicit .* prefix.
-                i += 1
-                continue
-            # The group lies entirely before the repetition: it can be
-            # skipped only when its content is nullable (e.g. ``(x?)*``);
-            # a group that must consume input (``(\d{1,12})``) blocks the
-            # implicit .* prefix — unless it belongs to an alternation
-            # branch, in which case the engine can choose another branch.
-            if not _group_with_quant_is_nullable(
-                i, close_idx, tokens, open_to_close,
-            ):
-                next_alt = _next_top_level_alt(
-                    tokens, close_idx + 1, limit,
-                )
-                if next_alt is not None:
-                    i = next_alt + 1
-                    continue
-                return False
-            i = close_idx + 1
-            if i < limit and tokens[i].kind == _TKind.QUANT:
-                i += 1
-            continue
-        if tok.kind == _TKind.ALT:
-            # A disjunction is reachable without consuming input if ANY of
-            # its branches is nullable.  Scan each branch: if one branch is
-            # fully nullable (every token skippable), the disjunction as a
-            # whole does not block the prefix.
-            branch_start = i + 1
-            branch_end = _branch_end(tokens, branch_start, limit)
-            if _range_is_nullable(
-                branch_start, branch_end, tokens, open_to_close,
-            ):
-                i = branch_end
-                continue
-            return False  # no nullable branch -> the disjunction consumes
-        if tok.kind == _TKind.GROUP_CLOSE:
-            i += 1
-            continue
-        i += 1
+        i = step
     return True
+
+
+def _prefix_step(
+    tok: _Token, tokens: list[_Token], i: int, limit: int,
+    open_to_close: dict[int, int],
+) -> int | None:
+    """Next index after skipping ``tok``, or None when it blocks."""
+    if tok.kind == _TKind.QUANT:
+        return i + 1
+    if tok.kind == _TKind.ANCHOR:
+        # ^ or $ boundary blocks the implicit .* prefix — unless the
+        # anchor belongs to an alternation branch, in which case the
+        # engine can choose a different branch.
+        next_alt = _next_top_level_alt(tokens, i + 1, limit)
+        if next_alt is not None:
+            return next_alt + 1
+        return None
+    if tok.kind == _TKind.ATOM:
+        return _prefix_atom_step(tok, tokens, i, limit)
+    if tok.kind == _TKind.GROUP_OPEN:
+        return _prefix_group_step(tok, tokens, i, limit, open_to_close)
+    if tok.kind == _TKind.ALT:
+        # A disjunction is reachable without consuming input if ANY of
+        # its branches is nullable.  Scan each branch: if one branch is
+        # fully nullable (every token skippable), the disjunction as a
+        # whole does not block the prefix.
+        branch_start = i + 1
+        branch_end = _branch_end(tokens, branch_start, limit)
+        if _range_is_nullable(
+            branch_start, branch_end, tokens, open_to_close,
+        ):
+            return branch_end
+        return None  # no nullable branch -> the disjunction consumes
+    return i + 1
+
+
+def _prefix_atom_step(
+    tok: _Token, tokens: list[_Token], i: int, limit: int,
+) -> int | None:
+    """Next index after an atom, or None when it blocks the prefix."""
+    if tok.text in (r"\A", r"\Z", r"\b", r"\B"):
+        return None  # boundary anchor blocks
+    # An atom followed by a quantifier that allows zero repetitions
+    # can be skipped entirely (e.g. ``!?``, ``x*``).
+    if i + 1 < limit and tokens[i + 1].kind == _TKind.QUANT:
+        if _quant_min_is_zero(tokens[i + 1].text):
+            return i + 2
+    # The atom is hard content.  If it belongs to an alternation
+    # branch (a top-level ALT follows before the repetition), the
+    # engine can choose a different branch, so skip to the next
+    # branch instead of blocking the prefix.
+    next_alt = _next_top_level_alt(tokens, i + 1, limit)
+    if next_alt is not None:
+        return next_alt + 1
+    return None  # any consuming atom blocks
+
+
+def _prefix_group_step(
+    tok: _Token, tokens: list[_Token], i: int, limit: int,
+    open_to_close: dict[int, int],
+) -> int | None:
+    """Next index after a group, or None when it blocks the prefix."""
+    close_idx = open_to_close.get(i)
+    if close_idx is None:
+        return None
+    # Lookaround groups ((?=...), (?!...), (?<=...), (?<!...)) are
+    # zero-width: they do not consume input, so they never block
+    # the implicit .* prefix.
+    if tok.text in ("(?=", "(?!", "(?<=", "(?<!"):
+        nxt = close_idx + 1
+        if nxt < limit and tokens[nxt].kind == _TKind.QUANT:
+            nxt += 1
+        return nxt
+    if close_idx >= limit:
+        # The repetition sits inside this group: keep scanning the
+        # group body so hard content before the repetition (e.g.
+        # ``ngx_command_t\s+``) blocks the implicit .* prefix.
+        return i + 1
+    # The group lies entirely before the repetition: it can be
+    # skipped only when its content is nullable (e.g. ``(x?)*``);
+    # a group that must consume input (``(\d{1,12})``) blocks the
+    # implicit .* prefix — unless it belongs to an alternation
+    # branch, in which case the engine can choose another branch.
+    if not _group_with_quant_is_nullable(
+        i, close_idx, tokens, open_to_close,
+    ):
+        next_alt = _next_top_level_alt(
+            tokens, close_idx + 1, limit,
+        )
+        if next_alt is not None:
+            return next_alt + 1
+        return None
+    nxt = close_idx + 1
+    if nxt < limit and tokens[nxt].kind == _TKind.QUANT:
+        nxt += 1
+    return nxt
 
 
 def _next_top_level_alt(
@@ -3065,38 +3169,50 @@ def _range_is_nullable(
     i = start
     while i < end:
         tok = tokens[i]
-        if tok.kind == _TKind.QUANT:
-            i += 1
-            continue
-        if tok.kind == _TKind.ANCHOR:
-            i += 1
-            continue
-        if tok.kind == _TKind.ATOM:
-            if tok.text in (r"\A", r"\Z", r"\b", r"\B"):
-                i += 1
-                continue
-            if i + 1 < end and tokens[i + 1].kind == _TKind.QUANT:
-                if _quant_min_is_zero(tokens[i + 1].text):
-                    i += 2
-                    continue
+        step = _range_step(tok, tokens, i, end, open_to_close)
+        if step is None:
             return False
-        if tok.kind == _TKind.GROUP_OPEN:
-            close_idx = open_to_close.get(i)
-            if close_idx is None or close_idx >= end:
-                return False
-            if not _group_with_quant_is_nullable(
-                i, close_idx, tokens, open_to_close,
-            ):
-                return False
-            i = close_idx + 1
-            if i < end and tokens[i].kind == _TKind.QUANT:
-                i += 1
-            continue
-        if tok.kind in (_TKind.GROUP_CLOSE, _TKind.ALT):
-            i += 1
-            continue
-        i += 1
+        i = step
     return True
+
+
+def _range_step(
+    tok: _Token, tokens: list[_Token], i: int, end: int,
+    open_to_close: dict[int, int],
+) -> int | None:
+    """Next index after skipping ``tok``, or None when it blocks."""
+    if tok.kind == _TKind.QUANT:
+        return i + 1
+    if tok.kind == _TKind.ANCHOR:
+        return i + 1
+    if tok.kind == _TKind.ATOM:
+        if tok.text in (r"\A", r"\Z", r"\b", r"\B"):
+            return i + 1
+        if i + 1 < end and tokens[i + 1].kind == _TKind.QUANT:
+            if _quant_min_is_zero(tokens[i + 1].text):
+                return i + 2
+        return None
+    if tok.kind == _TKind.GROUP_OPEN:
+        return _range_group_step(tok, tokens, i, end, open_to_close)
+    return i + 1
+
+
+def _range_group_step(
+    tok: _Token, tokens: list[_Token], i: int, end: int,
+    open_to_close: dict[int, int],
+) -> int | None:
+    """Next index after a group, or None when it blocks the range."""
+    close_idx = open_to_close.get(i)
+    if close_idx is None or close_idx >= end:
+        return None
+    if not _group_with_quant_is_nullable(
+        i, close_idx, tokens, open_to_close,
+    ):
+        return None
+    nxt = close_idx + 1
+    if nxt < end and tokens[nxt].kind == _TKind.QUANT:
+        nxt += 1
+    return nxt
 
 
 def _ancestors_allow_always_quadratic(
@@ -3113,25 +3229,41 @@ def _ancestors_allow_always_quadratic(
     else:
         rep_depth = depths[rep_idx]
     for j, tok in enumerate(tokens):
-        if tok.kind != _TKind.GROUP_CLOSE:
-            continue
-        # depths[j] is the depth BEFORE the close; the original code
-        # decremented first, so compare the depth AFTER the close.
-        if depths[j] - 1 >= rep_depth:
-            continue
-        q = j + 1
-        if q >= len(tokens) or tokens[q].kind != _TKind.QUANT:
-            continue
-        # The group repetition encloses rep_idx only if it opens before it.
-        open_idx = close_to_open.get(j)
-        if open_idx is None or open_idx > rep_idx:
-            continue
-        qtext = tokens[q].text
-        if _quantifier_is_unbounded(qtext) and not qtext.endswith("+"):
-            return False  # open-ended non-possessive ancestor
-        if _first_hard_token(tokens, q + 1, len(tokens), open_to_close) is None:
-            return False  # ancestor continuation cannot fail -> no recursion
+        if _ancestor_blocks(
+            j, tok, tokens, rep_idx, rep_depth, depths,
+            open_to_close, close_to_open,
+        ):
+            return False
     return True
+
+
+def _ancestor_blocks(
+    j: int, tok: _Token, tokens: list[_Token], rep_idx: int,
+    rep_depth: int, depths: list[int],
+    open_to_close: dict[int, int],
+    close_to_open: dict[int, int],
+) -> bool:
+    """True when the group close at ``j`` routes the repetition through
+    Sonar's BacktrackingFinder (an open-ended non-possessive ancestor) or
+    its continuation cannot fail (so the visitor never recurses into the
+    repetition)."""
+    if tok.kind != _TKind.GROUP_CLOSE:
+        return False
+    # depths[j] is the depth BEFORE the close; the original code
+    # decremented first, so compare the depth AFTER the close.
+    if depths[j] - 1 >= rep_depth:
+        return False
+    q = j + 1
+    if q >= len(tokens) or tokens[q].kind != _TKind.QUANT:
+        return False
+    # The group repetition encloses rep_idx only if it opens before it.
+    open_idx = close_to_open.get(j)
+    if open_idx is None or open_idx > rep_idx:
+        return False
+    qtext = tokens[q].text
+    if _quantifier_is_unbounded(qtext) and not qtext.endswith("+"):
+        return True  # open-ended non-possessive ancestor
+    return _first_hard_token(tokens, q + 1, len(tokens), open_to_close) is None
 
 
 def _matching_open(close_idx: int, tokens: list[_Token]) -> int | None:
@@ -3184,17 +3316,8 @@ def _atom_intersects_token(
     character of the continuation's hard content?"""
     atom_tok = tokens[atom_idx]
     cont_tok = tokens[cont_idx]
-    if cont_tok.kind == _TKind.ANCHOR:
-        return False  # $ matches empty; no character intersection
-    if cont_tok.kind == _TKind.ATOM:
-        cont_chars = [cont_tok.text[0]] if cont_tok.text else []
-    elif cont_tok.kind == _TKind.GROUP_OPEN:
-        c = open_to_close.get(cont_idx)
-        cont_chars = (
-            [a[0] for a in _group_first_atoms(cont_idx, c, tokens) if a]
-            if c is not None else []
-        )
-    else:
+    cont_chars = _cont_first_chars(cont_tok, cont_idx, tokens, open_to_close)
+    if not cont_chars:
         return False
     if atom_tok.kind == _TKind.ATOM:
         return any(
@@ -3208,6 +3331,24 @@ def _atom_intersects_token(
         for a in _group_first_atoms(open_idx, atom_idx, tokens)
         for ch in cont_chars
     )
+
+
+def _cont_first_chars(
+    cont_tok: _Token, cont_idx: int, tokens: list[_Token],
+    open_to_close: dict[int, int],
+) -> list[str]:
+    """First characters the continuation token can match, or [] when it
+    matches empty (anchors) or is not character content."""
+    if cont_tok.kind == _TKind.ANCHOR:
+        return []  # $ matches empty; no character intersection
+    if cont_tok.kind == _TKind.ATOM:
+        return [cont_tok.text[0]] if cont_tok.text else []
+    if cont_tok.kind == _TKind.GROUP_OPEN:
+        c = open_to_close.get(cont_idx)
+        if c is None:
+            return []
+        return [a[0] for a in _group_first_atoms(cont_idx, c, tokens) if a]
+    return []
 
 
 def _element_has_intersecting_repetition(
@@ -3233,27 +3374,55 @@ def _element_has_intersecting_repetition(
         while j < hi:
             tok = tokens[j]
             if tok.kind == _TKind.GROUP_OPEN:
-                c = open_to_close.get(j)
-                if c is not None and c < hi:
-                    stack.append((j + 1, c))
-                    j = c + 1
+                nested = _push_nested_group(
+                    j, hi, tokens, open_to_close, stack,
+                )
+                if nested is not None:
+                    j = nested
                     continue
-            if tok.kind in (_TKind.ATOM, _TKind.GROUP_CLOSE):
-                jq = j + 1
-                if (
-                    jq < hi
-                    and tokens[jq].kind == _TKind.QUANT
-                    and _quantifier_is_unbounded(tokens[jq].text)
-                ):
-                    cont = _first_hard_token(
-                        tokens, jq + 1, hi, open_to_close,
-                    )
-                    if cont is not None and _atom_intersects_token(
-                        j, cont, tokens, open_to_close, close_to_open,
-                    ):
-                        return True
+            if _inner_rep_intersects(
+                j, hi, tokens, open_to_close, close_to_open,
+            ):
+                return True
             j += 1
     return False
+
+
+def _push_nested_group(
+    j: int, hi: int, tokens: list[_Token],
+    open_to_close: dict[int, int], stack: list[tuple[int, int]],
+) -> int | None:
+    """Push a nested group's body onto the stack; return the index just
+    past the group when it lies inside [j, hi), else None."""
+    c = open_to_close.get(j)
+    if c is None or c >= hi:
+        return None
+    stack.append((j + 1, c))
+    return c + 1
+
+
+def _inner_rep_intersects(
+    j: int, hi: int, tokens: list[_Token],
+    open_to_close: dict[int, int], close_to_open: dict[int, int],
+) -> bool:
+    """True when the atom/group-close at ``j`` is an open-ended repetition
+    whose atom intersects its continuation."""
+    if tokens[j].kind not in (_TKind.ATOM, _TKind.GROUP_CLOSE):
+        return False
+    jq = j + 1
+    if (
+        jq >= hi
+        or tokens[jq].kind != _TKind.QUANT
+        or not _quantifier_is_unbounded(tokens[jq].text)
+    ):
+        return False
+    cont = _first_hard_token(tokens, jq + 1, hi, open_to_close)
+    return (
+        cont is not None
+        and _atom_intersects_token(
+            j, cont, tokens, open_to_close, close_to_open,
+        )
+    )
 
 
 def _repetition_repr(
@@ -3304,38 +3473,51 @@ def _check_implicit_partial_match(pattern: str) -> str | None:
     depths = _token_depths(tokens)
     atomic_ranges = _atomic_group_ranges(tokens, open_to_close)
     for i, tok in enumerate(tokens):
-        if tok.kind not in (_TKind.ATOM, _TKind.GROUP_CLOSE):
-            continue
-        if _inside_atomic_group(i, atomic_ranges):
-            continue
-        q_idx = i + 1
-        if q_idx >= n or tokens[q_idx].kind != _TKind.QUANT:
-            continue
-        if not _quantifier_is_unbounded(tokens[q_idx].text):
-            continue
-        if not _ancestors_allow_always_quadratic(
-            i, tokens, open_to_close, close_to_open, depths,
+        if _repetition_is_dangerous(
+            i, tok, tokens, n, open_to_close, close_to_open,
+            depths, atomic_ranges,
         ):
-            continue
-        if _first_hard_token(tokens, q_idx + 1, n, open_to_close) is None:
-            continue
-        if not _prefix_reaches_without_consuming(
-            tokens, i, open_to_close, close_to_open,
-        ):
-            continue
-        if _element_has_intersecting_repetition(
-            tokens, i, q_idx, open_to_close, close_to_open,
-        ):
-            continue
-        return (
-            f"unanchored open-ended repetition "
-            f"'{_repetition_repr(pattern, tokens, i, q_idx, close_to_open)}' "
-            "overlaps the implicit leading .* of a partial-match API — the "
-            "repetition is reachable from the pattern start and is followed "
-            "by content that can fail, so the engine backtracks "
-            "quadratically (SonarCloud S8786)"
-        )
+            return (
+                f"unanchored open-ended repetition "
+                f"'{_repetition_repr(pattern, tokens, i, i + 1, close_to_open)}' "
+                "overlaps the implicit leading .* of a partial-match API — the "
+                "repetition is reachable from the pattern start and is followed "
+                "by content that can fail, so the engine backtracks "
+                "quadratically (SonarCloud S8786)"
+            )
     return None
+
+
+def _repetition_is_dangerous(
+    i: int, tok: _Token, tokens: list[_Token], n: int,
+    open_to_close: dict[int, int], close_to_open: dict[int, int],
+    depths: list[int], atomic_ranges: list[tuple[int, int]],
+) -> bool:
+    """True when the repetition at token ``i`` is an S8786 hit."""
+    if tok.kind not in (_TKind.ATOM, _TKind.GROUP_CLOSE):
+        return False
+    if _inside_atomic_group(i, atomic_ranges):
+        return False
+    q_idx = i + 1
+    if q_idx >= n or tokens[q_idx].kind != _TKind.QUANT:
+        return False
+    if not _quantifier_is_unbounded(tokens[q_idx].text):
+        return False
+    if not _ancestors_allow_always_quadratic(
+        i, tokens, open_to_close, close_to_open, depths,
+    ):
+        return False
+    if _first_hard_token(tokens, q_idx + 1, n, open_to_close) is None:
+        return False
+    if not _prefix_reaches_without_consuming(
+        tokens, i, open_to_close, close_to_open,
+    ):
+        return False
+    if _element_has_intersecting_repetition(
+        tokens, i, q_idx, open_to_close, close_to_open,
+    ):
+        return False
+    return True
 
 
 # All checks in priority order
