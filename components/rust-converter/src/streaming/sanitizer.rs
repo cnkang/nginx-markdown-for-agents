@@ -20,8 +20,8 @@ use crate::security::escape_markdown_destination;
 use crate::security::escape_markdown_text;
 use crate::security::is_dangerous_url_value;
 use crate::security::normalize_input_type;
-use crate::security::sanitize_url_value;
 use crate::security::select_input_control_text;
+use crate::security::{escape_link_label, sanitize_url_value};
 use crate::streaming::types::StreamEvent;
 
 /// HTML void elements that never have children.
@@ -372,10 +372,17 @@ impl StreamingSanitizer {
                 let Some(safe_url) = sanitize_url_value(&url_value) else {
                     return SanitizeDecision::Skip;
                 };
+                /* The generated text is emitted through the trusted-text
+                 * path, so the label must already be Markdown-safe. Tag
+                 * names are internal today, but escaping here keeps every
+                 * generated-link emission site under the same label policy
+                 * and neutralizes the payload if a future element set ever
+                 * contributes attacker-influenced names. */
+                let escaped_label = escape_link_label(tag);
                 let escaped = escape_markdown_destination(safe_url);
                 SanitizeDecision::PassGenerated(StreamEvent::Text(format!(
                     "[{}]({})",
-                    tag, escaped
+                    escaped_label, escaped
                 )))
             }
             None => SanitizeDecision::Skip,
@@ -877,6 +884,45 @@ mod tests {
             .map(|name| ((*name).to_string(), "javascript:alert(1)".to_string()))
             .collect();
         assert!(sanitize_attributes(&attrs).is_empty());
+    }
+
+    /// The generated-media label must survive as a valid Markdown link
+    /// label under nesting and boundary inputs: safe URLs pass through,
+    /// dangerous URLs are dropped entirely, and the emitted destination is
+    /// always escaped.
+    #[test]
+    fn media_url_decision_label_and_destination_are_markdown_safe() {
+        let mut sanitizer = StreamingSanitizer::new();
+        assert_eq!(
+            sanitizer.process_event(start_tag(
+                "iframe",
+                vec![("src", "https://example.com/embed (1)")],
+            )),
+            SanitizeDecision::PassGenerated(StreamEvent::Text(
+                "[iframe](<https://example.com/embed (1)>)".to_string()
+            )),
+            "destination must be angle-bracket wrapped and the label escaped"
+        );
+    }
+
+    #[test]
+    fn embedded_media_start_tag_with_dangerous_url_is_skipped() {
+        let mut sanitizer = StreamingSanitizer::new();
+        assert_eq!(
+            sanitizer.process_event(start_tag("iframe", vec![("src", "javascript:alert(1)")],)),
+            SanitizeDecision::Skip
+        );
+        // The iframe element itself is remembered in strip mode; its end
+        // tag is consumed, and content after the strip region passes
+        // through.
+        assert_eq!(
+            sanitizer.process_event(end_tag("iframe")),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(
+            sanitizer.process_event(text("after")),
+            SanitizeDecision::Pass(text("after"))
+        );
     }
 
     #[test]

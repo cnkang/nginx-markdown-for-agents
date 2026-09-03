@@ -25,6 +25,11 @@
 
 #define MARKDOWN_STREAMING_ENABLED 1
 
+/* Test-stub ngx_memzero: not provided by the NGINX test stubs, and
+ * production NGINX defines it. Several unit files follow this same
+ * local-define pattern (see buf_len_safe_test.c). */
+#define ngx_memzero(buf, n)  memset(buf, 0, n)
+
 #include "../../src/ngx_http_markdown_filter_module.h"
 
 #ifndef NGX_HTTP_GET
@@ -306,6 +311,7 @@ test_marshalling_fidelity(void)
     init_conf(&conf);
     conf.max_size = 4096;
     memset(&range_hdr, 0, sizeof(range_hdr));
+    range_hdr.hash = 1;
 
     init_base_request(&r);
     r.headers_out.status = NGX_HTTP_OK;
@@ -321,6 +327,12 @@ test_marshalling_fidelity(void)
     TEST_ASSERT(g_last_input.status == 200, "status marshalled");
     TEST_ASSERT(g_last_input.has_range_header == 1,
                 "has_range_header marshalled from headers_in.range");
+
+    range_hdr.hash = 0;
+    reset_ffi_capture();
+    (void) ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL);
+    TEST_ASSERT(g_last_input.has_range_header == 0,
+                "inactive Range header must not reach the eligibility FFI");
     TEST_ASSERT(g_last_input.content_type_len == 9,
                 "content_type_len marshalled");
     TEST_ASSERT(g_last_input.content_length == 2048,

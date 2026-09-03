@@ -60,6 +60,9 @@ ln -sfn "$PWD/skills/nginx-markdown-harness-maintenance" \
 Claude Code:
 
 ```bash
+# Resolve the repository root first so the $PWD-relative source path works
+# from any starting directory.
+cd "$(git rev-parse --show-toplevel)"
 mkdir -p "$HOME/.claude/skills"
 ln -sfn "$PWD/skills/nginx-markdown-harness-maintenance" \
   "$HOME/.claude/skills/nginx-markdown-harness-maintenance"

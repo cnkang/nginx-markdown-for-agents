@@ -438,7 +438,7 @@ setup_conf_context(ngx_uint_t nargs)
 
     g_cf.pool = &g_pool;
     g_cf.args = &g_args_array;
-    g_cf.cmd_type = 0;
+    g_cf.cmd_type = NGX_HTTP_MAIN_CONF;
 
     g_cmd.name.data = g_cmd_name;
     g_cmd.name.len = sizeof(g_cmd_name) - 1;
@@ -1097,6 +1097,46 @@ test_property1g_all_keys_specified(void)
     TEST_PASS("Property 1g: all 8 keys × 100 iterations pass");
 }
 
+static void
+test_max_inflight_is_http_scoped(void)
+{
+    ngx_http_markdown_conf_t  mcf;
+    char                     *rc;
+    static u_char             max_inflight[] = "max_inflight=4";
+
+    TEST_SUBSECTION("max_inflight uses the http configuration scope");
+
+    init_limits_unset(&mcf);
+    setup_conf_context(2);
+    g_args[1].data = max_inflight;
+    g_args[1].len = sizeof(max_inflight) - 1;
+    rc = ngx_http_markdown_limits(&g_cf, &g_cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+                "max_inflight is accepted in the http context");
+
+    init_limits_unset(&mcf);
+    setup_conf_context(2);
+    g_cf.cmd_type = NGX_HTTP_SRV_CONF;
+    g_args[1].data = max_inflight;
+    g_args[1].len = sizeof(max_inflight) - 1;
+    rc = ngx_http_markdown_limits(&g_cf, &g_cmd, &mcf);
+    TEST_ASSERT(rc != NGX_CONF_OK
+                && strstr(g_conf_log_buf, "http context") != NULL,
+                "max_inflight is rejected in the server context");
+
+    init_limits_unset(&mcf);
+    setup_conf_context(2);
+    g_cf.cmd_type = NGX_HTTP_LOC_CONF;
+    g_args[1].data = max_inflight;
+    g_args[1].len = sizeof(max_inflight) - 1;
+    rc = ngx_http_markdown_limits(&g_cf, &g_cmd, &mcf);
+    TEST_ASSERT(rc != NGX_CONF_OK
+                && strstr(g_conf_log_buf, "http context") != NULL,
+                "max_inflight is rejected in the location context");
+
+    TEST_PASS("max_inflight is restricted to the http context");
+}
+
 /* ----------------------------------------------------------------
  * main
  * ---------------------------------------------------------------- */
@@ -1115,6 +1155,7 @@ main(void)
     test_property1e_overflow_values_rejected();
     test_property1f_malformed_args_rejected();
     test_property1g_all_keys_specified();
+    test_max_inflight_is_http_scoped();
 
     printf("\n✓ All Property 1 tests passed.\n");
     return 0;

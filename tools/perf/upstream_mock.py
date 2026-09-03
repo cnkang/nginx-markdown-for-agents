@@ -193,6 +193,13 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
 
     def _send_chunked_response(self, body: bytes, content_encoding: str | None) -> None:
         """Send chunked HTTP response."""
+        if content_encoding == "br" and BROTLI_MODULE is None:
+            # Streaming Brotli chunks require the Python brotli package
+            # (the CLI fallback only serves the non-chunked path).  Degrade
+            # to identity before sending the status line or headers,
+            # matching the _apply_compression fallback, instead of emitting
+            # a br encoding the body cannot satisfy or raising mid-response.
+            content_encoding = None
         self._send_common_headers(content_encoding)
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()

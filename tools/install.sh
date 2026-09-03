@@ -1862,7 +1862,11 @@ if ! resolve_download_info "$ASSET_NAME" "$OS_TYPE" "$ARCH" "$NGINX_VERSION" "$s
     "${_json_suggestions[@]:-Install python3: apt-get install python3 / apk add python3}"
 fi
 
-mapfile -t RELEASE_INFO < "$RELEASE_INFO_FILE"
+_release_info_index=0
+while IFS= read -r _release_line || [[ -n "$_release_line" ]]; do
+  RELEASE_INFO[$_release_info_index]="$_release_line"
+  _release_info_index=$((_release_info_index + 1))
+done < "$RELEASE_INFO_FILE"
 "$RM_BIN" -f "$RELEASE_INFO_FILE" || true
 DOWNLOAD_URL="${RELEASE_INFO[0]:-}"
 EXPECTED_SHA256="${RELEASE_INFO[1]:-}"
@@ -2053,6 +2057,18 @@ if [[ "$TAR_MEMBERS" != "$EXPECTED_MEMBER" ]]; then
     die_with_error "extraction" \
         "Archive member mismatch: expected \"$EXPECTED_MEMBER\", got \"$TAR_MEMBERS\"." \
         "The archive may be corrupted or built for a different purpose."
+fi
+# Require the member to be a regular file: `[[ -f ]]` follows symlinks, so a
+# crafted archive could point the expected name at a directory or device.
+# `tar -tvzf` typeflags: '-' = regular file. BSD tar prints no typeflag for
+# regular files; GNU tar prints '-' — accept both, reject anything else.
+TAR_TYPEFLAG="$( "$TAR_BIN" -tvzf "$ASSET_NAME" 2>/dev/null \
+    | awk -v member="$EXPECTED_MEMBER" '$NF == member { print substr($0, 1, 1) }' \
+    | head -1)"
+if [[ -n "$TAR_TYPEFLAG" && "$TAR_TYPEFLAG" != "-" ]]; then
+    die_with_error "extraction" \
+        "Archive member ${EXPECTED_MEMBER} is not a regular file (type flag '${TAR_TYPEFLAG}')." \
+        "Refusing to extract a non-regular-file member."
 fi
 # Check for absolute paths or path traversal in member names (defense-in-depth)
 if echo "$TAR_MEMBERS" | grep -qE '^/|(^|/)\.\./'; then

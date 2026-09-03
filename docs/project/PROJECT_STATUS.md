@@ -41,10 +41,10 @@ pending until the blocking gates pass.
 - **OTel removal**: The experimental OTel directives and implementation are
   absent from the 0.9.2 production surface. ADR-0027 records conditions for a
   possible future redesign.
-- **Metrics freeze**: The twelve-family v1 contract replaces the production
+- **Metrics freeze**: The eleven-family v1 contract replaces the production
   metrics endpoint (`requests_total`, `conversion_attempts_total`,
   `conversion_deliveries_total`, `conversion_duration_seconds`,
-  `input_bytes_total`, `output_bytes_total`, `inflight_requests`,
+  `input_bytes_total`, `output_bytes_total`,
   `streaming_events_total`, `streaming_peak_memory_bytes`,
   `decompression_events_total`, `dynconf_reloads_total`, `build_info`).
   This replaces the legacy multi-format, per-path, shadow, and debug families.
@@ -409,70 +409,29 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 The 0.9.x release line is the current maintained line. The current
 development version is 0.9.2. 0.9.1 remains the latest released patch until
 the 0.9.2 release tag and release gates are complete. It is a
-baseline-consolidation and compatibility-reset release that adds
-hybrid zero-copy streaming output, gzip/deflate/Brotli streaming decompression,
-performance evidence gates, and a doctor advice tool, on top of the 0.9.0
-breaking-release foundation.
+breaking surface-freeze release that consolidates the configuration surface
+to the 25-directive contract (removing profile presets and per-path metrics),
+freezes the observability surface (eleven v1 metric families, reason registry,
+diagnostics JSON v1), advances the bundled FFI boundary to ABI 2, and moves
+the musl dynamic-module build before publication, on top of the 0.9.1
+streaming-decompression and zero-copy foundation.
 
 #### 0.9.1 (previous release)
 
-- **Hybrid zero-copy streaming output**: `markdown_streaming_zero_copy`
-  directive (default off) with pool-cleanup handler and fallback to pool-copy
-  when the zero-copy buffer factory fails. **Removed in 0.9.2**: zero-copy
-  delivery is now an internal optimization selected automatically from buffer
-  ownership and backpressure state, with no operator-facing directive.
-- **Streaming decompression routing**: gzip, zlib-wrapped deflate (RFC 1950
-  header sniffing), and Brotli bounded streaming decompression with member
-  lifecycle management and cumulative budget enforcement.
-- **Full-buffer compressed copy reduction**: header accumulation helper and
-  streaming-first routing reduce unnecessary copies for compressed responses.
-- **Performance evidence gate**: `make release-gates-check-091` (blocking for
-  release tags) plus `make perf-evidence-check` (report-only), module
-  benchmark harness exercises 8 scenarios including Brotli streaming.
-- **Doctor advice tool**: `make doctor` provides module-aware configuration
-  diagnostics and actionable fix suggestions.
-- **ADRs 0020–0024**: hybrid zero-copy pool cleanup, gzip/deflate streaming
-  decompression routing, performance evidence release gate, single public
-  streaming policy, and Brotli streaming decompression.
-- **Rules 56–62**: orphan comment closers (56), `#ifdef`-guarded function
-  visibility (57), workflow input injection (58), hardcoded HTTP status in
-  reject paths (59), E2E config directive consistency (60), performance
-  evidence provenance invariant (61), release-matrix key normalization
-  invariant (62), new detectors `detect_orphan_comment_close.py`,
-  `detect_ifdef_guard_visibility.sh`, `detect_workflow_input_injection.sh`,
-  `detect_hardcoded_http_status.sh`, `detect_e2e_streaming_config.py`,
-  new rule documentation `release-integrity.md`.
-- **Config simplification**: `markdown_streaming off|auto|force` is the sole
-  public processing-path selector, `markdown_streaming_engine` removed.
-  `markdown_auto_decompress` directive registration fix.
-- **FFI ABI reset**: bundled Rust/C boundary reset to ABI 1. NGINX validates
-  `markdown_abi_version()` during preconfiguration.
-- **Security**: right-most Forwarded element selection, Cache-Control
-  quote-aware parsing with malformed fail-closed, workflow input sanitization
-  via env vars, base URL FFI scheme propagation for HTTPS.
-- **Release infrastructure**: reproducible evidence binding, tag SHA gate
-  with commit-status and check-run dual verification, canonical benchmark
-  baseline with provenance enforcement.
+Details for 0.9.1 (hybrid zero-copy streaming, streaming decompression,
+performance evidence gate, harness rules 56-62, FFI ABI v1) are in the
+[0.9.1 release notes](../releases/0.9.1-release-notes.md) and the
+[CHANGELOG](../../CHANGELOG.md).
 
 #### 0.9.0 (previous breaking release)
 
-- **Config V2 directives**: `markdown_error_policy`, `markdown_accept`,
-  `markdown_trusted_proxies`, `markdown_limits`, `markdown_cache_validation`
-  replace 0.8.x legacy directives.
-- **Profile system**: `markdown_profile` (strict_cache, balanced, streaming_first)
-  for one-line preset deployments.
-- **0.8.x migration**: 0.9.0 is a breaking release. `nginx -t` rejects legacy
-  directive names with a migration hint. See
-  [MIGRATION-0.9.md](../guides/MIGRATION-0.9.md) for the full mapping.
-- Breaking: removed `markdown_max_size`, `markdown_timeout`,
-  `markdown_streaming_budget`, `markdown_on_error`,
-  `markdown_streaming_on_error`, `markdown_etag`,
-  `markdown_conditional_requests`, `markdown_trust_forwarded_headers`,
-  `markdown_on_wildcard`, `markdown_large_body_threshold`,
-  `markdown_streaming_engine` (0.9.1), and
-  `markdown_streaming_auto_threshold` (0.8.0) as standalone directives.
+Details for 0.9.0 (Config V2 directives, profile system, and the
+0.8.x→0.9.0 migration mapping) are in the
+[0.9.0 release notes](../releases/0.9.0-release-notes.md),
+[MIGRATION-0.9.0.md](../guides/MIGRATION-0.9.0.md), and the
+[CHANGELOG](../../CHANGELOG.md).
 
-#### 0.8.3 (last 0.8.x patch)
+#### 0.8.3 (historical — last 0.8.x patch)
 
 - Streaming state machine correctness: corrected `pop_contexts_up_to`
   return order (innermost-first) and added `CodeBlock` handling in

@@ -92,6 +92,7 @@ Upstream response (HTML, possibly Content-Encoding: gzip/br)
 │ gunzip body filter (conditional)│  ← decompresses gzip-encoded upstream
 │  · only when client rejects gzip│     responses for clients that do not
 │  · strips Content-Encoding: gzip│     accept gzip; passes through otherwise
+│  · NOT an upstream decoder      │  · header mutation only, never an upstream decompressor
 └─────────────────────────────────┘
   │
   ▼

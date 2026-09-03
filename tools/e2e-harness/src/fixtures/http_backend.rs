@@ -675,9 +675,6 @@ nginx_markdown_input_bytes_total 1024\n\
 # HELP nginx_markdown_output_bytes_total Output bytes\n\
 # TYPE nginx_markdown_output_bytes_total counter\n\
 nginx_markdown_output_bytes_total 1024\n\
-# HELP nginx_markdown_inflight_requests In-flight conversions\n\
-# TYPE nginx_markdown_inflight_requests gauge\n\
-nginx_markdown_inflight_requests 0\n\
 # HELP nginx_markdown_streaming_events_total Streaming lifecycle events\n\
 # TYPE nginx_markdown_streaming_events_total counter\n\
 nginx_markdown_streaming_events_total{{transition=\"commit\",reason=\"converted\"}} 0\n\

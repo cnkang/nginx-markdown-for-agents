@@ -12,6 +12,7 @@ untracked non-ignored Markdown files.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -388,15 +389,32 @@ def check_internal_reference_policy(
 
 def _parse_document_update_version(
     version: str,
-) -> tuple[int, ...] | tuple[int, int, int, str]:
-    """Return a sortable key for a document-update version cell."""
+) -> tuple[tuple[int, ...], str]:
+    """Return a sortable key for a document-update version cell.
+
+    Every version maps to the same key shape (numeric parts, trailing
+    suffix), so descending sort comparisons never mix int and str
+    elements.  Numeric-only versions produce an empty suffix, which the
+    table sorter ranks above any release-candidate suffix so a release
+    orders above its rc builds while preserving full numeric ordering
+    for four-component versions.
+    """
     normalized = version.strip().strip("`*[]()\"'")
     if normalized.startswith("v"):
         normalized = normalized[1:]
-    try:
-        return tuple(int(part) for part in normalized.split("."))
-    except ValueError:
-        return (0, 0, 0, normalized)
+    numeric: list[int] = []
+    remainder = normalized
+    while remainder:
+        match = re.match(r"(\d+)", remainder)
+        if match is None:
+            break
+        numeric.append(int(match.group(1)))
+        remainder = remainder[match.end():]
+        if remainder.startswith("."):
+            remainder = remainder[1:]
+            continue
+        break
+    return (tuple(numeric), remainder)
 
 
 def _document_update_table_lines(content: str) -> list[str]:
@@ -425,11 +443,26 @@ def _document_update_rows_are_sorted(table_lines: list[str]) -> bool:
     for line in data_lines:
         cells = [cell.strip() for cell in line.split("|")]
         if len(cells) >= 3:
-            rows.append((_parse_document_update_version(cells[1]), cells[2], line))
+            version_key = _parse_document_update_version(cells[1])
+            rows.append((version_key, cells[2], line))
 
     retained_rows = [row[2] for row in rows]
     expected = [
-        row[2] for row in sorted(rows, key=lambda row: row[:2], reverse=True)
+        row[2]
+        for row in sorted(
+            rows,
+            key=lambda row: (
+                row[0][0],
+                (
+                    0
+                    if row[0][1].lstrip("-").lower().startswith("rc")
+                    else (1 if row[0][1] == "" else 2)
+                ),
+                row[0][1],
+                row[1],
+            ),
+            reverse=True,
+        )
     ]
     return expected == retained_rows
 
@@ -454,6 +487,86 @@ def check_document_updates_order(files: list[Path]) -> list[str]:
             )
 
     return errors
+
+
+FAMILY_COUNT_RE = re.compile(
+    r"twelve|eleven|exactly 11|exactly 12|11 famil|12 famil",
+    re.IGNORECASE,
+)
+HISTORICAL_FAMILY_CONTEXT_RE = re.compile(
+    r"historical|legacy|renamed|removed|retired|0\.9\.1|previous|earlier|older",
+    re.IGNORECASE,
+)
+
+
+def _claimed_family_count(line: str) -> int | None:
+    """Extract the metric-family count claimed by a doc line.
+
+    Spelled-out numbers take precedence: a line may also contain
+    version-like digits (e.g. "eleven v1 metric families") that
+    a numeric extractor would misread as a small count.
+    """
+    if re.search(r"\beleven\b", line, re.IGNORECASE):
+        return 11
+    if re.search(r"\btwelve\b", line, re.IGNORECASE):
+        return 12
+    claimed = (re.search(r"(\d{1,12})\s{0,64}metric\s{1,64}famil", line)
+               or re.search(r"(\d{1,12})\s{0,64}famil", line))
+    if not claimed:
+        return None
+    return int(claimed.group(1))
+
+
+def _family_count_mismatch(
+    path: Path, line_no: int, line: str, family_count: int
+) -> str | None:
+    """Return a failure message when a doc line claims a wrong count."""
+    if not FAMILY_COUNT_RE.search(line):
+        return None
+    claimed_count = _claimed_family_count(line)
+    if claimed_count is None:
+        return None
+    if claimed_count == family_count:
+        return None
+    # historical context is allowed to mention other counts
+    if HISTORICAL_FAMILY_CONTEXT_RE.search(line):
+        return None
+    return (
+        f"{path.relative_to(ROOT)}:{line_no}: claims {claimed_count} "
+        f"metric families but the registry defines {family_count}"
+    )
+
+
+def check_metric_family_count(files: list[Path]) -> list[str]:
+    """Metric-family counts claimed in docs must match the registry.
+
+    The frozen 0.9.2 surface is the family list in
+    schemas/metrics-v1.registry.json; docs must not restate a different count.
+    Lines describing historical/pre-freeze surfaces are allowed to reference
+    removed families, so only claims about the current contract are checked.
+    """
+    registry_path = ROOT / "schemas/metrics-v1.registry.json"
+    try:
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [f"cannot read metrics registry {registry_path}"]
+    families = [
+        entry
+        for entry in registry.get("families", [])
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+    ]
+    family_count = len(families)
+    failures: list[str] = []
+    for path in files:
+        if not path.is_relative_to(ROOT / "docs"):
+            continue
+        for line_no, line in enumerate(
+            path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
+        ):
+            failure = _family_count_mismatch(path, line_no, line, family_count)
+            if failure is not None:
+                failures.append(failure)
+    return failures
 
 
 def main() -> int:
@@ -491,6 +604,7 @@ def main() -> int:
     )
     failures.extend(check_duplicate_sync())
     failures.extend(check_document_updates_order(files))
+    failures.extend(check_metric_family_count(files))
 
     if failures:
         print("Documentation checks failed:")

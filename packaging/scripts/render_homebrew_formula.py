@@ -81,7 +81,7 @@ def main() -> int:
     args = parse_args()
     try:
         source = validate_read_path(args.source, purpose="Homebrew formula source")
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     try:

@@ -3,15 +3,17 @@
 | Field | Value |
 |-------|-------|
 | Version | 0.7.0 |
-| Status | ACTIVE |
+| Status | HISTORICAL |
 | Created | 2026-05-17 |
+| Superseded by | 0.9.2 release gates (`validate_release_gates_070.py`/`_092` are versioned separately) |
 | Source | design.md §14.0 |
 | Detailed Gates | [0.7.0-release-gates.md](./0.7.0-release-gates.md) |
 
-> This document defines the 6 release gates for v0.7.0 as specified in the
-> technical design (§14.0). Each gate must pass before the release can proceed.
-> For detailed check items, verification commands, and Go/No-Go criteria, see
-> [0.7.0-release-gates.md](./0.7.0-release-gates.md).
+> **Historical record.** This document defines the 6 release gates for v0.7.0
+> as specified in the technical design (§14.0). We retain it as a verifiable
+> record of the 0.7.0 cycle and it is **not** the active release line: current
+> Go/No-Go review enforces the 0.9.2 gates, never these. The
+> release-blocking statements below apply to 0.7.0 GA only.
 
 ---
 
@@ -212,7 +214,7 @@ make release-gates-check-070
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-24 | Kang | Gate 3.6 upgrade/rollback evidence independence defined (separate environment, runner, actor, or provenance); validator matrix rows annotated as 0.7.0-era names retired by the twelve-family freeze |
+| 0.9.2 | 2026-08-24 | Kang | Gate 3.6 upgrade/rollback evidence independence defined (separate environment, runner, actor, or provenance); validator matrix rows annotated as 0.7.0-era names retired by the eleven-family freeze |
 | 0.9.2 | 2026-08-15 | Kang | Helm chart render gate uses validate_k8s_manifests.py and defines the required rendered fields |
 | 0.7.0-int | 2026-05-20 | Kang | Add Gate 6 (Fuzz & Packaging Infrastructure) with validate_fuzz_packaging.py checks |
 | 0.7.0-draft | 2026-05-17 | spec-agent | Initial v0.7.0 gate definitions from design.md §14.0 |

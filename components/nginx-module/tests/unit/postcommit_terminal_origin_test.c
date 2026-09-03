@@ -54,7 +54,12 @@ test_expand_buf(
 
     new_size = old_size * 2;
     if (max_size > 0 && new_size > max_size) {
-        new_size = max_size;
+        /*
+         * Never shrink below old_size: the caller copies old_size
+         * bytes into the new buffer after this helper returns, so a
+         * smaller allocation would overflow the heap.
+         */
+        new_size = (max_size < old_size) ? old_size : max_size;
     }
 
     new_buf = malloc(new_size);
@@ -161,6 +166,39 @@ test_expand_buf_max_size(void)
 }
 
 
+/* --- Test: expand_buf never shrinks below old_size --- */
+
+static void
+test_expand_buf_max_size_below_old_size(void)
+{
+    u_char    *heap_buf;
+    u_char    *buf;
+    u_char     expected[64];
+    size_t     buf_size;
+    ngx_int_t  rc;
+
+    heap_buf = malloc(64);
+    TEST_ASSERT(heap_buf != NULL, "setup");
+    memset(heap_buf, 0x42, 64);
+    memcpy(expected, heap_buf, 64);
+    buf = heap_buf;
+    buf_size = 64;
+
+    rc = test_expand_buf(&heap_buf, &buf, &buf_size, 32, NULL);
+
+    TEST_ASSERT(rc == NGX_OK, "must succeed");
+    TEST_ASSERT(buf_size == 64,
+        "max_size below old_size must keep old_size");
+    TEST_ASSERT(heap_buf != NULL, "heap must be non-NULL");
+    TEST_ASSERT(memcmp(expected, buf, 64) == 0,
+        "old content must survive the copy");
+
+    free(heap_buf);
+
+    TEST_PASS("expand_buf max_size below old_size keeps old_size");
+}
+
+
 /* --- Test: send_origin constants are distinct --- */
 
 static void
@@ -232,6 +270,7 @@ main(void)
     test_expand_buf_overflow();
     test_expand_buf_success();
     test_expand_buf_max_size();
+    test_expand_buf_max_size_below_old_size();
     test_send_origin_constants();
     test_overflow_no_collision();
 

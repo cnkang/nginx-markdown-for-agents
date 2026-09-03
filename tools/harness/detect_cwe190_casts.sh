@@ -300,8 +300,18 @@ while IFS= read -r match; do
     cast_idents="$(printf '%s' "$content_line" \
         | grep -oE '\(size_t\)[[:space:]]*[A-Za-z_][A-Za-z0-9_]*' \
         | sed -E 's/^\(size_t\)[[:space:]]*//' || true)"
+    # Count every (size_t) cast on the line, including expression and
+    # literal casts (e.g. (size_t)(a - b) or (size_t)-1): those carry the
+    # same wrap risk as identifier casts but are invisible to the
+    # identifier extraction above.  The all-unsigned quick path may skip
+    # guard detection only when the counts match and every extracted
+    # identifier is unsigned; otherwise continue to guard detection.
+    total_cast_count="$(printf '%s' "$content_line" \
+        | grep -oE '\(size_t\)' | wc -l | tr -d ' ' || true)"
+    idents_cast_count="$(printf '%s\n' "$cast_idents" \
+        | grep -cE '[A-Za-z_]' || true)"
 
-    if [[ -n "$cast_idents" ]]; then
+    if [[ -n "$cast_idents" && "$total_cast_count" -eq "$idents_cast_count" ]]; then
         # Determine function boundary: find the nearest preceding line
         # matching ^} (NGINX style: function-closing brace at column 0).
         # Window starts from the line after that brace (or file start).

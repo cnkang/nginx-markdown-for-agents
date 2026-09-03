@@ -96,3 +96,18 @@ def test_ffi_heading_values_are_literal_not_regular_expressions():
         "FFI: summary export count or ABI heading does not match inventory" in error
         for error in errors
     )
+
+
+def test_split_row_odd_backslash_run_escapes_pipe():
+    """A pipe preceded by an odd backslash run stays inside the cell."""
+    assert checker._split_row("| a | b\\|c | d |") == ["a", "b\\|c", "d"]
+
+
+def test_split_row_even_backslash_run_splits_pipe():
+    """A pipe preceded by an even backslash run (including zero) is a delimiter."""
+    assert checker._split_row("| a | b\\\\|c | d |") == ["a", "b\\\\", "c", "d"]
+
+
+def test_split_row_escaped_pipe_inside_code_span():
+    """Escaped pipes inside code spans are preserved as content."""
+    assert checker._split_row("| `on\\|off` | x |") == ["`on\\|off`", "x"]

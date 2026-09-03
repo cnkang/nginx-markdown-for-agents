@@ -8,7 +8,8 @@
 //! 2. ETag differs from upstream original ETag
 //! 3. If-None-Match match returns 304
 //! 4. If-None-Match non-match returns 200
-//! 5. If-Modified-Since future returns 304
+//! 5. If-Modified-Since future returns 200 (converted representation has
+//!    no Last-Modified; source IMS never validates the transformed body)
 //! 6. If-Modified-Since past returns 200
 //! 7. Weak ETag (W/"") match returns 304
 //! 8. Wildcard If-None-Match: * returns 304
@@ -163,18 +164,23 @@ fn append_if_modified_since_cases(
     headers: &HashMap<String, String>,
     assertions: &mut Vec<AssertionResult>,
 ) {
+    // A converted Markdown representation never validates against the
+    // source If-Modified-Since (CACHE_AWARE_RESPONSES.md: "Source
+    // If-Modified-Since does not validate the transformed body").  The
+    // module clears Last-Modified on the converted response, so even a
+    // future-dated IMS must return a fresh 200 with the full body.
     let mut future_headers = headers.clone();
     future_headers.insert(
         "If-Modified-Since".to_string(),
         "Mon, 01 Jan 2030 00:00:00 GMT".to_string(),
     );
     if let Some(response) =
-        common::try_get_with_headers(url, &future_headers, assertions, "case5_ims_future_304")
+        common::try_get_with_headers(url, &future_headers, assertions, "case5_ims_future_200")
     {
         assertions.push(assertions::assert_status(
-            "case5_ims_future_304",
+            "case5_ims_future_200",
             response.status,
-            304,
+            200,
         ));
     }
 

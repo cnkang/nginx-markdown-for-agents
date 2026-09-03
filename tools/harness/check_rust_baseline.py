@@ -170,9 +170,11 @@ def _check_workflow_inventory(root: Path, errors: list[str]) -> None:
     known.update(OBSERVATION_ACTION_WORKFLOWS)
     known.update(RELEASE_WORKFLOWS)
     for path in sorted(workflow_dir.glob("*.y*ml")):
-        content = path.read_text(encoding="utf-8")
-        installs_rust = "dtolnay/rust-toolchain" in content or "RUST_TOOLCHAIN:" in content
         relative_path = path.relative_to(root)
+        content = _read_text(root, relative_path, errors)
+        if content is None:
+            continue
+        installs_rust = "dtolnay/rust-toolchain" in content or "RUST_TOOLCHAIN:" in content
         if installs_rust and relative_path not in known:
             errors.append(
                 f"{relative_path}: Rust-installing workflow is not classified by "

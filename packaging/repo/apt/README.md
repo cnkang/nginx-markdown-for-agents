@@ -261,7 +261,10 @@ PACKAGE="nginx-module-markdown-for-agents_0.9.1_nginx-1.30.4_amd64.deb"
 awk -v pkg="$PACKAGE" '
   $2 == pkg || $2 == "*" pkg { print; n++ }
   END { exit n == 1 ? 0 : 1 }
-' SHA256SUMS > SHA256SUMS.select
+' SHA256SUMS > SHA256SUMS.select || {
+  echo "ERROR: expected exactly one checksum entry for ${PACKAGE}" >&2
+  exit 1
+}
 sha256sum -c SHA256SUMS.select
 ```
 
@@ -287,12 +290,18 @@ When you rotate the signing key:
 
 ```bash
 # Refresh from the checked-in project public key, then verify the
-# signing-subkey fingerprint before trusting the repository.
-gpg --no-default-keyring --keyring /tmp/markdown-keyring.gpg \
+# signing-subkey fingerprint before trusting the repository.  Use a
+# private temporary keyring directory so the imported key material
+# never lands at a predictable world-readable path.
+GNUPGDIR="$(mktemp -d)"
+trap 'rm -rf "${GNUPGDIR}"' EXIT
+gpg --no-default-keyring --homedir "${GNUPGDIR}" \
+    --keyring "${GNUPGDIR}/markdown-keyring.gpg" \
     --import packaging/nginx-markdown-for-agents-release.asc
-gpg --no-default-keyring --keyring /tmp/markdown-keyring.gpg --fingerprint
+gpg --no-default-keyring --homedir "${GNUPGDIR}" \
+    --keyring "${GNUPGDIR}/markdown-keyring.gpg" --fingerprint
 # Install the keyring directly from the checked-in .asc file; the
-# /tmp keyring above is used only for fingerprint verification.
+# temporary keyring above is used only for fingerprint verification.
 sudo gpg --dearmor \
     -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg \
     < packaging/nginx-markdown-for-agents-release.asc

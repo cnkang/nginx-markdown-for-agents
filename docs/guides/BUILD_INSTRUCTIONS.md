@@ -207,7 +207,7 @@ Set the variable in the same shell that runs NGINX `./configure` whenever the
 Rust build does not use Cargo defaults:
 
 ```bash
-cargo build --release --no-default-features
+cargo build --release --no-default-features --target "$(rustc -vV | sed -n 's/^host: //p')"
 export NGX_MARKDOWN_RUST_FEATURES=none
 ./configure --add-dynamic-module="$MODULE_PATH"
 ```

@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from tools.lib import executable_validation as module
 
 
@@ -14,6 +16,13 @@ def test_trusted_roots_keep_configured_and_resolved_spellings() -> None:
 
 
 def test_literal_bin_entry_is_trusted_when_bin_is_a_symlink() -> None:
+    # The test verifies that a literal /bin entry is trusted when /bin is a
+    # symlink (macOS /bin -> /usr/bin) that resolves under an approved root.
+    # On systems where /bin is a real directory (not a link), the literal
+    # entry is still trusted directly, but the resolution path differs, so
+    # only run the symlink-specific assertion when the precondition holds.
+    if not Path("/bin").is_symlink():
+        pytest.skip("/bin is not a symlink on this platform")
     roots = module._trusted_roots()
     literal_bin = Path("/bin") / "git"
 

@@ -275,7 +275,87 @@ test-e2e-contract-scripts:
 		exit 1; \
 	fi
 
-test-all: build test-rust test-nginx-unit test-property
+# ---------------------------------------------------------------------------
+# test-all: aggregate every CI-checkable gate that can run on the current
+# host.  Mirrors the blocking jobs in .github/workflows/ci.yml:
+#   docs-check / harness-tooling / rust-quality / nginx-c-tests /
+#   release-092-contract-gates / matrix-release-tests
+# Native-E2E jobs (runtime-regressions, brotli-build-matrix) and the
+# coverage gate need a module-enabled NGINX binary and are aggregated
+# separately: `make test-all-e2e NGINX_BIN=...` and
+# `make test-all-coverage NGINX_BIN=...` (see below).
+# ---------------------------------------------------------------------------
+TEST_ALL_CORE := \
+	build \
+	check-headers \
+	rust-fmt-check \
+	rust-clippy-check \
+	test-rust \
+	test-nginx-unit \
+	test-nginx-unit-streaming \
+	test-nginx-unit-clang-smoke \
+	test-nginx-unit-sanitize-smoke \
+	test-property \
+	docs-check \
+	kb-contract-check \
+	regex-security-check \
+	e2e-streaming-config-check \
+	sonar-encoding-check \
+	harness-check \
+	harness-security-checks \
+	test-harness \
+	public-surface-drift-check \
+	schema-drift-check \
+	reason-codegen-check \
+	release-gates-check \
+	release-matrix-check \
+	complexity-check \
+	workflow-context-check \
+	license-check
+
+test-all:
+	@echo "=== test-all: running all CI-mirrored gates ==="
+	@$(MAKE) $(TEST_ALL_CORE)
+	@echo
+	@echo "=================================================="
+	@echo " test-all: ALL GATES PASSED"
+	@echo "=================================================="
+	@echo
+	@echo "E2E/coverage gates need a module-enabled NGINX:"
+	@echo "  make test-all-e2e NGINX_BIN=/path/to/nginx"
+	@echo "  make test-all-coverage NGINX_BIN=/path/to/nginx"
+
+# Native E2E suite — the runtime-regressions + brotli-build-matrix jobs
+# from ci.yml.  Requires NGINX_BIN (a module-enabled binary) or an
+# NGINX_URL fixture; fails with guidance when neither is provided.
+test-all-e2e:
+	@test -n "$(NGINX_BIN)" -o -n "$(NGINX_URL)" || { \
+		echo "FAIL: test-all-e2e requires NGINX_BIN (module-enabled nginx) or NGINX_URL (running fixture)" >&2; \
+		echo "  A module-enabled nginx binary is required; sync one from the verification host and use:" >&2; \
+		echo "    make test-all-e2e NGINX_BIN=/tmp/nginx-ims-verify.XXXX/objs/nginx" >&2; \
+		exit 2; \
+	}
+	@echo "=== test-all-e2e: native E2E suite ==="
+	$(MAKE) verify-conditional-requests-e2e
+	$(MAKE) verify-metrics-endpoint-e2e
+	$(MAKE) verify-auth-cache-e2e
+	$(MAKE) verify-status-codes-e2e
+	$(MAKE) verify-chunked-native-e2e-smoke
+	$(MAKE) verify-large-e2e
+	$(MAKE) verify-brotli-streaming-e2e
+	$(MAKE) verify-http2-alpn-e2e
+	@echo "=== test-all-e2e: ALL E2E SCENARIOS PASSED ==="
+
+# Coverage gate — coverage-gate from ci.yml.  Requires lcov and a
+# module-enabled NGINX binary for the C coverage collection.
+test-all-coverage:
+	@command -v lcov >/dev/null 2>&1 || { echo "FAIL: lcov is required for test-all-coverage" >&2; exit 127; }
+	@test -n "$(NGINX_BIN)" || { \
+		echo "FAIL: test-all-coverage requires NGINX_BIN so collect_nginx_coverage.sh can exercise the module (set RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 is NOT honored here)" >&2; \
+		exit 2; \
+	}
+	$(MAKE) coverage-gate
+	@echo "=== test-all-coverage: COVERAGE GATE PASSED ==="
 
 # Property-based test suites: Rust proptest + Python Hypothesis + shell.
 # Runs the proptest integration targets (tests/property_*.rs), the Python
@@ -617,6 +697,7 @@ TRIVY_LOCAL_SKIP_DIRS := \
 	--skip-dirs temp \
 	--skip-dirs .test-tmp \
 	--skip-dirs coverage \
+	--skip-dirs reports \
 	--skip-dirs test-output \
 	--skip-dirs test-results \
 	--skip-dirs '**/target' \
@@ -1329,7 +1410,13 @@ test-production-examples-e2e-smoke:
 	@bash tools/e2e/verify_profile_smoke_e2e.sh || { \
 		rc=$$?; \
 		case "$$rc" in \
-			2) echo "SKIP: E2E smoke requires NGINX_BIN environment (deferred to CI)" ;; \
+			2) \
+				if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
+					echo "SKIP: E2E smoke requires NGINX_BIN environment (deferred to CI; RELEASE_GATE_ALLOW_SKIP_MODULE=1)"; \
+				else \
+					echo "FAIL: E2E smoke requires NGINX_BIN environment (set NGINX_BIN to a module-enabled nginx)" >&2; \
+					exit "$$rc"; \
+				fi ;; \
 			*) exit "$$rc" ;; \
 		esac; \
 	}
@@ -1378,6 +1465,9 @@ verify-chunked-native-e2e-stress:
 
 verify-brotli-streaming-e2e:
 	./tools/e2e/verify_brotli_streaming_e2e.sh
+
+verify-http2-alpn-e2e:
+	./tools/e2e/verify_http2_alpn_e2e.sh
 
 verify-encoding-chain-e2e:
 	./tools/e2e/verify_encoding_chain_e2e.sh
@@ -1475,7 +1565,10 @@ coverage-gate: coverage-c coverage-rust
 clean:
 	cd $(RUST_DIR) && cargo clean
 	$(MAKE) -C $(NGINX_TEST_DIR) clean || true
-	find "$(NGINX_MODULE_DIR_CANONICAL)" -type d -name '*.dSYM' -prune -exec rm -rf {} +
+	# Remove only the known generated build-output directories; never scan
+	# the whole module tree, which may contain developer-owned directories.
+	rm -rf build
+	rm -rf $(NGINX_TEST_DIR)/build
 	rm -rf coverage
 
 help:

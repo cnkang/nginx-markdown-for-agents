@@ -138,6 +138,20 @@ test_classify_v070_codes(void)
         ngx_http_markdown_classify_error(ERROR_PARSE_BUDGET_EXCEEDED) == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
         "ERROR_PARSE_BUDGET_EXCEEDED (11) -> RESOURCE_LIMIT");
 
+    /* Decompression codes 12/13/14: format/truncated/IO all classify as
+     * CONVERSION (the Rust lane maps these to ConversionError, keeping
+     * DECOMPRESSION_ERROR (4) unreachable there). Pin the end-to-end
+     * mapping so the C and Rust lanes cannot drift. */
+    TEST_ASSERT(
+        ngx_http_markdown_classify_error(ERROR_DECOMPRESSION_FORMAT_ERROR) == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
+        "ERROR_DECOMPRESSION_FORMAT_ERROR (12) -> CONVERSION");
+    TEST_ASSERT(
+        ngx_http_markdown_classify_error(ERROR_DECOMPRESSION_TRUNCATED_INPUT) == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
+        "ERROR_DECOMPRESSION_TRUNCATED_INPUT (13) -> CONVERSION");
+    TEST_ASSERT(
+        ngx_http_markdown_classify_error(ERROR_DECOMPRESSION_IO_ERROR) == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
+        "ERROR_DECOMPRESSION_IO_ERROR (14) -> CONVERSION");
+
     TEST_PASS("FFI error codes classified correctly");
 }
 

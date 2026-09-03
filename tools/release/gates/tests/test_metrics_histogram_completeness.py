@@ -88,7 +88,7 @@ def test_renderer_emits_complete_histogram_families() -> None:
     assert f"{HISTOGRAM_FAMILY}_count" in function
 
     families = re.search(
-        r"static u_char \*\s*ngx_http_markdown_metrics_v1_render_families_4_to_8\("
+        r"static u_char \*\s*ngx_http_markdown_metrics_v1_render_families_4_to_7\("
         r".*?(?=\n}\n\nstatic )",
         source,
         flags=re.DOTALL,

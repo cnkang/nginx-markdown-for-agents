@@ -45,6 +45,15 @@ The team may exclude the P1 sub-spec without blocking the release (Req 7.5).
 | Compatibility | ✅/❌ | [None / description] |
 | Operations | ✅/❌ | [None / description] |
 
+## Artifact Signature Verification
+
+Every release artifact recorded in this decision must list the signature
+verification evidence that the reviewer actually performed:
+
+| Artifact | Signer Identity | Trusted Verification | Status |
+|----------|-----------------|----------------------|--------|
+| [artifact id] | [fingerprint / key id] | [gpg --verify command + trust anchor] | ✅/❌ |
+
 ## Exceptions
 
 Every unresolved failure must have an exception record here that includes its rationale, risk assessment, and mitigation (Req 7.6). Each exception must carry a non-P0, non-safety classification to be eligible for approval, and the release owner must approve it.

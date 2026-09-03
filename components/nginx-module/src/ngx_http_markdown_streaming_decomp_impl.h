@@ -824,7 +824,12 @@ ngx_http_markdown_streaming_decomp_expand_buf(
 
     new_size = old_size * 2;
     if (max_size > 0 && new_size > max_size) {
-        new_size = max_size;
+        /*
+         * Never shrink below old_size: the caller copies old_size
+         * bytes into the new buffer after this helper returns, so a
+         * smaller allocation would overflow the heap.
+         */
+        new_size = (max_size < old_size) ? old_size : max_size;
     }
 
     new_buf = ngx_alloc(new_size, log);

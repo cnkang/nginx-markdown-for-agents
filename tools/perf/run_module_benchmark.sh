@@ -724,18 +724,18 @@ run_load_gen() {
         -H "$ACCEPT_MD_HEADER" \
         -o csv \
         "$url" > "$raw_output" 2>/dev/null
+      return $?
       ;;
     ab)
       "$RESOLVED_LOAD_GEN" -n "$total_requests" -c "$concurrency" \
         -H "$ACCEPT_MD_HEADER" \
         "$url" > "$raw_output" 2>/dev/null
+      return $?
       ;;
     *)
       die "Unknown load generator: $LOAD_GEN"
       ;;
   esac
-
-  return 0
 }
 
 # probe_expectations returns a visible heading and terminal integrity token.

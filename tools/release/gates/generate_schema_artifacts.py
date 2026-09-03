@@ -29,6 +29,7 @@ import argparse
 import json
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 SOURCE_ROOT = Path(__file__).resolve().parents[3]
@@ -42,7 +43,25 @@ from lib.path_validation import (  # noqa: E402
     validate_write_path_within_root,
 )
 
-DEFAULT_VERSION = "0.9.2"
+CARGO_TOML_PATH = SOURCE_ROOT / "components" / "rust-converter" / "Cargo.toml"
+
+
+def _default_version() -> str:
+    """Derive the default release version from the rust-converter package."""
+    try:
+        with CARGO_TOML_PATH.open("rb") as fh:
+            cargo = tomllib.load(fh)
+        version = cargo.get("package", {}).get("version", "")
+        if isinstance(version, str) and version:
+            return version
+    except (OSError, tomllib.TOMLDecodeError):
+        # Keep the release fallback when package metadata is unavailable or
+        # malformed.
+        return "0.9.2"
+    return "0.9.2"
+
+
+DEFAULT_VERSION = _default_version()
 
 RENDERER_PATH = (
     SOURCE_ROOT

@@ -105,9 +105,18 @@ impl ScenarioRuntime {
         let artifact_dir = base_dir.join("artifacts");
         let scenario_artifact_dir = artifact_dir.join("scenarios").join(scenario_name);
 
+        // Recreate the runtime/representation-cache directory so each
+        // harness run starts with an empty cache: a leftover cache from a
+        // previous run would replay a cached representation and break the
+        // proxy_cache_miss_marker MISS assertion.
+        let cache_dir = runtime_dir.join("representation-cache");
+        if cache_dir.exists() {
+            std::fs::remove_dir_all(&cache_dir)?;
+        }
         std::fs::create_dir_all(&runtime_dir)?;
         std::fs::create_dir_all(runtime_dir.join("logs"))?;
         std::fs::create_dir_all(&scenario_artifact_dir)?;
+        std::fs::create_dir_all(&cache_dir)?;
 
         // Write a minimal nginx.conf stub; scenarios may override this.
         let conf_path = runtime_dir.join("nginx.conf");

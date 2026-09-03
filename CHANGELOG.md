@@ -360,7 +360,7 @@ that pre-1.0 consolidation window through v0.9.1.
 - Label whitelist enforcement for Prometheus metrics.
 - Production configuration examples (`examples/production/`): blog-balanced,
   docs-strict-cache, rag-streaming-first, private-internal.
-- Complete 0.8.x → 0.9.0 migration guide (`docs/guides/MIGRATION-0.9.md`).
+- Complete 0.8.x → 0.9.0 migration guide (`docs/guides/MIGRATION-0.9.0.md`).
 - `nginx-markdown-doctor` tool with full diagnostic checks (config snapshot,
   module health, FFI version alignment, profile smoke).
 - Cache-Control no-transform detection: conditional requests with
@@ -395,7 +395,7 @@ that pre-1.0 consolidation window through v0.9.1.
 
 ### Migration
 
-See [docs/guides/MIGRATION-0.9.md](docs/guides/MIGRATION-0.9.md) for the
+See [docs/guides/MIGRATION-0.9.0.md](docs/guides/MIGRATION-0.9.0.md) for the
 complete upgrade guide including directive mapping table, config diff,
 common failure fixes, and rollback plan.
 

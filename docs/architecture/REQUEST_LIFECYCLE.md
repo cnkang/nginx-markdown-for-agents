@@ -52,8 +52,10 @@ configuration lifecycle.
 bounded internal response-shape heuristic. It does not expose a threshold
 directive. `force` requests streaming after the hard eligibility gates pass.
 
-Full cache validation, excluded content types, and build-disabled streaming
-features can still select full-buffer or passthrough. A known codec whose
+User-configured streaming exclusions (`markdown_stream_excluded_types`)
+select full-buffer or passthrough, as do built-in hard exclusions (full cache
+validation for conditional requests, and streaming decoders absent from the
+build). A known codec whose
 streaming decoder is unavailable in the build (for example Brotli without
 `NGX_HTTP_BROTLI`) uses bounded full-buffer decompression. A malformed,
 unknown, or excessively deep `Content-Encoding` chain follows the configured
@@ -114,5 +116,5 @@ record at their own bounded event points.
 
 Use diagnostics JSON to inspect the effective configuration and provenance.
 Use the Prometheus endpoint with `Accept: text/plain; version=0.0.4` to inspect
-the twelve frozen metric families. The schema, renderer, reason-code,
+the eleven frozen metric families. The schema, renderer, reason-code,
 and conservation gates are the authoritative compatibility checks.

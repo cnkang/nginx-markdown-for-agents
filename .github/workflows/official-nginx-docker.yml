@@ -21,6 +21,9 @@ on:
         default: ""
   # Tag releases: docker-image matrix entries are release_blocking=true, so
   # the validation must run on the tag SHA before publication (F-03 fix).
+  # GitHub applies the paths filter to branch pushes only: a v* tag push
+  # triggers the workflow unconditionally, so tag-SHA validation can never
+  # be skipped by a paths miss.
   push:
     tags:
       - 'v*'
@@ -68,7 +71,7 @@ jobs:
       matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -116,7 +119,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0

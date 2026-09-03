@@ -291,34 +291,42 @@ impl MarkdownConverter {
     }
 
     fn format_list_item_rendered_len(content: &str, depth: usize, ordered: bool) -> usize {
-        let base_indent_len = depth * 2;
+        let base_indent_len = depth.saturating_mul(2);
         let marker_len = if ordered { 3 } else { 2 };
-        let continuation_indent_len = base_indent_len + marker_len;
+        let continuation_indent_len = base_indent_len.saturating_add(marker_len);
 
         let trimmed = content.trim_matches('\n');
         if trimmed.is_empty() {
-            return base_indent_len + marker_len + 1;
+            return base_indent_len.saturating_add(marker_len).saturating_add(1);
         }
 
         let mut total = 0usize;
         for (index, line) in trimmed.lines().enumerate() {
             if index == 0 {
-                total += base_indent_len + marker_len;
+                total = total.saturating_add(base_indent_len.saturating_add(marker_len));
                 if Self::list_line_is_nested(line) {
                     // Blank line after our marker, then the content with
                     // continuation indentation unless already indented.
-                    total += 1;
+                    total = total.saturating_add(1);
                     if !line.is_empty() {
-                        total += Self::list_line_continuation_indent(line, continuation_indent_len);
-                        total += line.len() + 1;
+                        total = total
+                            .saturating_add(Self::list_line_continuation_indent(
+                                line,
+                                continuation_indent_len,
+                            ))
+                            .saturating_add(line.len())
+                            .saturating_add(1);
                     }
                     continue;
                 }
             } else {
-                total += Self::list_line_continuation_indent(line, continuation_indent_len);
+                total = total.saturating_add(Self::list_line_continuation_indent(
+                    line,
+                    continuation_indent_len,
+                ));
             }
 
-            total += line.len() + 1;
+            total = total.saturating_add(line.len()).saturating_add(1);
         }
 
         total
@@ -934,5 +942,53 @@ mod tests {
             .expect("small conversion should reuse released working set");
         assert_eq!(markdown, "reused context\n");
         assert_eq!(context.working_set_bytes, 0);
+    }
+
+    #[test]
+    fn list_item_rendered_len_never_panics_on_extreme_inputs() {
+        // Extreme depth and content must saturate instead of overflowing
+        // in debug builds, mirroring the checked upper-bound path.
+        let rendered_len =
+            MarkdownConverter::format_list_item_rendered_len(&"x".repeat(4096), usize::MAX, true);
+        assert!(rendered_len >= usize::MAX - 8);
+
+        // Deep nesting with realistic content stays exact and finite.
+        assert_eq!(
+            MarkdownConverter::format_list_item_rendered_len("line1\nline2", 3, false),
+            28
+        );
+
+        // A realistic large content with realistic depth must remain far
+        // below any overflow boundary while exercising the saturating adds.
+        let large_len = MarkdownConverter::format_list_item_rendered_len(
+            &"x".repeat(16 * 1024 * 1024),
+            1000,
+            true,
+        );
+        assert!(
+            large_len > 16 * 1024 * 1024,
+            "large content must be counted"
+        );
+    }
+
+    #[test]
+    fn deeply_nested_list_with_long_content_converts_without_panic() {
+        let depth = 40;
+        let mut html = String::from("<ul>");
+        for _ in 0..depth {
+            html.push_str("<li>outer<ul>");
+        }
+        html.push_str("<li>");
+        html.push_str(&"detail ".repeat(512));
+        html.push_str("</li>");
+        for _ in 0..depth {
+            html.push_str("</li></ul>");
+        }
+        html.push_str("</ul>");
+
+        let (result, _context) =
+            convert_with_budget(&MarkdownConverter::new(), &html, 16 * 1024 * 1024);
+        let markdown = result.expect("deep nested list must convert without overflow");
+        assert!(markdown.contains("- detail"), "got: {markdown}");
     }
 }

@@ -443,9 +443,12 @@ pub unsafe extern "C" fn markdown_streaming_abort(handle: *mut StreamingConverte
 /// bytes after the already-committed output.
 ///
 /// On failure (`POST_COMMIT_ABORT` = 4), structures could not be safely
-/// closed. The output buffer is set to NULL/0. The caller must abort and
-/// discard or truncate the partial output. **C MUST NOT infer or synthesize
-/// Markdown closure for Rust-owned parser/emitter state** (safety invariant: C must not infer Markdown closure).
+/// closed. The output buffer is set to NULL/0. **The partial output is
+/// already committed and irreversible** — the caller must terminate the
+/// request through the protocol-safe abort path (e.g. the empty terminal
+/// marker) rather than attempting to discard or truncate bytes that
+/// downstream filters have already accepted; C MUST NOT infer or synthesize
+/// Markdown closure for Rust-owned parser/emitter state (safety invariant: C must not infer Markdown closure).
 ///
 /// This call consumes the handle after validation succeeds (the handle and
 /// output pointers are non-NULL). If validation fails, `ERROR_INVALID_INPUT`

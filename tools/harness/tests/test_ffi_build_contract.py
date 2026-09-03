@@ -208,6 +208,9 @@ def test_streaming_header_failure_helper_is_feature_guarded() -> None:
 
     assert guard_start != -1
     assert guard_end > helper_start
+    # The nearest guard must remain OPEN around the helper: no #endif may
+    # appear between the guard's opening and the helper's start.
+    assert "#endif" not in source[guard_start:helper_start]
 
 
 def _function_body(source: str, function_name: str) -> str:

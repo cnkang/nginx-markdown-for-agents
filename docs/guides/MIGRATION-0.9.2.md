@@ -488,7 +488,7 @@ curl --fail-with-body -sS http://localhost/nginx-markdown/diagnostics \
 | From | To | Guide |
 |------|----|-------|
 | 0.9.0 | 0.9.1 | [docs/guides/MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) |
-| 0.8.x | 0.9.0 | [docs/guides/MIGRATION-0.9.md](MIGRATION-0.9.md) |
+| 0.8.x | 0.9.0 | [docs/guides/MIGRATION-0.9.0.md](MIGRATION-0.9.0.md) |
 | 0.7.x | 0.8.0 | [docs/guides/MIGRATION-0.8.md](MIGRATION-0.8.md) |
 
 ---

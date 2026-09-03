@@ -54,9 +54,19 @@ VALIDATED_VAR_RE = re.compile(
 )
 
 VALIDATED_ASSIGN_RE = re.compile(
-    r"(\w+)\s*=\s*validate_read_path\s*\("
-    r"|(\w+)\s*=\s*validate_write_path_within_root\s*\("
-    r"|(\w+)\s*=\s*_resolve_repo_write_path\s*\(",
+    r"(?m)^\s*(\w+)\s*=\s*validate_read_path\s*\("
+    r"|^\s*(\w+)\s*=\s*validate_write_path_within_root\s*\("
+    r"|^\s*(\w+)\s*=\s*_resolve_repo_write_path\s*\(",
+)
+
+# Compound statements (``if cond: safe = validate_read_path(raw)``) put the
+# assignment after a colon, so the ^-anchored pattern above cannot see it.
+# The ``.*?`` prefix is bounded by the required ':' and the anchored line
+# start, so it cannot cause quadratic backtracking.
+COMPOUND_VALIDATED_ASSIGN_RE = re.compile(
+    r"(?m)^\s*(?:if|for|while|with)\b.*?:\s*(\w+)\s*=\s*validate_read_path\s*\("
+    r"|^\s*(?:if|for|while|with)\b.*?:\s*(\w+)\s*=\s*validate_write_path_within_root\s*\("
+    r"|^\s*(?:if|for|while|with)\b.*?:\s*(\w+)\s*=\s*_resolve_repo_write_path\s*\(",
 )
 
 OPEN_CALL_RE = re.compile(
@@ -93,7 +103,7 @@ HARDCODED_PATH_RE = re.compile(
     r'REPO_ROOT\s*/\s*"'
     r'|Path\s*\(\s*__file__\s*\)'
     r'|"/'
-    r"|[A-Z_]+_DIR\s*/\s*\"",
+    r"|(?<![A-Za-z0-9_])[A-Z_]{1,60}_DIR(?![A-Za-z0-9_])\s*/\s*\"",
 )
 
 SAFE_OPEN_ARG_RE = re.compile(
@@ -182,7 +192,7 @@ def _is_safe_open_context(
     if path_open_receiver and (
         path_open_receiver in hardcoded_vars
         or _path_root(path_open_receiver) in hardcoded_vars
-        or _path_root(path_open_receiver) in validated_vars
+        or path_open_receiver in validated_vars
     ):
         return True
     return _is_safe_open_line_context(line, lines, lineno)
@@ -391,7 +401,12 @@ def _extract_regex_groups(match: re.Match, target: set[str]) -> None:
 
 
 _PATH_WRAPPED_RE = re.compile(
-    r"(\w+)\s*=\s*Path\s*\(\s*(\w+)\s*\)",
+    r"(?m)^\s*(\w+)\s*=\s*Path\s*\(\s*(\w+)\s*\)",
+)
+
+# Compound-statement variant of _PATH_WRAPPED_RE (``if cond: path = Path(safe)``).
+COMPOUND_PATH_WRAPPED_RE = re.compile(
+    r"(?m)^\s*(?:if|for|while|with)\b.*?:\s*(\w+)\s*=\s*Path\s*\(\s*(\w+)\s*\)",
 )
 
 
@@ -406,15 +421,29 @@ def _collect_validated_vars(lines: list[str]) -> set[str]:
     for line in lines:
         for m in VALIDATED_ASSIGN_RE.finditer(line):
             _extract_regex_groups(m, validated_vars)
+        for m in COMPOUND_VALIDATED_ASSIGN_RE.finditer(line):
+            _extract_regex_groups(m, validated_vars)
 
     for line in lines:
-        for m in _PATH_WRAPPED_RE.finditer(line):
-            lhs = m.group(1)
-            rhs = m.group(2)
-            if rhs in validated_vars:
-                validated_vars.add(lhs)
+        _collect_path_wrapped_vars(line, validated_vars)
 
     return validated_vars
+
+
+def _collect_path_wrapped_vars(line: str, validated_vars: set[str]) -> None:
+    """Propagate validation through Path() wrappers on one line."""
+    for m in _PATH_WRAPPED_RE.finditer(line):
+        _add_wrapped_var(m, validated_vars)
+    for m in COMPOUND_PATH_WRAPPED_RE.finditer(line):
+        _add_wrapped_var(m, validated_vars)
+
+
+def _add_wrapped_var(m: re.Match[str], validated_vars: set[str]) -> None:
+    """Add the wrapped LHS when its RHS is already validated."""
+    lhs = m.group(1)
+    rhs = m.group(2)
+    if rhs in validated_vars:
+        validated_vars.add(lhs)
 
 
 def _collect_hardcoded_vars(lines: list[str]) -> set[str]:
@@ -515,6 +544,9 @@ def _scan_open_calls(
 
     for lineno, line in enumerate(lines, start=1):
         if not OPEN_CALL_RE.search(line):
+            continue
+
+        if COMMENT_RE.match(line.lstrip()):
             continue
 
         if NON_FILE_OPEN_RE.search(line):

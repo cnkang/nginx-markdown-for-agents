@@ -66,12 +66,24 @@ _RC_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+-rc(?:\.\d+)?$")
 _RELEASE_TAG_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+(?:\.\d+)?$")
 
 
-def _report_scenarios(report: dict) -> list:
-    """Extract the scenarios list from a benchmark report."""
-    return (
-        report.get("module_benchmark", {}).get("scenarios", [])
-        or report.get("scenarios", [])
-    )
+def _report_scenarios(report: dict | None) -> list:
+    """Extract the scenarios list from a benchmark report.
+
+    Only list-shaped values are returned; any other shape (string, dict,
+    None) normalizes to an empty list so downstream iteration and
+    validation never operate on a non-list.  Non-dict list elements are
+    filtered out here so every consumer (name lookups, metrics reads)
+    can use `.get(...)` without AttributeError on malformed entries.
+    """
+    if not isinstance(report, dict):
+        return []
+    module_benchmark = report.get("module_benchmark", {})
+    if not isinstance(module_benchmark, dict):
+        module_benchmark = {}
+    scenarios = module_benchmark.get("scenarios", []) or report.get("scenarios", [])
+    if not isinstance(scenarios, list):
+        return []
+    return [s for s in scenarios if isinstance(s, dict)]
 
 # Exit code for SKIP_NOT_PRESENT (matches run_module_benchmark.sh)
 EX_SKIP_NOT_PRESENT = 75
@@ -598,10 +610,7 @@ def _build_evidence_pack(  # pylint: disable=too-many-arguments,too-many-positio
         "breaches": breaches,
         "results": results,
         "evidence": {
-            "module_benchmark_tiers": (
-                report.get("module_benchmark", {}).get("scenarios", [])
-                if report else []
-            ),
+            "module_benchmark_tiers": _report_scenarios(report),
             "decompression_coverage": (
                 report.get("decompression_coverage", {})
                 if report else {}
@@ -800,7 +809,7 @@ def _read_benchmark_report(
 ) -> tuple[dict | None, int | None]:
     """Read a benchmark report and turn malformed JSON into gate evidence."""
     try:
-        return json.loads(report_path.read_text(encoding="utf-8")), None
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         return None, _report_integrity_failure(
             None,
@@ -810,6 +819,20 @@ def _read_benchmark_report(
             "  Regenerate the report with the benchmark harness.",
             exit_code=1 if blocking else 0,
         )
+    if not isinstance(payload, dict):
+        # A JSON value that is not an object (array, string, number, null)
+        # cannot be a benchmark report; reject it with the same integrity
+        # evidence as malformed JSON instead of crashing on .get() below.
+        typename = type(payload).__name__
+        return None, _report_integrity_failure(
+            None,
+            args,
+            [("benchmark_report", f"expected JSON object, got {typename}")],
+            heading,
+            "  Regenerate the report with the benchmark harness.",
+            exit_code=1 if blocking else 0,
+        )
+    return payload, None
 
 
 def _obtain_benchmark_report(
@@ -2551,13 +2574,29 @@ def _validate_benchmark_evidence(
     Returns a list of (check_name, reason) violations.  Empty list
     means the report passes all integrity checks.
     """
-    # 1. Critical scenarios must exist
+    violations: list[tuple[str, str]] = []
+    # 1. The module_benchmark container must be an object before any
+    #    downstream consumer calls .get() on it (scenario source env,
+    #    baseline fallback, identity fields).  Normalize early, record
+    #    the violation once, and hand a *copy* of the normalized report
+    #    to every downstream validator so all of them see the same
+    #    clean value (never mutate the caller's dict).
+    mb = report.get("module_benchmark", {})
+    if not isinstance(mb, dict):
+        violations.append(
+            (f"{role}.module_benchmark", "module_benchmark must be an object")
+        )
+        mb = {}
+        report = dict(report)
+        report["module_benchmark"] = mb
+
+    # 2. Critical scenarios must exist
     missing = _check_missing_scenarios(report)
-    violations: list[tuple[str, str]] = [
+    violations.extend(
         (f"{role}.scenario", f"missing critical scenario: {name}")
         for name in missing
-    ]
-    # 2. Critical scenarios must be completed (not skipped, not other)
+    )
+    # 3. Critical scenarios must be completed (not skipped, not other)
     incomplete = _check_scenario_completion(report)
     violations.extend(
         (
@@ -2566,14 +2605,14 @@ def _validate_benchmark_evidence(
         )
         for name, status in incomplete
     )
-    # 3. Skipped critical scenarios (redundant with #2 but preserves the
+    # 4. Skipped critical scenarios (redundant with #3 but preserves the
     #    existing skipped-with-reason message format for diagnostics)
     skipped = _check_skipped_scenarios(report)
     violations.extend(
         (f"{role}.scenario", f"skipped: {name}: {reason}")
         for name, reason in skipped
     )
-    # 4. Path-coverage invariants
+    # 5. Path-coverage invariants
     path_violations = _check_path_coverage(report)
     violations.extend(
         (f"{role}.path_coverage", f"{name}: {label} (metric={metric})")
@@ -2590,12 +2629,11 @@ def _validate_benchmark_evidence(
     violations.extend(_scenario_source_environment_violations(report, role))
     violations.extend(_raw_artifact_binding_violations(report, role))
 
-    # 5. Environment identity fields must be present and non-empty;
+    # 6. Environment identity fields must be present and non-empty;
     #    nginx_version must also not use the legacy "unknown" placeholder.
-    mb = report.get("module_benchmark", {})
     for field in ("platform", "load_generator", "nginx_version"):
         val = mb.get(field, "")
-        if not val:
+        if not val or not isinstance(val, str):
             violations.append(
                 (f"{role}.{field}", f"missing or empty {field}")
             )
@@ -2604,7 +2642,7 @@ def _validate_benchmark_evidence(
                 (f"{role}.nginx_version", "missing or 'unknown' nginx_version")
             )
 
-    # 6. Memory evidence completeness: at least 2 valid memory points
+    # 7. Memory evidence completeness: at least 2 valid memory points
     scenarios = _report_scenarios(report)
     memory_points = _extract_memory_points(scenarios)
     if len(memory_points) < 2:

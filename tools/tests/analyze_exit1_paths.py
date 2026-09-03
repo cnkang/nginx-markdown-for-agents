@@ -73,6 +73,19 @@ def _classify_lines(lines: list[str]) -> list[str]:
     return line_types
 
 
+# A bare assignment (VAR=... at line start) is not an invocation; anything
+# else that references awk with a quoted program is a helper context.
+_AWK_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=[^\"'$]*$")
+
+
+def _is_awk_invocation(prev: str) -> bool:
+    """True when a line invokes awk as a command (not a plain assignment)."""
+    if _AWK_ASSIGN_RE.match(prev):
+        return False
+    return ("awk " in prev or "${AWK_BIN}" in prev
+            or "$AWK_BIN" in prev) and ("'" in prev or '"' in prev)
+
+
 def _is_inside_helper_or_awk(lines: list[str], index: int) -> bool:
     """Return True if the line at *index* is inside a helper function or awk block.
 
@@ -83,7 +96,7 @@ def _is_inside_helper_or_awk(lines: list[str], index: int) -> bool:
     """
     for j in range(index, -1, -1):
         prev = lines[j].strip()
-        if (("awk " in prev or "AWK_BIN" in prev) and "'" in prev):
+        if _is_awk_invocation(prev):
             return True
         if HELPER_FUNCS_RE.match(prev):
             return True

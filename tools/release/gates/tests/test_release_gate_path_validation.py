@@ -187,3 +187,31 @@ def test_fuzz_packaging_uses_canonical_compatibility_document() -> None:
     assert fuzz_gate.COMPAT_DOCS == [
         fuzz_gate.PROJECT_ROOT / "docs" / "guides" / "PACKAGE_COMPATIBILITY.md"
     ]
+
+
+def test_fuzz_packaging_naming_patterns_are_mutually_exclusive() -> None:
+    """The deb pattern must not satisfy the rpm check and vice versa.
+
+    Regression: a shared ``nginx-?`` prefix let the deb naming row satisfy
+    the rpm check, hiding a missing NGINX version in the rpm filename.
+    """
+    deb_only = (
+        'DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}"\n'
+        '    _nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"'
+    )
+    rpm_only = (
+        'RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}"\n'
+        '    "-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"'
+    )
+    deb_rpm = deb_only + "\n" + rpm_only
+
+    deb_issue = fuzz_gate._workflow_naming_issue(deb_only)
+    rpm_issue = fuzz_gate._workflow_naming_issue(rpm_only)
+
+    assert deb_issue is not None
+    assert "rpm" in deb_issue
+    assert "deb" not in deb_issue
+    assert rpm_issue is not None
+    assert "deb" in rpm_issue
+    assert "rpm" not in rpm_issue
+    assert fuzz_gate._workflow_naming_issue(deb_rpm) is None

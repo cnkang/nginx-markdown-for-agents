@@ -691,7 +691,7 @@ def check_public_config_contract(project_root: Path) -> List[str]:
 def main():
     """
     Run documentation synchronization checks for the project and report any violations.
-    
+
     The project root is read from the first command-line argument when provided; otherwise,
     it is inferred from this module's location. Exits with status 1 when checks fail or the
     project directory is missing, and with status 0 when all checks pass.

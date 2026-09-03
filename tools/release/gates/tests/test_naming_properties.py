@@ -73,6 +73,10 @@ def test_invalid_nginx_directive_no_prefix(name):
 @given(suffix=_lower_alnum_underscore())
 def test_invalid_prometheus_metric_without_unit_suffix(suffix):
     """Metrics must end in one legal Prometheus unit suffix."""
+    # Skip generated bases that already end in a reserved unit token:
+    # the composition could only be rejected by the double-unit negative
+    # lookahead, which this test is not exercising.
+    assume(not suffix.endswith(("_total", "_bytes", "_seconds", "_info")))
     name = f"nginx_markdown_{suffix}"
     assert not is_valid_prometheus_metric(name), f"should reject: {name}"
 
@@ -97,13 +101,25 @@ def test_valid_prometheus_metric_with_unit(suffix, unit):
     # double-unit ending (e.g. foo_total_total, foo_bytes_bytes).  A base
     # ending in _bytes or _seconds combined with _total is legal
     # (canonical counter units bytes_total / seconds_total) and must be
-    # exercised.
-    assume(not name.endswith((
-        "_total_total", "_total_bytes", "_total_seconds", "_total_info",
-        "_bytes_bytes", "_bytes_seconds", "_bytes_info",
-        "_seconds_bytes", "_seconds_seconds", "_seconds_info",
-        "_info_total", "_info_bytes", "_info_seconds", "_info_info",
-    )))
+    # exercised.  Evaluate the base suffix combined with the FIRST token
+    # of the unit rather than the fully composed name, so compound units
+    # such as _bytes_total and _seconds_total are not excluded by the
+    # double-unit lookahead.  Mirror the validator's two lookaheads:
+    # forbidden first-token pairs, and a reserved single token followed
+    # by a compound bytes_total/seconds_total unit.
+    reserved = ("total", "bytes", "seconds", "info")
+    unit_tokens = unit.strip("_").split("_")
+    base_last = suffix.rsplit("_", 1)[-1]
+    if len(unit_tokens) == 1:
+        forbidden_second = {
+            "total": reserved,
+            "bytes": ("bytes", "seconds", "info"),
+            "seconds": ("bytes", "seconds", "info"),
+            "info": reserved,
+        }
+        assume(unit_tokens[0] not in forbidden_second.get(base_last, ()))
+    else:
+        assume(base_last not in reserved)
     assert is_valid_prometheus_metric(name), f"should accept: {name}"
 
 

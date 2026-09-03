@@ -18,79 +18,7 @@
 #include "ngx_http_markdown_exports.h"
 #include "ngx_http_markdown_diagnostics.h"
 #include "ngx_http_markdown_decompression_route.h"
-
-typedef enum {
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_NONE = 0,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY,
-    NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED
-} ngx_http_markdown_durable_bypass_kind_t;
-
-typedef struct {
-    ngx_http_markdown_durable_bypass_kind_t kind;
-} ngx_http_markdown_durable_bypass_marker_t;
-
-/*
- * These marker addresses occupy the request context slot when a request
- * context cannot be allocated.  State transitions replace the address, so
- * no mutable state is shared between requests.  The objects are never
- * written through: the context slot is a `void *`, so the markers stay
- * non-const to avoid casts that drop a qualifier; only their addresses
- * are ever compared.
- */
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_failopen_header_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER
-    };
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_failopen_body_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY
-    };
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_failopen_completed_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED
-    };
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_subrequest_header_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER
-    };
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_subrequest_body_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY
-    };
-static ngx_http_markdown_durable_bypass_marker_t
-    ngx_http_markdown_subrequest_completed_marker = {
-        NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED
-    };
-
-static ngx_http_markdown_durable_bypass_kind_t
-ngx_http_markdown_durable_bypass_kind(const void *value)
-{
-    if (value == (const void *) &ngx_http_markdown_failopen_header_marker) {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER;
-    }
-    if (value == (const void *) &ngx_http_markdown_failopen_body_marker) {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_BODY;
-    }
-    if (value == (const void *) &ngx_http_markdown_failopen_completed_marker) {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_COMPLETED;
-    }
-    if (value == (const void *) &ngx_http_markdown_subrequest_header_marker) {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_HEADER;
-    }
-    if (value == (const void *) &ngx_http_markdown_subrequest_body_marker) {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_BODY;
-    }
-    if (value
-        == (const void *) &ngx_http_markdown_subrequest_completed_marker)
-    {
-        return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_SUBREQUEST_COMPLETED;
-    }
-    return NGX_HTTP_MARKDOWN_DURABLE_BYPASS_NONE;
-}
+#include "ngx_http_markdown_durable_bypass.h"
 
 static void
 ngx_http_markdown_publish_durable_bypass(
@@ -714,12 +642,6 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
         break;
 
     case NEGOTIATE_REASON_INTERNAL_ERROR:
-        ngx_http_markdown_log_decision(r, conf, eff,
-            ngx_http_markdown_reason_skip_accept());
-        dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_SKIP;
-        dp.reason_code = "skipped_accept_internal_error";
-        break;
-
     default:
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_skip_accept());
@@ -889,6 +811,137 @@ ngx_http_markdown_handle_preaccess_failure(
 }
 
 /*
+ * Decide whether this pass may adopt orphaned validators and, for a main
+ * request without a context, perform the bounded atomic adoption.
+ */
+static ngx_int_t
+ngx_http_markdown_prepare_preaccess_adoption(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_ctx_t *ctx,
+    ngx_flag_t *adopt_orphans,
+    ngx_http_markdown_conditional_ownership_t *ownership)
+{
+    size_t  scan_limit;
+
+    *adopt_orphans = r->parent == NULL && ctx == NULL;
+    ngx_memzero(ownership, sizeof(*ownership));
+    if (!*adopt_orphans) {
+        return NGX_OK;
+    }
+
+    scan_limit = conf->limits.streaming_buffer;
+    if (scan_limit == NGX_CONF_UNSET_SIZE || scan_limit == 0) {
+        scan_limit = NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT;
+    }
+
+    /*
+     * Internal redirects clear the module context but leave suppressed
+     * request headers behind.  Only the main request may re-adopt them:
+     * subrequests share the parent's headers_in and must not un-suppress the
+     * parent's validators mid-flight.
+     */
+    return ngx_http_markdown_adopt_orphan_conditional_headers(
+        r, scan_limit, ownership);
+}
+
+/* Snapshot dynamic configuration and evaluate preaccess eligibility once. */
+static ngx_flag_t
+ngx_http_markdown_prepare_preaccess_eligibility(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_http_markdown_effective_conf_t *eff,
+    ngx_flag_t *filter_enabled)
+{
+    ngx_http_markdown_dynconf_snapshot_t  snap_copy;
+    ngx_uint_t                            accept_reason;
+
+    snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
+    ngx_memzero(eff, sizeof(*eff));
+    ngx_http_markdown_build_effective_conf(
+        eff,
+        conf->advanced.dynconf_enabled == 1 ? &snap_copy : NULL,
+        conf);
+
+    *filter_enabled = ngx_http_markdown_is_enabled(r, conf, eff);
+    accept_reason = 0;
+    if (!*filter_enabled) {
+        return 0;
+    }
+
+    return ngx_http_markdown_should_convert(
+        r, conf, &accept_reason);
+}
+
+/*
+ * Route an orphan-adoption failure through the configured error policy after
+ * restoring any live context-owned validators.
+ */
+static ngx_int_t
+ngx_http_markdown_handle_preaccess_adoption_failure(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff)
+{
+    ngx_int_t  failure_rc;
+
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                  "markdown: conditional validator adoption "
+                  "exceeded the configured request buffer limit");
+    /* Restore captured validators before exposing a uniform pass-through
+     * state to the error handlers or durable bypass. */
+    ngx_http_markdown_restore_conditional_request(r, ctx);
+    failure_rc = ngx_http_markdown_handle_preaccess_failure(
+        r, ctx, conf, eff);
+    if (failure_rc != NGX_DECLINED) {
+        return failure_rc;
+    }
+
+    ngx_http_markdown_publish_durable_bypass(
+        r, NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER);
+    return NGX_DECLINED;
+}
+
+/*
+ * Allocate and register the preaccess context.  On allocation failure,
+ * return the configured reject status or publish the fail-open bypass.
+ */
+static ngx_int_t
+ngx_http_markdown_create_preaccess_context(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t **ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff)
+{
+    ngx_int_t  failure_rc;
+
+    if (*ctx != NULL) {
+        return NGX_OK;
+    }
+
+    *ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_ctx_t));
+    if (*ctx != NULL
+        && ngx_http_markdown_register_fullbuffer_cleanup(r, *ctx) == NGX_OK)
+    {
+        return NGX_OK;
+    }
+
+    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                  "markdown: conditional validator context "
+                  "allocation failed");
+    failure_rc = ngx_http_markdown_handle_preaccess_failure(
+        r, *ctx, conf, eff);
+    if (failure_rc != NGX_DECLINED) {
+        return failure_rc;
+    }
+
+    ngx_http_markdown_publish_durable_bypass(
+        r, NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER);
+    return NGX_DECLINED;
+}
+
+/*
  * Capture client validators before proxy, cache, or content handlers can
  * satisfy them against the upstream representation.  The handler only
  * prepares state; the header filter remains responsible for response
@@ -899,11 +952,12 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
 {
     const ngx_http_markdown_conf_t  *conf;
     ngx_http_markdown_ctx_t         *ctx;
-    ngx_http_markdown_dynconf_snapshot_t  snap_copy;
     ngx_http_markdown_effective_conf_t    eff;
     ngx_flag_t                       filter_enabled;
-    ngx_uint_t                       accept_reason;
-    ngx_int_t                         failure_rc;
+    ngx_flag_t                       adopt_orphans;
+    ngx_http_markdown_conditional_ownership_t ownership;
+    ngx_int_t                         adoption_rc;
+    ngx_int_t                         context_rc;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
     if (ngx_http_markdown_durable_bypass_kind(ctx)
@@ -921,40 +975,24 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
 
-    /* Internal redirects clear the module context but leave suppressed
-     * request headers (hash == 0) behind.  Re-adopt those orphan entries
-     * on the main request only: a subrequest shares the parent's
-     * headers_in, so restoring visibility there would un-suppress the
-     * parent's validators mid-flight.  Only run when no live context
-     * exists (a live ctx still owns the suppression). */
-    if (r->parent == NULL && ctx == NULL) {
-        ngx_http_markdown_adopt_orphan_conditional_headers(r);
-    }
+    adoption_rc = ngx_http_markdown_prepare_preaccess_adoption(
+        r, conf, ctx, &adopt_orphans, &ownership);
 
     if ((r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)) == 0) {
-        if (ctx != NULL) {
-            ngx_http_markdown_restore_conditional_request(r, ctx);
-        }
+        ngx_http_markdown_restore_conditional_request(r, ctx);
         return NGX_DECLINED;
     }
 
-    snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
-    ngx_memzero(&eff, sizeof(eff));
-    ngx_http_markdown_build_effective_conf(
-        &eff,
-        conf->advanced.dynconf_enabled == 1 ? &snap_copy : NULL,
-        conf);
-
-    filter_enabled = ngx_http_markdown_is_enabled(r, conf, &eff);
-    accept_reason = 0;
-    if (!filter_enabled
-        || !ngx_http_markdown_should_convert(
-               r, conf, &accept_reason))
+    if (!ngx_http_markdown_prepare_preaccess_eligibility(
+            r, conf, &eff, &filter_enabled))
     {
-        if (ctx != NULL) {
-            ngx_http_markdown_restore_conditional_request(r, ctx);
-        }
+        ngx_http_markdown_restore_conditional_request(r, ctx);
         return NGX_DECLINED;
+    }
+
+    if (adoption_rc != NGX_OK) {
+        return ngx_http_markdown_handle_preaccess_adoption_failure(
+            r, ctx, conf, &eff);
     }
 
     if (ctx == NULL && !ngx_http_markdown_has_conditional_request(r)) {
@@ -968,24 +1006,14 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
 
-    if (ctx == NULL) {
-        ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_ctx_t));
-        if (ctx == NULL
-            || ngx_http_markdown_register_fullbuffer_cleanup(r, ctx)
-               != NGX_OK)
-        {
-            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
-                          "markdown: conditional validator context "
-                          "allocation failed");
-            failure_rc = ngx_http_markdown_handle_preaccess_failure(
-                r, ctx, conf, &eff);
-            if (failure_rc != NGX_DECLINED) {
-                return failure_rc;
-            }
-            ngx_http_markdown_publish_durable_bypass(
-                r, NGX_HTTP_MARKDOWN_DURABLE_BYPASS_FAILOPEN_HEADER);
-            return NGX_DECLINED;
-        }
+    context_rc = ngx_http_markdown_create_preaccess_context(
+        r, &ctx, conf, &eff);
+    if (context_rc != NGX_OK) {
+        return context_rc;
+    }
+
+    if (adopt_orphans && ownership.entry_count != 0) {
+        ctx->conditional.ownership = ownership;
     }
 
     return ngx_http_markdown_preaccess_capture(
@@ -1261,6 +1289,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
 
     if (inflight_rc == NGX_ERROR) {
         /* Cleanup alloc failed — treat as system error */
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
         NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
 
@@ -1863,15 +1892,15 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
 
-    precheck_rc = ngx_http_markdown_handle_durable_bypass(r, ctx, conf);
-    if (precheck_rc != NGX_DECLINED) {
-        return precheck_rc;
-    }
-
     if (conf == NULL) {
         ngx_http_markdown_restore_conditional_request(r, ctx);
         /* Module not configured, pass through */
         return ngx_http_markdown_next_header_filter_with_auth(r, NULL);
+    }
+
+    precheck_rc = ngx_http_markdown_handle_durable_bypass(r, ctx, conf);
+    if (precheck_rc != NGX_DECLINED) {
+        return precheck_rc;
     }
 
     /* Header-filter re-entry must reuse the request context created by the

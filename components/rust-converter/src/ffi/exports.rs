@@ -1147,10 +1147,12 @@ pub unsafe extern "C" fn markdown_decompress_free(result: *mut FFIDecompResult) 
         // SAFETY: `result` was validated as non-NULL above.
         let result_ref = unsafe { &mut *result };
         if !result_ref.output.is_null() && result_ref.output_len > 0 {
-            // Reconstruct the Box<[u8]> from the raw parts and drop it
-            let slice =
-                unsafe { std::slice::from_raw_parts_mut(result_ref.output, result_ref.output_len) };
-            unsafe { drop(Box::from_raw(slice)) };
+            // Reconstruct the Box<[u8]> from the raw parts and drop it.
+            // Raw-pointer form (no intermediate &mut, no redundant unsafe
+            // block) matches free_buffer in ffi/memory.rs for a consistent
+            // aliasing story.
+            let raw = ptr::slice_from_raw_parts_mut(result_ref.output, result_ref.output_len);
+            unsafe { drop(Box::from_raw(raw)) };
         }
         result_ref.output = ptr::null_mut();
         result_ref.output_len = 0;
@@ -1349,15 +1351,14 @@ pub unsafe extern "C" fn markdown_chain_decode_result_init(result: *mut FFIChain
 /// the output is a copy of the input (decode(identity, input) == input),
 /// allocated by Rust and released with `markdown_chain_decode_free`.
 ///
-/// **Empty-input contract (empty-input):** an empty wire body (`input_len == 0`)
-/// is a legal empty payload regardless of the declared chain — the call
-/// succeeds with an empty output (NULL pointer, zero length) instead of
-/// classifying the empty input as truncation. This intentionally differs
-/// from the single-format decompressors, which classify an empty compressed
-/// input as `DECOMP_CATEGORY_TRUNCATED_INPUT`; the chain decoder treats a
-/// zero-byte body as "no content" per HTTP semantics. Callers that need
-/// strict single-format truncation semantics must use the single-format
-/// entry points directly.
+/// **Empty-input contract (empty-input):** an empty wire body
+/// (`input_len == 0`) is treated as empty output only on the identity-only
+/// path (`layer_count == 0`): that branch is a successful no-op returning a
+/// zero-length output. With any non-zero layer count, a zero-length input
+/// reaches the chain decoder and is classified as truncated input
+/// (`DECOMP_CATEGORY_TRUNCATED_INPUT`), exactly like the single-format
+/// decompressors. Callers that need strict single-format truncation
+/// semantics must use the single-format entry points directly.
 ///
 /// # Return Value
 ///

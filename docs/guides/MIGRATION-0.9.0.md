@@ -95,7 +95,7 @@ The module honors these headers only for matching source IPs.
 ```
 nginx: [emerg] "markdown_trust_forwarded_headers" directive has been removed
 in 0.9.0; use "markdown_trusted_proxies <CIDR>..." instead
-(see docs/guides/MIGRATION-0.9.md)
+(see docs/guides/MIGRATION-0.9.0.md)
 ```
 
 **Migration:**
@@ -130,7 +130,7 @@ http {
 
   ```
   nginx: [emerg] "markdown_trusted_proxies" directive is only valid in the
-  http context, not in server or location (see docs/guides/MIGRATION-0.9.md)
+  http context, not in server or location (see docs/guides/MIGRATION-0.9.0.md)
   ```
 
 - **CIDR-gated trust.** Only requests whose direct source IP matches a
@@ -247,28 +247,45 @@ For Grafana dashboards and alert rules, apply these transformations:
 
 ```bash
 # Step 1: Replace old per-reason metric names with unified family + label
-# Example: markdown_skipped_accept_total → markdown_skipped_total{reason="skipped_accept"}
+# Example: nginx_markdown_skipped_accept_total → nginx_markdown_skips_total{reason="skipped_accept"}
 
-# Step 2: Lowercase all reason label values in existing queries
+# Step 2: Rewrite reason values that have explicit mapping-table rows
+# before the generic prefix replacement, so FAIL_CONVERSION and
+# SKIPPED_ACCEPT_REJECT become conversion_error and
+# skipped_accept_reject (not failed_*).
+sed -i 's/reason="FAIL_CONVERSION"/reason="conversion_error"/g' dashboard.json
+sed -i 's/reason="SKIPPED_ACCEPT_REJECT"/reason="skipped_accept_reject"/g' dashboard.json
+
+# Step 3: Lowercase all remaining reason label values in existing queries.
+# sed operates byte-wise without word boundaries: SKIP_/FAIL_ prefixes are
+# ASCII-only. dashboard.json stores PromQL strings as JSON, where the
+# quotes around label values are escaped (\"SKIP_ACC...) — match both the
+# escaped and unescaped forms so the rewrite survives either encoding.
+sed -i 's/reason=\"SKIP_/reason=\"skipped_/g' dashboard.json
 sed -i 's/reason="SKIP_/reason="skipped_/g' dashboard.json
+sed -i 's/reason=\"FAIL_/reason=\"failed_/g' dashboard.json
 sed -i 's/reason="FAIL_/reason="failed_/g' dashboard.json
 
-# Step 3: Replace old metric names with new unified families
-sed -i 's/markdown_skipped_accept_total/markdown_skipped_total{reason="skipped_accept"}/g' dashboard.json
-jq 'walk(if type == "string" then gsub("nginx_markdown_parse_timeouts_total"; "nginx_markdown_failures_total{reason=\\"timeout\\"}") else . end)' dashboard.json > dashboard.json.tmp
+# Step 4: Replace old metric names with new unified families.  The old
+# names carry the nginx_ prefix (see the mapping table above), so match
+# the full name to avoid duplicating the prefix in the replacement.
+sed -i 's/nginx_markdown_skipped_accept_total/nginx_markdown_skips_total{reason="skipped_accept"}/g' dashboard.json
+jq 'walk(if type == "string" then gsub("nginx_markdown_parse_timeouts_total"; "nginx_markdown_failures_total{reason=\"timeout\"}") else . end)' dashboard.json > dashboard.json.tmp
 mv dashboard.json.tmp dashboard.json
 # Parse a representative dashboard fixture after the migration.
 jq empty dashboard.json
+# The prefix sed above covers every remaining FAIL_/SKIP_ value that does
+# not have an explicit row in the reason-mapping table.
 ```
 
 #### Alert Migration Tips
 
 | 0.8.x Alert Query | 0.9.0 Alert Query |
 |-------------------|-------------------|
-| `rate(markdown_parse_timeouts_total[5m]) > 0` | `rate(nginx_markdown_failures_total{reason="timeout"}[5m]) > 0` |
-| `rate(markdown_failed_open_total[5m]) > 0.01` | `rate(nginx_markdown_failopen_total[5m]) > 0.01` |
-| `sum(rate(markdown_ffi_call_errors_total[5m]))` | `rate(nginx_markdown_failures_total{reason="system_error"}[5m])` |
-| `nginx_markdown_skips_total{reason="SKIP_ACCEPT"}` | `nginx_markdown_skips_total{reason="skipped_accept"}` |
+| `rate(nginx_markdown_parse_timeouts_total[5m]) > 0` | `rate(nginx_markdown_failures_total{reason="timeout"}[5m]) > 0` |
+| `rate(nginx_markdown_failed_open_total[5m]) > 0.01` | `rate(nginx_markdown_failopen_total[5m]) > 0.01` |
+| `sum(rate(nginx_markdown_ffi_call_errors_total[5m]))` | `rate(nginx_markdown_failures_total{reason="ffi_panic"}[5m])` |
+| `nginx_markdown_skipped_accept_total` | `nginx_markdown_skips_total{reason="skipped_accept"}` |
 
 #### Key Changes for Alert Authors
 
@@ -297,6 +314,13 @@ jq empty dashboard.json
 | `markdown_trust_forwarded_headers on` | `markdown_trusted_proxies <CIDR>...` | Now CIDR-based; http context only |
 | `markdown_trust_forwarded_headers off` | _(omit directive)_ | Default ignores forwarded headers |
 | `markdown_on_wildcard` | `markdown_accept wildcard` | Different syntax; controls wildcard Accept matching |
+| `markdown_decompress_max_size` | `markdown_limits decompressed_size=` key | Removed directive (0.9.x) |
+| `markdown_parse_timeout` | `markdown_limits parser_timeout=` key | Removed directive (0.9.x) |
+| `markdown_parser_budget` | `markdown_limits parser_memory=` key | Removed directive (0.9.x) |
+| `markdown_stream_threshold` | _(no replacement)_ | Internal 1 MiB routing heuristic |
+| `markdown_stream_flush_min` | _(no replacement)_ | Internal flush heuristic |
+| `markdown_streaming_auto_threshold` | `markdown_streaming off\|auto\|force` | Removed directive; explicit policy replaces the heuristic |
+| `markdown_stream_precommit_buffer` | `markdown_limits streaming_buffer=` key | Removed directive (0.9.x) |
 | _(new)_ | `markdown_profile balanced\|strict_cache\|streaming_first` | One-line production defaults |
 | _(new)_ | `markdown_limits memory=64m timeout=5s max_inflight=64` | Key-value resource limits |
 
@@ -433,7 +457,7 @@ http {
 ```
 nginx: [emerg] "markdown_on_error" directive has been removed in 0.9.0;
 use "markdown_error_policy pass|fail_closed" instead
-(see docs/guides/MIGRATION-0.9.md)
+(see docs/guides/MIGRATION-0.9.0.md)
 ```
 
 **Fix:** Replace `markdown_on_error pass` with `markdown_error_policy pass`,
@@ -444,7 +468,7 @@ or `markdown_on_error reject` with `markdown_error_policy fail_closed`.
 ```
 nginx: [emerg] "markdown_trusted_proxies" directive is only valid in the
 http context, not in server or location
-(see docs/guides/MIGRATION-0.9.md)
+(see docs/guides/MIGRATION-0.9.0.md)
 ```
 
 **Fix:** Move `markdown_trusted_proxies` to the `http {}` block. Per-server

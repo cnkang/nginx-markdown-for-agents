@@ -42,3 +42,21 @@ def test_load_matrix_projects_normalized_target_alias(tmp_path: Path) -> None:
         ("glibc", "x86_64"),
         ("musl", "aarch64"),
     }
+
+
+def test_validate_reports_none_arch_without_sorting_error() -> None:
+    """Malformed rows must produce validation errors, not a mixed-type sort crash."""
+    matrix = [
+        {"os_type": "glibc", "arch": "x86_64", "support_tier": "full"},
+        {"os_type": "glibc", "arch": None, "support_tier": "full"},
+    ]
+    install_info = {
+        "supported_architectures": {"x86_64"},
+        "asset_name_template": validator.EXPECTED_ASSET_TEMPLATE,
+        "detectable_os_types": {"glibc"},
+        "detectable_archs": {"x86_64"},
+    }
+
+    errors = validator.validate(matrix, install_info)
+
+    assert any("unrecognized arch 'None'" in error for error in errors)

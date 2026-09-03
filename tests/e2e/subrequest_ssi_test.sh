@@ -1,20 +1,19 @@
 #!/bin/bash
-# subrequest_ssi_test.sh — E2E test: SSI subrequest conversion + inflight release (subrequest).
+# subrequest_ssi_test.sh — E2E test: SSI subrequest conversion + terminal release.
 #
 # Verifies the module's subrequest support (decision D2, option B):
 #   1. An SSI-included subrequest response is converted to Markdown when
 #      the module is enabled in the subrequest location (module does NOT
 #      skip r != r->main).
-#   2. The inflight counter is released at conversion terminal, not at
-#      parent pool destruction: after the SSI page (and its subrequests)
-#      completes, the inflight counter returns to zero without waiting
-#      for the main request to finish.
+#   2. Conversion terminal delivery is proven via the attempts/terminal
+#      counters: each repeated SSI page advances both (the 0.9.2 surface
+#      freeze removed the inflight gauge).
 #   3. A converted subrequest body carries the module's representation
 #      contract (no upstream Accept-Ranges / digest headers forwarded).
 #   4. (Optional) auth_request subrequest_in_memory mode: when the
 #      fixture exposes an auth_request-protected page, the internal
-#      subrequest (r->subrequest_in_memory) response is converted and
-#      the inflight slot is released at its terminal.
+#      subrequest (r->subrequest_in_memory) response is converted and its
+#      terminal delivery is proven via the counters.
 #
 # Prerequisites:
 #   - NGINX running with the markdown module loaded AND SSI enabled
@@ -22,7 +21,7 @@
 #   - The fixture exposes:
 #       /page.ssi        — an SSI page with <!--# include virtual="/frag.md" -->
 #       /frag.md         — upstream text/html body (converted to Markdown)
-#       /nginx-markdown/metrics  — module metrics (inflight gauge)
+#       /nginx-markdown/metrics  — module metrics endpoint
 #   - curl and awk available
 #   - NGINX_URL environment variable set (default: http://localhost:8080)
 #
@@ -130,43 +129,9 @@ counter_increased() {
         && (( after > before ))
 }
 
-# Read the inflight gauge from the module metrics endpoint.
-# Returns the integer value, or empty string when unavailable.
-inflight_current() {
-    local body
-    if ! body="$(metrics_snapshot 2>/dev/null)"; then
-        echo ""
-        return 0
-    fi
-    if [[ -z "$body" ]]; then
-        echo ""
-        return
-    fi
-    # Prometheus text format — extract the runtime inflight gauge.
-    echo "$body" | grep -E "^nginx_markdown_inflight_requests" | awk '{print $2}' | head -1
-}
-
-# Poll for a bounded interval so the request-side gauge has time to settle
-# after a subrequest completes.  A single immediate sample can race the
-# metrics update and make a healthy release look like a leak.
-wait_for_inflight_baseline() {
-    local expected="$1"
-    local current=""
-    local attempts=40
-
-    [[ "$expected" =~ ^[0-9]+$ ]] || return 1
-    while (( attempts > 0 )); do
-        current="$(inflight_current)"
-        if [[ "$current" == "$expected" ]]; then
-            printf '%s\n' "$current"
-            return 0
-        fi
-        attempts=$((attempts - 1))
-        sleep 0.25
-    done
-    printf '%s\n' "$current"
-    return 1
-}
+# The 0.9.2 surface freeze removed the inflight gauge (worker-local counter
+# is diagnostics-only, not a Prometheus family).  All scenarios prove
+# conversion and terminal delivery with the attempts/terminal counters.
 
 check_prerequisites
 
@@ -231,19 +196,32 @@ else
     fi
 fi
 
-echo "=== Scenario 3: inflight counter released at conversion terminal ===" >&2
-before="$(inflight_current)"
-# Fire the SSI page; the subrequest completes while the main request is
-# still assembling.  With active release, the gauge returns to baseline
-# after the response finishes (no hold until pool destruction).
+echo "=== Scenario 3: conversion terminal release observed on repeated SSI page ===" >&2
+# With the inflight gauge removed from the frozen surface (0.9.2), the
+# terminal-release property is proven by the conversion counters: each
+# repeated SSI page must advance both attempts and terminal deliveries.
+scenario3_metrics_before=""
+scenario3_metrics_before="$(metrics_snapshot)" || {
+    fail "scenario 3 metrics snapshot failed"
+    scenario3_metrics_before=""
+}
+scenario3_attempts_before="$(conversion_attempts_total "$scenario3_metrics_before")"
+scenario3_terminals_before="$(converted_terminal_total "$scenario3_metrics_before")"
 if ! curl -fsS "${NGINX_URL}${PAGE_PATH}" >/dev/null; then
-    fail "SSI inflight recovery request failed"
+    fail "SSI scenario 3 request failed"
 else
-    after=""
-    if after="$(wait_for_inflight_baseline "$before")"; then
-        pass "inflight gauge stable after SSI page (${before} -> ${after})"
+    scenario3_metrics_after=""
+    scenario3_metrics_after="$(metrics_snapshot)" || {
+        fail "scenario 3 post metrics snapshot failed"
+        scenario3_metrics_after=""
+    }
+    scenario3_attempts_after="$(conversion_attempts_total "$scenario3_metrics_after")"
+    scenario3_terminals_after="$(converted_terminal_total "$scenario3_metrics_after")"
+    if counter_increased "$scenario3_attempts_before" "$scenario3_attempts_after" \
+        && counter_increased "$scenario3_terminals_before" "$scenario3_terminals_after"; then
+        pass "SSI conversion and terminal counters advanced on repeat page (${scenario3_attempts_before}->${scenario3_attempts_after}, ${scenario3_terminals_before}->${scenario3_terminals_after})"
     else
-        fail "inflight gauge did not return to its baseline (${before} -> ${after}); active release may be missing"
+        fail "SSI counters did not prove a fresh conversion and terminal delivery (${scenario3_attempts_before}->${scenario3_attempts_after}, ${scenario3_terminals_before}->${scenario3_terminals_after})"
     fi
 fi
 
@@ -263,20 +241,23 @@ echo "=== Scenario 5: auth_request subrequest_in_memory conversion ===" >&2
 # set (the response body is captured in memory, not streamed).  When the
 # fixture exposes an auth-protected page, the internal subrequest target
 # must still be converted and the inflight slot released at its terminal.
-auth_metrics_before=""
-auth_metrics_before="$(metrics_snapshot)" || {
-    fail "initial auth_request metrics snapshot failed"
-    auth_metrics_before=""
-}
-auth_attempts_before="$(conversion_attempts_total "$auth_metrics_before")"
-auth_terminals_before="$(converted_terminal_total "$auth_metrics_before")"
+auth_body_file="$(mktemp)"
 # Probe the fixture without curl's fail-on-error flag: any HTTP status is a
 # real observation.  Only 404 counts as fixture absence; other error statuses
 # (401, 500, ...) mean the fixture exists but misbehaves.
-auth_body_file="$(mktemp)"
 auth_http_status=""
+auth_curl_rc=0
 auth_http_status="$(curl -sS -o "${auth_body_file}" -w '%{http_code}' \
-    "${NGINX_URL}${AUTH_PAGE_PATH}" 2>/dev/null)" || auth_http_status=""
+    "${NGINX_URL}${AUTH_PAGE_PATH}" 2>/dev/null)" || auth_curl_rc=$?
+if [[ "${auth_curl_rc}" -ne 0 ]]; then
+    # A transport error (connection refused, timeout, ...) is not fixture
+    # absence: fail immediately instead of treating the missing status as
+    # an absent fixture.
+    rm -f "${auth_body_file}"
+    fail "auth_request fixture probe failed with curl exit ${auth_curl_rc} (transport error, not a 404)"
+    exit 1
+fi
+auth_http_status="${auth_http_status:-000}"
 auth_body=""
 if [[ -n "${auth_http_status}" && -s "${auth_body_file}" ]]; then
     auth_body="$(cat "${auth_body_file}")"
@@ -290,30 +271,35 @@ if [[ "${auth_http_status}" == "200" ]]; then
     else
         fail "auth_request-protected page lacks converted content: $(echo "$auth_body" | head -3)"
     fi
-    # Inflight release check for the internal subrequest path.
-    before="$(inflight_current)"
-    if ! curl -fsS "${NGINX_URL}${AUTH_PAGE_PATH}" >/dev/null; then
-        fail "auth_request inflight recovery request failed"
-    else
-        after=""
-        if after="$(wait_for_inflight_baseline "$before")"; then
-            pass "inflight gauge stable after auth_request subrequest (${before} -> ${after})"
-        else
-            fail "inflight gauge did not return to its baseline (${before} -> ${after})"
-        fi
-    fi
-    auth_metrics_after=""
-    auth_metrics_after="$(metrics_snapshot)" || {
-        fail "post-auth_request metrics snapshot failed"
-        auth_metrics_after=""
+    # Terminal-release check for the internal subrequest path: prove with
+    # the conversion counters (the inflight gauge no longer exists in the
+    # frozen 0.9.2 surface).  Snapshot immediately after the first auth page
+    # request (the probe above already converted) and use it as the
+    # repeat-request baseline, so the counters below prove the repeat
+    # request produced a fresh conversion and terminal delivery.
+    auth_metrics_before=""
+    auth_metrics_before="$(metrics_snapshot)" || {
+        fail "repeat-request auth metrics baseline failed"
+        auth_metrics_before=""
     }
-    auth_attempts_after="$(conversion_attempts_total "$auth_metrics_after")"
-    auth_terminals_after="$(converted_terminal_total "$auth_metrics_after")"
-    if counter_increased "$auth_attempts_before" "$auth_attempts_after" \
-        && counter_increased "$auth_terminals_before" "$auth_terminals_after"; then
-        pass "auth_request conversion and terminal counters advanced"
+    auth_attempts_before="$(conversion_attempts_total "$auth_metrics_before")"
+    auth_terminals_before="$(converted_terminal_total "$auth_metrics_before")"
+    if ! curl -fsS "${NGINX_URL}${AUTH_PAGE_PATH}" >/dev/null; then
+        fail "auth_request conversion recovery request failed"
     else
-        fail "auth_request counters did not prove conversion and terminal delivery"
+        scenario5_metrics_after=""
+        scenario5_metrics_after="$(metrics_snapshot)" || {
+            fail "scenario 5 post metrics snapshot failed"
+            scenario5_metrics_after=""
+        }
+        scenario5_attempts_after="$(conversion_attempts_total "$scenario5_metrics_after")"
+        scenario5_terminals_after="$(converted_terminal_total "$scenario5_metrics_after")"
+        if counter_increased "$auth_attempts_before" "$scenario5_attempts_after" \
+            && counter_increased "$auth_terminals_before" "$scenario5_terminals_after"; then
+            pass "auth_request conversion and terminal counters advanced (${auth_attempts_before}->${scenario5_attempts_after}, ${auth_terminals_before}->${scenario5_terminals_after})"
+        else
+            fail "auth_request counters did not prove a fresh conversion and terminal delivery"
+        fi
     fi
 elif [[ "${auth_http_status}" != "404" && -n "${auth_http_status}" ]]; then
     # A fixture that answers with any status other than 200/404 exists but

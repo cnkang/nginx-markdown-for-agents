@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Historical baseline (v0.8.0). The bounded streaming engine described here is
+the active second engine in current releases. See
+[ADR-0011](./0011-true-streaming-contract.md) and the streaming
+configuration guide for the current defaults and policy (`markdown_streaming
+auto` with per-buffer limits).
 
 ## Context
 
@@ -163,12 +167,17 @@ Streaming ships behind feature flags and progressive rollout:
 
 ## Implementation Notes
 
-### Proposed Configuration Surface (initial)
+### Proposed Configuration Surface (initial) — historical v0.8.0 notes
 
-Implementation review can refine the exact naming, but the behavior should
-include:
+> These are the initial v0.8.0 configuration notes, kept for design
+> history. They do not describe current behavior. The active streaming
+> contract is `markdown_streaming off|auto|force` (default `auto`), a
+> per-request streaming memory budget, and stream failure policy with
+> pre-commit/post-commit semantics at location scope.
 
-1. streaming enable/disable switch (default off)
+1. streaming enable/disable switch (default off) — historical v0.8.0
+   default.  The current contract is `markdown_streaming off|auto|force`
+   with default `auto`
 2. per-request streaming memory budget
 3. stream failure policy with pre-commit/post-commit semantics
 4. scope controls (location-level gradual rollout)

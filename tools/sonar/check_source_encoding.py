@@ -27,6 +27,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import codecs
 import json
 import subprocess
 import sys
@@ -152,6 +153,49 @@ def _context_hex(data: bytes, offset: int, width: int = 16) -> str:
     return data[start:end].hex()
 
 
+_WIDE_UTF_DECLARED = frozenset(
+    ("utf-16", "utf-16-le", "utf-16-be", "utf-32", "utf-32-le", "utf-32-be")
+)
+
+
+def _canonical_codec_name(declared: str) -> str:
+    """Return Python's canonical codec spelling, preserving unknown names."""
+    try:
+        return codecs.lookup(declared).name
+    except LookupError:
+        return declared.lower()
+
+
+def _declared_decode_failure(
+    data: bytes, rel: str, declared: str, exc: Exception
+) -> str:
+    """Format a declared-encoding decode failure as a gate failure line."""
+    if isinstance(exc, UnicodeDecodeError):
+        return (
+            f"INVALID_UTF8 {rel} byte={exc.start}: "
+            f"declared {declared} decode failed: {exc.reason} "
+            f"context={_context_hex(data, exc.start)}"
+        )
+    return (
+        f"INVALID_UTF8 {rel} byte=-1: unknown declared encoding "
+        f"{declared}: {exc}"
+    )
+
+
+def _try_declared_decode(data: bytes, rel: str, declared: str,
+                         failures: list[str]) -> bool:
+    """Decode with the declared encoding; record a failure if it fails.
+
+    Returns True when the file was fully handled (success or recorded
+    failure), False when no declared encoding was applicable.
+    """
+    try:
+        data.decode(declared, errors="strict")
+    except (UnicodeDecodeError, LookupError) as exc:
+        failures.append(_declared_decode_failure(data, rel, declared, exc))
+    return True
+
+
 def _validate_file(
     abs_path: Path,
     manifest: dict[str, dict[str, Any]],
@@ -169,29 +213,25 @@ def _validate_file(
     except OSError as exc:
         failures.append(f"INVALID_UTF8 {rel} byte=-1: read error: {exc}")
         return
+
+    exc_info = manifest.get(rel)
+    if exc_info is not None:
+        declared = exc_info.get("encoding", "unknown")
+        if _canonical_codec_name(declared) in _WIDE_UTF_DECLARED:
+            # Declared UTF-16/UTF-32 files legitimately contain NUL bytes as
+            # part of their encoding; bypass the binary-NUL rejection and
+            # validate against the declared decoding instead.
+            _try_declared_decode(data, rel, declared, failures)
+            return
     if b"\0" in data:
         nul_offset = data.index(b"\0")
         failures.append(f"INVALID_UTF8 {rel} byte={nul_offset}: binary NUL byte")
         return
 
-    exc_info = manifest.get(rel)
     if exc_info is not None:
         declared = exc_info.get("encoding", "unknown")
-        try:
-            data.decode(declared, errors="strict")
-            return
-        except UnicodeDecodeError as exc:
-            failures.append(
-                f"INVALID_UTF8 {rel} byte={exc.start}: "
-                f"declared {declared} decode failed: {exc.reason} "
-                f"context={_context_hex(data, exc.start)}"
-            )
-            return
-        except LookupError as exc:
-            failures.append(
-                f"INVALID_UTF8 {rel} byte=-1: unknown declared encoding {declared}: {exc}"
-            )
-            return
+        _try_declared_decode(data, rel, declared, failures)
+        return
 
     try:
         data.decode("utf-8", errors="strict")

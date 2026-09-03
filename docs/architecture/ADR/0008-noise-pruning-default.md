@@ -58,9 +58,10 @@ Tag-name-only selectors apply to **all** elements matching the selected tag name
 ### Empty-Output Fallback (Deferred)
 
 Not implemented in 0.9.x. If pruning removes all content from the output, the
-module delivers the empty Markdown string as a converted result. The decision
-chain reports no dedicated skip or failure reason for this outcome, and the
-reason registry defines no prune-specific reason code.
+module delivers the empty Markdown string as a converted result and reports
+the normal `converted` outcome. The delivered zero-length body and the
+conversion metrics make the emptied output observable, but the reason
+registry defines no prune-specific reason code.
 
 The fallback design below stays deferred because it needs all three of the
 following, and none fits the 0.9.2 freeze:
@@ -68,7 +69,7 @@ following, and none fits the 0.9.2 freeze:
 1. A `prune_empty_fallback` reason code in the reason registry with a
    `log_decision()` callsite
 2. A `prune_empty_fallback_total` metric family outside the frozen v1 set of
-   exactly 12 families
+   exactly 11 families
 3. Replay-capable rollback: return the unpruned conversion result only when
    the converter has not committed output and all consumed input remains
    fully replayable
@@ -135,7 +136,9 @@ pub struct PruneConfig {
 7. Empty-output fallback (deferred, see Empty-Output Fallback above): a future line would implement it with a `prune_empty_fallback` reason code and metric outside the frozen v1 set
 8. Update `ngx_http_markdown_prepare_conversion_options()` to set FFI fields
 9. Update `decode_options()` in Rust to read new fields
-10. Add unit tests for selector matching, protection priority, empty-output fallback
+10. Add unit tests for selector matching and protection priority (the
+    empty-output fallback stays deferred, see Empty-Output Fallback above,
+    and the tests exclude it)
 11. Add E2E tests for pruning with custom/protection selectors
 
 ## Relationship to Other ADRs

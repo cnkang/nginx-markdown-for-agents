@@ -284,8 +284,13 @@ fn leading_indent_columns(line: &str) -> usize {
     let mut columns = 0usize;
     for byte in line.bytes() {
         match byte {
-            b' ' => columns += 1,
-            b'\t' => columns = (columns / 4 + 1) * 4,
+            b' ' => columns = columns.saturating_add(1),
+            b'\t' => {
+                columns = columns
+                    .saturating_div(4)
+                    .saturating_add(1)
+                    .saturating_mul(4)
+            }
             _ => break,
         }
     }
@@ -401,6 +406,19 @@ mod tests {
         assert_eq!(measure_fence_len(" ```"), 3);
         assert_eq!(measure_fence_len("```"), 3);
         assert_eq!(measure_fence_len("    ````"), 0);
+    }
+
+    #[test]
+    fn leading_indent_columns_counts_large_bounded_prefix() {
+        // A pathological line of spaces must count columns without
+        // overflowing in debug builds; the counter saturates at
+        // usize::MAX. Exercise the loop with a large (but finite)
+        // prefix instead of materializing a multi-gigabyte string.
+        let long_prefix = " ".repeat(4 * 1024 * 1024); // 4 MiB of spaces
+        assert_eq!(leading_indent_columns(&long_prefix), 4 * 1024 * 1024);
+        assert_eq!(leading_indent_columns("\t```"), 4);
+        assert_eq!(leading_indent_columns(""), 0);
+        assert_eq!(leading_indent_columns("  \tx"), 4);
     }
 
     #[test]

@@ -467,8 +467,11 @@ make
 ```bash
 cd components/rust-converter
 
-# Build release version
-cargo build --release
+# Build release version for the current platform triple.
+# The module configure script only accepts target/<triple>/release/ archives,
+# so pass the platform triple explicitly (or run `make rust-lib`, which does
+# this and also copies the header):
+cargo build --release --target "$(rustc -vV | sed -n 's/^host: //p')"
 
 # Generate C header file
 cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
@@ -714,12 +717,12 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.4 | mainline | debian12 | glibc | amd64 | supported |
 | 1.30.4 | stable | debian12 | glibc | arm64 | supported |
 | 1.30.4 | stable | debian12 | glibc | amd64 | supported |
-| 1.28.3 | stable | debian12 | glibc | arm64 | supported |
-| 1.28.3 | stable | debian12 | glibc | amd64 | supported |
-| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
-| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
-| 1.24.0 | oldstable | debian12 | glibc | arm64 | supported |
-| 1.24.0 | oldstable | debian12 | glibc | amd64 | supported |
+| 1.28.3 | legacy | debian12 | glibc | arm64 | supported |
+| 1.28.3 | legacy | debian12 | glibc | amd64 | supported |
+| 1.26.3 | legacy | debian12 | glibc | arm64 | supported |
+| 1.26.3 | legacy | debian12 | glibc | amd64 | supported |
+| 1.24.0 | legacy | debian12 | glibc | arm64 | supported |
+| 1.24.0 | legacy | debian12 | glibc | amd64 | supported |
 
 ### docker-image
 
@@ -729,10 +732,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.4 | mainline | debian12 | glibc | amd64 | supported |
 | 1.31.4 | mainline | alpine3.24 | musl | arm64 | supported |
 | 1.31.4 | mainline | alpine3.24 | musl | amd64 | supported |
-| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
-| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
-| 1.26.3 | stable | alpine3.20 | musl | arm64 | supported |
-| 1.26.3 | stable | alpine3.20 | musl | amd64 | supported |
+| 1.26.3 | legacy | debian12 | glibc | arm64 | supported |
+| 1.26.3 | legacy | debian12 | glibc | amd64 | supported |
+| 1.26.3 | legacy | alpine3.20 | musl | arm64 | supported |
+| 1.26.3 | legacy | alpine3.20 | musl | amd64 | supported |
 
 ### dynamic-module
 
@@ -746,24 +749,24 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.30.4 | stable | linux | musl | arm64 | supported |
 | 1.30.4 | stable | linux | glibc | amd64 | supported |
 | 1.30.4 | stable | linux | musl | amd64 | supported |
-| 1.28.3 | stable | linux | glibc | arm64 | supported |
-| 1.28.3 | stable | linux | musl | arm64 | supported |
-| 1.28.3 | stable | linux | glibc | amd64 | supported |
-| 1.28.3 | stable | linux | musl | amd64 | supported |
-| 1.26.3 | stable | linux | glibc | arm64 | supported |
-| 1.26.3 | stable | linux | musl | arm64 | supported |
-| 1.26.3 | stable | linux | glibc | amd64 | supported |
-| 1.26.3 | stable | linux | musl | amd64 | supported |
-| 1.24.0 | oldstable | linux | glibc | arm64 | supported |
-| 1.24.0 | oldstable | linux | musl | arm64 | supported |
-| 1.24.0 | oldstable | linux | glibc | amd64 | supported |
-| 1.24.0 | oldstable | linux | musl | amd64 | supported |
+| 1.28.3 | legacy | linux | glibc | arm64 | supported |
+| 1.28.3 | legacy | linux | musl | arm64 | supported |
+| 1.28.3 | legacy | linux | glibc | amd64 | supported |
+| 1.28.3 | legacy | linux | musl | amd64 | supported |
+| 1.26.3 | legacy | linux | glibc | arm64 | supported |
+| 1.26.3 | legacy | linux | musl | arm64 | supported |
+| 1.26.3 | legacy | linux | glibc | amd64 | supported |
+| 1.26.3 | legacy | linux | musl | amd64 | supported |
+| 1.24.0 | legacy | linux | glibc | arm64 | supported |
+| 1.24.0 | legacy | linux | musl | arm64 | supported |
+| 1.24.0 | legacy | linux | glibc | amd64 | supported |
+| 1.24.0 | legacy | linux | musl | amd64 | supported |
 
 ### homebrew-formula
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.26.3 | stable | macos | darwin | arm64 | experimental |
+| 1.26.3 | legacy | macos | darwin | arm64 | experimental |
 
 ### rpm-package
 
@@ -773,18 +776,18 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.4 | mainline | almalinux9 | glibc | amd64 | supported |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | supported |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | supported |
-| 1.28.3 | stable | almalinux9 | glibc | arm64 | supported |
-| 1.28.3 | stable | almalinux9 | glibc | amd64 | supported |
-| 1.26.3 | stable | almalinux9 | glibc | arm64 | supported |
-| 1.26.3 | stable | almalinux9 | glibc | amd64 | supported |
-| 1.24.0 | oldstable | almalinux9 | glibc | arm64 | supported |
-| 1.24.0 | oldstable | almalinux9 | glibc | amd64 | supported |
+| 1.28.3 | legacy | almalinux9 | glibc | arm64 | supported |
+| 1.28.3 | legacy | almalinux9 | glibc | amd64 | supported |
+| 1.26.3 | legacy | almalinux9 | glibc | arm64 | supported |
+| 1.26.3 | legacy | almalinux9 | glibc | amd64 | supported |
+| 1.24.0 | legacy | almalinux9 | glibc | arm64 | supported |
+| 1.24.0 | legacy | almalinux9 | glibc | amd64 | supported |
 
 ### source
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.26.3 | stable | any | n/a | any | best-effort |
+| 1.26.3 | legacy | any | n/a | any | best-effort |
 <!-- END:release-matrix:installation-matrix -->
 
 ---
@@ -1431,7 +1434,7 @@ cp include/markdown_converter.h ../nginx-module/src/
 # Rebuild Rust library
 cd components/rust-converter
 cargo clean
-cargo build --release
+cargo build --release --target "$(rustc -vV | sed -n 's/^host: //p')"
 
 # Verify library exists
 find target -path '*/release/libnginx_markdown_converter.a' -maxdepth 4
@@ -1493,7 +1496,7 @@ rustc --version
 # Clean and rebuild
 cd components/rust-converter
 cargo clean
-cargo build --release --verbose
+cargo build --release --verbose --target "$(rustc -vV | sed -n 's/^host: //p')"
 ```
 
 ### Issue: Module Not Loading

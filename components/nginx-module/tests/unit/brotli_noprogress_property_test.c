@@ -851,6 +851,9 @@ test_property11c_varied_quality_no_false_positives(void)
                     "return NGX_OK");
 
                 if (out_len > 0) {
+                    TEST_ASSERT(result_len + out_len <= text_len + 256,
+                        "varied-quality output must not exceed result_buf "
+                        "capacity");
                     memcpy(result_buf + result_len, out, out_len);
                     result_len += out_len;
                 }
@@ -875,6 +878,8 @@ test_property11c_varied_quality_no_false_positives(void)
                 "finish must return NGX_OK");
 
             if (finish_len > 0) {
+                TEST_ASSERT(result_len + finish_len <= text_len + 256,
+                    "finish output must not exceed result_buf capacity");
                 memcpy(result_buf + result_len,
                     finish_out, finish_len);
                 result_len += finish_len;

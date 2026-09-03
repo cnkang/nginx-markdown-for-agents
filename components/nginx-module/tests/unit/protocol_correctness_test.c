@@ -486,7 +486,7 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
 static void
 init_headers_list(ngx_list_t *list, ngx_uint_t capacity)
 {
-    list->last = NULL;
+    list->last = &list->part;
     list->size = sizeof(ngx_table_elt_t);
     list->nalloc = capacity;
     list->pool = NULL;

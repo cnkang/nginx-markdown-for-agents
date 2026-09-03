@@ -51,7 +51,7 @@ does not have an operator toggle:
 ### Related Documents
 
 - [OPERATIONAL_ROLLBACK.md](OPERATIONAL_ROLLBACK.md) — general module rollback procedures
-- [streaming-rollout-cookbook.md](streaming-rollout-cookbook.md) — streaming engine rollout
+- [Rollout Cookbook — Streaming-Focused Rollout](ROLLOUT_COOKBOOK.md#streaming-focused-rollout)
 - [CONFIGURATION.md](CONFIGURATION.md) — full directive reference
 - [OPERATIONS.md](OPERATIONS.md) — metrics reference
 
@@ -311,7 +311,12 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
    fi
    sudo cp components/nginx-module/src/ngx_http_markdown_filter_module.so \
      "$MODULES_DIR/"
-   sudo nginx -t
+   # Abort the rollout if the replaced module fails configuration validation;
+   # never restart with a broken module in place.
+   sudo nginx -t || {
+     echo "ERROR: nginx -t failed after module replacement; restore the previous module and re-validate" >&2
+     exit 1
+   }
    # Restart through systemd only when it actually owns the running NGINX
    # process.  A unit file existing on disk is not proof of ownership —
    # the process may be started by another supervisor or directly.
@@ -326,7 +331,19 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
        exit 1
      fi
    else
-     sudo nginx -s stop
+     sudo nginx -s quit
+     # Wait for the master to exit before starting fresh: an immediate
+     # `nginx` start can race the old master's shutdown and fail the
+     # module swap semantics this rollout depends on.
+     waited=0
+     while pgrep -x nginx >/dev/null 2>&1; do
+       if [[ "$waited" -ge 30 ]]; then
+         echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting" >&2
+         exit 1
+       fi
+       sleep 1
+       waited=$((waited + 1))
+     done
      sudo nginx
    fi
    ```
@@ -416,10 +433,11 @@ location /docs {
 nginx -t && nginx -s reload
 ```
 
-This configuration produces behavior equivalent to pre-0.9.1 (full-buffer path
-only, pool-copy output, no streaming decompression). The full-buffer copy
-reduction remains active (internal optimization) but has no observable effect
-when decompression routes through the standard full-buffer path.
+This configuration disables the streaming controls (streaming engine,
+zero-copy and streaming decompression are off), so behavior is equivalent
+to pre-0.9.1 for those controls. Full-buffer copy reduction remains active
+(internal optimization) and the full-buffer path is not byte-identical to
+pre-0.9.1, so equivalence applies only to the disabled streaming controls.
 
 ---
 

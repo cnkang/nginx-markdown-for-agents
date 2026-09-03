@@ -598,23 +598,23 @@ def _percentile(values: list[float], fraction: float) -> float:
     return values[min(int(len(values) * fraction), len(values) - 1)]
 
 
-def _ab_performance(content: str) -> tuple[float, float, float, float]:
+def _ab_performance(content: str) -> tuple[float, float, float, float] | None:
     patterns = (
         r"Requests per second:\s+([\d.]+)",
-        r"\s+50%\s+(\d+)",
-        r"\s+95%\s+(\d+)",
-        r"\s+99%\s+(\d+)",
+        r"(?m)^[ \t]+50%[ \t]+(\d+)",
+        r"(?m)^[ \t]+95%[ \t]+(\d+)",
+        r"(?m)^[ \t]+99%[ \t]+(\d+)",
     )
     values = []
     for pattern in patterns:
         match = re.search(pattern, content)
         if match is None:
-            return 0.0, 0.0, 0.0, 0.0
+            return None
         values.append(float(match.group(1)))
     return values[0], values[1], values[2], values[3]
 
 
-def _hey_performance(content: str) -> tuple[float, float, float, float]:
+def _hey_performance(content: str) -> tuple[float, float, float, float] | None:
     try:
         rows = list(csv.DictReader(io.StringIO(content)))
         latencies = sorted(float(row["response-time"]) * 1000.0 for row in rows)
@@ -623,9 +623,9 @@ def _hey_performance(content: str) -> tuple[float, float, float, float]:
             for row in rows
         )
     except (KeyError, TypeError, ValueError):
-        return 0.0, 0.0, 0.0, 0.0
+        return None
     if not latencies or wall_end <= 0:
-        return 0.0, 0.0, 0.0, 0.0
+        return None
     return (
         len(latencies) / wall_end,
         _percentile(latencies, 0.50),
@@ -661,17 +661,27 @@ def _load_result(data: ScenarioResultInput) -> tuple[dict, float, float, float, 
     """Parse the selected load generator and return performance fields."""
     if data.load_generator == "ab":
         load = parse_ab_result(data.raw_content, data.iterations)
-        rps, p50, p95, p99 = _ab_performance(data.raw_content)
+        performance = _ab_performance(data.raw_content)
     elif data.load_generator == "hey":
         load = parse_hey_result(data.raw_content, data.iterations)
-        rps, p50, p95, p99 = _hey_performance(data.raw_content)
+        performance = _hey_performance(data.raw_content)
     else:
         load = _failure(
             {}, f"unknown_load_generator: {data.load_generator}"
         )
-        rps = p50 = p95 = p99 = 0.0
-    if data.load_exit_code != 0:
+        performance = None
+    if performance is None:
+        # Only overwrite a still-passing load verdict: a load that already
+        # failed (parse_ab_result/parse_hey_result strict checks) carries a
+        # more specific failure_reason that must be preserved.
+        if load.get("verdict") == "pass":
+            load = _failure(load, "load_result_unparseable: performance fields")
+    elif data.load_exit_code != 0:
         load = _failure(load, f"load_generator_exit: {data.load_exit_code}")
+    if performance is None:
+        rps = p50 = p95 = p99 = 0.0
+    else:
+        rps, p50, p95, p99 = performance
     return load, rps, p50, p95, p99
 
 

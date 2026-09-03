@@ -177,7 +177,7 @@ route to bounded full-buffer decompression regardless of streaming preference.
 
 - [DECOMPRESSION.md](DECOMPRESSION.md) — decompression behavior, budget enforcement, and error categories
 - [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md) — Directive syntax and defaults
-- [../guides/streaming-rollout-cookbook.md](../guides/streaming-rollout-cookbook.md) — Streaming rollout guidance
+- [Rollout Cookbook — Streaming-Focused Rollout](../guides/ROLLOUT_COOKBOOK.md#streaming-focused-rollout)
 
 ## Document Updates
 

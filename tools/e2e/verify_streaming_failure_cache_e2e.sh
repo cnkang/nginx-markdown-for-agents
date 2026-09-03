@@ -1364,15 +1364,22 @@ fi
 
 t09_pass=1
 
-# 10.9a: error_policy pass → fail-open → HTTP 200 with HTML body
+# 10.9a: error_policy pass → fail-open → HTTP 2xx with original HTML body
 if [[ "${t09a_code}" == "000" ]]; then
-    echo "  10.9a INFO: transport close (connection reset = implicit reject)" >&2
-elif [[ "${t09a_code}" -ge 400 ]]; then
-    echo "  10.9a FAIL: expected HTTP 200 (error_policy fail-open)," \
+    echo "  10.9a FAIL: transport error (no status line); expected HTTP 200 " \
+         "fail-open HTML" >&2
+    t09_pass=0
+elif ! [[ "${t09a_code}" -ge 200 && "${t09a_code}" -lt 300 ]]; then
+    echo "  10.9a FAIL: expected HTTP 2xx (error_policy fail-open)," \
          "got ${t09a_code}" >&2
     t09_pass=0
 else
     echo "  10.9a INFO: error_policy pass returned ${t09a_code}" >&2
+    if ! grep -q "${OVERSIZE_END_TOKEN}" "${RAW_DIR}/t09a.body" 2>/dev/null; then
+        echo "  10.9a FAIL: error_policy pass body missing original HTML" \
+             "(expected ${OVERSIZE_END_TOKEN})" >&2
+        t09_pass=0
+    fi
 fi
 
 # 10.9b: error_policy fail_closed → reject → connection close / empty reply
@@ -1556,12 +1563,17 @@ fi
 # 10.12b Unauthenticated fail-open keeps the upstream public policy
 # ---------------------------------------------------------------------------
 echo "==> 10.12b Unauthenticated fail-open keeps upstream public policy"
+t12b_pass=1
+# Guard the curl so transport errors do not terminate the script under
+# set -e; the assertions below then report the failure explicitly.
+curl_rc=0
 curl -sS -D "${RAW_DIR}/t12b.hdr" -o "${RAW_DIR}/t12b.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" \
     --max-time 60 \
-    "http://127.0.0.1:${PORT}/t12/failopen-headers"
-
-t12b_pass=1
+    "http://127.0.0.1:${PORT}/t12/failopen-headers" || curl_rc=$?
+if [[ "${curl_rc}" -ne 0 ]]; then
+    mark_case_fail "10.12b" "curl transport error (rc=${curl_rc})" t12b_pass
+fi
 
 assert_http_200 "${RAW_DIR}/t12b.hdr" "10.12b" t12b_pass \
     "expected HTTP 200 for unauthenticated fail-open"

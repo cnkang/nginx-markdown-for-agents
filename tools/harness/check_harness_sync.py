@@ -86,6 +86,7 @@ TRIVY_REQUIRED_LOCAL_EXCLUSIONS = (
     ".codeartsdoer",
     ".kiro",
     "build",
+    "reports",
 )
 
 

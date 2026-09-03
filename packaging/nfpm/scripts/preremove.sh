@@ -195,6 +195,11 @@ resolve_trusted_nginx() {
 
 MODULE_REFERENCE_PATTERN='^[[:space:]]*load_module[[:space:]]+"?[^;]*ngx_http_markdown_filter_module\.so"?[[:space:]]*;'
 FORCE_REMOVE_SENTINEL="/etc/nginx/markdown-module-force-remove"
+# One-shot, content-bound forced-removal acknowledgement: the sentinel file
+# must contain exactly this token (operator-written when acknowledging a
+# forced removal) and is consumed on use, so a stale sentinel from a prior
+# install/remove cycle can never silently re-authorize a later removal.
+FORCE_REMOVE_TOKEN='nginx-markdown-module force-remove v1'
 
 ##############################################################################
 # Helpers
@@ -202,6 +207,25 @@ FORCE_REMOVE_SENTINEL="/etc/nginx/markdown-module-force-remove"
 
 info() {
     printf '[preremove] %s\n' "$1" >&2
+}
+
+# force_remove_acknowledged returns 0 when the sentinel file content
+# matches the required token byte-for-byte with no trailing newline.
+# A newline-terminated file, a longer file, an empty file, or an
+# unreadable file is a non-match (the guard stays active).
+force_remove_acknowledged() {
+    local line
+    local read_status
+
+    [[ -f "$FORCE_REMOVE_SENTINEL" ]] || return 1
+    IFS= read -r line < "$FORCE_REMOVE_SENTINEL" 2>/dev/null
+    read_status=$?
+    # read returns 0 when the line ended with a newline (reject: the
+    # token must not carry a trailing newline), 1 at EOF without a
+    # newline (the exact-token shape), and 2 on read failure.
+    [[ "$read_status" -eq 0 ]] && return 1
+    [[ "$read_status" -eq 2 || -z "$line" ]] && return 1
+    [[ "$line" == "$FORCE_REMOVE_TOKEN" ]]
 }
 
 configuration_loads_module() {
@@ -225,6 +249,7 @@ check_active_configuration() {
     local nginx_dump
     local nginx_status=0
     local config_status=0
+    local standard_config_present=0
 
     nginx_candidate="$(command -v nginx 2>/dev/null || true)"
     if [[ -n "$nginx_candidate" ]]; then
@@ -271,23 +296,15 @@ check_active_configuration() {
     done
 
     if [[ "$standard_config_present" -eq 0 ]]; then
-        # No NGINX executable on the trusted PATH and no standard
-        # configuration file exists.  This package installs the module only
-        # for a packaged NGINX (the preinstall ABI gate requires a distro
-        # nginx at install time), so nothing the package supports can load
-        # the module in this state.  A custom NGINX build outside the
-        # supported packages is unverifiable by design; the persistent
-        # force-removal sentinel is the explicit operator path for hosts
-        # that run one.
-        info "No NGINX executable and no standard configuration file found."
-        info "If a custom NGINX build uses this module, verify it manually or"
-        info "create ${FORCE_REMOVE_SENTINEL} to acknowledge forced removal."
-        return 1
+        info "No trusted NGINX executable or standard configuration file found."
+    else
+        info "Standard NGINX configuration files contain no module reference."
     fi
-
-    # A missing executable with configuration files present but unassessable,
-    # or an unobserved include path, is unverifiable rather than evidence
-    # that no module is loaded.
+    # Without the executable, the complete include graph and active
+    # configuration cannot be verified. The persistent force-removal sentinel
+    # is the explicit operator path for an out-of-band verification.
+    info "The complete NGINX include graph could not be verified."
+    info "Create ${FORCE_REMOVE_SENTINEL} to acknowledge forced removal."
     return 2
 }
 
@@ -303,9 +320,16 @@ main() {
             ;;
         remove|0)
             if [[ -f "$FORCE_REMOVE_SENTINEL" ]]; then
-                info "WARNING: forced removal acknowledged (${FORCE_REMOVE_SENTINEL} present); skipping active-configuration verification."
-                info "WARNING: delete $FORCE_REMOVE_SENTINEL after removal to re-enable the guard."
-                return 0
+                if force_remove_acknowledged; then
+                    info "WARNING: forced removal acknowledged (${FORCE_REMOVE_SENTINEL} present); skipping active-configuration verification."
+                    info "WARNING: one-shot sentinel consumed; a future removal requires a fresh acknowledgement."
+                    rm -f "$FORCE_REMOVE_SENTINEL" || {
+                        info "ERROR: could not remove ${FORCE_REMOVE_SENTINEL}; delete it manually and retry removal."
+                        return 1
+                    }
+                    return 0
+                fi
+                info "WARNING: ${FORCE_REMOVE_SENTINEL} exists but its content does not match the required token; ignoring it."
             fi
             ;;
         *)

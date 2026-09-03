@@ -94,9 +94,9 @@ def judge_metric_percent(
 
     For lower-is-better: positive pct_change = regression.
 
-    When pass_delta_ms is set, absolute deltas below that floor are
-    treated as pass regardless of percentage — prevents false positives
-    on sub-3ms micro-benchmarks where CI runner noise dominates.
+    When pass_delta_ms is set, absolute deltas below that configured floor
+    are treated as pass regardless of percentage — prevents false positives
+    on sub-millisecond micro-benchmarks where CI runner noise dominates.
     """
     if pass_delta_ms is not None and abs_delta < pass_delta_ms:
         return "pass"

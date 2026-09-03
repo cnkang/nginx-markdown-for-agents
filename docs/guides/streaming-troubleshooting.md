@@ -7,7 +7,7 @@ switches.
 
 Related docs:
 
-- [Streaming Rollout Cookbook](streaming-rollout-cookbook.md)
+- [Rollout Cookbook — Streaming-Focused Rollout](ROLLOUT_COOKBOOK.md#streaming-focused-rollout)
 - [Configuration Reference](CONFIGURATION.md)
 - [Prometheus Metrics Guide](prometheus-metrics.md)
 
@@ -64,7 +64,9 @@ Prometheus endpoint exposes exactly these relevant families:
 - `nginx_markdown_streaming_events_total{transition=...}`
 - `nginx_markdown_decompression_events_total{encoding=...,outcome=...,reason=...}`
 - `nginx_markdown_requests_total{outcome=...,stage=...,reason=...}`
-- `nginx_markdown_inflight_requests`
+
+The in-flight conversion population is observable through the diagnostics
+endpoint (inflight field), not through Prometheus.
 
 ## Response uses full-buffer
 
@@ -211,8 +213,8 @@ separate budget-limit failure classification. The module records the event in
 ## Rollback checklist
 
 1. Save diagnostics and Prometheus output (record a pre-reload baseline of
-   `nginx_markdown_conversion_attempts_total` and
-   `nginx_markdown_inflight_requests`).
+   `nginx_markdown_conversion_attempts_total` and the diagnostics inflight
+   field).
 2. Set `markdown_streaming off` (and, if needed,
    `markdown_auto_decompress off`).
 3. Run `nginx -t && nginx -s reload`.
@@ -223,7 +225,7 @@ separate budget-limit failure classification. The module records the event in
    requests from before the reload are still converting. Compare the delta
    from your pre-reload baseline only after diagnostics/error logs and the
    worker lifecycle show that no pre-reload request remains in flight. A zero
-   `nginx_markdown_inflight_requests` value alone is not proof of pre-reload
+   diagnostics inflight value alone is not proof of pre-reload
    drain because it only describes the currently observed conversion
    population.
 5. Re-enable with `auto` only after reviewing the reason labels and

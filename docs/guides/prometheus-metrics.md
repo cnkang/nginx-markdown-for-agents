@@ -1,7 +1,7 @@
 # Prometheus Metrics Guide
 
 This guide describes the 0.9.2 production metrics contract. The endpoint emits
-only Prometheus text exposition format 0.0.4 and exactly the twelve families
+only Prometheus text exposition format 0.0.4 and exactly the eleven families
 listed below. The checked-in metrics registry is the machine-readable source
 for names, types, labels, and help text. The public inventory documents the
 operator-facing surface.
@@ -45,7 +45,6 @@ path, URI, host, profile, and per-path dimensions are not emitted.
 | `nginx_markdown_conversion_duration_seconds` | histogram | `engine` | Conversion duration with ten fixed boundaries, `_bucket`, `_sum`, and `_count`. |
 | `nginx_markdown_input_bytes_total` | counter | — | Input bytes read for conversion. |
 | `nginx_markdown_output_bytes_total` | counter | — | Converted bytes successfully delivered downstream. |
-| `nginx_markdown_inflight_requests` | gauge | — | Requests currently undergoing conversion. |
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | Peak working-set estimate from the most recent streaming conversion; not process RSS. |
 | `nginx_markdown_streaming_events_total` | counter | `transition`, `reason` | Closed streaming lifecycle transitions. |
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | Decompression completion and failure events. |
@@ -76,7 +75,7 @@ The frozen event model is:
    outcome.
 2. A request starts at most one conversion attempt.
 3. A successful attempt produces at most one request-level successful delivery.
-4. `inflight_requests` returns to zero after quiescence.
+4. The diagnostics in-flight counter returns to zero after quiescence.
 
 Therefore, after the system is quiescent (no in-flight requests, so the
 counters have stopped advancing), the conservation equations hold on
@@ -88,12 +87,22 @@ delta(sum(requests_total)) == requests entering the decision chain during the wi
 delta(sum(conversion_attempts_total)) <= delta(sum(requests_total))
 delta(sum(conversion_deliveries_total)) <= delta(sum(conversion_attempts_total))
 delta(conversion_duration_seconds_count) <= delta(sum(conversion_attempts_total))
-inflight_requests == 0
 ```
 
 Compare deltas from the same baseline for every family. Raw cumulative
 values from different points in time are not comparable because the
-counters never reset.
+counters persist only for the lifetime of a running shared-memory
+instance.
+
+Counters persist across graceful reloads (`nginx -s reload` keeps the
+existing shared-memory counters) **only while the metrics zone size stays
+unchanged**. Changing `markdown_metrics_shm_size` makes NGINX recreate the
+shared-memory zone on the next reload (the old segment unmaps and a new
+one replaces it), which resets all counters to zero and invalidates any
+baseline taken before the change. Treat a `shm_size` change like a full
+restart: establish a new baseline after the reload. After any full restart,
+establish a new baseline before
+computing deltas so the comparison interval never spans the reset.
 
 HTML passthrough, failed-open HTML, failed-closed responses, and abort-terminal
 responses do not increment `conversion_deliveries_total`. They appear
@@ -157,7 +166,7 @@ Unknown numeric reason codes map to `internal_unknown` and get logged as errors.
 
 The 0.9.2 freeze removes legacy conversion, passthrough, per-path, streaming
 debug, JSON, and multi-format families. Update dashboards and alerts to the
-twelve families above. Do not carry old family names into a
+eleven families above. Do not carry old family names into a
 new 0.9.2 deployment. The detailed public compatibility inventory is
 [`docs/architecture/PUBLIC_SURFACE_INVENTORY.md`](../architecture/PUBLIC_SURFACE_INVENTORY.md).
 
@@ -185,12 +194,12 @@ that reference the old name.
 
 ## Stability policy
 
-The twelve-family set is frozen for 0.9.2. A future 1.x family addition
+The eleven-family set is frozen for 0.9.2. A future 1.x family addition
 requires a documented operator use case and a backward-compatible schema
 review. New labels must remain bounded and must not introduce path, URI, host,
 or other unbounded cardinality.
 
 | Version | Change |
 |---|---|
-| 0.9.2 | Replaced legacy multi-format metrics with the twelve-family Prometheus v1 contract. |
+| 0.9.2 | Replaced legacy multi-format metrics with the eleven-family Prometheus v1 contract. |
 | 0.9.1 | Previous release-line metric migration guidance. |

@@ -58,7 +58,7 @@ All patterns in this cookbook use existing NGINX configuration primitives (`map`
 - [CONFIGURATION.md](CONFIGURATION.md) — full directive reference
 - [DEPLOYMENT_EXAMPLES.md](DEPLOYMENT_EXAMPLES.md) — deployment patterns and verification
 - [OPERATIONS.md](OPERATIONS.md) — operational guide and metrics reference
-- [streaming-rollout-cookbook.md](streaming-rollout-cookbook.md) — streaming-specific
+- [ROLLOUT_COOKBOOK.md](ROLLOUT_COOKBOOK.md#streaming-focused-rollout) — streaming-specific
   rollout and compressed-response verification
 
 ---
@@ -169,11 +169,11 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
   grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check decision log entries
-grep "markdown decision:" /var/log/nginx/error.log | tail -10
+grep "markdown:" /var/log/nginx/error.log | tail -10
 
 # Check for failure reason codes
-grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -c "reason=failed_open\|reason=failed_closed"
+grep "markdown:" /var/log/nginx/error.log | \
+  grep -cE "outcome=(failed_open|failed_closed|aborted)"
 
 # Verify a test request converts
 curl -sD - -o /dev/null \
@@ -267,12 +267,13 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
   grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check reason code distribution
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 
-# Check for failures across all enabled paths
-grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -E "reason=failed_open\|reason=failed_closed" | \
+# Check for failures across all enabled paths (outcome is a decision-log
+# field; failed_open/failed_closed are outcome values, not reason codes)
+grep "markdown:" /var/log/nginx/error.log | \
+  grep -E "outcome=failed_open|outcome=failed_closed" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c
 ```
 
@@ -364,11 +365,11 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
   grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check for failure reason codes in the last 24 hours
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open\|reason=failed_closed" | wc -l
 
 # Check reason code distribution
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 
 # Verify conversion latency samples are present; use histogram_quantile in PromQL
@@ -458,16 +459,16 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics
 
 # Reason code distribution
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 
 # Path-specific failure check
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open\|reason=failed_closed" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c
 
 # Verify no internal system-failure categories
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -c "category=system"
 ```
 
@@ -1052,7 +1053,7 @@ http {
 
 The `map` approach is easier to maintain as your rollout scope grows. You add or remove paths in the `map` block without creating new `location` blocks. Combine it with explicit `location` overrides for critical exclusions (like `/api`) as a safety net. NGINX `map` evaluation is not simple declaration order. Exact matches and masked prefixes or suffixes take precedence over regular expressions, and competing regular expressions apply in declaration order. Place critical map exclusions so they win under those rules. A specific exclusion that appears after a broad regex that matches it never reaches its branch.
 
-Note: Even if a risky page type is accidentally included in your conversion scope, the module's eligibility checks provide a safety net. The module skips unsupported or unbounded response types via `not_eligible` (for example non-HTML content types, error statuses, or responses the module cannot convert). Large or chunked responses are a separate case: they may enter `markdown_streaming` and produce `STREAMING_*` outcomes rather than `not_eligible`. However, relying on eligibility checks alone adds noise to your decision logs and metrics. Explicit exclusions keep your rollout scope clean and your observation data meaningful. The safety net catches accidental scope mistakes. It does not replace explicit scope control.
+Note: Even if a risky page type is accidentally included in your conversion scope, the module's eligibility checks provide a safety net. The module skips unsupported or unbounded response types via `not_eligible` (for example non-HTML content types, error statuses, or responses the module cannot convert). Large or chunked responses are a separate case: they may enter `markdown_streaming` and transition through bounded lowercase `event` values such as `engine_streaming` or `streaming_convert` — never `STREAMING_*` outcomes. The terminal outcome set stays `converted`, `failed_open`, `failed_closed`, `aborted`, and `skipped`. However, relying on eligibility checks alone adds noise to your decision logs and metrics. Explicit exclusions keep your rollout scope clean and your observation data meaningful. The safety net catches accidental scope mistakes. It does not replace explicit scope control.
 
 ---
 
@@ -1105,7 +1106,7 @@ are intentionally meant to receive Markdown.
 
 At `info` level, the module emits a decision log entry for every request that enters the decision chain. This covers conversions, skips, and failures alike. This gives you full visibility into module behavior without requiring `debug` level. The `debug` level adds extended fields (filter value, Accept header, upstream status) and increases log volume. Choose `info` for rollout monitoring.
 
-During rollout, `info` is the right level. You can see every decision the module makes, correlate with metrics, and diagnose unexpected behavior. After rollout stabilizes, you may raise verbosity to `warn` to reduce log volume. At that level, the module logs only failure outcomes (`failed_open`, `failed_closed`). The `warn` level logs failures only. Rollout uses `info` for full visibility. Steady state can drop to `warn`.
+During rollout, `info` is the right level. You can see every decision the module makes, correlate with metrics, and diagnose unexpected behavior. After rollout stabilizes, you may raise verbosity to `warn` to reduce log volume. At that level, the module logs only failure outcomes (`failed_open`, `failed_closed`, `aborted`). The `warn` level logs failures only. Rollout uses `info` for full visibility. Steady state can drop to `warn`.
 
 ### Changing Defaults During Rollout
 
@@ -1143,7 +1144,7 @@ Use this guidance at every observation checkpoint and whenever you need to asses
 ### Metrics to Monitor
 
 The module exposes `/markdown-metrics` as a localhost-only Prometheus text
-0.0.4 endpoint. It always emits the exact twelve families listed in the
+0.0.4 endpoint. It always emits the exact eleven families listed in the
 [Prometheus Metrics Guide](prometheus-metrics.md). The `Accept` header cannot
 select a legacy JSON or human-readable representation.
 
@@ -1181,11 +1182,11 @@ Decision log entries use the format `markdown decision: reason=<REASON_CODE> ...
 
 ```bash
 # Count all conversion failures
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open\|reason=failed_closed" -c
 
 # Show the most recent failures with full context
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open\|reason=failed_closed" | tail -10
 ```
 
@@ -1193,7 +1194,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ```bash
 # category=system indicates internal errors — these should never appear
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -c "category=system"
 ```
 
@@ -1201,7 +1202,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ```bash
 # See the distribution of all reason codes
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[A-Za-z_]+' | sort | uniq -c | sort -rn
 ```
 
@@ -1209,7 +1210,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ```bash
 # Show all eligibility and Accept skip reasons; disabled is intentionally excluded.
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=(not_eligible|skipped_[a-z_]+)" | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 ```
@@ -1219,7 +1220,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 ```bash
 # Break down failures by category (conversion, resource_limit, system)
 # The category= field appears in decision log entries for failure outcomes
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -oP 'category=\K[a-z_]+' | sort | uniq -c
 ```
 
@@ -1227,7 +1228,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ```bash
 # Identify which URIs are failing most often
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=failed_open|reason=failed_closed" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c | sort -rn | head -10
 ```
@@ -1282,7 +1283,7 @@ diff -u /tmp/metrics-before.prom /tmp/metrics-after.prom
 # Show all skip reason codes from decision log
 # (skip reasons are not in the metrics endpoint;
 # use decision log grep patterns instead)
-grep "markdown decision:" /var/log/nginx/error.log | \
+grep "markdown:" /var/log/nginx/error.log | \
   grep -E "reason=not_eligible|reason=skipped_" | \
   grep -oP 'reason=\K[A-Za-z_]+' | sort | uniq -c
 ```
@@ -1370,6 +1371,183 @@ When a trigger fires:
 4. If the issue is widespread, consider rolling back — see the Rollback Guide (`OPERATIONAL_ROLLBACK.md`) for procedures.
 5. Resolve the underlying issue before resuming rollout expansion.
 
+
+## Streaming-Focused Rollout
+
+This section is the streaming-specific supplement folded in from the former
+Streaming Rollout Cookbook. It assumes the general stages and observation
+guidance above, and it adds the verification-request, go/no-go, and emergency
+rollback signals specific to the 0.9.2 frozen streaming surface
+(`markdown_streaming off|auto|force`, bounded streaming buffer, and the
+streaming counters).
+
+### Streaming baseline
+
+Keep `markdown_error_policy pass` during the initial streaming rollout so
+conversion errors that occur before headers commit can preserve the upstream
+response. After NGINX commits headers or converted bytes, the original HTML
+is no longer replayable, and a later failure follows the safe-finish/abort
+contract and may leave the client with a truncated Markdown response. Use
+`markdown_streaming force` only for paths whose response size, cache
+requirements, and compressed encodings have completed testing.
+
+Start with explicit, bounded settings:
+
+```nginx
+http {
+    markdown_filter off;
+    markdown_streaming auto;
+    markdown_auto_decompress on;
+    markdown_cache_validation ims_only;
+    markdown_error_policy pass;
+    markdown_limits conversion_memory=64m conversion_timeout=10s
+        parser_memory=32m parser_timeout=5s streaming_buffer=2m
+        decompressed_size=20m decompression_ratio=100 max_inflight=64;
+
+    server {
+        # Required before collecting the baseline. Keep the endpoint local-only.
+        location = /markdown-metrics {
+            allow 127.0.0.1;
+            allow ::1;
+            deny all;
+            markdown_metrics;
+        }
+
+        location /docs {
+            markdown_filter on;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+Baseline snapshot (loopback only):
+
+```bash
+curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics > "$SNAPSHOT_DIR/markdown-metrics.baseline"
+curl -fsS -H 'Accept: application/json' \
+  http://localhost/nginx-markdown/diagnostics > \
+  "$SNAPSHOT_DIR/markdown-diagnostics.baseline.json"
+```
+
+### Streaming staged enablement
+
+1. Enable one low-traffic staging location.
+2. Observe at least one normal traffic cycle.
+3. Enable a second representative path.
+4. Enable one low-traffic production path.
+5. Expand only after the counters and logs remain stable.
+
+For each stage, record `nginx_markdown_requests_total` by `outcome`, `stage`,
+and `reason`, conversion attempts and deliveries by `engine`, streaming
+transitions by `transition`, decompression events by `encoding`, `outcome`,
+and `reason`, plus the diagnostics `configuration.effective` object.
+
+### Streaming verification requests
+
+Exercise both uncompressed and compressed upstreams:
+
+```bash
+curl -sD - -o "$SNAPSHOT_DIR/markdown.out" \
+  -H 'Accept: text/markdown' http://staging.example.com/docs/
+curl -sD - -o "$SNAPSHOT_DIR/markdown-gzip.out" \
+  -H 'Accept: text/markdown' http://staging.example.com/gzip-docs/
+```
+
+The expected converted response has `Content-Type: text/markdown` and valid
+Markdown output.
+
+Measure one known streaming-eligible request per before/after snapshot pair.
+The diagnostics/decision log confirms eligibility (the request must
+carry `engine=streaming`), not assumed from `force` alone, which may
+still fall back to full-buffer for hard incompatibilities (for example
+build-disabled streaming decoders or excluded content types).
+
+The metrics endpoint runs on the NGINX host itself, so target the loopback
+address for snapshot capture:
+
+```bash
+# Pick the uncompressed request as the single measured request.
+curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics > "$SNAPSHOT_DIR/metrics.before"
+# Send exactly one streaming-eligible request between the snapshots,
+# then capture the after snapshot without any other conversion request.
+curl -s -H 'Accept: text/markdown' http://localhost/docs/ > /dev/null
+curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics > "$SNAPSHOT_DIR/metrics.after"
+```
+
+Assert that `nginx_markdown_conversion_deliveries_total{engine="streaming"}`
+increases by exactly one between the two snapshots for that single request.
+**This assertion is valid only when the instance has no concurrent traffic
+during the measurement window** — no other conversion requests (including
+scheduled crawlers, health probes, or other tenants on a shared instance).
+With concurrent traffic, the cumulative counter cannot attribute deliveries
+to this request. Use request-correlated evidence instead: issue the probe
+with a **unique probe token** — a random query parameter (for example
+`?probe=<uuid>`) so the decision-log entry's URI field identifies exactly
+this request. A generated request header only helps if a decision-log field
+records it, which the schema does not do today. Prefer the query parameter,
+because the bare path is not a correlation key since unrelated requests share it.
+Confirm the probe token decision-log entry for the delivered engine. Note
+that `streaming_events_total` has no URI/path label, so it cannot scope
+to a probe path. For byte accounting compare deltas of
+`nginx_markdown_output_bytes_total`. Never use a delivery count as a byte
+measurement. A downstream `NGX_AGAIN` is a suspension, not a successful
+delivery.
+
+### Streaming go/no-go signals
+
+Continue when:
+
+- `nginx -t` passes after each change,
+- conversion delivery counts grow only after successful terminal delivery,
+- streaming resume failures and post-commit aborts remain zero or explained,
+- decompression failures stay limited to intentionally malformed fixtures,
+- the diagnostics in-flight counter returns to zero after the test traffic
+  drains,
+- the diagnostics effective configuration matches the intended location.
+
+Pause and investigate when:
+
+- `failed_open`, `failed_closed`, `aborted`, `abort_start`, or
+  `resume_failure` grows unexpectedly (compare each rate or count with the
+  established pre-rollout baseline),
+- compressed responses show repeated decompression failures with
+  `reason="truncated_input"`, `reason="format_error"`, or
+  `reason="io_error"` on `nginx_markdown_decompression_events_total`,
+- conversion attempts exceed the request population,
+- full-buffer and streaming delivery conservation no longer holds,
+- a reload changes a request's effective configuration mid-request.
+
+### Streaming emergency rollback
+
+```nginx
+location /docs {
+    markdown_filter on;
+    markdown_streaming off;
+    markdown_auto_decompress off;
+    proxy_pass http://backend;
+}
+```
+
+Apply with `nginx -t && nginx -s reload`, then wait for the graceful reload
+to drain. The diagnostics in-flight field returns to zero when the request
+population is quiescent, but it is **supplemental evidence only, not proof**:
+it shows that no request is currently mid-conversion, while new requests
+admitted after the reload keep it at or above one while they convert. Treat
+in-flight values and conversion-counter deltas as supporting signals. The
+decisive signal is the diagnostics/error log showing the pre-reload requests
+reaching terminal. Record a baseline immediately before the reload, then
+compare **deltas after quiescence**, or wait until the logs show the
+pre-reload requests reaching terminal. Do not poll the cumulative
+`nginx_markdown_requests_total` counter, which only advances and cannot show
+drain. Only then issue controlled requests for the rolled-back scope and
+compare the before/after deltas. Verify that streaming attempts stop and
+full-buffer attempts remain healthy. Preserve the diagnostics JSON,
+Prometheus snapshot, error-log excerpts, and the exact configuration used
+for the incident.
 
 ## Document Updates
 

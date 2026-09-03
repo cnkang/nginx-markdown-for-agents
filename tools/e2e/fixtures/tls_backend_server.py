@@ -32,7 +32,7 @@ class TLSBackendHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         """
         Handle one HTTP request and send the corresponding response.
-        
+
         The handler supports `GET` and `HEAD` requests for health, static HTML,
         chunked-trailer, and error endpoints. Query strings are excluded from path
         routing, and unsupported methods or malformed request lines receive error
@@ -100,11 +100,11 @@ class TLSBackendHandler(socketserver.StreamRequestHandler):
     def _send_html(self, status: int, body: str, method: str) -> None:
         """
         Send an HTML response with caching metadata and omit the body for HEAD requests.
-        
+
         Parameters:
-        	status (int): HTTP response status code.
-        	body (str): HTML content to encode as UTF-8.
-        	method (str): HTTP request method controlling whether the response body is sent.
+            status (int): HTTP response status code.
+            body (str): HTML content to encode as UTF-8.
+            method (str): HTTP request method controlling whether the response body is sent.
         """
         payload = body.encode("utf-8")
         headers = {
@@ -122,7 +122,7 @@ class TLSBackendHandler(socketserver.StreamRequestHandler):
         self, status: int, body: str, method: str
     ) -> None:
         """Send an HTML response using chunked transfer encoding with a content digest trailer.
-        
+
         Parameters:
             status (int): HTTP response status code.
             body (str): HTML response content.
