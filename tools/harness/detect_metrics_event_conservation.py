@@ -74,7 +74,8 @@ ABORTED_SOURCE_FIELD = "terminal_aborted_total"
 # equality comparisons (`==`) are not derivation statements and must not
 # be treated as one (a `==` would otherwise match on its second `=`).
 FAILED_CLOSED_ASSIGN_RE = re.compile(
-    r"(?<![.\w>])failed_closed[ \t]*(?<![!<>=+\-*/%&|^])=(?!=)([^;]*);"
+    r"(?:^|[;{}])[ \t]*failed_closed[ \t]*(?<![!<>=+\-*/%&|^])=(?!=)([^;]*);",
+    flags=re.MULTILINE,
 )
 
 

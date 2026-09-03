@@ -141,6 +141,18 @@ def test_temporary_assignment_before_read_records_variable():
     assert "ARCH" in defined
 
 
+def test_assignment_prefixed_non_read_does_not_record_targets():
+    """`MODE=1 echo read -r ARCH` executes echo, not read: ARCH must not
+    be recorded as defined by a read command."""
+    run = (
+        "MODE=1 echo read -r ARCH\n"
+        "echo \"done\"\n"
+    )
+    defined = module.extract_shell_definitions(run)
+    assert "MODE" in defined
+    assert "ARCH" not in defined
+
+
 def test_awk_single_quoted_field_not_a_reference():
     run = "printf '%s\\n' \"$(awk '{print $NF}' file.txt)\"\n"
     assert "NF" not in module.extract_run_vars(run)

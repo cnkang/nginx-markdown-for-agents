@@ -141,8 +141,13 @@ while IFS= read -r -d '' file; do
             fi
 
             # No whole-init: if the var is used with field access (partial
-            # assignment pattern) in the window, report it.
-            if echo "$tail_code" | grep -qE "${var_name}\.[a-zA-Z_]+[[:space:]]*="; then
+            # assignment pattern) in the window, report it.  The field
+            # name must be a real identifier (digits allowed after the
+            # first char) and the line must be a single `=` assignment,
+            # not an equality comparison (`==`).  The variable name is
+            # anchored to an identifier boundary so `otherctx.field = 1`
+            # is not reported for var_name `ctx`.
+            if echo "$tail_code" | grep -qE "(^|[^[:alnum:]_])${var_name}\\.[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*=[[:space:]]*[^=]"; then
                 echo "CANDIDATE: $file:$line_num — stack ${type} '${var_name}' assigned field-by-field without whole-struct initialization (memset/zero-init/helper); uninitialized members may carry stack garbage past NULL guards" >> "$tmp_violations"
             fi
         done < "$grep_matches"
