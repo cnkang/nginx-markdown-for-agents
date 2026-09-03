@@ -24,6 +24,10 @@ SANITIZER_ENV ?= ASAN_OPTIONS=$(ASAN_OPTIONS_BASE) UBSAN_OPTIONS=print_stacktrac
 
 .PHONY: unit unit-smoke unit-clang-smoke unit-sanitize-smoke $(addprefix unit-,$(UNIT_NAMES)) integration-c integration-nginx e2e unit-coverage clean
 
+# Rebuild a unit target when any src/ file it directly includes changes
+# (see -MMD -MP in targets.mk).  Files are generated next to each binary.
+-include $(wildcard build/unit/*.d)
+
 build/unit build/integration build/generated:
 	@mkdir -p $@
 
