@@ -60,7 +60,10 @@ echo ""
 # capture failures) and d42971f5 (+1 NGX_LOG_ERR: inflight guard rejection).
 # Updated 2026-09-03: 353 — 59e7b41c (rollback-safe orphan conditional
 # header adoption) adds +2 NGX_LOG_DEBUG0 while removing one, net +1.
-BASELINE_LOG_SITES=353
+# Updated 2026-09-04: 356 — 8d81db9e (If-Match/If-Unmodified-Since
+# precondition evaluation) adds +2 NGX_LOG_DEBUG0; send_412 integration
+# adds +1 NGX_LOG_DEBUG0.
+BASELINE_LOG_SITES=356
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=0

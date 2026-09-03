@@ -1964,6 +1964,9 @@ ngx_int_t ngx_http_markdown_adopt_orphan_conditional_headers(
 ngx_int_t ngx_http_markdown_send_304(ngx_http_request_t *r,
     const struct MarkdownResult *result);
 
+/* Send 412 Precondition Failed response */
+ngx_int_t ngx_http_markdown_send_412(ngx_http_request_t *r);
+
 /*
  * Check if the response carries Cache-Control: no-transform.
  *
