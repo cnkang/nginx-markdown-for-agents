@@ -121,9 +121,9 @@ and malformed entries fail static NGINX configuration parsing (`nginx -t`).
 The generic `markdown_limits` directive is not parsed by the atomic dynconf
 path. Dynconf has its own supported-key schema and validation.
 Explicit zero values fail validation. This includes `max_inflight=0`.
-Configured `max_inflight` values must be integers greater than 0. The internal zero value
-for an unset or inherited `max_inflight` means unlimited. The `markdown_limits` keys
-themselves declare no explicit per-key defaults (inheritance-based `NGX_CONF_UNSET`).
+Configured `max_inflight` values must be integers between 1 and 65535. When unset
+or inherited, `max_inflight` merges to the default bound of 64 (there is no unlimited sentinel).
+The `markdown_limits` keys themselves declare no explicit per-key defaults (inheritance-based `NGX_CONF_UNSET`).
 CONFIGURATION_STRUCTURE.md documents the effective module defaults.
 
 | Key | Meaning |

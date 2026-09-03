@@ -467,7 +467,7 @@ Verification:
   regression tests (folded-error, immediate-return, clean branch, definition
   skip).
 
-### 71. Header-chain NGX_AGAIN publishes commit latches (canonical model)
+### 72. Header-chain NGX_AGAIN publishes commit latches (canonical model)
 
 Rule 64 states the semantics; this rule locks the latch contract.  A
 header-chain `NGX_AGAIN` from `ngx_http_next_header_filter` means the write

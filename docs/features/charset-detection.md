@@ -213,15 +213,15 @@ wins.
 ## Dependencies
 
 - `regex = "1.10"` - For Content-Type and HTML meta tag parsing
-- `html5ever = "0.39"` - For HTML parsing (UTF-8 only)
+- `encoding_rs = "0.8"` - For decoding non-UTF-8 encodings to UTF-8
+- `html5ever = "0.39"` - For HTML DOM construction
 
 ## Future Enhancements
 
-1. **Charset Transcoding**: Add support for non-UTF-8 charsets using `encoding_rs`
-2. **BOM Detection**: Detect UTF-8/UTF-16 BOM (Byte Order Mark)
-3. **Configurable Scan Limit**: Make meta tag scan limit configurable
-4. **Charset Validation**: Validate detected charset against known encodings
-5. **Performance Metrics**: Track charset detection time and cache hit rates
+1. **BOM Detection**: Detect UTF-8/UTF-16 BOM (Byte Order Mark)
+2. **Configurable Scan Limit**: Make meta tag scan limit configurable
+3. **Charset Validation**: Validate detected charset against known encodings
+4. **Performance Metrics**: Track charset detection time and cache hit rates
 
 ## References
 
