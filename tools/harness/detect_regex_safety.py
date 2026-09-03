@@ -3193,12 +3193,12 @@ def _range_step(
                 return i + 2
         return None
     if tok.kind == _TKind.GROUP_OPEN:
-        return _range_group_step(tok, tokens, i, end, open_to_close)
+        return _range_group_step(tokens, i, end, open_to_close)
     return i + 1
 
 
 def _range_group_step(
-    tok: _Token, tokens: list[_Token], i: int, end: int,
+    tokens: list[_Token], i: int, end: int,
     open_to_close: dict[int, int],
 ) -> int | None:
     """Next index after a group, or None when it blocks the range."""
@@ -3375,7 +3375,7 @@ def _element_has_intersecting_repetition(
             tok = tokens[j]
             if tok.kind == _TKind.GROUP_OPEN:
                 nested = _push_nested_group(
-                    j, hi, tokens, open_to_close, stack,
+                    j, hi, open_to_close, stack,
                 )
                 if nested is not None:
                     j = nested
@@ -3389,7 +3389,7 @@ def _element_has_intersecting_repetition(
 
 
 def _push_nested_group(
-    j: int, hi: int, tokens: list[_Token],
+    j: int, hi: int,
     open_to_close: dict[int, int], stack: list[tuple[int, int]],
 ) -> int | None:
     """Push a nested group's body onto the stack; return the index just
