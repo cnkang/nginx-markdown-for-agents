@@ -886,7 +886,7 @@ ngx_http_markdown_is_last_modified_header(const ngx_table_elt_t *header)
 }
 
 /* Find the active response Last-Modified header, ignoring invalidated slots. */
-static ngx_table_elt_t *
+static const ngx_table_elt_t *
 ngx_http_markdown_find_last_modified_header(ngx_http_request_t *r)
 {
     if (r == NULL) {
@@ -1507,14 +1507,19 @@ ngx_http_markdown_can_compare_etag(const ngx_http_request_t *r,
     return 1;
 }
 
+/* Bundled preconditions for the entity-tag generation pass. */
+typedef struct {
+    const ngx_table_elt_t  *im_header;
+    const ngx_table_elt_t  *ius_header;
+    const ngx_table_elt_t  *last_modified_header;
+} ngx_http_markdown_conditional_validators_t;
+
 static ngx_int_t
 ngx_http_markdown_generate_conditional_result(
     ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
     struct MarkdownConverterHandle *converter,
-    const ngx_table_elt_t *im_header,
-    const ngx_table_elt_t *ius_header,
-    const ngx_table_elt_t *last_modified_header,
+    const ngx_http_markdown_conditional_validators_t *validators,
     struct MarkdownResult **result)
 {
     struct MarkdownOptions  options;
@@ -1571,16 +1576,17 @@ ngx_http_markdown_generate_conditional_result(
         return NGX_ERROR;
     }
 
-    if (im_header != NULL
+    if (validators->im_header != NULL
         && !ngx_http_markdown_if_match_satisfied(
-               r, ctx, im_header, conv_result->etag, conv_result->etag_len))
+               r, ctx, validators->im_header,
+               conv_result->etag, conv_result->etag_len))
     {
         markdown_result_free(conv_result);
         return NGX_HTTP_PRECONDITION_FAILED;
     }
 
     if (ngx_http_markdown_validate_if_unmodified_since(
-            ctx, ius_header, last_modified_header)
+            ctx, validators->ius_header, validators->last_modified_header)
         != NGX_OK)
     {
         markdown_result_free(conv_result);
@@ -1601,12 +1607,13 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     struct MarkdownResult    *conv_result;
     struct FFIConditionalInput  cond_input;
     struct FFIConditionalDecision cond_decision;
-    ngx_table_elt_t        *inm_header;
-    ngx_table_elt_t        *ims_header;
-    ngx_table_elt_t        *im_header;
-    ngx_table_elt_t        *ius_header;
-    ngx_table_elt_t        *range_header;
-    ngx_table_elt_t        *last_modified_header;
+    ngx_table_elt_t         *inm_header;
+    ngx_table_elt_t         *ims_header;
+    ngx_table_elt_t         *im_header;
+    ngx_table_elt_t         *ius_header;
+    ngx_table_elt_t         *range_header;
+    const ngx_table_elt_t   *last_modified_header;
+    ngx_http_markdown_conditional_validators_t  validators;
     const u_char            *inm_data;
     size_t                   inm_len;
     ngx_str_t                inm_value;
@@ -1695,9 +1702,12 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
                   "performing conversion "
                   "to generate ETag for comparison (performance cost)");
 
+    validators.im_header = im_header;
+    validators.ius_header = ius_header;
+    validators.last_modified_header = last_modified_header;
+
     conditional_rc = ngx_http_markdown_generate_conditional_result(
-        r, ctx, conf, converter, im_header, ius_header,
-        last_modified_header, &conv_result);
+        r, ctx, conf, converter, &validators, &conv_result);
     if (conditional_rc != NGX_OK) {
         return conditional_rc;
     }
