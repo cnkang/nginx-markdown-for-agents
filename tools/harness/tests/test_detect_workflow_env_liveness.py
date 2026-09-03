@@ -131,6 +131,16 @@ def test_while_read_loop_variable_passes():
     assert "keygrip" in module.extract_shell_definitions(run)
 
 
+def test_temporary_assignment_before_read_records_variable():
+    run = (
+        "IFS= read -r ARCH < /tmp/arch.txt\n"
+        "echo \"${ARCH}\"\n"
+    )
+    defined = module.extract_shell_definitions(run)
+    assert "IFS" in defined
+    assert "ARCH" in defined
+
+
 def test_awk_single_quoted_field_not_a_reference():
     run = "printf '%s\\n' \"$(awk '{print $NF}' file.txt)\"\n"
     assert "NF" not in module.extract_run_vars(run)

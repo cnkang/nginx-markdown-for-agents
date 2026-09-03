@@ -303,6 +303,11 @@ def extract_shell_definitions(run_text):
         name = _match_assignment(stripped)
         if name is not None:
             defined.add(name)
+            # A temporary assignment prefixing a command (e.g. `IFS= read -r A`)
+            # does not hide the command's own variable capture: the read
+            # variables must be recorded too, otherwise a following
+            # `${A}` reference is reported as an undefined variable.
+            defined.update(_match_read_variables(stripped))
             continue
         name = _match_case_assignment(stripped)
         if name is not None:

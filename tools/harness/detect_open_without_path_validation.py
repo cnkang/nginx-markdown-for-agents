@@ -706,6 +706,35 @@ def check_file(
     return errors, warnings
 
 
+def _scan_file_tree(scan_dir: Path, strict: bool) -> tuple[list[str], list[str]]:
+    """Scan every non-exempt Python file under *scan_dir*.
+
+    Returns:
+        (errors, warnings) accumulated across all scanned files.
+    """
+    all_errors: list[str] = []
+    all_warnings: list[str] = []
+
+    for filepath in sorted(scan_dir.rglob("*.py")):
+        try:
+            rel = filepath.relative_to(REPO_ROOT)
+        except ValueError:
+            rel = filepath
+        rel_str = str(rel)
+        if any(
+            rel_str == exempt or rel_str.startswith(exempt.rstrip("/") + "/")
+            for exempt in EXEMPT_DIRS
+        ):
+            continue
+        if _display_path(filepath) in EXEMPT_FILES:
+            continue
+        file_errors, file_warnings = check_file(filepath, strict=strict)
+        all_errors.extend(file_errors)
+        all_warnings.extend(file_warnings)
+
+    return all_errors, all_warnings
+
+
 def main() -> int:
     """Main entry point.
 
@@ -751,27 +780,7 @@ def main() -> int:
     print(f"Scanning: {scan_dir}", file=sys.stderr)
     print("", file=sys.stderr)
 
-    all_errors: list[str] = []
-    all_warnings: list[str] = []
-
-    py_files = sorted(scan_dir.rglob("*.py"))
-    for filepath in py_files:
-        # Skip exempt directories
-        try:
-            rel = filepath.relative_to(REPO_ROOT)
-        except ValueError:
-            rel = filepath
-        rel_str = str(rel)
-        if any(
-            rel_str == exempt or rel_str.startswith(exempt.rstrip("/") + "/")
-            for exempt in EXEMPT_DIRS
-        ):
-            continue
-        if _display_path(filepath) in EXEMPT_FILES:
-            continue
-        file_errors, file_warnings = check_file(filepath, strict=strict)
-        all_errors.extend(file_errors)
-        all_warnings.extend(file_warnings)
+    all_errors, all_warnings = _scan_file_tree(scan_dir, strict=strict)
 
     for e in all_errors:
         print(e, file=sys.stderr)
