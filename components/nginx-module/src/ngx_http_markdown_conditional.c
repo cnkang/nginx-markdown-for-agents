@@ -480,6 +480,8 @@ ngx_http_markdown_is_captured_conditional_name(const ngx_str_t *key)
 {
     static u_char  if_none_match_name[] = "If-None-Match";
     static u_char  if_modified_since_name[] = "If-Modified-Since";
+    static u_char  if_match_name[] = "If-Match";
+    static u_char  if_unmodified_since_name[] = "If-Unmodified-Since";
 
     if (key == NULL || key->data == NULL) {
         return 0;
@@ -491,8 +493,21 @@ ngx_http_markdown_is_captured_conditional_name(const ngx_str_t *key)
         return 1;
     }
 
-    return (key->len == sizeof(if_modified_since_name) - 1
-            && ngx_strncasecmp(key->data, if_modified_since_name,
+    if (key->len == sizeof(if_modified_since_name) - 1
+        && ngx_strncasecmp(key->data, if_modified_since_name,
+                           key->len) == 0)
+    {
+        return 1;
+    }
+
+    if (key->len == sizeof(if_match_name) - 1
+        && ngx_strncasecmp(key->data, if_match_name, key->len) == 0)
+    {
+        return 1;
+    }
+
+    return (key->len == sizeof(if_unmodified_since_name) - 1
+            && ngx_strncasecmp(key->data, if_unmodified_since_name,
                                key->len) == 0);
 }
 
@@ -522,6 +537,8 @@ ngx_http_markdown_suppress_captured_conditional_headers(
 
     r->headers_in.if_none_match = NULL;
     r->headers_in.if_modified_since = NULL;
+    r->headers_in.if_match = NULL;
+    r->headers_in.if_unmodified_since = NULL;
 }
 
 /* Restore each entry to the state observed before capture. */
@@ -540,6 +557,8 @@ ngx_http_markdown_restore_captured_conditional_headers(
 
     r->headers_in.if_none_match = ctx->conditional.if_none_match;
     r->headers_in.if_modified_since = ctx->conditional.if_modified_since;
+    r->headers_in.if_match = ctx->conditional.if_match;
+    r->headers_in.if_unmodified_since = ctx->conditional.if_unmodified_since;
 }
 
 /*
@@ -885,11 +904,17 @@ ngx_http_markdown_has_conditional_request(ngx_http_request_t *r)
     ngx_table_elt_t  *ims_header;
     ngx_table_elt_t  *range_header;
 
+    if (r == NULL) {
+        return 0;
+    }
+
     ngx_http_markdown_collect_conditional_headers(
         r, NULL, &inm_header, &ims_header, &range_header);
 
     return (range_header == NULL
-            && (inm_header != NULL || ims_header != NULL));
+            && (inm_header != NULL || ims_header != NULL
+                || r->headers_in.if_match != NULL
+                || r->headers_in.if_unmodified_since != NULL));
 }
 
 /*
@@ -937,7 +962,9 @@ ngx_http_markdown_capture_conditional_request(
     ngx_http_markdown_collect_conditional_headers(
         r, NULL, &inm_header, &ims_header, &range_header);
     if (range_header != NULL
-        || (inm_header == NULL && ims_header == NULL))
+        || (inm_header == NULL && ims_header == NULL
+            && r->headers_in.if_match == NULL
+            && r->headers_in.if_unmodified_since == NULL))
     {
         return NGX_DECLINED;
     }
@@ -976,6 +1003,8 @@ ngx_http_markdown_capture_conditional_request(
 
     ctx->conditional.if_none_match = inm_header;
     ctx->conditional.if_modified_since = ims_header;
+    ctx->conditional.if_match = r->headers_in.if_match;
+    ctx->conditional.if_unmodified_since = r->headers_in.if_unmodified_since;
     ctx->conditional.captured = 1;
 
     ngx_http_markdown_suppress_captured_conditional_headers(r, ctx);
@@ -1042,6 +1071,37 @@ ngx_http_markdown_conditional_early_outcome(
  *                 NGX_DECLINED if no match or processing is skipped,
  *                 NGX_ERROR on failure (parsing, allocation, conversion, or internal errors).
  */
+static ngx_flag_t
+ngx_http_markdown_is_downstream_transcoding(const ngx_http_request_t *r)
+{
+    return (r->headers_out.override_charset != NULL
+            && r->headers_out.override_charset->len > 0
+            && (r->headers_out.override_charset->len != 5
+                || ngx_strncasecmp(r->headers_out.override_charset->data,
+                                   (u_char *) "utf-8", 5) != 0));
+}
+
+static ngx_flag_t
+ngx_http_markdown_can_compare_etag(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (!conf->policy.generate_etag) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: ETag generation disabled, "
+                      "cannot perform If-None-Match comparison");
+        return 0;
+    }
+
+    if (ngx_http_markdown_is_downstream_transcoding(r)) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: downstream charset transcoding configured, "
+                      "disabling ETag comparison");
+        return 0;
+    }
+
+    return 1;
+}
+
 ngx_int_t
 ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
                                        const ngx_http_markdown_conf_t *conf,
@@ -1116,10 +1176,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         return ngx_http_markdown_conditional_early_outcome(&cond_decision);
     }
 
-    if (!conf->policy.generate_etag) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown: ETag generation disabled, "
-                      "cannot perform If-None-Match comparison");
+    if (!ngx_http_markdown_can_compare_etag(r, conf)) {
         return NGX_DECLINED;
     }
 

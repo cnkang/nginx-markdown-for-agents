@@ -1961,24 +1961,24 @@ test_brotli_error_classification(void)
         TEST_ASSERT(
             ngx_http_markdown_brotli_error_classify(code)
                 == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-            "Brotli reserved/generic code must use the system-error class");
+            "Brotli reserved/generic code must use the internal-error class");
     }
     for (code = -23; code >= -24; code--) {
         TEST_ASSERT(
             ngx_http_markdown_brotli_error_classify(code)
                 == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-            "Brotli reserved allocation code must use the system-error class");
+            "Brotli reserved allocation code must use the internal-error class");
     }
     for (code = -28; code >= -29; code--) {
         TEST_ASSERT(
             ngx_http_markdown_brotli_error_classify(code)
                 == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-            "Brotli reserved allocation code must use the system-error class");
+            "Brotli reserved allocation code must use the internal-error class");
     }
     TEST_ASSERT(
         ngx_http_markdown_brotli_error_classify(-31)
             == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-        "Brotli unreachable code must use the system-error class");
+        "Brotli unreachable code must use the internal-error class");
 
     TEST_PASS("Brotli decoder error classification is consistent");
 }

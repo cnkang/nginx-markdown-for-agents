@@ -892,6 +892,20 @@ ngx_http_markdown_fullcov_prepare_etag(ngx_http_request_t *r,
         return NGX_OK;
     }
 
+    /*
+     * If downstream charset transcoding overrides charset to a non-UTF-8
+     * encoding, suppress ETag so the wire payload is not paired with a stale
+     * UTF-8-derived validator.
+     */
+    if (r->headers_out.override_charset != NULL
+        && r->headers_out.override_charset->len > 0
+        && (r->headers_out.override_charset->len != 5
+            || ngx_strncasecmp(r->headers_out.override_charset->data,
+                               (u_char *) "utf-8", 5) != 0))
+    {
+        return NGX_OK;
+    }
+
     h = ngx_list_push(&r->headers_out.headers);
     if (h == NULL) {
         return NGX_ERROR;

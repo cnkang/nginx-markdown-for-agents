@@ -1660,6 +1660,9 @@ ngx_http_markdown_forward_headers_for(ngx_http_request_t *r,
 
     if (kind == NGX_HTTP_MARKDOWN_FORWARD_SOURCE_REPRESENTATION) {
         ngx_http_markdown_restore_conditional_request(r, ctx);
+        if (ngx_http_markdown_add_vary_accept(r) != NGX_OK) {
+            return NGX_ERROR;
+        }
     }
 
     /*
