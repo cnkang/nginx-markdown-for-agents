@@ -103,7 +103,7 @@ HARDCODED_PATH_RE = re.compile(
     r'REPO_ROOT\s*/\s*"'
     r'|Path\s*\(\s*__file__\s*\)'
     r'|"/'
-    r"|[A-Z_]{1,64}_DIR\s*/\s*\"",
+    r"|(?<![A-Z0-9_])[A-Z_]{1,60}_DIR(?![A-Z0-9_])\s*/\s*\"",
 )
 
 SAFE_OPEN_ARG_RE = re.compile(
