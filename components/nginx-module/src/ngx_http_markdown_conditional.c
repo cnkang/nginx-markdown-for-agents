@@ -791,6 +791,46 @@ ngx_http_markdown_if_match_value_matches(const u_char *value,
     return 0;
 }
 
+/*
+ * Scan the request's If-Match field lines for a strong match against the
+ * generated entity tag.
+ *
+ * Returns:
+ *   1  a matching field line was found
+ *   0  no matching field line was found (fallback evaluation may apply)
+ *  -1  the request header list is malformed, so the preconditions cannot
+ *      be evaluated and the caller must fail the check outright
+ */
+static ngx_int_t
+ngx_http_markdown_request_has_matching_if_match(
+    const ngx_http_request_t *r, const u_char *etag, size_t etag_len)
+{
+    for (const ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        const ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return -1;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash != 0
+                && ngx_http_markdown_is_if_match_header(&headers[i])
+                && ngx_http_markdown_if_match_value_matches(
+                       headers[i].value.data, headers[i].value.len,
+                       etag, etag_len))
+            {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
 /* Compare every captured or active If-Match field against the generated tag. */
 static ngx_flag_t
 ngx_http_markdown_if_match_satisfied(const ngx_http_request_t *r,
@@ -816,27 +856,13 @@ ngx_http_markdown_if_match_satisfied(const ngx_http_request_t *r,
     }
 
     if (r != NULL) {
-        for (const ngx_list_part_t *part = &r->headers_in.headers.part;
-             part != NULL;
-             part = part->next)
-        {
-            const ngx_table_elt_t  *headers;
+        ngx_int_t  match_rc;
 
-            headers = part->elts;
-            if (headers == NULL && part->nelts != 0) {
-                return 0;
-            }
-
-            for (ngx_uint_t i = 0; i < part->nelts; i++) {
-                if (headers[i].hash != 0
-                    && ngx_http_markdown_is_if_match_header(&headers[i])
-                    && ngx_http_markdown_if_match_value_matches(
-                           headers[i].value.data, headers[i].value.len,
-                           etag, etag_len))
-                {
-                    return 1;
-                }
-            }
+        match_rc = ngx_http_markdown_request_has_matching_if_match(
+            r, etag, etag_len);
+        /* 1 = matched, -1 = malformed header list (fail the check). */
+        if (match_rc != 0) {
+            return (match_rc == 1) ? 1 : 0;
         }
     }
 
