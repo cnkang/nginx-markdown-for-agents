@@ -302,7 +302,7 @@ The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs th
 - No file system access beyond NGINX configuration
 
 ### 2. Fail-Open Availability Trade-off
-- Default to fail-open and return the original eligible HTML response. This preserves availability when conversion fails. Conversion failures do not expose internal details. If the conversion engine is unavailable, the module returns the original HTML instead of an error.
+- Pre-commit conversion paths default to fail-open (`markdown_error_policy pass`) and return the original eligible HTML response. This preserves availability when conversion fails before headers are sent. Once streaming headers are committed (post-commit), failures safely terminate the stream (fail-closed) because the original HTML cannot be rewound. Conversion failures never expose internal details.
 - Error messages are generic to clients, detailed in logs
 
 ### 3. Defense in Depth

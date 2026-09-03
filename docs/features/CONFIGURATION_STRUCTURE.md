@@ -63,15 +63,12 @@ the structure above and rejects cross-key violations before mutation:
 - `parser_memory <= conversion_memory`
 - `streaming_buffer <= conversion_memory`
 
-Zero handling: an unset `conversion_timeout` leaves the overall conversion
-deadline disabled. An explicit `conversion_timeout=0` is **rejected by the
-config handler** (must be a positive duration). Operators cannot opt into
-the disabled state by writing 0 — they leave the key unset. A nonzero `parser_timeout`
-stays valid beside it and keeps its parser-phase deadline, including when
-both keys are explicitly configured. When `conversion_timeout` is nonzero and
-both keys are explicitly configured, `nginx -t` fails if
-`parser_timeout` exceeds it. When only one side is explicit, the merge step
-clamps the parser value down only to a nonzero conversion bound.
+Zero handling: `conversion_timeout=0` is **rejected by the config handler**
+(must be a positive duration). When omitted, `conversion_timeout` defaults to 30s
+via configuration merge. A nonzero `parser_timeout` (default 10s) limits only the parser
+phase. When both keys are explicitly configured, `nginx -t` fails if
+`parser_timeout` exceeds `conversion_timeout`. When only one side is explicit, the merge step
+clamps the parser value down to the effective conversion bound.
 
 `streaming_buffer` is the total per-request streaming working-set and
 pre-commit replay budget. It is not merely a transport chunk size. A value
