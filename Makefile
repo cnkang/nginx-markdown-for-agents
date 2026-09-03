@@ -814,11 +814,15 @@ release-gates-check-070:
 				rpm_nginx_evr="$${RPM_NGINX_EVR:-1:$$nginx_version}"; \
 				rpm_nginx_evr_ceil="$${RPM_NGINX_EVR_CEIL:-1:$$nginx_version_ceil}"; \
 				nfpm_preinstall="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preinstall.XXXXXX")"; \
+				nfpm_preremove="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preremove.XXXXXX")"; \
 				nfpm_config="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-nfpm.XXXXXX")"; \
-				trap 'rm -f "$$nfpm_preinstall" "$$nfpm_config"' EXIT; \
+				trap 'rm -f "$$nfpm_preinstall" "$$nfpm_preremove" "$$nfpm_config"' EXIT; \
 				packaging/nfpm/scripts/render-nfpm-config.sh \
 					packaging/nfpm/scripts/preinstall.sh "$$nfpm_preinstall" "$$nginx_version"; \
-				sed "s|./packaging/nfpm/scripts/preinstall.sh|$$nfpm_preinstall|" \
+				packaging/nfpm/scripts/render-nfpm-config.sh \
+					packaging/nfpm/scripts/preremove.sh "$$nfpm_preremove" "$$nginx_version"; \
+				sed -e "s|./packaging/nfpm/scripts/preinstall.sh|$$nfpm_preinstall|" \
+				    -e "s|./packaging/nfpm/scripts/preremove.sh|$$nfpm_preremove|" \
 					packaging/nfpm/nfpm.yaml > "$$nfpm_config"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
 					NGINX_VERSION_CEIL="$$nginx_version_ceil" \

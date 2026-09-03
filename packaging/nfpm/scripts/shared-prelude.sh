@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # shared-prelude.sh — Trusted-executable contract shared by nFPM maintainer scripts.
 #
 # Single source of truth for the executable-trust invariant.  The nFPM build
