@@ -425,18 +425,25 @@ def _collect_validated_vars(lines: list[str]) -> set[str]:
             _extract_regex_groups(m, validated_vars)
 
     for line in lines:
-        for m in _PATH_WRAPPED_RE.finditer(line):
-            lhs = m.group(1)
-            rhs = m.group(2)
-            if rhs in validated_vars:
-                validated_vars.add(lhs)
-        for m in COMPOUND_PATH_WRAPPED_RE.finditer(line):
-            lhs = m.group(1)
-            rhs = m.group(2)
-            if rhs in validated_vars:
-                validated_vars.add(lhs)
+        _collect_path_wrapped_vars(line, validated_vars)
 
     return validated_vars
+
+
+def _collect_path_wrapped_vars(line: str, validated_vars: set[str]) -> None:
+    """Propagate validation through Path() wrappers on one line."""
+    for m in _PATH_WRAPPED_RE.finditer(line):
+        _add_wrapped_var(m, validated_vars)
+    for m in COMPOUND_PATH_WRAPPED_RE.finditer(line):
+        _add_wrapped_var(m, validated_vars)
+
+
+def _add_wrapped_var(m: re.Match[str], validated_vars: set[str]) -> None:
+    """Add the wrapped LHS when its RHS is already validated."""
+    lhs = m.group(1)
+    rhs = m.group(2)
+    if rhs in validated_vars:
+        validated_vars.add(lhs)
 
 
 def _collect_hardcoded_vars(lines: list[str]) -> set[str]:

@@ -39,8 +39,8 @@ Required:
     boundary anchor (`^`, `$`, `\A`, `\Z`, `\b`, `\B`), and whose
     continuation can fail (a hard literal, group, or `$`/`\Z` anchor
     follows), causes guaranteed quadratic backtracking.  Examples:
-    `(\d+)\s*metric\s+famili`, `x*yx*`, `\s*,`, `(ab)*a(ba)*`.  Only
-    partial-match APIs are checked (`re.search`, `re.findall`,
+    `(\d+)\s*metric\s+famili`, `x*yx*`, `\s*,`, `(ab)*a(ba)*`.  The
+    check covers only partial-match APIs (`re.search`, `re.findall`,
     `re.finditer`, `re.split`, `re.sub`, `re.subn`, and the same compiled
     methods); `re.match`/`re.fullmatch` are not partial matches and are
     exempt, matching Sonar's `RedosMatchTypeHelper`.  Bounded quantifiers
