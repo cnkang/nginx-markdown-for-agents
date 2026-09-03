@@ -231,7 +231,19 @@ sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
 # start NGINX with a module whose configuration failed validation.
 sudo nginx -t || {
   echo "ERROR: nginx -t failed after module swap; restoring module backup..." >&2
-  sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+  # Stage the rollback to a temporary path first.  cp -a alone can leave a
+  # partially-written module on I/O or disk-space failure; the atomic
+  # replace only happens after the copy fully succeeds.
+  sudo cp -a "${MODULE_BACKUP}" \
+    "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore" 2>/dev/null || {
+    echo "ERROR: rollback copy failed; NGINX remains stopped. Restore manually from ${MODULE_BACKUP}." >&2
+    exit 1
+  }
+  sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore" \
+    "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null || {
+    echo "ERROR: atomic module replacement failed; NGINX remains stopped. Restore manually from ${MODULE_BACKUP}." >&2
+    exit 1
+  }
   sudo nginx -t && echo "INFO: previous module restored and configuration verified." >&2
   exit 1
 }

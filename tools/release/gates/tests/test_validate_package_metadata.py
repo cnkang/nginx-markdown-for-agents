@@ -394,8 +394,9 @@ class TestReleaseGateSnippetExpectations:
         constraints probed with dpkg-compatible comparisons), not via literal
         snippet matching.
         """
-        assert 'nginx (>= ${NGINX_VERSION})' not in validator.NFPM_REQUIRED_SNIPPETS
-        assert "nginx = ${RPM_NGINX_EVR}" in validator.NFPM_REQUIRED_SNIPPETS
+        assert "nginx (>= ${NGINX_VERSION})" not in validator.NFPM_REQUIRED_SNIPPETS
+        assert "nginx >= ${RPM_NGINX_EVR}" in validator.NFPM_REQUIRED_SNIPPETS
+        assert "nginx < ${RPM_NGINX_EVR_CEIL}" in validator.NFPM_REQUIRED_SNIPPETS
 
         nfpm_content = validator.NFPM_CONFIG.read_text(encoding="utf-8")
         contract_ok, contract_errors = validator.validate_nfpm_deb_dependency_contract(
@@ -439,11 +440,14 @@ class TestReleaseGateSnippetExpectations:
 
         NGINX dynamic modules require an exact version match; the core
         loader rejects any difference (including patch) before signature
-        checks.  The RPM spec must pin the exact version with the
-        nginx.org epoch prefix (1:), never a branch-scoped floor, and
-        never a naked exact dep without the epoch.
+        checks.  The RPM spec must express a closed floor-and-ceiling
+        interval between the pinned version and the next patch, never a
+        floor-only branch-scoped dependency and never a naked exact dep
+        without the epoch.
         """
-        assert "Requires:       nginx = 1:%{nginx_version}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "Requires:       nginx >= 1:%{nginx_version}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "Conflicts:      nginx >= 1:%{nginx_version_ceil}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "nginx = 1:%{nginx_version}" not in validator.STANDALONE_RPM_SPEC_SNIPPETS
         assert "Requires:       nginx = %{nginx_version}" in validator.FORBIDDEN_NAKED_EXACT_NGINX_DEPS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.STANDALONE_RPM_SPEC_SNIPPETS
 
