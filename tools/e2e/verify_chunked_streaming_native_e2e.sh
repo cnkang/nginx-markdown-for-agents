@@ -1738,7 +1738,7 @@ assert_streaming_markdown_response \
   "gzip-postcommit" "${RAW_DIR}/gzip_postcommit.hdr" \
   "${RAW_DIR}/gzip_postcommit.body" "# Gzip Postcommit" \
   "${GZIP_POSTCOMMIT_END_TOKEN}" 1
-if grep -q "${GZIP_POSTCOMMIT_LATE_TOKEN}" \
+if markdown_token_present "${GZIP_POSTCOMMIT_LATE_TOKEN}" \
   "${RAW_DIR}/gzip_postcommit.body"; then
   echo "FAIL: truncated later gzip member unexpectedly delivered its tail" >&2
   exit 1

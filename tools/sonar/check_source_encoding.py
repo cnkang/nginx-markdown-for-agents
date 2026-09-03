@@ -90,10 +90,19 @@ def _run_git_ls_files() -> list[Path]:
         ["git", "ls-files", "-z"],
         cwd=REPO_ROOT,
         capture_output=True,
-        text=True,
+        text=False,
         check=True,
     )
-    return [Path(p) for p in result.stdout.split("\0")[:-1] if p]
+    paths: list[Path] = []
+    for raw in result.stdout.split(b"\0")[:-1]:
+        if not raw:
+            continue
+        try:
+            decoded = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            decoded = raw.decode("utf-8", errors="surrogateescape")
+        paths.append(Path(decoded))
+    return paths
 
 
 def _validate_manifest_entry(rel: object, info: object) -> None:

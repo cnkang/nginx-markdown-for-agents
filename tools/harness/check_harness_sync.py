@@ -1410,7 +1410,7 @@ def check_trivy_local_scan_scope() -> CheckResult:
     missing = [
         directory
         for directory in TRIVY_REQUIRED_LOCAL_EXCLUSIONS
-        if f"--skip-dirs {directory}" not in content
+        if re.search(rf"--skip-dirs\s+{re.escape(directory)}\b", content) is None
     ]
     if missing:
         return _result(

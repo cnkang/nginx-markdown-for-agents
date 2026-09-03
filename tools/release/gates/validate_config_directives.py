@@ -491,9 +491,11 @@ def check_conf_field_not_in_source(
     check_id = f"removed-field:{field_pattern}"
     found_in = []
     for name, content in sources.items():
-        if not content:
+        if content is None:
             result.fail(check_id, f"source file missing: {name}")
-            return
+            continue
+        if not content:
+            continue
         if re.search(field_pattern, content):
             found_in.append(name)
     if found_in:

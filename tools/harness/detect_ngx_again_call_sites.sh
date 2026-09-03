@@ -30,7 +30,7 @@
 #   1 — one or more violations detected
 #   2 — usage/argument error
 
-set -eu
+set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"

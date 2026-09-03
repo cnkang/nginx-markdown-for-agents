@@ -9,6 +9,10 @@ Scorecard.
 - `.github/workflows/security-static.yml`
 - `.github/workflows/supply-chain.yml`
 - `.github/workflows/codeql.yml`
+- `.github/workflows/release-binaries.yml`
+- `.github/workflows/release-packages.yml`
+- `.github/workflows/release-rpm.yml`
+- `.github/workflows/homebrew-tap-publish.yml`
 - `.semgrep.yml`
 - `.gitleaks.toml`
 - `deny.toml`

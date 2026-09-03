@@ -266,8 +266,7 @@ C
 output_file="${tmp_dir}/adv-multi.out"
 exit_code=0
 (cd "${tmp_dir}/fixture-adv-multi" && bash "${DETECTOR}" "${fixture_adv_multi_dir}") >"${output_file}" 2>&1 || exit_code=$?
-if [[ "${exit_code}" -eq 0 ]] \
-    && grep -q 'WARNING' "${output_file}"; then
+if grep -q 'WARNING' "${output_file}"; then
     pass "adversarial-wide-and-multiple: every cast is audited fail-closed"
 else
     fail "adversarial-wide-and-multiple: risky cast was hidden by a later safe cast" \

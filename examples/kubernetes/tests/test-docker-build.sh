@@ -342,16 +342,13 @@ nginx -c /tmp/markdown-http.conf
         log_fail "HTTP conversion request failed"
         return 1
     fi
-    case "$response" in
-        *text/markdown*|*"# Kubernetes module test"*)
-            log_pass "HTTP Accept: text/markdown returned converted content"
-            ;;
-        *)
-            log_fail "HTTP response was not Markdown"
-            printf '%s\n' "$response" | tail -20 >&2
-            return 1
-            ;;
-    esac
+    if [[ "$response" == *"text/markdown"* && "$response" == *"# Kubernetes module test"* ]]; then
+        log_pass "HTTP Accept: text/markdown returned converted content"
+    else
+        log_fail "HTTP response was not Markdown"
+        printf '%s\n' "$response" | tail -20 >&2
+        return 1
+    fi
 
     return 0
 }

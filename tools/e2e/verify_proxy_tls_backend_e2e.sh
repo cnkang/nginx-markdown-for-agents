@@ -416,7 +416,7 @@ fi
 
 echo "==> Case 5: upstream representation trailer suppressed after conversion"
 : > "${RAW_DIR}/trailer.body"
-trailer_code="$(curl -sS -D "${RAW_DIR}/trailer.hdr" -o "${RAW_DIR}/trailer.body" \
+trailer_code="$(curl -sS --max-time 30 -D "${RAW_DIR}/trailer.hdr" -o "${RAW_DIR}/trailer.body" \
   -H 'Accept: text/markdown' \
   "http://127.0.0.1:${PORT}/trailer" \
   -w '%{http_code}')"

@@ -770,7 +770,11 @@ def _blocking_entry_reasons(spec: dict, entry: dict | None) -> list[str]:
 def _blocking_set_reasons(record: dict, manifest: dict) -> list[str]:
     """Return reasons for missing, non-pass, or below-threshold blocking runs."""
     reasons = []
-    by_name = {entry.get("target"): entry for entry in record["per_target"]}
+    by_name = {
+        entry.get("target"): entry
+        for entry in record.get("per_target", [])
+        if isinstance(entry, dict)
+    }
     for spec in manifest["targets"]:
         if spec["blocking"]:
             reasons.extend(_blocking_entry_reasons(

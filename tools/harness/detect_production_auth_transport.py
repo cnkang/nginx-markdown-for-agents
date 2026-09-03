@@ -47,6 +47,9 @@ def _server_blocks(text: str) -> tuple[list[tuple[int, str]], bool]:
             if re.search(r"\bserver\s*\{", line):
                 start = index
                 depth = line.count("{") - line.count("}")
+                if depth == 0:
+                    blocks.append((start + 1, "\n".join(original_lines[start : index + 1])))
+                    start = None
             continue
         depth += line.count("{") - line.count("}")
         if depth == 0:
