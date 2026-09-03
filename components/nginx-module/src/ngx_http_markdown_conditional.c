@@ -152,15 +152,27 @@ typedef struct {
     ngx_table_elt_t  *entry;
 } ngx_http_markdown_adopt_rollback_t;
 
+/*
+ * Shared adoption state threaded through the per-name commit passes:
+ * the rollback stack, its cursor, the running adopted-entry count, and
+ * the scan limit are identical across all four validator names, so they
+ * live in one context instead of eight positional parameters.
+ */
+typedef struct {
+    ngx_http_request_t                 *r;
+    size_t                              scan_limit;
+    ngx_uint_t                         *adopted_count;
+    ngx_uint_t                         *rollback_count;
+    ngx_http_markdown_adopt_rollback_t *rollback;
+} ngx_http_markdown_adopt_ctx_t;
+
 /* Roll back every adopted entry recorded so far: restored hash and
  * length both return to their suppressed-candidate values (0). */
 static void
 ngx_http_markdown_adopt_rollback_all(
     ngx_http_markdown_adopt_rollback_t *rollback, ngx_uint_t count)
 {
-    ngx_uint_t  i;
-
-    for (i = 0; i < count; i++) {
+    for (ngx_uint_t i = 0; i < count; i++) {
         rollback[i].entry->hash = 0;
         rollback[i].entry->value.len = 0;
     }
@@ -176,15 +188,13 @@ ngx_http_markdown_adopt_rollback_all(
  */
 static ngx_int_t
 ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
-    u_char *name, size_t name_len, size_t scan_limit,
-    ngx_table_elt_t **first_restored, ngx_uint_t *adopted_count,
-    ngx_http_markdown_adopt_rollback_t *rollback, ngx_uint_t *rollback_count)
+    u_char *name, size_t name_len, ngx_table_elt_t **first_restored,
+    ngx_http_markdown_adopt_ctx_t *ctx)
 {
     const u_char  *value_end;
 
     if (r == NULL || name == NULL || name_len == 0
-        || first_restored == NULL || adopted_count == NULL
-        || rollback == NULL || rollback_count == NULL)
+        || first_restored == NULL || ctx == NULL)
     {
         return NGX_ERROR;
     }
@@ -220,11 +230,11 @@ ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
             }
 
             value_end = (const u_char *) memchr(
-                headers[i].value.data, '\0', scan_limit);
+                headers[i].value.data, '\0', ctx->scan_limit);
             if (value_end == NULL) {
                 return NGX_ERROR;
             }
-            if (*rollback_count >= NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX) {
+            if (*ctx->rollback_count >= NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX) {
                 /* Snapshot capacity exhausted: fail before mutating this
                  * entry so the caller's rollback stays complete. */
                 return NGX_ERROR;
@@ -232,9 +242,9 @@ ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
             headers[i].value.len = (size_t) (value_end
                 - headers[i].value.data);
             headers[i].hash = 1;
-            rollback[*rollback_count].entry = &headers[i];
-            (*rollback_count)++;
-            (*adopted_count)++;
+            ctx->rollback[*ctx->rollback_count].entry = &headers[i];
+            (*ctx->rollback_count)++;
+            (*ctx->adopted_count)++;
             ngx_http_markdown_adopt_first_restored(
                 first_restored, &headers[i]);
         }
@@ -260,6 +270,7 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     ngx_uint_t       rollback_count;
     ngx_http_markdown_adopt_rollback_t  rollback[
         NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX];
+    ngx_http_markdown_adopt_ctx_t  ctx;
     ngx_int_t        inm_rc;
     ngx_int_t        ims_rc;
     ngx_int_t        im_rc;
@@ -268,6 +279,12 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     if (r == NULL) {
         return NGX_ERROR;
     }
+
+    ctx.r = r;
+    ctx.scan_limit = scan_limit;
+    ctx.adopted_count = &adopted_count;
+    ctx.rollback_count = &rollback_count;
+    ctx.rollback = rollback;
 
     /*
      * Cross-name atomic adoption: validate ALL suppressed sets before
@@ -297,17 +314,13 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     adopted_count = 0;
     rollback_count = 0;
     inm_rc = ngx_http_markdown_commit_one_conditional_headers(
-        r, inm_name, sizeof(inm_name) - 1, scan_limit,
-        &inm, &adopted_count, rollback, &rollback_count);
+        r, inm_name, sizeof(inm_name) - 1, &inm, &ctx);
     ims_rc = ngx_http_markdown_commit_one_conditional_headers(
-        r, ims_name, sizeof(ims_name) - 1, scan_limit,
-        &ims, &adopted_count, rollback, &rollback_count);
+        r, ims_name, sizeof(ims_name) - 1, &ims, &ctx);
     im_rc = ngx_http_markdown_commit_one_conditional_headers(
-        r, im_name, sizeof(im_name) - 1, scan_limit,
-        &im, &adopted_count, rollback, &rollback_count);
+        r, im_name, sizeof(im_name) - 1, &im, &ctx);
     ius_rc = ngx_http_markdown_commit_one_conditional_headers(
-        r, ius_name, sizeof(ius_name) - 1, scan_limit,
-        &ius, &adopted_count, rollback, &rollback_count);
+        r, ius_name, sizeof(ius_name) - 1, &ius, &ctx);
 
     if (inm_rc != NGX_OK || ims_rc != NGX_OK
         || im_rc != NGX_OK || ius_rc != NGX_OK)
@@ -1152,15 +1165,17 @@ ngx_http_markdown_conditional_early_outcome(
 static ngx_flag_t
 ngx_http_markdown_is_downstream_transcoding(const ngx_http_request_t *r)
 {
+    static u_char  utf8[] = "utf-8";
+
     return (r->headers_out.override_charset != NULL
             && r->headers_out.override_charset->len > 0
             && (r->headers_out.override_charset->len != 5
                 || ngx_strncasecmp(r->headers_out.override_charset->data,
-                                   (u_char *) "utf-8", 5) != 0));
+                                   utf8, 5) != 0));
 }
 
 static ngx_flag_t
-ngx_http_markdown_can_compare_etag(ngx_http_request_t *r,
+ngx_http_markdown_can_compare_etag(const ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf)
 {
     if (!conf->policy.generate_etag) {
