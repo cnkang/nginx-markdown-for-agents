@@ -1870,7 +1870,10 @@ def _handle_special_group(
     consumed = _consume_named_group_prefix(pattern, k, n)
     if consumed != k:
         return _Token(_TKind.GROUP_OPEN, pattern[i], i), consumed
-    while k < n and pattern[k] in ":=!<>(?P":
+    # Non-capturing group (?:...): consume only the ':' marker.  Anything
+    # else (a nested '(' or '?') starts a new group and must not be
+    # swallowed here.
+    if k < n and pattern[k] == ":":
         k += 1
     return _Token(_TKind.GROUP_OPEN, pattern[i], i), k
 
@@ -2223,6 +2226,21 @@ def _analyze_branch_for_nested(
     leading = branch[leading_idx]
     if leading.kind == _TKind.QUANT:
         return None
+    # A branch that starts with a group is separator-led when the group's
+    # first content token is a strong literal separator (e.g. the nested
+    # ``(?:static|inline|...)`` in ``(?:(?:static|...)\\s+)+``): every outer
+    # iteration then starts with that literal, which the inner unbounded
+    # atom cannot consume.  Only the group's continuation is checked for
+    # overlap — atoms inside the group are alternatives, not continuations.
+    if leading.kind == _TKind.GROUP_OPEN:
+        group_first = _group_first_strong_separator(branch, leading_idx)
+        if group_first is not None:
+            close_idx = _branch_group_close(branch, leading_idx)
+            return _check_strong_separator_branch(
+                branch, group_first, outer_quant,
+                start=close_idx + 1 if close_idx is not None else 0,
+            )
+        return _find_unbounded_in_branch(branch, outer_quant)
     if (leading.kind != _TKind.ATOM
             or not _atom_is_literal(leading.text)
             or not _is_strong_separator(leading.text)):
@@ -2232,8 +2250,10 @@ def _analyze_branch_for_nested(
 
 def _check_strong_separator_branch(
     branch: list[_Token], leading_text: str, outer_quant: str,
+    start: int = 0,
 ) -> str | None:
-    for i, tok in enumerate(branch):
+    for i in range(start, len(branch)):
+        tok = branch[i]
         if tok.kind != _TKind.ATOM or i + 1 >= len(branch):
             continue
         nxt = branch[i + 1]
@@ -2280,6 +2300,48 @@ def _is_strong_separator(text: str) -> bool:
     if len(text) >= 2:
         return True
     return not text.isalnum() if len(text) == 1 else False
+
+
+def _group_first_strong_separator(
+    branch: list[_Token], group_idx: int,
+) -> str | None:
+    """First strong literal separator inside the group starting at
+    ``group_idx``, or None when the group does not start with one.
+
+    Used for separator-led branches like ``(?:(?:static|inline|...)\\s+)+``:
+    the nested group's first content token is a strong literal, so every
+    outer iteration starts with it.
+    """
+    j = group_idx + 1
+    while j < len(branch):
+        tok = branch[j]
+        if tok.kind == _TKind.GROUP_CLOSE:
+            return None
+        if tok.kind == _TKind.ANCHOR:
+            j += 1
+            continue
+        if tok.kind == _TKind.ATOM and _atom_is_literal(tok.text):
+            if _is_strong_separator(tok.text):
+                return tok.text
+            return None
+        return None
+    return None
+
+
+def _branch_group_close(
+    branch: list[_Token], group_idx: int,
+) -> int | None:
+    """Index of the group close matching the open at ``group_idx``."""
+    depth = 0
+    for j in range(group_idx, len(branch)):
+        tok = branch[j]
+        if tok.kind == _TKind.GROUP_OPEN:
+            depth += 1
+        elif tok.kind == _TKind.GROUP_CLOSE:
+            depth -= 1
+            if depth == 0:
+                return j
+    return None
 
 
 def _find_unbounded_in_branch(
@@ -2727,6 +2789,13 @@ def _branch_is_nullable(
             close_idx = open_to_close.get(idx)
             if close_idx is None:
                 return False
+            # Lookaround groups ((?=...), (?!...), (?<=...), (?<!...)) are
+            # zero-width assertions: they consume no input, so a branch
+            # containing one is nullable as long as the rest is.
+            if tok.text in ("(?=", "(?!", "(?<=", "(?<!"):
+                while j < len(branch) and branch[j] <= close_idx:
+                    j += 1
+                continue
             if not _group_with_quant_is_nullable(
                 idx, close_idx, tokens, open_to_close,
             ):
@@ -2866,7 +2935,14 @@ def _prefix_reaches_without_consuming(
             i += 1
             continue
         if tok.kind == _TKind.ANCHOR:
-            return False  # ^ or $ boundary blocks the implicit .* prefix
+            # ^ or $ boundary blocks the implicit .* prefix — unless the
+            # anchor belongs to an alternation branch, in which case the
+            # engine can choose a different branch.
+            next_alt = _next_top_level_alt(tokens, i + 1, limit)
+            if next_alt is not None:
+                i = next_alt + 1
+                continue
+            return False
         if tok.kind == _TKind.ATOM:
             if tok.text in (r"\A", r"\Z", r"\b", r"\B"):
                 return False  # boundary anchor blocks
@@ -2906,10 +2982,17 @@ def _prefix_reaches_without_consuming(
             # The group lies entirely before the repetition: it can be
             # skipped only when its content is nullable (e.g. ``(x?)*``);
             # a group that must consume input (``(\d{1,12})``) blocks the
-            # implicit .* prefix.
+            # implicit .* prefix — unless it belongs to an alternation
+            # branch, in which case the engine can choose another branch.
             if not _group_with_quant_is_nullable(
                 i, close_idx, tokens, open_to_close,
             ):
+                next_alt = _next_top_level_alt(
+                    tokens, close_idx + 1, limit,
+                )
+                if next_alt is not None:
+                    i = next_alt + 1
+                    continue
                 return False
             i = close_idx + 1
             if i < limit and tokens[i].kind == _TKind.QUANT:
