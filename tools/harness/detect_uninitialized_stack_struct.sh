@@ -74,8 +74,11 @@ WHOLE_INIT_TYPES=(
 )
 
 tmp_violations=$(mktemp)
+# Bash 3.2 + set -u: an empty GREP_TEMPS would make a bare
+# ${GREP_TEMPS[@]} expansion in the trap abort; guard with the
+# ${arr[@]+...} idiom (Rule 11).
 GREP_TEMPS=()
-trap 'rm -f "$tmp_violations" "${GREP_TEMPS[@]}"' EXIT
+trap 'rm -f "$tmp_violations" ${GREP_TEMPS[@]+"${GREP_TEMPS[@]}"}' EXIT
 
 while IFS= read -r -d '' file; do
     case "$file" in
