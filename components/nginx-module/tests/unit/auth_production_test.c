@@ -949,6 +949,10 @@ test_modify_cc_public_allocation_failure_is_atomic(void)
     first_len = first->value.len;
     second_data = second->value.data;
     second_len = second->value.len;
+    u_char first_copy[64];
+    u_char second_copy[64];
+    ngx_memcpy(first_copy, first->value.data, first_len);
+    ngx_memcpy(second_copy, second->value.data, second_len);
 
     /* Request metadata succeeds; the second prepared value allocation fails. */
     fail_after_successful_allocations(2);
@@ -958,11 +962,11 @@ test_modify_cc_public_allocation_failure_is_atomic(void)
                 "allocation failure returns NGX_ERROR");
     TEST_ASSERT(first->value.data == first_data
                 && first->value.len == first_len
-                && memcmp(first->value.data, first_data, first_len) == 0,
+                && memcmp(first->value.data, first_copy, first_len) == 0,
                 "first Cache-Control remains unchanged");
     TEST_ASSERT(second->value.data == second_data
                 && second->value.len == second_len
-                && memcmp(second->value.data, second_data, second_len) == 0,
+                && memcmp(second->value.data, second_copy, second_len) == 0,
                 "second Cache-Control remains unchanged");
     TEST_ASSERT(first->hash == 1 && second->hash == 1,
                 "both Cache-Control entries remain active");

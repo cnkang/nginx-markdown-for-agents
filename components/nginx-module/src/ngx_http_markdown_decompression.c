@@ -1584,7 +1584,8 @@ ngx_http_markdown_decomp_handle_inflate_failure(
 
     if (loop_rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
         && ctx->type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
-        && ctx->completed_out == 0)
+        && ctx->completed_out == 0
+        && (ctx->stream == NULL || ctx->stream->total_out == 0))
     {
         ngx_memzero(&retry_ctx, sizeof(retry_ctx));
         retry_ctx.output_data = ctx->output_data;

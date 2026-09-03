@@ -2499,7 +2499,9 @@ test_finalize_time_fallback_reentry(void)
 
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
-    r.main = (ngx_http_request_t *) (uintptr_t) 0x52;
+    ngx_http_request_t subrequest_main;
+    ngx_memzero(&subrequest_main, sizeof(subrequest_main));
+    r.main = &subrequest_main;
     ctx.eligible = 1;
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;

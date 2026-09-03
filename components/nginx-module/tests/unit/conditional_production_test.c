@@ -150,6 +150,8 @@ struct ngx_http_request_s {
         ngx_table_elt_t *authorization;
         ngx_table_elt_t *if_none_match;
         ngx_table_elt_t *if_modified_since;
+        ngx_table_elt_t *if_match;
+        ngx_table_elt_t *if_unmodified_since;
     } headers_in;
     struct {
         ngx_uint_t status;
@@ -160,6 +162,7 @@ struct ngx_http_request_s {
         u_char    *content_type_lowcase;
         ngx_uint_t content_type_hash;
         ngx_str_t  charset;
+        ngx_str_t *override_charset;
         size_t     content_type_len;
         ngx_table_elt_t *content_length;
         ngx_table_elt_t *content_encoding;
