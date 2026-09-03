@@ -20,6 +20,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from threshold_engine import (
+    _is_finite_number,
     build_direction_map,
     build_verdict_report,
     compute_deviation,
@@ -381,6 +382,38 @@ class TestMissingThresholds:
         empty_cfg = {"platforms": {}}
         result = get_threshold(empty_cfg, "ubuntu-latest", "small", "p50_ms")
         assert result == DEFAULT_THRESHOLDS["p50_ms"]
+
+
+# ---------------------------------------------------------------------------
+# PERF_GATE_SKIP=1 skip behaviour
+# ---------------------------------------------------------------------------
+
+class TestFiniteNumberHelper:
+    """_is_finite_number rejects booleans, non-numbers, and non-finite
+    values including oversized integers that would raise OverflowError
+    when passed through math.isnan/math.isinf."""
+
+    def test_rejects_bool(self):
+        assert not _is_finite_number(True)
+        assert not _is_finite_number(False)
+
+    def test_rejects_non_number(self):
+        assert not _is_finite_number("42")
+        assert not _is_finite_number(None)
+
+    def test_rejects_nan_and_inf(self):
+        assert not _is_finite_number(float("nan"))
+        assert not _is_finite_number(float("inf"))
+
+    def test_rejects_oversized_int(self):
+        # math.isnan(10**400) raises OverflowError; the helper must
+        # classify it as non-finite instead of crashing.
+        assert not _is_finite_number(10**400)
+
+    def test_accepts_normal_numbers(self):
+        assert _is_finite_number(0)
+        assert _is_finite_number(-1)
+        assert _is_finite_number(3.14)
 
 
 # ---------------------------------------------------------------------------
