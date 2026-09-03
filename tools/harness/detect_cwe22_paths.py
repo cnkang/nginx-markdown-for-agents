@@ -79,8 +79,11 @@ PATH_OPEN_CALL_RE = re.compile(
 
 # Match builtin open() or os.open() — NOT .open() method calls.
 # A .open() call (e.g. path.open(encoding=...)) has a dot before open.
+# The negative lookbehind applies at the START of the whole match, so the
+# optional ``os.`` prefix still matches from the identifier's position
+# (the character before ``os`` is a non-word char, never a dot).
 BUILTIN_OPEN_CALL_RE = re.compile(
-    r"(?<!\.)\b(?:os\.)?open\s*\(",
+    r"(?<![\w.])\b(?:os\.)?open\s*\(",
 )
 
 OPEN_ARG_RE = re.compile(
@@ -531,7 +534,7 @@ def _extract_builtin_open_first_arg(line: str) -> str | None:
     # A bare f/r/b/u prefix followed by a quote is the start of an
     # f-string or literal, not an identifier argument.
     tail = line[m.end():].lstrip(" \t")
-    if re.match(r"^'|\"", tail):
+    if re.match(r"^['\"]", tail):
         return None
 
     # The identifier must be the COMPLETE path expression.  A trailing
@@ -539,7 +542,7 @@ def _extract_builtin_open_first_arg(line: str) -> str | None:
     # means the extracted token is only the receiver root: the real
     # path is a dynamic member the simple-identifier extractor cannot
     # vouch for, so treat the whole expression as unparsed.
-    if tail.startswith(".") or tail.startswith("["):
+    if tail.startswith((".", "[")):
         return None
 
     return first_arg
@@ -585,6 +588,32 @@ def _try_open_quote(line: str, idx: int) -> tuple[str, int] | None:
     return ch, idx + 1
 
 
+def _advance_quote_char(
+    line: str, idx: int, quote: str | None, escaped: bool,
+) -> tuple[str | None, bool, int]:
+    """Advance the quote-state machine by one character at ``idx``.
+
+    Returns the updated ``(quote, escaped, idx)``.  A ``-1`` idx signals
+    that an unquoted ``#`` started an inline comment (scan must stop).
+    """
+    ch = line[idx]
+    if escaped:
+        return quote, False, idx + 1
+    if ch == "\\":
+        return quote, True, idx + 1
+    if quote is not None:
+        next_idx = _try_close_quote(line, idx, quote)
+        if next_idx is not None:
+            return None, False, next_idx
+        return quote, False, idx + 1
+    if ch == "#":
+        return None, False, -1
+    opened = _try_open_quote(line, idx)
+    if opened is not None:
+        return opened[0], False, opened[1]
+    return None, False, idx + 1
+
+
 def _multiline_quote_after(
     line: str, initial_quote: str | None = None,
 ) -> str | None:
@@ -608,31 +637,10 @@ def _multiline_quote_after(
     escaped = False
     idx = 0
     while idx < len(line):
-        ch = line[idx]
-        if escaped:
-            escaped = False
-            idx += 1
-            continue
-        if ch == "\\":
-            escaped = True
-            idx += 1
-            continue
-        if quote is not None:
-            next_idx = _try_close_quote(line, idx, quote)
-            if next_idx is not None:
-                quote = None
-                idx = next_idx
-            else:
-                idx += 1
-            continue
-        if ch == "#":
+        quote, escaped, idx = _advance_quote_char(line, idx, quote, escaped)
+        if idx < 0:
             # Unquoted '#' begins a comment; nothing after it is code.
             return None
-        opened = _try_open_quote(line, idx)
-        if opened is not None:
-            quote, idx = opened
-        else:
-            idx += 1
     return quote
 
 
@@ -648,6 +656,30 @@ def _is_position_inside_string(
     return _multiline_quote_after(line[:pos], initial_quote) is not None
 
 
+def _is_inside_comment(
+    line: str, pos: int, initial_quote: str | None = None,
+) -> bool:
+    """True when ``pos`` lies inside an inline (``#``) comment.
+
+    Scans ``line[:pos]`` with the same quote-state machine as
+    ``_multiline_quote_after``; the first unquoted ``#`` starts a
+    comment, so any position at or after it is comment text.  A ``#``
+    inside a string literal (e.g. ``open("#f")``) does not start a
+    comment, and an open multiline string (``initial_quote``) keeps
+    ``#`` inert until the delimiter closes.
+    """
+    quote: str | None = initial_quote
+    escaped = False
+    idx = 0
+    while idx < pos:
+        quote, escaped, idx = _advance_quote_char(line, idx, quote, escaped)
+        if idx == -1:
+            # _advance_quote_char signals that an unquoted # started a
+            # comment: everything from there on is comment text.
+            return True
+    return False
+
+
 def _has_complex_open_argument(
     line: str, initial_quote: str | None = None,
 ) -> bool:
@@ -658,13 +690,19 @@ def _has_complex_open_argument(
     Returns False for method calls (``receiver.open(...)``), keyword-only
     calls, bare ``open()`` with no argument, plain string literals
     (hardcoded paths), and `open(` text embedded inside string
-    literals.  True arguments are statically unresolved: the caller must
-    treat them as unaudited rather than silently skipping the sink.
+    literals or comments.  True arguments are statically unresolved: the
+    caller must treat them as unaudited rather than silently skipping
+    the sink.  Both builtin ``open()`` and ``os.open()`` are matched
+    (the optional ``os.`` prefix is part of the builtin call); ``.open()``
+    method calls are excluded by the negative lookbehind.
     """
-    for match in re.finditer(r"(?<![\w.])open\s*\(([^)]*)", line):
+    for match in BUILTIN_OPEN_CALL_RE.finditer(line):
         if _is_position_inside_string(line, match.start(), initial_quote):
             continue
-        inner = match.group(1).strip()
+        if _is_inside_comment(line, match.start(), initial_quote):
+            continue
+        inner_end = line.find(")", match.end())
+        inner = line[match.end():inner_end].strip() if inner_end != -1 else ""
         if not inner:
             continue
         if KEYWORD_ARG_RE.match(inner):
@@ -687,6 +725,20 @@ def _emit_unaudited_warning(warnings: list[str], rel: str, lineno: int) -> None:
     )
 
 
+@dataclass
+class _OpenScanState:
+    """Per-file scan state threaded through open() match processing."""
+
+    lines: list[str]
+    has_validation_import: bool
+    validated_vars: set[str]
+    hardcoded_vars: set[str]
+    filepath: Path
+    rel: str
+    strict: bool
+    open_quote: str | None = None
+
+
 def _scan_open_calls(
     lines: list[str],
     has_validation_import: bool,
@@ -699,55 +751,115 @@ def _scan_open_calls(
     """Scan lines for open() calls and classify each."""
     errors: list[str] = []
     warnings: list[str] = []
-
-    # Quote state carried across lines for multiline strings/docstrings.
-    open_quote: str | None = None
+    state = _OpenScanState(
+        lines=lines,
+        has_validation_import=has_validation_import,
+        validated_vars=validated_vars,
+        hardcoded_vars=hardcoded_vars,
+        filepath=filepath,
+        rel=rel,
+        strict=strict,
+    )
 
     for lineno, line in enumerate(lines, start=1):
-        open_match = OPEN_CALL_RE.search(line)
-        if not open_match:
+        open_matches = list(OPEN_CALL_RE.finditer(line))
+        if not open_matches:
             # Keep tracking docstring state even without open() text.
-            open_quote = _multiline_quote_after(line, open_quote)
+            state.open_quote = _multiline_quote_after(line, state.open_quote)
             continue
 
         # Evaluate the string state at the matched open() offset, not at
         # end-of-line: a call embedded inside a quoted message is ignored
         # while one that merely *appears on* a quoted line is detected.
-        in_string = _is_position_inside_string(
-            line, open_match.start(), open_quote)
-        if COMMENT_RE.match(line.lstrip()) or NON_FILE_OPEN_RE.search(line):
-            # A comment line cannot contain a live call; still update state.
-            open_quote = _multiline_quote_after(line, open_quote)
-            continue
-
-        first_arg = _resolve_open_first_arg(line)
-        if first_arg is None:
-            # A builtin open() whose path argument the simple-identifier
-            # extractor cannot resolve (f-string, concatenation, call
-            # result, Path() wrap) is an unaudited sink, not a skip: a
-            # dynamic expression may embed user-derived components.
-            if _has_complex_open_argument(line, open_quote):
-                _emit_unaudited_warning(warnings, rel, lineno)
-            open_quote = _multiline_quote_after(line, open_quote)
-            continue
-
-        if in_string and first_arg:
-            # A simple identifier inside a docstring is still not a call.
-            open_quote = _multiline_quote_after(line, open_quote)
-        else:
-            call_errors, call_warnings = _classify_open_call(
-                OpenCallContext(
-                    first_arg=first_arg, line=line, lines=lines, lineno=lineno,
-                    has_validation_import=has_validation_import,
-                    validated_vars=validated_vars, hardcoded_vars=hardcoded_vars,
-                    filepath=filepath, rel=rel, strict=strict,
-                )
+        # Every match on the line is processed so a later live open() call
+        # is never suppressed by an earlier quoted/textual token.
+        for match_idx, open_match in enumerate(open_matches):
+            match_errors, match_warnings = _scan_single_open_match(
+                open_match, match_idx, open_matches, line, lineno, state
             )
-            errors.extend(call_errors)
-            warnings.extend(call_warnings)
-            open_quote = _multiline_quote_after(line, open_quote)
+            errors.extend(match_errors)
+            warnings.extend(match_warnings)
 
     return errors, warnings
+
+
+def _scan_single_open_match(
+    open_match: re.Match[str],
+    match_idx: int,
+    open_matches: list[re.Match[str]],
+    line: str,
+    lineno: int,
+    state: _OpenScanState,
+) -> tuple[list[str], list[str]]:
+    """Process one open() match and return (errors, warnings).
+
+    The method/builtin dispatch and the argument-extraction scope are
+    per-match so a later live open() call on the same line is never
+    suppressed by an earlier quoted/textual token.  Mutable quote state
+    lives on *state* and is threaded across matches/lines.
+    """
+    in_string = _is_position_inside_string(line, open_match.start(), state.open_quote)
+    in_comment = _is_inside_comment(line, open_match.start(), state.open_quote)
+    match_errors: list[str] = []
+    match_warnings: list[str] = []
+
+    if COMMENT_RE.match(line.lstrip()) or NON_FILE_OPEN_RE.search(line):
+        # A comment line cannot contain a live call; still update state.
+        state.open_quote = _multiline_quote_after(line, state.open_quote)
+        return match_errors, match_warnings
+
+    prev_char = line[open_match.start() - 1] if open_match.start() > 0 else " "
+    if prev_char == ".":
+        # Method call `receiver.open(...)`.  The OPEN_CALL_RE match
+        # sits on the `open` token; os.open() produces a SECOND,
+        # dot-preceded match inside the same call — skip that
+        # duplicate (the `os.open` match starts at `os` and is
+        # handled through the builtin branch).
+        if re.match(r"os\.$", line[max(0, open_match.start() - 3):open_match.start()]):
+            state.open_quote = _multiline_quote_after(line, state.open_quote)
+            return match_errors, match_warnings
+        first_arg = _extract_path_open_receiver(line)
+    else:
+        # Builtin open()/os.open(): scope argument extraction to
+        # the current match so an earlier call on the same line
+        # cannot mis-attribute this one's arguments.
+        segment_end = (
+            open_matches[match_idx + 1].start()
+            if match_idx + 1 < len(open_matches)
+            else len(line)
+        )
+        first_arg = _extract_builtin_open_first_arg(
+            line[open_match.start():segment_end]
+        )
+
+    if first_arg is None:
+        # A builtin open() whose path argument the simple-identifier
+        # extractor cannot resolve (f-string, concatenation, call
+        # result, Path() wrap) is an unaudited sink, not a skip: a
+        # dynamic expression may embed user-derived components.
+        if _has_complex_open_argument(line, state.open_quote):
+            _emit_unaudited_warning(match_warnings, state.rel, lineno)
+        state.open_quote = _multiline_quote_after(line, state.open_quote)
+        return match_errors, match_warnings
+
+    if in_string or in_comment:
+        # A simple identifier inside a docstring or trailing comment
+        # is still not a call.
+        state.open_quote = _multiline_quote_after(line, state.open_quote)
+        return match_errors, match_warnings
+
+    call_errors, call_warnings = _classify_open_call(
+        OpenCallContext(
+            first_arg=first_arg, line=line, lines=state.lines, lineno=lineno,
+            has_validation_import=state.has_validation_import,
+            validated_vars=state.validated_vars, hardcoded_vars=state.hardcoded_vars,
+            filepath=state.filepath, rel=state.rel, strict=state.strict,
+        )
+    )
+    match_errors.extend(call_errors)
+    match_warnings.extend(call_warnings)
+    state.open_quote = _multiline_quote_after(line, state.open_quote)
+    return match_errors, match_warnings
 
 
 def _resolve_open_first_arg(line: str) -> str | None:
