@@ -296,10 +296,11 @@ check_active_configuration() {
     done
 
     if [[ "$standard_config_present" -eq 0 ]]; then
-        info "No trusted NGINX executable or standard configuration file found."
-    else
-        info "Standard NGINX configuration files contain no module reference."
+        info "No trusted NGINX executable and no standard configuration files found; allowing clean removal."
+        return 1
     fi
+
+    info "Standard NGINX configuration files contain no module reference."
     # Without the executable, the complete include graph and active
     # configuration cannot be verified. The persistent force-removal sentinel
     # is the explicit operator path for an out-of-band verification.

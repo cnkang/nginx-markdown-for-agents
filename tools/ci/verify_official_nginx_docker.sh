@@ -40,7 +40,8 @@ Examples:
     --image-reference nginx:1.31.4 --image-digest sha256:DIGEST \
     --module-sha FULL_40_HEX_COMMIT_SHA \
     --image-name nginx-markdown-official-check:1.31.4-debian12-glibc-amd64
-  $(basename "$0") --artifact-dir /tmp/official-nginx-docker/row
+  $(basename "$0") --expected-nginx-version 1.31.4 --image-digest sha256:DIGEST \
+    --module-sha FULL_40_HEX_COMMIT_SHA --artifact-dir /tmp/official-nginx-docker/row
 
 Environment variables:
   NGINX_TAG   Default: mainline

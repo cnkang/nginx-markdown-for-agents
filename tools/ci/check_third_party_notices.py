@@ -150,11 +150,22 @@ def collect_notice_version_issues(
     ]
 
 
+ALL_CARGO_TOMLS: list[Path] = [
+    CARGO_TOML,
+    *SUB_WORKSPACE_CARGO_TOMLS,
+]
+
+ALL_CARGO_LOCKS: list[Path] = [
+    CARGO_LOCK,
+    *SUB_WORKSPACE_CARGO_LOCKS,
+]
+
+
 def collect_workspace_lock_issues() -> list[str]:
-    """Collect missing or stale sub-workspace Cargo.lock errors."""
+    """Collect missing or stale workspace and sub-workspace Cargo.lock errors."""
     issues: list[str] = []
     for cargo_toml, cargo_lock in zip(
-        SUB_WORKSPACE_CARGO_TOMLS, SUB_WORKSPACE_CARGO_LOCKS, strict=True
+        ALL_CARGO_TOMLS, ALL_CARGO_LOCKS, strict=True
     ):
         if not cargo_toml.is_file():
             continue
