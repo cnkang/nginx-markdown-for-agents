@@ -901,11 +901,11 @@ ngx_http_markdown_find_last_modified_header(ngx_http_request_t *r)
         return r->headers_out.last_modified;
     }
 
-    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+    for (const ngx_list_part_t *part = &r->headers_out.headers.part;
          part != NULL;
          part = part->next)
     {
-        ngx_table_elt_t  *headers;
+        const ngx_table_elt_t  *headers;
 
         headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
@@ -1631,6 +1631,15 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     ngx_http_markdown_collect_conditional_headers(
         r, ctx, &inm_header, &ims_header, &im_header, &ius_header,
         &range_header);
+
+    /* RFC 7232 section 3.3: a recipient MUST ignore If-Unmodified-Since
+     * when the request carries an If-Match header field.  The two
+     * validators address the same precondition; If-Match (entity tag)
+     * wins because it is evaluated first and is more specific. */
+    if (im_header != NULL) {
+        ius_header = NULL;
+    }
+
 
     inm_value.data = NULL;
     inm_value.len = 0;

@@ -2276,6 +2276,51 @@ test_handle_if_match_wildcard_passes(void)
 }
 
 static void
+test_handle_if_match_ignores_contradicting_if_unmodified_since(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_match;
+    ngx_table_elt_t          *if_unmodified_since;
+    struct MarkdownConverterHandle  converter;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+    static uint8_t             etag_data[] = "\"abc123\"";
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+    g_convert_etag = etag_data;
+    g_convert_etag_len = sizeof(etag_data) - 1;
+    g_cond_result_code = 0;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_match = add_header(&r->headers_in.headers, "If-Match", "\"abc123\"");
+    r->headers_in.if_match = if_match;
+    if_unmodified_since = add_header(&r->headers_in.headers,
+        "If-Unmodified-Since", "Tue, 20 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_unmodified_since = if_unmodified_since;
+    add_last_modified_header(r, "Wed, 21 Oct 2015 07:28:00 GMT");
+    prepare_full_conditional_test(&conf, &ctx);
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    /* RFC 7232 section 3.3: If-Match takes precedence over
+     * If-Unmodified-Since, which must be ignored when both are present.
+     * A contradicting IUS must not turn the matched If-Match into 412. */
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "satisfied If-Match ignores a contradicting If-Unmodified-Since");
+    TEST_ASSERT(result != NULL,
+        "If-Match satisfied by the generated representation publishes a result");
+    TEST_ASSERT(g_convert_calls == 1,
+        "If-Match match still obtains the generated representation");
+    TEST_PASS("If-Match ignores contradicting If-Unmodified-Since");
+}
+
+static void
 test_handle_if_unmodified_since_before_last_modified_returns_412(void)
 {
     ngx_http_request_t       *r;
@@ -3206,6 +3251,7 @@ main(void)
     test_handle_if_match_mismatch_returns_412();
     test_handle_if_match_match_preserves_304();
     test_handle_if_match_wildcard_passes();
+    test_handle_if_match_ignores_contradicting_if_unmodified_since();
     test_handle_if_unmodified_since_before_last_modified_returns_412();
     test_handle_if_unmodified_since_after_last_modified_proceeds();
     test_handle_if_unmodified_since_without_last_modified_is_satisfied();
