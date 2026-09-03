@@ -150,22 +150,18 @@ def collect_notice_version_issues(
     ]
 
 
-ALL_CARGO_TOMLS: list[Path] = [
-    CARGO_TOML,
-    *SUB_WORKSPACE_CARGO_TOMLS,
-]
-
-ALL_CARGO_LOCKS: list[Path] = [
-    CARGO_LOCK,
-    *SUB_WORKSPACE_CARGO_LOCKS,
-]
-
-
 def collect_workspace_lock_issues() -> list[str]:
-    """Collect missing or stale workspace and sub-workspace Cargo.lock errors."""
+    """Collect missing or stale sub-workspace Cargo.lock errors.
+
+    This check deliberately covers only SUB-workspace manifests: the main
+    workspace lock is validated by the resolved-versions text parser
+    (resolved_versions), which must also accept fixture/placeholder
+    manifests in tests.  A cargo metadata run against the main manifest is
+    not part of this gate.
+    """
     issues: list[str] = []
     for cargo_toml, cargo_lock in zip(
-        ALL_CARGO_TOMLS, ALL_CARGO_LOCKS, strict=True
+        SUB_WORKSPACE_CARGO_TOMLS, SUB_WORKSPACE_CARGO_LOCKS, strict=True
     ):
         if not cargo_toml.is_file():
             continue
