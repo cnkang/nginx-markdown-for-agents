@@ -2160,6 +2160,12 @@ ngx_http_markdown_send_412(ngx_http_request_t *r)
     r->headers_out.status = NGX_HTTP_PRECONDITION_FAILED;
     r->headers_out.status_line.len = 0;
 
+    /* The 412 carries no body: mark the request header-only so the
+     * HTTP/1.1 header filter does not switch to chunked encoding for a
+     * body that is never sent.  The core only sets header_only for 204,
+     * 304 and HEAD; the module must declare it explicitly for 412. */
+    r->header_only = 1;
+
     ngx_http_clear_content_length(r);
     r->headers_out.content_length_n = -1;
 
