@@ -59,6 +59,16 @@ VALIDATED_ASSIGN_RE = re.compile(
     r"|^\s*(\w+)\s*=\s*_resolve_repo_write_path\s*\(",
 )
 
+# Compound statements (``if cond: safe = validate_read_path(raw)``) put the
+# assignment after a colon, so the ^-anchored pattern above cannot see it.
+# The ``.*?`` prefix is bounded by the required ':' and the anchored line
+# start, so it cannot cause quadratic backtracking.
+COMPOUND_VALIDATED_ASSIGN_RE = re.compile(
+    r"(?m)^\s*(?:if|for|while|with)\b.*?:\s*(\w+)\s*=\s*validate_read_path\s*\("
+    r"|^\s*(?:if|for|while|with)\b.*?:\s*(\w+)\s*=\s*validate_write_path_within_root\s*\("
+    r"|^\s*(?:if|for|while|with)\b.*?:\s*(\w+)\s*=\s*_resolve_repo_write_path\s*\(",
+)
+
 OPEN_CALL_RE = re.compile(
     r"(?:os\.)?open\s*\(",
 )
@@ -93,7 +103,7 @@ HARDCODED_PATH_RE = re.compile(
     r'REPO_ROOT\s*/\s*"'
     r'|Path\s*\(\s*__file__\s*\)'
     r'|"/'
-    r"|[A-Z_]+_DIR\s*/\s*\"",
+    r"|[A-Z_]{1,64}_DIR\s*/\s*\"",
 )
 
 SAFE_OPEN_ARG_RE = re.compile(
@@ -394,6 +404,11 @@ _PATH_WRAPPED_RE = re.compile(
     r"(?m)^\s*(\w+)\s*=\s*Path\s*\(\s*(\w+)\s*\)",
 )
 
+# Compound-statement variant of _PATH_WRAPPED_RE (``if cond: path = Path(safe)``).
+COMPOUND_PATH_WRAPPED_RE = re.compile(
+    r"(?m)^\s*(?:if|for|while|with)\b.*?:\s*(\w+)\s*=\s*Path\s*\(\s*(\w+)\s*\)",
+)
+
 
 def _collect_validated_vars(lines: list[str]) -> set[str]:
     """Extract variable names assigned from validation calls (LHS only).
@@ -406,9 +421,16 @@ def _collect_validated_vars(lines: list[str]) -> set[str]:
     for line in lines:
         for m in VALIDATED_ASSIGN_RE.finditer(line):
             _extract_regex_groups(m, validated_vars)
+        for m in COMPOUND_VALIDATED_ASSIGN_RE.finditer(line):
+            _extract_regex_groups(m, validated_vars)
 
     for line in lines:
         for m in _PATH_WRAPPED_RE.finditer(line):
+            lhs = m.group(1)
+            rhs = m.group(2)
+            if rhs in validated_vars:
+                validated_vars.add(lhs)
+        for m in COMPOUND_PATH_WRAPPED_RE.finditer(line):
             lhs = m.group(1)
             rhs = m.group(2)
             if rhs in validated_vars:
