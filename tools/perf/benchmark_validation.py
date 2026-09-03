@@ -601,9 +601,9 @@ def _percentile(values: list[float], fraction: float) -> float:
 def _ab_performance(content: str) -> tuple[float, float, float, float] | None:
     patterns = (
         r"Requests per second:\s+([\d.]+)",
-        r"(?m)^\s+50%\s+(\d+)",
-        r"(?m)^\s+95%\s+(\d+)",
-        r"(?m)^\s+99%\s+(\d+)",
+        r"(?m)^[ \t]+50%[ \t]+(\d+)",
+        r"(?m)^[ \t]+95%[ \t]+(\d+)",
+        r"(?m)^[ \t]+99%[ \t]+(\d+)",
     )
     values = []
     for pattern in patterns:
