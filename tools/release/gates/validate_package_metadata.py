@@ -1463,6 +1463,30 @@ def validate_nfpm_preremove_lifecycle(result: ValidationResult) -> None:
         return
     _check_snippets(spec, RPM_PREUN_SNIPPETS, "rpm-preun", str(RPM_SPEC), result)
 
+    workflow = read_safe(RELEASE_PACKAGES_WORKFLOW)
+    if not workflow:
+        result.fail(
+            "nfpm-preremove:workflow-exists",
+            "release-packages.yml not found",
+        )
+        return
+    # The release workflow must render the preremove template exactly like
+    # the preinstall template; an unrendered %%TRUSTED_EXEC_PRELUDE%% would
+    # ship a preremove script that cannot resolve the trusted nginx
+    # executable and therefore fails every removal.
+    _check_snippets(
+        workflow,
+        [
+            "render-nfpm-config.sh",
+            "packaging/nfpm/scripts/preinstall.sh",
+            "packaging/nfpm/scripts/preremove.sh",
+            "${NFPM_TMP}/preremove.sh",
+        ],
+        "nfpm-preremove:workflow-render",
+        "release-packages.yml",
+        result,
+    )
+
 
 def validate_release_build_glibc_baseline(result: ValidationResult) -> None:
     """Validate release builds use the supported RPM glibc baseline."""

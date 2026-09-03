@@ -797,23 +797,29 @@ jobs:
           echo "RPM_FILENAME=${RPM_FILENAME}" >&2
         shell: bash
 
-      - name: Prepare nFPM config with version-stamped preinstall
+      - name: Prepare nFPM config with version-stamped preinstall and preremove
         run: |
-          # Render the preinstall template before nFPM copies it into the
-          # package; keep the tracked checkout unmodified.
+          # Render the preinstall and preremove templates before nFPM copies
+          # them into the package; keep the tracked checkout unmodified.
           NFPM_TMP="$(mktemp -d)"
           packaging/nfpm/scripts/render-nfpm-config.sh \
             packaging/nfpm/scripts/preinstall.sh \
             "${NFPM_TMP}/preinstall.sh" \
             "${NGINX_VERSION}"
+          packaging/nfpm/scripts/render-nfpm-config.sh \
+            packaging/nfpm/scripts/preremove.sh \
+            "${NFPM_TMP}/preremove.sh" \
+            "${NGINX_VERSION}"
 
-          # Generate a temporary nfpm config that references the temp preinstall
-          # while keeping all other paths relative to the workspace root.
-          sed "s|./packaging/nfpm/scripts/preinstall.sh|${NFPM_TMP}/preinstall.sh|" \
+          # Generate a temporary nfpm config that references the temp
+          # preinstall and preremove scripts while keeping all other paths
+          # relative to the workspace root.
+          sed -e "s|./packaging/nfpm/scripts/preinstall.sh|${NFPM_TMP}/preinstall.sh|" \
+              -e "s|./packaging/nfpm/scripts/preremove.sh|${NFPM_TMP}/preremove.sh|" \
             packaging/nfpm/nfpm.yaml > "${NFPM_TMP}/nfpm.yaml"
 
           echo "NFPM_TMP=${NFPM_TMP}" >> "$GITHUB_ENV"
-          echo "Version-stamped preinstall.sh written to ${NFPM_TMP}/preinstall.sh" >&2
+          echo "Version-stamped preinstall.sh and preremove.sh written to ${NFPM_TMP}/" >&2
         shell: bash
 
       - name: Generate DEB package

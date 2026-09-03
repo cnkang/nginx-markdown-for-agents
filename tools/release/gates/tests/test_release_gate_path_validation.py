@@ -215,3 +215,27 @@ def test_fuzz_packaging_naming_patterns_are_mutually_exclusive() -> None:
     assert "deb" in rpm_issue
     assert "rpm" not in rpm_issue
     assert fuzz_gate._workflow_naming_issue(deb_rpm) is None
+
+
+def test_config_directive_read_sources_tolerate_unreadable_files(
+    monkeypatch,
+) -> None:
+    """An OSError/UnicodeError while reading an expected C source must be
+    recorded as missing (None) so the conf-field check FAILs structurally
+    instead of crashing the gate (code-review finding: read_safe raises
+    and _read_c_sources had no catch)."""
+    # is_file() is forced True so the read path is reached for every
+    # expected source; the read itself then raises.
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+
+    def fake_read_safe(path):
+        raise OSError(f"simulated unreadable: {path}")
+
+    monkeypatch.setattr(config_gate, "read_safe", fake_read_safe)
+
+    sources = config_gate._read_c_sources()
+
+    # Every expected source is still enumerated (names come from the
+    # static lists) and recorded as missing (None) rather than raising.
+    assert sources
+    assert all(value is None for value in sources.values())
