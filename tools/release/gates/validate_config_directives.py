@@ -688,7 +688,14 @@ def _read_c_sources() -> dict[str, str | None]:
         if not c_path.is_file():
             sources[rel] = None
             continue
-        content = read_safe(c_path)
+        try:
+            content = read_safe(c_path)
+        except (OSError, UnicodeError):
+            # An unreadable source is not provably readable: record it as
+            # missing so check_conf_field_not_in_source emits the
+            # structured FAIL instead of crashing the gate.
+            sources[rel] = None
+            continue
         sources[rel] = content if content else None
     return sources
 
