@@ -80,3 +80,36 @@ def test_comment_open_call_is_not_reported(tmp_path):
 
     assert errors == []
     assert warnings == []
+
+
+def test_fstring_open_argument_is_flagged_unaudited(tmp_path):
+    """open() fed an f-string must be reported as an unparsed sink,
+    not silently skipped."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(base):\n"
+        "    with open(f\"{base}/file.txt\") as stream:\n"
+        "        return stream.read()\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert len(warnings) == 1
+    assert "dynamic expression" in warnings[0]
+
+
+def test_open_string_literal_inside_fixture_is_not_flagged(tmp_path):
+    """open() text embedded in a string literal is not a call site."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "content = 'with open(\"tools/release-matrix.json\") as f:'\n"
+        "assert content\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert warnings == []

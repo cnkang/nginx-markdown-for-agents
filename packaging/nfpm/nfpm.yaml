@@ -45,7 +45,7 @@ overrides:
       - "libbrotli1"
   rpm:
     depends:
-      - "nginx = ${RPM_NGINX_EVR}"
+      - "nginx >= ${RPM_NGINX_EVR}"
       - "libbrotli"
 
 contents:
