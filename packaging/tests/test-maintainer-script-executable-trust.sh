@@ -119,13 +119,20 @@ prepare_sandboxed_script() {
 
     case "${script_family}" in
         nfpm)
+            local rendered_path
+            rendered_path="$(mktemp "${WORK_DIR}/${label}/rendered.XXXXXX")"
+            if ! "${REPO_ROOT}/packaging/nfpm/scripts/render-nfpm-config.sh" \
+                "${source_script}" "${rendered_path}" "1.26.3"; then
+                fail "sandbox: failed to render ${source_script##*/}"
+                return 1
+            fi
             local rewritten_script
             rewritten_script="$(sed \
                 -e "s|TRUSTED_PATH_ROOT=\"\"|TRUSTED_PATH_ROOT=\"${SANDBOX_ROOT}\"|" \
                 -e "s|/etc/nginx|${SANDBOX_ROOT}/etc/nginx|g" \
                 -e "s|/usr/share/nginx|${SANDBOX_ROOT}/usr/share/nginx|g" \
-                -e 's|%%NGINX_VERSION%%|1.26.3|g' \
-                "${source_script}")"
+                "${rendered_path}")"
+            rm -f "${rendered_path}"
             if ! printf '%s\n' "$rewritten_script" | grep -Fq \
                 "TRUSTED_PATH_ROOT=\"${SANDBOX_ROOT}\""; then
                 fail "sandbox: TRUSTED_PATH_ROOT substitution did not match"
@@ -214,14 +221,26 @@ assert_path_present() {
 assert_default_trusted_root() {
     local source_script="$1"
     local function_source=""
+    local rendered_path=""
 
     if [[ ! -f "${source_script}" ]]; then
         fail "default trusted root: script not found: ${source_script}"
         return 0
     fi
 
+    # The tracked source is a template with a prelude placeholder; render
+    # the packaged form before extracting the shared helper.
+    rendered_path="$(mktemp "${WORK_DIR}/default-trusted-root.XXXXXX")"
+    if ! "${REPO_ROOT}/packaging/nfpm/scripts/render-nfpm-config.sh" \
+        "${source_script}" "${rendered_path}" "1.26.3"; then
+        rm -f "${rendered_path}"
+        fail "default trusted root: failed to render ${source_script##*/}"
+        return 0
+    fi
+
     function_source="$(sed -n '/^path_is_trusted_root()/,/^}/p' \
-        "${source_script}")"
+        "${rendered_path}")"
+    rm -f "${rendered_path}"
     if [[ -z "${function_source}" ]]; then
         fail "default trusted root: helper not found in ${source_script}"
         return 0

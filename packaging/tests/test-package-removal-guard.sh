@@ -25,9 +25,19 @@ for util in cat grep readlink rm rmdir sed stat basename; do
     fi
 done
 
+# Render the template first (injects the shared trusted-executable
+# prelude and stamps the NGINX version), then redirect the sandbox paths.
+RENDERED_SCRIPT="${FAKE_ROOT}/rendered-preremove.sh"
+if ! "${SCRIPT_DIR}/../nfpm/scripts/render-nfpm-config.sh" \
+    "${SOURCE_SCRIPT}" "${RENDERED_SCRIPT}" "1.26.3"; then
+    printf 'FAIL: failed to render preremove template\n' >&2
+    exit 1
+fi
+
 sed -e "s|^TRUSTED_PATH_ROOT=\"\"$|TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\"|" \
     -e "s|/etc/nginx|${FAKE_ROOT}/etc/nginx|g" \
-    "${SOURCE_SCRIPT}" > "${RUN_SCRIPT}"
+    "${RENDERED_SCRIPT}" > "${RUN_SCRIPT}"
+rm -f "${RENDERED_SCRIPT}"
 if ! grep -F -q "TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\"" "${RUN_SCRIPT}"; then
     printf 'FAIL: test sandbox was not wired into the guard\n' >&2
     exit 1
@@ -155,24 +165,26 @@ if ! printf '%s\n' "${run_case_output}" \
 fi
 printf 'PASS: no-nginx fallback blocks unverifiable configuration\n' >&2
 
-# No NGINX executable and no standard configuration file at all: the complete
-# include graph is unverifiable, so removal must remain blocked.
+# No NGINX executable and no standard configuration file at all: the
+# module package alone is being removed from a host where the main nginx
+# package is already gone, so there is no NGINX instance that could load
+# the module.  Clean removal is correct, not a block.
 rm -f "${FAKE_ROOT}/usr/sbin/nginx"
 rm -rf "${FAKE_ROOT}/etc/nginx/conf.d" "${FAKE_ROOT}/etc/nginx/modules-enabled"
 rm -f "${FAKE_ROOT}/etc/nginx/nginx.conf"
 run_case_status=0
 run_case_output="$(${RUN_SCRIPT} remove 2>&1)" || run_case_status=$?
-if [[ "${run_case_status}" -ne 1 ]]; then
-    printf 'FAIL: empty-host removal returned %s, expected unverifiable removal block\n%s\n' \
+if [[ "${run_case_status}" -ne 0 ]]; then
+    printf 'FAIL: empty-host removal returned %s, expected clean removal exit 0\n%s\n' \
         "${run_case_status}" "${run_case_output}" >&2
     exit 1
 fi
 if ! printf '%s\n' "${run_case_output}" \
-    | grep -F -q "could not be verified"; then
-    printf 'FAIL: empty-host fallback did not explain the verification block\n%s\n' \
+    | grep -F -q "allowing clean removal"; then
+    printf 'FAIL: empty-host fallback did not explain the clean removal path\n%s\n' \
         "${run_case_output}" >&2
     exit 1
 fi
-printf 'PASS: no-nginx host without configuration files blocks unverifiable removal\n' >&2
+printf 'PASS: empty host without NGINX or configuration allows clean removal\n' >&2
 
 printf 'PASS: package removal guard lifecycle scenarios\n' >&2
