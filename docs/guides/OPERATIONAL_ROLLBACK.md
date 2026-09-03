@@ -308,7 +308,7 @@ Follow the [Verification Steps](#verification-steps) section. Confirm that the e
 
 ### Method C: Restore Fail-Open Behavior
 
-If you changed `markdown_error_policy` to `fail_closed` and conversion failures are returning 502 errors to clients, switch back to `pass`. This restores fail-open behavior: failed conversions serve the original HTML instead of an error response. Conversion continues for requests that succeed.
+Switch `markdown_error_policy` back to `pass` when conversion failures return 502 errors. This restores fail-open behavior for pre-commit conversion failures: the module serves the buffered source HTML instead of an error response. Conversion continues for requests that succeed. This applies only before the module commits the converted representation. After headers commit, a streaming mid-response failure terminates the stream with a connection close. The module cannot replay the source HTML then.
 
 #### When to Use
 
