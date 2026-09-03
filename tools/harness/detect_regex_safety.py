@@ -3352,7 +3352,7 @@ def _cont_first_chars(
 
 
 def _element_has_intersecting_repetition(
-    tokens: list[_Token], rep_idx: int, q_idx: int,
+    tokens: list[_Token], rep_idx: int,
     open_to_close: dict[int, int], close_to_open: dict[int, int],
 ) -> bool:
     """True if the repetition's element contains an open-ended repetition
@@ -3514,7 +3514,7 @@ def _repetition_is_dangerous(
     ):
         return False
     if _element_has_intersecting_repetition(
-        tokens, i, q_idx, open_to_close, close_to_open,
+        tokens, i, open_to_close, close_to_open,
     ):
         return False
     return True
