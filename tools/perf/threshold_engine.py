@@ -92,6 +92,22 @@ def get_threshold(thresholds_cfg, platform, tier, metric):
     return DEFAULT_THRESHOLDS.get(metric, {"warning_pct": 15, "blocking_pct": 30})
 
 
+def _is_finite_number(value: object) -> bool:
+    """True when value is an int/float (not bool) and mathematically finite.
+
+    ``math.isnan``/``math.isinf`` internally convert to float first and
+    raise OverflowError for oversized integers (e.g. ``10**400``); those
+    values must be rejected as non-finite everywhere so neither the
+    current nor the baseline metric can bypass validation.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def compute_deviation(current, baseline):
     """
     Compute the percentage deviation between current and baseline for threshold comparisons.
@@ -672,27 +688,11 @@ def _evaluate_single_module_metric(metric_name, threshold_value, direction,
     # would otherwise raise TypeError and abort the whole gate.  Booleans
     # are int subclasses in Python, so JSON true/false must be rejected
     # explicitly before the int/float check.
-    if isinstance(cur_val, bool):
+    if not _is_finite_number(cur_val):
         return {
             "metric": metric_name,
             "status": "missing_evidence",
-            "reason": f"critical metric '{metric_name}' not numeric: {cur_val!r}",
-        }
-    if not isinstance(cur_val, (int, float)):
-        return {
-            "metric": metric_name,
-            "status": "missing_evidence",
-            "reason": f"critical metric '{metric_name}' not numeric: {cur_val!r}",
-        }
-    # NaN and infinities are float instances but are not valid performance
-    # evidence: NaN comparisons are always false (which would misreport a
-    # breach) and infinities poison deviation math.  Reject them before any
-    # threshold comparison.
-    if isinstance(cur_val, float) and not math.isfinite(cur_val):
-        return {
-            "metric": metric_name,
-            "status": "missing_evidence",
-            "reason": f"critical metric '{metric_name}' not finite: {cur_val!r}",
+            "reason": f"critical metric '{metric_name}' not a finite number: {cur_val!r}",
         }
 
     if direction == "absolute_cap":
@@ -719,13 +719,7 @@ def _evaluate_single_module_metric(metric_name, threshold_value, direction,
         }
 
     base_val = baseline_metrics.get(metric_name)
-    if (
-        base_val is None
-        or not isinstance(base_val, (int, float))
-        or isinstance(base_val, bool)
-        or math.isnan(base_val)
-        or math.isinf(base_val)
-    ):
+    if not _is_finite_number(base_val):
         return {
             "metric": metric_name,
             "status": "missing_evidence",

@@ -1411,14 +1411,18 @@ def check_trivy_local_scan_scope() -> CheckResult:
     # (current Makefile form) or several whitespace-separated directories
     # under a single option.  Normalize line continuations first, then
     # collect the value set of every option so both forms are recognized.
+    # Collection stops at the next option boundary (a token beginning
+    # with --), so arguments of a LATER option (e.g. --cache-dir values
+    # on the same line) are never mistaken for skipped directories.
     flattened = content.replace("\\\n", " ")
     marked = flattened.replace("--skip-dirs", "\x00")
     skip_dirs_values: set[str] = set()
     for entry in marked.split("\x00")[1:]:
         values = entry.split("\n", 1)[0].strip()
-        skip_dirs_values.update(
-            value.strip("\"'") for value in values.split()
-        )
+        for value in values.split():
+            if value.startswith("--"):
+                break
+            skip_dirs_values.add(value.strip("\"'"))
 
     missing = [
         directory
