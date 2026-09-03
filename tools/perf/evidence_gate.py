@@ -394,11 +394,7 @@ def _extract_evidence_metrics(report: dict) -> dict:
     scenarios = _report_scenarios(report)
 
     if not scenarios:
-        # keep empty/legacy tests happy while failing real missing scenarios
-        return {
-            "fallback_rate_abs": 0.0,
-            "memory_slope_pct": 0.0,
-        }
+        return {}
 
     metrics: dict = {}
     _extract_small_latency(scenarios, metrics)
@@ -2776,12 +2772,12 @@ def _check_environment_compatibility(
 
     cur_scenarios = {
         scenario.get("name"): scenario
-        for scenario in cur_mb.get("scenarios", [])
+        for scenario in _report_scenarios(cur_mb)
         if scenario.get("name")
     }
     base_scenarios = {
         scenario.get("name"): scenario
-        for scenario in base_mb.get("scenarios", [])
+        for scenario in _report_scenarios(base_mb)
         if scenario.get("name")
     }
     for name in sorted(_CRITICAL_SCENARIOS):

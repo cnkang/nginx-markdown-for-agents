@@ -96,7 +96,7 @@ def compute_deviation(current, baseline):
     """
     Compute the percentage deviation between current and baseline for threshold comparisons.
 
-    The deviation is (current - baseline) / baseline * 100. If baseline is zero, returns sentinel values to avoid infinite results:
+    The deviation is (current - baseline) / abs(baseline) * 100. If baseline is zero, returns sentinel values to avoid infinite results:
     - baseline == 0 and current == 0 -> 0.0
     - baseline == 0 and current > 0 -> 100.0
     - baseline == 0 and current < 0 -> -100.0
@@ -108,7 +108,7 @@ def compute_deviation(current, baseline):
         if current == 0:
             return 0.0
         return 100.0 if current > 0 else -100.0
-    return (current - baseline) / baseline * 100.0
+    return (current - baseline) / abs(baseline) * 100.0
 
 
 def judge_metric(deviation_pct, direction, warning_pct, blocking_pct):
@@ -719,11 +719,17 @@ def _evaluate_single_module_metric(metric_name, threshold_value, direction,
         }
 
     base_val = baseline_metrics.get(metric_name)
-    if base_val is None:
+    if (
+        base_val is None
+        or not isinstance(base_val, (int, float))
+        or isinstance(base_val, bool)
+        or math.isnan(base_val)
+        or math.isinf(base_val)
+    ):
         return {
             "metric": metric_name,
             "status": "missing_evidence",
-            "reason": "baseline metric is missing",
+            "reason": "baseline metric is missing or not a valid number",
             "threshold": threshold_value,
             "actual": None,
             "baseline": None,

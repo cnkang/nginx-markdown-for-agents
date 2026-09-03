@@ -465,6 +465,11 @@ def main():
     )
     args = parser.parse_args()
 
+    if _GIT_BIN is None:
+        print("ERROR git executable not found; cannot verify baseline provenance",
+              file=sys.stderr)
+        return 2
+
     findings = []
 
     if args.changed is not None:

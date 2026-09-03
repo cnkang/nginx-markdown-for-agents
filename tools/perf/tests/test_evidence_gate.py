@@ -1175,10 +1175,10 @@ class TestEvidenceMetricExtraction:
         expected_rate = 1 / 50
         assert metrics["fallback_rate_abs"] == pytest.approx(expected_rate, abs=1e-6)
 
-    def test_empty_report_returns_zero_fallback(self):
-        """Empty report produces zero fallback rate."""
+    def test_empty_report_returns_empty_metrics(self):
+        """Empty report produces empty metrics dictionary."""
         metrics = _extract_evidence_metrics({})
-        assert metrics["fallback_rate_abs"] == 0.0
+        assert metrics == {}
 
     @pytest.mark.parametrize(
         "degraded_scenario",
@@ -2806,10 +2806,7 @@ class TestEnvironmentCompatibility:
             blocking=False,
         )
 
-        assert metrics == {
-            "memory_slope_pct": 0.0,
-            "fallback_rate_abs": 0.0,
-        }
+        assert metrics == {}
         assert has_baseline is True
         assert exit_rc is None
 

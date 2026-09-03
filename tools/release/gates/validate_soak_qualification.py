@@ -843,11 +843,13 @@ def measure_drain(worker_pid: int) -> tuple[int | None, bool, list[int]]:
     """Sample worker RSS after load; return delta, monotonic flag, and samples."""
     time.sleep(30)
     drain = []
-    for _ in range(3):
-        if worker_pid > 0:
-            sample = read_worker_rss(worker_pid)
-            if sample >= 0:
-                drain.append(sample)
+    attempts = 0
+    max_attempts = 10
+    while worker_pid > 0 and len(drain) < MIN_RSS_SAMPLES and attempts < max_attempts:
+        sample = read_worker_rss(worker_pid)
+        if sample >= 0:
+            drain.append(sample)
+        attempts += 1
         time.sleep(5)
     drain_delta = None
     if len(drain) >= 2:
