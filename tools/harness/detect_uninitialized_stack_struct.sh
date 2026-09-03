@@ -142,10 +142,10 @@ while IFS= read -r -d '' file; do
 
             # No whole-init: if the var is used with field access (partial
             # assignment pattern) in the window, report it.
-            if echo "$tail_code" | grep -qE "${var_name}\\.[a-zA-Z_]+[[:space:]]*="; then
+            if echo "$tail_code" | grep -qE "${var_name}\.[a-zA-Z_]+[[:space:]]*="; then
                 echo "CANDIDATE: $file:$line_num — stack ${type} '${var_name}' assigned field-by-field without whole-struct initialization (memset/zero-init/helper); uninitialized members may carry stack garbage past NULL guards" >> "$tmp_violations"
             fi
-        done
+        done < "$grep_matches"
         rm -f "$grep_matches"
     done
 done < <(if [[ "$explicit_scan_dir" -eq 1 ]]; then
