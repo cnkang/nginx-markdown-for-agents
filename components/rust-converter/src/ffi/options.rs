@@ -49,7 +49,7 @@ const CHARS_PER_TOKEN_MAX: f32 = 100.0;
 /// Non-positive inputs default to [`DEFAULT_CHARS_PER_TOKEN`] (4.0).
 /// Positive inputs are clamped to [CHARS_PER_TOKEN_MIN, CHARS_PER_TOKEN_MAX].
 pub(crate) fn clamp_chars_per_token(raw: f32) -> f32 {
-    if raw <= 0.0 {
+    if raw.is_nan() || raw <= 0.0 {
         DEFAULT_CHARS_PER_TOKEN
     } else {
         raw.clamp(CHARS_PER_TOKEN_MIN, CHARS_PER_TOKEN_MAX)
@@ -86,7 +86,7 @@ pub(crate) struct DecodedOptions<'a> {
     /// Normalized chars-per-token clamped to a sane range [1.0, 100.0].
     /// All token estimation paths (full-buffer and streaming)
     /// must use this value to avoid divergent behavior when the raw
-    /// FFI `chars_per_token_fixed` decodes to a non-positive or
+    /// FFI `chars_per_token` decodes to a non-positive or
     /// pathological value.
     pub(crate) effective_chars_per_token: f32,
     /// Parse-specific timeout.  When non-zero, the parser uses this
