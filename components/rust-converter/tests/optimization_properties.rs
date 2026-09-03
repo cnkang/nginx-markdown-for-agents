@@ -1488,10 +1488,31 @@ fn fused_normalize(input: &str) -> String {
             in_code_block = !in_code_block;
         }
 
-        prev_blank = append_reference_body_line(&mut output, line, in_code_block, prev_blank);
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            if !prev_blank {
+                output.push('\n');
+            }
+            prev_blank = true;
+        } else {
+            if in_code_block {
+                output.push_str(trimmed);
+            } else {
+                output.push_str(&reference_normalize_line_whitespace(trimmed));
+            }
+            output.push('\n');
+            prev_blank = false;
+        }
     }
 
-    finalize_reference_normalization(output)
+    if !output.ends_with('\n') {
+        output.push('\n');
+    } else {
+        while output.ends_with("\n\n") {
+            output.pop();
+        }
+    }
+    output
 }
 
 proptest! {
