@@ -162,7 +162,7 @@ while IFS= read -r -d '' file; do
             if [[ "$has_again_branch" -eq 0 && ( -n "$fold_pattern" || "$immediate_return" -eq 1 ) ]]; then
                 echo "VIOLATION: $file:$line_num — call to $api() returns NGX_AGAIN but the call site has no explicit NGX_AGAIN branch (folded into error path or immediate return)" >> "$tmp_violations"
             fi
-        done
+        done < "$grep_matches"
         rm -f "$grep_matches"
     done
 done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f -print0)

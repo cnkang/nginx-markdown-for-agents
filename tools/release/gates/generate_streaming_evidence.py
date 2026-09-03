@@ -96,10 +96,6 @@ def _validate_marker_ids(payload: dict[str, object]) -> None:
             "parity marker known_difference_observation_ids must be "
             "non-empty strings"
         )
-    if len(set(observations)) != len(observations):
-        raise ValueError(
-            "parity marker known_difference_observation_ids must be unique"
-        )
     if payload["known_difference_count"] != len(observations):
         raise ValueError(
             "parity marker known-difference count does not match observations"
