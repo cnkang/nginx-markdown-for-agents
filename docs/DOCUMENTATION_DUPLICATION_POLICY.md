@@ -14,7 +14,7 @@ The repository follows a **single-source documentation policy**.
 | Class | Definition | Examples |
 |---|---|---|
 | Current normative docs | Active guidance for the current release line | `docs/guides/`, `docs/features/`, `docs/architecture/` |
-| Historical docs | Records of past releases or decisions; accurate as history, not current guidance | `docs/guides/MIGRATION-0.8.md`, `docs/guides/MIGRATION-0.9.md`, `docs/guides/MIGRATION-0.9.1.md`, `docs/project/*-0-5-*`, `docs/project/release-gates/` |
+| Historical docs | Records of past releases or decisions; accurate as history, not current guidance | `docs/guides/MIGRATION-0.8.md`, `docs/guides/MIGRATION-0.9.0.md`, `docs/guides/MIGRATION-0.9.1.md`, `docs/project/*-0-5-*`, `docs/project/release-gates/` |
 | Generated docs | Machine-produced from a canonical source; do not hand-edit | `docs/guides/PACKAGE_COMPATIBILITY.md` sections rendered by `tools/render_release_matrix_docs.py` |
 | Navigation/index docs | Entry points that list canonical documents | `docs/README.md`, `docs/guides/README.md`, `docs/features/README.md` |
 | Release records | Per-version release notes and checklists | `docs/releases/` |

@@ -39,7 +39,7 @@ FFI_HEADER_PATH = os.path.join(ROOT, "components", "rust-converter", "include", 
 COMMAND_REGISTRY_ERROR = "ngx_command_t registry is missing or unterminated"
 MIGRATION_PREFIX = "Migration:"
 FINAL_DIRECTIVE_COUNT = 25
-FINAL_METRIC_COUNT = 12
+FINAL_METRIC_COUNT = 11
 
 DIRECTIVE_RE = re.compile(r'ngx_string\("(markdown_[^"\\]+)"\)')
 REASON_CODE_RE = re.compile(r'^\s+(\w+)\s*=\s*(\d+)\s*,', re.MULTILINE)
@@ -167,7 +167,7 @@ def _validate_inventory_header(inventory):
     metrics = inventory.get("metrics")
     if isinstance(metrics, list) and len(metrics) != FINAL_METRIC_COUNT:
         errors.append(
-            "final 0.9.2 inventory must contain exactly 12 metric families")
+            "final 0.9.2 inventory must contain exactly 11 metric families")
     if inventory.get("reject_only_directives") != []:
         errors.append(
             "final 0.9.2 inventory must contain zero reject-only directives")
@@ -747,8 +747,12 @@ def _reason_metrics(text):
         pending_variants.extend(re.findall(r"ReasonCode::(\w+)", lhs))
         if not separator:
             continue
-        metric_match = re.match(r'\s*"([^\"]+)"', rhs)
+        metric_match = re.match(r'\s*"([^"]+)"', rhs)
         if metric_match is None:
+            # An arm contains the separator but no string literal on the
+            # right-hand side: pending variants must not carry over to the
+            # next arm, or they would be attributed to the wrong metric.
+            pending_variants = []
             continue
         for variant in pending_variants:
             metrics[variant] = metric_match.group(1)

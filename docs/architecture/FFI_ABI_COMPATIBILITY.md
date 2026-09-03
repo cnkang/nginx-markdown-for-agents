@@ -43,13 +43,13 @@ Rust owns:
 
 ```text
 MARKDOWN_ABI_VERSION = 2
-MARKDOWN_HEADER_HASH = 0x083d81372b053be2
-MARKDOWN_SYMBOL_SET_HASH = 0x0492468d15617cc7
+MARKDOWN_HEADER_HASH = 0x8d0eab17c2e46c45
+MARKDOWN_SYMBOL_SET_HASH = 0x4d34d6a1507cb9cc
 MARKDOWN_LAYOUT_FINGERPRINT = 0x5082868a7afe5890
 
 markdown_abi_version() -> 2
-markdown_abi_header_hash() -> 0x083d81372b053be2
-markdown_abi_symbol_set_hash() -> 0x0492468d15617cc7
+markdown_abi_header_hash() -> 0x8d0eab17c2e46c45
+markdown_abi_symbol_set_hash() -> 0x4d34d6a1507cb9cc
 markdown_abi_layout_fingerprint() -> 0x5082868a7afe5890
 ```
 

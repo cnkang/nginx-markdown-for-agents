@@ -1389,6 +1389,15 @@ def _collect_findings(
             f, e = scan_file(conf_file, scan_dir)
             findings.extend(f)
             errors.extend(e)
+
+    # Production example profiles are shipped documentation: they must obey
+    # the same explicit-streaming contract as the E2E fixtures.
+    production_dir = scan_dir / "examples" / "production"
+    if production_dir.is_dir():
+        for conf_file in sorted(production_dir.rglob("*.conf")):
+            f, e = scan_file(conf_file, scan_dir)
+            findings.extend(f)
+            errors.extend(e)
     return findings, errors
 
 

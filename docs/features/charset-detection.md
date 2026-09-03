@@ -49,7 +49,7 @@ The main charset detection module with the following functions:
 
 - `extract_charset_from_content_type(content_type: &str) -> Option<String>`
   - Parses Content-Type header for charset parameter
-  - Uses regex for robust parsing
+  - Uses a bounded byte-level scan (no regex)
   - Handles various formats (quoted, unquoted, with/without spaces)
 
 - `extract_charset_from_html(html: &[u8]) -> Option<String>`
@@ -173,7 +173,8 @@ decoding.
 
 - Meta tag scanning limits to the first 1024 bytes for performance
 - This is sufficient as meta charset tags should appear in the `<head>` section
-- Content-Type parameter scanning is a bounded byte-level walk (no regex)
+- Content-Type parameter scanning is a bounded byte-level walk (no regex).
+  Regex applies only to HTML meta charset scanning
 
 ## Integration Points
 

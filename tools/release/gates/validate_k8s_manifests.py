@@ -125,6 +125,7 @@ HELM_RENDER_REQUIRED_SNIPPETS = [
 HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS = [
     "load_module",
     "markdown_filter on;",
+    "markdown_limits",
     "markdown_metrics",
 ]
 HELM_MODULE_LOAD_PATH = "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
@@ -412,12 +413,21 @@ def _validate_helm_image_digest(
     result: ValidationResult,
     schema: dict[str, object],
 ) -> None:
-    image_properties = schema.get("properties", {}).get("image", {}).get(
-        "properties", {}
+    schema_properties = schema.get("properties")
+    image_schema = (
+        schema_properties.get("image")
+        if isinstance(schema_properties, dict)
+        else None
+    )
+    image_properties = (
+        image_schema.get("properties")
+        if isinstance(image_schema, dict)
+        else None
     )
     deployment = read_safe(DEPLOYMENT_TEMPLATE)
     digest_contract = (
-        "digest" in image_properties
+        isinstance(image_properties, dict)
+        and "digest" in image_properties
         and 'contains "@" $imageRepo' in deployment
         and 'image: "{{ $imageRepo }}@{{ $imageDigest }}"' in deployment
     )
@@ -430,6 +440,84 @@ def _validate_helm_image_digest(
         result.fail(
             "helm:public-surface:image-digest",
             "main image digest precedence contract is incomplete",
+        )
+
+
+def _indent_of(line: str) -> int:
+    """Return the leading whitespace width of a line."""
+    return len(line) - len(line.lstrip(" \t"))
+
+
+def _limits_entry(line: str) -> tuple[str, str] | None:
+    """Return (key, value) when a line is a limits block entry."""
+    match = re.match(r"^(\w+):\s*\"?([^\"#\s]+)\"?\s*(?:#.*)?$", line.strip())
+    if not match or not match.group(2).strip():
+        return None
+    return match.group(1), match.group(2).strip()
+
+
+def _chart_limit_defaults(values: str) -> dict[str, str]:
+    """Return chart values that restate a module frozen default (if any)."""
+    defaults: dict[str, str] = {}
+    in_limits = False
+    limits_indent = 0
+    for line in values.splitlines():
+        stripped = line.strip()
+        if stripped == "limits:":
+            in_limits = True
+            limits_indent = _indent_of(line)
+            continue
+        if in_limits:
+            if stripped.startswith("#"):
+                continue
+            if _indent_of(line) <= limits_indent and ":" in stripped:
+                # a sibling key at the same or shallower indent ends the
+                # limits block
+                in_limits = False
+                continue
+            entry = _limits_entry(line)
+            if entry is not None:
+                defaults[entry[0]] = entry[1]
+    return defaults
+
+
+def validate_helm_frozen_defaults(result: ValidationResult) -> None:
+    """Module frozen limits must not be silently overridden by chart values."""
+    values = read_safe(VALUES_YAML)
+    configmap = read_safe(CONFIGMAP_TEMPLATE)
+    if not values or not configmap:
+        result.fail(
+            "helm:frozen-defaults:files",
+            "Helm values and configmap files are required",
+        )
+        return
+    chart_defaults = _chart_limit_defaults(values)
+
+    for chart_key, _directive_key in HELM_CANONICAL_LIMIT_KEYS.items():
+        chart_value = chart_defaults.get(chart_key)
+        if chart_value is None:
+            result.pass_(
+                f"helm:frozen-defaults:{chart_key}",
+                f"{chart_key} has no chart-level default (module frozen default applies)",
+            )
+            continue
+        result.fail(
+            f"helm:frozen-defaults:{chart_key}",
+            f"{chart_key} restates a default ({chart_value!r}) that must live in "
+            "the module frozen contract; set it to \"\" to inherit module defaults",
+        )
+
+    if "{{- if or .Values.markdown.limits" in configmap:
+        result.pass_(
+            "helm:frozen-defaults:directive-guard",
+            "configmap template wraps the whole markdown_limits directive in "
+            "a conditional so an all-empty render omits it entirely",
+        )
+    else:
+        result.fail(
+            "helm:frozen-defaults:directive-guard",
+            "configmap template must wrap the whole markdown_limits directive "
+            "in a conditional so an all-empty render omits it entirely",
         )
 
 
@@ -803,17 +891,19 @@ def _validate_module_enabled_render(
     if (
         f"load_module {HELM_MODULE_LOAD_PATH};" in rendered.stdout
         and "markdown_filter on;" in rendered.stdout
-        and len(limits_lines) == 1
+        and len(limits_lines) == 0
     ):
         result.pass_(
             _CHECK_HELM_RENDER_MODULE_ENABLED,
-            "module-enabled Helm render includes load_module and one markdown_limits directive",
+            "module-enabled Helm render includes module directives and omits "
+            "markdown_limits so the frozen module defaults apply",
         )
     else:
         result.fail(
             _CHECK_HELM_RENDER_MODULE_ENABLED,
-            "module-enabled Helm render must include load_module, markdown directives, "
-            f"and exactly one markdown_limits directive (found {len(limits_lines)})",
+            "module-enabled Helm render must include load_module and markdown directives "
+            "and must omit markdown_limits unless limits are configured "
+            f"(found {len(limits_lines)})",
         )
 
 
@@ -995,6 +1085,7 @@ def main() -> int:
     result = ValidationResult()
     validate_chart_yaml(result)
     validate_k8s_manifests(result)
+    validate_helm_frozen_defaults(result)
     validate_helm_secure_defaults(result)
     validate_gate4_local_smoke(result)
     validate_helm_render(result)

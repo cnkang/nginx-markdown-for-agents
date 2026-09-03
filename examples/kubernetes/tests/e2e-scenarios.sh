@@ -683,7 +683,7 @@ scenario_config_update() {
     log_scenario "2. Config Update — Update ConfigMap and verify module picks up new config"
 
     # Create or update a ConfigMap with module configuration
-    # P1-2 fix: keys use .conf extension so projected files match nginx include *.conf
+    # ConfigMap keys use the .conf extension so projected files match the nginx include *.conf pattern
     log_info "Applying updated ConfigMap '$CONFIGMAP_NAME'..."
     kubectl create configmap "$CONFIGMAP_NAME" \
         -n "$NAMESPACE" \
@@ -721,7 +721,7 @@ scenario_config_update() {
 
     log_info "ConfigMap data verified: $cm_data"
 
-    # P1-2 fix: verify NGINX actually consumed the new config (not just ConfigMap existence)
+    # Verify NGINX actually consumed the new config (not just ConfigMap existence)
     local pod_name
     pod_name="$(kubectl get pods -n "$NAMESPACE" -l "app=$DEPLOYMENT_NAME" \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)" || pod_name=""
@@ -732,7 +732,7 @@ scenario_config_update() {
         fi
         log_info "nginx -T verification passed for updated config"
     else
-        log_warn "no pod found for nginx -T verification; skipping strict check"
+        log_info "no pod found for nginx -T verification; skipping strict check"
     fi
 
     # Run smoke test to verify functionality after config change

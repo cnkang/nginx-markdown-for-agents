@@ -28,12 +28,12 @@ source "${TMP_DIR}/config-search-function.sh"
 # The extracted helper normally runs after cache_trusted_executables in the
 # installer. Recreate its explicit executable dependencies in this isolated
 # fixture instead of weakening the helper's nounset or trust guarantees.
-FIND_BIN="$(command -v find)"
-GREP_BIN="$(command -v grep)"
-SH_BIN="$(command -v sh)"
+FIND_BIN="$(command -v find 2>/dev/null || true)"
+GREP_BIN="$(command -v grep 2>/dev/null || true)"
+SH_BIN="$(command -v sh 2>/dev/null || true)"
 for required_tool in "$FIND_BIN" "$GREP_BIN" "$SH_BIN"; do
   if [[ ! -x "$required_tool" ]]; then
-    echo "FAIL: required executable is unavailable: $required_tool" >&2
+    echo "FAIL: required executable is unavailable: ${required_tool:-<missing>}" >&2
     exit 1
   fi
 done

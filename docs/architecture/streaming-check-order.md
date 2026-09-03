@@ -102,7 +102,7 @@ the request passes through without ever reaching the streaming path selector.
   `ngx_http_markdown_is_streaming()` called from `check_eligibility()`.
 - **Code**: Hardcoded prefix match against `text/event-stream`.
 - **Ordering**: Executes at step 4, inside eligibility check.
-- **Additional**: Also checked in `select_processing_path()` Rule 6 as defense-in-depth.
+- **Additional**: Also checked in `select_processing_path()` Rule 5 as defense-in-depth.
 - **Verdict**: CONFIRMED -- runs before streaming (double-guarded).
 
 ### Hard exclusions -- application/x-ndjson, application/stream+json (Requirement 4) -- PASS
@@ -111,13 +111,13 @@ the request passes through without ever reaching the streaming path selector.
   (step 4) since only `text/html` (or user-configured types) passes.
 - **Defense-in-depth**: `ngx_http_markdown_stream_type_excluded()` provides an
   explicit hard-exclusion function covering all three types. The streaming
-  engine selector (Rule 7 in `select_processing_path`) also checks
+  engine selector (Rule 6 in `select_processing_path`) also checks
   `stream_types` exclusion list.
 - **Ordering**: The content_type allowlist rejects them at step 4. Even if
   a user configures `markdown_content_types application/x-ndjson`, the
   `ngx_http_markdown_is_streaming()` check (step 4) catches
   user-configured `stream_types`, and the streaming engine selector
-  (step 9, Rule 7) provides a final defense layer.
+  (step 9, Rule 6) provides a final defense layer.
 - **Verdict**: CONFIRMED -- implicitly excluded by content_type allowlist
   before streaming, explicitly excluded by `stream_type_excluded()` for
   defense-in-depth.

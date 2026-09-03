@@ -184,6 +184,8 @@ from tools.release.gates.validate_package_metadata import (
 path = Path(sys.argv[1])
 pinned = sys.argv[2]
 next_patch = sys.argv[3]
+passed = 0
+failed = 0
 content = path.read_text(encoding="utf-8")
 constraints = _parse_nginx_dep_constraints(_parse_nfpm_deb_depends(content))
 floor = constraints.get(">=")
@@ -232,13 +234,17 @@ for index, (candidate, expected, label) in enumerate(checks):
     else:
         actual = _dpkg_version_satisfies_interval(candidate, floor, ceil)
     if actual != expected:
-        raise SystemExit(f"FAIL: {label} (expected {expected}, got {actual})")
-    print(f"PASS: {label}")
+        failed += 1
+        print(f"FAIL: {label} (expected {expected}, got {actual})", file=sys.stderr)
+    else:
+        passed += 1
+        print(f"PASS: {label}")
+
+print(f"Results: {passed} passed, {failed} failed", file=sys.stderr)
+sys.exit(0 if failed == 0 else 1)
 PY
     then
-        echo "Results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed" >&2
         exit 1
     fi
-    echo "Results: fallback comparator checks passed" >&2
     exit 0
 fi

@@ -18,6 +18,11 @@ markdown_error_policy fail_closed;     # Return 502, never leak original content
 
 Allowed status codes: `429`, `503` (`502` is the `fail_closed` default. Use `fail_closed` instead of `status 502`).
 
+> This section is the single source of truth for `markdown_error_policy`
+> values and their semantics. Configuration reference tables
+> (CONFIGURATION.md, dynconf JSON docs) must mirror or link here rather
+> than redefine the value set.
+
 ## Error Classes
 
 | Class | Commit Stage | Configurable | Description |
@@ -95,7 +100,7 @@ decision structs, and export got removed before the v1 ABI freeze.
 
 ## Related Documents
 
-- **Config V2**: Directive syntax (see [MIGRATION-0.9.md](../guides/MIGRATION-0.9.md)).
+- **Config V2**: Directive syntax (see [MIGRATION-0.9.0.md](../guides/MIGRATION-0.9.0.md)).
 - **HeaderPlan**: Pre-commit/post-commit boundary (see [header mutation inventory](header-mutation-inventory.md)).
 - **Worker Inflight Guard**: Overload detection.
 - **Reason Code Registry**: See [Observability Schema v2](observability-schema-v2.md).

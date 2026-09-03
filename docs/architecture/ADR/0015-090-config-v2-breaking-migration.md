@@ -52,13 +52,13 @@ by the 0.9.0 migration contract.
 Every directive removed as part of the 0.9.0 migration contract keeps a parser
 entry whose **only** behavior is
 `NGX_CONF_ERROR` + a migration hint pointing at the replacement and the 0.9.0
-migration guide (`docs/guides/MIGRATION-0.9.md`). There are **no transition
+migration guide (`docs/guides/MIGRATION-0.9.0.md`). There are **no transition
 aliases** in 0.9.0. Canonical error shape:
 
 ```
 nginx: [emerg] "markdown_trust_forwarded_headers" directive has been removed in
 0.9.0; use "markdown_trusted_proxies <CIDR>..." instead
-(see docs/guides/MIGRATION-0.9.md)
+(see docs/guides/MIGRATION-0.9.0.md)
 ```
 
 Stub set: `markdown_on_wildcard`, `markdown_etag`,

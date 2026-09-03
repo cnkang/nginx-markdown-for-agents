@@ -29,6 +29,8 @@
 #include "ngx_http_markdown_streaming_impl.h"
 #endif
 
+ngx_http_markdown_inflight_t  ngx_http_markdown_g_inflight;
+
 void
 ngx_http_markdown_release_inflight_for_request(const ngx_http_request_t *r)
 {
@@ -39,9 +41,14 @@ ngx_http_markdown_release_inflight_for_request(const ngx_http_request_t *r)
     }
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
-    if (ctx != NULL) {
-        ngx_http_markdown_inflight_release(ctx);
+    if (ctx == NULL
+        || ngx_http_markdown_durable_bypass_kind(ctx)
+           != NGX_HTTP_MARKDOWN_DURABLE_BYPASS_NONE)
+    {
+        return;
     }
+
+    ngx_http_markdown_inflight_release(ctx);
 }
 
 /*

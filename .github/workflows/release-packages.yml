@@ -114,7 +114,7 @@ jobs:
       feature_manifest_digest: ${{ steps.resolve.outputs.feature_manifest_digest }}
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -342,7 +342,7 @@ jobs:
         shell: bash
 
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -640,7 +640,7 @@ jobs:
         include: ${{ fromJson(needs.prepare.outputs.musl_matrix) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -681,7 +681,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -917,7 +917,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -979,7 +979,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -1239,7 +1239,7 @@ jobs:
           # immutable runtime family instead of assuming Ubuntu provides the
           # EL9 ABI. Keep the host-side validators above on Ubuntu because
           # they intentionally inspect DEB/RPM layouts with native tooling.
-          docker run --rm \
+          docker run --rm -i \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --workdir /workspace \
             --env GITHUB_REF \
@@ -1306,6 +1306,11 @@ jobs:
           # Short-soak qualification against the module-enabled EL9 nginx
           # binary.
           python3 tools/release/gates/validate_soak_qualification.py --mode real --git-head
+          # Fail loudly if any candidate artifact did not materialize: the
+          # blocking gates above consume these files downstream.
+          test -f perf/baselines/module-baseline-092-raw.json
+          test -f perf/baselines/module-baseline-092.json
+          test -d perf/baselines/module-baseline-092-raw-probes
           CONTAINER_SCRIPT
           python3 tools/release/gates/generate_release_gate_manifests.py \
             --phase final \
@@ -1349,7 +1354,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -1542,7 +1547,7 @@ jobs:
         shell: bash
 
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -1650,7 +1655,7 @@ jobs:
         shell: bash
 
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 

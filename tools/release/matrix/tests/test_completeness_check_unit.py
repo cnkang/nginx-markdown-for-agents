@@ -22,7 +22,7 @@ from tools.release.matrix.completeness_check import (
 SAMPLE_ENTRY = {"nginx": "1.24.0", "os_type": "glibc", "arch": "x86_64", "support_tier": "full"}
 CURRENT_SCHEMA_ENTRY = {
     "nginx_version": "1.24.0",
-    "nginx_channel": "oldstable",
+    "nginx_channel": "legacy",
     "os": "linux",
     "libc": "musl",
     "arch": "arm64",

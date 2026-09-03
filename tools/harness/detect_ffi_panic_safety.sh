@@ -147,6 +147,10 @@ trap 'rm -f "$map_file" >/dev/null 2>&1' EXIT
 
 # Collect the list of Rust files first so we can pass them all to a
 # single awk invocation without re-splitting paths through the shell.
+if [[ ! -d "$SRC_DIR" || ! -r "$SRC_DIR" ]]; then
+    echo "ERROR: SRC_DIR='${SRC_DIR}' is missing or not readable" >&2
+    exit 1
+fi
 rs_files=()
 while IFS= read -r -d '' rs_file; do
     rs_files+=("$rs_file")

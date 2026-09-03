@@ -26,9 +26,13 @@ RUN apk add --no-cache \
     && chmod +x /tmp/install.sh \
     && SKIP_ROOT_CHECK=1 /tmp/install.sh \
     && rm -f /tmp/install.sh \
+    && grep -q '^user[[:space:]][[:space:]]*nginx;' /etc/nginx/nginx.conf \
     && sed -i '/^user[[:space:]][[:space:]]*nginx;/d' /etc/nginx/nginx.conf \
+    && grep -q 'pid[[:space:]][[:space:]]*/var/run/nginx.pid;' /etc/nginx/nginx.conf \
     && sed -i 's#pid[[:space:]][[:space:]]*/var/run/nginx.pid;#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf \
+    && grep -q 'listen[[:space:]][[:space:]]*80;' /etc/nginx/conf.d/default.conf \
     && sed -i 's#listen[[:space:]][[:space:]]*80;#listen 8080;#' /etc/nginx/conf.d/default.conf \
+    && grep -q 'listen[[:space:]][[:space:]]*\[::\]:80;' /etc/nginx/conf.d/default.conf \
     && sed -i 's#listen[[:space:]][[:space:]]*\[::\]:80;#listen [::]:8080;#' /etc/nginx/conf.d/default.conf \
     && printf '%s\n' \
         'client_body_temp_path /tmp/client_temp;' \

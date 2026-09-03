@@ -298,6 +298,7 @@ EOF
       # For auth_basic: omit credentials
       # For satisfy_any: omit credentials (deny all applies but satisfy any means auth can override)
       local unauth_status
+      local outside_status
       case "${policy}" in
         allow_deny)
           if [[ "${loopback_alias_available}" -eq 0 ]]; then

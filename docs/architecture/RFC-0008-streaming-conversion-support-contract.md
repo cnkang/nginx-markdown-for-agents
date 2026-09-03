@@ -278,7 +278,7 @@ Original-HTML passthrough is available **only while the replay buffer still
 covers every upstream byte read so far** (see §3.1). When replay is
 incomplete and headers are not yet committed, the module MUST NOT pass
 through: it must continue safe streaming conversion or apply
-`markdown_error_policy` (reject) before committing headers.
+`markdown_error_policy fail_closed` before committing headers.
 
 #### `markdown_error_policy fail_closed`
 
@@ -565,6 +565,6 @@ Before 0.8.0 ships, the following MUST hold:
 - `docs/architecture/ADR/0004-streaming-bounded-memory-conversion.md`
 - `docs/architecture/ADR/0007-streaming-default.md`
 - `docs/architecture/LARGE_RESPONSE_DESIGN.md`
-- `docs/guides/streaming-rollout-cookbook.md`
+- `docs/guides/ROLLOUT_COOKBOOK.md` (Streaming-Focused Rollout section)
 - `docs/features/` (per-feature streaming notes)
 - `AGENTS.md` Rules 1, 2, 38 (streaming backpressure and replay buffer)

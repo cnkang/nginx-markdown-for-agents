@@ -63,10 +63,19 @@ while IFS= read -r -d '' file; do
     in_run_block=0
     inline_run_command=0
     line_num=0
+    run_indent=0
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         line_num=$((line_num + 1))
         inline_run_command=0
+
+        # Compute the line's leading whitespace (tabs count as one column
+        # for boundary purposes; YAML block content is always indented
+        # deeper than its key, so the comparison stays conservative).
+        indent_len=0
+        while [[ "${line:indent_len:1}" == " " || "${line:indent_len:1}" == $'\t' ]]; do
+            indent_len=$((indent_len + 1))
+        done
 
         # Detect start/end of run: blocks (line starts with "run:" or contains "run: |")
         # YAML structure: we look for lines with "run:" that start a multiline block
@@ -78,6 +87,7 @@ while IFS= read -r -d '' file; do
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]*$ ]] || \
            [[ "$line" =~ $block_scalar_re ]]; then
             in_run_block=1
+            run_indent=$indent_len
             continue
         fi
 
@@ -92,21 +102,47 @@ while IFS= read -r -d '' file; do
             inline_run_command=1
         fi
 
-        # Detect env: blocks (which are safe for input interpolation)
+        # Detect env: blocks (which are safe for input interpolation).
+        # A step-level env: key (with or without the list dash) ends any
+        # preceding run block; a job-level env: key is a sibling of the
+        # step list and also ends it.
         if [[ "$line" =~ ^[[:space:]]*env:[[:space:]]*$ ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*env:[[:space:]]*$ ]]; then
             in_run_block=0
             continue
         fi
 
-        # Detect new step or job boundary (dedent to job/step level)
+        # Detect new step or job boundary (dedent to job/step level).
+        # Subsequent step-level keys (if:, with:, shell:, working-directory:,
+        # timeout-minutes:, continue-on-error:, env:) end any preceding run
+        # block even when the step has no name/uses/id header — otherwise a
+        # prior step's run state is carried into wiring keys like with: and
+        # safe ${{ inputs.* }} expressions there are misreported.
         if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*name: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*uses: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*id: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*if: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*with: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*shell: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*working-directory: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*timeout-minutes: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*continue-on-error: ]] || \
            [[ "$line" =~ ^[[:space:]]*steps: ]] || \
            [[ "$line" =~ ^[[:space:]]*jobs: ]]; then
             in_run_block=0
             continue
+        fi
+
+        # A sibling key at the same indentation as the run key (or
+        # shallower) ends the run block even when it has no list dash —
+        # e.g. an unprefixed `if:` or `env:` continuation key.  Without
+        # this boundary the scanner carries run state into wiring keys
+        # that are not shell source.  Blank lines never end the block:
+        # a blank line inside a block scalar is content, and a blank
+        # line between steps must not clear run state before the next
+        # step's keys are seen.
+        if [[ $in_run_block -eq 1 && $indent_len -le $run_indent && -n "$line" ]]; then
+            in_run_block=0
         fi
 
         # A reusable-workflow job uses a plain `uses:` key (without the
@@ -122,7 +158,7 @@ while IFS= read -r -d '' file; do
         # Check for input interpolation inside run blocks
         if [[ $in_run_block -eq 1 || $inline_run_command -eq 1 ]]; then
             # Flag ${{ inputs.* }} inside run blocks
-            if [[ "$line" =~ \$\{\{[[:space:]]*inputs\.[a-zA-Z_]+[[:space:]]*\}\} ]]; then
+            if [[ "$line" =~ \$\{\{[[:space:]]*inputs\.[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*\}\} ]]; then
                 echo "ERROR: ${rel_path}:${line_num}: inputs.* directly interpolated in run block" >&2
                 echo "  ${line}" >&2
                 echo "  Fix: route through env: INPUT_VAR: \${{ inputs.var }} and use \${INPUT_VAR} in shell" >&2
@@ -131,7 +167,7 @@ while IFS= read -r -d '' file; do
 
             # Flag ${{ github.event.* }} inside run blocks (except release.created_at etc)
             # github.event.inputs.* is user-controlled
-            if [[ "$line" =~ \$\{\{[[:space:]]*github\.event\.inputs\.[a-zA-Z_]+[[:space:]]*\}\} ]]; then
+            if [[ "$line" =~ \$\{\{[[:space:]]*github\.event\.inputs\.[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*\}\} ]]; then
                 echo "ERROR: ${rel_path}:${line_num}: github.event.inputs.* directly interpolated in run block" >&2
                 echo "  ${line}" >&2
                 echo "  Fix: route through env: INPUT_VAR: \${{ github.event.inputs.var }} and use \${INPUT_VAR}" >&2

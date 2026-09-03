@@ -56,6 +56,11 @@ defaults. Stack-allocated FFI structs must call the matching initializer.
 | `MarkdownOptions` | `markdown_options_init` applies semantic defaults as well as NULL/0 fields | Do not replace it with a blind memset |
 | `MarkdownDecompResult` | `markdown_decomp_result_init` sets pointer/length fields NULL/0 | Successfully filled results must be released with `markdown_decompress_free` after use |
 
+Any future field addition, removal, reorder, or type change to these structs
+must increment `MARKDOWN_ABI_VERSION` and update the fingerprint hashes per
+FFI_ABI_COMPATIBILITY.md. Tail-append-only is the *preferred* evolution shape.
+It is not an exception to the ABI increment rule.
+
 ## Safety Invariant
 
 After FFI call returns, the C code must check `error_code` before
@@ -68,5 +73,5 @@ pointer fields may be NULL.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.9.2 | 2026-08-08 | Kang | Updated version references to v0.9.2 |
-| 0.7.0 | 2026-05-17 | Kang | Initial zero/default initialization strategy document |
 | 0.7.0-impl | 2026-05-18 | codex | Add FFIHeaderPlan zero-init and free lifecycle rule |
+| 0.7.0 | 2026-05-17 | Kang | Initial zero/default initialization strategy document |

@@ -306,12 +306,17 @@ For authenticated requests, the module adjusts cache control:
 ```nginx
 location /private/ {
     markdown_filter on;
-    markdown_auth_policy deny;
+    markdown_auth_policy allow;
     markdown_auth_cookies "session_id auth_token";
 
     proxy_pass http://backend;
 }
 ```
+
+> **Note**: `markdown_auth_policy deny` bypasses conversion for authenticated
+> requests (the client receives the original HTML). The example above uses
+> `allow`, which keeps converting and lets the module rewrite the cache-control
+> headers below.
 
 When the module detects authentication:
 - `Cache-Control: public` → `Cache-Control: private`
@@ -395,9 +400,10 @@ With `full` mode:
 - Benefit: Saves bandwidth if ETag matches
 
 With `ims_only` mode:
-- Conditional requests skip module processing
-- No conversion or ETag generation
-- Cost: Minimal
+- Markdown-negotiated requests still convert and return a fresh Markdown body
+- No Markdown ETag generation or validation (source If-Modified-Since applies
+  to pass-through responses only)
+- Cost: Conversion cost only, with no ETag bookkeeping
 - Limitation: No ETag-based validation for Markdown variants
 
 ### Caching Benefits

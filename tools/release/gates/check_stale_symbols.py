@@ -146,7 +146,12 @@ def _scan_tracked_file(repo: Path, path: str) -> tuple[list[str], str]:
 
     try:
         content = f_path.read_text(encoding='utf-8')
-    except (OSError, UnicodeError) as e:
+    except UnicodeDecodeError:
+        # A non-text file (binary artifact, raw probe capture) cannot
+        # contain stale symbols; treat it as a skipped scan rather than
+        # a read error.
+        return [], ""
+    except OSError as e:
         return [], f"Error reading {path}: {e}"
 
     lines = content.splitlines()

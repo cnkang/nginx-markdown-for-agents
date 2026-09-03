@@ -19,7 +19,6 @@ observability comes through:
 | `nginx_markdown_conversion_attempts_total` | `engine` | At-most-once conversion attempts. |
 | `nginx_markdown_conversion_deliveries_total` | `engine` | Successful downstream delivery only. |
 | `nginx_markdown_output_bytes_total` | none | Converted bytes accepted downstream. |
-| `nginx_markdown_inflight_requests` | none | Requests still in the conversion pipeline. |
 | `nginx_markdown_requests_total` | `outcome`, `stage`, `reason` | Exactly one terminal outcome per decision-chain request. |
 
 The renderer emits a fixed transition allowlist: `commit`, `fallback`,
@@ -31,10 +30,12 @@ The internal C path-selection enum is not used for this family.
 The table above is the production label inventory. Lifecycle events use the
 `transition`/`reason` labels. The terminal request family uses the
 `outcome`/`stage`/`reason` labels. The `engine` label is the sole intentional
-label on the conversion-attempt and conversion-delivery families. Output bytes and
-inflight requests are intentionally unlabelled to keep series cardinality
-bounded. Rust helper-event names and enums are implementation details and do
-not expand this Prometheus label contract.
+label on the conversion-attempt and conversion-delivery families. Output
+bytes are intentionally unlabelled to keep series cardinality bounded. The
+per-worker in-flight counter is diagnostics-only: the `markdown_diagnostics`
+endpoint exposes it, and it is not a Prometheus family in the
+metrics catalog. Rust helper-event names and enums are implementation
+details and do not expand this Prometheus label contract.
 
 The `nginx_markdown_streaming_events_total` counter uses `transition` and
 `reason` labels. The six rows below are the label-value combinations emitted by
@@ -66,7 +67,8 @@ The counters follow these conservation rules:
   downstream filter accepts the converted response.
 - failed-open, failed-closed, terminal abort, and client-abort paths do not
   count as successful deliveries.
-- `inflight_requests` returns to zero after cleanup and quiescence.
+- the in-flight counter (diagnostics-only, not a Prometheus family) returns
+  to zero after cleanup and quiescence.
 - `NGX_AGAIN` records pending work, not delivery.
 
 ## Diagnostics

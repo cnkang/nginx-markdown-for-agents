@@ -231,7 +231,7 @@ if [[ -d "$PY_SRC" ]]; then
     if [[ $complexipy_rc -eq 0 ]]; then
         echo "  Python cognitive complexity: PASS (all functions <= $PY_COGNITIVE_THRESHOLD)"
     else
-        py_cog_count=$(grep -c "FAILED" "$PY_COMPLEXIPY_OUT" 2>/dev/null || echo "?")
+        py_cog_count=$(grep -c "FAILED" "$PY_COMPLEXIPY_OUT" 2>/dev/null || true)
         echo "  Python cognitive complexity violations: ~$py_cog_count (threshold: $PY_COGNITIVE_THRESHOLD)"
     fi
     echo "  Output: $PY_COMPLEXIPY_OUT"
@@ -251,7 +251,7 @@ set -e
 if [[ $shellcheck_rc -eq 0 ]]; then
     echo "  Shell: PASS (no shellcheck errors)"
 else
-    shellcheck_issues=$(grep -c ":" "$SHELLCHECK_OUT" 2>/dev/null || echo "?")
+    shellcheck_issues=$(grep -c ":" "$SHELLCHECK_OUT" 2>/dev/null || true)
     echo "  Shell: $shellcheck_issues shellcheck issue(s) found"
     echo "  Output: $SHELLCHECK_OUT"
 fi

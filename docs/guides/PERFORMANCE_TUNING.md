@@ -66,8 +66,7 @@ Monitor these frozen families while tuning:
 - `nginx_markdown_conversion_deliveries_total`,
 - `nginx_markdown_conversion_duration_seconds`,
 - `nginx_markdown_streaming_events_total`,
-- `nginx_markdown_decompression_events_total`,
-- `nginx_markdown_inflight_requests`.
+- `nginx_markdown_decompression_events_total`.
 
 ## Memory and backpressure
 
@@ -77,9 +76,9 @@ It is not a delivery success. Delivery counters advance only after the
 downstream filter accepts the terminal converted buffer. An internal handoff
 is not delivery.
 
-If the inflight gauge does not return to zero after traffic drains, stop the
-rollout and collect diagnostics before changing limits. Never solve an
-allocation failure by removing a bound.
+If the diagnostics in-flight counter does not return to zero after traffic
+drains, stop the rollout and collect diagnostics before changing limits. Never
+solve an allocation failure by removing a bound.
 
 ## Historical note
 

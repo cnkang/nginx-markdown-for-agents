@@ -60,11 +60,9 @@ findings=0
 # Pattern: return NGX_HTTP_BAD_GATEWAY or return NGX_HTTP_INTERNAL_SERVER_ERROR
 # in files that contain reject/error handling code
 
-error_files=$(grep -rlE \
-    'reject|on_error|fail_open|precommit_error|postcommit_error|stream_on_error' \
-    "$SRC_DIR" 2>/dev/null | grep -E '\.(c|h)$' || true)
-
-for file in $error_files; do
+# Preserve paths containing whitespace: iterate NUL-delimited find output.
+while IFS= read -r -d '' file || [[ -n "$file" ]]; do
+    [[ -n "$file" ]] || continue
     rel_path="${file#${REPO_ROOT}/}"
 
     # Use grep to find return statements with hardcoded status codes
@@ -75,9 +73,9 @@ for file in $error_files; do
         # Strip leading whitespace for display
         trimmed="${line_text#"${line_text%%[![:space:]]*}"}"
 
-        # Skip comment lines (starting with * or //)
+        # Skip comment lines (starting with /* or * or //)
         case "$trimmed" in
-            \**|//*) continue ;;
+            /*|\**|//*) continue ;;
             *) ;;
         esac
 
@@ -95,7 +93,9 @@ for file in $error_files; do
         fi
 
     done < <(grep -nE 'return.*NGX_HTTP_(BAD_GATEWAY|INTERNAL_SERVER_ERROR)' "$file" || true)
-done
+done < <(find "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \) -print0 2>/dev/null \
+    | xargs -0 grep -lE 'reject|on_error|fail_open|precommit_error|postcommit_error|stream_on_error' 2>/dev/null \
+    | tr '\n' '\0' || true)
 
 if [[ $findings -gt 0 ]]; then
     if [[ $STRICT -eq 1 ]]; then

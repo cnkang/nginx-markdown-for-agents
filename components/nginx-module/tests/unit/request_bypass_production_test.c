@@ -491,6 +491,8 @@ static ngx_uint_t g_if_none_match_calls;
 static ngx_uint_t g_send_304_calls;
 static ngx_uint_t g_resume_send_header_calls;
 static struct MarkdownResult g_conditional_result;
+static ngx_int_t g_adopt_rc;
+static ngx_http_markdown_conditional_ownership_t g_adoption_record;
 
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
@@ -685,10 +687,17 @@ ngx_http_markdown_restore_conditional_request(
     g_restore_calls++;
 }
 
-void
-ngx_http_markdown_adopt_orphan_conditional_headers(ngx_http_request_t *r)
+ngx_int_t
+ngx_http_markdown_adopt_orphan_conditional_headers(
+    ngx_http_request_t *r, size_t scan_limit,
+    ngx_http_markdown_conditional_ownership_t *ownership)
 {
     UNUSED(r);
+    UNUSED(scan_limit);
+    if (ownership != NULL) {
+        *ownership = g_adoption_record;
+    }
+    return g_adopt_rc;
 }
 
 void
@@ -1065,8 +1074,46 @@ reset_test_state(void)
     g_if_none_match_calls = 0;
     g_send_304_calls = 0;
     g_resume_send_header_calls = 0;
+    g_adopt_rc = NGX_OK;
+    memset(&g_adoption_record, 0, sizeof(g_adoption_record));
     g_decision_category_calls = 0;
     memset(&g_conditional_result, 0, sizeof(g_conditional_result));
+}
+
+static void
+test_preaccess_records_orphan_adoption(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_ctx_t *ctx;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    g_capture_rc = NGX_DECLINED;
+    g_adoption_record.adopter =
+        NGX_HTTP_MARKDOWN_CONDITIONAL_ADOPTER_PREACCESS;
+    g_adoption_record.phase = NGX_HTTP_MARKDOWN_CONDITIONAL_PHASE_PREACCESS;
+    g_adoption_record.entry_count = 2;
+
+    rc = ngx_http_markdown_preaccess_handler(&request);
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "preaccess should continue after adopting validators");
+    ctx = (ngx_http_markdown_ctx_t *)
+        request.ctx[ngx_http_markdown_filter_module.ctx_index];
+    TEST_ASSERT(ctx != NULL
+                && ctx->conditional.ownership.adopter
+                   == NGX_HTTP_MARKDOWN_CONDITIONAL_ADOPTER_PREACCESS
+                && ctx->conditional.ownership.phase
+                   == NGX_HTTP_MARKDOWN_CONDITIONAL_PHASE_PREACCESS
+                && ctx->conditional.ownership.entry_count == 2,
+                "preaccess must retain complete orphan ownership metadata");
+    TEST_PASS("preaccess records orphan adoption metadata");
 }
 
 static void
@@ -1772,6 +1819,7 @@ main(void)
     printf("========================================\n");
 
     g_conf = NULL;
+    test_preaccess_records_orphan_adoption();
     test_preaccess_handler_installs_durable_bypass();
     test_header_filter_bypass_forwards_once();
     test_preaccess_bypass_terminal_header_outcomes();

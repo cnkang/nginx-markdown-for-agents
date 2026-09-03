@@ -15,7 +15,7 @@ All 0.4.0 sub-specs must follow these conventions for any new operator-facing su
 |--------------------------|---------------------------|---------------------------|------------------------------------------------------------------------|
 | NGINX directives         | `markdown_`               | lowercase + underscores   | `^markdown_[a-z][a-z0-9_]*$`                                          |
 | Prometheus metrics       | `nginx_markdown_`         | snake_case                | `^nginx_markdown_([a-z][a-z0-9_]*_seconds_(bucket\|sum\|count)\|(?!.*_(bucket\|sum\|count)$)[a-z][a-z0-9_]*(_total\|_bytes\|_seconds\|_info)?)$`  |
-| Decision reason codes    | —                         | lowercase snake_case      | `^[a-z][a-z0-9_]*$`                                                   |
+| Decision reason codes    | —                         | lowercase snake_case      | `^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`                         |
 | Benchmark report fields  | —                         | lowercase kebab-case JSON | `^[a-z][a-z0-9-]*$`                                                   |
 | C macro constants        | `NGX_HTTP_MARKDOWN_`      | uppercase + underscores   | `^NGX_HTTP_MARKDOWN_[A-Z][A-Z0-9_]*$`                                 |
 
@@ -67,7 +67,7 @@ New directives introduced in 0.4.0 must follow the same `markdown_` prefix and l
 
 ### Defined metrics
 
-The authoritative metric families are the twelve-family v1 freeze defined in
+The authoritative metric families are the eleven-family v1 freeze defined in
 `schemas/metrics-v1.registry.json` (0.9.2). Legacy families such as
 `nginx_markdown_conversions_total`, `nginx_markdown_failures_total`, and
 `nginx_markdown_failopen_total` no longer exist. The v1 renderer partitions
@@ -82,7 +82,6 @@ conversion outcomes into `nginx_markdown_requests_total{outcome=...}` and
 | `nginx_markdown_conversion_duration_seconds`      | histogram | `engine`        |
 | `nginx_markdown_input_bytes_total`                | counter   | —               |
 | `nginx_markdown_output_bytes_total`               | counter   | —               |
-| `nginx_markdown_inflight_requests`                | gauge     | —               |
 | `nginx_markdown_streaming_peak_memory_bytes`      | gauge     | —               |
 | `nginx_markdown_streaming_events_total`            | counter   | `reason`,`transition` |
 | `nginx_markdown_decompression_events_total`       | counter   | `encoding`,`outcome`,`reason` |
@@ -123,7 +122,7 @@ internal transition names, not a second operator-visible reason taxonomy:
   `ngx_http_markdown_get_reason_code_str()` (resolved from the Rust
   `ReasonCode` registry). Examples: `not_eligible`, `skipped_accept`,
   `skipped_conditional`, `disabled`, `converted`, `failed_open`, `failed_closed`,
-  `bypass_no_transform`.
+  `aborted`, `bypass_no_transform`.
 - **Streaming engine internal transition names** — lowercase snake_case in the
   structured `event=` field. Examples: `engine_streaming`,
   `streaming_convert`, `streaming_fallback_prebuffer`,
@@ -155,7 +154,7 @@ separate transition metric.
 | Failed   | `failed_closed`         | Conversion failed, error returned (`fail_closed`)    |
 | Failed   | `conversion_error`      | HTML parse or conversion error                       |
 | Failed   | `memory_budget_exceeded`| Memory limit reached                                 |
-| Failed   | `timeout`               | Parser exceeded `markdown_parse_timeout`             |
+| Failed   | `timeout`               | Parser exceeded `markdown_limits parser_timeout=`             |
 | Failed   | `ffi_panic`             | Internal/system error (Rust↔C panic)                 |
 
 These codes no longer use the legacy `ngx_http_markdown_eligibility_t` enum or

@@ -105,15 +105,46 @@ function_contains_line() {
         NR < start { next }
         {
             line = $0
-            # Ignore braces inside line comments, block comments,
-            # string literals, and character literals so a brace in
-            # prose or a quoted value cannot close the function early.
-            # Each matched token is replaced in place with same-length
-            # spaces so offsets stay aligned across iterations.
-            while (match(line, /\/\/.*|\/\*.*\*\/|"(\\\\.|[^"\\\\])*"|'"'"'.'"'"'/)) {
+            # Carry block-comment state across lines: while in_block, only
+            # a */ terminator ends the comment and braces inside the
+            # comment are blanked before opens/closes are counted.
+            if (in_block) {
+                stop = index(line, "*/")
+                if (stop) {
+                    token = substr(line, 1, stop + 1)
+                    gsub(/./, " ", token)
+                    line = token substr(line, stop + 2)
+                    in_block = 0
+                } else {
+                    line = ""
+                }
+            }
+            # Blank closed block comments, line comments, string literals
+            # and single-quoted character literals in place with
+            # same-length spaces so offsets stay aligned.  The quote
+            # character is written with its octal escape because a literal
+            # quote would close the awk program string.
+            while (match(line, /\/\/.*|\/\*.*\*\//)) {
                 token = substr(line, RSTART, RLENGTH)
                 gsub(/./, " ", token)
                 line = substr(line, 1, RSTART - 1) token substr(line, RSTART + RLENGTH)
+            }
+            while (match(line, /"(\\.|[^"\\])*"/)) {
+                token = substr(line, RSTART, RLENGTH)
+                gsub(/./, " ", token)
+                line = substr(line, 1, RSTART - 1) token substr(line, RSTART + RLENGTH)
+            }
+            while (match(line, /\047[^\047]\047/)) {
+                token = substr(line, RSTART, RLENGTH)
+                gsub(/./, " ", token)
+                line = substr(line, 1, RSTART - 1) token substr(line, RSTART + RLENGTH)
+            }
+            # An unterminated block comment opening starts cross-line state.
+            if (match(line, /\/\*/)) {
+                token = substr(line, RSTART)
+                gsub(/./, " ", token)
+                line = substr(line, 1, RSTART - 1) token
+                in_block = 1
             }
             opens += gsub(/\{/, "{", line)
             closes += gsub(/\}/, "}", line)
@@ -307,7 +338,7 @@ while IFS= read -r match; do
     echo "  ERROR   ${file}:${line} — request-path reads live conf->: ${content}" >&2
     errors=$((errors + 1))
     hits=$((hits + 1))
-done < <(grep -rnE "conf->(${MUTABLE_FIELDS})[^_a-zA-Z]" "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+done < <(grep -rnE "conf->(${MUTABLE_FIELDS})([^_a-zA-Z0-9]|$)" "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
 if [[ "$hits" -eq 0 ]]; then
     echo "  (none found)" >&2

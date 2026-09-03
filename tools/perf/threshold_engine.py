@@ -15,6 +15,7 @@ Environment variables:
 
 import argparse
 import json
+import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -151,11 +152,11 @@ def judge_metric(deviation_pct, direction, warning_pct, blocking_pct):
 def build_skipped_verdict(reason, platform):
     """
     Create and emit a verdict report indicating that performance checks were skipped.
-    
+
     Parameters:
         reason (str): Explanation for why the checks were skipped.
         platform (str): Platform name included in the report.
-    
+
     Returns:
         dict: The emitted skipped-verdict report.
     """
@@ -180,18 +181,18 @@ def build_skipped_verdict(reason, platform):
 def _metric_comparison(cur_tier, base_tier, metric, direction_map, thresholds_cfg, platform, tier_name):
     """
     Compare a metric between current and baseline tier measurements.
-    
+
     Parameters:
-    	cur_tier (dict): Current tier measurement values.
-    	base_tier (dict): Baseline tier measurement values.
-    	metric (str): Metric name to evaluate.
-    	direction_map (dict): Mapping of metric names to comparison directions.
-    	thresholds_cfg (dict): Threshold configuration for the metric.
-    	platform (str): Platform used for threshold lookup.
-    	tier_name (str): Tier used for threshold lookup.
-    
+        cur_tier (dict): Current tier measurement values.
+        base_tier (dict): Baseline tier measurement values.
+        metric (str): Metric name to evaluate.
+        direction_map (dict): Mapping of metric names to comparison directions.
+        thresholds_cfg (dict): Threshold configuration for the metric.
+        platform (str): Platform used for threshold lookup.
+        tier_name (str): Tier used for threshold lookup.
+
     Returns:
-    	dict or None: A metric comparison payload with baseline and current values, percentage deviation, and verdict; `None` for informational or missing metrics.
+        dict or None: A metric comparison payload with baseline and current values, percentage deviation, and verdict; `None` for informational or missing metrics.
     """
     direction = direction_map.get(metric, "lower_is_better")
     if direction == "informational":
@@ -276,10 +277,10 @@ def build_verdict_report(
 ):
     """
     Build a verdict report comparing current measurements with a baseline.
-    
+
     The report is emitted as JSON to standard output, and a human-readable
     summary is written to standard error.
-    
+
     Returns:
         tuple: The report dictionary and a boolean indicating whether any metric
             exceeded a blocking threshold.
@@ -360,13 +361,13 @@ def _print_text_summary(comparison_tiers, overall):
     Print a concise, human-readable performance comparison summary to standard error.
 
     Parameters:
-    	comparison_tiers (dict): Mapping of tier name to a mapping of metric name to metric entry.
-    		Each metric entry is a dict containing at least:
-    			- 'baseline' (number): baseline metric value
-    			- 'current' (number): current metric value
-    			- 'deviation_pct' (float): percentage deviation ((current - baseline) / baseline * 100)
-    			- 'verdict' (str): one of 'pass', 'warn', or 'fail'
-    	overall (str): Overall verdict string (e.g., 'pass', 'warn', 'fail') to display at the end.
+        comparison_tiers (dict): Mapping of tier name to a mapping of metric name to metric entry.
+            Each metric entry is a dict containing at least:
+                - 'baseline' (number): baseline metric value
+                - 'current' (number): current metric value
+                - 'deviation_pct' (float): percentage deviation ((current - baseline) / baseline * 100)
+                - 'verdict' (str): one of 'pass', 'warn', or 'fail'
+        overall (str): Overall verdict string (e.g., 'pass', 'warn', 'fail') to display at the end.
     """
     _stderr("")
     _stderr("=== Performance Verdict Summary ===")
@@ -574,7 +575,9 @@ def get_module_level_thresholds(thresholds_cfg):
             if isinstance(v, (int, float)) and not isinstance(v, bool)
         }
         if numeric:
-            return numeric
+            merged = dict(DEFAULT_MODULE_LEVEL_THRESHOLDS)
+            merged.update(numeric)
+            return merged
     return dict(DEFAULT_MODULE_LEVEL_THRESHOLDS)
 
 
@@ -664,6 +667,34 @@ def _evaluate_single_module_metric(metric_name, threshold_value, direction,
             "reason": f"critical metric '{metric_name}' not present in current measurements",
         }
 
+    # Non-numeric metric values (e.g. a malformed string in a JSON report)
+    # must be rejected before any comparison or deviation math, which
+    # would otherwise raise TypeError and abort the whole gate.  Booleans
+    # are int subclasses in Python, so JSON true/false must be rejected
+    # explicitly before the int/float check.
+    if isinstance(cur_val, bool):
+        return {
+            "metric": metric_name,
+            "status": "missing_evidence",
+            "reason": f"critical metric '{metric_name}' not numeric: {cur_val!r}",
+        }
+    if not isinstance(cur_val, (int, float)):
+        return {
+            "metric": metric_name,
+            "status": "missing_evidence",
+            "reason": f"critical metric '{metric_name}' not numeric: {cur_val!r}",
+        }
+    # NaN and infinities are float instances but are not valid performance
+    # evidence: NaN comparisons are always false (which would misreport a
+    # breach) and infinities poison deviation math.  Reject them before any
+    # threshold comparison.
+    if isinstance(cur_val, float) and not math.isfinite(cur_val):
+        return {
+            "metric": metric_name,
+            "status": "missing_evidence",
+            "reason": f"critical metric '{metric_name}' not finite: {cur_val!r}",
+        }
+
     if direction == "absolute_cap":
         passed = cur_val <= threshold_value
         return {
@@ -679,7 +710,7 @@ def _evaluate_single_module_metric(metric_name, threshold_value, direction,
     if not has_baseline:
         return {
             "metric": metric_name,
-            "status": "skipped",
+            "status": "missing_evidence",
             "reason": "cannot evaluate percentage threshold: missing baseline",
             "threshold": threshold_value,
             "actual": None,

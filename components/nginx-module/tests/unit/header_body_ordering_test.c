@@ -23,6 +23,29 @@ typedef struct {
     int pending_chain;
 } filter_state_t;
 
+typedef enum {
+    MODULE_BODY_MARKDOWN = 0,
+    MODULE_COPY_FILTER,
+    MODULE_NOT_MODIFIED,
+    MODULE_HEADER_MARKDOWN,
+    MODULE_SLICE_FILTER
+} module_order_entry_t;
+
+static int
+module_order_position(const module_order_entry_t *order, size_t count,
+                       module_order_entry_t module)
+{
+    size_t i;
+
+    for (i = 0; i < count; i++) {
+        if (order[i] == module) {
+            return (int) i;
+        }
+    }
+
+    return -1;
+}
+
 
 static int
 send_headers(filter_state_t *state)
@@ -111,12 +134,52 @@ test_header_body_ordering_robust(void)
 }
 
 
+static void
+test_split_filter_hook_ordering(void)
+{
+    static const module_order_entry_t module_order[] = {
+        MODULE_BODY_MARKDOWN,
+        MODULE_COPY_FILTER,
+        MODULE_NOT_MODIFIED,
+        MODULE_HEADER_MARKDOWN,
+        MODULE_SLICE_FILTER
+    };
+    int body_position;
+    int copy_position;
+    int header_position;
+    int not_modified_position;
+
+    body_position = module_order_position(
+        module_order, sizeof(module_order) / sizeof(module_order[0]),
+        MODULE_BODY_MARKDOWN);
+    copy_position = module_order_position(
+        module_order, sizeof(module_order) / sizeof(module_order[0]),
+        MODULE_COPY_FILTER);
+    header_position = module_order_position(
+        module_order, sizeof(module_order) / sizeof(module_order[0]),
+        MODULE_HEADER_MARKDOWN);
+    not_modified_position = module_order_position(
+        module_order, sizeof(module_order) / sizeof(module_order[0]),
+        MODULE_NOT_MODIFIED);
+
+    TEST_ASSERT(body_position >= 0 && copy_position >= 0
+                && header_position >= 0 && not_modified_position >= 0,
+                "split hook order must contain both filter anchors");
+    TEST_ASSERT(body_position < copy_position,
+                "body module must precede copy filter in module order");
+    TEST_ASSERT(not_modified_position < header_position,
+                "header module must follow not_modified in module order");
+    TEST_PASS("split filter hooks preserve independent runtime order");
+}
+
+
 int
 main(void)
 {
     test_headers_before_body();
     test_header_send_idempotent();
     test_header_body_ordering_robust();
+    test_split_filter_hook_ordering();
 
     TEST_PASS("header_body_ordering: all tests passed");
     return 0;

@@ -52,7 +52,7 @@ set -euo pipefail
 # The signing key fingerprint is defined by the GPG key management contract;
 # import it through an independently authenticated channel before verifying.
 # See docs/guides/GPG_KEY_MANAGEMENT.md for the authoritative fingerprint.
-TRUSTED_FINGERPRINT="<project-signing-key-fingerprint-from-GPG_KEY_MANAGEMENT.md>"
+TRUSTED_FINGERPRINT="15C792438EAA762B421E60D21E8D41E7D19A8A75"  # from docs/guides/GPG_KEY_MANAGEMENT.md (authoritative)
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${EXPECTED_FINGERPRINT}" =~ ^[A-F0-9]{40}$ ]] || {
   printf 'missing or invalid trusted fingerprint\n' >&2
@@ -122,10 +122,19 @@ fi
 
 ### 4. Replace the module
 
+> **Warning — do not overwrite a running module in place.** Copying over
+> the `.so` while old workers still have it mapped can serve mixed or stale
+> code (and risks SIGBUS on some platforms). Replace the module file
+> only between a full stop and the next start, below.
+
 ```bash
 tar -xzf "${MODULE_ARCHIVE}"
-sudo cp ngx_http_markdown_filter_module.so \
-    "$MODULES_DIR/ngx_http_markdown_filter_module.so"
+mkdir -p "${MODULES_DIR}"
+# Stage the new module beside the running one, then atomically rename it
+# into place while NGINX is stopped (step 6).  A plain cp over the live
+# file is NOT atomic and may tear the mapping for active workers.
+sudo install -m 0755 ngx_http_markdown_filter_module.so \
+    "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new"
 ```
 
 ### 5. Migrate the configuration
@@ -144,7 +153,10 @@ NGINX, apply the 0.9.2 migration:
 # See docs/guides/MIGRATION-0.9.2.md for the complete mapping.
 ```
 
-Validate the migrated configuration with the new binary:
+Validate the migrated configuration with the currently loaded (old) module
+as a pre-flight: the staged 0.9.2 module is not yet swapped in, so this
+`nginx -t` exercises the migrated configuration syntax against the binary
+that is still running:
 
 ```bash
 sudo nginx -t
@@ -152,30 +164,81 @@ sudo nginx -t
 
 A 0.9.1 configuration fails `nginx -t` under the 0.9.2 binary (removed
 directives produce errors), so configuration migration must happen before
-the restart in the next step.
+the restart in the next step. The definitive validation against the new
+module happens after the swap (step 6), where `nginx -t` runs again.
 
-### 6. Validate and restart with the active service manager
+### 6. Full stop, swap the module, and start
+
+> **A plain `nginx -s reload` does NOT load a replaced module.** NGINX
+> keeps the previously loaded module when both old and new configs
+> reference the same `load_module` directive — an operator can believe the
+> upgrade landed while workers still run the old code. The upgrade below
+> therefore uses a full stop, an atomic rename of the staged module into
+> place, and a fresh start. (For a truly in-place online upgrade, NGINX
+> binary upgrade via `kill -USR2` + `kill -QUIT` is the supported path, not
+> module-file replacement under reload.)
 
 ```bash
+set -euo pipefail
 sudo nginx -t
 # systemd-managed host: verify the RUNNING nginx process is actually
 # owned by nginx.service before restarting through systemd.  A unit
 # file existing on disk is not proof of ownership — the process may be
-# started by another supervisor or directly.
+# started by another supervisor or directly.  Record the ownership
+# decision BEFORE stopping: after a successful stop, is-active is
+# false even on systemd-managed hosts, so it cannot be re-derived.
+systemd_managed=0
 if command -v systemctl >/dev/null 2>&1 \
     && systemctl is-active --quiet nginx.service; then
   main_pid="$(systemctl show -p MainPID --value nginx.service)"
   if [[ "$main_pid" =~ ^[0-9]+$ ]] \
       && pgrep -x nginx | grep -qx "$main_pid"; then
-    sudo systemctl restart nginx
+    systemd_managed=1
+    sudo systemctl stop nginx
   else
-    echo "ERROR: nginx.service is active but does not own the running NGINX master; refusing to reload" >&2
+    echo "ERROR: nginx.service is active but does not own the running NGINX master; refusing to stop" >&2
     exit 1
   fi
 else
-  # If another supervisor owns NGINX, use its restart/reload operation instead.
-  # For a directly managed master process, the equivalent is:
-  sudo nginx -s reload
+  # For a directly managed master: terminate the master so all workers
+  # exit before the module file is swapped; then start fresh below.
+  # (If the process is owned by another supervisor, use its stop/start.)
+  if pgrep -x nginx >/dev/null 2>&1; then
+    sudo nginx -s quit
+    # Wait for the master to exit, with a finite deadline: an indefinite
+    # poll can hang the upgrade if a worker refuses to terminate.
+    waited=0
+    while pgrep -x nginx >/dev/null 2>&1; do
+      if [[ "$waited" -ge 30 ]]; then
+        echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting upgrade" >&2
+        exit 1
+      fi
+      sleep 1
+      waited=$((waited + 1))
+    done
+  else
+    echo "INFO: no running NGINX master found; skipping 'nginx -s quit'"
+  fi
+fi
+
+# Swap the staged module into place atomically while NGINX is stopped.
+sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
+    "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+# The swap is reversible: if nginx -t fails here, restore the module backup
+# taken in step 4 (${MODULE_BACKUP}), re-run nginx -t, then start. Never
+# start NGINX with a module whose configuration failed validation.
+sudo nginx -t || {
+  echo "ERROR: nginx -t failed after module swap; restore the backup:" >&2
+  echo "  sudo cp -a ${MODULE_BACKUP} ${MODULES_DIR}/ngx_http_markdown_filter_module.so" >&2
+  exit 1
+}
+
+# Start a fresh master with the new module loaded, using the ownership
+# decision recorded before the stop.
+if [[ "$systemd_managed" -eq 1 ]]; then
+  sudo systemctl start nginx
+else
+  sudo nginx
 fi
 ```
 
@@ -212,7 +275,9 @@ rustup default 1.97.1
 
 ```bash
 cd components/rust-converter
-cargo build --release
+# Target the current platform explicitly so the archive lands in
+# target/<triple>/release/, the only layout the module configure accepts
+cargo build --release --target "$(rustc -vV | sed -n 's/^host: //p')"
 cd ../..
 ```
 
@@ -227,6 +292,7 @@ make modules
 ### 5. Install and restart
 
 ```bash
+set -euo pipefail
 # Copy the module into the ACTIVE NGINX module directory.  Determine it
 # from the running binary: `nginx -V 2>&1 | grep modules-path` (for example
 # /usr/lib/nginx/modules on Debian/Ubuntu, /usr/lib64/nginx/modules on
@@ -236,24 +302,51 @@ if [[ -z "${MODULES_DIR}" || ! -d "${MODULES_DIR}" ]]; then
     echo "ERROR: could not determine a valid --modules-path from 'nginx -V'" >&2
     exit 1
 fi
-sudo cp objs/ngx_http_markdown_filter_module.so "${MODULES_DIR}/"
+# Stage the rebuilt module, then swap it in with a full stop/start.
+# A plain `nginx -s reload` does NOT load a replaced module (see the
+# package upgrade note above), so the same stop/swap/start procedure
+# applies to source builds.
+sudo cp objs/ngx_http_markdown_filter_module.so \
+    "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new"
 sudo nginx -t
-# Restart through the host's service manager only when systemd actually
-# owns the running NGINX process.  A unit file existing on disk is not
-# proof of ownership — the process may be started by another supervisor
-# or directly.
+# Record the service-manager ownership decision BEFORE stopping: after
+# a successful stop, is-active is false even on systemd-managed hosts.
+systemd_managed=0
 if command -v systemctl >/dev/null 2>&1 \
     && systemctl is-active --quiet nginx.service; then
     main_pid="$(systemctl show -p MainPID --value nginx.service)"
     if [[ "$main_pid" =~ ^[0-9]+$ ]] \
         && [ -x "/proc/$main_pid/exe" ] \
         && pgrep -x nginx | grep -qx "$main_pid"; then
-        sudo systemctl restart nginx
+        systemd_managed=1
+        sudo systemctl stop nginx
     else
-        sudo nginx -s reload
+        echo "ERROR: nginx.service is active but does not own the running NGINX master; refusing to stop" >&2
+        exit 1
     fi
 else
-    sudo nginx -s reload
+    if pgrep -x nginx >/dev/null 2>&1; then
+        sudo nginx -s quit
+        waited=0
+        while pgrep -x nginx >/dev/null 2>&1; do
+            if [[ "$waited" -ge 30 ]]; then
+                echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting upgrade" >&2
+                exit 1
+            fi
+            sleep 1
+            waited=$((waited + 1))
+        done
+    else
+        echo "INFO: no running NGINX master found; skipping 'nginx -s quit'"
+    fi
+fi
+sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
+    "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+sudo nginx -t
+if [[ "$systemd_managed" -eq 1 ]]; then
+    sudo systemctl start nginx
+else
+    sudo nginx
 fi
 ```
 
@@ -276,14 +369,18 @@ helm repo update
 ```bash
 # Use the chart source selected in Step 1.
 # In-tree chart (checked out at the 0.9.2 tag):
+# The chart requires an explicit image.repository plus tag (or digest);
+# image values live at the chart top level, not under markdown.image.
 helm upgrade nginx-markdown ./charts/nginx-markdown \
     --namespace nginx-markdown \
-    --set markdown.image.tag=v0.9.2
+    --set "image.repository=<your-registry>/nginx-markdown" \
+    --set image.tag=v0.9.2
 
 # Remote chart repository (added in Step 1):
 #   helm upgrade nginx-markdown nginx-markdown/nginx-markdown-for-agents \
 #       --namespace nginx-markdown \
-#       --set markdown.image.tag=v0.9.2
+#       --set "image.repository=<your-registry>/nginx-markdown" \
+#       --set image.tag=v0.9.2
 ```
 
 ### 3. Verify

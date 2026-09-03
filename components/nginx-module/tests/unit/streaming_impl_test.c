@@ -2627,6 +2627,13 @@ test_null_input_tracking_and_body_filter_entry(void)
     rc = ngx_http_markdown_streaming_body_filter(&r, &c1);
     TEST_ASSERT(rc == g_next_body_filter_rc,
         "body_filter should passthrough when ctx is missing");
+
+    g_next_body_filter_calls = 0;
+    r.ctx = &ngx_http_markdown_failopen_header_marker;
+    rc = ngx_http_markdown_streaming_body_filter(&r, &c1);
+    TEST_ASSERT(rc == g_next_body_filter_rc
+                && g_next_body_filter_calls == 1,
+                "body_filter should passthrough for a durable marker");
     r.ctx = &ctx;
 
     r.loc_conf = NULL;

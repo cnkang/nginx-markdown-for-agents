@@ -64,7 +64,7 @@ request-time directive, variable, or runtime default.
 
 No new NGINX runtime directive, configuration parameter, or runtime
 configuration default gets introduced. The existing
-`markdown_decompress_max_size` budget
+`markdown_limits decompressed_size=` budget
 applies identically to Brotli. The existing `markdown_error_policy` governs
 fail-open/reject behavior.
 
@@ -84,7 +84,7 @@ Reservation failures fall into three cases based on decoder input consumption, t
 - **After response commit (post-commit)**: The decoder has consumed input and `ngx_http_send_header()` has returned `NGX_OK`. The workspace expansion failure places the decoder in a terminal abort state. The module does not re-feed the consumed chunk. Existing terminal/error state fields enforce this non-retryable invariant (see the State Machine section below).
 
 Decoded output remains governed separately by the cumulative
-`markdown_decompress_max_size` budget.
+`markdown_limits decompressed_size=` budget.
 
 ### Error Code Semantics — Two-Layer Model
 
@@ -108,7 +108,12 @@ The decompressor implements a two-layer error model:
 | `brotli_trailing_data` | Non-empty input after `SUCCESS`, or input after `finished` flag |
 | `brotli_truncated_input` | EOF without `BrotliDecoderIsFinished()` |
 | `brotli_no_progress` | Decoder stall (no input consumed, no output produced) |
-| `brotli_budget_exceeded` | Cumulative output exceeds `markdown_decompress_max_size` |
+| `brotli_budget_exceeded` | Cumulative output exceeds `markdown_limits decompressed_size=` |
+
+The ALLOCATION and INTERNAL origins (Layer 1 rows above) log
+`class=allocation`/`class=internal` with `category=system` and map to the
+canonical `decompression_error` reason in the reason registry (allowed origin
+`internal`). They never report corrupt input (the `format` origin).
 
 **Three-way error classifier (frozen):**
 

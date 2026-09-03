@@ -33,10 +33,6 @@ REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
 INSTALL_SCRIPT_PATH = REPO_ROOT / "tools" / "install.sh"
 
-# Known values that install.sh can detect
-INSTALL_DETECTABLE_OS_TYPES = {"glibc", "musl"}
-INSTALL_DETECTABLE_ARCHS = {"x86_64", "aarch64"}
-
 # The asset naming template used by completeness_check.py
 EXPECTED_ASSET_TEMPLATE = (
     "ngx_http_markdown_filter_module-{nginx}-{os_type}-{arch}.tar.gz"
@@ -45,11 +41,13 @@ EXPECTED_ASSET_TEMPLATE = (
 
 def load_matrix(path: Path) -> list[dict]:
     """
-    Load and validate the release matrix, returning install-script-compatible entries.
-    
-    Only supported dynamic-module entries for detectable libc and architecture values
-    are included. Architecture aliases are canonicalized before projection.
-    
+    Load and normalize the release matrix for install-script consistency checks.
+
+    All supported dynamic-module entries are projected so unrecognized libc or
+    architecture values remain visible to the consistency checks. Architecture
+    aliases are canonicalized before projection; non-string targets remain
+    invalid values for validation.
+
     Returns:
         list[dict]: Entries containing ``nginx``, ``os_type``, ``arch``, and
             ``support_tier`` fields.
@@ -80,19 +78,21 @@ def load_matrix(path: Path) -> list[dict]:
             )
         if entry.get("artifact_type") == "dynamic-module" and entry.get(
             "support_tier"
-        ) == "supported" and entry.get("libc") in INSTALL_DETECTABLE_OS_TYPES:
+        ) == "supported":
             # Compatibility normalization stores the architecture in the
             # canonical `target` field; canonicalize it (amd64 -> x86_64,
             # arm64 -> aarch64, target triples collapse to the bare arch)
             # before projecting into the install-detectable vocabulary.
+            # Rows whose libc or architecture is NOT install-detectable are
+            # still projected so the validate checks below report them as
+            # errors (only_in_matrix results included) instead of silently
+            # dropping them from consistency verification.
             raw_arch = entry.get("target")
             arch = (
                 canonical_arch(raw_arch)
                 if isinstance(raw_arch, str)
                 else None
             )
-            if arch not in INSTALL_DETECTABLE_ARCHS:
-                continue
             matrix.append(
                 {
                     "nginx": entry.get("nginx_version"),
@@ -117,8 +117,16 @@ def extract_matrix_values(matrix: list[dict]) -> tuple[set[str], set[str]]:
         tuple[set[str], set[str]]: A tuple with two sets: the first is the set of unique
         `os_type` strings found, the second is the set of unique `arch` strings found.
     """
-    os_types = {entry["os_type"] for entry in matrix if "os_type" in entry}
-    archs = {entry["arch"] for entry in matrix if "arch" in entry}
+    os_types = {
+        entry["os_type"]
+        for entry in matrix
+        if isinstance(entry.get("os_type"), str)
+    }
+    archs = {
+        entry["arch"]
+        for entry in matrix
+        if isinstance(entry.get("arch"), str)
+    }
     return os_types, archs
 
 

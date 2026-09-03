@@ -15,8 +15,7 @@
 #include <string.h>
 
 
-#define NGX_HTTP_MARKDOWN_HTTP_DATE_LEN \
-    (sizeof("Mon, 28 Sep 1970 06:00:00 GMT") - 1)
+#define NGX_HTTP_MARKDOWN_IF_NONE_MATCH_MAX  8192
 
 
 /*
@@ -89,16 +88,25 @@ ngx_http_markdown_adopt_first_restored(
     }
 }
 
-static void
-ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
-    u_char *name, size_t name_len, ngx_table_elt_t **first_restored)
+/*
+ * Validate every suppressed candidate of one header name without
+ * mutating anything.  Returns NGX_OK when all candidates (if any) are
+ * safely adoptable, NGX_ERROR when any candidate's value lacks a
+ * terminating NUL within the bounded scan.  Used to make cross-name
+ * adoption atomic: both name sets must validate before either is
+ * committed.
+ */
+static ngx_int_t
+ngx_http_markdown_validate_conditional_candidates(ngx_http_request_t *r,
+    u_char *name, size_t name_len, size_t scan_limit)
 {
-    *first_restored = NULL;
-    if (r == NULL || name == NULL || name_len == 0
-        || r->headers_in.headers.part.nelts == 0)
-    {
-        return;
+    if (r == NULL || name == NULL || name_len == 0) {
+        return NGX_ERROR;
     }
+    if (r->headers_in.headers.part.nelts == 0) {
+        return NGX_OK;
+    }
+
     for (ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
@@ -113,62 +121,147 @@ ngx_http_markdown_adopt_one_conditional_headers(ngx_http_request_t *r,
                 continue;
             }
 
-            /* A hash that survived was never suppressed by this module
-             * (suppression clears hash and length together); leave it.
-             * It is still a valid entry, so it remains a candidate for
-             * the typed pointer when no orphan was restored. */
             if (headers[i].hash != 0) {
-                ngx_http_markdown_adopt_first_restored(
-                    first_restored, &headers[i]);
                 continue;
             }
 
-            /* Module suppression clears hash AND length together.  An
-             * entry with hash == 0 but a non-zero length was invalidated
-             * by other code, not by this module, and must not be adopted
-             * (its value bytes may not be NUL-terminated). */
             if (headers[i].value.len != 0
                 || headers[i].value.data == NULL)
             {
                 continue;
             }
 
-            /* NGINX NUL-terminates parsed header values, so the byte
-             * length can be rebuilt after suppression zeroed it.
-             * Use a bounded scan (8k = default large_header_buffers)
-             * to avoid unbounded read if the NUL invariant changes. */
-            {
-                const u_char  *data = headers[i].value.data;
-                const u_char  *nul;
-
-                nul = memchr(data, '\0', 8192);
-                if (nul == NULL) {
-                    continue;
-                }
-                headers[i].value.len = (size_t) (nul - data);
+            if (memchr(headers[i].value.data, '\0', scan_limit) == NULL) {
+                return NGX_ERROR;
             }
+        }
+    }
+
+    return NGX_OK;
+}
+
+/*
+ * Commit adoption for one validator name after the caller has validated all
+ * suppressed candidates.  Returns NGX_ERROR if the NUL-termination invariant
+ * no longer holds while committing; otherwise records the first visible
+ * entry and increments the number of adopted entries.
+ */
+static ngx_int_t
+ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
+    u_char *name, size_t name_len, size_t scan_limit,
+    ngx_table_elt_t **first_restored, ngx_uint_t *adopted_count)
+{
+    const u_char  *value_end;
+
+    if (r == NULL || name == NULL || name_len == 0
+        || first_restored == NULL || adopted_count == NULL)
+    {
+        return NGX_ERROR;
+    }
+    *first_restored = NULL;
+    if (r->headers_in.headers.part.nelts == 0) {
+        return NGX_OK;
+    }
+
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].key.len != name_len
+                || ngx_strncasecmp(headers[i].key.data, name, name_len) != 0)
+            {
+                continue;
+            }
+
+            if (headers[i].hash != 0) {
+                ngx_http_markdown_adopt_first_restored(
+                    first_restored, &headers[i]);
+                continue;
+            }
+
+            if (headers[i].value.len != 0
+                || headers[i].value.data == NULL)
+            {
+                continue;
+            }
+
+            value_end = (const u_char *) memchr(
+                headers[i].value.data, '\0', scan_limit);
+            if (value_end == NULL) {
+                return NGX_ERROR;
+            }
+            headers[i].value.len = (size_t) (value_end
+                - headers[i].value.data);
             headers[i].hash = 1;
+            (*adopted_count)++;
             ngx_http_markdown_adopt_first_restored(
                 first_restored, &headers[i]);
         }
     }
+
+    return NGX_OK;
 }
 
-void
-ngx_http_markdown_adopt_orphan_conditional_headers(ngx_http_request_t *r)
+ngx_int_t
+ngx_http_markdown_adopt_orphan_conditional_headers(
+    ngx_http_request_t *r, size_t scan_limit,
+    ngx_http_markdown_conditional_ownership_t *ownership)
 {
     static u_char  inm_name[] = "If-None-Match";
     static u_char  ims_name[] = "If-Modified-Since";
     ngx_table_elt_t  *inm;
     ngx_table_elt_t  *ims;
+    ngx_uint_t       adopted_count;
+    ngx_int_t        inm_rc;
+    ngx_int_t        ims_rc;
 
-    ngx_http_markdown_adopt_one_conditional_headers(
-        r, inm_name, sizeof(inm_name) - 1, &inm);
-    ngx_http_markdown_adopt_one_conditional_headers(
-        r, ims_name, sizeof(ims_name) - 1, &ims);
+    if (r == NULL) {
+        return NGX_ERROR;
+    }
+
+    /*
+     * Cross-name atomic adoption: validate BOTH suppressed sets before
+     * committing either.  A failure in one name must leave the request
+     * headers entirely unchanged — restoring If-None-Match and then
+     * failing on If-Modified-Since would expose a partially re-owned
+     * validator set to the next PREACCESS pass.
+     */
+    inm_rc = ngx_http_markdown_validate_conditional_candidates(
+        r, inm_name, sizeof(inm_name) - 1, scan_limit);
+    ims_rc = ngx_http_markdown_validate_conditional_candidates(
+        r, ims_name, sizeof(ims_name) - 1, scan_limit);
+    if (inm_rc != NGX_OK || ims_rc != NGX_OK) {
+        r->headers_in.if_none_match = NULL;
+        r->headers_in.if_modified_since = NULL;
+        return NGX_ERROR;
+    }
+
+    adopted_count = 0;
+    inm_rc = ngx_http_markdown_commit_one_conditional_headers(
+        r, inm_name, sizeof(inm_name) - 1, scan_limit,
+        &inm, &adopted_count);
+    ims_rc = ngx_http_markdown_commit_one_conditional_headers(
+        r, ims_name, sizeof(ims_name) - 1, scan_limit,
+        &ims, &adopted_count);
 
     r->headers_in.if_none_match = inm;
     r->headers_in.if_modified_since = ims;
+
+    if (ownership != NULL) {
+        ngx_memzero(ownership, sizeof(*ownership));
+        if (adopted_count != 0) {
+            ownership->adopter =
+                NGX_HTTP_MARKDOWN_CONDITIONAL_ADOPTER_PREACCESS;
+            ownership->phase = NGX_HTTP_MARKDOWN_CONDITIONAL_PHASE_PREACCESS;
+            ownership->entry_count = adopted_count;
+        }
+    }
+
+    return (inm_rc == NGX_OK && ims_rc == NGX_OK) ? NGX_OK : NGX_ERROR;
 }
 
 static uint8_t
@@ -244,6 +337,12 @@ ngx_http_markdown_header_has_cache_directive(const ngx_table_elt_t *header,
 {
     const u_char  *p;
     const u_char  *end;
+
+    if (header == NULL || header->value.data == NULL
+        || header->value.len == 0)
+    {
+        return 0;
+    }
 
     p = header->value.data;
     end = p + header->value.len;
@@ -469,6 +568,311 @@ ngx_http_markdown_conditional_value_len(
     return header->value.len;
 }
 
+typedef struct {
+    u_char         *single_data;
+    size_t         single_len;
+    ngx_uint_t     match_count;
+    size_t         total_len;
+} ngx_http_markdown_if_none_match_measurement_t;
+
+/* Return whether a header entry carries an If-None-Match field value. */
+static ngx_flag_t
+ngx_http_markdown_is_if_none_match_header(const ngx_table_elt_t *header)
+{
+    static u_char  if_none_match_name[] = "If-None-Match";
+
+    return header != NULL
+           && header->key.data != NULL
+           && header->key.len == sizeof(if_none_match_name) - 1
+           && ngx_strncasecmp(header->key.data, if_none_match_name,
+                              header->key.len) == 0;
+}
+
+/* Add one field-line length, including its RFC combined-value separator. */
+static ngx_int_t
+ngx_http_markdown_add_if_none_match_length(
+    ngx_http_markdown_if_none_match_measurement_t *measurement,
+    size_t value_len)
+{
+    if (measurement->match_count > 0) {
+        if (measurement->total_len > (size_t) -1 - 2
+            || measurement->total_len + 2
+               > NGX_HTTP_MARKDOWN_IF_NONE_MATCH_MAX)
+        {
+            return NGX_ERROR;
+        }
+        measurement->total_len += 2;
+    }
+
+    if (value_len > (size_t) -1 - measurement->total_len
+        || value_len > NGX_HTTP_MARKDOWN_IF_NONE_MATCH_MAX
+                       - measurement->total_len)
+    {
+        return NGX_ERROR;
+    }
+
+    measurement->total_len += value_len;
+    return NGX_OK;
+}
+
+/* Measure all captured If-None-Match entries, including suppressed values. */
+static ngx_int_t
+ngx_http_markdown_measure_captured_if_none_match(
+    const ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_if_none_match_measurement_t *measurement)
+{
+    ngx_int_t  rc;
+
+    for (const ngx_http_markdown_conditional_header_state_t *state =
+             ctx->conditional.header_states;
+         state != NULL;
+         state = state->next)
+    {
+        if (!ngx_http_markdown_is_if_none_match_header(state->header)) {
+            continue;
+        }
+        if (state->original_value_len != 0
+            && state->header->value.data == NULL)
+        {
+            return NGX_ERROR;
+        }
+
+        rc = ngx_http_markdown_add_if_none_match_length(
+            measurement, state->original_value_len);
+        if (rc != NGX_OK) {
+            return rc;
+        }
+
+        if (measurement->match_count == 0) {
+            measurement->single_data = state->header->value.data;
+            measurement->single_len = state->original_value_len;
+        }
+        measurement->match_count++;
+    }
+
+    return NGX_OK;
+}
+
+/* Measure captured If-None-Match entries and the typed fallback. */
+static ngx_int_t
+ngx_http_markdown_measure_captured_if_none_match_with_fallback(
+    const ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_if_none_match_measurement_t *measurement)
+{
+    ngx_table_elt_t  *fallback;
+    ngx_int_t          rc;
+
+    rc = ngx_http_markdown_measure_captured_if_none_match(
+        ctx, measurement);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    if (measurement->match_count != 0
+        || ctx->conditional.if_none_match == NULL)
+    {
+        return NGX_OK;
+    }
+
+    fallback = ctx->conditional.if_none_match;
+    measurement->single_data = fallback->value.data;
+    measurement->single_len =
+        ngx_http_markdown_conditional_value_len(ctx, fallback);
+    if (measurement->single_len != 0
+        && measurement->single_data == NULL)
+    {
+        return NGX_ERROR;
+    }
+
+    rc = ngx_http_markdown_add_if_none_match_length(
+        measurement, measurement->single_len);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+    measurement->match_count = 1;
+
+    return NGX_OK;
+}
+
+
+/* Measure all active If-None-Match entries in request-list order. */
+static ngx_int_t
+ngx_http_markdown_measure_request_if_none_match(
+    const ngx_http_request_t *r,
+    ngx_http_markdown_if_none_match_measurement_t *measurement)
+{
+    ngx_int_t  rc;
+
+    for (const ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        const ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0
+                || !ngx_http_markdown_is_if_none_match_header(&headers[i]))
+            {
+                continue;
+            }
+            if (headers[i].value.len != 0
+                && headers[i].value.data == NULL)
+            {
+                return NGX_ERROR;
+            }
+
+            rc = ngx_http_markdown_add_if_none_match_length(
+                measurement, headers[i].value.len);
+            if (rc != NGX_OK) {
+                return rc;
+            }
+
+            if (measurement->match_count == 0) {
+                measurement->single_data = headers[i].value.data;
+                measurement->single_len = headers[i].value.len;
+            }
+            measurement->match_count++;
+        }
+    }
+
+    return NGX_OK;
+}
+
+/* Copy captured If-None-Match entries using their original value lengths. */
+static u_char *
+ngx_http_markdown_copy_captured_if_none_match(
+    const ngx_http_markdown_ctx_t *ctx, u_char *data)
+{
+    ngx_uint_t  copied;
+    u_char      *p;
+
+    copied = 0;
+    p = data;
+    for (const ngx_http_markdown_conditional_header_state_t *state =
+             ctx->conditional.header_states;
+         state != NULL;
+         state = state->next)
+    {
+        if (!ngx_http_markdown_is_if_none_match_header(state->header)) {
+            continue;
+        }
+        if (copied != 0) {
+            *p++ = ',';
+            *p++ = ' ';
+        }
+        if (state->original_value_len != 0) {
+            p = ngx_cpymem(p, state->header->value.data,
+                           state->original_value_len);
+        }
+        copied++;
+    }
+
+    return p;
+}
+
+/* Copy active If-None-Match entries using request-list order. */
+static u_char *
+ngx_http_markdown_copy_request_if_none_match(
+    const ngx_http_request_t *r, u_char *data)
+{
+    ngx_uint_t  copied;
+    u_char      *p;
+
+    copied = 0;
+    p = data;
+    for (const ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        const ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return data;
+        }
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0
+                || !ngx_http_markdown_is_if_none_match_header(&headers[i]))
+            {
+                continue;
+            }
+            if (copied != 0) {
+                *p++ = ',';
+                *p++ = ' ';
+            }
+            if (headers[i].value.len != 0) {
+                p = ngx_cpymem(p, headers[i].value.data,
+                               headers[i].value.len);
+            }
+            copied++;
+        }
+    }
+
+    return p;
+}
+
+/* Combine all If-None-Match field-lines before the FFI decision. */
+static ngx_int_t
+ngx_http_markdown_collect_if_none_match_value(
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
+    ngx_str_t *out)
+{
+    ngx_http_markdown_if_none_match_measurement_t  measurement;
+    ngx_int_t                                       rc;
+    const u_char                                   *end;
+
+    if (r == NULL || out == NULL) {
+        return NGX_ERROR;
+    }
+
+    memset(&measurement, 0, sizeof(measurement));
+    out->data = NULL;
+    out->len = 0;
+
+    if (ctx != NULL && ctx->conditional.captured) {
+        rc = ngx_http_markdown_measure_captured_if_none_match_with_fallback(
+            ctx, &measurement);
+    } else {
+        rc = ngx_http_markdown_measure_request_if_none_match(
+            r, &measurement);
+    }
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    if (measurement.match_count == 0) {
+        return NGX_DECLINED;
+    }
+    if (measurement.match_count == 1) {
+        out->data = measurement.single_data;
+        out->len = measurement.single_len;
+        return NGX_OK;
+    }
+
+    out->data = ngx_pnalloc(r->pool, measurement.total_len);
+    if (out->data == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (ctx != NULL && ctx->conditional.captured) {
+        end = ngx_http_markdown_copy_captured_if_none_match(
+            ctx, out->data);
+    } else {
+        end = ngx_http_markdown_copy_request_if_none_match(r, out->data);
+    }
+    if ((size_t) (end - out->data) != measurement.total_len) {
+        return NGX_ERROR;
+    }
+
+    out->len = measurement.total_len;
+    return NGX_OK;
+}
+
 /*
  * Return whether the request has a conditional validator that can be held
  * while a negotiated Markdown response is obtained.  Range requests remain
@@ -654,6 +1058,8 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     ngx_table_elt_t        *range_header;
     const u_char            *inm_data;
     size_t                   inm_len;
+    ngx_str_t                inm_value;
+    ngx_int_t                inm_rc;
     ngx_flag_t               needs_entity_etag;
 
     if (conf->policy.conditional_requests == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED) {
@@ -666,9 +1072,16 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     ngx_http_markdown_collect_conditional_headers(
         r, ctx, &inm_header, &ims_header, &range_header);
 
+    inm_value.data = NULL;
+    inm_value.len = 0;
     if (inm_header != NULL) {
-        inm_data = inm_header->value.data;
-        inm_len = ngx_http_markdown_conditional_value_len(ctx, inm_header);
+        inm_rc = ngx_http_markdown_collect_if_none_match_value(
+            r, ctx, &inm_value);
+        if (inm_rc != NGX_OK) {
+            return NGX_ERROR;
+        }
+        inm_data = inm_value.data;
+        inm_len = inm_value.len;
     } else {
         inm_data = NULL;
         inm_len = 0;

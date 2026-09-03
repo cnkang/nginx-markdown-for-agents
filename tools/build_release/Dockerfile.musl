@@ -63,7 +63,13 @@ ARG NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST
 # (AGENTS.md Rule 13: release builds must not float on `stable`).  rustup
 # auto-installs the channel named in this file on first cargo invocation.
 COPY rust-toolchain.toml /src/rust-toolchain.toml
+# Fail fast when required release-identity ARGs are missing (mirrors the
+# glibc Dockerfile gate so a mis-invoked musl build cannot emit artifacts
+# without provenance).
 RUN set -eux; \
+    test -n "${NGX_MARKDOWN_SOURCE_SHA}"; \
+    test -n "${NGX_MARKDOWN_RUST_VERSION}"; \
+    test -n "${NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST}"; \
     retry() { \
         attempts="$1"; \
         shift; \

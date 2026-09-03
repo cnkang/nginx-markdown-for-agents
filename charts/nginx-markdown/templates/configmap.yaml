@@ -37,7 +37,9 @@ data:
         listen 8080;
         {{- if .Values.markdown.enabled }}
         markdown_filter on;
+        {{- if or .Values.markdown.limits.conversionMemory .Values.markdown.limits.conversionTimeout .Values.markdown.limits.streamingBuffer .Values.markdown.limits.parserMemory .Values.markdown.limits.parserTimeout .Values.markdown.limits.decompressedSize .Values.markdown.limits.decompressionRatio .Values.markdown.limits.maxInflight }}
         markdown_limits{{- if .Values.markdown.limits.conversionMemory }} conversion_memory={{ .Values.markdown.limits.conversionMemory }}{{- end }}{{- if .Values.markdown.limits.conversionTimeout }} conversion_timeout={{ .Values.markdown.limits.conversionTimeout }}{{- end }}{{- if .Values.markdown.limits.streamingBuffer }} streaming_buffer={{ .Values.markdown.limits.streamingBuffer }}{{- end }}{{- if .Values.markdown.limits.parserMemory }} parser_memory={{ .Values.markdown.limits.parserMemory }}{{- end }}{{- if .Values.markdown.limits.parserTimeout }} parser_timeout={{ .Values.markdown.limits.parserTimeout }}{{- end }}{{- if .Values.markdown.limits.decompressedSize }} decompressed_size={{ .Values.markdown.limits.decompressedSize }}{{- end }}{{- if .Values.markdown.limits.decompressionRatio }} decompression_ratio={{ .Values.markdown.limits.decompressionRatio }}{{- end }}{{- if .Values.markdown.limits.maxInflight }} max_inflight={{ .Values.markdown.limits.maxInflight }}{{- end }};
+        {{- end }}
         markdown_error_policy {{ .Values.markdown.onError }};
         markdown_flavor {{ .Values.markdown.flavor }};
         {{- if .Values.markdown.tokenEstimate }}

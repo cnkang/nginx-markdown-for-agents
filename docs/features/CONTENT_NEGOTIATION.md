@@ -182,7 +182,11 @@ Not all requests are eligible for conversion. The module checks:
     streaming path: the total bytes buffered across the request (pending
     input plus replay window) never exceeds it, so a large response that
     would exceed `conversion_memory` is not eligible for streaming either.
-- Responses that exceed all applicable limits → Not eligible (passthrough)
+- Responses with a known size that exceed all applicable limits → Not
+  eligible (passthrough). `markdown_limits conversion_memory=<size>`
+  bounds chunked responses and responses without a Content-Length. On
+  those paths, an overrun triggers `markdown_error_policy` with reason
+  `memory_budget_exceeded` instead of the size-based passthrough gate.
 
 ### Other Conditions
 - Range requests → Not eligible (bypass)

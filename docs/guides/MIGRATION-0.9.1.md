@@ -284,7 +284,7 @@ Rust converter and C module must be a matched pair from the same version.
 
 | From | To | Guide |
 |------|----|-------|
-| 0.8.x | 0.9.0 | [docs/guides/MIGRATION-0.9.md](MIGRATION-0.9.md) |
+| 0.8.x | 0.9.0 | [docs/guides/MIGRATION-0.9.0.md](MIGRATION-0.9.0.md) |
 | 0.7.x | 0.8.0 | [docs/guides/MIGRATION-0.8.md](MIGRATION-0.8.md) |
 
 ---

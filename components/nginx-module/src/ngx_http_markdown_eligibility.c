@@ -121,6 +121,8 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
     const struct FFIStr  *stream_types;
     uint8_t               code;
 
+    ngx_memzero(&input, sizeof(input));
+
     /*
      * Guard NULL here because marshalling dereferences r and conf.  A
      * disabled filter is reported through filter_enabled and decided by the
@@ -144,7 +146,8 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
     input.filter_enabled = filter_enabled ? 1 : 0;
     input.method_get_or_head =
         (r->method == NGX_HTTP_GET || r->method == NGX_HTTP_HEAD) ? 1 : 0;
-    input.has_range_header = (r->headers_in.range != NULL) ? 1 : 0;
+    input.has_range_header =
+        ngx_http_markdown_header_is_active(r->headers_in.range) ? 1 : 0;
     input.status = (uint16_t) r->headers_out.status;
     input.content_type = r->headers_out.content_type.data;
     input.content_type_len = r->headers_out.content_type.len;

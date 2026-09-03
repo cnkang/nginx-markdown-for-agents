@@ -46,7 +46,10 @@ explicit phases:
 **Prepare phase** (all fallible operations, returns error on failure with
 headers unchanged = no-op):
 - FFI plan application (Content-Type stale delete-all, Content-Encoding
-  delete-all, Content-Length delete-all)
+  delete-all, Content-Length delete-all) — performed under the snapshot
+  restore mechanism described below. The delete-alls follow the same
+  boundary as the outer prepare, so header mutations never become visible
+  until the outer commit succeeds
 - ETag header slot allocation and value copy
 - Vary: Accept lookup, dedup check, append/new-slot allocation
 - X-Markdown-Tokens slot allocation and value formatting

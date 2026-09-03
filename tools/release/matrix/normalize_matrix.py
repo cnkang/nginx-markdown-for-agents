@@ -216,12 +216,12 @@ def normalize_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 def _fold_entry_keys(entry: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize entry keys to canonical names while preserving supported optional metadata and rejecting unknown or conflicting fields.
-    
+
     Parameters:
-    	entry (Dict[str, Any]): Matrix entry whose canonical and legacy keys should be normalized.
-    
+        entry (Dict[str, Any]): Matrix entry whose canonical and legacy keys should be normalized.
+
     Returns:
-    	Dict[str, Any]: Entry with legacy aliases folded into canonical keys."""
+        Dict[str, Any]: Entry with legacy aliases folded into canonical keys."""
     canonical: Dict[str, Any] = {}
     for key, value in entry.items():
         if key in CANONICAL_ENTRY_KEYS or key in OPTIONAL_ENTRY_KEYS:

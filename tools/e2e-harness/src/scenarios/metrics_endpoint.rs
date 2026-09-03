@@ -12,14 +12,13 @@ use anyhow::Result;
 use std::collections::HashMap;
 
 const PROMETHEUS_ACCEPT: &str = "text/plain; version=0.0.4";
-const METRIC_FAMILIES: [&str; 12] = [
+const METRIC_FAMILIES: [&str; 11] = [
     "nginx_markdown_requests_total",
     "nginx_markdown_conversion_attempts_total",
     "nginx_markdown_conversion_deliveries_total",
     "nginx_markdown_conversion_duration_seconds",
     "nginx_markdown_input_bytes_total",
     "nginx_markdown_output_bytes_total",
-    "nginx_markdown_inflight_requests",
     "nginx_markdown_streaming_peak_memory_bytes",
     "nginx_markdown_streaming_events_total",
     "nginx_markdown_decompression_events_total",

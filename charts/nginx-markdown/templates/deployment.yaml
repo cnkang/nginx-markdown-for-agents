@@ -22,6 +22,9 @@ spec:
       labels:
         {{- include "nginx-markdown.selectorLabels" . | nindent 8 }}
     spec:
+      {{- with .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -47,6 +50,10 @@ spec:
           image: "{{ $imageRepo }}:{{ $imageTag }}"
           {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: nginx-config
               mountPath: /etc/nginx/nginx.conf
@@ -114,7 +121,11 @@ spec:
               protocol: TCP
           readinessProbe:
             httpGet:
-              path: /healthz
+              # End-to-end via the sidecar proxy: the module is loopback-only,
+              # so probing /metrics verifies the full scrape path (sidecar ->
+              # 127.0.0.1:8080/_markdown_metrics).  The module returning 502
+              # (or the sidecar failing) leaves the pod unready.
+              path: /metrics
               port: metrics
             initialDelaySeconds: 5
             periodSeconds: 10

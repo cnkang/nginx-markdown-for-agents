@@ -81,6 +81,7 @@ NFPM_REQUIRED_SNIPPETS = [
     "packager: rpm",
     "/usr/share/doc/nginx-markdown-for-agents/README.md",
     "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md",
+    "/usr/share/doc/nginx-markdown-for-agents/INSTALLATION.md",
     "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md",
     "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_COMPATIBILITY.md",
     "/usr/share/licenses/nginx-markdown-for-agents/LICENSE",
@@ -617,22 +618,64 @@ def _validate_nfpm_deb_interval_version(
     return errors
 
 
+def _deb_depends_entry(line: str) -> str | None:
+    """Return the dependency when a line is a depends list entry."""
+    if not line.strip().startswith("- "):
+        return None
+    match = _DEB_DEP_LINE_RE.match(line)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
+def _advance_deb_depends_state(
+    line: str,
+    in_deb: bool,
+    deb_indent: int,
+    in_depends: bool,
+) -> tuple[bool, int, bool, str | None]:
+    """Advance the nfpm deb: depends state machine for one line.
+
+    Returns (in_deb, deb_indent, in_depends, dep) where dep is the
+    extracted dependency when the line is a depends list entry.
+    """
+    indent_len = len(line) - len(line.lstrip(" \t"))
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return in_deb, deb_indent, in_depends, None
+    if stripped == "deb:" or stripped.startswith("deb: "):
+        return True, indent_len, False, None
+    if in_deb:
+        # A key at the same indent as deb: (or shallower) starts the
+        # next overrides sibling (rpm:) or leaves overrides entirely;
+        # both end the deb block and must not leak its depends.
+        if indent_len <= deb_indent:
+            return False, deb_indent, False, None
+        # A depends key opens the DEB collection (nfpm nests it under
+        # deb:, so it is always deeper-indented than the deb: key).
+        if stripped.startswith("depends:"):
+            return in_deb, deb_indent, True, None
+    if in_depends:
+        dep = _deb_depends_entry(line)
+        if dep is not None:
+            return in_deb, deb_indent, in_depends, dep
+        if stripped and not stripped.startswith("-"):
+            return in_deb, deb_indent, False, None
+    return in_deb, deb_indent, in_depends, None
+
+
 def _parse_nfpm_deb_depends(content: str) -> list[str]:
     """Extract the DEB `depends` entries of the deb: overrides block."""
     depends: list[str] = []
+    in_deb = False
+    deb_indent = 0
     in_depends = False
     for line in content.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("depends:"):
-            in_depends = True
-            continue
-        if in_depends:
-            if stripped.startswith("- "):
-                match = _DEB_DEP_LINE_RE.match(line)
-                if match:
-                    depends.append(match.group(1).strip())
-            elif stripped and not stripped.startswith("-"):
-                in_depends = False
+        in_deb, deb_indent, in_depends, dep = _advance_deb_depends_state(
+            line, in_deb, deb_indent, in_depends,
+        )
+        if dep is not None:
+            depends.append(dep)
     return depends
 
 
@@ -1404,7 +1447,7 @@ def validate_nfpm_preremove_lifecycle(result: ValidationResult) -> None:
             "run_case reference upgrade 0",
             "run_case clear remove 0",
             "run_case unreadable remove 1",
-            "persistent force-removal sentinel",
+            "content-bound one-shot force-removal sentinel",
             "No NGINX configuration was modified automatically",
         ],
         "nfpm-preremove:test",

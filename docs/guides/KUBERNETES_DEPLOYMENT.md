@@ -47,7 +47,7 @@ volumeMounts:
 1. **ABI binding**: The `.so` must compile against the exact NGINX
    version inside the F5 Controller image, using a compatible build
    configuration (matching `configure` arguments). Use `--with-compat`
-   only when the target binary also enables it; otherwise the module
+   only when the target binary also enables it, otherwise the module
    binary must be built with the same configure arguments as the
    Controller's NGINX.
 2. **No custom image**: F5 does not support replacing the Controller
@@ -275,7 +275,7 @@ After deploying the custom image to your cluster:
 
 ```bash
 kubectl exec -n ingress-nginx <pod-name> -- nginx -T 2>&1 \
-  | grep -F 'load_module'
+  | grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so;'
 kubectl exec -n ingress-nginx <pod-name> -- nginx -t
 ```
 
@@ -382,6 +382,27 @@ When `markdown.enabled=true`, the chart requires `markdown.loadModule`. The char
 not create a `hostPath` mount from that value. If a deployment needs additional
 volumes or mounts, use the explicit opt-in `extraVolumes` and
 `extraVolumeMounts` values.
+
+### Graceful shutdown and rolling updates
+
+The 0.9.2 chart renders a termination contract so a rolled-out pod finishes
+its in-flight conversions instead of the platform killing it mid-stream:
+
+- `terminationGracePeriodSeconds` (default `30`) bounds the total drain window.
+- The container `lifecycle.preStop` hook sends `SIGQUIT` to the NGINX master
+  process (`/var/run/nginx.pid`). NGINX then stops accepting new connections
+  and drains in-flight requests, which lets the markdown module complete
+  active streaming conversions and emit their terminal outcomes.
+
+During a `helm upgrade`, the Deployment controller marks old pods
+`Terminating`, Kubelet delivers the preStop hook, and NGINX drains within the
+grace period, and readiness gates remove traffic from the Service as pods
+become unready. If workloads run conversions longer than 30s, raise
+`terminationGracePeriodSeconds` rather than disabling the hook.
+
+When the container entrypoint is not NGINX (custom images that start
+sidecar-style processes), set `lifecycle: {}` and manage shutdown signals at
+the application level instead.
 
 ---
 

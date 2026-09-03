@@ -106,6 +106,7 @@ static ngx_int_t ngx_http_markdown_diag_render_dynconf(
 static ngx_int_t ngx_http_markdown_diag_render_features(
     u_char **pos, u_char *last);
 static const char *ngx_http_markdown_diag_outcome(ngx_int_t code);
+static ngx_int_t ngx_http_markdown_diag_is_failure_outcome(const char *outcome);
 static const char *ngx_http_markdown_diag_decision_stage(ngx_int_t code);
 static const char *ngx_http_markdown_diag_error_origin(ngx_int_t code);
 static const char *ngx_http_markdown_diag_recording_state_name(
@@ -240,7 +241,7 @@ ngx_http_markdown_diagnostics_record(ngx_http_markdown_diag_state_t *state,
     const char *error_origin;
 
     outcome = ngx_http_markdown_diag_outcome(reason_code);
-    error_origin = (outcome[0] == 'f' || outcome[0] == 'a')
+    error_origin = ngx_http_markdown_diag_is_failure_outcome(outcome)
         ? ngx_http_markdown_diag_error_origin(reason_code) : NULL;
     ngx_http_markdown_diagnostics_record_classified(
         state, outcome, ngx_http_markdown_diag_decision_stage(reason_code),
@@ -287,7 +288,7 @@ ngx_http_markdown_diagnostics_record_reason_at_stage(
      * the emitted value is derived from the resolved reason code.
      */
     (void) error_category;
-    error_origin = (outcome[0] == 'f' || outcome[0] == 'a')
+    error_origin = ngx_http_markdown_diag_is_failure_outcome(outcome)
         ? ngx_http_markdown_diag_error_origin(reason_code) : NULL;
     ngx_http_markdown_diagnostics_record_classified(
         state,
@@ -1085,6 +1086,31 @@ static const char *
 ngx_http_markdown_diag_error_origin(ngx_int_t code)
 {
     return ngx_http_markdown_diag_reason_meta_for(code)->error_origin;
+}
+
+
+/*
+ * Determine whether an outcome string is a failure outcome eligible for an
+ * error origin.  Full-string comparison against the canonical outcome
+ * vocabulary (failed_open, failed_closed, aborted) mirrors the shared
+ * predicate used by the decision log; the outcome is always sourced from
+ * the canonical reason metadata registry.
+ *
+ * Parameters:
+ *   outcome - canonical outcome string (never NULL from the registry)
+ *
+ * Returns:
+ *   1 if the outcome is a failure outcome, 0 otherwise
+ */
+static ngx_int_t
+ngx_http_markdown_diag_is_failure_outcome(const char *outcome)
+{
+    if (outcome == NULL) {
+        return 0;
+    }
+    return strcmp(outcome, "failed_open") == 0
+        || strcmp(outcome, "failed_closed") == 0
+        || strcmp(outcome, "aborted") == 0;
 }
 static ngx_int_t
 ngx_http_markdown_diagnostics_fmt_decisions(

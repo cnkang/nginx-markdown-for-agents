@@ -154,6 +154,10 @@ typedef struct {
 /* Include the implementation under test */
 #include "../../src/ngx_http_markdown_inflight_impl.h"
 
+ngx_http_markdown_inflight_t  ngx_http_markdown_g_inflight;
+
+extern long test_inflight_peer_current(void);
+
 /* ----------------------------------------------------------------
  * Test helpers
  * ---------------------------------------------------------------- */
@@ -247,6 +251,44 @@ test_increment_rejects_at_limit(void)
         "overload_total should be 1");
 
     TEST_PASS("increment rejects at limit");
+}
+
+static void
+test_worker_counter_is_shared_across_request_contexts(void)
+{
+    ngx_http_request_t        first_request;
+    ngx_http_request_t        second_request;
+    ngx_http_markdown_conf_t  first_conf;
+    ngx_http_markdown_conf_t  second_conf;
+    ngx_int_t                  rc;
+
+    ngx_http_markdown_inflight_reset();
+    first_conf.routing.max_inflight = 2;
+    second_conf.routing.max_inflight = 2;
+
+    setup_request(&first_request);
+    rc = ngx_http_markdown_inflight_try_increment(
+        &first_request, &first_conf, &g_ctx);
+    TEST_ASSERT(rc == NGX_OK, "first request should enter the worker guard");
+    TEST_ASSERT(test_inflight_peer_current() == 1,
+                "worker counter must be visible from another translation unit");
+
+    setup_request(&second_request);
+    rc = ngx_http_markdown_inflight_try_increment(
+        &second_request, &second_conf, &g_ctx);
+    TEST_ASSERT(rc == NGX_OK, "second request should reach the worker limit");
+    TEST_ASSERT(test_inflight_peer_current() == 2,
+                "request contexts must share one worker counter");
+
+    setup_request(&first_request);
+    rc = ngx_http_markdown_inflight_try_increment(
+        &first_request, &first_conf, &g_ctx);
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "a request at the shared worker limit must be declined");
+    TEST_ASSERT(test_inflight_peer_current() == 2,
+                "worker counter must remain at its configured limit");
+
+    TEST_PASS("worker inflight counter is shared across request contexts");
 }
 
 static void
@@ -580,6 +622,7 @@ main(void)
     test_counter_starts_at_zero();
     test_increment_below_limit();
     test_increment_rejects_at_limit();
+    test_worker_counter_is_shared_across_request_contexts();
     test_cleanup_handler_decrements();
     test_cleanup_handler_idempotent();
     test_high_watermark_updates();

@@ -447,7 +447,7 @@ def test_docker_runtime_security_rejects_missing_stage_build_args(
 def test_trivy_local_scope_excludes_ignored_state(tmp_path, monkeypatch):
     """Accept local Trivy scope that excludes adapters and generated reports."""
     (tmp_path / "Makefile").write_text(
-        "--skip-dirs .codeartsdoer --skip-dirs .kiro --skip-dirs build\n",
+        "--skip-dirs .codeartsdoer --skip-dirs .kiro --skip-dirs build --skip-dirs reports\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)

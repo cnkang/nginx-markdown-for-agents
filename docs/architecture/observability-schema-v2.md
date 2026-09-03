@@ -70,7 +70,7 @@ than inferring these values from unrelated Prometheus labels.
 
 ## Prometheus Metrics v1
 
-The endpoint emits Prometheus text format 0.0.4 and exactly these twelve
+The endpoint emits Prometheus text format 0.0.4 and exactly these eleven
 families:
 
 ```text
@@ -80,7 +80,6 @@ nginx_markdown_conversion_deliveries_total
 nginx_markdown_conversion_duration_seconds
 nginx_markdown_input_bytes_total
 nginx_markdown_output_bytes_total
-nginx_markdown_inflight_requests
 nginx_markdown_streaming_events_total
 nginx_markdown_streaming_peak_memory_bytes
 nginx_markdown_decompression_events_total

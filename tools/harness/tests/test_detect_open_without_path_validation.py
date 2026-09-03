@@ -388,3 +388,35 @@ def test_read_bytes_unvalidated_receiver_warns(det):
     assert errors == []
     assert len(warnings) == 1
     assert "read_bytes" in warnings[0]
+
+
+def test_gzip_open_first_arg_is_path(det):
+    """gzip.open(unvalidated) — the path is the FIRST positional argument.
+
+    The module receiver (gzip) must not be treated as the path: the
+    detector must resolve the real path argument and flag it.
+    """
+    src = """
+    import gzip
+    def f(path):
+        with gzip.open(path, "rt") as fh:
+            return fh.read()
+    """
+    errors, warnings = _check_source(det, src, strict=True)
+    assert len(errors) == 1
+    assert "open(path)" in errors[0]
+    assert warnings == []
+
+
+def test_gzip_open_validated_path_is_safe(det):
+    """gzip.open(validated_path) — no finding once the path is validated."""
+    src = """
+    import gzip
+    def f(tmp_path):
+        p = validate_read_path(tmp_path)
+        with gzip.open(p, "rb") as fh:
+            return fh.read()
+    """
+    errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert warnings == []

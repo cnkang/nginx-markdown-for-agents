@@ -58,8 +58,8 @@ typedef struct ngx_http_markdown_inflight_cleanup_s {
     ngx_flag_t                     decremented;
 } ngx_http_markdown_inflight_cleanup_t;
 
-/* Per-worker global counter instance. */
-static ngx_http_markdown_inflight_t  ngx_http_markdown_g_inflight;
+/* Per-worker global counter instance, defined by the module main TU. */
+extern ngx_http_markdown_inflight_t  ngx_http_markdown_g_inflight;
 
 static ngx_inline void
 ngx_http_markdown_inflight_update_high_watermark(ngx_atomic_int_t new_val)
@@ -151,6 +151,15 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
     ngx_http_markdown_inflight_cleanup_t   *cd;
 
     cur = ngx_http_markdown_g_inflight.current;
+
+    /*
+     * Single-worker-thread note: NGINX workers run event loops on one
+     * thread, so the plain read followed by atomic_fetch_add below is not
+     * a race.  ngx_atomic_t here only guarantees tear-free metric
+     * snapshot reads, not cross-thread CAS semantics — do not replace
+     * this sequence with a full CAS unless a threaded execution model is
+     * introduced.
+     */
 
     /*
      * max_inflight is validated > 0 at config parse time

@@ -376,10 +376,10 @@ curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics
   grep -E "nginx_markdown_conversion_attempts_total|nginx_markdown_conversion_deliveries_total|nginx_markdown_requests_total"
 ```
 
-If the failed `nginx_markdown_requests_total{outcome=~"failed_.*"}` count grows
+If the failed `nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}` count grows
 faster than expected relative to `nginx_markdown_conversion_attempts_total`,
 roll back. Compare the two counters using PromQL rates (for example
-`rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m])` against
+`rate(nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}[5m])` against
 `rate(nginx_markdown_conversion_attempts_total[5m])`) or before-and-after
 counter deltas over the same window, rather than comparing instantaneous
 snapshots.
@@ -428,8 +428,8 @@ After disabling conversion (Methods A and B), the decision log should show `disa
 
 ```bash
 # Watch for new disabled entries after reload
-grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=disabled" | tail -10
+grep "markdown:" /var/log/nginx/error.log | \
+  grep "outcome=skipped" | grep "reason=disabled" | tail -10
 ```
 
 For Method C (restoring fail-open), trigger a known conversion failure first and
@@ -449,8 +449,8 @@ curl -sS -H 'Accept: text/markdown' http://localhost/known-failing-path \
 
 # Inspect only entries appended after the trigger request.
 tail -c +"$((LOG_OFFSET + 1))" /var/log/nginx/error.log \
-  | grep "markdown decision:" \
-  | grep -E "reason=(failed_closed|failed_open)"
+  | grep "markdown:" \
+  | grep -E "outcome=(failed_closed|failed_open|aborted)"
 ```
 
 The offset excludes earlier history but does not identify a single request.
@@ -462,6 +462,13 @@ quiesce competing traffic for the duration of the verification.
 ### 2. Confirm Metrics Stop Incrementing
 
 For Methods A and B, conversion metrics for the affected scope should stop incrementing:
+
+> **Scope note**: the counters below are **instance-wide** cumulative
+> counters. A flat comparison cannot prove that a *specific scope* stopped
+> converting — unrelated traffic on the same instance also moves them. For
+> scope-specific verification use the decision-log probe from Step 1
+> (uniquely named path + timestamp match), and the metrics comparison below is
+> supporting, instance-wide evidence only.
 
 ```bash
 # Take a snapshot of the frozen metric families.
@@ -514,12 +521,14 @@ Copy-paste rollback sequence for the most common scenario (disable all conversio
 nginx -t && nginx -s reload
 
 # 3. Verify: check for disabled in logs
-grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=disabled" | tail -5
+grep "markdown:" /var/log/nginx/error.log | \
+  grep "outcome=skipped" | grep "reason=disabled" | tail -5
 
 # 4. Verify: confirm conversion metrics stopped
-# Stabilize before capturing the baseline so the before counters reflect
-# the quiesced state immediately before the comparison interval.
+# Use a quiet-window delta instead of comparing instance-wide cumulative
+# counters, which also move when unrelated requests convert: sample the
+# counters, wait, sample again, and require zero conversion activity in
+# that window (no client traffic of your own inside it).
 sleep 5
 before=$(curl -fsS http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
@@ -527,7 +536,7 @@ if [ -z "$before" ]; then
   echo "FAIL: conversion metrics not present before rollback check"
   exit 1
 fi
-curl -fsS -o /dev/null -H "Accept: text/markdown" http://localhost/test
+sleep 5
 after=$(curl -fsS http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
 if [ -z "$after" ]; then
@@ -535,6 +544,12 @@ if [ -z "$after" ]; then
   exit 1
 fi
 # Capture disabled-request signal separately without changing the conversion metric comparison
+# Trigger a unique request first so the disabled signal is guaranteed to be
+# emitted by this verification, not by unrelated traffic.
+curl -fsS -o /dev/null \
+  -H "Accept: text/markdown" \
+  "http://localhost/rollback-probe-$(date +%s)"
+sleep 1
 disabled=$(curl -fsS http://localhost/markdown-metrics | \
   grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"')
 if [ -z "$disabled" ]; then
@@ -542,9 +557,9 @@ if [ -z "$disabled" ]; then
   exit 1
 fi
 if [ "$before" = "$after" ]; then
-  echo "OK: conversion counters stable after rollback"
+  echo "OK: no conversion activity in the quiet window after rollback"
 else
-  echo "FAIL: conversion counters still increasing after rollback"
+  echo "FAIL: conversion activity detected in the quiet window after rollback"
   exit 1
 fi
 

@@ -246,7 +246,10 @@ def _collect_function_body(lines, start_index):
         if _function_body_is_complete(depth, end_index, start_index, line):
             break
     else:
-        return start_index, body_lines
+        # Unterminated body: the collected lines span the rest of the source.
+        # Consume through the final line so the caller's index advances past
+        # them instead of returning start_index unchanged and re-scanning.
+        return len(lines) - 1, body_lines
     return end_index, body_lines
 
 

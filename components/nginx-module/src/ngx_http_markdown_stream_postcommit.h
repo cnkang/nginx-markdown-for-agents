@@ -63,8 +63,16 @@ ngx_http_markdown_stream_postcommit_safe_finish(
  *
  * Terminates the streaming response chain safely:
  *   1. Transition to POST_COMMIT_ABORT state
- *   2. Send a last_buf=1 terminal chain to close the HTTP response
- *   3. Do NOT send any additional content bytes
+ *   2. Resume any retained pending output (see
+ *      ngx_http_markdown_stream_postcommit_resume_pending) so buffered
+ *      bytes are forwarded before the terminal chain
+ *   3. Send a last_buf=1 terminal chain to close the HTTP response
+ *   4. Do NOT send any additional content bytes
+ *
+ * When the terminal chain is delivered by the resumed pending output,
+ * abort may complete early with NGX_OK and no extra terminal is sent.
+ * No further content bytes are emitted after the terminal chain under
+ * any path.
  *
  * The downstream client receives a truncated but valid HTTP response
  * (Content-Length was removed at commit time, so truncation is valid

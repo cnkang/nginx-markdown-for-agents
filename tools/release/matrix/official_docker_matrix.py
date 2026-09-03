@@ -30,15 +30,15 @@ SUPPORTED_DOCKER_LIBC_BY_OS = {
 def _canonical_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Extract the canonical release entries from a release matrix.
-    
+
     Parameters:
-    	data (dict[str, Any]): Release matrix data containing an `entries` list.
-    
+        data (dict[str, Any]): Release matrix data containing an `entries` list.
+
     Returns:
-    	list[dict[str, Any]]: The validated release entries.
-    
+        list[dict[str, Any]]: The validated release entries.
+
     Raises:
-    	ValueError: If legacy aliases are present, `entries` is missing or empty, or any entry is not an object.
+        ValueError: If legacy aliases are present, `entries` is missing or empty, or any entry is not an object.
     """
     if "matrix" in data or "additional_artifacts" in data:
         raise ValueError(
@@ -55,13 +55,13 @@ def _canonical_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
 def _is_release_blocking_docker(entry: dict[str, Any]) -> bool:
     """
     Determine whether a matrix entry is a release-blocking official Docker image.
-    
+
     Parameters:
         entry (dict[str, Any]): Matrix entry to evaluate.
-    
+
     Returns:
         bool: `true` if the entry is an official release-blocking Docker image, `false` otherwise.
-    
+
     Raises:
         ValueError: If an official release-blocking Docker entry does not use
             `support_tier="supported"`.
@@ -86,14 +86,14 @@ def _is_release_blocking_docker(entry: dict[str, Any]) -> bool:
 def _resolve_docker_entry(entry: dict[str, Any]) -> dict[str, str]:
     """
     Validate and normalize an official NGINX Docker matrix entry.
-    
+
     Parameters:
         entry (dict[str, Any]): Docker matrix entry containing the NGINX version,
             operating system, libc, architecture, image reference, and image digest.
-    
+
     Returns:
         dict[str, str]: Normalized entry with stable row identity and Docker tag.
-    
+
     Raises:
         ValueError: If a required field, platform value, version, digest, or image
             reference is invalid or inconsistent.
@@ -160,13 +160,13 @@ def _docker_sort_key(row: dict[str, str]) -> tuple[tuple[int, ...], str, str, st
 def resolve_official_docker_entries(data: dict[str, Any]) -> list[dict[str, str]]:
     """
     Resolve supported, release-blocking official NGINX Docker entries from the release matrix.
-    
+
     Parameters:
         data (dict[str, Any]): Release matrix data containing canonical Docker entries.
-    
+
     Returns:
         list[dict[str, str]]: Normalized Docker entries sorted by NGINX version, OS, libc, and architecture.
-    
+
     Raises:
         ValueError: If the matrix is invalid, contains no qualifying entries, or contains duplicate row identities.
     """
@@ -190,13 +190,13 @@ def resolve_official_docker_entries(data: dict[str, Any]) -> list[dict[str, str]
 def load_official_docker_entries(matrix_path: Path) -> list[dict[str, str]]:
     """
     Load and resolve the official Docker matrix from a JSON file.
-    
+
     Parameters:
         matrix_path (Path): Path to the release matrix JSON file.
-    
+
     Returns:
         list[dict[str, str]]: Resolved, validated official Docker matrix entries.
-    
+
     Raises:
         ValueError: If the JSON root is not an object.
     """

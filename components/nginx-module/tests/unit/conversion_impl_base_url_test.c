@@ -942,6 +942,17 @@ ngx_http_markdown_send_304(
 #include "../../src/ngx_http_markdown_buffer.c"
 
 #include "../../src/ngx_http_markdown_conversion_impl.h" /* SONAR_NOTE: must follow stub definitions */
+#ifndef NGINX_VERSION
+#define NGINX_VERSION "test"
+#endif
+#define NGX_HTTP_MARKDOWN_METRICS_CORE_ONLY
+static ngx_atomic_uint_t
+ngx_http_markdown_inflight_current(void)
+{
+    return 0;
+}
+#include "../../src/ngx_http_markdown_metrics_impl.h"
+#undef NGX_HTTP_MARKDOWN_METRICS_CORE_ONLY
 
 static ngx_connection_t g_connection = { 0 };
 static ngx_log_t g_log = { 0 };
@@ -2593,6 +2604,38 @@ test_conditional_match_propagates_terminal_done(void)
     TEST_PASS("conditional match propagates terminal NGX_DONE");
 }
 
+/* Legacy latency counters are exclusive per-band counts. */
+static void
+test_metrics_legacy_histogram_preserves_exclusive_bands(void)
+{
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+
+    TEST_SUBSECTION("legacy histogram preserves exclusive bands");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(&v1, 0, sizeof(v1));
+    snapshot.conversions_succeeded = 2;
+    snapshot.conversions_failed = 8;
+    snapshot.conversion_latency.le_10ms = 2;
+    snapshot.conversion_latency.le_100ms = 1;
+    snapshot.conversion_latency.le_1000ms = 3;
+    snapshot.conversion_latency.gt_1000ms = 4;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+
+    TEST_ASSERT(v1.duration_full_buffer.buckets[2] == 2,
+                "10ms legacy band must map directly");
+    TEST_ASSERT(v1.duration_full_buffer.buckets[5] == 1,
+                "100ms legacy band must not subtract the 10ms band");
+    TEST_ASSERT(v1.duration_full_buffer.buckets[8] == 3,
+                "1000ms legacy band must map directly");
+    TEST_ASSERT(v1.duration_full_buffer.buckets[9] == 4,
+                "greater-than-1000ms legacy band must map directly");
+
+    TEST_PASS("legacy histogram preserves exclusive bands");
+}
+
 
 int
 main(void)
@@ -2631,6 +2674,7 @@ main(void)
     test_misc_conversion_helpers();
     test_conditional_bypass_bypasses_error_policy();
     test_conditional_match_propagates_terminal_done();
+    test_metrics_legacy_histogram_preserves_exclusive_bands();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

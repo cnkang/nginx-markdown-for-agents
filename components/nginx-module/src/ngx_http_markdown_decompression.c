@@ -914,6 +914,8 @@ ngx_http_markdown_reset_gzip_member(ngx_http_request_t *r,
         return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
     }
 
+    stream->total_in = 0;
+    stream->total_out = 0;
     stream->next_in = next_in;
     stream->avail_in = avail_in;
 

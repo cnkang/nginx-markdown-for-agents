@@ -100,7 +100,7 @@ Use **auto** (default since 0.8.0) to let the module choose based on the bounded
 
 ## Related Documentation
 
-- [Streaming Rollout Cookbook](../guides/streaming-rollout-cookbook.md)
+- [Rollout Cookbook — Streaming-Focused Rollout](../guides/ROLLOUT_COOKBOOK.md#streaming-focused-rollout)
 - [Configuration Reference — Streaming Directives](../guides/CONFIGURATION.md)
 - [Migration Guide](../guides/MIGRATION-0.8.md)
 - [Streaming Observability](streaming-observability.md)

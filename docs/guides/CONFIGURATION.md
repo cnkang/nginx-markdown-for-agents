@@ -10,6 +10,12 @@ five-key JSON overlay.
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
+# Minimal upstream used by the example proxy_pass below.
+# Replace with your actual origin service (or proxy to a socket/port).
+upstream backend {
+    server 127.0.0.1:8080;
+}
+
 http {
     markdown_filter on;
     markdown_streaming auto;
@@ -192,7 +198,7 @@ location = /markdown-metrics {
 ```
 
 Scrape with `Accept: text/plain; version=0.0.4`. The endpoint emits exactly
-the twelve frozen Prometheus families documented in
+the eleven frozen Prometheus families documented in
 [`prometheus-metrics.md`](prometheus-metrics.md). `markdown_diagnostics` is a
 read-only JSON endpoint for effective configuration, provenance, decisions,
 and bounded runtime state. Its built-in access boundary is loopback-only.
@@ -264,6 +270,17 @@ python3 tools/release/gates/validate_schema_drift.py
 
 Historical migrations retain examples for removed directives under their
 versioned documents. Do not copy those examples into a 0.9.2 configuration.
+
+The authoritative removal table for 0.8.x-era directives is
+[MIGRATION-0.9.0.md](MIGRATION-0.9.0.md#directive-mapping-table).  The
+mapping rows below cover only removals that appeared after that table
+(`markdown_streaming_auto_threshold`, `markdown_decompress_max_size`,
+`markdown_parse_timeout`, `markdown_parser_budget`,
+`markdown_stream_threshold`, `markdown_stream_precommit_buffer`,
+`markdown_stream_flush_min`).  `nginx -t` rejects removed directives
+with NGINX's standard "unknown directive" error.  The migration-guide
+pointer in the error message exists only for the 0.9.0 and 0.9.1
+removals.
 
 ## Removed directives
 

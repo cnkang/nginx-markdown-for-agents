@@ -209,6 +209,32 @@ def check_release_workflow(result: ValidationResult) -> None:
         result.fail("pkg:smoke-test-job", "no smoke test job in workflow")
 
 
+def _workflow_naming_issue(wf_content: str) -> str | None:
+    """Return a description of the naming gap, or None when both formats carry the version.
+
+    The deb and rpm patterns are intentionally mutually exclusive: the deb
+    filename form separates the product name with a hyphen (``nginx-<version>``)
+    while the rpm form appends the version directly (``nginx<version>``).
+    A shared ``nginx-?`` prefix would let the deb row satisfy the rpm check.
+    """
+    has_deb_naming = bool(
+        re.search(r"nginx-\$\{?NGINX_VERSION", wf_content)
+        or re.search(r"nginx-\$\{\{.*nginx_version", wf_content)
+    )
+    has_rpm_naming = bool(
+        re.search(r"nginx\$\{?NGINX_VERSION", wf_content)
+        or re.search(r"nginx\$\{\{.*nginx_version", wf_content)
+    )
+    if has_deb_naming and has_rpm_naming:
+        return None
+    missing = []
+    if not has_deb_naming:
+        missing.append(".deb naming without NGINX version")
+    if not has_rpm_naming:
+        missing.append(".rpm naming without NGINX version")
+    return "; ".join(missing)
+
+
 def check_artifact_naming(result: ValidationResult) -> None:
     """Validate artifact naming includes NGINX target version (Req 2.8).
 
@@ -238,30 +264,17 @@ def check_artifact_naming(result: ValidationResult) -> None:
         )
         return
 
-    # Look for filename patterns that include nginx version
-    has_deb_naming = bool(
-        re.search(r"nginx-.*\$\{?NGINX_VERSION", wf_content)
-        or re.search(r"nginx-\$\{\{.*nginx_version", wf_content)
-    )
-    has_rpm_naming = bool(
-        re.search(r"nginx\$\{?NGINX_VERSION", wf_content)
-        or re.search(r"nginx\$\{\{.*nginx_version", wf_content)
-    )
-
-    if has_deb_naming and has_rpm_naming:
+    issue = _workflow_naming_issue(wf_content)
+    if issue is None:
         result.pass_(
             PKG_ARTIFACT_NAMING_WORKFLOW_GATE,
             "workflow constructs .deb/.rpm filenames with NGINX version",
         )
-    elif has_deb_naming or has_rpm_naming:
-        result.pass_(
-            PKG_ARTIFACT_NAMING_WORKFLOW_GATE,
-            "workflow includes NGINX version in artifact naming",
-        )
     else:
         result.fail(
             PKG_ARTIFACT_NAMING_WORKFLOW_GATE,
-            "workflow does not include NGINX version in artifact filenames",
+            "workflow must include NGINX version in BOTH package formats: "
+            + issue,
         )
 
 
