@@ -177,6 +177,7 @@ struct ngx_http_request_s {
         time_t     last_modified_time;
     } headers_out;
     ngx_flag_t allow_ranges;
+    ngx_flag_t header_only;
 };
 
 struct ngx_module_s {
@@ -878,6 +879,8 @@ test_send_412_success_clears_body_headers(void)
                 "send_412 succeeds");
     TEST_ASSERT(r->headers_out.status == NGX_HTTP_PRECONDITION_FAILED,
                 "412 status is set");
+    TEST_ASSERT(r->header_only == 1,
+                "412 request is marked header-only (no chunked body)");
     TEST_ASSERT(r->headers_out.content_length_n == -1,
                 "Content-Length cleared on 412");
     TEST_ASSERT(r->allow_ranges == 0,
