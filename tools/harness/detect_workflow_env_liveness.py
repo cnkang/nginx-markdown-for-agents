@@ -266,9 +266,20 @@ def _match_for_variable(line):
 
 
 def _match_read_variables(line):
-    """Return variable names captured by `read -r A B`."""
+    """Return variable names captured by `read -r A B`.
+
+    A temporary assignment prefix (`IFS= read -r A`) and a `while` loop
+    head (`while IFS= read -r A; do`) are stripped first; the command
+    following them must actually be `read`, otherwise the `read` token
+    is just an argument to another command (`MODE=1 echo read -r ARCH`
+    captures nothing).
+    """
+    remainder = re.sub(
+        r"^(?:\s*while\s+)?(?:export\s+)?[A-Za-z_]\w*=", "", line, count=1
+    )
     match = re.search(
-        r"\bread\s+(?:-[a-zA-Z]+\s+)*([A-Za-z_][A-Za-z0-9_\s]*)", line
+        r"^\s*read\s+(?:-[a-zA-Z]+\s+)*([A-Za-z_][A-Za-z0-9_\s]*)",
+        remainder,
     )
     if not match:
         return ()
