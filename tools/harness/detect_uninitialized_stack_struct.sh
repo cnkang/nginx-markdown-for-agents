@@ -84,10 +84,22 @@ while IFS= read -r -d '' file; do
 
     for type in "${WHOLE_INIT_TYPES[@]}"; do
         # Stack declaration: TYPE name;  or  TYPE name = ...;  or TYPE *name.
-        # `|| true` keeps pipefail from aborting the audit when grep finds
-        # no declarations in a file (grep exits 1 on no match).
-        grep -nE "^[[:space:]]*${type}[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(=|;)" "$file" 2>/dev/null | \
-            while IFS=: read -r line_num content; do
+        # grep exits 1 when the file has no declaration; any other failure
+        # (exit 2, or an error inside the loop body) must propagate under
+        # set -euo pipefail instead of being suppressed.
+        grep_matches="$(mktemp)"
+        grep_rc=0
+        grep -nE "^[[:space:]]*${type}[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(=|;)" "$file" 2>/dev/null > "$grep_matches" || grep_rc=$?
+        if [[ "$grep_rc" -eq 2 ]]; then
+            echo "ERROR: grep failed scanning $file for $type" >&2
+            rm -f "$grep_matches"
+            exit 2
+        fi
+        if [[ "$grep_rc" -eq 1 ]]; then
+            rm -f "$grep_matches"
+            continue
+        fi
+        while IFS=: read -r line_num content; do
             [[ -z "$line_num" ]] && continue
             [[ -z "$content" ]] && continue
 
@@ -125,12 +137,11 @@ while IFS= read -r -d '' file; do
 
             # No whole-init: if the var is used with field access (partial
             # assignment pattern) in the window, report it.
-            if echo "$tail_code" | grep -qE "${var_name}\.[a-zA-Z_]+[[:space:]]*="; then
+            if echo "$tail_code" | grep -qE "${var_name}\\.[a-zA-Z_]+[[:space:]]*="; then
                 echo "CANDIDATE: $file:$line_num — stack ${type} '${var_name}' assigned field-by-field without whole-struct initialization (memset/zero-init/helper); uninitialized members may carry stack garbage past NULL guards" >> "$tmp_violations"
             fi
-        # `|| true` keeps pipefail from aborting the audit when grep finds
-        # no declarations in a file (grep exits 1 on no match).
-        done || true
+        done
+        rm -f "$grep_matches"
     done
 done < <(if [[ "$explicit_scan_dir" -eq 1 ]]; then
     # An explicitly provided directory is scanned without the src/tests

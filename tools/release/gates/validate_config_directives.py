@@ -490,9 +490,11 @@ def check_conf_field_not_in_source(
     """Verify removed conf->streaming.* fields are absent from C sources."""
     check_id = f"removed-field:{field_pattern}"
     found_in = []
+    missing_sources = []
     for name, content in sources.items():
         if content is None:
             result.fail(check_id, f"source file missing: {name}")
+            missing_sources.append(name)
             continue
         if not content:
             continue
@@ -503,6 +505,11 @@ def check_conf_field_not_in_source(
             check_id,
             f"removed field pattern still present in: {', '.join(found_in)}",
         )
+    elif missing_sources:
+        # A missing source makes an absence verdict unsound: the field may
+        # still be referenced in the file that could not be read.  The FAIL
+        # record above already flags it; do not also emit a misleading PASS.
+        return
     else:
         result.pass_(check_id, "removed field pattern absent from all sources")
 

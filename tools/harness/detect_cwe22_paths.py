@@ -534,6 +534,14 @@ def _extract_builtin_open_first_arg(line: str) -> str | None:
     if re.match(r"^'|\"", tail):
         return None
 
+    # The identifier must be the COMPLETE path expression.  A trailing
+    # attribute or subscript access (``args.filename``, ``base[0]``)
+    # means the extracted token is only the receiver root: the real
+    # path is a dynamic member the simple-identifier extractor cannot
+    # vouch for, so treat the whole expression as unparsed.
+    if tail.startswith(".") or tail.startswith("["):
+        return None
+
     return first_arg
 
 
@@ -591,6 +599,10 @@ def _multiline_quote_after(
     from triple-quoted (``'''`` / ``\"\"\"``) strings so that a lone
     quote character inside a docstring continuation line cannot close
     the string early.
+
+    An unquoted ``#`` starts an inline comment: quote scanning stops
+    there so comment text (for example a quoted example path) cannot
+    open a phantom multiline string that swallows later source lines.
     """
     quote: str | None = initial_quote
     escaped = False
@@ -613,6 +625,9 @@ def _multiline_quote_after(
             else:
                 idx += 1
             continue
+        if ch == "#":
+            # Unquoted '#' begins a comment; nothing after it is code.
+            return None
         opened = _try_open_quote(line, idx)
         if opened is not None:
             quote, idx = opened
@@ -689,12 +704,17 @@ def _scan_open_calls(
     open_quote: str | None = None
 
     for lineno, line in enumerate(lines, start=1):
-        if not OPEN_CALL_RE.search(line):
+        open_match = OPEN_CALL_RE.search(line)
+        if not open_match:
             # Keep tracking docstring state even without open() text.
             open_quote = _multiline_quote_after(line, open_quote)
             continue
 
-        in_string = _is_position_inside_string(line, len(line), open_quote)
+        # Evaluate the string state at the matched open() offset, not at
+        # end-of-line: a call embedded inside a quoted message is ignored
+        # while one that merely *appears on* a quoted line is detected.
+        in_string = _is_position_inside_string(
+            line, open_match.start(), open_quote)
         if COMMENT_RE.match(line.lstrip()) or NON_FILE_OPEN_RE.search(line):
             # A comment line cannot contain a live call; still update state.
             open_quote = _multiline_quote_after(line, open_quote)

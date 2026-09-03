@@ -213,11 +213,17 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
 {
     static u_char  inm_name[] = "If-None-Match";
     static u_char  ims_name[] = "If-Modified-Since";
+    static u_char  im_name[] = "If-Match";
+    static u_char  ius_name[] = "If-Unmodified-Since";
     ngx_table_elt_t  *inm;
     ngx_table_elt_t  *ims;
+    ngx_table_elt_t  *im;
+    ngx_table_elt_t  *ius;
     ngx_uint_t       adopted_count;
     ngx_int_t        inm_rc;
     ngx_int_t        ims_rc;
+    ngx_int_t        im_rc;
+    ngx_int_t        ius_rc;
 
     if (r == NULL) {
         return NGX_ERROR;
@@ -234,9 +240,17 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
         r, inm_name, sizeof(inm_name) - 1, scan_limit);
     ims_rc = ngx_http_markdown_validate_conditional_candidates(
         r, ims_name, sizeof(ims_name) - 1, scan_limit);
-    if (inm_rc != NGX_OK || ims_rc != NGX_OK) {
+    im_rc = ngx_http_markdown_validate_conditional_candidates(
+        r, im_name, sizeof(im_name) - 1, scan_limit);
+    ius_rc = ngx_http_markdown_validate_conditional_candidates(
+        r, ius_name, sizeof(ius_name) - 1, scan_limit);
+    if (inm_rc != NGX_OK || ims_rc != NGX_OK
+        || im_rc != NGX_OK || ius_rc != NGX_OK)
+    {
         r->headers_in.if_none_match = NULL;
         r->headers_in.if_modified_since = NULL;
+        r->headers_in.if_match = NULL;
+        r->headers_in.if_unmodified_since = NULL;
         return NGX_ERROR;
     }
 
@@ -247,9 +261,17 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     ims_rc = ngx_http_markdown_commit_one_conditional_headers(
         r, ims_name, sizeof(ims_name) - 1, scan_limit,
         &ims, &adopted_count);
+    im_rc = ngx_http_markdown_commit_one_conditional_headers(
+        r, im_name, sizeof(im_name) - 1, scan_limit,
+        &im, &adopted_count);
+    ius_rc = ngx_http_markdown_commit_one_conditional_headers(
+        r, ius_name, sizeof(ius_name) - 1, scan_limit,
+        &ius, &adopted_count);
 
     r->headers_in.if_none_match = inm;
     r->headers_in.if_modified_since = ims;
+    r->headers_in.if_match = im;
+    r->headers_in.if_unmodified_since = ius;
 
     if (ownership != NULL) {
         ngx_memzero(ownership, sizeof(*ownership));
@@ -261,7 +283,9 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
         }
     }
 
-    return (inm_rc == NGX_OK && ims_rc == NGX_OK) ? NGX_OK : NGX_ERROR;
+    return (inm_rc == NGX_OK && ims_rc == NGX_OK
+            && im_rc == NGX_OK && ius_rc == NGX_OK)
+        ? NGX_OK : NGX_ERROR;
 }
 
 static uint8_t

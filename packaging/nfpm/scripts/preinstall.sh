@@ -84,9 +84,14 @@ case "$ACTION" in
         fi
         INSTALLED_NGINX_VERSION=""
         while IFS= read -r version_line; do
-            candidate="${version_line##*nginx/}"
-            if [[ "${candidate}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                INSTALLED_NGINX_VERSION="${candidate}"
+            # Match the version token immediately after the LAST "nginx/"
+            # occurrence in the banner.  A distro build appends a package
+            # revision (for example 1.26.3-1+deb12u1) to the upstream
+            # version; such a suffix proves the binary is NOT the nginx.org
+            # build this module was compiled against, so it must fail the
+            # exact-version guard rather than be truncated away.
+            if [[ "${version_line}" =~ nginx/[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                INSTALLED_NGINX_VERSION="${version_line##*nginx/}"
                 break
             fi
         done <<< "${NGINX_VERSION_OUTPUT}"

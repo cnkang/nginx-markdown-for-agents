@@ -211,10 +211,17 @@ jobs:
           NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}
         run: |
           . "$HOME/.cargo/env"
+          nginx_version_ceil="$(
+            awk 'BEGIN {
+              split(ARGV[1], parts, ".");
+              printf "%d.%d.%d", parts[1], parts[2], parts[3] + 1;
+            }' "${NGINX_VERSION}"
+          )"
           rpmbuild -bb \
             --define "_topdir $HOME/rpmbuild" \
             --define "version ${PKG_VERSION}" \
             --define "nginx_version ${NGINX_VERSION}" \
+            --define "nginx_version_ceil ${nginx_version_ceil}" \
             ~/rpmbuild/SPECS/nginx-module-markdown.spec
 
       - name: Collect RPM artifacts

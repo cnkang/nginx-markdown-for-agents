@@ -226,7 +226,8 @@ fi
 fake_nginx "1.26.3"
 unresolved_path="$(mktemp "${FAKE_ROOT}/unresolved.XXXXXX")"
 render_status=0
-render-nfpm-config.sh "${PREINSTALL}" "${unresolved_path}" "%%NGINX_VERSION%%" \
+"${SCRIPT_DIR}/../nfpm/scripts/render-nfpm-config.sh" "${PREINSTALL}" \
+    "${unresolved_path}" "%%NGINX_VERSION%%" \
     2>/dev/null || render_status=$?
 rm -f "${unresolved_path}"
 if [[ "${render_status}" -ne 0 ]]; then

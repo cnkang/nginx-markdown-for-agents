@@ -57,10 +57,22 @@ trap 'rm -f "$tmp_violations"' EXIT
 while IFS= read -r -d '' file; do
     for api in "${NGX_AGAIN_APIS[@]}"; do
         # Find every call site of this API (matches "api(" as a call).
-        # `|| true` keeps pipefail from aborting the audit when grep finds
-        # no calls in a file (grep exits 1 on no match).
-        grep -n "${api}[[:space:]]*(" "$file" 2>/dev/null | \
-            while IFS=: read -r line_num content; do
+        # grep exits 1 when a file has no call; that is the expected
+        # no-match result.  Any other grep failure (exit 2) or a failure
+        # inside the loop body must propagate under set -euo pipefail.
+        grep_matches="$(mktemp)"
+        grep_rc=0
+        grep -n "${api}[[:space:]]*(" "$file" 2>/dev/null > "$grep_matches" || grep_rc=$?
+        if [[ "$grep_rc" -eq 2 ]]; then
+            echo "ERROR: grep failed scanning $file for $api()" >&2
+            rm -f "$grep_matches"
+            exit 2
+        fi
+        if [[ "$grep_rc" -eq 1 ]]; then
+            rm -f "$grep_matches"
+            continue
+        fi
+        while IFS=: read -r line_num content; do
             [[ -z "$line_num" ]] && continue
             [[ -z "$content" ]] && continue
 
@@ -145,9 +157,8 @@ while IFS= read -r -d '' file; do
             if [[ "$has_again_branch" -eq 0 && ( -n "$fold_pattern" || "$immediate_return" -eq 1 ) ]]; then
                 echo "VIOLATION: $file:$line_num — call to $api() returns NGX_AGAIN but the call site has no explicit NGX_AGAIN branch (folded into error path or immediate return)" >> "$tmp_violations"
             fi
-        # `|| true` keeps pipefail from aborting the audit when grep finds
-        # no calls in a file (grep exits 1 on no match).
-        done || true
+        done
+        rm -f "$grep_matches"
     done
 done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f -print0)
 

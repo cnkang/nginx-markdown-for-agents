@@ -113,3 +113,19 @@ def test_open_string_literal_inside_fixture_is_not_flagged(tmp_path):
 
     assert errors == []
     assert warnings == []
+
+
+def test_identifier_with_attribute_access_is_unaudited(tmp_path):
+    """open(args.filename) is a dynamic member, not a safe bare variable."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(args):\n"
+        "    with open(args.filename, encoding='utf-8') as stream:\n"
+        "        return stream.read()\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert len(warnings) == 1
+    assert "dynamic expression" in warnings[0]

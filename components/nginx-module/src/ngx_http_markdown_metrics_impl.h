@@ -656,7 +656,7 @@ ngx_http_markdown_metrics_to_v1(
         v1->duration_full_buffer.buckets[8] =
             snapshot->conversion_latency.le_1000ms;
         v1->duration_full_buffer.buckets[9] =
-            snapshot->conversion_latency.le_1000ms;
+            snapshot->conversion_latency.gt_1000ms;
         v1->duration_full_buffer.sum_us =
             ngx_http_markdown_metrics_ms_to_us(
                 snapshot->conversion_time_sum_ms);
