@@ -455,6 +455,10 @@ class TestReleaseGateSnippetExpectations:
         assert "nginx = 1:%{nginx_version}" not in validator.STANDALONE_RPM_SPEC_SNIPPETS
         assert "Requires:       nginx = %{nginx_version}" in validator.FORBIDDEN_NAKED_EXACT_NGINX_DEPS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "PATH=/usr/sbin:/usr/bin:/sbin:/bin" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "NGINX_BIN=/usr/sbin/nginx" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "SED_BIN=/usr/bin/sed" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert '"$NGINX_BIN" -v 2>&1 | "$SED_BIN" -n' in validator.STANDALONE_RPM_SPEC_SNIPPETS
 
     def test_preremove_regex_is_shell_ere_safe(self) -> None:
         """Keep the module-load regex free of invalid ERE quote escapes."""
@@ -475,8 +479,32 @@ class TestReleaseGateSnippetExpectations:
         snippets = validator.STANDALONE_RPM_WORKFLOW_SNIPPETS
         assert env_binding in snippets
         assert validator_cmd in snippets
+        assert "NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}" in snippets
+        assert "packaging/nfpm/scripts/render-nfpm-config.sh" in snippets
+        assert '"/tmp/${TARBALL_DIR}/preremove.sh"' in snippets
         assert direct_interpolation not in snippets
         assert direct_interpolation in validator.STANDALONE_VERSION_FORBIDDEN_SNIPPETS
+
+    def test_standalone_rpm_workflow_requires_rendered_preremove(
+        self, monkeypatch
+    ) -> None:
+        """The standalone tarball must not carry an unresolved template."""
+        output_path = '"/tmp/${TARBALL_DIR}/preremove.sh"'
+        removed_snippets = {
+            output_path,
+            validator.STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET,
+        }
+        content = "\n".join(
+            snippet
+            for snippet in validator.STANDALONE_RPM_WORKFLOW_SNIPPETS
+            if snippet not in removed_snippets
+        )
+        monkeypatch.setattr(validator, "read_safe", lambda _path: content)
+        result = validator.ValidationResult()
+
+        validator._validate_standalone_rpm_workflow(result)
+
+        assert result.has_failures
 
     def test_standalone_rpm_workflow_rejects_direct_expression_in_shell(
         self, monkeypatch
@@ -592,6 +620,11 @@ class TestReleaseGateSnippetExpectations:
         validator.validate_nfpm_preremove_lifecycle(result)
         assert not result.has_failures, result.results
         assert "remove|0)" in validator.NFPM_PREREMOVE_SNIPPETS
+        assert "no trailing newline" in validator.NFPM_PREREMOVE_SNIPPETS
+        assert validator.RPM_FORCE_REMOVE_INSTRUCTION_SNIPPETS == [
+            "printf '%s' 'nginx-markdown-module force-remove v1'",
+            "sudo tee /etc/nginx/markdown-module-force-remove >/dev/null",
+        ]
         assert "%preun" in validator.RPM_PREUN_SNIPPETS
 
     def test_release_build_uses_rpm_glibc_baseline(self) -> None:
