@@ -887,7 +887,7 @@ ngx_http_markdown_is_last_modified_header(const ngx_table_elt_t *header)
 
 /* Find the active response Last-Modified header, ignoring invalidated slots. */
 static const ngx_table_elt_t *
-ngx_http_markdown_find_last_modified_header(ngx_http_request_t *r)
+ngx_http_markdown_find_last_modified_header(const ngx_http_request_t *r)
 {
     if (r == NULL) {
         return NULL;
