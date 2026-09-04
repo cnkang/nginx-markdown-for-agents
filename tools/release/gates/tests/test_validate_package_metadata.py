@@ -440,11 +440,16 @@ class TestReleaseGateSnippetExpectations:
 
         NGINX dynamic modules require an exact version match; the core
         loader rejects any difference (including patch) before signature
-        checks.  The RPM spec must express a closed floor-and-ceiling
-        interval between the pinned version and the next patch, never a
-        floor-only branch-scoped dependency and never a naked exact dep
-        without the epoch.
+        checks. The RPM metadata must require the official nginx-r capability
+        as well as express a closed floor-and-ceiling interval between the
+        pinned version and the next patch, never a floor-only branch-scoped
+        dependency and never a naked exact dep without the epoch.
         """
+        assert "nginx-r${NGINX_VERSION}" in validator.NFPM_REQUIRED_SNIPPETS
+        assert (
+            "Requires:       nginx-r%{nginx_version}"
+            in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        )
         assert "Requires:       nginx >= 1:%{nginx_version}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
         assert "Conflicts:      nginx >= 1:%{nginx_version_ceil}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
         assert "nginx = 1:%{nginx_version}" not in validator.STANDALONE_RPM_SPEC_SNIPPETS

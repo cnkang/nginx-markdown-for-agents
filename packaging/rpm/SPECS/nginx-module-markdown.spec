@@ -7,6 +7,7 @@ License:        BSD-2-Clause
 URL:            https://github.com/cnkang/nginx-markdown-for-agents
 Source0:        %{name}-%{version}.tar.gz
 
+Requires:       nginx-r%{nginx_version}
 Requires:       nginx >= 1:%{nginx_version}
 Conflicts:      nginx >= 1:%{nginx_version_ceil}
 
@@ -19,10 +20,12 @@ Built against nginx.org stable %{nginx_version}.
 WARNING: This module is built for nginx.org %{nginx_version} ONLY. NGINX
 dynamic modules require an exact version match — the core loader rejects
 any version difference (including a patch release) before signature
-checks. The RPM dependency allows the exact build version (with a ceiling
-at the next patch) but rejects any other NGINX version or distro build.
-It will NOT work with distro-provided, vendor-patched, OpenResty, Tengine,
-or custom-built NGINX binaries, or with any other NGINX version.
+checks. The RPM dependency requires the nginx.org nginx-r%{nginx_version}
+capability in addition to the epoch-aware version bounds. A package that
+merely reports the same version without the expected ABI capability is
+rejected before installation. It will NOT work with distro-provided,
+vendor-patched, OpenResty, Tengine, or custom-built NGINX binaries, or with
+any other NGINX version.
 
 Features:
 - Streaming and full-buffer conversion engines
@@ -69,16 +72,17 @@ install -m 0755 preremove.sh \
     %{buildroot}/usr/libexec/nginx-markdown-for-agents/preremove.sh
 
 %pre
-# Guard: the running NGINX executable must match the exact version this
-# module was built against.  The RPM dependency bounds (Requires floor +
-# Conflicts ceiling) describe the compatible EVR interval, but a distro-
-# rebuilt, vendor-patched, or mismatched binary can still satisfy RPM EVR
-# comparison while failing the dynamic-module ABI check at load time.
+# The nginx-r%{nginx_version} capability above is provided by the official
+# nginx.org nginx package. RPM resolves that capability before %pre, so a
+# same-EVR distro-rebuilt, vendor-patched, or custom package without the
+# expected ABI provenance is rejected before this script runs.
+# Guard: the running NGINX executable must also match the exact version this
+# module was built against. The loader performs the final signature check.
 # Fail the transaction here with an explicit message instead of leaving
 # the operator with a module NGINX refuses to load.
 # $1==1 during upgrade, $1==2 during erase — run the guard only for
 # install/upgrade (not erase), and tolerate a missing nginx binary
-# (the RPM dependency still enforces the floor/ceiling).
+# (the RPM dependencies still enforce the capability and floor/ceiling).
 if [ "$1" -ne 0 ]; then
     if command -v nginx >/dev/null 2>&1; then
         GUARD_NGINX_VERSION="$(nginx -v 2>&1 | sed -n 's/.*nginx version: nginx\/\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
