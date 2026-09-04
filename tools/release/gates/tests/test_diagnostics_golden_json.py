@@ -574,10 +574,12 @@ class TestLastErrorBounds:
         # Build an error whose tail crosses the 512-byte boundary with a
         # config filename: the redactor must scrub the complete filename
         # before truncation, leaving no path fragment in the output.
-        prefix = "x" * 500
+        prefix = "x" * 504
         error_text = prefix + " /etc/nginx/nginx.conf"
         redacted = redact_last_error(error_text)
-        assert len(redacted.encode("utf-8")) <= 512
+        assert len(error_text.encode("utf-8")) > 512
+        assert len(redacted.encode("utf-8")) == 512
+        assert redacted == prefix + " <redact"
         for pattern in _PATH_PATTERNS:
             assert not pattern.search(redacted), (
                 f"path fragment survived truncation: {redacted!r}"
