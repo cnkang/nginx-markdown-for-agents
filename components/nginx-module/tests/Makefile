@@ -76,7 +76,15 @@ build/unit/%: unit/%_test.c include/test_common.h | build/unit build/generated
 	  request_bypass_production) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-parameter" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  inflight) extra_srcs="helpers/inflight_peer.c"; extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	esac; \
-	$(CC) $(CFLAGS_COMMON) $(LDFLAGS_COMMON) $$extra_cflags -o "$@" "$<" $$extra_srcs $$extra_ldflags
+	objs=""; \
+	i=0; \
+	for src in "$<" $$extra_srcs; do \
+	  i=$$((i + 1)); \
+	  obj="build/unit/$*-src$${i}.o"; \
+	  objs="$${objs} $${obj}"; \
+	  $(CC) $(CFLAGS_COMMON) $$extra_cflags -MT "$@" -c "$${src}" -o "$${obj}"; \
+	done; \
+	$(CC) $(LDFLAGS_COMMON) -o "$@" $$objs $$extra_ldflags
 
 unit: $(UNIT_BINS)
 	@set -e; \
@@ -126,7 +134,7 @@ COV_DIR ?= build/coverage
 unit-coverage:
 	@$(MAKE) clean
 	@$(MAKE) unit \
-		CFLAGS_COMMON="-Wall -Wextra -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -g --coverage -std=$(CSTD) -Iinclude -I../../rust-converter/include" \
+		CFLAGS_COMMON="-Wall -Wextra -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -g --coverage -std=$(CSTD) -Iinclude -I../../rust-converter/include -MMD -MP" \
 		LDFLAGS_COMMON="--coverage"
 	@mkdir -p $(COV_DIR)
 	lcov --capture --directory build/unit --output-file $(COV_DIR)/raw.lcov \
