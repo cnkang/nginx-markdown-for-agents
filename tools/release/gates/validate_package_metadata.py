@@ -74,6 +74,7 @@ NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
+    "nginx-r${NGINX_VERSION}",
     "nginx >= ${RPM_NGINX_EVR}",
     "nginx < ${RPM_NGINX_EVR_CEIL}",
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
@@ -183,6 +184,7 @@ RELEASE_BINARY_SIGNING_FORBIDDEN_SNIPPETS = [
 ]
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
+    "Requires:       nginx-r%{nginx_version}",
     "Requires:       nginx >= 1:%{nginx_version}",
     "Conflicts:      nginx >= 1:%{nginx_version_ceil}",
     "Source0:        %{name}-%{version}.tar.gz",
