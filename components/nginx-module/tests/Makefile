@@ -82,7 +82,10 @@ build/unit/%: unit/%_test.c include/test_common.h | build/unit build/generated
 	  i=$$((i + 1)); \
 	  obj="build/unit/$*-src$${i}.o"; \
 	  objs="$${objs} $${obj}"; \
-	  $(CC) $(CFLAGS_COMMON) $$extra_cflags -MT "$@" -c "$${src}" -o "$${obj}"; \
+	  $(CC) $(CFLAGS_COMMON) $$extra_cflags -MT "$@" -c "$${src}" -o "$${obj}" || { \
+	    printf 'ERROR: failed to compile unit source %s\n' "$${src}" >&2; \
+	    exit 1; \
+	  }; \
 	done; \
 	$(CC) $(LDFLAGS_COMMON) -o "$@" $$objs $$extra_ldflags
 
