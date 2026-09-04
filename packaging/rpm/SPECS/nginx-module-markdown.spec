@@ -80,12 +80,25 @@ install -m 0755 preremove.sh \
 # module was built against. The loader performs the final signature check.
 # Fail the transaction here with an explicit message instead of leaving
 # the operator with a module NGINX refuses to load.
+# Use fixed system paths in this root-run scriptlet; never inherit a caller's
+# PATH when resolving the executable or the parser used to inspect its output.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+NGINX_BIN=/usr/sbin/nginx
+SED_BIN=/usr/bin/sed
 # $1==1 during upgrade, $1==2 during erase — run the guard only for
 # install/upgrade (not erase), and tolerate a missing nginx binary
 # (the RPM dependencies still enforce the capability and floor/ceiling).
 if [ "$1" -ne 0 ]; then
-    if command -v nginx >/dev/null 2>&1; then
-        GUARD_NGINX_VERSION="$(nginx -v 2>&1 | sed -n 's/.*nginx version: nginx\/\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+    if [ -x "$NGINX_BIN" ]; then
+        if [ ! -x "$SED_BIN" ]; then
+            echo "ERROR: trusted sed executable not found at $SED_BIN" >&2
+            exit 1
+        fi
+        if ! GUARD_NGINX_VERSION="$("$NGINX_BIN" -v 2>&1 | "$SED_BIN" -n 's/.*nginx version: nginx\/\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"; then
+            echo "ERROR: could not inspect the installed NGINX version" >&2
+            exit 1
+        fi
         if [ -n "${GUARD_NGINX_VERSION}" ] && [ "${GUARD_NGINX_VERSION}" != "%{nginx_version}" ]; then
             echo "ERROR: installed NGINX version ${GUARD_NGINX_VERSION} does not match the exact version %{nginx_version} this module was built for" >&2
             echo "  This package provides a dynamic module for nginx.org %{nginx_version} ONLY." >&2
@@ -123,11 +136,10 @@ EOF
 # inspection is impossible, operators who have verified the include graph
 # themselves may acknowledge that explicitly by creating the sentinel file
 # below before running the RPM removal:
-#   sudo touch /etc/nginx/markdown-module-force-remove
+#   printf '%s' 'nginx-markdown-module force-remove v1' | sudo tee /etc/nginx/markdown-module-force-remove >/dev/null
 #   sudo rpm -e <package>
-# The file persists until the operator deletes it, so every affected
-# removal transaction stays explicit rather than inheriting unsettable
-# scriptlet environment state.
+# The exact token has no trailing newline and is consumed after one use, so
+# every affected removal transaction stays explicit.
 %preun
 if [ "$1" -eq 0 ]; then
     /bin/bash /usr/libexec/nginx-markdown-for-agents/preremove.sh remove

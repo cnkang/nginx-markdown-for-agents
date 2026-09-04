@@ -15,6 +15,8 @@
 
 set -euo pipefail
 
+# The renderer replaces this marker with the trusted executable prelude.
+# shellcheck disable=SC2288
 %%TRUSTED_EXEC_PRELUDE%%
 
 ##############################################################################
@@ -133,7 +135,8 @@ check_active_configuration() {
     # configuration cannot be verified. The persistent force-removal sentinel
     # is the explicit operator path for an out-of-band verification.
     info "The complete NGINX include graph could not be verified."
-    info "Create ${FORCE_REMOVE_SENTINEL} to acknowledge forced removal."
+    info "Create ${FORCE_REMOVE_SENTINEL} with the exact token (no trailing newline):"
+    info "  printf '%s' '${FORCE_REMOVE_TOKEN}' | sudo tee '${FORCE_REMOVE_SENTINEL}' >/dev/null"
     return 2
 }
 

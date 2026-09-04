@@ -145,18 +145,31 @@ ARCH_RUNNER_SNIPPET = (
     "'ubuntu-24.04' }}"
 )
 STANDALONE_CONTAINER_BASH_SHELL = "defaults:\n      run:\n        shell: bash"
+STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET = (
+    "packaging/nfpm/scripts/render-nfpm-config.sh \\\n"
+    "            packaging/nfpm/scripts/preremove.sh \\\n"
+    "            \"/tmp/${TARBALL_DIR}/preremove.sh\" \\\n"
+    "            \"${NGINX_VERSION}\""
+)
 STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     "INPUT_VERSION: ${{ inputs.version }}",
+    "NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}",
     './packaging/scripts/validate-version.sh "$INPUT_VERSION"',
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "docs/guides/INSTALL.md",
     "docs/guides/PACKAGE_INSTALLATION.md",
     "docs/guides/PACKAGE_COMPATIBILITY.md",
+    "packaging/nfpm/scripts/render-nfpm-config.sh",
+    '"/tmp/${TARBALL_DIR}/preremove.sh"',
+    STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET,
     '--define "nginx_version ${NGINX_VERSION}"',
     "tools/release/gates/check_install_layout.sh dist/*.rpm",
 ]
 STANDALONE_VERSION_FORBIDDEN_SNIPPETS = [
     './packaging/scripts/validate-version.sh "${{ inputs.version }}"',
+]
+STANDALONE_RPM_WORKFLOW_FORBIDDEN_SNIPPETS = [
+    'cp packaging/nfpm/scripts/preremove.sh "/tmp/${TARBALL_DIR}/"',
 ]
 RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS = [
     "integrity-signing:",
@@ -190,8 +203,17 @@ STANDALONE_RPM_SPEC_SNIPPETS = [
     "Source0:        %{name}-%{version}.tar.gz",
     f"%setup -q -n {CANONICAL_PACKAGE_NAME}-%{{version}}",
     "# No-op: release-rpm.yml packages a prebuilt dynamic module.",
+    "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+    "NGINX_BIN=/usr/sbin/nginx",
+    "SED_BIN=/usr/bin/sed",
+    'if [ -x "$NGINX_BIN" ]; then',
+    '"$NGINX_BIN" -v 2>&1 | "$SED_BIN" -n',
     "install -m 0644 ngx_http_markdown_filter_module.so",
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
+]
+STANDALONE_RPM_SPEC_FORBIDDEN_SNIPPETS = [
+    "command -v nginx",
+    "$(nginx -v 2>&1 | sed ",
 ]
 FORBIDDEN_NAKED_EXACT_NGINX_DEPS = [
     "Requires:       nginx = %{nginx_version}",
@@ -239,7 +261,13 @@ NFPM_PREREMOVE_SNIPPETS = [
     "Remove that directive, run 'nginx -t', then retry package removal.",
     "No NGINX configuration was modified automatically.",
     'FORCE_REMOVE_SENTINEL="/etc/nginx/markdown-module-force-remove"',
+    "no trailing newline",
+    "printf '%s' '${FORCE_REMOVE_TOKEN}' | sudo tee '${FORCE_REMOVE_SENTINEL}' >/dev/null",
     "forced removal acknowledged",
+]
+RPM_FORCE_REMOVE_INSTRUCTION_SNIPPETS = [
+    "printf '%s' 'nginx-markdown-module force-remove v1'",
+    "sudo tee /etc/nginx/markdown-module-force-remove >/dev/null",
 ]
 RPM_PREUN_SNIPPETS = [
     "%preun",
@@ -1321,6 +1349,13 @@ def _validate_standalone_rpm_workflow(result: ValidationResult) -> None:
         rpm_workflow, STANDALONE_VERSION_FORBIDDEN_SNIPPETS,
         "standalone-rpm-workflow", RELEASE_RPM_WORKFLOW.name, result,
     )
+    _check_forbidden_snippets(
+        rpm_workflow,
+        STANDALONE_RPM_WORKFLOW_FORBIDDEN_SNIPPETS,
+        "standalone-rpm-workflow",
+        RELEASE_RPM_WORKFLOW.name,
+        result,
+    )
 
 
 def _validate_standalone_rpm_spec(result: ValidationResult) -> None:
@@ -1332,6 +1367,13 @@ def _validate_standalone_rpm_spec(result: ValidationResult) -> None:
     _check_snippets(
         rpm_spec, STANDALONE_RPM_SPEC_SNIPPETS, "standalone-rpm-spec",
         "RPM spec", result,
+    )
+    _check_forbidden_snippets(
+        rpm_spec,
+        STANDALONE_RPM_SPEC_FORBIDDEN_SNIPPETS,
+        "standalone-rpm-spec",
+        "RPM spec",
+        result,
     )
     if _contains_make_build_command(rpm_spec):
         result.fail(
@@ -1453,6 +1495,7 @@ def validate_nfpm_preremove_lifecycle(result: ValidationResult) -> None:
             "run_case unreadable remove 1",
             "content-bound one-shot force-removal sentinel",
             "No NGINX configuration was modified automatically",
+            "printf '%s' 'nginx-markdown-module force-remove v1' | sudo tee",
         ],
         "nfpm-preremove:test",
         "test-package-removal-guard.sh",
@@ -1464,6 +1507,13 @@ def validate_nfpm_preremove_lifecycle(result: ValidationResult) -> None:
         result.fail("rpm-preun:exists", "RPM spec not found")
         return
     _check_snippets(spec, RPM_PREUN_SNIPPETS, "rpm-preun", str(RPM_SPEC), result)
+    _check_snippets(
+        spec,
+        RPM_FORCE_REMOVE_INSTRUCTION_SNIPPETS,
+        "rpm-preun:force-remove-instruction",
+        str(RPM_SPEC),
+        result,
+    )
 
     workflow = read_safe(RELEASE_PACKAGES_WORKFLOW)
     if not workflow:

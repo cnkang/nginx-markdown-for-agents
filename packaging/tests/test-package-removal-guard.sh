@@ -163,6 +163,12 @@ if ! printf '%s\n' "${run_case_output}" \
         "${run_case_output}" >&2
     exit 1
 fi
+if ! printf '%s\n' "${run_case_output}" \
+    | grep -F -q "printf '%s' 'nginx-markdown-module force-remove v1' | sudo tee"; then
+    printf 'FAIL: no-nginx fallback did not provide the exact no-newline sentinel command\n%s\n' \
+        "${run_case_output}" >&2
+    exit 1
+fi
 printf 'PASS: no-nginx fallback blocks unverifiable configuration\n' >&2
 
 # No NGINX executable and no standard configuration file at all: the
