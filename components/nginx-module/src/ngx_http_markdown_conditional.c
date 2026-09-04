@@ -1703,6 +1703,18 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
             return NGX_HTTP_PRECONDITION_FAILED;
         }
 
+        /*
+         * If If-Match is present, we must fail closed (412) if we cannot evaluate it
+         * unless it is an asterisk '*'.
+         */
+        if (im_header != NULL) {
+            if (!ngx_http_markdown_if_match_satisfied(
+                    r, ctx, im_header, NULL, 0))
+            {
+                return NGX_HTTP_PRECONDITION_FAILED;
+            }
+        }
+
         return NGX_DECLINED;
     }
 
@@ -1815,6 +1827,7 @@ typedef struct {
     unsigned                                allow_ranges;
     ngx_http_markdown_304_list_snapshot_t  headers_snapshot;
     ngx_http_markdown_304_list_snapshot_t  trailers_snapshot;
+    ngx_flag_t                              header_only;
 } ngx_http_markdown_304_snapshot_t;
 
 static ngx_int_t
@@ -1945,6 +1958,7 @@ ngx_http_markdown_304_snapshot_prepare(ngx_http_request_t *r,
     snapshot->content_length_n = r->headers_out.content_length_n;
     snapshot->last_modified_time = r->headers_out.last_modified_time;
     snapshot->allow_ranges = r->allow_ranges;
+    snapshot->header_only = r->header_only;
 
     if (ngx_http_markdown_304_snapshot_list(r->pool,
             &r->headers_out.headers, &snapshot->headers_snapshot)
@@ -1988,6 +2002,7 @@ ngx_http_markdown_304_snapshot_restore(ngx_http_request_t *r,
     r->headers_out.content_length_n = snapshot->content_length_n;
     r->headers_out.last_modified_time = snapshot->last_modified_time;
     r->allow_ranges = snapshot->allow_ranges;
+    r->header_only = snapshot->header_only;
 
     ngx_http_markdown_304_restore_list(&r->headers_out.headers,
         &snapshot->headers_snapshot);
@@ -2131,21 +2146,13 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     return NGX_DONE;
 }
 
-/*
- * Send 412 Precondition Failed.
- *
- * Mirrors the 304 path's failure contract: snapshot both outgoing lists and
- * every dedicated field touched before any mutation, so a failed header
- * operation restores the exact upstream representation.  The 412 carries no
- * body: Content-Length, representation digests, Accept-Ranges, and trailers
- * of the source HTML representation are cleared.  Vary: Accept is retained
- * because the representation is still negotiated.
- */
 ngx_int_t
 ngx_http_markdown_send_412(ngx_http_request_t *r)
 {
     ngx_int_t                           rc;
     ngx_http_markdown_304_snapshot_t    snapshot;
+    ngx_flag_t                          auth_cache_control_required;
+    const ngx_http_markdown_conf_t     *conf;
 
     if (r == NULL) {
         return NGX_ERROR;
@@ -2159,11 +2166,6 @@ ngx_http_markdown_send_412(ngx_http_request_t *r)
 
     r->headers_out.status = NGX_HTTP_PRECONDITION_FAILED;
     r->headers_out.status_line.len = 0;
-
-    /* The 412 carries no body: mark the request header-only so the
-     * HTTP/1.1 header filter does not switch to chunked encoding for a
-     * body that is never sent.  The core only sets header_only for 204,
-     * 304 and HEAD; the module must declare it explicitly for 412. */
     r->header_only = 1;
 
     ngx_http_clear_content_length(r);
@@ -2193,14 +2195,40 @@ ngx_http_markdown_send_412(ngx_http_request_t *r)
         r, (const u_char *) "Trailer", sizeof("Trailer") - 1);
     ngx_http_markdown_clear_trailers(r);
 
-    /* The 412 describes the Markdown representation; the weak validator
-     * must not reference the source HTML mtime. */
+    /*
+     * The 412 describes the Markdown representation, not the source HTML.
+     * Clear stale Last-Modified metadata so no upstream mtime leaks out,
+     * matching the 304 representation contract.
+     */
     r->headers_out.last_modified_time = (time_t) -1;
     r->headers_out.last_modified = NULL;
     ngx_http_markdown_invalidate_response_header(
         r, (const u_char *) "Last-Modified", sizeof("Last-Modified") - 1);
 
     ngx_http_markdown_set_representation_content_type(r);
+
+    /*
+     * The 412 carries no Markdown ETag (no body was produced): drop the
+     * source HTML validator so the response cannot mix a Markdown
+     * Content-Type with an HTML ETag.
+     */
+    r->headers_out.etag = NULL;
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "ETag", sizeof("ETag") - 1);
+
+    conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
+    auth_cache_control_required = 0;
+    rc = ngx_http_markdown_auth_cache_control_required(
+        r, conf, &auth_cache_control_required);
+    if (rc == NGX_OK && auth_cache_control_required) {
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+    }
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: 412 auth Cache-Control update failed");
+        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        return NGX_ERROR;
+    }
 
     rc = ngx_http_markdown_add_vary_accept(r);
     if (rc != NGX_OK) {
@@ -2210,12 +2238,10 @@ ngx_http_markdown_send_412(ngx_http_request_t *r)
 
     rc = ngx_http_send_header(r);
     if (rc == NGX_AGAIN) {
-        /* Same NGX_AGAIN contract as the 304 path: the prepared
-         * representation stays prepared and the header chain resumes
-         * it on the next filter invocation. */
         return NGX_AGAIN;
     }
     if (rc != NGX_OK && rc != NGX_DONE) {
+        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
         return rc;
     }
 
