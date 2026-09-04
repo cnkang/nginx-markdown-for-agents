@@ -1794,6 +1794,87 @@ test_deflate_raw_trailing_data(void)
 }
 
 /*
+ * A valid raw stored-block stream can begin with bytes that also satisfy the
+ * zlib header check.  The wrapped interpretation of this fixture emits one
+ * byte before reaching an invalid block, while the raw interpretation
+ * decompresses the complete payload.  The fallback must therefore replay the
+ * input even after wrapped inflate has produced output.
+ */
+static void
+test_deflate_raw_zlib_like_prefix_after_wrapped_output(void)
+{
+    enum {
+        raw_payload_size = 0x0a9c,
+        compressed_size = raw_payload_size + 10
+    };
+    u_char    *compressed;
+    u_char     wrapped_output[raw_payload_size];
+    ngx_buf_t  in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t  rc;
+    z_stream   wrapped;
+    int        zrc;
+
+    init_request(&r);
+    compressed = ngx_alloc(compressed_size, r.connection->log);
+    TEST_ASSERT(compressed != NULL,
+                "ambiguous raw-deflate fixture allocation should succeed");
+
+    /*
+     * First raw block: LEN=0x0a9c, NLEN=0xf563.  The final empty stored
+     * block completes the raw stream.  After the 78 9c prefix is consumed as
+     * a zlib header, the remaining bytes make wrapped inflate produce output
+     * and then report a format error.
+     */
+    compressed[0] = 0x78;
+    compressed[1] = 0x9c;
+    compressed[2] = 0x0a;
+    compressed[3] = 0x63;
+    compressed[4] = 0xf5;
+    memset(compressed + 5, 0, raw_payload_size);
+    compressed[5 + raw_payload_size] = 0x01;
+    compressed[6 + raw_payload_size] = 0x00;
+    compressed[7 + raw_payload_size] = 0x00;
+    compressed[8 + raw_payload_size] = 0xff;
+    compressed[9 + raw_payload_size] = 0xff;
+
+    ngx_memzero(&wrapped, sizeof(wrapped));
+    wrapped.next_in = compressed;
+    wrapped.avail_in = compressed_size;
+    wrapped.next_out = wrapped_output;
+    wrapped.avail_out = sizeof(wrapped_output);
+    zrc = inflateInit2(&wrapped, MAX_WBITS);
+    TEST_ASSERT(zrc == Z_OK,
+                "ambiguous fixture wrapped inflate init should succeed");
+    zrc = inflate(&wrapped, Z_NO_FLUSH);
+    TEST_ASSERT(zrc == Z_DATA_ERROR && wrapped.total_out > 0,
+                "wrapped interpretation should fail after producing output");
+    inflateEnd(&wrapped);
+
+    in = make_chain(compressed, compressed_size, &in_buf);
+    out = NULL;
+    rc = ngx_http_markdown_decompress(
+        &r, NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, &in, &out);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "raw deflate fallback should replay after wrapped output");
+    TEST_ASSERT(out != NULL && out->buf != NULL,
+                "replayed raw deflate should produce output");
+    TEST_ASSERT((size_t) (out->buf->last - out->buf->pos)
+                == raw_payload_size,
+                "replayed raw deflate output length should match");
+    TEST_ASSERT(memcmp(out->buf->pos, compressed + 5, raw_payload_size) == 0,
+                "replayed raw deflate output should match the raw payload");
+
+    release_output(out);
+    ngx_free(compressed);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "ambiguous raw-deflate output should release all buffers");
+}
+
+/*
  * Test that clean deflate (no trailing data) still succeeds for both
  * zlib-wrapped and raw deflate formats.  This is the positive control
  * ensuring the trailing-data guard does not over-reject valid streams.
@@ -2015,6 +2096,7 @@ main(void)
     test_gzip_truncated_input();
     test_deflate_zlib_trailing_data();
     test_deflate_raw_trailing_data();
+    test_deflate_raw_zlib_like_prefix_after_wrapped_output();
     test_deflate_clean_still_succeeds();
     test_gzip_concatenated_not_regressed();
     test_brotli_not_compiled_in();

@@ -1506,10 +1506,11 @@ ngx_http_markdown_decomp_build_output_chain(ngx_http_request_t *r,
  * decode as raw RFC 1951 (-MAX_WBITS).  Raw RFC 1951 deflate is part of the
  * public contract as a fallback for servers that provide raw deflate
  * (Microsoft IIS 5/6 and older Java servlets send raw RFC 1951 under
- * Content-Encoding: deflate).  The caller invokes this only after a
- * FORMAT_ERROR with zero output produced, so a partial decode (already
- * committed with zlib framing) is never replayed.  The retry result is
- * propagated to the caller: on failure it returns the raw attempt's own
+ * Content-Encoding: deflate).  The caller invokes this after a
+ * FORMAT_ERROR.  The retry resets the stream and output accounting before
+ * decoding from the beginning, so a partial wrapped decode can be replayed
+ * when the input is an ambiguous raw stream.  The retry result is propagated
+ * to the caller: on failure it returns the raw attempt's own
  * classification (budget, truncation, or format), which is more informative
  * than the original wrapped-mode error; only an inflateInit2 failure (raw
  * mode could not even start) returns the original format error.
@@ -1570,9 +1571,10 @@ ngx_http_markdown_deflate_raw_retry(ngx_http_request_t *r,
 
 
 /*
- * Finish an unsuccessful wrapped-mode inflate attempt.  A zero-output format
- * error for deflate may be retried as raw RFC 1951; all other failures own and
- * release the current output buffer before returning their classification.
+ * Finish an unsuccessful wrapped-mode inflate attempt.  A format error for
+ * deflate may be retried as raw RFC 1951, including after wrapped inflate has
+ * produced output; all other failures own and release the current output
+ * buffer before returning their classification.
  */
 static ngx_int_t
 ngx_http_markdown_decomp_handle_inflate_failure(
@@ -1584,8 +1586,7 @@ ngx_http_markdown_decomp_handle_inflate_failure(
 
     if (loop_rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
         && ctx->type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
-        && ctx->completed_out == 0
-        && (ctx->stream == NULL || ctx->stream->total_out == 0))
+        && ctx->stream != NULL)
     {
         ngx_memzero(&retry_ctx, sizeof(retry_ctx));
         retry_ctx.output_data = ctx->output_data;
@@ -1606,7 +1607,9 @@ ngx_http_markdown_decomp_handle_inflate_failure(
         return loop_rc;
     }
 
-    inflateEnd(ctx->stream);
+    if (ctx->stream != NULL) {
+        inflateEnd(ctx->stream);
+    }
     ngx_free(*ctx->output_data);
     if (loop_rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED
         && ratio_limited)
