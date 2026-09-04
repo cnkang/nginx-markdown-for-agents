@@ -243,3 +243,39 @@ def test_config_directive_read_sources_tolerate_unreadable_files(
         # static lists) and recorded as missing (None) rather than raising.
         assert sources
         assert all(value is None for value in sources.values())
+
+
+def test_config_directive_source_manifest_covers_current_module_sources() -> None:
+    """The removed-field scan must cover every current C/header source."""
+    src_dir = config_gate.PROJECT_ROOT / "components" / "nginx-module" / "src"
+    actual = {
+        path.name
+        for path in src_dir.iterdir()
+        if path.is_file() and path.suffix in {".c", ".h"}
+    }
+    expected = set(
+        config_gate.EXPECTED_C_SOURCES + config_gate.EXPECTED_H_SOURCES
+    )
+
+    assert actual == expected
+
+
+def test_config_directive_source_manifest_rejects_unlisted_source(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A new source must not silently fall outside the absence proof."""
+    src_dir = tmp_path / "components" / "nginx-module" / "src"
+    src_dir.mkdir(parents=True)
+    (src_dir / "known.c").touch()
+    (src_dir / "new_impl.h").touch()
+    monkeypatch.setattr(config_gate, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(config_gate, "EXPECTED_C_SOURCES", ["known.c"])
+    monkeypatch.setattr(config_gate, "EXPECTED_H_SOURCES", [])
+
+    result = config_gate.ValidationResult()
+    config_gate.check_source_manifest(result)
+
+    assert any(
+        status == "FAIL" and check_id == "source-manifest:unlisted"
+        for status, check_id, _message in result.results
+    )

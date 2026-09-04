@@ -68,9 +68,11 @@ FILTER_MODULE_H = (
 CONFIGURATION_MD = PROJECT_ROOT / "docs" / "guides" / "CONFIGURATION.md"
 
 # ── Expected C/header sources under components/nginx-module/src ──────────
-# Explicit enumeration of the module sources that must exist for the
-# removed-field absence proof to be sound.  Kept in sync with the
-# ngx_module_srcs / ngx_module_deps lists in components/nginx-module/config.
+# Explicit enumeration of every module source that must exist for the
+# removed-field absence proof to be sound.  The C list mirrors
+# ngx_module_srcs; the header list also includes implementation-only headers
+# that are included transitively and therefore do not appear in
+# ngx_module_deps.
 EXPECTED_C_SOURCES = [
     "ngx_http_markdown_filter_module.c",
     "ngx_http_markdown_accept.c",
@@ -92,12 +94,41 @@ EXPECTED_C_SOURCES = [
 ]
 
 EXPECTED_H_SOURCES = [
+    "markdown_converter.h",
+    "markdown_reason_meta.h",
+    "ngx_http_markdown_config_core_impl.h",
+    "ngx_http_markdown_config_directives_impl.h",
+    "ngx_http_markdown_config_handlers_impl.h",
+    "ngx_http_markdown_config_impl.h",
+    "ngx_http_markdown_config_merge_impl.h",
+    "ngx_http_markdown_conversion_impl.h",
+    "ngx_http_markdown_decision_log_impl.h",
+    "ngx_http_markdown_decompression_route.h",
+    "ngx_http_markdown_diagnostics.h",
+    "ngx_http_markdown_diagnostics_accessors_impl.h",
+    "ngx_http_markdown_directive_names.h",
+    "ngx_http_markdown_durable_bypass.h",
+    "ngx_http_markdown_dynconf_impl.h",
+    "ngx_http_markdown_dynconf_precedence.h",
+    "ngx_http_markdown_exports.h",
+    "ngx_http_markdown_ffi_layout_check.h",
+    "ngx_http_markdown_filter_chain_impl.h",
     "ngx_http_markdown_filter_module.h",
     "ngx_http_markdown_header_plan.h",
-    "ngx_http_markdown_diagnostics.h",
-    "ngx_http_markdown_stream_replay.h",
+    "ngx_http_markdown_headers_impl.h",
+    "ngx_http_markdown_inflight_impl.h",
+    "ngx_http_markdown_lifecycle_impl.h",
+    "ngx_http_markdown_metrics_impl.h",
+    "ngx_http_markdown_metrics_v1_renderer.h",
+    "ngx_http_markdown_module_state_impl.h",
+    "ngx_http_markdown_payload_impl.h",
+    "ngx_http_markdown_postcommit_metrics_impl.h",
+    "ngx_http_markdown_request_impl.h",
     "ngx_http_markdown_stream_commit.h",
     "ngx_http_markdown_stream_postcommit.h",
+    "ngx_http_markdown_stream_replay.h",
+    "ngx_http_markdown_streaming_decomp_impl.h",
+    "ngx_http_markdown_streaming_impl.h",
 ]
 
 
@@ -700,6 +731,50 @@ def _read_c_sources() -> dict[str, str | None]:
     return sources
 
 
+def check_source_manifest(result: ValidationResult) -> None:
+    """Ensure every top-level module C/header source is scanned."""
+    src_dir = PROJECT_ROOT / "components" / "nginx-module" / "src"
+    if not src_dir.is_dir():
+        result.fail(
+            "source-manifest:directory",
+            f"module source directory missing: {src_dir}",
+        )
+        return
+
+    try:
+        actual = {
+            path.name
+            for path in src_dir.iterdir()
+            if path.is_file() and path.suffix in {".c", ".h"}
+        }
+    except OSError as exc:
+        result.fail(
+            "source-manifest:directory",
+            f"module source directory could not be enumerated: {exc}",
+        )
+        return
+
+    expected = set(EXPECTED_C_SOURCES + EXPECTED_H_SOURCES)
+    missing = sorted(expected - actual)
+    unlisted = sorted(actual - expected)
+    if missing:
+        result.fail(
+            "source-manifest:missing",
+            "expected module sources missing: " + ", ".join(missing),
+        )
+    if unlisted:
+        result.fail(
+            "source-manifest:unlisted",
+            "module sources are not in the scan manifest: "
+            + ", ".join(unlisted),
+        )
+    if not missing and not unlisted:
+        result.pass_(
+            "source-manifest:complete",
+            f"all {len(actual)} module C/header sources are scanned",
+        )
+
+
 def validate_all(result: ValidationResult) -> None:
     """Run every directive check and record pass/fail in result."""
     (
@@ -748,6 +823,7 @@ def validate_all(result: ValidationResult) -> None:
             check_constant_not_in_source(constant, filter_h, result)
 
     # Removed conf->streaming.* fields: absent from all C sources
+    check_source_manifest(result)
     c_sources = _read_c_sources()
     for field_pat in REMOVED_CONF_FIELDS:
         check_conf_field_not_in_source(field_pat, c_sources, result)
