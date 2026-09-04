@@ -145,7 +145,7 @@ def test_member_access_after_dot_is_not_local_derivation(tmp_path) -> None:
     (it is a struct member of a value, not the local counter)."""
     renderer = CLEAN_RENDERER.replace(
         "v1->requests.failed_closed = failed_closed;",
-        "v1.failed_closed = failed_closed;",  # noqa: PLR0101
+        "v1.failed_closed = failed_closed;",
     )
     violations, _ = _audit_text(renderer, tmp_path)
     assert violations == []

@@ -175,11 +175,11 @@ cat >"${src_dir}/boundary.c" <<'C'
 static void
 test_prefix_and_eq(void)
 {
-    ngx_conf_t  cf;
+    ngx_conf_t  ctx;
     ngx_conf_t  otherctx;
 
     memset(&otherctx, 0, sizeof(otherctx));
-    if (cf.pool == &g_pool) {
+    if (ctx.pool == &g_pool) {
         return;
     }
     otherctx.pool2 = &g_pool;
