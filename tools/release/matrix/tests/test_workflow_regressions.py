@@ -147,6 +147,20 @@ def test_non_streaming_verifier_changes_trigger_runtime_regressions() -> None:
     assert "tools/ci/verify_non_streaming_nginx_module.sh" in filters["e2e"]
 
 
+def test_cflite_pr_sarif_job_has_artifact_when_fuzz_finds_no_crashes() -> None:
+    """The trusted SARIF job must not fail on a clean fuzz run."""
+    workflow_text = _workflow_text("cflite_pr.yml")
+    workflow = _workflow_data("cflite_pr.yml")
+
+    fuzz_steps = workflow["jobs"]["pr-fuzz"]["steps"]
+    ensure_sarif = _step_by_name(fuzz_steps, "Ensure SARIF artifact exists")
+
+    assert ensure_sarif["if"] == "always()"
+    assert "pr-fuzz-empty.sarif" in ensure_sarif["run"]
+    assert "name: pr-fuzz-out" in workflow_text
+    assert "  pr-fuzz-sarif:" in workflow_text
+
+
 def test_release_packages_tag_gate_requires_exact_approved_candidate() -> None:
     """Release tags must match an independently approved protected candidate."""
     workflow = _workflow_data("release-packages.yml")
