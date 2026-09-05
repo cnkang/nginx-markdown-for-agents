@@ -157,6 +157,8 @@ def test_cflite_pr_sarif_job_has_artifact_when_fuzz_finds_no_crashes() -> None:
 
     assert ensure_sarif["if"] == "always()"
     assert "pr-fuzz-empty.sarif" in ensure_sarif["run"]
+    assert "printf '%s\\n'" in ensure_sarif["run"]
+    assert "EOF" not in ensure_sarif["run"]
     assert "name: pr-fuzz-out" in workflow_text
     assert "  pr-fuzz-sarif:" in workflow_text
 
