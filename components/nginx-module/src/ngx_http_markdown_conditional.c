@@ -2414,7 +2414,7 @@ ngx_http_markdown_send_412(ngx_http_request_t *r)
     r->header_only = 1;
 
     ngx_http_clear_content_length(r);
-    r->headers_out.content_length_n = -1;
+    r->headers_out.content_length_n = 0;
 
     /* The 412 describes the transformed Markdown representation: clear
      * byte-range and representation-digest headers of the upstream HTML
