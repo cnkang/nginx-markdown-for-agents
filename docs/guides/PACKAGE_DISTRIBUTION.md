@@ -47,8 +47,7 @@ workflows do not consume it. Do not add new release versions there.
 | `.github/workflows/ci.yml` | 1 | best-effort |
 | `.github/workflows/homebrew-formula-gate.yml` | 1 | experimental |
 | `.github/workflows/official-nginx-docker.yml` | 8 | supported |
-| `.github/workflows/release-binaries.yml` | 10 | supported |
-| `.github/workflows/release-packages.yml` | 30 | supported |
+| `.github/workflows/release-packages.yml` | 40 | supported |
 <!-- END:release-matrix:distribution-matrix -->
 
 ## Important Disclaimers
@@ -147,6 +146,11 @@ curl -fsSLO "https://github.com/<org>/nginx-markdown-for-agents/releases/downloa
 
 After downloading both the package and `SHA256SUMS`:
 
+> **Hash check is not authentication.** This subsection verifies transfer
+> integrity only. A matching SHA-256 does **not** authorize installation.
+> Verify the `SHA256SUMS.asc` GPG signature first (see §GPG Signature
+> Verification below). Do not install unless the signature is valid.
+
 ```bash
 set -euo pipefail
 # Verify the specific package; an absent matching entry is an error.
@@ -167,7 +171,9 @@ grep "nginx-module-markdown-for-agents_<VERSION>_nginx-1.26.3_amd64.deb" SHA256S
 ```
 
 Both values must match exactly. If they differ, do not install the package
-and re-download from the official release page.
+and re-download from the official release page. A hash match alone still
+does not authorize installation — complete §GPG Signature Verification
+first.
 
 ### Checksum File Format
 
@@ -294,6 +300,12 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 #    shown in "Verifying a Downloaded Package" above)
 CHECKSUM_LINE="$(awk -v package="${PACKAGE_FILE}" '$2 == package { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"
 printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -
+
+# 4. Verify the manifest itself: require exactly one SHA256SUMS entry for
+#    release-manifest.json and check it with the same pattern, so a
+#    substituted manifest cannot pass as authentic or intact.
+MANIFEST_LINE="$(awk '$2 == "release-manifest.json" { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"
+printf '%s\n' "${MANIFEST_LINE}" | sha256sum -c -
 ```
 
 If all steps succeed and the imported key matches the independently

@@ -183,6 +183,12 @@ validate it.
 
 ### 2.5 Relationship to Existing Chunked Configuration
 
+> **Pre-0.9.2 history.** The `markdown_buffer_chunked` directive below was
+> removed in 0.9.2. The active contract is the `markdown_streaming`
+> directive (`off|auto|force`). Keep this subsection as historical
+> documentation only — do not present `markdown_buffer_chunked` as a
+> retained active directive.
+
 ```nginx
 markdown_buffer_chunked on;
 ```
@@ -272,7 +278,7 @@ conversion or apply `markdown_error_policy` before committing headers.
 - Replay already-read raw bytes from the pre-commit replay buffer.
 - Pass through subsequent upstream body directly.
 - Preserve or restore upstream HTML response headers.
-- Metric: `streaming_fallback_total{phase="precommit",action="pass"}`
+- Metric: `nginx_markdown_streaming_events_total{transition="fallback",reason="precommit_html_error"}`
 
 Original-HTML passthrough is available **only while the replay buffer still
 covers every upstream byte read so far** (see §3.1). When replay is
@@ -283,7 +289,7 @@ through: it must continue safe streaming conversion or apply
 #### `markdown_error_policy fail_closed`
 
 - If headers have not been sent, return 502.
-- Metric: `streaming_fallback_total{phase="precommit",action="reject"}`
+- Metric: `nginx_markdown_streaming_events_total{transition="fallback",reason="precommit_html_error"}`
 
 ### 3.2 Full-buffer Fallback
 

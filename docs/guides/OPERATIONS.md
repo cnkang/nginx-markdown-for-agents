@@ -1269,7 +1269,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 ```bash
 # Extract URIs that failed conversion
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E 'reason=(failed_open|failed_closed)' | \
+  grep -E 'outcome=(failed_open|failed_closed|aborted)' | \
   sed -nE 's/.*uri=([^ ]+).*/\1/p' | sort | uniq -c | sort -rn
 ```
 

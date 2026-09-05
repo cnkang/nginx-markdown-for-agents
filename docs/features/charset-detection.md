@@ -211,7 +211,8 @@ wins.
 ### Error Handling
 
 - Missing or malformed charset parameter in Content-Type: Falls back to HTML meta tag detection
-- Invalid UTF-8 bytes in HTML: Returns `ConversionError::EncodingError`
+- Unsupported charset labels: Falls back to HTML meta tag detection when possible
+- Invalid bytes for the declared charset (including invalid UTF-8): Returns `ConversionError::EncodingError`
 - Empty input: Returns `ConversionError::InvalidInput`
 - Charset detection never fails (always returns UTF-8 as fallback). Parsing
   rejects only invalid UTF-8 bytes and empty input. Valid UTF-8 bytes remain

@@ -198,11 +198,11 @@ At both parser-boundary checkpoints, the parser check runs before the overall
 check. If elapsed time exceeds both deadlines at the same checkpoint, the
 converter reports the parser timeout (`ERROR_PARSE_TIMEOUT`). This is
 call-order precedence, not a minimum or an "earlier of" calculation. When
-`conversion_timeout` is left unset, the FFI layer disables the
-overall deadline but keeps a nonzero `parser_timeout` active at the two
-parser checkpoints. (An explicit `conversion_timeout=0` fails config
-validation — the handler rejects zero, and the disabled state is
-reachable only by omitting the key.)
+operators leave `conversion_timeout` unset, the NGINX merge fills the
+30-second default, so the overall deadline stays active. Only an explicit
+nonzero `parser_timeout` adds the parser checkpoints. (An explicit
+`conversion_timeout=0` fails config validation. The handler rejects zero.
+Operators cannot disable the deadline through configuration.)
 
 #### Checkpoint Frequency
 
@@ -355,8 +355,8 @@ overall check. The numbering below names the limit surfaces. It does not
 claim that the overall deadline triggers before the parser deadline.
 
 1. Input size (`markdown_limits conversion_memory=<size>`) — checked first, before FFI call
-2. Overall FFI deadline (`markdown_limits conversion_timeout=<time>`) — the authoritative upper bound, measured from `conversion_start`. The converter checks it after `parser_timeout` at the pre-parse and post-parse checkpoints. The converter uses it as the only deadline for DOM traversal and output processing. Omit the key to disable the deadline: an explicit `conversion_timeout=0` fails config validation (the handler rejects zero), so only omitting the key reaches the disabled state.
-3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — when nonzero, the converter measures it from `conversion_start` for the pre-parse check and from `parse_start` for the post-parse check. The converter evaluates it before the overall deadline at both parser checkpoints. If elapsed time exceeds both deadlines, the converter reports the parser timeout. The two checks are separately configured, not an earlier-of/minimum deadline. When `conversion_timeout` is 0, a nonzero parser deadline still applies.
+2. Overall FFI deadline (`markdown_limits conversion_timeout=<time>`) — the authoritative upper bound, measured from `conversion_start`. The converter checks it after `parser_timeout` at the pre-parse and post-parse checkpoints. The converter uses it as the only deadline for DOM traversal and output processing. Omit the key to accept the merged 30-second default. An explicit `conversion_timeout=0` fails config validation. The handler rejects zero. Operators cannot disable the deadline through configuration.
+3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — when nonzero, the converter measures it from `conversion_start` for the pre-parse check and from `parse_start` for the post-parse check. The converter evaluates it before the overall deadline at both parser checkpoints. If elapsed time exceeds both deadlines, the converter reports the parser timeout. The two checks are separately configured, not an earlier-of/minimum deadline. At the FFI layer, a zero `conversion_timeout` would still leave a nonzero parser deadline applicable. Through NGINX configuration, the overall deadline is always the merged 30-second default or an explicit nonzero value.
 4. Memory budget (`markdown_limits parser_memory=<size>`) — enforced per
    parsing path: streaming parsing applies allocation preflight/checkpoints
    as the parser grows its buffers. Full-buffer parsing uses a conservative
@@ -434,8 +434,9 @@ expired. The
 pre-parse parser check uses `conversion_start`, and the post-parse parser
 check uses `parse_start`. Subsequent traversal and output checks use only the
 remaining overall deadline. At the FFI boundary, a zero
-`conversion_timeout` disables only the overall deadline (config validation
-rejects an explicit zero, so this state requires omitting the key), so a nonzero
+`conversion_timeout` would disable only the overall deadline, but NGINX
+config validation rejects an explicit zero and the merge fills the
+30-second default when operators omit the key, so a nonzero
 `parser_timeout` still produces `ERROR_PARSE_TIMEOUT` at a parser checkpoint.
 
 ---

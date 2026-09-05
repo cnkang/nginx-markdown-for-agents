@@ -181,7 +181,7 @@ For non-eligible requests, the module stays out of the way and the original resp
 
 ## Key Architectural Tradeoffs
 
-### Dual-engine: Full buffering + Streaming (since v0.8.0)
+### Dual-engine: Full buffering + Streaming
 
 The architecture supports two conversion engines:
 
@@ -191,7 +191,7 @@ The architecture supports two conversion engines:
   - very large or streaming-style content should use streaming when eligible,
     or passthrough when ineligible
 
-- **Streaming engine** (since v0.8.0, enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline. The pipeline runs charset detection, tokenization, sanitization, a state machine, and emission. Tradeoffs:
+- **Streaming engine** (enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline. The pipeline runs charset detection, tokenization, sanitization, a state machine, and emission. Tradeoffs:
   - bounded per-request working-set memory (configurable via
     `markdown_limits streaming_buffer=<size>`). This value is a total budget,
     not a network chunk size.
@@ -234,10 +234,10 @@ This decision appears in [ADR-0003](ADR/0003-inline-origin-near-conversion.md).
 - Repository layout: [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md)
 - Operator-facing behavior: [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md)
 
-## v0.8.0 Streaming Architecture
+## Streaming Architecture
 
-v0.8.0 adds a true streaming path alongside the existing full-buffer path.
-The NGINX module still owns request lifecycle, header ordering, policy gates,
+The architecture provides a true streaming path alongside the full-buffer
+path. The NGINX module owns request lifecycle, header ordering, policy gates,
 and backpressure handling. Rust owns conversion logic and exposes both
 full-buffer and streaming FFI entrypoints.
 
@@ -269,14 +269,14 @@ correct success or failure path.
 
 ### Observability and Release Gate
 The module exposes streaming decisions, fallbacks, and post-commit failures
-through Prometheus metrics and diagnostics reason codes. `make release-gates-check-080` validates the 0.8.0 release contract. This gate layers streaming,
-documentation, release-matrix, and clean-checkout checks on top of the earlier
-0.7.0 gates.
+through Prometheus metrics and diagnostics reason codes. The current release
+gate validates the streaming contract together with documentation,
+release-matrix, and clean-checkout checks.
 
-## v0.7.0 Subsystems
+## Rust-first Subsystems
 
-v0.7.0 introduced the following Rust-first subsystems. They move
-pure-logic decisions from C into Rust, improving testability and safety:
+The following Rust-first subsystems move pure-logic decisions from C into Rust,
+improving testability and safety:
 
 ### Accept Negotiator (`negotiator.rs`)
 Parses `Accept` headers per RFC 9110 §12.5.1, performs q-value comparison
@@ -360,7 +360,7 @@ This prevents partial header state when an allocation failure occurs mid-plan.
 The plan is built by Rust and returned as a single FFI struct. C iterates
 the operation list and applies changes to `r->headers_out`.
 
-## v0.9.2 Current State
+## Current Release State
 
 v0.9.2 is the final pre-1.0 breaking release. It consolidates the public
 surface before the 1.0 LTS compatibility freeze:

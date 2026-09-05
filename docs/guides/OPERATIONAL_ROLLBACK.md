@@ -530,14 +530,16 @@ grep "markdown:" /var/log/nginx/error.log | \
 # counters, wait, sample again, and require zero conversion activity in
 # that window (no client traffic of your own inside it).
 sleep 5
-before=$(curl -fsS http://localhost/markdown-metrics | \
+before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
 if [ -z "$before" ]; then
   echo "FAIL: conversion metrics not present before rollback check"
   exit 1
 fi
 sleep 5
-after=$(curl -fsS http://localhost/markdown-metrics | \
+after=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
 if [ -z "$after" ]; then
   echo "FAIL: conversion metrics not present after rollback check"
@@ -550,7 +552,8 @@ curl -fsS -o /dev/null \
   -H "Accept: text/markdown" \
   "http://localhost/rollback-probe-$(date +%s)"
 sleep 1
-disabled=$(curl -fsS http://localhost/markdown-metrics | \
+disabled=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
   grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"')
 if [ -z "$disabled" ]; then
   echo "FAIL: disabled signal not present after rollback check (expected requests_total outcome=skipped reason=disabled)"

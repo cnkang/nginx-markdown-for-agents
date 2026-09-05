@@ -2,7 +2,7 @@
 
 ## Status
 
-Superseded
+Superseded (removed in 0.9.2)
 
 **Superseded by 0.9.2:** the 0.9.2 change removed the
 `markdown_streaming_zero_copy` directive and the entire zero-copy output

@@ -53,60 +53,12 @@ the release-gates-check-092 evidence chain and the release artifacts get
 reviewed. Passing local gates alone does not declare a published stable
 release.
 
-## v0.9.1 Release Objective
+## Historical v0.9.1 baseline
 
-The release establishes one coherent baseline across source builds, release
-automation, runtime configuration, the Rust/C boundary, packaging, examples,
-and public documentation.
-
-### Required Baseline
-
-- Rust 1.97.1 is the exact repository and release compiler (pinned in
-  `rust-toolchain.toml`).
-- Rust 1.97 is the minimum supported compiler for every first-party Rust
-  package.
-- Source-build packaging and current contributor/install documentation use the
-  same minimum.
-- Release workflows use the pinned compiler with `--locked`, the intended
-  feature set, and explicit target triples.
-- Prebuilt module users do not need Rust. Runtime compatibility for prebuilt
-  artifacts remains governed by the published NGINX, operating-system, libc,
-  architecture, and exact NGINX dynamic-module compatibility matrix.
-
-### Compatibility Reset Scope
-
-v0.9.1 may intentionally make source-build, configuration, internal ABI, or
-dependency changes when they remove redundant contracts or materially reduce
-long-term maintenance risk. Every such change must have:
-
-1. an implementation-backed reason,
-2. a direct regression or contract test,
-3. an actionable migration path,
-4. synchronized English and Chinese operator documentation, and
-5. a clear entry in the changelog and v0.9.1 release notes.
-
-Removed directives must fail `nginx -t` with a migration hint. They must not be
-kept as silent aliases. Historical documentation may retain old names when it
-is clearly marked as historical or migration guidance.
-
-### Public Surface Review
-
-Before the v1.0 freeze, the project must classify every provisional or
-implementation-oriented public surface as stable, experimental, internal, or
-removed. The review includes:
-
-- Markdown flavors such as MDX and Org mode,
-- streaming shadow and zero-copy controls,
-- dynamic configuration and OpenTelemetry controls,
-- implementation/backend selectors,
-- diagnostics and metrics schemas,
-- reason-code labels, and
-- exported FFI entry points and ABI layout.
-
-A surface is ready for the v1.0 contract only when the code implements it in the
-production path, documented accurately, directly tested, deterministic across
-configuration inheritance, useful to operators, and named suitably for
-long-term support.
+The [0.9.1 release notes](../releases/0.9.1-release-notes.md), the
+[migration guide](../guides/MIGRATION-0.9.0.md), and the changelog document
+the completed baseline and compatibility reset. These are historical evidence
+for the current plan, not an active release objective.
 
 ## v1.0 Contract Freeze
 
@@ -117,8 +69,10 @@ than another baseline reset.
 
 - Existing supported directives keep their meaning, defaults, inheritance,
   and failure behavior.
-- Existing FFI structures and exported functions retain their documented
-  layout and ownership rules. Additions must be append-only or versioned.
+- Existing structures and exported functions at the bundled internal Rust/C
+  boundary retain their documented layout and ownership rules. This is an
+  internal bundled boundary, not a public external ABI. Additions must be
+  append-only or versioned within that contract.
 - Diagnostics, metrics, and reason labels follow their declared stability
   level, stable names are not repurposed.
 - Supported NGINX/OS/libc/architecture targets do not shrink silently.
@@ -158,20 +112,6 @@ Rust compiler changes after v1.0 are deliberate compatibility decisions, not a
 floating “current plus N releases” rule. The repository toolchain, manifest
 MSRV, release workflows, source-build packaging, and active docs must advance
 together and pass the version-consistency gate.
-
-## Release Evidence
-
-The project declared the v0.9.1 release stable after all of the following held:
-
-1. repository harness, docs, complexity, license, static-security, and
-   supply-chain checks pass,
-2. Rust, C, FFI/header, fuzz-smoke, sanitizer, and native E2E tests pass,
-3. coverage gates and production-example tests pass,
-4. 0.9.0, 0.9.1, and aggregate release gates pass,
-5. performance evidence satisfies the release policy,
-6. package and platform checks match the published support matrix,
-7. the exact pushed commit has green required GitHub checks, and
-8. SonarCloud reports no open or confirmed issues for the pull request.
 
 ## Historical Planning Note
 

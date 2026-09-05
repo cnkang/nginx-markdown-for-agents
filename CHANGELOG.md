@@ -298,7 +298,9 @@ completing before the long-lived contract begins.
   Workflow input sanitization via environment variables prevents command
   injection. Base URL FFI scheme propagation for HTTPS.
 - Configuration: The profile merge preserves explicit parent directives.
-  The documented contract treats `max_inflight=0` as unlimited.
+  The 0.9.1 documentation described `max_inflight=0` as unlimited. The 0.9.2
+  configuration rejects zero, so no unlimited value exists.
+  See `docs/architecture/inflight-guard.md`.
   Error-policy reject paths return configured `error_status`.
 - Complexity debt: split the remaining C and Rust production/test renderers,
   streaming handlers, sanitizers, and traversal helpers. Removed all 27
@@ -368,7 +370,9 @@ that pre-1.0 consolidation window through v0.9.1.
 - `markdown_error_policy` C→FFI translation: C-side `on_error`/`error_status`
   mapped to Rust FFI `error_policy` kind.
 - Per-worker inflight guard (`markdown_limits max_inflight=N`) wired into
-  filter path. `max_inflight=0` means unlimited.
+  filter path. The 0.9.0-era documentation described `max_inflight=0` as
+  unlimited. The 0.9.2 configuration rejects zero, so no unlimited value
+  exists. See `docs/architecture/inflight-guard.md`.
 - `cache_validation_explicit` flag inherited across config scopes for
   correct profile merge semantics.
 - ADR-0017: HeaderPlan atomic scope boundary documentation.
@@ -908,7 +912,7 @@ dynconf dry-run/rollback, and runtime diagnostics.
   - `security` module extensions: `url_contains_control_chars`,
     `validate_link_url`, `parse_forwarded_headers`,
     `escape_link_label`, `escape_link_destination`. 10 unit tests.
-  - `docs/architecture/FFI_MIGRATION_CONTRACT.md`: FFI function/struct
+- `docs/architecture/FFI_MIGRATION_HISTORY.md`: FFI function/struct
     registry, error code registry, migration priority, compatibility rules.
 
 - **FFI ABI Verification**
@@ -1018,8 +1022,7 @@ hardening fixes before the v0.6.3 tag.
   - `tools/e2e-harness/` scenario modules for `accept-negotiation`,
     `metrics-endpoint`, `conditional-requests`, `auth-cache`, and
     `status-codes`.
-  - `docs/project/0.6.3-test-surface-audit.md`,
-    `docs/project/0.6.3-e2e-parity.md`,
+  - `docs/project/history/0.6.3-e2e-parity.md`,
     `docs/testing/C_TEST_BOUNDARY.md`,
     `docs/project/release-notes-0-6-3.md`,
     `docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md`.
@@ -1314,9 +1317,10 @@ release-gate/documentation synchronization.
   (`tools/harness/audit_reason_codes.sh`) and decision-log tests covering
   failure/degradation classification and verbosity gating.
 - 0.5.5 release governance surfaces:
-  `docs/project/0.5.5-release-spec.md`,
-  `docs/project/release-checklist-0-5-5.md`,
-  `docs/project/test-matrix-0-5-5.md`, go/no-go criteria, waiver format, and
+  `docs/project/history/0.5.5-release-spec.md`,
+  `docs/project/history/release-checklist-0-5-5.md`,
+  `docs/project/history/test-matrix-0-5-5.md`, go/no-go criteria, waiver
+  format, and
   version-specific release-gate validator
   (`tools/release/gates/validate_release_gates_055.py`).
 - New E2E validation scripts for Accept negotiation, error handling, and

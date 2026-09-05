@@ -364,9 +364,9 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
-# Check for failure reason codes in the last 24 hours
+# Check for terminal failures in the last 24 hours
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "reason=failed_open\|reason=failed_closed" | wc -l
+  grep -E "outcome=(failed_open|failed_closed|aborted)" | wc -l
 
 # Check reason code distribution
 grep "markdown:" /var/log/nginx/error.log | \
@@ -1460,7 +1460,7 @@ Markdown output.
 
 Measure one known streaming-eligible request per before/after snapshot pair.
 The diagnostics/decision log confirms eligibility (the request must
-carry `engine=streaming`), not assumed from `force` alone, which may
+carry `event=engine_streaming`), not assumed from `force` alone, which may
 still fall back to full-buffer for hard incompatibilities (for example
 build-disabled streaming decoders or excluded content types).
 

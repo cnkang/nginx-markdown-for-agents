@@ -100,7 +100,7 @@ markdown_error_policy pass fail_closed; # Error: too many arguments
 **Expected behavior:**
 - Default: pass (fail-open)
 - Context: http, server, location
-- Error message: "invalid value \"%s\" in \"markdown_error_policy\" directive, it must be \"pass\" or \"fail_closed\""
+- Error message: "invalid value \"%s\" in \"markdown_error_policy\" directive, it must be \"pass\", \"fail_closed\", or \"status <code>\""
 
 ---
 

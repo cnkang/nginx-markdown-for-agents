@@ -122,7 +122,7 @@ HeaderPlan exceptions (ADR-0017).
 - [ADR-0015: Config V2 Breaking Migration](0015-090-config-v2-breaking-migration.md)
 - [ADR-0017: HeaderPlan Atomic Apply](0017-090-headerplan-atomic-apply.md)
 - [ADR-0018: Observability Schema v1 and Reason Code Registry](0018-090-observability-schema-v1-reason-registry.md)
-- [FFI Migration Contract](../FFI_MIGRATION_CONTRACT.md), [FFI ABI Compatibility](../FFI_ABI_COMPATIBILITY.md)
+- [FFI Migration History](../FFI_MIGRATION_HISTORY.md), [FFI ABI Compatibility](../FFI_ABI_COMPATIBILITY.md)
 - AGENTS.md Rule 15, 17, 46, 53
 
 ## Date

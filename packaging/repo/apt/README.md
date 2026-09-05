@@ -173,14 +173,16 @@ expected_fingerprints="$(printf '%s\n' \
     '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"
 expected_signing_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
 set -o pipefail
-if ! actual_fingerprints="$(gpg --batch --with-colons --show-keys \
+actual_fingerprints="$(gpg --batch --with-colons --show-keys \
     --fingerprint "$key_file" \
     | awk -F: '$1 == "fpr" { print toupper($10) }' | sort)" \
-    || actual_signing_fingerprint="$(gpg --batch --with-colons --show-keys \
+    || { echo "failed to list key fingerprints" >&2; rm -f "$key_file"; exit 1; }
+actual_signing_fingerprint="$(gpg --batch --with-colons --show-keys \
         --fingerprint "$key_file" \
         | awk -F: -v expected="$expected_signing_fingerprint" \
             '$1 == "fpr" && toupper($10) == expected { print toupper($10) }')" \
-    || [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]] \
+    || { echo "failed to extract signing fingerprint" >&2; rm -f "$key_file"; exit 1; }
+if [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]] \
     || [[ "${actual_signing_fingerprint}" != "${expected_signing_fingerprint}" ]]; then
     echo "unexpected signing-key fingerprint set" >&2
     rm -f "$key_file"

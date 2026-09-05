@@ -139,8 +139,9 @@ bytes form a valid zlib header, such as the common `78 9c` prefix. A rare raw
 RFC 1951 stream can begin with the same two bytes by coincidence. Because the
 streaming path cannot replay input after it has consumed a chunk, it reports a
 decompression format error and follows `markdown_error_policy` instead of
-retrying with raw framing. This is an intentional fail-closed safety choice,
-not evidence that a valid zlib-wrapped response is corrupt. Prefer
+retrying with raw framing. The raw-framing retry is unavailable in this path.
+With the default `pass` policy, a pre-commit failure returns the original
+response. Prefer
 standards-compliant zlib-wrapped deflate when controlling the upstream encoder.
 
 ## Pre-commit fallback

@@ -38,14 +38,14 @@ run `nginx -t`, fix any errors using the mapping tables below, then reload.
 ### 1. Rust Baseline Raised from 1.91 to 1.97
 
 All first-party crates now declare MSRV 1.97. Repository/CI/release builds use
-exact Rust 1.97.0.
+exact Rust 1.97.1.
 
 **Impact:**
 
 - **Source builders** must update their toolchain:
   ```bash
-  rustup toolchain install 1.97.0
-  rustup default 1.97.0
+  rustup toolchain install 1.97.1
+  rustup default 1.97.1
   ```
 - **Prebuilt module users** do not need Rust. Runtime compatibility remains
   governed by the published NGINX, OS/libc, architecture, and exact
@@ -213,8 +213,8 @@ directive and linking to this migration guide.
 
 1. **Update Rust toolchain** (source builds only):
    ```bash
-   rustup toolchain install 1.97.0
-   rustup default 1.97.0
+   rustup toolchain install 1.97.1
+   rustup default 1.97.1
    ```
 
 2. **Replace `markdown_streaming_engine`:**

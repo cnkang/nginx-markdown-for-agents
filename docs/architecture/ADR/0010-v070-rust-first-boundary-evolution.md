@@ -153,7 +153,7 @@ benefit for v0.7.0 scope.
 ## References
 
 - [ADR-0001: Use Rust for HTML-to-Markdown Conversion](0001-use-rust-for-conversion.md)
-- [FFI Migration Contract](../FFI_MIGRATION_CONTRACT.md)
+- [FFI Migration History](../FFI_MIGRATION_HISTORY.md)
 - [FFI ABI Compatibility](../FFI_ABI_COMPATIBILITY.md)
 - v0.7.0 Technical Design: C/Rust Boundary Contract (§2)
 - AGENTS.md Rule 15 (FFI cross-language boundary)

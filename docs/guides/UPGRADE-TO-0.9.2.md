@@ -52,6 +52,15 @@ set -euo pipefail
 # The signing key fingerprint is defined by the GPG key management contract;
 # import it through an independently authenticated channel before verifying.
 # See docs/guides/GPG_KEY_MANAGEMENT.md for the authoritative fingerprint.
+GNUPGHOME="$(mktemp -d)"
+chmod 700 "${GNUPGHOME}"
+export GNUPGHOME
+cleanup_gnupg() {
+  gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+  rm -rf "${GNUPGHOME}"
+}
+trap cleanup_gnupg EXIT
+
 TRUSTED_FINGERPRINT="15C792438EAA762B421E60D21E8D41E7D19A8A75"  # from docs/guides/GPG_KEY_MANAGEMENT.md (authoritative)
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${EXPECTED_FINGERPRINT}" =~ ^[A-F0-9]{40}$ ]] || {
@@ -227,8 +236,9 @@ fi
 sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
     "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
 # The swap is reversible: if nginx -t fails here, restore the module backup
-# taken in step 4 (${MODULE_BACKUP}), re-run nginx -t, then start. Never
-# start NGINX with a module whose configuration failed validation.
+# taken in step 4 (${MODULE_BACKUP}) AND the migrated configuration from
+# ${CONFIG_BACKUP_DIR}, re-run nginx -t on the restored pair, then start.
+# Never start NGINX with a module whose configuration failed validation.
 sudo nginx -t || {
   echo "ERROR: nginx -t failed after module swap; restoring module backup..." >&2
   # Stage the rollback to a temporary path first.  cp -a alone can leave a
@@ -236,15 +246,19 @@ sudo nginx -t || {
   # replace only happens after the copy fully succeeds.
   sudo cp -a "${MODULE_BACKUP}" \
     "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore" 2>/dev/null || {
-    echo "ERROR: rollback copy failed; NGINX remains stopped. Restore manually from ${MODULE_BACKUP}." >&2
+    echo "ERROR: rollback copy failed; NGINX remains stopped. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}." >&2
     exit 1
   }
   sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore" \
     "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null || {
-    echo "ERROR: atomic module replacement failed; NGINX remains stopped. Restore manually from ${MODULE_BACKUP}." >&2
+    echo "ERROR: atomic module replacement failed; NGINX remains stopped. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}." >&2
     exit 1
   }
-  sudo nginx -t && echo "INFO: previous module restored and configuration verified." >&2
+  sudo cp -a "${CONFIG_BACKUP_DIR}/nginx.conf" "${NGINX_CONF_DIR}/nginx.conf" 2>/dev/null || {
+    echo "ERROR: configuration restore failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+    exit 1
+  }
+  sudo nginx -t && echo "INFO: previous module and configuration restored and verified." >&2
   exit 1
 }
 
@@ -357,7 +371,16 @@ else
 fi
 sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
     "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
-sudo nginx -t
+# Back up the running module first so a failed validation can restore it.
+MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
+sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" "${MODULE_BACKUP}"
+if ! sudo nginx -t; then
+  echo "ERROR: nginx -t failed after module swap; restoring previous module..." >&2
+  sudo mv -f "${MODULE_BACKUP}" "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+  sudo nginx -t && echo "INFO: previous module restored and configuration verified." >&2
+  exit 1
+fi
+rm -f "${MODULE_BACKUP}" 2>/dev/null || sudo rm -f "${MODULE_BACKUP}"
 if [[ "$systemd_managed" -eq 1 ]]; then
     sudo systemctl start nginx
 else

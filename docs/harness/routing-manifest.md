@@ -34,6 +34,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `soak-qualification` | focused semantic | `make test-e2e-rust-soak` |
 | `version-consistency` | focused semantic | `bash tools/harness/detect_version_consistency.sh`, `make harness-security-checks` |
 | `regex-security` | cheap blocker | `make regex-security-check` |
+| `complexity` | cheap blocker | `make complexity-check` |
 | `e2e-streaming-config` | cheap blocker | `make e2e-streaming-config-check` |
 | `sonar-encoding` | cheap blocker | `make sonar-encoding-check` |
 | `diagnostics-access-phase` | focused semantic | `make verify-diagnostics-access-phase-e2e` (requires `NGINX_BIN` and `NGINX_MODULE_SO`; emits `SKIP` when unavailable) |
