@@ -151,7 +151,7 @@ static const ngx_http_markdown_conditional_side_state_t *
 ngx_http_markdown_conditional_side_state_find(
     const ngx_http_request_t *r, const ngx_table_elt_t *header)
 {
-    ngx_http_markdown_conditional_side_table_t  *table;
+    const ngx_http_markdown_conditional_side_table_t  *table;
 
     if (header == NULL) {
         return NULL;
@@ -368,7 +368,7 @@ ngx_http_markdown_adopt_rollback_all(
 /* Commit one matching suppressed header after validation has completed. */
 static ngx_int_t
 ngx_http_markdown_commit_conditional_header(
-    ngx_http_request_t *r, ngx_table_elt_t *header,
+    const ngx_http_request_t *r, ngx_table_elt_t *header,
     u_char *name, size_t name_len,
     ngx_table_elt_t **first_restored, ngx_http_markdown_adopt_ctx_t *ctx)
 {
