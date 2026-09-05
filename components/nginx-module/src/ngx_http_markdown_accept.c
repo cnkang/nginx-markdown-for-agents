@@ -82,6 +82,7 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r,
 }
 
 
+/* Return true when an active field entry is an Accept header. */
 static ngx_flag_t
 ngx_http_markdown_is_accept_header(const ngx_table_elt_t *header)
 {
@@ -94,6 +95,7 @@ ngx_http_markdown_is_accept_header(const ngx_table_elt_t *header)
 }
 
 
+/* Count active Accept field-lines while validating their list storage. */
 static ngx_int_t
 ngx_http_markdown_count_accept_headers(ngx_http_request_t *r,
     ngx_uint_t *count)
@@ -130,6 +132,7 @@ ngx_http_markdown_count_accept_headers(ngx_http_request_t *r,
 }
 
 
+/* Validate and account for one Accept field-line in the combined value. */
 static ngx_int_t
 ngx_http_markdown_process_accept_field(ngx_table_elt_t *header,
     ngx_uint_t *count, size_t *total_len, ngx_table_elt_t **single)
@@ -165,6 +168,7 @@ ngx_http_markdown_process_accept_field(ngx_table_elt_t *header,
 }
 
 
+/* Walk every NGINX header-list part and process its Accept entries. */
 static ngx_int_t
 ngx_http_markdown_scan_accept_fields(ngx_http_request_t *r,
     ngx_uint_t *count, size_t *total_len, ngx_table_elt_t **single)
@@ -251,6 +255,7 @@ ngx_http_markdown_accept_fields(ngx_http_request_t *r,
 }
 
 
+/* Copy active Accept field-lines into one RFC 9110 combined value. */
 static ngx_int_t
 ngx_http_markdown_copy_accept_fields(ngx_http_request_t *r, u_char *data,
     size_t total_len)
@@ -390,6 +395,7 @@ ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
 }
 
 
+/* Return a singleton Accept value or collect multiple field-lines. */
 static ngx_int_t
 ngx_http_markdown_get_accept_value(ngx_http_request_t *r, ngx_str_t *out)
 {
@@ -409,7 +415,7 @@ ngx_http_markdown_get_accept_value(ngx_http_request_t *r, ngx_str_t *out)
     return ngx_http_markdown_collect_accept_header(r, out);
 }
 
-
+/* Store an FFI reason only when the caller supplied an output pointer. */
 static void
 ngx_http_markdown_set_accept_reason(ngx_uint_t *out_reason,
     ngx_uint_t reason)

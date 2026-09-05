@@ -178,6 +178,27 @@ impl CharsetState {
         }
     }
 
+    fn transcode_chunks_for_feed(
+        &mut self,
+        state: &mut CharsetState,
+        first: &[u8],
+        second: &[u8],
+    ) -> Result<Vec<u8>, ConversionError> {
+        let first_bound = Self::resolved_output_upper_bound(state, first.len())?;
+        let second_bound = Self::resolved_output_upper_bound(state, second.len())?;
+        let output_bound = Self::checked_allocation_add(first_bound, second_bound)?;
+        let mut output = Vec::new();
+
+        output.try_reserve_exact(output_bound).map_err(|_| {
+            ConversionError::MemoryLimit(
+                "charset combined transcoded output allocation failed".to_string(),
+            )
+        })?;
+        transcode_append(state, first, &mut output)?;
+        transcode_append(state, second, &mut output)?;
+        Ok(output)
+    }
+
     /// Return the maximum additional allocation that `feed` can create.
     ///
     /// This is deliberately an allocation plan, rather than a blanket
@@ -432,19 +453,9 @@ impl CharsetState {
             *self = state;
             return Ok(Cow::Owned(sniff_buffer));
         }
-        let mut result = self.transcode_for_feed(&mut state, &sniff_buffer)?;
-        if !remainder.is_empty() {
-            let remainder_output = self.transcode_for_feed(&mut state, remainder)?;
-            result
-                .try_reserve_exact(remainder_output.len())
-                .map_err(|_| {
-                    ConversionError::MemoryLimit(
-                        "charset transcoded output allocation failed".to_string(),
-                    )
-                })
-                .inspect_err(|error| self.mark_failed(error))?;
-            result.extend_from_slice(&remainder_output);
-        }
+        let result = self
+            .transcode_chunks_for_feed(&mut state, &sniff_buffer, remainder)
+            .inspect_err(|error| self.mark_failed(error))?;
         *self = state;
         Ok(Cow::Owned(result))
     }
@@ -730,39 +741,68 @@ fn resolve_charset(charset: &str) -> Result<(CharsetState, bool), ConversionErro
 /// # Examples
 ///
 /// ```ignore
-fn transcode_data(state: &mut CharsetState, data: &[u8]) -> Result<Vec<u8>, ConversionError> {
+fn transcode_append(
+    state: &mut CharsetState,
+    data: &[u8],
+    output: &mut Vec<u8>,
+) -> Result<(), ConversionError> {
     if data.is_empty() {
-        return Ok(Vec::new());
+        return Ok(());
     }
 
-    match state {
-        CharsetState::Resolved { decoder: None } => Err(ConversionError::EncodingError(
-            "UTF-8 input must use the zero-copy feed path".to_string(),
-        )),
-        CharsetState::Resolved { decoder: Some(dec) } => {
-            // Non-UTF-8: transcode using encoding_rs
-            // Calculate maximum output size
-            let max_len = dec
-                .max_utf8_buffer_length(data.len())
-                .unwrap_or(data.len().saturating_mul(4));
-            let mut output = vec![0u8; max_len];
-
-            let (_result, _read, written, had_errors) =
-                dec.decode_to_utf8(data, &mut output, false);
-
-            if had_errors {
-                return Err(ConversionError::EncodingError(
-                    "Invalid byte sequence during transcoding".to_string(),
-                ));
-            }
-
-            output.truncate(written);
-            Ok(output)
+    let max_len = match state {
+        CharsetState::Resolved { decoder: None } => {
+            return Err(ConversionError::EncodingError(
+                "UTF-8 input must use the zero-copy feed path".to_string(),
+            ));
         }
-        _ => Err(ConversionError::EncodingError(
-            "CharsetState not in Resolved state".to_string(),
-        )),
+        CharsetState::Resolved { decoder: Some(dec) } => {
+            CharsetState::decoder_output_upper_bound(dec, data.len())
+        }
+        _ => {
+            return Err(ConversionError::EncodingError(
+                "CharsetState not in Resolved state".to_string(),
+            ));
+        }
+    };
+
+    let available = output.capacity().saturating_sub(output.len());
+    if available < max_len {
+        output.try_reserve_exact(max_len - available).map_err(|_| {
+            ConversionError::MemoryLimit("charset transcoded output allocation failed".to_string())
+        })?;
     }
+
+    let start = output.len();
+    let end = start
+        .checked_add(max_len)
+        .ok_or_else(CharsetState::allocation_plan_overflow)?;
+    output.resize(end, 0);
+
+    let (written, had_errors) = match state {
+        CharsetState::Resolved { decoder: Some(dec) } => {
+            let (_result, _read, written, had_errors) =
+                dec.decode_to_utf8(data, &mut output[start..end], false);
+            (written, had_errors)
+        }
+        _ => unreachable!("charset state changed during transcoding"),
+    };
+
+    if had_errors {
+        output.truncate(start);
+        return Err(ConversionError::EncodingError(
+            "Invalid byte sequence during transcoding".to_string(),
+        ));
+    }
+
+    output.truncate(start + written);
+    Ok(())
+}
+
+fn transcode_data(state: &mut CharsetState, data: &[u8]) -> Result<Vec<u8>, ConversionError> {
+    let mut output = Vec::new();
+    transcode_append(state, data, &mut output)?;
+    Ok(output)
 }
 
 #[cfg(test)]

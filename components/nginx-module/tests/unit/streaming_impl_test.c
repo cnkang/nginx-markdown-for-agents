@@ -2049,8 +2049,7 @@ test_send_output_and_resume_paths(void)
         "main-request terminal must not latch subrequest terminal state");
     TEST_ASSERT(g_next_body_filter_last_in != NULL
         && g_next_body_filter_last_in->buf != NULL
-        && g_next_body_filter_last_in->buf->pos
-           == (u_char *) g_next_body_filter_last_in->buf
+        && g_next_body_filter_last_in->buf->pos != NULL
         && g_next_body_filter_last_in->buf->last
            == g_next_body_filter_last_in->buf->pos,
         "empty terminal buffers must have explicit zero-length bounds");

@@ -1131,6 +1131,100 @@ ngx_http_markdown_wrap_chain_decompression_output(
 }
 #endif /* !NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 
+/* Decode a multi-layer Content-Encoding chain through the Rust FFI. */
+#ifndef NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS
+static ngx_int_t
+ngx_http_markdown_decompress_multilayer_via_rust(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_chain_t *compressed_chain,
+    ngx_chain_t **decompressed_chain,
+    ngx_uint_t ratio)
+{
+    FFIChainDecodeResult  chain_result;
+    uint32_t              ffi_rc;
+    size_t                input_size;
+    u_char                *input_buf;
+    ngx_int_t             rc;
+    size_t                memory_budget;
+    size_t                input_copy_size;
+    ngx_uint_t            output_buffers;
+
+    rc = ngx_http_markdown_decompression_input(
+        r, compressed_chain, &input_buf, &input_size);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    memory_budget = ngx_http_markdown_effective_memory_budget(
+        ctx->effective_conf, conf);
+    input_copy_size = (input_buf == ctx->buffer.data) ? 0 : input_size;
+    output_buffers = 3;
+    if (!ngx_http_markdown_decompression_peak_within_budget(
+            ctx->buffer.size, input_copy_size,
+            conf->decompress.max_size, output_buffers,
+            memory_budget))
+    {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown: multi-layer decompression peak "
+                     "exceeds conversion memory budget, "
+                     "category=resource_limit");
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    }
+
+    markdown_chain_decode_result_init(&chain_result);
+
+    ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: calling rust multi-layer "
+                  "decode, layers=%ui, input=%uz, "
+                  "budget=%uz",
+                  ctx->decompression.layer_count, input_size,
+                  conf->decompress.max_size);
+
+    ffi_rc = markdown_decode_encoding_chain(
+        (const uint8_t *) input_buf,
+        (uintptr_t) input_size,
+        (const uint8_t *) ctx->decompression.layers,
+        (uint32_t) ctx->decompression.layer_count,
+        (uintptr_t) conf->decompress.max_size,
+        (uint64_t) ratio,
+        &chain_result);
+
+    if (ffi_rc != 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: rust multi-layer decode "
+                     "failed, rc=%ud, error_category=%ud",
+                     ffi_rc, chain_result.error_category);
+
+        markdown_chain_decode_free(&chain_result);
+        return ngx_http_markdown_decompression_error(ffi_rc);
+    }
+
+    if (chain_result.output == NULL && chain_result.output_len > 0) {
+        size_t  saved_len;
+
+        saved_len = (size_t) chain_result.output_len;
+        markdown_chain_decode_free(&chain_result);
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: rust multi-layer decode "
+                     "returned NULL output with "
+                     "non-zero length=%uz",
+                     saved_len);
+        return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+    }
+
+    if (chain_result.output_len == 0) {
+        return ngx_http_markdown_wrap_empty_chain_decompression(
+            r, &chain_result, decompressed_chain);
+    }
+
+    return ngx_http_markdown_wrap_chain_decompression_output(
+        r, &chain_result, conf->decompress.max_size,
+        decompressed_chain);
+}
+#endif /* !NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
+
 #ifdef NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS
 static ngx_int_t
 ngx_http_markdown_decompress_without_rust(
@@ -1169,6 +1263,9 @@ ngx_http_markdown_decompress_via_rust(
     u_char                *input_buf;
     ngx_int_t              rc;
     ngx_uint_t             ratio;
+    size_t                  memory_budget;
+    size_t                  input_copy_size;
+    ngx_uint_t              output_buffers;
 
     ratio = conf->limits.decompression_ratio;
     if (ratio == NGX_CONF_UNSET_UINT) {
@@ -1182,63 +1279,8 @@ ngx_http_markdown_decompress_via_rust(
      * expansion ratio are enforced inside Rust.
      */
     if (ctx->decompression.layer_count > 1) {
-        FFIChainDecodeResult  chain_result;
-
-        rc = ngx_http_markdown_decompression_input(
-            r, compressed_chain, &input_buf, &input_size);
-        if (rc != NGX_OK) {
-            return rc;
-        }
-
-        markdown_chain_decode_result_init(&chain_result);
-
-        ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown: calling rust multi-layer "
-                      "decode, layers=%ui, input=%uz, "
-                      "budget=%uz",
-                      ctx->decompression.layer_count, input_size,
-                      conf->decompress.max_size);
-
-        ffi_rc = markdown_decode_encoding_chain(
-            (const uint8_t *) input_buf,
-            (uintptr_t) input_size,
-            (const uint8_t *) ctx->decompression.layers,
-            (uint32_t) ctx->decompression.layer_count,
-            (uintptr_t) conf->decompress.max_size,
-            (uint64_t) ratio,
-            &chain_result);
-
-        if (ffi_rc != 0) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: rust multi-layer decode "
-                         "failed, rc=%ud, error_category=%ud",
-                         ffi_rc, chain_result.error_category);
-
-            markdown_chain_decode_free(&chain_result);
-            return ngx_http_markdown_decompression_error(ffi_rc);
-        }
-
-        if (chain_result.output == NULL && chain_result.output_len > 0) {
-            size_t  saved_len;
-
-            saved_len = (size_t) chain_result.output_len;
-            markdown_chain_decode_free(&chain_result);
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: rust multi-layer decode "
-                         "returned NULL output with "
-                         "non-zero length=%uz",
-                         saved_len);
-            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
-        }
-
-        if (chain_result.output_len == 0) {
-            return ngx_http_markdown_wrap_empty_chain_decompression(
-                r, &chain_result, decompressed_chain);
-        }
-
-        return ngx_http_markdown_wrap_chain_decompression_output(
-            r, &chain_result, conf->decompress.max_size,
-            decompressed_chain);
+        return ngx_http_markdown_decompress_multilayer_via_rust(
+            r, ctx, conf, compressed_chain, decompressed_chain, ratio);
     }
 
     /*
@@ -1252,15 +1294,31 @@ ngx_http_markdown_decompress_via_rust(
     }
 
     /*
-     * Contiguity fast path: when the chain has a single buffer with
-     * valid pos/last pointers, use it directly without linearizing.
-     * This is the common case after body-filter accumulation where
-     * ctx->buffer.data is a single ngx_alloc allocation (Rule 43).
+     * Resolve the contiguous fast path or linearize the chain before using
+     * the input metadata for the peak-memory preflight.  Both output values
+     * are produced by this helper; reading them before this call would carry
+     * uninitialized stack state into the budget decision.
      */
     rc = ngx_http_markdown_decompression_input(
         r, compressed_chain, &input_buf, &input_size);
     if (rc != NGX_OK) {
         return rc;
+    }
+
+    memory_budget = ngx_http_markdown_effective_memory_budget(
+        ctx->effective_conf, conf);
+    input_copy_size = (input_buf == ctx->buffer.data) ? 0 : input_size;
+    output_buffers = 2;
+    if (!ngx_http_markdown_decompression_peak_within_budget(
+            ctx->buffer.size, input_copy_size,
+            conf->decompress.max_size, output_buffers,
+            memory_budget))
+    {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown: decompression peak exceeds "
+                     "conversion memory budget, "
+                     "category=resource_limit");
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
 
     /* Initialize the result struct before the FFI call. */

@@ -953,12 +953,114 @@ ngx_http_markdown_diag_json_control(
 }
 
 
+static ngx_flag_t
+ngx_http_markdown_diag_json_is_continuation(u_char value)
+{
+    return (value & 0xc0) == 0x80;
+}
+
+
+static size_t
+ngx_http_markdown_diag_json_utf8_length_3(const u_char *value, size_t len,
+    u_char first)
+{
+    u_char second;
+
+    if (len < 3) {
+        return 0;
+    }
+
+    second = value[1];
+    if (first == 0xe0) {
+        if (second < 0xa0 || second > 0xbf) {
+            return 0;
+        }
+    } else if (first == 0xed) {
+        if (second < 0x80 || second > 0x9f) {
+            return 0;
+        }
+    } else if (!ngx_http_markdown_diag_json_is_continuation(second)) {
+        return 0;
+    }
+
+    return ngx_http_markdown_diag_json_is_continuation(value[2])
+        ? 3 : 0;
+}
+
+
+static size_t
+ngx_http_markdown_diag_json_utf8_length_4(const u_char *value, size_t len,
+    u_char first)
+{
+    u_char second;
+
+    if (len < 4) {
+        return 0;
+    }
+
+    second = value[1];
+    if (first == 0xf0) {
+        if (second < 0x90 || second > 0xbf) {
+            return 0;
+        }
+    } else if (first == 0xf4) {
+        if (second < 0x80 || second > 0x8f) {
+            return 0;
+        }
+    } else if (!ngx_http_markdown_diag_json_is_continuation(second)) {
+        return 0;
+    }
+
+    if (!ngx_http_markdown_diag_json_is_continuation(value[2])
+        || !ngx_http_markdown_diag_json_is_continuation(value[3]))
+    {
+        return 0;
+    }
+
+    return 4;
+}
+
+
+/* Return the length of one valid UTF-8 sequence, or zero for invalid input. */
+static size_t
+ngx_http_markdown_diag_json_utf8_length(const u_char *value, size_t len)
+{
+    u_char first;
+
+    if (value == NULL || len == 0) {
+        return 0;
+    }
+
+    first = value[0];
+    if (first < 0x80) {
+        return 1;
+    }
+
+    if (first >= 0xc2 && first <= 0xdf) {
+        return len >= 2
+               && ngx_http_markdown_diag_json_is_continuation(value[1])
+            ? 2 : 0;
+    }
+
+    if (first >= 0xe0 && first <= 0xef) {
+        return ngx_http_markdown_diag_json_utf8_length_3(value, len, first);
+    }
+
+    if (first >= 0xf0 && first <= 0xf4) {
+        return ngx_http_markdown_diag_json_utf8_length_4(value, len, first);
+    }
+
+    return 0;
+}
+
+
 /* Append one length-bounded JSON string, escaping syntax and controls. */
 static ngx_int_t
 ngx_http_markdown_diag_json_string(
     u_char **pos, const u_char *last, const u_char *value, size_t len)
 {
     u_char               ch;
+    size_t               utf8_len;
 
     if (pos == NULL || *pos == NULL || last == NULL || value == NULL
         || *pos > last)
@@ -986,6 +1088,25 @@ ngx_http_markdown_diag_json_string(
                 != NGX_OK)
             {
                 return NGX_ERROR;
+            }
+        } else if (ch >= 0x80) {
+            utf8_len = ngx_http_markdown_diag_json_utf8_length(
+                value + i, len - i);
+            if (utf8_len == 0) {
+                if (ngx_http_markdown_diag_json_control(pos, last, ch)
+                    != NGX_OK)
+                {
+                    return NGX_ERROR;
+                }
+            } else {
+                for (size_t j = 0; j < utf8_len; j++) {
+                    if (ngx_http_markdown_diag_json_put_byte(
+                            pos, last, value[i + j]) != NGX_OK)
+                    {
+                        return NGX_ERROR;
+                    }
+                }
+                i += utf8_len - 1;
             }
         } else {
             if (ngx_http_markdown_diag_json_put_byte(

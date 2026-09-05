@@ -130,7 +130,9 @@ fn sha256(data: &[u8]) -> [u8; 32] {
     ];
 
     // Pre-processing: padding
-    let bit_len = (data.len() as u64) * 8;
+    let bit_len = (data.len() as u64)
+        .checked_mul(8)
+        .expect("SHA-256 input length exceeds the encodable bit-length field");
     let mut padded = data.to_vec();
     padded.push(0x80);
     while (padded.len() % 64) != 56 {
