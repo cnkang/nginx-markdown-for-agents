@@ -514,7 +514,7 @@ def _memory_point_for_scenario(scenario: dict) -> tuple[float, float] | None:
     """
     metrics = scenario.get("metrics") or scenario.get("results") or scenario
     input_bytes = metrics.get("input_bytes") or metrics.get("html_bytes")
-    if not _is_numeric_count(input_bytes) or input_bytes <= 0:
+    if not _is_exact_int(input_bytes) or input_bytes <= 0:
         return None
 
     # Required: peak RSS delta from background sampling
