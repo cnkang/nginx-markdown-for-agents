@@ -99,18 +99,16 @@ static ngx_http_markdown_conditional_side_table_t *
 ngx_http_markdown_conditional_side_table(
     const ngx_http_request_t *r)
 {
-    ngx_pool_cleanup_t  *cleanup;
-
     if (r == NULL || r->pool == NULL) {
         return NULL;
     }
 
-    for (cleanup = r->pool->cleanup;
+    for (ngx_pool_cleanup_t *cleanup = r->pool->cleanup;
          cleanup != NULL;
          cleanup = cleanup->next)
     {
         if (cleanup->handler
-            == ngx_http_markdown_conditional_side_table_cleanup)
+            == &ngx_http_markdown_conditional_side_table_cleanup)
         {
             return cleanup->data;
         }
@@ -149,12 +147,11 @@ ngx_http_markdown_conditional_side_table_create(ngx_http_request_t *r)
     return table;
 }
 
-static ngx_http_markdown_conditional_side_state_t *
+static const ngx_http_markdown_conditional_side_state_t *
 ngx_http_markdown_conditional_side_state_find(
     const ngx_http_request_t *r, const ngx_table_elt_t *header)
 {
     ngx_http_markdown_conditional_side_table_t  *table;
-    ngx_http_markdown_conditional_side_state_t  *state;
 
     if (header == NULL) {
         return NULL;
@@ -165,7 +162,11 @@ ngx_http_markdown_conditional_side_state_find(
         return NULL;
     }
 
-    for (state = table->entries; state != NULL; state = state->next) {
+    for (const ngx_http_markdown_conditional_side_state_t *state =
+             table->entries;
+         state != NULL;
+         state = state->next)
+    {
         if (state->header == header) {
             return state;
         }
@@ -213,7 +214,7 @@ static size_t
 ngx_http_markdown_conditional_adoption_limit(
     const ngx_http_request_t *r, size_t configured_limit)
 {
-    ngx_buf_t  *header_buffer;
+    const ngx_buf_t  *header_buffer;
     size_t      limit;
     size_t      header_limit;
 
@@ -290,7 +291,7 @@ ngx_http_markdown_validate_conditional_candidates(ngx_http_request_t *r,
          part = part->next)
     {
         ngx_table_elt_t  *headers;
-        ngx_http_markdown_conditional_side_state_t  *state;
+        const ngx_http_markdown_conditional_side_state_t  *state;
 
         headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
@@ -364,6 +365,54 @@ ngx_http_markdown_adopt_rollback_all(
     }
 }
 
+/* Commit one matching suppressed header after validation has completed. */
+static ngx_int_t
+ngx_http_markdown_commit_conditional_header(
+    ngx_http_request_t *r, ngx_table_elt_t *header,
+    u_char *name, size_t name_len,
+    ngx_table_elt_t **first_restored, ngx_http_markdown_adopt_ctx_t *ctx)
+{
+    const ngx_http_markdown_conditional_side_state_t  *state;
+
+    if (header->key.data == NULL
+        || header->key.len != name_len
+        || ngx_strncasecmp(header->key.data, name, name_len) != 0)
+    {
+        return NGX_OK;
+    }
+
+    if (header->hash != 0) {
+        ngx_http_markdown_adopt_first_restored(first_restored, header);
+        return NGX_OK;
+    }
+
+    if (header->value.len != 0 || header->value.data == NULL) {
+        return NGX_OK;
+    }
+
+    state = ngx_http_markdown_conditional_side_state_find(r, header);
+    if (state == NULL) {
+        return NGX_OK;
+    }
+
+    if (state->original_value_len > ctx->adoption_limit
+        || *ctx->rollback_count >= NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX)
+    {
+        return NGX_ERROR;
+    }
+
+    ctx->rollback[*ctx->rollback_count].entry = header;
+    ctx->rollback[*ctx->rollback_count].original_hash = header->hash;
+    ctx->rollback[*ctx->rollback_count].original_value_len = header->value.len;
+    header->value.len = state->original_value_len;
+    header->hash = 1;
+    (*ctx->rollback_count)++;
+    (*ctx->adopted_count)++;
+    ngx_http_markdown_adopt_first_restored(first_restored, header);
+
+    return NGX_OK;
+}
+
 /*
  * Commit adoption for one validator name after the caller has validated all
  * suppressed candidates.  The original length comes from the request-pool
@@ -376,8 +425,6 @@ ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
     u_char *name, size_t name_len, ngx_table_elt_t **first_restored,
     ngx_http_markdown_adopt_ctx_t *ctx)
 {
-    ngx_http_markdown_conditional_side_state_t  *state;
-
     if (r == NULL || name == NULL || name_len == 0
         || first_restored == NULL || ctx == NULL)
     {
@@ -399,49 +446,14 @@ ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
             return NGX_ERROR;
         }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].key.data == NULL
-                || headers[i].key.len != name_len
-                || ngx_strncasecmp(headers[i].key.data, name, name_len) != 0)
+            if (ngx_http_markdown_commit_conditional_header(
+                    r, &headers[i], name, name_len, first_restored, ctx)
+                != NGX_OK)
             {
-                continue;
-            }
-
-            if (headers[i].hash != 0) {
-                ngx_http_markdown_adopt_first_restored(
-                    first_restored, &headers[i]);
-                continue;
-            }
-
-            if (headers[i].value.len != 0
-                || headers[i].value.data == NULL)
-            {
-                continue;
-            }
-
-            state = ngx_http_markdown_conditional_side_state_find(
-                r, &headers[i]);
-            if (state == NULL) {
-                continue;
-            }
-            if (state->original_value_len > ctx->adoption_limit) {
-                return NGX_ERROR;
-            }
-            if (*ctx->rollback_count >= NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX) {
                 /* Snapshot capacity exhausted: fail before mutating this
                  * entry so the caller's rollback stays complete. */
                 return NGX_ERROR;
             }
-            ctx->rollback[*ctx->rollback_count].entry = &headers[i];
-            ctx->rollback[*ctx->rollback_count].original_hash =
-                headers[i].hash;
-            ctx->rollback[*ctx->rollback_count].original_value_len =
-                headers[i].value.len;
-            headers[i].value.len = state->original_value_len;
-            headers[i].hash = 1;
-            (*ctx->rollback_count)++;
-            (*ctx->adopted_count)++;
-            ngx_http_markdown_adopt_first_restored(
-                first_restored, &headers[i]);
         }
     }
 
@@ -1443,7 +1455,7 @@ ngx_http_markdown_collect_if_none_match_value(
  * conditional precedence rules; other collection failures remain fatal. */
 static ngx_flag_t
 ngx_http_markdown_if_none_match_is_oversized(
-    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx)
+    const ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx)
 {
     ngx_http_markdown_if_none_match_measurement_t  measurement;
     ngx_int_t                                       rc;
@@ -1491,6 +1503,47 @@ ngx_http_markdown_has_conditional_request(ngx_http_request_t *r)
                 || im_header != NULL || ius_header != NULL));
 }
 
+static ngx_int_t
+ngx_http_markdown_capture_conditional_header(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    ngx_table_elt_t *header,
+    ngx_http_markdown_conditional_header_state_t **tail)
+{
+    const ngx_http_markdown_conditional_side_state_t  *side_state;
+    ngx_http_markdown_conditional_header_state_t      *state;
+
+    if (header->hash == 0
+        || !ngx_http_markdown_is_captured_conditional_name(&header->key))
+    {
+        return NGX_OK;
+    }
+
+    side_state = ngx_http_markdown_conditional_side_state_find(r, header);
+    if (side_state == NULL) {
+        side_state = ngx_http_markdown_conditional_side_state_add(r, header);
+        if (side_state == NULL) {
+            return NGX_ERROR;
+        }
+    }
+
+    state = ngx_pcalloc(r->pool, sizeof(*state));
+    if (state == NULL) {
+        return NGX_ERROR;
+    }
+
+    state->header = header;
+    state->original_hash = side_state->original_hash;
+    state->original_value_len = side_state->original_value_len;
+    if (*tail == NULL) {
+        ctx->conditional.header_states = state;
+    } else {
+        (*tail)->next = state;
+    }
+    *tail = state;
+
+    return NGX_OK;
+}
+
 /*
  * Capture source validators before the upstream content handler or cache can
  * produce a conditional response.  Repeated phase execution re-applies the
@@ -1506,9 +1559,7 @@ ngx_http_markdown_capture_conditional_request(
     ngx_table_elt_t  *im_header;
     ngx_table_elt_t  *ius_header;
     ngx_table_elt_t  *range_header;
-    ngx_http_markdown_conditional_header_state_t  *state;
     ngx_http_markdown_conditional_header_state_t  *tail;
-    ngx_http_markdown_conditional_side_state_t   *side_state;
     ngx_table_elt_t  *headers;
 
     if (r == NULL || ctx == NULL) {
@@ -1562,37 +1613,12 @@ ngx_http_markdown_capture_conditional_request(
             return NGX_ERROR;
         }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].hash == 0
-                || !ngx_http_markdown_is_captured_conditional_name(
-                       &headers[i].key))
+            if (ngx_http_markdown_capture_conditional_header(
+                    r, ctx, &headers[i], &tail)
+                != NGX_OK)
             {
-                continue;
-            }
-
-            side_state = ngx_http_markdown_conditional_side_state_find(
-                r, &headers[i]);
-            if (side_state == NULL) {
-                side_state = ngx_http_markdown_conditional_side_state_add(
-                    r, &headers[i]);
-                if (side_state == NULL) {
-                    return NGX_ERROR;
-                }
-            }
-
-            state = ngx_pcalloc(r->pool, sizeof(*state));
-            if (state == NULL) {
                 return NGX_ERROR;
             }
-
-            state->header = &headers[i];
-            state->original_hash = side_state->original_hash;
-            state->original_value_len = side_state->original_value_len;
-            if (tail == NULL) {
-                ctx->conditional.header_states = state;
-            } else {
-                tail->next = state;
-            }
-            tail = state;
         }
     }
 
@@ -1803,7 +1829,7 @@ ngx_http_markdown_conditional_without_entity_etag(
     const ngx_http_markdown_ctx_t *ctx,
     const ngx_table_elt_t *ius_header,
     const ngx_table_elt_t *last_modified_header,
-    struct FFIConditionalInput *cond_input,
+    const struct FFIConditionalInput *cond_input,
     struct FFIConditionalDecision *cond_decision)
 {
     if (ngx_http_markdown_validate_if_unmodified_since(
@@ -1819,7 +1845,7 @@ ngx_http_markdown_conditional_without_entity_etag(
 
 static ngx_int_t
 ngx_http_markdown_conditional_without_comparable_etag(
-    ngx_http_request_t *r,
+    const ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx,
     const ngx_table_elt_t *im_header,
     const ngx_table_elt_t *ius_header,
@@ -2058,7 +2084,7 @@ typedef struct {
     unsigned                                allow_ranges;
     ngx_http_markdown_304_list_snapshot_t  headers_snapshot;
     ngx_http_markdown_304_list_snapshot_t  trailers_snapshot;
-    ngx_flag_t                              header_only;
+    unsigned                                header_only;
 } ngx_http_markdown_304_snapshot_t;
 
 static ngx_int_t

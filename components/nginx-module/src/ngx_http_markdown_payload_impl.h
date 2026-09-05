@@ -1149,7 +1149,7 @@ ngx_http_markdown_decompress_multilayer_via_rust(
     ngx_int_t             rc;
     size_t                memory_budget;
     size_t                input_copy_size;
-    ngx_uint_t            output_buffers;
+    unsigned              output_buffers;
 
     rc = ngx_http_markdown_decompression_input(
         r, compressed_chain, &input_buf, &input_size);
@@ -1265,7 +1265,7 @@ ngx_http_markdown_decompress_via_rust(
     ngx_uint_t             ratio;
     size_t                  memory_budget;
     size_t                  input_copy_size;
-    ngx_uint_t              output_buffers;
+    unsigned                output_buffers;
 
     ratio = conf->limits.decompression_ratio;
     if (ratio == NGX_CONF_UNSET_UINT) {
