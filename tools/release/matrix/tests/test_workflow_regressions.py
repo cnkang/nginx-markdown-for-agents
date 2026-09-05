@@ -154,10 +154,12 @@ def test_cflite_pr_sarif_job_has_artifact_when_fuzz_finds_no_crashes() -> None:
 
     fuzz_steps = workflow["jobs"]["pr-fuzz"]["steps"]
     prepare_output = _step_by_name(fuzz_steps, "Prepare non-root fuzz output")
+    prepare_sarif = _step_by_name(fuzz_steps, "Prepare non-root SARIF output")
     ensure_sarif = _step_by_name(fuzz_steps, "Ensure SARIF artifact exists")
 
-    assert "mkdir -p build-out out" in prepare_output["run"]
-    assert "chmod 0777 out" in prepare_output["run"]
+    assert prepare_output["run"] == "mkdir -p build-out"
+    assert "mkdir -p out" in prepare_sarif["run"]
+    assert "chmod 0777 out" in prepare_sarif["run"]
     run_fuzzers = next(
         step for step in fuzz_steps
         if step.get("uses", "").endswith(
