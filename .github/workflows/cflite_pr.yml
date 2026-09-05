@@ -31,8 +31,11 @@ jobs:
           persist-credentials: false
 
       - name: Prepare non-root fuzz output
+        run: mkdir -p build-out
+
+      - name: Prepare non-root SARIF output
         run: |
-          mkdir -p build-out out
+          mkdir -p out
           # Docker-based fuzz actions write the shared workspace as root.
           # Keep the host-side artifact directory writable for SARIF fallback
           # creation and artifact upload after the container exits.
