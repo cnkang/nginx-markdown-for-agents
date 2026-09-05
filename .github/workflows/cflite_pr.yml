@@ -15,13 +15,20 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   pr-fuzz:
+    # Untrusted phase: builds and runs PR-controlled fuzz targets.
+    # This job receives no tokens: the fuzz actions run without
+    # github-token so a compromised action or target cannot exfiltrate
+    # write-capable credentials (S6-5).
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Prepare non-root fuzz output
         run: mkdir -p build-out
@@ -31,15 +38,19 @@ jobs:
         with:
           language: rust
           sanitizer: address
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
         id: fuzz
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           mode: code-change
           fuzz-seconds: 600
           sanitizer: address
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        if: always()
+        with:
+          name: pr-fuzz-out
+          path: ./out/
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         if: failure()
@@ -47,7 +58,27 @@ jobs:
           name: pr-fuzz-crashes
           path: ./out/artifacts
 
+  pr-fuzz-sarif:
+    # Trusted phase: publishes fuzzer-produced SARIF. Runs after the
+    # untrusted job and never executes PR-controlled code; only this
+    # job holds security-events: write.
+    permissions:
+      contents: read
+      security-events: write
+    runs-on: ubuntu-latest
+    needs: pr-fuzz
+    if: always() && needs.pr-fuzz.result != 'skipped'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: pr-fuzz-out
+          path: ./out/
+
       - uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38  # v4.37.4
-        if: always() && hashFiles('./out/*.sarif') != ''
+        if: hashFiles('./out/*.sarif') != ''
         with:
           sarif_file: ./out/

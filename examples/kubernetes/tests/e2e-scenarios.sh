@@ -643,7 +643,8 @@ scenario_deploy() {
         >/dev/null 2>&1; then
         log_info "Creating placeholder ConfigMap '$CONFIGMAP_NAME'..."
         kubectl create configmap "$CONFIGMAP_NAME" \
-            -n "$NAMESPACE" --from-literal=placeholder=yes \
+            -n "$NAMESPACE" \
+            --from-literal=markdown-filter.conf="markdown_filter off;" \
             --dry-run=client -o yaml 2>/dev/null \
             | kubectl apply -f - >&2 2>&1 || {
             log_error "Failed to ensure ConfigMap '$CONFIGMAP_NAME' exists"

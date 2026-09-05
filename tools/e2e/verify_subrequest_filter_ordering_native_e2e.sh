@@ -453,6 +453,8 @@ run_load_tools() {
 run_redirect_case() {
     local path="$1" label="$2"
     local before after attempts_before attempts_after terminals_before terminals_after
+    local header_before header_after header_attempts_before header_attempts_after
+    local header_terminals_before header_terminals_after
     local body headers content_type_count inflight pending
 
     before="$(metrics_snapshot)"
@@ -472,12 +474,30 @@ run_redirect_case() {
     attempts_after="$(converted_attempts "${after}")"
     terminals_after="$(converted_terminals "${after}")"
 
+    header_before="$(metrics_snapshot)"
+    header_attempts_before="$(converted_attempts "${header_before}")"
+    header_terminals_before="$(converted_terminals "${header_before}")"
+
     headers="$(curl -fsS -D - -o /dev/null -H 'Accept: text/markdown' "${BASE_URL}${path}")"
     content_type_count="$(printf '%s\n' "${headers}" | tr -d '\r' | grep -ic '^Content-Type:' || true)"
     if [[ "${content_type_count}" -eq 1 ]]; then
         pass "${label}: header filter committed one Content-Type"
     else
         fail "${label}: expected one Content-Type header, got ${content_type_count}"
+    fi
+
+    header_after="$(metrics_snapshot)"
+    header_attempts_after="$(converted_attempts "${header_after}")"
+    header_terminals_after="$(converted_terminals "${header_after}")"
+    if [[ $((header_attempts_after - header_attempts_before)) -eq 1 ]]; then
+        pass "${label}: header request recorded exactly one conversion attempt"
+    else
+        fail "${label}: header request conversion-attempt delta was ${header_attempts_after}-${header_attempts_before}"
+    fi
+    if [[ $((header_terminals_after - header_terminals_before)) -eq 1 ]]; then
+        pass "${label}: header request recorded exactly one terminal outcome"
+    else
+        fail "${label}: header request terminal delta was ${header_terminals_after}-${header_terminals_before}"
     fi
 
     if [[ $((attempts_after - attempts_before)) -eq 1 ]]; then

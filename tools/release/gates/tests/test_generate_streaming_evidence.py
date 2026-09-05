@@ -27,17 +27,16 @@ def test_parse_marker_accepts_harness_partition() -> None:
     assert _parse_marker(_marker())["known_difference_ids"] == ["DIFF-001"]
 
 
-def test_parse_marker_accepts_repeated_observation_for_one_registry_id() -> None:
-    payload = _parse_marker(
-        _marker(
-            total_comparisons=3,
-            identical_count=1,
-            known_difference_count=2,
-            known_difference_observation_ids=["DIFF-001", "DIFF-001"],
+def test_parse_marker_rejects_repeated_observation_for_one_registry_id() -> None:
+    with pytest.raises(ValueError):
+        _parse_marker(
+            _marker(
+                total_comparisons=3,
+                identical_count=1,
+                known_difference_count=2,
+                known_difference_observation_ids=["DIFF-001", "DIFF-001"],
+            )
         )
-    )
-
-    assert payload["known_difference_ids"] == ["DIFF-001"]
 
 
 @pytest.mark.parametrize(

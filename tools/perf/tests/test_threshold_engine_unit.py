@@ -385,7 +385,7 @@ class TestMissingThresholds:
 
 
 # ---------------------------------------------------------------------------
-# PERF_GATE_SKIP=1 skip behaviour
+# Finite-number helper
 # ---------------------------------------------------------------------------
 
 class TestFiniteNumberHelper:

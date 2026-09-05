@@ -31,7 +31,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -301,6 +303,57 @@ def _check_verification_status(status, index_pos: int, reasons: list) -> None:
             f"{status!r} must be 'pass' for the real gate")
 
 
+def _hash_contained_regular_file(path: Path, label: str) -> tuple[str | None, str | None]:
+    """Hash a contained regular file without following a swapped-in symlink.
+
+    The caller must have already established that ``path`` is inside the
+    repository. The file is opened relative to its parent directory with
+    ``O_NOFOLLOW`` (plus ``O_NONBLOCK`` so a swapped-in FIFO cannot hang
+    the gate), so a symlink planted after containment validation is
+    rejected instead of followed; ``fstat`` then rejects non-regular
+    files. Returns (hex digest, None) on success, (None, None) when the
+    file is absent, or (None, reason) on failure.
+    """
+    # Allow missing files (must_exist=False) because optional local artifacts
+    # may not be present; the open() call below handles the FileNotFoundError
+    # and returns (None, None) as expected.
+    validated_path = validate_read_path(path, purpose=label, must_exist=False)
+    try:
+        parent_fd = os.open(
+            validated_path.parent,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+        )
+    except (FileNotFoundError, NotADirectoryError):
+        return None, None
+    except OSError as exc:
+        return None, f"malformed: {label} unreadable: {exc}"
+    try:
+        try:
+            fd = os.open(
+                validated_path.name,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=parent_fd,
+            )
+        except FileNotFoundError:
+            return None, None
+        except OSError as exc:
+            return None, f"malformed: {label} unreadable: {exc}"
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return None, f"malformed: {label} is not a regular file"
+            digest = hashlib.sha256()
+            with os.fdopen(fd, "rb") as handle:
+                fd = -1
+                for chunk in iter(lambda: handle.read(1 << 20), b""):
+                    digest.update(chunk)
+            return digest.hexdigest(), None
+        finally:
+            if fd != -1:
+                os.close(fd)
+    finally:
+        os.close(parent_fd)
+
+
 def _check_local_artifact_digest(artifact: dict, index_pos: int,
                                  reasons: list) -> None:
     """Verify digest against local bytes when the artifact is present."""
@@ -332,23 +385,19 @@ def _check_local_artifact_digest(artifact: dict, index_pos: int,
     )
     if not _contains(local, f"artifacts[{index_pos}].artifact_id"):
         return
-    if local.is_file():
-        digest = hashlib.sha256()
-        try:
-            with open(local, "rb") as fh:
-                for chunk in iter(lambda: fh.read(1 << 20), b""):
-                    digest.update(chunk)
-        except OSError as exc:
-            reasons.append(
-                f"malformed: artifacts[{index_pos}] local artifact "
-                f"{artifact_path} unreadable: {exc}")
-            return
-        actual = "sha256:" + digest.hexdigest()
-        if actual != artifact_sha_value:
-            reasons.append(
-                f"stale-digest: artifacts[{index_pos}] local "
-                f"artifact {artifact_path} digest {actual} != "
-                f"recorded {artifact_sha_value}")
+    label = f"artifacts[{index_pos}] local artifact {artifact_path}"
+    actual_hex, error = _hash_contained_regular_file(local, label)
+    if error is not None:
+        reasons.append(error)
+        return
+    if actual_hex is None:
+        return
+    actual = "sha256:" + actual_hex
+    if actual != artifact_sha_value:
+        reasons.append(
+            f"stale-digest: artifacts[{index_pos}] local "
+            f"artifact {artifact_path} digest {actual} != "
+            f"recorded {artifact_sha_value}")
 
 
 def validate_record(record: dict, expected_sha: str | None = None) -> list[str]:

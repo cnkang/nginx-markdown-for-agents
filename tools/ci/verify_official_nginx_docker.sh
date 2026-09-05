@@ -267,7 +267,11 @@ append_step_summary() {
     echo "- Expected NGINX version: \`${EXPECTED_NGINX_VERSION}\`"
     echo "- Actual NGINX version: \`${ACTUAL_NGINX_VERSION:-<not-checked>}\`"
     echo "- Image reference: \`${IMAGE_REFERENCE}\`"
-    echo "- Image digest: \`${IMAGE_DIGEST}\`"
+    if [[ "${IMAGE_BINDING_ESTABLISHED}" -eq 1 ]]; then
+      echo "- Image digest: \`${IMAGE_DIGEST}\`"
+    else
+      echo "- Image digest binding: not established"
+    fi
     echo "- Platform: \`${MATRIX_OS:-<not-provided>}/${MATRIX_LIBC:-<not-provided>}/${MATRIX_ARCH:-<not-provided>}\`"
     echo "- Image: \`${IMAGE_NAME}\`"
     echo "- Module ref: \`${MODULE_REF}\`"

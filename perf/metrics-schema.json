@@ -354,6 +354,7 @@
             },
             "scenarios": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "type": "object",
                 "required": ["name", "scenario_config", "status"],
@@ -499,7 +500,20 @@
                       },
                       "required": ["status"]
                     },
-                    "then": { "required": ["metrics", "load_integrity", "response_correctness"] }
+                    "then": {
+                      "required": ["metrics", "load_integrity", "response_correctness"],
+                      "properties": {
+                        "metrics": {
+                          "required": [
+                            "latency_p50_ms",
+                            "latency_p95_ms",
+                            "ttfb_p50_ms",
+                            "ttfb_p95_ms",
+                            "fallback_rate"
+                          ]
+                        }
+                      }
+                    }
                   },
                   {
                     "if": {
@@ -524,6 +538,7 @@
             },
             "memory_slope": {
               "type": "object",
+              "description": "Optional in stored baselines; required when the report is evaluated by the module_level release gate.",
               "required": ["rss_per_input_mb", "r_squared"],
               "properties": {
                 "rss_per_input_mb": {

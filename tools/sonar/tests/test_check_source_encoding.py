@@ -243,7 +243,7 @@ class TestCheckerAdversarialInputs:
         # The resolved auditable files under the corpus root must not
         # contain the binary fuzz seed; only the explicit seed exclusion
         # keeps it out of the audit.
-        assert seed_path not in checker._generated_files_under(
+        assert (REPO_ROOT / seed_path) not in checker._generated_files_under(
             Path("components/rust-converter/fuzz/corpus")
         ), "binary fuzz seed must be excluded from generated files"
         # Exercise the audit entry point with the real seed path under a

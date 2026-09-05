@@ -76,6 +76,7 @@ def test_invalid_prometheus_metric_without_unit_suffix(suffix):
     # Skip generated bases that already end in a reserved unit token:
     # the composition could only be rejected by the double-unit negative
     # lookahead, which this test is not exercising.
+    assume(suffix not in {"total", "bytes", "seconds", "info"})
     assume(not suffix.endswith(("_total", "_bytes", "_seconds", "_info")))
     name = f"nginx_markdown_{suffix}"
     assert not is_valid_prometheus_metric(name), f"should reject: {name}"

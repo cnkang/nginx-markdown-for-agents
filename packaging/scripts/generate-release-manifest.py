@@ -250,10 +250,12 @@ def build_manifest(
     expected_package_version = version or tag_version
 
     # Discover packages — sort all files globally for deterministic ordering
-    # that matches the validator's global-filename-sort check.
+    # that matches the validator's global-filename-sort check. Non-matching
+    # .tar.gz files (e.g. source archives) are skipped here so parse_package
+    # only ever sees module tarballs that match TARBALL_PATTERN.
     all_files = sorted(
         f for f in artifact_dir.iterdir()
-        if f.suffix in (".deb", ".rpm") or f.name.endswith(".tar.gz")
+        if f.suffix in (".deb", ".rpm") or TARBALL_PATTERN.match(f.name)
         if f.is_file()
     )
 

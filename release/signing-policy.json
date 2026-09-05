@@ -77,7 +77,7 @@
       "attachment_name": "Bottle sha256 in the formula/bottle JSON",
       "digest_binding": "Bottle sha256 binds the exact bottle artifact bytes",
       "verification_commands": [
-        "test \"$(shasum -a 256 \"${BOTTLE_PATH}\" | awk '{print $1}')\" = \"${RECORDED_BOTTLE_SHA256}\""
+        "test -n \"${COMPUTED_BOTTLE_SHA256}\" && test \"${COMPUTED_BOTTLE_SHA256}\" = \"${RECORDED_BOTTLE_SHA256}\""
       ],
       "release_pipeline": "Homebrew bottle production (when applicable); bottle sha256 embedded in formula JSON"
     }

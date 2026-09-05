@@ -57,6 +57,75 @@ def test_artifact_digest_does_not_follow_external_symlink(
     assert any("escapes repository root" in reason for reason in reasons)
 
 
+def test_artifact_digest_verifies_regular_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A contained regular file must still be hashed and compared."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    payload = b"release artifact bytes"
+    (repo_root / "artifact.bin").write_bytes(payload)
+    monkeypatch.setattr(artifact_gate, "REPO_ROOT", repo_root)
+
+    reasons: list[str] = []
+    artifact_gate._check_local_artifact_digest(
+        {
+            "artifact_id": "artifact.bin",
+            "artifact_type": "rpm",
+            "artifact_sha256": "sha256:" + hashlib.sha256(payload).hexdigest(),
+        },
+        0,
+        reasons,
+    )
+
+    assert reasons == []
+
+
+def test_artifact_digest_rejects_non_regular_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A directory at the artifact path must fail closed, not be skipped."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "artifact.bin").mkdir()
+    monkeypatch.setattr(artifact_gate, "REPO_ROOT", repo_root)
+
+    reasons: list[str] = []
+    artifact_gate._check_local_artifact_digest(
+        {
+            "artifact_id": "artifact.bin",
+            "artifact_type": "deb",
+            "artifact_sha256": "sha256:" + "0" * 64,
+        },
+        0,
+        reasons,
+    )
+
+    assert any("not a regular file" in reason for reason in reasons)
+
+
+def test_artifact_digest_ignores_missing_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An absent optional local artifact must stay silent, as before."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.setattr(artifact_gate, "REPO_ROOT", repo_root)
+
+    reasons: list[str] = []
+    artifact_gate._check_local_artifact_digest(
+        {
+            "artifact_id": "absent.bin",
+            "artifact_type": "source",
+            "artifact_sha256": "sha256:" + "0" * 64,
+        },
+        0,
+        reasons,
+    )
+
+    assert reasons == []
+
+
 def test_artifact_index_rows_bind_to_frozen_candidate_sha(monkeypatch) -> None:
     """Every candidate artifact row must identify the frozen candidate."""
     expected_sha = "a" * 40

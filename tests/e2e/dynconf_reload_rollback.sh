@@ -107,7 +107,8 @@ path_is_inside_test_directory() {
 requested_dynconf_path() {
     if [[ "$CALLER_DYNCONF_FILE_SET" -eq 1 ]]; then
         printf '%s\n' "$CALLER_DYNCONF_FILE"
-    elif [[ "${DYNCONF_RELOAD_ROLLBACK_LIBRARY:-0}" == "1" ]]; then
+    elif [[ "${DYNCONF_RELOAD_ROLLBACK_LIBRARY:-0}" == "1"
+        && -n "$TEST_TMPDIR" ]]; then
         printf '%s/markdown-dynamic.conf\n' "$TEST_TMPDIR"
     else
         echo "Error: DYNCONF_FILE must be set to the configured dynconf path" >&2

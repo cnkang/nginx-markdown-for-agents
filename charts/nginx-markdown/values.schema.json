@@ -6,6 +6,7 @@
   "properties": {
     "markdown": {
       "type": "object",
+      "description": "The chart exposes the safe request-path, streaming, decompression, pruning, conditional, and metrics settings below. Other 0.9.2 module directives, including authentication, trusted-proxy, dynamic-config, diagnostics, and front-matter controls, are intentionally not rendered by this opinionated ConfigMap; use a custom NGINX configuration when those controls are required.",
       "additionalProperties": false,
       "properties": {
         "enabled": { "type": "boolean" },
@@ -44,6 +45,7 @@
         },
         "prune": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "noise": { "type": "boolean" },
             "selectors": { "type": "string" },

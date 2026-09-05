@@ -779,6 +779,9 @@ def _scan_open_calls(
             )
             errors.extend(match_errors)
             warnings.extend(match_warnings)
+        # Advance the multiline-quote state exactly once per line, after
+        # all matches are processed.
+        state.open_quote = _multiline_quote_after(line, state.open_quote)
 
     return errors, warnings
 
@@ -804,8 +807,7 @@ def _scan_single_open_match(
     match_warnings: list[str] = []
 
     if COMMENT_RE.match(line.lstrip()) or NON_FILE_OPEN_RE.search(line):
-        # A comment line cannot contain a live call; still update state.
-        state.open_quote = _multiline_quote_after(line, state.open_quote)
+        # A comment line cannot contain a live call.
         return match_errors, match_warnings
 
     prev_char = line[open_match.start() - 1] if open_match.start() > 0 else " "
@@ -816,7 +818,6 @@ def _scan_single_open_match(
         # duplicate (the `os.open` match starts at `os` and is
         # handled through the builtin branch).
         if re.match(r"os\.$", line[max(0, open_match.start() - 3):open_match.start()]):
-            state.open_quote = _multiline_quote_after(line, state.open_quote)
             return match_errors, match_warnings
         first_arg = _extract_path_open_receiver(line)
     else:
@@ -839,13 +840,11 @@ def _scan_single_open_match(
         # dynamic expression may embed user-derived components.
         if _has_complex_open_argument(line, state.open_quote):
             _emit_unaudited_warning(match_warnings, state.rel, lineno)
-        state.open_quote = _multiline_quote_after(line, state.open_quote)
         return match_errors, match_warnings
 
     if in_string or in_comment:
         # A simple identifier inside a docstring or trailing comment
         # is still not a call.
-        state.open_quote = _multiline_quote_after(line, state.open_quote)
         return match_errors, match_warnings
 
     call_errors, call_warnings = _classify_open_call(
@@ -858,7 +857,6 @@ def _scan_single_open_match(
     )
     match_errors.extend(call_errors)
     match_warnings.extend(call_warnings)
-    state.open_quote = _multiline_quote_after(line, state.open_quote)
     return match_errors, match_warnings
 
 

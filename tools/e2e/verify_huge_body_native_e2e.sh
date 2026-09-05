@@ -5,7 +5,7 @@ set -euo pipefail
 # Goal: ensure requests remain correct under Accept: text/markdown by taking the
 # size-limit bypass path (no conversion) rather than hanging/truncating.
 
-NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
+NGINX_VERSION="${NGINX_VERSION:-1.28.3}"
 PORT="${PORT:-18092}"
 KEEP_ARTIFACTS=0
 RUN_1G_GET="${RUN_1G_GET:-1}"
@@ -126,7 +126,7 @@ else
   markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}" >/dev/null
 
   echo "==> Downloading/building NGINX ${NGINX_VERSION}"
-  curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
+  markdown_download_nginx_source "${NGINX_VERSION}" "${BUILDROOT}/nginx.tar.gz" "${WORKSPACE_ROOT}"
   mkdir -p "${BUILDROOT}/src"
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (

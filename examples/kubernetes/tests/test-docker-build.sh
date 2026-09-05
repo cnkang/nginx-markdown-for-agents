@@ -64,6 +64,7 @@ DOCKERFILE="${SCRIPT_DIR}/../Dockerfile.ingress"
 IMAGE_TAG="nginx-markdown-test:latest"
 BUILD_CONTEXT=""
 MODULE_SHA=""
+MODULE_REPO="${MODULE_REPO:-https://github.com/cnkang/nginx-markdown-for-agents.git}"
 CLEANUP="yes"
 RUNTIME_CONTAINER=""
 PASS_COUNT=0
@@ -153,6 +154,12 @@ resolve_module_sha() {
         log_error "MODULE_SHA must be a full 40-character lowercase commit ID"
         return 2
     fi
+
+    if ! git -C "$BUILD_CONTEXT" fetch --dry-run "$MODULE_REPO" \
+        "$MODULE_SHA" >/dev/null 2>&1; then
+        log_error "MODULE_SHA ${MODULE_SHA} is not reachable from MODULE_REPO ${MODULE_REPO}"
+        return 2
+    fi
     return 0
 }
 
@@ -187,6 +194,7 @@ test_docker_build() {
 
     build_output="$(docker build \
         -f "$DOCKERFILE" \
+        --build-arg "MODULE_REPO=${MODULE_REPO}" \
         --build-arg "MODULE_SHA=${MODULE_SHA}" \
         -t "$IMAGE_TAG" \
         "$BUILD_CONTEXT" 2>&1)" || build_rc=$?

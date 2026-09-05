@@ -527,39 +527,45 @@ class TestReleaseGateSnippetExpectations:
             for status, check_id, _message in result.results
         )
 
-    def test_binary_signing_uses_immutable_checkout_and_release_environment(self) -> None:
-        """Ensure the live signing job binds secrets to the prepared commit."""
-        snippets = validator.RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS
-        assert "integrity-signing:" in snippets
+    def test_checksum_signing_uses_immutable_checkout_and_release_environment(self) -> None:
+        """Ensure canonical checksum signing binds secrets to the prepared commit."""
+        snippets = validator.RELEASE_CHECKSUM_SIGNING_SECURITY_SNIPPETS
+        assert "integrity-signature:" in snippets
         assert "environment: release-signing" in snippets
         assert "ref: ${{ github.sha }}" in snippets
         assert "persist-credentials: false" in snippets
-        assert "./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS" in snippets
+        assert (
+            './packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS "${GPG_KEY_ID}"'
+            in snippets
+        )
 
-    def test_binary_signing_forbids_caller_selected_ref_checkout(self) -> None:
+    def test_checksum_signing_forbids_caller_selected_ref_checkout(self) -> None:
         """Ensure signing workflow cannot reintroduce caller-selected checkout."""
-        assert "ref: ${{ inputs.version }}" in validator.RELEASE_BINARY_SIGNING_FORBIDDEN_SNIPPETS
+        assert (
+            "ref: ${{ inputs.version }}"
+            in validator.RELEASE_CHECKSUM_SIGNING_FORBIDDEN_SNIPPETS
+        )
 
-    def test_binary_signing_validator_fails_when_live_job_is_missing(
+    def test_checksum_signing_validator_fails_when_live_job_is_missing(
         self, monkeypatch
     ) -> None:
-        """Do not pass because a retired signing workflow is absent."""
+        """Do not pass when the canonical signing job is absent."""
         monkeypatch.setattr(validator, "read_safe", lambda _path: "name: unrelated")
         result = validator.ValidationResult()
 
-        validator._validate_release_binary_signing_security(result)
+        validator._validate_release_checksum_signing_security(result)
 
         assert result.has_failures
 
-    def test_binary_signing_validator_checks_the_live_job(self, monkeypatch) -> None:
-        """Validate the actual release-binaries signing job contract."""
-        job = "\n  integrity-signing:\n" + "\n".join(
-            f"    {snippet}" for snippet in validator.RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS
-        ) + "\n  package-artifacts:\n"
+    def test_checksum_signing_validator_checks_the_live_job(self, monkeypatch) -> None:
+        """Validate the canonical release-packages signing job contract."""
+        job = "\n  integrity-signature:\n" + "\n".join(
+            f"    {snippet}" for snippet in validator.RELEASE_CHECKSUM_SIGNING_SECURITY_SNIPPETS
+        ) + "\n  publish:\n"
         monkeypatch.setattr(validator, "read_safe", lambda _path: job)
         result = validator.ValidationResult()
 
-        validator._validate_release_binary_signing_security(result)
+        validator._validate_release_checksum_signing_security(result)
 
         assert not result.has_failures, result.results
 
