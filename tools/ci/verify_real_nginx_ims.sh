@@ -50,6 +50,8 @@ ORIG_ARGS=("$@")
 readonly ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
 readonly HTTP_CODE_FORMAT='%{http_code}'
 readonly LAST_MODIFIED_HEADER_PATTERN='^Last-Modified:'
+readonly MARKDOWN_CONTENT_TYPE_HEADER_PATTERN='^Content-Type: text/markdown; charset=utf-8'
+readonly STALE_IF_UNMODIFIED_SINCE_HEADER='If-Unmodified-Since: Thu, 01 Jan 1970 00:00:00 GMT'
 
 usage() {
   cat <<EOF
@@ -349,7 +351,7 @@ echo "==> Running conditional-request validation scenario"
   [[ "${code1}" == "200" ]] || { echo "Expected converted response 200, got ${code1}" >&2; exit 1; }
   [[ -n "${etag}" ]] || { echo "Converted response missing Markdown-derived ETag" >&2; exit 1; }
 
-  grep -qi '^Content-Type: text/markdown; charset=utf-8' resp1.headers || {
+  grep -qi "${MARKDOWN_CONTENT_TYPE_HEADER_PATTERN}" resp1.headers || {
     echo "Converted response missing markdown Content-Type" >&2
     exit 1
   }
@@ -418,7 +420,7 @@ echo "==> Running conditional-request validation scenario"
     "http://127.0.0.1:${PORT}/proxy/index.html" \
     -w "${HTTP_CODE_FORMAT}")"
   [[ "${code5}" == "200" ]] || { echo "Expected proxied conversion 200, got ${code5}" >&2; exit 1; }
-  grep -qi '^Content-Type: text/markdown; charset=utf-8' resp5.headers || {
+  grep -qi "${MARKDOWN_CONTENT_TYPE_HEADER_PATTERN}" resp5.headers || {
     echo "Proxied converted response missing markdown Content-Type" >&2
     exit 1
   }
@@ -437,7 +439,7 @@ echo "==> Running conditional-request validation scenario"
     "http://127.0.0.1:${PORT}/index.html" \
     -w "${HTTP_CODE_FORMAT}" | tr -d '\n')"
   [[ "${code6}" == "200" ]] || { echo "Expected HEAD 200, got ${code6}" >&2; exit 1; }
-  grep -qi '^Content-Type: text/markdown; charset=utf-8' resp6.headers || {
+  grep -qi "${MARKDOWN_CONTENT_TYPE_HEADER_PATTERN}" resp6.headers || {
     echo "HEAD representation missing markdown Content-Type" >&2
     exit 1
   }
@@ -456,7 +458,7 @@ echo "==> Running conditional-request validation scenario"
   code7="$(curl -sS -D resp7.headers -o resp7.body \
     -H "${ACCEPT_MARKDOWN_HEADER}" \
     -H 'If-Match: "different-etag-value"' \
-    -H 'If-Unmodified-Since: Thu, 01 Jan 1970 00:00:00 GMT' \
+    -H "${STALE_IF_UNMODIFIED_SINCE_HEADER}" \
     "http://127.0.0.1:${PORT}/index.html" \
     -w "${HTTP_CODE_FORMAT}")"
   [[ "${code7}" == "412" ]] || {
@@ -467,7 +469,7 @@ echo "==> Running conditional-request validation scenario"
     echo "Expected empty 412 response body, but resp7.body is non-empty" >&2
     exit 1
   fi
-  grep -qi '^Content-Type: text/markdown; charset=utf-8' resp7.headers || {
+  grep -qi "${MARKDOWN_CONTENT_TYPE_HEADER_PATTERN}" resp7.headers || {
     echo "412 response missing Markdown Content-Type" >&2
     exit 1
   }
@@ -509,7 +511,7 @@ echo "==> Running conditional-request validation scenario"
   code10="$(curl -sS -D resp10.headers -o resp10.body \
     -H "${ACCEPT_MARKDOWN_HEADER}" \
     -H "If-Match: ${etag}" \
-    -H 'If-Unmodified-Since: Thu, 01 Jan 1970 00:00:00 GMT' \
+    -H "${STALE_IF_UNMODIFIED_SINCE_HEADER}" \
     "http://127.0.0.1:${PORT}/index.html" \
     -w "${HTTP_CODE_FORMAT}")"
   [[ "${code10}" == "200" ]] || {
@@ -536,7 +538,7 @@ echo "==> Running conditional-request validation scenario"
   # Passthrough remains source-scoped: NGINX itself must reject a stale
   # If-Unmodified-Since against the origin Last-Modified value.
   code12="$(curl -sS -D resp12.headers -o resp12.body \
-    -H 'If-Unmodified-Since: Thu, 01 Jan 1970 00:00:00 GMT' \
+    -H "${STALE_IF_UNMODIFIED_SINCE_HEADER}" \
     "http://127.0.0.1:$((PORT + 1))/source/index.html" \
     -w "${HTTP_CODE_FORMAT}")"
   [[ "${code12}" == "412" ]] || {
@@ -545,7 +547,7 @@ echo "==> Running conditional-request validation scenario"
   }
   code13="$(curl -sS -D resp13.headers -o resp13.body \
     -H "If-Match: ${source_etag}" \
-    -H 'If-Unmodified-Since: Thu, 01 Jan 1970 00:00:00 GMT' \
+    -H "${STALE_IF_UNMODIFIED_SINCE_HEADER}" \
     "http://127.0.0.1:$((PORT + 1))/source/index.html" \
     -w "${HTTP_CODE_FORMAT}")"
   [[ "${code13}" == "412" ]] || {

@@ -103,7 +103,9 @@ _RE_MODULE_FUNCS: dict[str, int] = {
 }
 
 _SHELL_PARAMETER_EXPANSION_RE = re.compile(
-    r"\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*"
+    # ``re.ASCII`` keeps ``\w`` aligned with shell variable-name syntax.
+    r"\$\{[^}]*\}|\$(?!\d)\w+",
+    re.ASCII,
 )
 
 

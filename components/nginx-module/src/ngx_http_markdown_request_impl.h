@@ -866,7 +866,7 @@ static ngx_flag_t
 ngx_http_markdown_prepare_preaccess_eligibility(
     ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
-    ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_effective_conf_t *eff,
     ngx_flag_t *filter_enabled)
 {
     ngx_uint_t  accept_reason;
