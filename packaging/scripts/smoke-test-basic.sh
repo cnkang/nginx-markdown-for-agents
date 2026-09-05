@@ -174,7 +174,10 @@ remove_module_package() {
             die "Unsupported package format for module removal: ${PKG_FORMAT}"
             ;;
     esac
-    return 0
+    # Propagate the package-manager exit status: an unconditional
+    # `return 0` here would mask a failed module removal and let the
+    # lifecycle continue as if the package were gone (P1-8).
+    return "$?"
 }
 
 run_package_removal_lifecycle() {
@@ -292,6 +295,7 @@ run_module_behavior_smoke() {
         || die "Failed to create module smoke document root"
     smoke_prefix="$(mktemp -d "${TMPDIR:-/tmp}/markdown-smoke-prefix.XXXXXX")" \
         || die "Failed to create module smoke NGINX prefix"
+    chmod 0755 "$smoke_root" "$smoke_prefix"
     smoke_conf="${smoke_prefix}/nginx.conf"
     negative_conf="${smoke_prefix}/negative.conf"
     headers_file="${smoke_prefix}/response.headers"

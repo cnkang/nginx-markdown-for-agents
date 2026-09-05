@@ -67,6 +67,70 @@ FILTER_MODULE_H = (
 )
 CONFIGURATION_MD = PROJECT_ROOT / "docs" / "guides" / "CONFIGURATION.md"
 
+# ── Expected C/header sources under components/nginx-module/src ──────────
+# Explicit enumeration of every module source that must exist for the
+# removed-field absence proof to be sound.  The C list mirrors
+# ngx_module_srcs; the header list also includes implementation-only headers
+# that are included transitively and therefore do not appear in
+# ngx_module_deps.
+EXPECTED_C_SOURCES = [
+    "ngx_http_markdown_filter_module.c",
+    "ngx_http_markdown_accept.c",
+    "ngx_http_markdown_auth.c",
+    "ngx_http_markdown_buffer.c",
+    "ngx_http_markdown_eligibility.c",
+    "ngx_http_markdown_error.c",
+    "ngx_http_markdown_headers.c",
+    "ngx_http_markdown_header_plan.c",
+    "ngx_http_markdown_conditional.c",
+    "ngx_http_markdown_decompression.c",
+    "ngx_http_markdown_reason.c",
+    "ngx_http_markdown_reason_ffi.c",
+    "ngx_http_markdown_diagnostics_reason.c",
+    "ngx_http_markdown_diagnostics.c",
+    "ngx_http_markdown_stream_replay.c",
+    "ngx_http_markdown_stream_commit.c",
+    "ngx_http_markdown_stream_postcommit.c",
+]
+
+EXPECTED_H_SOURCES = [
+    "markdown_converter.h",
+    "markdown_reason_meta.h",
+    "ngx_http_markdown_config_core_impl.h",
+    "ngx_http_markdown_config_directives_impl.h",
+    "ngx_http_markdown_config_handlers_impl.h",
+    "ngx_http_markdown_config_impl.h",
+    "ngx_http_markdown_config_merge_impl.h",
+    "ngx_http_markdown_conversion_impl.h",
+    "ngx_http_markdown_decision_log_impl.h",
+    "ngx_http_markdown_decompression_route.h",
+    "ngx_http_markdown_diagnostics.h",
+    "ngx_http_markdown_diagnostics_accessors_impl.h",
+    "ngx_http_markdown_directive_names.h",
+    "ngx_http_markdown_durable_bypass.h",
+    "ngx_http_markdown_dynconf_impl.h",
+    "ngx_http_markdown_dynconf_precedence.h",
+    "ngx_http_markdown_exports.h",
+    "ngx_http_markdown_ffi_layout_check.h",
+    "ngx_http_markdown_filter_chain_impl.h",
+    "ngx_http_markdown_filter_module.h",
+    "ngx_http_markdown_header_plan.h",
+    "ngx_http_markdown_headers_impl.h",
+    "ngx_http_markdown_inflight_impl.h",
+    "ngx_http_markdown_lifecycle_impl.h",
+    "ngx_http_markdown_metrics_impl.h",
+    "ngx_http_markdown_metrics_v1_renderer.h",
+    "ngx_http_markdown_module_state_impl.h",
+    "ngx_http_markdown_payload_impl.h",
+    "ngx_http_markdown_postcommit_metrics_impl.h",
+    "ngx_http_markdown_request_impl.h",
+    "ngx_http_markdown_stream_commit.h",
+    "ngx_http_markdown_stream_postcommit.h",
+    "ngx_http_markdown_stream_replay.h",
+    "ngx_http_markdown_streaming_decomp_impl.h",
+    "ngx_http_markdown_streaming_impl.h",
+]
+
 
 # ── Current public command registry (0.9.2 freeze) ────────────────────────
 
@@ -485,15 +549,19 @@ def check_constant_not_in_source(
 
 
 def check_conf_field_not_in_source(
-    field_pattern: str, sources: dict[str, str], result: ValidationResult
+    field_pattern: str, sources: dict[str, str | None], result: ValidationResult
 ) -> None:
     """Verify removed conf->streaming.* fields are absent from C sources."""
     check_id = f"removed-field:{field_pattern}"
     found_in = []
+    missing_sources = []
     for name, content in sources.items():
-        if not content:
+        if content is None:
             result.fail(check_id, f"source file missing: {name}")
-            return
+            missing_sources.append(name)
+            continue
+        if not content:
+            continue
         if re.search(field_pattern, content):
             found_in.append(name)
     if found_in:
@@ -501,6 +569,11 @@ def check_conf_field_not_in_source(
             check_id,
             f"removed field pattern still present in: {', '.join(found_in)}",
         )
+    elif missing_sources:
+        # A missing source makes an absence verdict unsound: the field may
+        # still be referenced in the file that could not be read.  The FAIL
+        # record above already flags it; do not also emit a misleading PASS.
+        return
     else:
         result.pass_(check_id, "removed field pattern absent from all sources")
 
@@ -627,20 +700,79 @@ def _check_directive_contract(
         check_removed_directive_in_docs(name, directive["doc_heading"], docs, result)
 
 
-def _read_c_sources() -> dict[str, str]:
-    """Read C source files used to prove removed fields are gone.
+def _read_c_sources() -> dict[str, str | None]:
+    """Read the explicit C/header source files that back the
+    removed-fields absence proof.
 
-    Discovered source paths are retained in the mapping even when
-    read_safe returns empty content, so a missing/unreadable file surfaces
-    as a source-file failure instead of silently dropping the file (which
-    would let a removed field hide in an unreadable source).
+    Sources are enumerated by name (EXPECTED_C_SOURCES +
+    EXPECTED_H_SOURCES) rather than discovered via rglob, so a deleted or
+    renamed module file fails the gate instead of silently shrinking the
+    scan surface.  A missing or unreadable source is recorded in the
+    mapping as a ``missing`` marker (value None), which
+    check_conf_field_not_in_source turns into a FAIL.
     """
     src_dir = PROJECT_ROOT / "components" / "nginx-module" / "src"
-    sources: dict[str, str] = {}
-    for c_path in src_dir.rglob("*.[ch]"):
-        rel = c_path.relative_to(PROJECT_ROOT).as_posix()
-        sources[rel] = read_safe(c_path)
+    sources: dict[str, str | None] = {}
+    for rel_name in EXPECTED_C_SOURCES + EXPECTED_H_SOURCES:
+        rel = f"components/nginx-module/src/{rel_name}"
+        c_path = src_dir / rel_name
+        if not c_path.is_file():
+            sources[rel] = None
+            continue
+        try:
+            content = read_safe(c_path)
+        except (OSError, UnicodeError):
+            # An unreadable source is not provably readable: record it as
+            # missing so check_conf_field_not_in_source emits the
+            # structured FAIL instead of crashing the gate.
+            sources[rel] = None
+            continue
+        sources[rel] = content if content else None
     return sources
+
+
+def check_source_manifest(result: ValidationResult) -> None:
+    """Ensure every top-level module C/header source is scanned."""
+    src_dir = PROJECT_ROOT / "components" / "nginx-module" / "src"
+    if not src_dir.is_dir():
+        result.fail(
+            "source-manifest:directory",
+            f"module source directory missing: {src_dir}",
+        )
+        return
+
+    try:
+        actual = {
+            path.name
+            for path in src_dir.iterdir()
+            if path.is_file() and path.suffix in {".c", ".h"}
+        }
+    except OSError as exc:
+        result.fail(
+            "source-manifest:directory",
+            f"module source directory could not be enumerated: {exc}",
+        )
+        return
+
+    expected = set(EXPECTED_C_SOURCES + EXPECTED_H_SOURCES)
+    missing = sorted(expected - actual)
+    unlisted = sorted(actual - expected)
+    if missing:
+        result.fail(
+            "source-manifest:missing",
+            "expected module sources missing: " + ", ".join(missing),
+        )
+    if unlisted:
+        result.fail(
+            "source-manifest:unlisted",
+            "module sources are not in the scan manifest: "
+            + ", ".join(unlisted),
+        )
+    if not missing and not unlisted:
+        result.pass_(
+            "source-manifest:complete",
+            f"all {len(actual)} module C/header sources are scanned",
+        )
 
 
 def validate_all(result: ValidationResult) -> None:
@@ -691,6 +823,7 @@ def validate_all(result: ValidationResult) -> None:
             check_constant_not_in_source(constant, filter_h, result)
 
     # Removed conf->streaming.* fields: absent from all C sources
+    check_source_manifest(result)
     c_sources = _read_c_sources()
     for field_pat in REMOVED_CONF_FIELDS:
         check_conf_field_not_in_source(field_pat, c_sources, result)

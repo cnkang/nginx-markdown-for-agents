@@ -53,14 +53,19 @@ export NGINX_VERSION_CEIL="$(awk 'BEGIN {
 export RPM_NGINX_EVR="1:${NGINX_VERSION}"
 export NFPM_ARCH="amd64"
 
-# Render the version-bound preinstall script before nFPM copies maintainer
-# scripts into the package.  Keep the tracked template unchanged.
+# Render the maintainer scripts before nFPM copies them into the package.
+# The preinstall script is version-bound, while preremove also needs the
+# trusted executable prelude. Keep the tracked templates unchanged.
 NFPM_TMP="$(mktemp -d)"
 trap 'rm -rf "${NFPM_TMP}"' EXIT
 packaging/nfpm/scripts/render-nfpm-config.sh \
   packaging/nfpm/scripts/preinstall.sh "${NFPM_TMP}/preinstall.sh" \
   "${NGINX_VERSION}"
-sed "s|./packaging/nfpm/scripts/preinstall.sh|${NFPM_TMP}/preinstall.sh|" \
+packaging/nfpm/scripts/render-nfpm-config.sh \
+  packaging/nfpm/scripts/preremove.sh "${NFPM_TMP}/preremove.sh" \
+  "${NGINX_VERSION}"
+sed -e "s|./packaging/nfpm/scripts/preinstall.sh|${NFPM_TMP}/preinstall.sh|" \
+  -e "s|./packaging/nfpm/scripts/preremove.sh|${NFPM_TMP}/preremove.sh|" \
   packaging/nfpm/nfpm.yaml > "${NFPM_TMP}/nfpm.yaml"
 
 # Generate DEB

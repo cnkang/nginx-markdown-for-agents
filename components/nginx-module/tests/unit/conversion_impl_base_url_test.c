@@ -933,6 +933,13 @@ ngx_http_markdown_send_304(
     return g_send_304_rc;
 }
 
+ngx_int_t
+ngx_http_markdown_send_412(ngx_http_request_t *r)
+{
+    UNUSED(r);
+    return g_send_304_rc;
+}
+
 /*
  * subrequest: conversion_impl.h calls ngx_http_markdown_buffer_release() at the
  * conversion terminal.  The implementation lives in buffer.c; include it
@@ -2630,8 +2637,10 @@ test_metrics_legacy_histogram_preserves_exclusive_bands(void)
                 "100ms legacy band must not subtract the 10ms band");
     TEST_ASSERT(v1.duration_full_buffer.buckets[8] == 3,
                 "1000ms legacy band must map directly");
-    TEST_ASSERT(v1.duration_full_buffer.buckets[9] == 4,
-                "greater-than-1000ms legacy band must map directly");
+    TEST_ASSERT(v1.duration_full_buffer.buckets[9] == 0,
+                "legacy >1000ms band must not be mapped to a finite bucket");
+    TEST_ASSERT(v1.duration_full_buffer.count == 10,
+                "legacy latency total remains available through histogram count");
 
     TEST_PASS("legacy histogram preserves exclusive bands");
 }

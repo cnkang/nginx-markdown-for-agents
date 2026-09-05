@@ -32,7 +32,7 @@
 #   1 — one or more candidate violations found under --strict
 #   2 — usage/argument error
 
-set -eu
+set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -74,7 +74,11 @@ WHOLE_INIT_TYPES=(
 )
 
 tmp_violations=$(mktemp)
-trap 'rm -f "$tmp_violations"' EXIT
+# Bash 3.2 + set -u: an empty GREP_TEMPS would make a bare
+# ${GREP_TEMPS[@]} expansion in the trap abort; guard with the
+# ${arr[@]+...} idiom (Rule 11).
+GREP_TEMPS=()
+trap 'rm -f "$tmp_violations" ${GREP_TEMPS[@]+"${GREP_TEMPS[@]}"}' EXIT
 
 while IFS= read -r -d '' file; do
     case "$file" in
@@ -83,9 +87,24 @@ while IFS= read -r -d '' file; do
     esac
 
     for type in "${WHOLE_INIT_TYPES[@]}"; do
-        # Stack declaration: TYPE name;  or  TYPE name = ...;  or TYPE *name
-        grep -nE "^[[:space:]]*${type}[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(=|;)" "$file" 2>/dev/null | \
-            while IFS=: read -r line_num content; do
+        # Stack declaration: TYPE name;  or  TYPE name = ...;  or TYPE *name.
+        # grep exits 1 when the file has no declaration; any other failure
+        # (exit 2, or an error inside the loop body) must propagate under
+        # set -euo pipefail instead of being suppressed.
+        grep_matches="$(mktemp)"
+        GREP_TEMPS+=("$grep_matches")
+        grep_rc=0
+        grep -nE "^[[:space:]]*${type}[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(=|;)" "$file" 2>/dev/null > "$grep_matches" || grep_rc=$?
+        if [[ "$grep_rc" -eq 2 ]]; then
+            echo "ERROR: grep failed scanning $file for $type" >&2
+            rm -f "$grep_matches"
+            exit 2
+        fi
+        if [[ "$grep_rc" -eq 1 ]]; then
+            rm -f "$grep_matches"
+            continue
+        fi
+        while IFS=: read -r line_num content; do
             [[ -z "$line_num" ]] && continue
             [[ -z "$content" ]] && continue
 
@@ -122,11 +141,17 @@ while IFS= read -r -d '' file; do
             fi
 
             # No whole-init: if the var is used with field access (partial
-            # assignment pattern) in the window, report it.
-            if echo "$tail_code" | grep -qE "${var_name}\.[a-zA-Z_]+[[:space:]]*="; then
+            # assignment pattern) in the window, report it.  The field
+            # name must be a real identifier (digits allowed after the
+            # first char) and the line must be a single `=` assignment,
+            # not an equality comparison (`==`).  The variable name is
+            # anchored to an identifier boundary so `otherctx.field = 1`
+            # is not reported for var_name `ctx`.
+            if echo "$tail_code" | grep -qE "(^|[^[:alnum:]_])${var_name}\\.[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*=[[:space:]]*[^=]"; then
                 echo "CANDIDATE: $file:$line_num — stack ${type} '${var_name}' assigned field-by-field without whole-struct initialization (memset/zero-init/helper); uninitialized members may carry stack garbage past NULL guards" >> "$tmp_violations"
             fi
-        done
+        done < "$grep_matches"
+        rm -f "$grep_matches"
     done
 done < <(if [[ "$explicit_scan_dir" -eq 1 ]]; then
     # An explicitly provided directory is scanned without the src/tests

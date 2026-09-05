@@ -137,7 +137,7 @@ curl -s http://localhost/markdown-metrics | \
 > **0.9.2 note:** the 0.9.2 release removed both `zero_copy_output_total`
 > and the `markdown_streaming_zero_copy` directive. The frozen v1 metrics
 > registry has no per-path output counter at all (see
-> [prometheus-metrics.md](prometheus-metrics.md) for the frozen 12-family
+> [prometheus-metrics.md](prometheus-metrics.md) for the frozen 11-family
 > list). Monitor `nginx_markdown_requests_total{outcome="converted"}`
 > and `nginx_markdown_conversion_deliveries_total{engine="streaming"}`
 > instead. The 0.9.1 steps above stay for rollback verification on the

@@ -7,7 +7,9 @@ License:        BSD-2-Clause
 URL:            https://github.com/cnkang/nginx-markdown-for-agents
 Source0:        %{name}-%{version}.tar.gz
 
-Requires:       nginx = 1:%{nginx_version}
+Requires:       nginx-r%{nginx_version}
+Requires:       nginx >= 1:%{nginx_version}
+Conflicts:      nginx >= 1:%{nginx_version_ceil}
 
 %description
 NGINX dynamic filter module that converts HTML responses to Markdown
@@ -18,9 +20,12 @@ Built against nginx.org stable %{nginx_version}.
 WARNING: This module is built for nginx.org %{nginx_version} ONLY. NGINX
 dynamic modules require an exact version match — the core loader rejects
 any version difference (including a patch release) before signature
-checks. The RPM dependency enforces that exact version at install time.
-It will NOT work with distro-provided, vendor-patched, OpenResty, Tengine,
-or custom-built NGINX binaries, or with any other NGINX version.
+checks. The RPM dependency requires the nginx.org nginx-r%{nginx_version}
+capability in addition to the epoch-aware version bounds. A package that
+merely reports the same version without the expected ABI capability is
+rejected before installation. It will NOT work with distro-provided,
+vendor-patched, OpenResty, Tengine, or custom-built NGINX binaries, or with
+any other NGINX version.
 
 Features:
 - Streaming and full-buffer conversion engines
@@ -66,6 +71,44 @@ install -d %{buildroot}/usr/libexec/nginx-markdown-for-agents
 install -m 0755 preremove.sh \
     %{buildroot}/usr/libexec/nginx-markdown-for-agents/preremove.sh
 
+%pre
+# The nginx-r%{nginx_version} capability above is provided by the official
+# nginx.org nginx package. RPM resolves that capability before %pre, so a
+# same-EVR distro-rebuilt, vendor-patched, or custom package without the
+# expected ABI provenance is rejected before this script runs.
+# Guard: the running NGINX executable must also match the exact version this
+# module was built against. The loader performs the final signature check.
+# Fail the transaction here with an explicit message instead of leaving
+# the operator with a module NGINX refuses to load.
+# Use fixed system paths in this root-run scriptlet; never inherit a caller's
+# PATH when resolving the executable or the parser used to inspect its output.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+NGINX_BIN=/usr/sbin/nginx
+SED_BIN=/usr/bin/sed
+# $1==1 during upgrade, $1==2 during erase — run the guard only for
+# install/upgrade (not erase), and tolerate a missing nginx binary
+# (the RPM dependencies still enforce the capability and floor/ceiling).
+if [ "$1" -ne 0 ]; then
+    if [ -x "$NGINX_BIN" ]; then
+        if [ ! -x "$SED_BIN" ]; then
+            echo "ERROR: trusted sed executable not found at $SED_BIN" >&2
+            exit 1
+        fi
+        if ! GUARD_NGINX_VERSION="$("$NGINX_BIN" -v 2>&1 | "$SED_BIN" -n 's/.*nginx version: nginx\/\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"; then
+            echo "ERROR: could not inspect the installed NGINX version" >&2
+            exit 1
+        fi
+        if [ -n "${GUARD_NGINX_VERSION}" ] && [ "${GUARD_NGINX_VERSION}" != "%{nginx_version}" ]; then
+            echo "ERROR: installed NGINX version ${GUARD_NGINX_VERSION} does not match the exact version %{nginx_version} this module was built for" >&2
+            echo "  This package provides a dynamic module for nginx.org %{nginx_version} ONLY." >&2
+            echo "  The NGINX core loader rejects any other version (including a patch release)." >&2
+            echo "  Install nginx-%{nginx_version} and retry." >&2
+            exit 1
+        fi
+    fi
+fi
+
 %post
 PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH
 cat >&2 <<'EOF'
@@ -93,11 +136,10 @@ EOF
 # inspection is impossible, operators who have verified the include graph
 # themselves may acknowledge that explicitly by creating the sentinel file
 # below before running the RPM removal:
-#   sudo touch /etc/nginx/markdown-module-force-remove
+#   printf '%s' 'nginx-markdown-module force-remove v1' | sudo tee /etc/nginx/markdown-module-force-remove >/dev/null
 #   sudo rpm -e <package>
-# The file persists until the operator deletes it, so every affected
-# removal transaction stays explicit rather than inheriting unsettable
-# scriptlet environment state.
+# The exact token has no trailing newline and is consumed after one use, so
+# every affected removal transaction stays explicit.
 %preun
 if [ "$1" -eq 0 ]; then
     /bin/bash /usr/libexec/nginx-markdown-for-agents/preremove.sh remove

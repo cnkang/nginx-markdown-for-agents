@@ -12,7 +12,7 @@ set -euo pipefail
 #  6) Deeply nested HTML does not crash (memory bounded)
 #  7) Control characters in URLs are rejected
 
-NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
+NGINX_VERSION="${NGINX_VERSION:-1.28.3}"
 PORT="${PORT:-18096}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-19096}"
 KEEP_ARTIFACTS=0
@@ -238,7 +238,7 @@ else
     "${WORKSPACE_ROOT}" "${RUST_TARGET}" --features streaming >/dev/null
 
   echo "==> Downloading/building NGINX ${NGINX_VERSION}"
-  curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
+  markdown_download_nginx_source "${NGINX_VERSION}" "${BUILDROOT}/nginx.tar.gz" "${WORKSPACE_ROOT}"
   mkdir -p "${BUILDROOT}/src"
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (

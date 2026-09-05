@@ -19,7 +19,7 @@ set -euo pipefail
 #  7) A truncated legacy raw deflate fixture triggers decomp finalize failure
 #     and fail-open.
 
-NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
+NGINX_VERSION="${NGINX_VERSION:-1.28.3}"
 PORT="${PORT:-18094}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-19094}"
 KEEP_ARTIFACTS=0
@@ -685,7 +685,7 @@ else
     "${WORKSPACE_ROOT}" "${RUST_TARGET}" --features streaming >/dev/null
 
   echo "==> Downloading/building NGINX ${NGINX_VERSION}"
-  curl --proto '=https' --tlsv1.2 --max-time 600 --connect-timeout 30 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
+  markdown_download_nginx_source "${NGINX_VERSION}" "${BUILDROOT}/nginx.tar.gz" "${WORKSPACE_ROOT}"
   mkdir -p "${BUILDROOT}/src"
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (
@@ -1738,7 +1738,7 @@ assert_streaming_markdown_response \
   "gzip-postcommit" "${RAW_DIR}/gzip_postcommit.hdr" \
   "${RAW_DIR}/gzip_postcommit.body" "# Gzip Postcommit" \
   "${GZIP_POSTCOMMIT_END_TOKEN}" 1
-if grep -q "${GZIP_POSTCOMMIT_LATE_TOKEN}" \
+if markdown_token_present "${GZIP_POSTCOMMIT_LATE_TOKEN}" \
   "${RAW_DIR}/gzip_postcommit.body"; then
   echo "FAIL: truncated later gzip member unexpectedly delivered its tail" >&2
   exit 1

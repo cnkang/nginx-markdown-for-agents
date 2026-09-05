@@ -20,6 +20,7 @@ sys.path.insert(0, str(TOOLS_DIR))
 from harness.detect_production_auth_transport import (  # noqa: E402
     _server_blocks,
     check_config,
+    scan_examples,
 )
 
 DETECTOR = Path(__file__).resolve().parent.parent / "detect_production_auth_transport.py"
@@ -151,6 +152,15 @@ class TestServerBlocks:
 # ---------------------------------------------------------------------------
 # CLI contract
 # ---------------------------------------------------------------------------
+
+class TestScanExamplesRoot:
+    """A missing examples root must fail closed, not print pass."""
+
+    def test_missing_examples_root_is_reported(self, tmp_path: Path):
+        findings = scan_examples(tmp_path / "no-such-dir")
+
+        assert any("missing or not a directory" in f.message for f in findings)
+
 
 class TestCLI:
     """CLI contract: the detector must exit exactly 0 on success."""

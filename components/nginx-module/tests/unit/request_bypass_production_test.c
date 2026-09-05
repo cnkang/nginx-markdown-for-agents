@@ -22,6 +22,9 @@
 #ifndef NGX_HTTP_NOT_MODIFIED
 #define NGX_HTTP_NOT_MODIFIED 304
 #endif
+#ifndef NGX_HTTP_PRECONDITION_FAILED
+#define NGX_HTTP_PRECONDITION_FAILED 412
+#endif
 
 #ifndef NGX_LOG_INFO
 #define NGX_LOG_INFO  6
@@ -493,6 +496,7 @@ static ngx_uint_t g_resume_send_header_calls;
 static struct MarkdownResult g_conditional_result;
 static ngx_int_t g_adopt_rc;
 static ngx_http_markdown_conditional_ownership_t g_adoption_record;
+static size_t g_adoption_scan_limit;
 
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
@@ -693,7 +697,7 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     ngx_http_markdown_conditional_ownership_t *ownership)
 {
     UNUSED(r);
-    UNUSED(scan_limit);
+    g_adoption_scan_limit = scan_limit;
     if (ownership != NULL) {
         *ownership = g_adoption_record;
     }
@@ -714,6 +718,7 @@ ngx_http_markdown_build_effective_conf(
     eff->enabled = conf->enabled;
     eff->error_policy = conf->on_error;
     eff->error_status = conf->error_status;
+    eff->streaming_buffer = conf->limits.streaming_buffer;
 }
 
 void
@@ -869,6 +874,16 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     g_send_304_calls++;
     if (r != NULL) {
         r->headers_out.status = NGX_HTTP_NOT_MODIFIED;
+    }
+    return g_send_304_rc;
+}
+
+ngx_int_t
+ngx_http_markdown_send_412(ngx_http_request_t *r)
+{
+    g_send_304_calls++;
+    if (r != NULL) {
+        r->headers_out.status = NGX_HTTP_PRECONDITION_FAILED;
     }
     return g_send_304_rc;
 }
@@ -1075,6 +1090,7 @@ reset_test_state(void)
     g_send_304_calls = 0;
     g_resume_send_header_calls = 0;
     g_adopt_rc = NGX_OK;
+    g_adoption_scan_limit = 0;
     memset(&g_adoption_record, 0, sizeof(g_adoption_record));
     g_decision_category_calls = 0;
     memset(&g_conditional_result, 0, sizeof(g_conditional_result));
@@ -1094,6 +1110,7 @@ test_preaccess_records_orphan_adoption(void)
     conf.enabled = 1;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    conf.limits.streaming_buffer = 12345;
     g_conf = &conf;
     g_capture_rc = NGX_DECLINED;
     g_adoption_record.adopter =
@@ -1113,6 +1130,8 @@ test_preaccess_records_orphan_adoption(void)
                    == NGX_HTTP_MARKDOWN_CONDITIONAL_PHASE_PREACCESS
                 && ctx->conditional.ownership.entry_count == 2,
                 "preaccess must retain complete orphan ownership metadata");
+    TEST_ASSERT(g_adoption_scan_limit == 12345,
+                "orphan adoption must use the snapshot-bound streaming limit");
     TEST_PASS("preaccess records orphan adoption metadata");
 }
 

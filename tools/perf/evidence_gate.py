@@ -394,11 +394,7 @@ def _extract_evidence_metrics(report: dict) -> dict:
     scenarios = _report_scenarios(report)
 
     if not scenarios:
-        # keep empty/legacy tests happy while failing real missing scenarios
-        return {
-            "fallback_rate_abs": 0.0,
-            "memory_slope_pct": 0.0,
-        }
+        return {}
 
     metrics: dict = {}
     _extract_small_latency(scenarios, metrics)
@@ -518,7 +514,7 @@ def _memory_point_for_scenario(scenario: dict) -> tuple[float, float] | None:
     """
     metrics = scenario.get("metrics") or scenario.get("results") or scenario
     input_bytes = metrics.get("input_bytes") or metrics.get("html_bytes")
-    if input_bytes is None or input_bytes <= 0:
+    if not _is_exact_int(input_bytes) or input_bytes <= 0:
         return None
 
     # Required: peak RSS delta from background sampling
@@ -2341,7 +2337,7 @@ def _canonical_baseline_fallback_violations(
     if role != "baseline":
         return []
 
-    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
+    scenarios = _report_scenarios(report)
     by_name = {scenario.get("name"): scenario for scenario in scenarios}
     violations = []
     for name in _CRITICAL_STREAMING_SCENARIOS:
@@ -2776,12 +2772,12 @@ def _check_environment_compatibility(
 
     cur_scenarios = {
         scenario.get("name"): scenario
-        for scenario in cur_mb.get("scenarios", [])
+        for scenario in _report_scenarios(cur_mb)
         if scenario.get("name")
     }
     base_scenarios = {
         scenario.get("name"): scenario
-        for scenario in base_mb.get("scenarios", [])
+        for scenario in _report_scenarios(base_mb)
         if scenario.get("name")
     }
     for name in sorted(_CRITICAL_SCENARIOS):

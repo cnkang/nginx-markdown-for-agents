@@ -58,7 +58,13 @@ echo ""
 # Updated 2026-09-02: 352 — fail-closed logging added by reviewed fixes:
 # 68cc50e5 (+2 NGX_LOG_CRIT: conditional validator context allocation and
 # capture failures) and d42971f5 (+1 NGX_LOG_ERR: inflight guard rejection).
-BASELINE_LOG_SITES=352
+# Updated 2026-09-03: 353 — 59e7b41c (rollback-safe orphan conditional
+# header adoption) adds +2 NGX_LOG_DEBUG0 while removing one, net +1.
+# Updated 2026-09-04: 357 — send_412 auth Cache-Control hardening adds
+# +1 NGX_LOG_ERR for the 412 path failure (mirroring 304 path).
+# Updated 2026-09-05: 359 — decompression peak-budget rejection adds
+# +2 NGX_LOG_WARN sites for single- and multi-layer resource-limit paths.
+BASELINE_LOG_SITES=359
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=0

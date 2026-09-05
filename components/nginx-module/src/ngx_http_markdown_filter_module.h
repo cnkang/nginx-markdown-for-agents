@@ -1018,6 +1018,8 @@ typedef struct {
     struct {
         struct ngx_table_elt_s      *if_none_match;
         struct ngx_table_elt_s      *if_modified_since;
+        struct ngx_table_elt_s      *if_match;
+        struct ngx_table_elt_s      *if_unmodified_since;
         ngx_http_markdown_conditional_header_state_t *header_states;
         ngx_http_markdown_conditional_ownership_t ownership;
         ngx_flag_t                  captured;
@@ -1961,6 +1963,9 @@ ngx_int_t ngx_http_markdown_adopt_orphan_conditional_headers(
 /* Send 304 Not Modified response */
 ngx_int_t ngx_http_markdown_send_304(ngx_http_request_t *r,
     const struct MarkdownResult *result);
+
+/* Send 412 Precondition Failed response */
+ngx_int_t ngx_http_markdown_send_412(ngx_http_request_t *r);
 
 /*
  * Check if the response carries Cache-Control: no-transform.

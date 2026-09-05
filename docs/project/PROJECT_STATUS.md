@@ -61,67 +61,12 @@ pending until the blocking gates pass.
 - **README consistency verification**: English and Chinese READMEs verified
   for version, directive, and default-value consistency.
 
-### Release 0.7.0 Updates (historical)
+### Historical release records
 
-- P0 runtime correctness:
-  - Full-buffer pending chain on NGX_AGAIN with resume (Rule 1).
-  - `failopen_completed` flag prevents duplicate finalize (Rule 38).
-  - Safe output ordering: alloc→copy→chain→headers→body filter.
-  - `markdown_decompress_max_size` directive: decompression budget
-    decoupled from the legacy `max_size` field (consolidated into
-    `markdown_limits` in 0.9.0).
-  - `markdown_parse_timeout` directive (default: 30s).
-  - `markdown_parser_budget` directive (default: 64m).
-  - Rust error codes: `DecompressionBudgetExceeded` (9), `ParseTimeout` (10),
-    `ParseBudgetExceeded` (11).
-- Rust-first architecture modules:
-  - `negotiator`: RFC 7231 Accept header q-value negotiation with
-    `FFIAcceptResult` struct and `markdown_negotiate_accept` FFI export.
-  - `conditional`: If-None-Match / If-Modified-Since handling in Rust.
-  - `decision`: pure decision engine with reason codes.
-  - `header_plan`: declarative header mutation plan for atomic application.
-  - `security` extensions: URL control-char rejection, link escaping,
-    forwarded header parsing.
-- FFI ABI verification:
-  - Rust layout tests for `MarkdownResult`, `FFIAcceptResult`, error/reason
-    code uniqueness.
-  - C `static_assert` for critical struct sizeof and offsetof.
-- DEB/RPM packaging pipeline with SHA256SUMS, mandatory tag-release GPG signing,
-  release-manifest.json traceability, and repository metadata.
-- Kubernetes deployment examples (Ingress Controller, Helm chart, manifests).
-- Runtime diagnostics endpoint (`/nginx-markdown/diagnostics`).
-- Dynconf dry-run, last-known-good failed-reload protection, and atomic file restore.
-- Rules 39–40: NGX_DONE terminal semantics, invalidated header hash==0
-  filtering.
-- CI supply-chain hardening: SHA-pinned Actions, checksum verification,
-  ClusterFuzzLite integration.
-- Streaming memory budget enforcement during code block accumulation.
-
-### Release 0.6.3 Updates (historical)
-
-- Rust-first E2E migration closure:
-  - `tools/e2e-harness/` is now a first-class migrated-scenario runner for:
-    `accept-negotiation`, `metrics-endpoint`, `conditional-requests`,
-    `auth-cache`, and `status-codes`.
-  - `make test-e2e` delegates migrated scenarios to the Rust harness while
-    retaining non-migrated canonical shell scenarios.
-  - `make test-e2e-rust` provides a direct migrated-scenario entrypoint.
-- Python E2E cleanup:
-  - removed stale spec-only files:
-    `components/nginx-module/tests/e2e/test_streaming_e2e.py` and
-    `components/nginx-module/tests/e2e/test_streaming_failure_cache_e2e.py`.
-- Harness rule/governance alignment:
-  - routing manifest includes Rust harness ownership surfaces,
-  - harness checks enforce Rust harness contract and migration-policy guards for
-    migrated shell wrappers and removed Python E2E surfaces.
-- Final mainline hardening before the v0.6.3 tag:
-  - release/performance tooling path validation uses `REPO_ROOT` as the
-    repository-boundary source of truth,
-  - release binary matrix targets current NGINX versions `1.30.1` and
-    `1.31.0`,
-  - local runner path and round-trip temp-file tests keep artifacts under the
-    repository root,
-  - development test dependencies align with the current CI baseline.
+Release-specific implementation recaps before the current 0.9.x line are
+kept in the [release notes](../releases/) and [CHANGELOG](../../CHANGELOG.md).
+This status document intentionally records the current release state and
+verification posture rather than duplicating the historical project ledger.
 
 ### Repository Harness Updates
 
@@ -135,72 +80,8 @@ pending until the blocking gates pass.
 - The harness now records short-lived execution memory in a user-local state
   carrier instead of tracked repository docs.
 
-### Release 0.6.2 Updates (historical)
-
-- Dynamic configuration hot-reload:
-  - `markdown_dynamic_config` directive for runtime configuration reload without
-    NGINX restart, with snapshot isolation and reload retry contract.
-  - Dynconf snapshot isolation: `dynconf_enabled=0` locations are never
-    influenced by the global snapshot, `header_filter` reads the snapshot
-    exactly once to eliminate race windows.
-  - Unknown dynconf keys cause atomic reload rejection (entire file rejected).
-- Snapshot race elimination (v0.6.2):
-  - `active_snapshot` read once at `header_filter` entry into function-lifetime
-    `snap_copy`, effective conf built once from that copy.
-  - Deferred-state latches cleared on both success and failure resume paths.
-- dynconf_path_configured lifecycle:
-  - Flag lives in `main_conf_t` (per-reload isolation), not file-scope static.
-
-### Release 0.6.1 Updates (historical)
-
-- Hardening release:
-  - Rules 27–31: Markdown output escaping and injection prevention, full
-    `ngx_list_part_t` chain iteration, flag clearing ordering, NUL-termination
-    of `ngx_str_t` before C API calls, merge residual code integrity checks.
-  - Output-safety risk pack added under `docs/harness/risk-packs/`.
-
-### Release 0.6.0 Updates (historical)
-
-- Production readiness release:
-  - Streaming engine as default (`markdown_streaming_engine auto`).
-  - Noise pruning default enabled (`markdown_prune_noise on`).
-  - Unified memory budget (`markdown_memory_budget`, 0.6.0, retired in 0.9.0 as `markdown_limits`) superseding dual
-    `markdown_max_size` + `markdown_streaming_budget`.
-  - Historical OpenTelemetry tracing proposal (the proposal selected OTLP
-    HTTP/JSON). No OTel implementation shipped in this release line.
-  - Per-path metrics with cardinality control.
-  - OS package manager distribution (APT, YUM/DNF, Homebrew).
-  - Helm chart with Ingress annotation support.
-  - Coverage gate as CI merge requirement.
-  - MDX and Org-mode flavor selectors (experimental at the time, removed in
-    v0.9.1 because they never provided distinct conversion semantics).
-  - Dynamic configuration hot-reload (`markdown_dynamic_config`).
-  - ADR-0006 (OTel), ADR-0007 (Streaming Default), ADR-0008 (Noise Pruning Default).
-
-### Release 0.5.0 Updates (historical)
-
-- Streaming architecture and runtime:
-  - True streaming path integrated into the dual-engine model (opt-in), with
-    request-scoped engine selection.
-  - Streaming lifecycle and failure semantics hardened across fallback,
-    backpressure, and post-commit handling.
-- Streaming quality gates:
-  - Expanded parity, diff, and chunk-boundary validation for streaming outputs.
-  - Streaming-focused evidence and release-gate tooling aligned with 0.5.0
-    scope.
-- Harness and governance:
-  - Repo-owned harness docs and checks promoted as canonical truth surfaces.
-  - `make harness-check` and `make harness-check-full` wired as executable
-    validation entrypoints.
-
-### Release 0.4.0 Updates (historical)
-
-- 0.4.0 release-gate validation and tests refined based on automated code-review feedback:
-  - Metric naming validation now supports histogram `_seconds_bucket/_sum/_count` series while keeping stricter rejection of ambiguous suffixes.
-  - Checklist verifiability checks now include checked items and ignore fenced code examples.
-  - Release-gate constants centralized in a shared module to reduce drift between tooling, tests, and governance docs.
-  - File read and directory listing paths in release-gate checks hardened for graceful failure reporting.
-- Release checklist wording now explicitly requires both Rust proptest and Python Hypothesis property-based test suites.
+Earlier release-specific changes remain available in the linked release notes
+and changelog. This current-status page deliberately omits those details.
 
 This assessment rests on:
 
@@ -218,78 +99,6 @@ This assessment rests on:
 - `cargo-fuzz` targets and nightly fuzz workflow for parser, FFI, and security-validator paths
 - A separate non-blocking Darwin/macOS smoke workflow validates native Rust build plus real-nginx runtime checks on GitHub-hosted macOS
 - Release artifacts and installation tooling
-
-## Release 0.3.0 Highlights
-
-The 0.3.0 release includes:
-
-### Added
-- Incremental processing for large responses with `markdown_large_body_threshold` directive
-- `IncrementalConverter` Rust API behind the `incremental` feature gate
-- Matrix-driven release automation pipeline (`tools/release/`)
-- Third-party notices coverage checks and generated `THIRD-PARTY-NOTICES`
-- Performance baseline gating system with `nightly-perf.yml` workflow
-- Path hit metrics (`fullbuffer_path_hits`, `incremental_path_hits`) via metrics endpoint
-- Large response design document and rollout guide
-- `Cargo.toml` version now strictly tracks the release tag (synchronized from 0.1.0 to 0.3.0)
-
-### Changed
-- Event handler attribute sanitization now uses `on*` prefix matching instead of a static allowlist, following the OWASP/DOMPurify convention
-- Form-related elements now use strip-tag-keep-content instead of full removal, preserving child text for AI agents
-- Embedded content elements (`iframe`, `object`, `embed`) now use strip-tag-keep-content instead of full removal
-- Image conversion now preserves the `title` attribute in Markdown syntax, missing/blocked image URLs emit `alt` text as plain text
-- Media elements (`video`, `audio`) now have their `src` URL extracted as a Markdown link, video `poster` thumbnails extracted as Markdown images
-- Image map `<area>` elements now have their `href` extracted as Markdown links
-- X-Forwarded-Host/Proto headers are no longer trusted by default, added CIDR-based `markdown_trusted_proxies <CIDR>...` directive (default: off — no forwarded headers honored)
-- Decompression buffer estimation now logs a warning when the estimated output exceeds 50 MB
-- CI jobs for clang compiler and AddressSanitizer/UndefinedBehaviorSanitizer smoke tests
-- SonarCloud Quality Gate Status badge in both English and Chinese READMEs
-- Updated documentation to reflect correct Rust minimum version (1.85.0+ for edition 2024)
-- Corrected NGINX minimum version references across all documentation (1.24.0+)
-
-### Fixed
-- Rust minimum version requirement in all documentation (was 1.70.0+, now 1.85.0+)
-- NGINX minimum version in CONTRIBUTING.md (was 1.18.0, now 1.24.0)
-
-## Previous Release: 0.2.2 (March 15, 2026)
-
-### Added
-- Canonical native E2E entrypoints under `tools/e2e/`
-- Shared native-build helper logic for runtime verification scripts
-- `cargo-fuzz` targets for parser, FFI, and security-validator paths, plus a nightly GitHub Actions workflow
-- Non-blocking Darwin/macOS smoke workflow
-- Additional performance artifact sampling for the medium front-matter path
-
-### Changed
-- Split the NGINX module implementation into focused config, request-state, payload, conversion, lifecycle, and metrics helper units
-- Moved shared metrics collection to a cross-worker shared-memory model
-- Split the Rust converter internals into dedicated submodules
-- Reworked `make test-e2e` to delegate to the canonical native E2E suite
-- Expanded C and Rust inline documentation
-- Completed broader doc pass across decompression/buffering and Rust FFI/parser hot paths
-
-### Fixed
-- Hardened native E2E/runtime scripts for reusable `NGINX_BIN` paths
-- Aligned Darwin native builds around a consistent `MACOSX_DEPLOYMENT_TARGET`
-- Restored Darwin Rust target detection in the shared native-build helper
-- Fixed `markdown_stream_types` content-type validation for stricter `-Werror` builds
-- Synchronized documentation with the refactored implementation
-
-## Previous Release: 0.2.1 (March 11, 2026)
-
-### New Features
-- Variable-driven `markdown_filter` support using NGINX variables and complex values
-- Phase-consistent decision caching for reliable header and body processing
-- Enhanced installation script with Docker support (`SKIP_ROOT_CHECK=1`)
-- Simplified Chinese documentation (`README_zh-CN.md`)
-- Comprehensive deployment examples guide
-- Complete architecture documentation suite
-
-### Bug Fixes
-- Normalized `markdown_filter` runtime parsing for consistent variable resolution
-- Restored const compatibility for stricter compiler builds
-- Hardened path and URL-scheme parsing utilities
-- Corrected installation paths and documentation details
 
 ## Implemented Features
 
@@ -431,112 +240,9 @@ Details for 0.9.0 (Config V2 directives, profile system, and the
 [MIGRATION-0.9.0.md](../guides/MIGRATION-0.9.0.md), and the
 [CHANGELOG](../../CHANGELOG.md).
 
-#### 0.8.3 (historical — last 0.8.x patch)
-
-- Streaming state machine correctness: corrected `pop_contexts_up_to`
-  return order (innermost-first) and added `CodeBlock` handling in
-  `ol`/`ul` derived state branches (Rule 6).
-- Streaming emitter `ExitMany` action for batch context unwinding from
-  mid-stack (Rule 6).
-- Decompression buffer memory safety: switched workspace from `ngx_alloc`/`ngx_free`
-  to `ngx_pnalloc`/`ngx_pfree` (Rule 43).
-- Snapshot capacity raised from 4 to 8 entries in stream commit path
-  (Rule 39).
-- FFI `Box::into_raw` correctness: fixed use-after-free in converter
-  handle allocation (Rule 15).
-- Added `ngx_pfree` mock to `decompression_production_test.c` for
-  unit test compilation.
-- Full release gate validation: all 0.8.x gates pass (harness-check
-  15/15, test-harness, release-gates-check-08x, test-nginx-unit,
-  test-rust-fuzz-smoke, FFI panic safety --strict, all detector tests).
-- Release integrity: `release-manifest.json` added as a release asset for
-  DEB/RPM packages, generated before `SHA256SUMS` and covered by the
-  `SHA256SUMS.asc` GPG signature chain for tag releases.
-
-#### 0.8.2
-
-- Streaming decompression hardening: eliminated heap leaks in `finish_zlib()`
-  across all exit paths, hardened buffer expansion error paths, and enforced
-  `ngx_alloc`/`ngx_free` exclusively for resizable buffer backing stores
-  (Rule 43).
-- Implied closure correctness (Rule 6): structural closures now unwind
-  inner-to-outer, the Rust converter consumes implied closures before the
-  sanitizer Skip decision and mirrors them to the state machine.
-- FFI safety: centralized header plan reset for panic safety, parser working-set
-  estimation with overflow-safe budget enforcement.
-- Streaming decompression budget and memory accounting (Rule 3, Rule 44).
-- Code fence language handling: `lang-` prefix support and sanitization in the
-  streaming converter.
-- `parse_size()` hardening for empty, whitespace-only, and malformed input.
-- Security scan scoping: gitleaks scoped to tracked worktree content, skipping
-  deleted paths and guarding against empty scan roots (Rule 48).
-- Synced "current release line" wording across project, README, installation,
-  and compatibility docs to 0.8.x (latest patch 0.8.3).
-- Finalized RFC-0008 status from `Draft` to `Accepted / Implemented in 0.8.0`.
-- Narrowed `markdown_stream_flush_interval` commitment from "future 0.8.x" to
-  "future release".
-- Added stream commit multipart header-list rollback regression tests covering
-  cross-part `orig_nelts` semantics (Rule 39 / Rule 40).
-- Added `make release-gates-check-08x` as the canonical 0.8.x patch-line entry
-  point.
-- Updated `THIRD-PARTY-NOTICES` with current dependency versions (Rule 49).
-
-#### 0.8.1
-
-- Streaming header commit atomicity / Rule 39 rollback semantics.
-- FFI streaming finish invalid input handle ownership / cleanup contract.
-- Content-Type OWS / HTAB compliance.
-- Full-buffer backpressure `NGX_AGAIN` resume tail duplication.
-- Release/perf/coverage tooling path traversal and taint sink hardening.
-- Static security / supply-chain gate additions and documentation.
-
-#### 0.8.0 (line anchor)
-
-- True streaming contract: formalize incremental input processing, incremental
-  output emission, and bounded memory as a single verifiable contract
-  (RFC 0008, ADR-0011)
-- Fallback state machine: implement pre-commit/post-commit two-phase error
-  handling with deterministic recovery semantics (ADR-0012)
-- Default-auto engine: align the auto-mode streaming policy with the true
-  streaming contract definition (ADR-0013)
-- Support matrix source of truth: consolidate platform, version, and package
-  support declarations into a single machine-readable matrix consumed by CI,
-  docs, and packaging (ADR-0014)
-
-**Non-goals for 0.8.x line:**
-- SSE/NDJSON conversion (out of scope for this release line)
-- Full parser rewrite (incremental improvements only)
-- Edge-CDN deployment model (origin-near architecture retained)
-- Implementing `markdown_stream_flush_interval` (reserved for a future release,
-  current use causes `nginx -t` to fail)
-
-### Implemented Features (0.8.x line)
-
-- Dual-engine conversion architecture: streaming default with full-buffer
-  fallback
-- Rust-first architecture: Accept negotiation, conditional requests, decision
-  engine, and header plan modules implemented in Rust with narrow FFI boundary
-- Independent decompression budget, parse timeout, and parser budget directives
-- Runtime diagnostics endpoint with config snapshot and recent decisions
-- Dynamic configuration hot-reload with dry-run validation and LKG rollback
-- DEB/RPM packaging pipeline with GPG signing
-- Kubernetes deployment examples and Helm chart
-- FFI ABI layout verification (Rust layout tests + C static_assert)
-- CI supply-chain hardening (SHA-pinned Actions, checksum verification)
-- ClusterFuzzLite integration for continuous fuzz testing
-- Streaming failure semantics and fallback controls aligned to commit
-  boundaries
-- Streaming parity and differential validation across chunk boundaries and
-  failure paths
-- Benchmark corpus and evidence-based release-gate validation
-- Repo-owned harness governance (`AGENTS.md`, `docs/harness/`, `tools/harness/`)
-- Prometheus-compatible metrics endpoint for operational monitoring
-- Historical OpenTelemetry tracing proposal (OTLP HTTP/JSON). The product has
-  no built-in OTel tracing implementation.
-- Per-path metrics with cardinality control
-- OS package manager distribution (APT, YUM/DNF, Homebrew)
-- Rollout and rollback guides with executable operator procedures
-- Performance baseline gating system and hardened CI/CD validation
+The [0.8.x release notes](../releases/) and the
+[CHANGELOG](../../CHANGELOG.md) record historical architecture and patch
+details.
 
 ### Near-Term
 - Expand streaming rollout samples across mixed traffic profiles
@@ -666,9 +372,9 @@ See `examples/docker/` for Docker build examples.
 | 1.24.0 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.24.0 linux musl amd64 dynamic-module | `.github/workflows/release-binaries.yml` |
+| 1.24.0 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.24.0 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.24.0 linux musl arm64 dynamic-module | `.github/workflows/release-binaries.yml` |
+| 1.24.0 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.24.0 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
@@ -678,25 +384,25 @@ See `examples/docker/` for Docker build examples.
 | 1.26.3 debian12 glibc arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
 | 1.26.3 alpine3.20 musl arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
 | 1.26.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.26.3 linux musl amd64 dynamic-module | `.github/workflows/release-binaries.yml` |
+| 1.26.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.26.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.26.3 linux musl arm64 dynamic-module | `.github/workflows/release-binaries.yml` |
+| 1.26.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.28.3 linux musl amd64 dynamic-module | `.github/workflows/release-binaries.yml` |
+| 1.28.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.28.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.28.3 linux musl arm64 dynamic-module | `.github/workflows/release-binaries.yml` |
+| 1.28.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.28.3 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.30.4 linux musl amd64 dynamic-module | `.github/workflows/release-binaries.yml` |
+| 1.30.4 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.30.4 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.30.4 linux musl arm64 dynamic-module | `.github/workflows/release-binaries.yml` |
+| 1.30.4 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.31.4 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
@@ -706,9 +412,9 @@ See `examples/docker/` for Docker build examples.
 | 1.31.4 debian12 glibc arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
 | 1.31.4 alpine3.24 musl arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
 | 1.31.4 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.31.4 linux musl amd64 dynamic-module | `.github/workflows/release-binaries.yml` |
+| 1.31.4 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.31.4 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.31.4 linux musl arm64 dynamic-module | `.github/workflows/release-binaries.yml` |
+| 1.31.4 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.31.4 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.31.4 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 <!-- END:release-matrix:status-matrix -->
@@ -718,24 +424,10 @@ See `examples/docker/` for Docker build examples.
 **NGINX Markdown for Agents** is on the 0.9.x line: 0.9.2 is the current
 development line and 0.9.1 is the latest released patch. The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
-streaming-default conversion model, with bounded-memory streaming as the
-default path and full-buffer conversion as the fallback. Version 0.8.0
-formalizes the true streaming contract (RFC 0008, ADR-0011), introduces
-the streaming fallback
-state machine (ADR-0012), aligns the auto-mode streaming policy with the true
-streaming contract definition (ADR-0013), and consolidates platform and
-version support declarations into a release matrix source of truth (ADR-0014).
-The 0.8.1 through 0.8.3 patch releases harden streaming atomicity, FFI cleanup,
-OWS compliance, backpressure resume, streaming decompression, implied-closure
-correctness, release-gate naming, and documentation
-consistency without changing the 0.8.x configuration contract. They also
-include streaming observability metrics, streaming security
-enforcement (policy validation and alerts), streaming configuration directives, Prometheus-compatible
-metrics, decision reason codes, rollout and rollback guides, parity and
-evidence workflows for streaming rollout safety, dynamic configuration
-hot-reload, OS package distribution,
-release automation, performance baseline gating, runtime validation reuse,
-fuzzing workflows, and shared metrics aggregation for observability.
+streaming-default conversion model, bounded-memory processing, a full-buffer
+fallback, and a repo-owned validation harness. Release readiness remains tied
+to the current release matrix and the evidence-producing gates described in
+the active release documentation.
 
 ### Key Components
 - Core feature implementation
@@ -765,7 +457,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-24 | Kang | The Release 0.7.0 historical bullet now names markdown_decompress_max_size as the directive of that era and keeps markdown_limits in its 0.9.0 context |
+| 0.9.2 | 2026-08-24 | Kang | Trimmed historical release recaps and kept the active status page linked to release notes and the changelog |
 | 0.9.2 | 2026-08-15 | Kang | Split E2E coverage ownership between tools/e2e/ entrypoints and tools/e2e-harness/ migrated scenarios |
 | 0.9.2 | 2026-08-08 | Kang | Fixed summary release line to 0.9.2; removed OTel and per-path metrics from current capabilities |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

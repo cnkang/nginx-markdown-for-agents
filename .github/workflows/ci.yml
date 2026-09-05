@@ -16,7 +16,7 @@ on:
       - "perf/**"
       - "packaging/**"
       - "release/**"
-      - "artifacts/release/0.9.2/**"
+      - "artifacts/release/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
       - "examples/production/**"
@@ -47,7 +47,7 @@ on:
       - "perf/**"
       - "packaging/**"
       - "release/**"
-      - "artifacts/release/0.9.2/**"
+      - "artifacts/release/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
       - "examples/production/**"
@@ -204,7 +204,7 @@ jobs:
             contract_gates:
               - 'schemas/**'
               - 'release/**'
-              - 'artifacts/release/0.9.2/**'
+              - 'artifacts/release/**'
               - 'components/rust-converter/src/decision/reason_code.rs'
               - 'tools/release/gates/**'
               - 'tools/harness/**'

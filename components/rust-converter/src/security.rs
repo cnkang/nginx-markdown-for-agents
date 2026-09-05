@@ -821,6 +821,19 @@ mod tests {
     }
 
     #[test]
+    fn streaming_markdown_destination_escaper_matches_full_buffer() {
+        let url = "a <b>\\c\n\r\t z";
+        let mut streamed = String::new();
+        for_each_escaped_markdown_destination(url, |ch| streamed.push(ch));
+
+        assert_eq!(streamed, escape_markdown_destination(url));
+
+        let mut plain = String::new();
+        for_each_escaped_markdown_destination("safe", |ch| plain.push(ch));
+        assert_eq!(plain, "safe");
+    }
+
+    #[test]
     fn test_xxe_prevention_documentation() {
         let doc = xxe_prevention_documentation();
         assert!(doc.contains("html5ever"));
@@ -1016,6 +1029,54 @@ pub(crate) fn escape_markdown_destination(url: &str) -> Cow<'_, str> {
     Cow::Owned(escaped)
 }
 
+/// Emit the canonical Markdown destination representation one character at
+/// a time.  Streaming callers use this form to avoid a temporary `Cow` while
+/// retaining exactly the same escaping policy as
+/// [`escape_markdown_destination`].
+pub(crate) fn for_each_escaped_markdown_destination<F>(url: &str, mut emit: F)
+where
+    F: FnMut(char),
+{
+    if markdown_destination_escaped_capacity(url) == Some(0) {
+        for ch in url.chars() {
+            emit(ch);
+        }
+        return;
+    }
+
+    emit('<');
+    for ch in url.chars() {
+        match ch {
+            '<' => {
+                emit('\\');
+                emit('<');
+            }
+            '>' => {
+                emit('\\');
+                emit('>');
+            }
+            '\\' => {
+                emit('\\');
+                emit('\\');
+            }
+            '\n' => {
+                emit('\\');
+                emit('n');
+            }
+            '\r' => {
+                emit('\\');
+                emit('r');
+            }
+            '\t' => {
+                emit('\\');
+                emit('t');
+            }
+            _ => emit(ch),
+        }
+    }
+    emit('>');
+}
+
 fn contains_percent_encoded_control(url: &str) -> bool {
     url.as_bytes().windows(3).any(|window| {
         window[0] == b'%'
@@ -1126,6 +1187,25 @@ pub(crate) fn link_label_escaped_capacity(s: &str) -> Option<usize> {
     }
 
     if needs_owned { Some(capacity) } else { Some(0) }
+}
+
+/// Emit the canonical Markdown link-label representation one character at a
+/// time.  This keeps the streaming emitter from materializing an escaped
+/// label solely to concatenate it into the output buffer.
+pub(crate) fn for_each_escaped_link_label<F>(s: &str, mut emit: F)
+where
+    F: FnMut(char),
+{
+    for ch in s.chars() {
+        match link_label_escape_action(ch) {
+            LinkLabelEscapeAction::Escape => {
+                emit('\\');
+                emit(ch);
+            }
+            LinkLabelEscapeAction::ReplaceWithSpace => emit(' '),
+            LinkLabelEscapeAction::Copy => emit(ch),
+        }
+    }
 }
 
 /// Escape a string for safe use as a Markdown link label.
@@ -1405,6 +1485,19 @@ mod url_validation_tests {
             Cow::Owned(value) => assert!(value.capacity() >= expected.len()),
             Cow::Borrowed(_) => panic!("an escaped label must own its output"),
         }
+    }
+
+    #[test]
+    fn streaming_link_label_escaper_matches_full_buffer() {
+        let label = "[]\\<>*_`~\n";
+        let mut streamed = String::new();
+        for_each_escaped_link_label(label, |ch| streamed.push(ch));
+
+        assert_eq!(streamed, escape_link_label(label));
+
+        let mut plain = String::new();
+        for_each_escaped_link_label("plain", |ch| plain.push(ch));
+        assert_eq!(plain, "plain");
     }
 
     #[test]

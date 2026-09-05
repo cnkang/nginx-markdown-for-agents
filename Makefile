@@ -68,6 +68,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         install \
         test test-rust rust-fmt-check rust-clippy-check test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-canonical test-e2e-rust test-e2e-contract-scripts test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
+        test-all-e2e test-all-coverage \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
         official-feature-manifest-generate \
@@ -80,11 +81,13 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         streaming-evidence-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
         test-rust-fuzz-qualification test-e2e-rust-soak \
+        docs-check-base release-perf-evidence-blocking \
         perf-evidence-check \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-brotli-streaming-e2e \
+        verify-http2-alpn-e2e \
         verify-encoding-chain-e2e \
         verify-streaming-failure-cache-e2e \
         verify-streaming-failure-cache-e2e-plan \
@@ -812,12 +815,17 @@ release-gates-check-070:
 				nginx_version="$${NGINX_VERSION:-1.26.3}"; \
 				nginx_version_ceil="$$(awk 'BEGIN { split(ARGV[1], p, "."); printf "%d.%d.%d", p[1], p[2], p[3] + 1 }' "$$nginx_version")"; \
 				rpm_nginx_evr="$${RPM_NGINX_EVR:-1:$$nginx_version}"; \
+				rpm_nginx_evr_ceil="$${RPM_NGINX_EVR_CEIL:-1:$$nginx_version_ceil}"; \
 				nfpm_preinstall="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preinstall.XXXXXX")"; \
+				nfpm_preremove="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preremove.XXXXXX")"; \
 				nfpm_config="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-nfpm.XXXXXX")"; \
-				trap 'rm -f "$$nfpm_preinstall" "$$nfpm_config"' EXIT; \
+				trap 'rm -f "$$nfpm_preinstall" "$$nfpm_preremove" "$$nfpm_config"' EXIT; \
 				packaging/nfpm/scripts/render-nfpm-config.sh \
 					packaging/nfpm/scripts/preinstall.sh "$$nfpm_preinstall" "$$nginx_version"; \
-				sed "s|./packaging/nfpm/scripts/preinstall.sh|$$nfpm_preinstall|" \
+				packaging/nfpm/scripts/render-nfpm-config.sh \
+					packaging/nfpm/scripts/preremove.sh "$$nfpm_preremove" "$$nginx_version"; \
+				sed -e "s|./packaging/nfpm/scripts/preinstall.sh|$$nfpm_preinstall|" \
+				    -e "s|./packaging/nfpm/scripts/preremove.sh|$$nfpm_preremove|" \
 					packaging/nfpm/nfpm.yaml > "$$nfpm_config"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
 					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
@@ -826,7 +834,7 @@ release-gates-check-070:
 					--target "dist/nginx-module-markdown-for-agents_$${pkg_version}_nginx-$${nginx_version}_$${nfpm_arch}.deb"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
 					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
-					RPM_NGINX_EVR="$$rpm_nginx_evr" NFPM_ARCH="$$nfpm_arch" \
+					RPM_NGINX_EVR="$$rpm_nginx_evr" RPM_NGINX_EVR_CEIL="$$rpm_nginx_evr_ceil" NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager rpm \
 					--target "dist/nginx-module-markdown-for-agents-$${pkg_version}-nginx$${nginx_version}-1.$${rpm_arch}.rpm"; \
 			else \

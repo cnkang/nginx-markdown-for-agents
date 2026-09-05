@@ -110,7 +110,12 @@ not prevent the churn because the *workflow* did not manage the lifecycle:
     `refs/tags/perf-baseline/<baseline-stem>`, a namespace disjoint from
     the release tags `v<MAJOR>.<MINOR>.<PATCH>`.  The tag message must
     record the baseline stem, `source_run`, and `source_artifact_sha256`,
-    so the ref audits itself.  A pushed anchor is immutable: never move it
+    so the ref audits itself.  Archival fallback: a `type:
+    verbatim_import` pack exempted from those two fields under clause 9
+    records the stem, the full `source_git_commit`, and the retained
+    artifact path instead.  In both cases the gate enforces the anchor by
+    resolving (`source_git_commit`, stem) — see `repo_commit_anchored()`
+    — never by parsing the message.  A pushed anchor is immutable: never move it
     and never delete it.  Create one only when the finalizer produces a new
     canonical baseline whose measurement commit no existing ref anchors —
     a commit that an immutable ref (a release tag or an existing

@@ -73,13 +73,19 @@ Publication and artifact availability are separate release gates.
      exit 1
    fi
    sudo cp "$MODULE_091_ARTIFACT" \
+       "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" && \
+       sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \
        "$MODULES_DIR/ngx_http_markdown_filter_module.so"
    ```
 
    Or download the 0.9.1 binary from the GitHub release archive. Verify the
    `SHA256SUMS` and `SHA256SUMS.asc` files, confirming the signing key's
    fingerprint through an independent trusted source, before copying or
-   installing the binary.
+   installing the binary. Follow the standard verification block in
+   `docs/guides/PACKAGE_INSTALLATION.md` (isolated `GNUPGHOME`, fingerprint
+   check against `docs/guides/GPG_KEY_MANAGEMENT.md` §3, `VALIDSIG`
+   extraction from the Good-signature status line) — the one-sentence
+   summary here is not a substitute for that procedure.
 
 3. **Restore the matching 0.9.1 configuration:**
 
@@ -155,7 +161,10 @@ Publication and artifact availability are separate release gates.
      echo "ERROR: cannot locate the NGINX modules directory" >&2
      exit 1
    fi
-   sudo cp objs/ngx_http_markdown_filter_module.so "$MODULES_DIR/"
+   sudo cp objs/ngx_http_markdown_filter_module.so \
+       "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" && \
+   sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \
+       "$MODULES_DIR/ngx_http_markdown_filter_module.so"
    sudo nginx -t && sudo nginx
    ```
 
@@ -232,6 +241,8 @@ if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
   exit 1
 fi
 sudo cp /path/to/ngx_http_markdown_filter_module.so.0.9.0 \
+    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" && \
+sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \
     "$MODULES_DIR/ngx_http_markdown_filter_module.so"
 sudo nginx -t && sudo nginx
 ```

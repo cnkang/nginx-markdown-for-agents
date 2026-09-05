@@ -40,6 +40,8 @@ pub const DYNCONF_ERR_INVALID_TYPE: u32 = 9;
 pub const DYNCONF_ERR_VALUE_OUT_OF_RANGE: u32 = 10;
 /// FFI result code: invalid UTF-8.
 pub const DYNCONF_ERR_INVALID_UTF8: u32 = 11;
+/// FFI result code: invalid pointer or buffer argument.
+pub const DYNCONF_ERR_INVALID_ARGS: u32 = 12;
 /// FFI result code: internal panic.
 pub const DYNCONF_ERR_INTERNAL: u32 = 255;
 
@@ -49,9 +51,8 @@ pub const DYNCONF_ERR_INTERNAL: u32 = 255;
 /// location-specific `static_config_manifest_v1` in canonical JSON order.
 /// Keeping the hash implementation on the Rust side avoids a second, subtly
 /// different SHA-256 implementation in the NGINX module.
-/// Invalid output-buffer arguments reuse `DYNCONF_ERR_INVALID_TYPE` for ABI
-/// compatibility; in this entry point that code means an FFI parameter error,
-/// not a JSON value-type mismatch.
+/// Invalid output-buffer arguments return `DYNCONF_ERR_INVALID_ARGS`; JSON
+/// value-type errors continue to use `DYNCONF_ERR_INVALID_TYPE`.
 ///
 /// # Safety
 ///
@@ -66,7 +67,7 @@ pub unsafe extern "C" fn markdown_sha256_hex(
     output_len: usize,
 ) -> u32 {
     if output.is_null() || output_len < 64 || (data.is_null() && data_len > 0) {
-        return DYNCONF_ERR_INVALID_TYPE;
+        return DYNCONF_ERR_INVALID_ARGS;
     }
 
     // All unsafe writes and the digest computation are inside catch_unwind
@@ -519,6 +520,7 @@ fn error_message_for_code(code: u32) -> &'static str {
         DYNCONF_ERR_INVALID_TYPE => "dynamic configuration contains a value of invalid type",
         DYNCONF_ERR_VALUE_OUT_OF_RANGE => "dynamic configuration contains a value out of range",
         DYNCONF_ERR_INVALID_UTF8 => "dynamic configuration is not valid UTF-8",
+        DYNCONF_ERR_INVALID_ARGS => "dynamic configuration FFI arguments are invalid",
         _ => "dynamic configuration parser failed internally",
     }
 }

@@ -308,7 +308,7 @@ Follow the [Verification Steps](#verification-steps) section. Confirm that the e
 
 ### Method C: Restore Fail-Open Behavior
 
-If you changed `markdown_error_policy` to `fail_closed` and conversion failures are returning 502 errors to clients, switch back to `pass`. This restores fail-open behavior: failed conversions serve the original HTML instead of an error response. Conversion continues for requests that succeed.
+Switch `markdown_error_policy` back to `pass` when conversion failures return 502 errors. This restores fail-open behavior for pre-commit conversion failures: the module serves the buffered source HTML instead of an error response. Conversion continues for requests that succeed. This applies only before the module commits the converted representation. After headers commit, a streaming mid-response failure terminates the stream with a connection close. The module cannot replay the source HTML then.
 
 #### When to Use
 
@@ -530,14 +530,16 @@ grep "markdown:" /var/log/nginx/error.log | \
 # counters, wait, sample again, and require zero conversion activity in
 # that window (no client traffic of your own inside it).
 sleep 5
-before=$(curl -fsS http://localhost/markdown-metrics | \
+before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
 if [ -z "$before" ]; then
   echo "FAIL: conversion metrics not present before rollback check"
   exit 1
 fi
 sleep 5
-after=$(curl -fsS http://localhost/markdown-metrics | \
+after=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
 if [ -z "$after" ]; then
   echo "FAIL: conversion metrics not present after rollback check"
@@ -550,7 +552,8 @@ curl -fsS -o /dev/null \
   -H "Accept: text/markdown" \
   "http://localhost/rollback-probe-$(date +%s)"
 sleep 1
-disabled=$(curl -fsS http://localhost/markdown-metrics | \
+disabled=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
   grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"')
 if [ -z "$disabled" ]; then
   echo "FAIL: disabled signal not present after rollback check (expected requests_total outcome=skipped reason=disabled)"

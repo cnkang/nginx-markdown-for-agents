@@ -269,13 +269,26 @@ sed -i 's/reason="FAIL_/reason="failed_/g' dashboard.json
 # Step 4: Replace old metric names with new unified families.  The old
 # names carry the nginx_ prefix (see the mapping table above), so match
 # the full name to avoid duplicating the prefix in the replacement.
+# Every row of the mapping table has an explicit substitution below.
 sed -i 's/nginx_markdown_skipped_accept_total/nginx_markdown_skips_total{reason="skipped_accept"}/g' dashboard.json
-jq 'walk(if type == "string" then gsub("nginx_markdown_parse_timeouts_total"; "nginx_markdown_failures_total{reason=\"timeout\"}") else . end)' dashboard.json > dashboard.json.tmp
-mv dashboard.json.tmp dashboard.json
+sed -i 's/nginx_markdown_skipped_no_accept_total/nginx_markdown_skips_total{reason="skipped_no_accept"}/g' dashboard.json
+sed -i 's/nginx_markdown_skipped_conditional_total/nginx_markdown_skips_total{reason="skipped_conditional"}/g' dashboard.json
+sed -i 's/nginx_markdown_skipped_accept_reject_total/nginx_markdown_skips_total{reason="skipped_accept_reject"}/g' dashboard.json
+sed -i 's/nginx_markdown_skipped_not_eligible_total/nginx_markdown_skips_total{reason="not_eligible"}/g' dashboard.json
+sed -i 's/nginx_markdown_skipped_disabled_total/nginx_markdown_skips_total{reason="disabled"}/g' dashboard.json
+sed -i 's/nginx_markdown_failed_decompression_total/nginx_markdown_failures_total{reason="decompression_error"}/g' dashboard.json
+sed -i 's/nginx_markdown_decompression_budget_exceeded_total/nginx_markdown_failures_total{reason="decompression_budget_exceeded"}/g' dashboard.json
+sed -i 's/nginx_markdown_decompression_format_error_total/nginx_markdown_failures_total{reason="decompression_format_error"}/g' dashboard.json
+sed -i 's/nginx_markdown_decompression_truncated_input_total/nginx_markdown_failures_total{reason="decompression_truncated_input"}/g' dashboard.json
+sed -i 's/nginx_markdown_decompression_io_error_total/nginx_markdown_failures_total{reason="decompression_io_error"}/g' dashboard.json
+sed -i 's/nginx_markdown_parse_timeouts_total/nginx_markdown_failures_total{reason="timeout"}/g' dashboard.json
+sed -i 's/nginx_markdown_parse_budget_exceeded_total/nginx_markdown_failures_total{reason="budget_exceeded"}/g' dashboard.json
+sed -i 's/nginx_markdown_replay_buffer_errors_total/nginx_markdown_failures_total{reason="replay_error"}/g' dashboard.json
+sed -i 's/nginx_markdown_ffi_call_errors_total/nginx_markdown_failures_total{reason="ffi_panic"}/g' dashboard.json
+sed -i 's/nginx_markdown_failed_open_total/nginx_markdown_failopen_total{reason="failed_open"}/g' dashboard.json
+sed -i 's/nginx_markdown_failed_closed_total/nginx_markdown_failures_total{reason="failed_closed"}/g' dashboard.json
 # Parse a representative dashboard fixture after the migration.
 jq empty dashboard.json
-# The prefix sed above covers every remaining FAIL_/SKIP_ value that does
-# not have an explicit row in the reason-mapping table.
 ```
 
 #### Alert Migration Tips
@@ -319,7 +332,7 @@ jq empty dashboard.json
 | `markdown_parser_budget` | `markdown_limits parser_memory=` key | Removed directive (0.9.x) |
 | `markdown_stream_threshold` | _(no replacement)_ | Internal 1 MiB routing heuristic |
 | `markdown_stream_flush_min` | _(no replacement)_ | Internal flush heuristic |
-| `markdown_streaming_auto_threshold` | `markdown_streaming off\|auto\|force` | Removed directive; explicit policy replaces the heuristic |
+| `markdown_streaming_auto_threshold` | `markdown_streaming_engine on\|off` + `markdown_stream_threshold=<size>` (0.9.0 pair) | Removed directive; explicit policy replaces the heuristic |
 | `markdown_stream_precommit_buffer` | `markdown_limits streaming_buffer=` key | Removed directive (0.9.x) |
 | _(new)_ | `markdown_profile balanced\|strict_cache\|streaming_first` | One-line production defaults |
 | _(new)_ | `markdown_limits memory=64m timeout=5s max_inflight=64` | Key-value resource limits |

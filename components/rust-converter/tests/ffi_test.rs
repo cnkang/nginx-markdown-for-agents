@@ -1383,7 +1383,7 @@ fn test_parse_timeout_enforced_when_overrun() {
     );
     let elapsed = start.elapsed();
 
-    // The 512 KiB fixture cannot parse within a 1 ms parser sub-deadline,
+    // The approximately 1 MiB fixture cannot parse within a 1 ms parser sub-deadline,
     // so this overrun conversion must report ERROR_PARSE_TIMEOUT
     // deterministically.  A parser that ignored parse_timeout_ms would
     // return ERROR_SUCCESS here and fail the assertion.

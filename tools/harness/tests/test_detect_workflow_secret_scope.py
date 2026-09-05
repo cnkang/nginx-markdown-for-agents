@@ -17,9 +17,11 @@ from pathlib import Path
 TOOLS_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(TOOLS_DIR))
 
+import harness.detect_workflow_secret_scope as secret_scope_module
 from harness.detect_workflow_secret_scope import (  # noqa: E402
     check_sonar_token_steps,
     find_broad_env_secrets,
+    scan_workflows,
 )
 
 DETECTOR = Path(__file__).resolve().parent.parent / "detect_workflow_secret_scope.py"
@@ -183,6 +185,24 @@ class TestSonarTokenSteps:
 # ---------------------------------------------------------------------------
 # CLI contract
 # ---------------------------------------------------------------------------
+
+class TestRequiredWorkflowPresence:
+    """Missing sonarcloud.yml must fail closed, not pass silently."""
+
+    def test_missing_sonarcloud_workflow_is_reported(self, tmp_path: Path, monkeypatch):
+        root = tmp_path / "workflows"
+        root.mkdir()
+        (root / "ci.yml").write_text("name: ci\non: [push]\n", encoding="utf-8")
+        monkeypatch.setattr(secret_scope_module, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(secret_scope_module, "WORKFLOW_ROOT", root)
+
+        findings = scan_workflows(root)
+
+        assert any(
+            "sonarcloud.yml" in f.path and "missing" in f.message
+            for f in findings
+        )
+
 
 class TestCLI:
     """CLI contract: the detector must exit 0 or 1."""

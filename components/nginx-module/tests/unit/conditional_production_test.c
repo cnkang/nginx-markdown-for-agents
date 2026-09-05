@@ -34,6 +34,10 @@ struct MarkdownConverterHandle { int dummy; };
 #define NGX_HTTP_NOT_MODIFIED 304
 #endif
 
+#ifndef NGX_HTTP_PRECONDITION_FAILED
+#define NGX_HTTP_PRECONDITION_FAILED 412
+#endif
+
 #ifndef NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT
 #define NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT (-104)
 #endif
@@ -98,9 +102,20 @@ struct MarkdownConverterHandle { int dummy; };
 #define ERROR_SUCCESS 0
 #endif
 
-struct ngx_pool_s {
-    int dummy;
+typedef void (*ngx_pool_cleanup_pt)(void *data);
+typedef struct ngx_pool_cleanup_s ngx_pool_cleanup_t;
+
+struct ngx_pool_cleanup_s {
+    ngx_pool_cleanup_pt  handler;
+    void                *data;
+    ngx_pool_cleanup_t  *next;
 };
+
+struct ngx_pool_s {
+    ngx_pool_cleanup_t  *cleanup;
+};
+
+static struct ngx_pool_s g_test_pool;
 
 struct ngx_array_s {
     void       *elts;
@@ -141,6 +156,7 @@ typedef struct ngx_connection_s ngx_connection_t;
 
 struct ngx_http_request_s {
     ngx_pool_t *pool;
+    ngx_buf_t *header_in;
     ngx_connection_t *connection;
     ngx_http_request_t *parent;
     struct {
@@ -150,6 +166,8 @@ struct ngx_http_request_s {
         ngx_table_elt_t *authorization;
         ngx_table_elt_t *if_none_match;
         ngx_table_elt_t *if_modified_since;
+        ngx_table_elt_t *if_match;
+        ngx_table_elt_t *if_unmodified_since;
     } headers_in;
     struct {
         ngx_uint_t status;
@@ -160,6 +178,7 @@ struct ngx_http_request_s {
         u_char    *content_type_lowcase;
         ngx_uint_t content_type_hash;
         ngx_str_t  charset;
+        ngx_str_t *override_charset;
         size_t     content_type_len;
         ngx_table_elt_t *content_length;
         ngx_table_elt_t *content_encoding;
@@ -170,6 +189,7 @@ struct ngx_http_request_s {
         time_t     last_modified_time;
     } headers_out;
     ngx_flag_t allow_ranges;
+    ngx_flag_t header_only;
 };
 
 struct ngx_module_s {
@@ -218,6 +238,26 @@ ngx_pnalloc(ngx_pool_t *pool, size_t size)
     return ngx_palloc(pool, size);
 }
 
+ngx_pool_cleanup_t *
+ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
+{
+    ngx_pool_cleanup_t  *cleanup;
+
+    UNUSED(size);
+    if (pool == NULL) {
+        return NULL;
+    }
+
+    cleanup = ngx_pcalloc(pool, sizeof(*cleanup));
+    if (cleanup == NULL) {
+        return NULL;
+    }
+
+    cleanup->next = pool->cleanup;
+    pool->cleanup = cleanup;
+    return cleanup;
+}
+
 ngx_int_t
 ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
 {
@@ -247,6 +287,38 @@ ngx_http_time(u_char *buf, time_t t)
     return buf + (sizeof(fmt) - 1);
 }
 
+time_t
+ngx_parse_http_time(u_char *value, size_t len)
+{
+    static const u_char before[] = "Tue, 20 Oct 2015 07:28:00 GMT";
+    static const u_char current[] = "Wed, 21 Oct 2015 07:28:00 GMT";
+    static const u_char after[] = "Thu, 22 Oct 2015 07:28:00 GMT";
+
+    if (value == NULL) {
+        return (time_t) -1;
+    }
+
+    if (len == sizeof(before) - 1
+        && memcmp(value, before, len) == 0)
+    {
+        return (time_t) 1;
+    }
+
+    if (len == sizeof(current) - 1
+        && memcmp(value, current, len) == 0)
+    {
+        return (time_t) 2;
+    }
+
+    if (len == sizeof(after) - 1
+        && memcmp(value, after, len) == 0)
+    {
+        return (time_t) 3;
+    }
+
+    return (time_t) -1;
+}
+
 ngx_table_elt_t *
 ngx_list_push(ngx_list_t *list)
 {
@@ -267,6 +339,7 @@ static int g_finalize_call_count;
 static int g_prepare_options_rc;
 static int g_cond_result_code;
 static int g_convert_error_code;
+static int g_convert_calls;
 static uint8_t *g_convert_etag;
 static uintptr_t g_convert_etag_len;
 static const uint8_t *g_decide_if_none_match;
@@ -359,6 +432,7 @@ markdown_convert(struct MarkdownConverterHandle *handle,
     struct MarkdownResult *result)
 {
     UNUSED(handle); UNUSED(input); UNUSED(input_len); UNUSED(options);
+    g_convert_calls++;
     if (result != NULL) {
         memset(result, 0, sizeof(*result));
         result->error_code = g_convert_error_code;
@@ -688,11 +762,13 @@ make_req(void)
     g_pool_fail_at = (size_t) -1;
     g_pool_allocations = 0;
     g_finalize_call_count = 0;
+    g_convert_calls = 0;
 
     ngx_http_request_t *r = (ngx_http_request_t *)
         ngx_pcalloc(NULL, sizeof(ngx_http_request_t));
     if (r == NULL) return NULL;
-    r->pool = NULL;
+    g_test_pool.cleanup = NULL;
+    r->pool = &g_test_pool;
     r->connection = (ngx_connection_t *)
         ngx_pcalloc(NULL, sizeof(ngx_connection_t));
     if (r->connection == NULL) return NULL;
@@ -810,6 +886,94 @@ test_send_304_appends_accept_to_upstream_vary(void)
                 "Accept appended to the upstream Vary value");
 
     TEST_PASS("304 appends Accept to an existing foreign Vary header");
+}
+
+/* A 412 for a failed If-Match/If-Unmodified-Since precondition must
+ * describe the transformed Markdown representation: status 412, no body
+ * headers, no source-HTML trailers, and Vary: Accept retained. */
+static void
+test_send_412_success_clears_body_headers(void)
+{
+    ngx_http_request_t *r;
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    r->headers_out.trailers = *create_header_list();
+    add_header(&r->headers_out.headers, "Content-Length", "123");
+    add_header(&r->headers_out.headers, "Accept-Ranges", "bytes");
+    add_header(&r->headers_out.headers, "Trailer", "X-Checksum");
+    r->headers_out.content_length_n = 123;
+    r->allow_ranges = 1;
+
+    TEST_ASSERT(ngx_http_markdown_send_412(r) == NGX_DONE,
+                "send_412 succeeds");
+    TEST_ASSERT(r->headers_out.status == NGX_HTTP_PRECONDITION_FAILED,
+                "412 status is set");
+    TEST_ASSERT(r->header_only == 1,
+                "412 request is marked header-only (no response body)");
+    TEST_ASSERT(r->headers_out.content_length_n == 0,
+                "412 response is framed with an empty body");
+    TEST_ASSERT(r->allow_ranges == 0,
+                "range state cleared on 412");
+    TEST_ASSERT(count_vary_headers(r) == 1,
+                "Vary: Accept retained on 412");
+
+    TEST_PASS("412 clears body headers and retains Vary: Accept");
+}
+
+/* A failed header operation during 412 preparation must restore the exact
+ * upstream representation (same failure contract as the 304 path). */
+static void
+test_send_412_failure_restores_headers(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *original_etag;
+    ngx_uint_t          original_header_count;
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    r->headers_out.trailers = *create_header_list();
+    original_etag = fill_response_headers(r);
+    original_header_count = r->headers_out.headers.part.nelts;
+
+    TEST_ASSERT(ngx_http_markdown_send_412(r) == NGX_ERROR,
+                "Vary allocation failure returns NGX_ERROR");
+    TEST_ASSERT(r->headers_out.status == 200,
+                "412 failure restores status");
+    TEST_ASSERT(r->headers_out.content_length_n == 123,
+                "412 failure restores Content-Length");
+    TEST_ASSERT(r->allow_ranges == 1,
+                "412 failure restores range state");
+    TEST_ASSERT(original_etag->hash == 1,
+                "412 failure restores ETag");
+    TEST_ASSERT(r->headers_out.headers.part.nelts == original_header_count,
+                "412 failure restores header list length");
+
+    TEST_PASS("412 failure restores the upstream representation");
+}
+
+static void
+test_send_412_send_header_again(void)
+{
+    ngx_http_request_t  *r;
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_AGAIN;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    TEST_ASSERT(ngx_http_markdown_send_412(r) == NGX_AGAIN,
+                "send_412 preserves downstream NGX_AGAIN");
+    TEST_ASSERT(r->headers_out.status == NGX_HTTP_PRECONDITION_FAILED
+                && r->header_only == 1,
+                "412 representation remains prepared for resume");
+    TEST_PASS("412 header backpressure");
 }
 
 static void
@@ -1121,16 +1285,38 @@ test_send_304_empty_etag(void)
 static void
 test_send_304_send_header_fails(void)
 {
+    ngx_table_elt_t *upstream_etag;
+    ngx_table_elt_t *upstream_trailer;
+    ngx_uint_t original_header_count;
+
     g_pool_offset = 0;
     g_send_header_rc = NGX_ERROR;
     ngx_http_request_t *r = make_req();
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    r->headers_out.trailers = *create_header_list();
+    r->headers_out.status = 200;
+    r->headers_out.status_line.data = (u_char *) "OK";
+    r->headers_out.status_line.len = 2;
+    r->headers_out.content_type.data = (u_char *) "text/html";
+    r->headers_out.content_type.len = sizeof("text/html") - 1;
+    r->headers_out.content_type_len = sizeof("text/html") - 1;
+    r->headers_out.content_length_n = 123;
+    r->allow_ranges = 1;
+    upstream_etag = add_header(&r->headers_out.headers,
+                               "ETag", "\"upstream\"");
+    r->headers_out.etag = upstream_etag;
+    upstream_trailer = add_header(&r->headers_out.trailers,
+                                  "Digest", "sha-256=upstream");
+    original_header_count = r->headers_out.headers.part.nelts;
 
     struct MarkdownResult result;
     memset(&result, 0, sizeof(result));
 
     ngx_int_t rc = ngx_http_markdown_send_304(r, &result);
     TEST_ASSERT(rc == NGX_ERROR, "send_304 returns NGX_ERROR on header fail");
+    assert_304_failure_restored(r, upstream_etag, upstream_trailer,
+                                original_header_count);
     TEST_PASS("send_304 header failure");
 }
 
@@ -1392,15 +1578,15 @@ test_adopt_orphan_restores_repeated_validators(void)
 }
 
 static void
-test_adopt_orphan_rejects_value_beyond_scan_limit(void)
+test_adopt_orphan_uses_saved_length_for_non_nul_value(void)
 {
     ngx_http_request_t *r;
     ngx_http_markdown_ctx_t ctx;
     ngx_table_elt_t *valid;
-    ngx_table_elt_t *broken;
+    ngx_table_elt_t *non_nul_header;
     u_char *non_nul;
-    const size_t scan_limit = 8192;
-    ngx_int_t rc;
+    const size_t original_len = sizeof(
+        "Wed, 21 Oct 2015 07:28:00 GMT") - 1;
 
     g_pool_offset = 0;
     r = make_req();
@@ -1408,48 +1594,79 @@ test_adopt_orphan_rejects_value_beyond_scan_limit(void)
 
     valid = add_header(&r->headers_in.headers,
                        "If-None-Match", "\"valid\"");
-    broken = add_header(&r->headers_in.headers,
-                        "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    non_nul_header = add_header(&r->headers_in.headers,
+                                "If-Modified-Since", "date");
     r->headers_in.if_none_match = valid;
-    r->headers_in.if_modified_since = broken;
+    r->headers_in.if_modified_since = non_nul_header;
+
+    /* Install the non-NUL backing storage before capture.  Capture clears
+     * value.len, reproducing the internal-redirect state that previously
+     * made adoption scan past the request-header allocation. */
+    non_nul = ngx_palloc(r->pool, original_len);
+    if (non_nul == NULL) { TEST_FAIL("alloc non_nul failed"); return; }
+    memset(non_nul, 'A', original_len);
+    non_nul_header->value.data = non_nul;
+    non_nul_header->value.len = original_len;
     memset(&ctx, 0, sizeof(ctx));
 
     TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
                     == NGX_OK,
-                "both validators are captured and hidden");
-    TEST_ASSERT(valid->hash == 0 && broken->hash == 0,
+        "both validators are captured and hidden");
+    TEST_ASSERT(valid->hash == 0 && non_nul_header->hash == 0,
                 "both entries are suppressed before redirect");
 
-    /* Corrupt the second entry so its value lacks a terminating NUL
-     * within the bounded scan.  The orphan-adopt helper must bound
-     * the scan with memchr and reject the request instead of reading
-     * past the allocation. */
-    non_nul = ngx_palloc(r->pool, scan_limit + 1);
-    if (non_nul == NULL) { TEST_FAIL("alloc non_nul failed"); return; }
-    memset(non_nul, 'A', scan_limit + 1);
-    non_nul[scan_limit] = '\0';
-    broken->value.data = non_nul;
-    broken->value.len = 0;
-
     memset(&ctx, 0, sizeof(ctx));
-    rc = ngx_http_markdown_adopt_orphan_conditional_headers(
-        r, scan_limit, NULL);
-    TEST_ASSERT(rc == NGX_ERROR,
-                "value beyond the configured scan limit must be rejected");
-    TEST_ASSERT(valid->hash == 0,
-                "cross-name atomicity: a healthy entry is NOT restored when "
-                "the other name fails validation (request stays unchanged)");
-    TEST_ASSERT(valid->value.len == 0,
-                "the healthy entry's suppressed length is preserved");
-    TEST_ASSERT(broken->hash == 0,
-                "entry without NUL within bound remains hidden");
-    TEST_ASSERT(r->headers_in.if_none_match == NULL,
-                "no typed pointer is rebuilt on a failed adoption");
-    TEST_ASSERT(r->headers_in.if_modified_since == NULL
-                    || r->headers_in.if_modified_since != broken,
-                "typed pointer for the skipped entry is not rebuilt");
+    TEST_ASSERT(ngx_http_markdown_adopt_orphan_conditional_headers(
+                    r, 8192, NULL) == NGX_OK,
+                "orphan adoption uses the saved length without a NUL scan");
+    TEST_ASSERT(valid->hash != 0 && non_nul_header->hash != 0,
+                "both saved validator entries are restored");
+    TEST_ASSERT(non_nul_header->value.len == original_len,
+                "the saved original length is restored");
+    TEST_ASSERT(r->headers_in.if_modified_since == non_nul_header,
+                "typed pointer is rebuilt for the non-NUL value");
 
-    TEST_PASS("orphan adoption rejects values beyond the scan limit");
+    TEST_PASS("orphan adoption uses saved length for non-NUL value");
+}
+
+static void
+test_adopt_orphan_rejects_saved_length_over_limit(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *header;
+    u_char *large_value;
+    const size_t scan_limit = 8192;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    header = add_header(&r->headers_in.headers, "If-None-Match", "");
+    if (header == NULL) { TEST_FAIL("header alloc failed"); return; }
+    large_value = ngx_palloc(r->pool, scan_limit + 1);
+    if (large_value == NULL) {
+        TEST_FAIL("large value allocation failed");
+        return;
+    }
+    memset(large_value, 'A', scan_limit + 1);
+    large_value[scan_limit] = '\0';
+    header->value.data = large_value;
+    header->value.len = scan_limit + 1;
+    r->headers_in.if_none_match = header;
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "oversized validator is captured before adoption");
+    TEST_ASSERT(ngx_http_markdown_adopt_orphan_conditional_headers(
+                    r, scan_limit, NULL) == NGX_ERROR,
+                "saved value length beyond the bound is rejected");
+    TEST_ASSERT(header->hash == 0 && header->value.len == 0,
+                "oversized validator remains suppressed after rejection");
+    TEST_ASSERT(r->headers_in.if_none_match == NULL,
+                "typed pointer is not rebuilt after rejection");
+    TEST_PASS("orphan adoption rejects saved length over limit");
 }
 
 static void
@@ -2020,6 +2237,480 @@ test_handle_inm_with_ims_header(void)
         r, &conf, &ctx, &converter, &result);
     TEST_ASSERT(rc == NGX_HTTP_NOT_MODIFIED, "With IMS header returns 304");
     TEST_PASS("with If-Modified-Since header");
+}
+
+static void
+prepare_full_conditional_test(ngx_http_markdown_conf_t *conf,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    memset(conf, 0, sizeof(*conf));
+    conf->policy.conditional_requests =
+        NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+    conf->policy.generate_etag = 1;
+
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->buffer_initialized = 1;
+    ctx->buffer.size = 100;
+    ctx->buffer.data = (u_char *) "test data";
+}
+
+static ngx_table_elt_t *
+add_last_modified_header(ngx_http_request_t *r, const char *value)
+{
+    ngx_table_elt_t  *header;
+
+    header = add_header(&r->headers_out.headers, "Last-Modified", value);
+    if (header != NULL) {
+        r->headers_out.last_modified = header;
+    }
+
+    return header;
+}
+
+static void
+test_handle_if_match_mismatch_returns_412(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_match;
+    struct MarkdownConverterHandle  converter;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+    static uint8_t             etag_data[] = "\"abc123\"";
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+    g_convert_etag = etag_data;
+    g_convert_etag_len = sizeof(etag_data) - 1;
+    g_cond_result_code = 0;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_match = add_header(&r->headers_in.headers,
+                          "If-Match", "\"different\"");
+    r->headers_in.if_match = if_match;
+    prepare_full_conditional_test(&conf, &ctx);
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx) == NGX_OK,
+        "If-Match is captured before the generated ETag is evaluated");
+    TEST_ASSERT(r->headers_in.if_match == NULL,
+        "captured If-Match is suppressed from the upstream path");
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    TEST_ASSERT(rc == NGX_HTTP_PRECONDITION_FAILED,
+        "If-Match mismatch returns 412");
+    TEST_ASSERT(result == NULL,
+        "failed If-Match does not publish a conversion result");
+    TEST_ASSERT(g_convert_calls == 1,
+        "If-Match comparison uses the generated entity ETag");
+    TEST_PASS("If-Match mismatch returns PRECONDITION_FAILED");
+}
+
+static void
+test_handle_if_match_match_preserves_304(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_match;
+    struct MarkdownConverterHandle  converter;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+    static uint8_t             etag_data[] = "\"abc123\"";
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+    g_convert_etag = etag_data;
+    g_convert_etag_len = sizeof(etag_data) - 1;
+    g_cond_result_code = 0;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_match = add_header(&r->headers_in.headers,
+                          "If-Match", "\"abc123\"");
+    r->headers_in.if_match = if_match;
+    add_header(&r->headers_in.headers,
+               "If-None-Match", "\"abc123\"");
+    prepare_full_conditional_test(&conf, &ctx);
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    TEST_ASSERT(rc == NGX_HTTP_NOT_MODIFIED,
+        "matching If-Match preserves the matching If-None-Match 304");
+    TEST_ASSERT(result != NULL, "matching conditional request publishes result");
+    TEST_PASS("If-Match match preserves 304");
+}
+
+static void
+test_handle_if_match_wildcard_passes(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_match;
+    struct MarkdownConverterHandle  converter;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+    static uint8_t             etag_data[] = "\"generated\"";
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+    g_convert_etag = etag_data;
+    g_convert_etag_len = sizeof(etag_data) - 1;
+    g_cond_result_code = 1;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_match = add_header(&r->headers_in.headers, "If-Match", "*");
+    r->headers_in.if_match = if_match;
+    prepare_full_conditional_test(&conf, &ctx);
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "If-Match wildcard passes for any generated entity ETag");
+    TEST_ASSERT(result != NULL, "wildcard If-Match keeps the conversion result");
+    TEST_ASSERT(g_convert_calls == 1,
+        "wildcard If-Match still obtains the generated representation");
+    TEST_PASS("If-Match wildcard passes");
+}
+
+static void
+test_handle_if_match_without_etag_comparison_fails_closed(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_match;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+    g_convert_calls = 0;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_match = add_header(&r->headers_in.headers,
+                          "If-Match", "\"different\"");
+    r->headers_in.if_match = if_match;
+    prepare_full_conditional_test(&conf, &ctx);
+    conf.policy.generate_etag = 0;
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, NULL, &result);
+    TEST_ASSERT(rc == NGX_HTTP_PRECONDITION_FAILED,
+        "non-wildcard If-Match fails closed without an entity ETag");
+    TEST_ASSERT(result == NULL,
+        "failed no-comparison If-Match publishes no result");
+    TEST_ASSERT(g_convert_calls == 0,
+        "no-comparison If-Match does not convert the source");
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("wildcard request allocation failed"); return; }
+    if_match = add_header(&r->headers_in.headers, "If-Match", "*");
+    r->headers_in.if_match = if_match;
+    prepare_full_conditional_test(&conf, &ctx);
+    conf.policy.generate_etag = 0;
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, NULL, &result);
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "wildcard If-Match passes when entity comparison is unavailable");
+    TEST_PASS("If-Match without ETag comparison fails closed");
+}
+
+static void
+test_handle_oversized_inm_still_evaluates_if_match(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_none_match;
+    ngx_table_elt_t          *if_match;
+    struct MarkdownConverterHandle  converter;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+    u_char                    *oversized;
+    const size_t               oversized_len =
+        NGX_HTTP_MARKDOWN_IF_NONE_MATCH_MAX + 1;
+    static uint8_t             etag_data[] = "\"abc123\"";
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+    g_convert_etag = etag_data;
+    g_convert_etag_len = sizeof(etag_data) - 1;
+    g_cond_result_code = 0;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_none_match = add_header(&r->headers_in.headers,
+                               "If-None-Match", "ignored");
+    if_match = add_header(&r->headers_in.headers,
+                          "If-Match", "\"different\"");
+    if (if_none_match == NULL || if_match == NULL) {
+        TEST_FAIL("header allocation failed");
+        return;
+    }
+    oversized = ngx_palloc(r->pool, oversized_len);
+    if (oversized == NULL) {
+        TEST_FAIL("oversized validator allocation failed");
+        return;
+    }
+    memset(oversized, 'A', oversized_len);
+    if_none_match->value.data = oversized;
+    if_none_match->value.len = oversized_len;
+    r->headers_in.if_none_match = if_none_match;
+    r->headers_in.if_match = if_match;
+    prepare_full_conditional_test(&conf, &ctx);
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    TEST_ASSERT(rc == NGX_HTTP_PRECONDITION_FAILED,
+        "oversized If-None-Match does not mask a failing If-Match");
+    TEST_ASSERT(result == NULL,
+        "failing If-Match after ignored oversized INM publishes no result");
+    TEST_ASSERT(g_convert_calls == 1,
+        "If-Match is evaluated after oversized If-None-Match is ignored");
+    TEST_PASS("oversized If-None-Match still evaluates If-Match");
+}
+
+static void
+test_handle_if_match_ignores_contradicting_if_unmodified_since(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_match;
+    ngx_table_elt_t          *if_unmodified_since;
+    struct MarkdownConverterHandle  converter;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+    static uint8_t             etag_data[] = "\"abc123\"";
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+    g_convert_etag = etag_data;
+    g_convert_etag_len = sizeof(etag_data) - 1;
+    g_cond_result_code = 0;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_match = add_header(&r->headers_in.headers, "If-Match", "\"abc123\"");
+    r->headers_in.if_match = if_match;
+    if_unmodified_since = add_header(&r->headers_in.headers,
+        "If-Unmodified-Since", "Tue, 20 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_unmodified_since = if_unmodified_since;
+    add_last_modified_header(r, "Wed, 21 Oct 2015 07:28:00 GMT");
+    prepare_full_conditional_test(&conf, &ctx);
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    /* RFC 7232 section 3.3: If-Match takes precedence over
+     * If-Unmodified-Since, which must be ignored when both are present.
+     * A contradicting IUS must not turn the matched If-Match into 412. */
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "satisfied If-Match ignores a contradicting If-Unmodified-Since");
+    TEST_ASSERT(result != NULL,
+        "If-Match satisfied by the generated representation publishes a result");
+    TEST_ASSERT(g_convert_calls == 1,
+        "If-Match match still obtains the generated representation");
+    TEST_PASS("If-Match ignores contradicting If-Unmodified-Since");
+}
+
+static void
+test_handle_if_unmodified_since_ignores_source_last_modified(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_unmodified_since;
+    struct MarkdownConverterHandle  converter;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+    g_convert_calls = 0;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_unmodified_since = add_header(&r->headers_in.headers,
+        "If-Unmodified-Since", "Tue, 20 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_unmodified_since = if_unmodified_since;
+    add_last_modified_header(r, "Wed, 21 Oct 2015 07:28:00 GMT");
+    prepare_full_conditional_test(&conf, &ctx);
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "transformed Markdown ignores source Last-Modified for IUS");
+    TEST_ASSERT(result == NULL,
+        "date-only source validator does not publish a conversion result");
+    TEST_ASSERT(g_convert_calls == 0,
+        "source-scoped IUS does not trigger a conversion");
+    TEST_PASS("transformed Markdown ignores source Last-Modified for IUS");
+}
+
+static void
+test_handle_if_unmodified_since_after_last_modified_proceeds(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_unmodified_since;
+    struct MarkdownConverterHandle  converter;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_unmodified_since = add_header(&r->headers_in.headers,
+        "If-Unmodified-Since", "Thu, 22 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_unmodified_since = if_unmodified_since;
+    add_last_modified_header(r, "Wed, 21 Oct 2015 07:28:00 GMT");
+    prepare_full_conditional_test(&conf, &ctx);
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "If-Unmodified-Since after Last-Modified proceeds normally");
+    TEST_ASSERT(result == NULL,
+        "date-only conditional request does not need an ETag conversion");
+    TEST_PASS("If-Unmodified-Since after Last-Modified proceeds");
+}
+
+static void
+test_handle_if_unmodified_since_without_last_modified_is_satisfied(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_unmodified_since;
+    struct MarkdownConverterHandle  converter;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_unmodified_since = add_header(&r->headers_in.headers,
+        "If-Unmodified-Since", "Tue, 20 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_unmodified_since = if_unmodified_since;
+    prepare_full_conditional_test(&conf, &ctx);
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "If-Unmodified-Since is satisfied without Last-Modified");
+    TEST_ASSERT(result == NULL,
+        "missing Last-Modified does not allocate a conversion result");
+    TEST_ASSERT(g_convert_calls == 0,
+        "date precondition without Last-Modified does not require ETag generation");
+    TEST_PASS("If-Unmodified-Since without Last-Modified is satisfied");
+}
+
+static void
+test_handle_preconditions_disabled(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_match;
+    ngx_table_elt_t          *if_unmodified_since;
+    struct MarkdownConverterHandle  converter;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_match = add_header(&r->headers_in.headers,
+                          "If-Match", "\"different\"");
+    if_unmodified_since = add_header(&r->headers_in.headers,
+        "If-Unmodified-Since", "Tue, 20 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_match = if_match;
+    r->headers_in.if_unmodified_since = if_unmodified_since;
+    add_last_modified_header(r, "Wed, 21 Oct 2015 07:28:00 GMT");
+    prepare_full_conditional_test(&conf, &ctx);
+    conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "disabled conditional mode declines If-Match and If-Unmodified-Since");
+    TEST_ASSERT(result == NULL,
+        "disabled conditional mode does not allocate a conversion result");
+    TEST_ASSERT(g_convert_calls == 0,
+        "disabled conditional mode does not generate an entity ETag");
+    TEST_PASS("disabled mode declines all conditional preconditions");
+}
+
+static void
+test_handle_if_match_failure_precedes_if_none_match(void)
+{
+    ngx_http_request_t       *r;
+    ngx_http_markdown_conf_t  conf;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_table_elt_t          *if_match;
+    struct MarkdownConverterHandle  converter;
+    struct MarkdownResult    *result;
+    ngx_int_t                  rc;
+    static uint8_t             etag_data[] = "\"abc123\"";
+
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_convert_error_code = 0;
+    g_convert_etag = etag_data;
+    g_convert_etag_len = sizeof(etag_data) - 1;
+    g_cond_result_code = 0;
+
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    if_match = add_header(&r->headers_in.headers,
+                          "If-Match", "\"different\"");
+    r->headers_in.if_match = if_match;
+    add_header(&r->headers_in.headers,
+               "If-None-Match", "\"abc123\"");
+    prepare_full_conditional_test(&conf, &ctx);
+    result = NULL;
+
+    rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, &converter, &result);
+    TEST_ASSERT(rc == NGX_HTTP_PRECONDITION_FAILED,
+        "If-Match failure takes precedence over matching If-None-Match");
+    TEST_ASSERT(result == NULL,
+        "precedence failure does not publish the converted result");
+    TEST_PASS("If-Match failure wins over If-None-Match 304");
 }
 
 /* ── Bypass outcome tests ────────────────────────────────────── */
@@ -2725,6 +3416,9 @@ main(void)
     test_send_304_with_etag();
     test_send_304_does_not_duplicate_upstream_vary();
     test_send_304_appends_accept_to_upstream_vary();
+    test_send_412_success_clears_body_headers();
+    test_send_412_failure_restores_headers();
+    test_send_412_send_header_again();
     test_send_304_replaces_existing_etag();
     test_auth_ignores_invalidated_authorization();
     test_send_304_null_result();
@@ -2743,7 +3437,8 @@ main(void)
     test_capture_restore_conditional_headers();
     test_adopt_orphan_conditional_headers();
     test_adopt_orphan_restores_repeated_validators();
-    test_adopt_orphan_rejects_value_beyond_scan_limit();
+    test_adopt_orphan_uses_saved_length_for_non_nul_value();
+    test_adopt_orphan_rejects_saved_length_over_limit();
     test_adopt_orphan_with_empty_headers();
     test_adopt_orphan_skips_invalid_len();
     test_adopt_orphan_skips_null_data();
@@ -2770,6 +3465,17 @@ main(void)
     test_conditional_helper_guards();
     test_handle_inm_etag_mismatch();
     test_handle_inm_with_ims_header();
+    test_handle_if_match_mismatch_returns_412();
+    test_handle_if_match_match_preserves_304();
+    test_handle_if_match_wildcard_passes();
+    test_handle_if_match_without_etag_comparison_fails_closed();
+    test_handle_oversized_inm_still_evaluates_if_match();
+    test_handle_if_match_ignores_contradicting_if_unmodified_since();
+    test_handle_if_unmodified_since_ignores_source_last_modified();
+    test_handle_if_unmodified_since_after_last_modified_proceeds();
+    test_handle_if_unmodified_since_without_last_modified_is_satisfied();
+    test_handle_preconditions_disabled();
+    test_handle_if_match_failure_precedes_if_none_match();
 
     test_handle_bypass_range_request();
     test_handle_bypass_no_transform();

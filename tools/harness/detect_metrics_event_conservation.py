@@ -74,7 +74,8 @@ ABORTED_SOURCE_FIELD = "terminal_aborted_total"
 # equality comparisons (`==`) are not derivation statements and must not
 # be treated as one (a `==` would otherwise match on its second `=`).
 FAILED_CLOSED_ASSIGN_RE = re.compile(
-    r"failed_closed[ \t]*(?<![!<>=+\-*/%&|^])=(?!=)([^;]*);"
+    r"(?:^|[;{}])[ \t]*failed_closed[ \t]*(?<![!<>=+\-*/%&|^])=(?!=)([^;]*);",
+    flags=re.MULTILINE,
 )
 
 
@@ -235,6 +236,10 @@ def _audit_failed_closed(
         # 0` initializer in an include guard or struct block is not a
         # derivation branch.
         if not any("snapshot" in stmt for stmt in block_stmts):
+            reviews.append(
+                f"{name}: failed_closed assignment found in block without "
+                "snapshot source; derivation not evaluated for this block"
+            )
             continue
         if not any("failopen_count" in stmt for stmt in block_stmts):
             violations.append(

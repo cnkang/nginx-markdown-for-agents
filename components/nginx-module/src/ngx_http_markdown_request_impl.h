@@ -13,11 +13,11 @@
  * evolve separately from payload buffering, decompression, and output shaping.
  */
 
+#include "ngx_http_markdown_decompression_route.h"
 #include "ngx_http_markdown_payload_impl.h"
 #include "ngx_http_markdown_conversion_impl.h"
 #include "ngx_http_markdown_exports.h"
 #include "ngx_http_markdown_diagnostics.h"
-#include "ngx_http_markdown_decompression_route.h"
 #include "ngx_http_markdown_durable_bypass.h"
 
 static void
@@ -817,7 +817,7 @@ ngx_http_markdown_handle_preaccess_failure(
 static ngx_int_t
 ngx_http_markdown_prepare_preaccess_adoption(
     ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_ctx_t *ctx,
     ngx_flag_t *adopt_orphans,
     ngx_http_markdown_conditional_ownership_t *ownership)
@@ -830,7 +830,7 @@ ngx_http_markdown_prepare_preaccess_adoption(
         return NGX_OK;
     }
 
-    scan_limit = conf->limits.streaming_buffer;
+    scan_limit = eff != NULL ? eff->streaming_buffer : 0;
     if (scan_limit == NGX_CONF_UNSET_SIZE || scan_limit == 0) {
         scan_limit = NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT;
     }
@@ -845,16 +845,13 @@ ngx_http_markdown_prepare_preaccess_adoption(
         r, scan_limit, ownership);
 }
 
-/* Snapshot dynamic configuration and evaluate preaccess eligibility once. */
-static ngx_flag_t
-ngx_http_markdown_prepare_preaccess_eligibility(
-    ngx_http_request_t *r,
+/* Snapshot dynamic configuration before any preaccess state is adopted. */
+static void
+ngx_http_markdown_prepare_preaccess_effective_conf(
     const ngx_http_markdown_conf_t *conf,
-    ngx_http_markdown_effective_conf_t *eff,
-    ngx_flag_t *filter_enabled)
+    ngx_http_markdown_effective_conf_t *eff)
 {
     ngx_http_markdown_dynconf_snapshot_t  snap_copy;
-    ngx_uint_t                            accept_reason;
 
     snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
     ngx_memzero(eff, sizeof(*eff));
@@ -862,6 +859,17 @@ ngx_http_markdown_prepare_preaccess_eligibility(
         eff,
         conf->advanced.dynconf_enabled == 1 ? &snap_copy : NULL,
         conf);
+}
+
+/* Evaluate preaccess eligibility against the already captured snapshot. */
+static ngx_flag_t
+ngx_http_markdown_prepare_preaccess_eligibility(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    ngx_flag_t *filter_enabled)
+{
+    ngx_uint_t  accept_reason;
 
     *filter_enabled = ngx_http_markdown_is_enabled(r, conf, eff);
     accept_reason = 0;
@@ -975,8 +983,9 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
 
+    ngx_http_markdown_prepare_preaccess_effective_conf(conf, &eff);
     adoption_rc = ngx_http_markdown_prepare_preaccess_adoption(
-        r, conf, ctx, &adopt_orphans, &ownership);
+        r, &eff, ctx, &adopt_orphans, &ownership);
 
     if ((r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)) == 0) {
         ngx_http_markdown_restore_conditional_request(r, ctx);

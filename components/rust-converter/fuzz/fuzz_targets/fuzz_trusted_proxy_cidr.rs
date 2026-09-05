@@ -1,6 +1,6 @@
 #![no_main]
 
-//! Fuzz target for trusted-proxy CIDR parsing (0.9.0).
+//! Fuzz target for trusted-proxy CIDR parsing (0.9.2).
 //!
 //! Feeds arbitrary bytes as a trusted-proxy CIDR configuration string into
 //! [`nginx_markdown_converter::forwarded::parse_cidr`], covering strict UTF-8

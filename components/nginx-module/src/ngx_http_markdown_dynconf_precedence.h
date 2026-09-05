@@ -87,33 +87,6 @@
 
 
 /*
- * Propagate dynconf block mask from parent to child during merge.
- *
- * Implements NGINX merge semantics: child inherits parent block
- * bits via OR.  The child's own explicitly-set bits (set during
- * config parsing) are preserved — they were already set in the
- * child's mask before merge.
- *
- * An explicit setting in the http block does NOT set the bit
- * (handled at parse time by checking the configuration context).
- *
- * Parameters:
- *   child_mask  - pointer to the child location's block mask
- *   parent_mask - the parent location/server's block mask
- */
-static ngx_inline void
-ngx_http_markdown_propagate_block_mask(ngx_uint_t *child_mask,
-    ngx_uint_t parent_mask)
-{
-    if (child_mask == NULL) {
-        return;
-    }
-
-    *child_mask |= parent_mask;
-}
-
-
-/*
  * Check whether a specific field's block bit is set.
  *
  * Parameters:

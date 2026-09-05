@@ -19,6 +19,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define MARKDOWN_STREAMING_ENABLED 1
 
@@ -189,12 +190,10 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
  * Local FFI-entry stub: markdown_decide_eligibility is the thin
  * FFI boundary shim (normally compiled in the Rust converter FFI
  * layer).  This file links the production check_eligibility()
- * implementation and provides the stub purely so the wrapper
- * compiles standalone; the real FFI negotiation precedence
- * contract is owned by the accept-negotiation unit tests
- * (accept_production_test.c) and the C/Rust FFI integration
- * tests.  Do not extend this stub with new decision logic —
- * add it to the production eligibility implementation instead.
+ * implementation and provides the stub so the wrapper can be tested
+ * standalone.  Keep the status-before-streaming precedence here as a
+ * discriminating positive control: a status-200 event stream reaches
+ * the streaming result, while a non-200 event stream returns status.
  */
 uint8_t
 markdown_decide_eligibility(const struct FFIEligibilityInput *input)
@@ -213,6 +212,13 @@ markdown_decide_eligibility(const struct FFIEligibilityInput *input)
     }
     if (input->has_range_header) {
         return NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE;
+    }
+    if (input->content_type != NULL
+        && input->content_type_len == sizeof("text/event-stream") - 1
+        && memcmp(input->content_type, "text/event-stream",
+                  sizeof("text/event-stream") - 1) == 0)
+    {
+        return NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING;
     }
     if (input->content_type == NULL || input->content_type_len == 0) {
         return NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE;
@@ -483,6 +489,13 @@ test_status_checked_before_streaming(void)
     TEST_ASSERT(ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
         == NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
         "Status check must run BEFORE streaming type check");
+
+    /* Positive control: the same candidate reaches streaming classification
+     * only after the status check accepts the response. */
+    r.headers_out.status = NGX_HTTP_OK;
+    TEST_ASSERT(ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
+        == NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
+        "Streaming candidate must be observable after status acceptance");
 
     /*
      * Similarly: status 500 with oversized body.

@@ -247,45 +247,88 @@ def extract_run_vars(run_text):
     return refs
 
 
+def _match_assignment(line):
+    """Return the variable name assigned by `export NAME=...` or `NAME=...`."""
+    match = re.match(r"^(?:export\s+)?([A-Za-z_]\w*)=", line)
+    return match.group(1) if match else None
+
+
+def _match_case_assignment(line):
+    """Return the variable assigned by a case branch like `amd64) TARGET=...`."""
+    match = re.match(r"^[^)]*\)\s+(?:export\s+)?([A-Za-z_]\w*)=", line)
+    return match.group(1) if match else None
+
+
+def _match_for_variable(line):
+    """Return the loop variable of `for NAME in ...`."""
+    match = re.match(r"^for\s+([A-Za-z_]\w*)\s+in\b", line)
+    return match.group(1) if match else None
+
+
+def _match_read_variables(line):
+    """Return variable names captured by `read -r A B`.
+
+    A temporary assignment prefix (`IFS= read -r A`) and a `while` loop
+    head (`while IFS= read -r A; do`) are stripped first; the command
+    following them must actually be `read`, otherwise the `read` token
+    is just an argument to another command (`MODE=1 echo read -r ARCH`
+    captures nothing).
+    """
+    remainder = re.sub(
+        r"^(?:\s*while\s+)?(?:export\s+)?[A-Za-z_]\w*=", "", line, count=1
+    )
+    match = re.search(
+        r"^\s*read\s+(?:-[a-zA-Z]+\s+)*([A-Za-z_][A-Za-z0-9_\s]*)",
+        remainder,
+    )
+    if not match:
+        return ()
+    return tuple(
+        var
+        for var in match.group(1).split()
+        if re.match(r"^[A-Za-z_]\w*$", var)
+        and var not in ("do", "done", "then", "fi")
+    )
+
+
 def extract_shell_definitions(run_text):
     """Return variables assigned within the run block itself."""
     defined = set()
     if not isinstance(run_text, str):
         return defined
     text = _merge_continuations(run_text)
+    # Mask comments and quoted literals before pattern matching so that
+    # `echo 'read -r X'` or `# read -r Y` cannot register a definition.
+    masked = _mask_shell_non_expanding(text)
+    # Source-detection must use the same masked text: a comment or quoted
+    # literal mentioning `source /etc/os-release` must not mark every
+    # OS-release variable as defined.
     sourced_os_release = bool(
-        re.search(r"(?:^|[\s;(])(?:\.|source)\s+/etc/os-release\b", text,
+        re.search(r"(?:^|[\s;(])(?:\.|source)\s+/etc/os-release\b", masked,
                   re.MULTILINE)
     )
     if sourced_os_release:
         defined |= OS_RELEASE_VARS
-    for line in text.splitlines():
+    for line in masked.splitlines():
         stripped = line.strip()
-        # export NAME=... / NAME=... command
-        match = re.match(r"^(?:export\s+)?([A-Za-z_]\w*)=", stripped)
-        if match:
-            defined.add(match.group(1))
+        name = _match_assignment(stripped)
+        if name is not None:
+            defined.add(name)
+            # A temporary assignment prefixing a command (e.g. `IFS= read -r A`)
+            # does not hide the command's own variable capture: the read
+            # variables must be recorded too, otherwise a following
+            # `${A}` reference is reported as an undefined variable.
+            defined.update(_match_read_variables(stripped))
             continue
-        # case branches: amd64) TARGET="..."
-        match = re.match(r"^[^)]*\)\s+(?:export\s+)?([A-Za-z_]\w*)=",
-                         stripped)
-        if match:
-            defined.add(match.group(1))
+        name = _match_case_assignment(stripped)
+        if name is not None:
+            defined.add(name)
             continue
-        match = re.match(r"^for\s+([A-Za-z_]\w*)\s+in\b", stripped)
-        if match:
-            defined.add(match.group(1))
+        name = _match_for_variable(stripped)
+        if name is not None:
+            defined.add(name)
             continue
-        # while IFS= read -r NAME  (loop variable is in scope in the body)
-        match = re.match(r"^while\s+.*\bread\s+(?:-[a-zA-Z]+\s+)*"
-                         r"([A-Za-z_]\w*)", stripped)
-        if match:
-            defined.add(match.group(1))
-            continue
-        match = re.match(r"^read\s+(?:-[a-zA-Z]+\s+)*([A-Za-z_]\w*)",
-                         stripped)
-        if match:
-            defined.add(match.group(1))
+        defined.update(_match_read_variables(stripped))
     return defined
 
 

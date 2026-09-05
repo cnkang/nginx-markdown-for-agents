@@ -24,12 +24,15 @@ Key points:
 
 ### Package Dependency Scope
 
-The package manager dependency pins the exact upstream NGINX version.  The DEB
+The package manager dependency pins the exact upstream NGINX version. The DEB
 metadata uses the closed interval `nginx (>= ${NGINX_VERSION})` plus
 `nginx (<< next-patch)`, so distro revisions of the pinned version stay
 installable while a plain NGINX patch upgrade no longer satisfies the
 dependency — the package manager keeps the module and NGINX versions in lock
-step.  The RPM metadata pins the exact version (`nginx = 1:X.Y.Z`).
+step. The RPM metadata additionally requires the `nginx-rX.Y.Z` capability
+published by the official nginx.org NGINX package, alongside the epoch-aware
+closed version bounds. RPM therefore rejects a same-version package that does
+not provide the expected NGINX package ABI capability before installation.
 **Runtime compatibility is only verified for the exact NGINX versions listed
 in the build matrix below**. Loading the module on any other NGINX version
 will fail with a version mismatch before signature checks. Install the
@@ -313,9 +316,9 @@ the module from source against your local NGINX installation.
 | NGINX Version | Channel | OS | libc | Arch | Artifact | Test Level | Tier | Blocking | Workflow |
 |---------------|---------|-----|------|------|----------|------------|------|----------|----------|
 | 1.31.4 | mainline | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.31.4 | mainline | linux | musl | arm64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-binaries.yml` |
+| 1.31.4 | mainline | linux | musl | arm64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.31.4 | mainline | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.31.4 | mainline | linux | musl | amd64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-binaries.yml` |
+| 1.31.4 | mainline | linux | musl | amd64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.31.4 | mainline | debian12 | glibc | arm64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.31.4 | mainline | debian12 | glibc | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
 | 1.31.4 | mainline | debian12 | glibc | amd64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
@@ -325,26 +328,26 @@ the module from source against your local NGINX installation.
 | 1.31.4 | mainline | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.31.4 | mainline | almalinux9 | glibc | amd64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-binaries.yml` |
+| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-binaries.yml` |
+| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.4 | stable | debian12 | glibc | arm64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.28.3 | legacy | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.28.3 | legacy | linux | musl | arm64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-binaries.yml` |
+| 1.28.3 | legacy | linux | musl | arm64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.28.3 | legacy | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.28.3 | legacy | linux | musl | amd64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-binaries.yml` |
+| 1.28.3 | legacy | linux | musl | amd64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.28.3 | legacy | debian12 | glibc | arm64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.28.3 | legacy | debian12 | glibc | amd64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.28.3 | legacy | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.28.3 | legacy | almalinux9 | glibc | amd64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.26.3 | legacy | macos | darwin | arm64 | homebrew-formula | formula-gate | experimental | No | `.github/workflows/homebrew-formula-gate.yml` |
 | 1.26.3 | legacy | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.26.3 | legacy | linux | musl | arm64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-binaries.yml` |
+| 1.26.3 | legacy | linux | musl | arm64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.26.3 | legacy | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.26.3 | legacy | linux | musl | amd64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-binaries.yml` |
+| 1.26.3 | legacy | linux | musl | amd64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.26.3 | legacy | debian12 | glibc | arm64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.26.3 | legacy | debian12 | glibc | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
 | 1.26.3 | legacy | debian12 | glibc | amd64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
@@ -355,9 +358,9 @@ the module from source against your local NGINX installation.
 | 1.26.3 | legacy | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.26.3 | legacy | almalinux9 | glibc | amd64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.24.0 | legacy | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.24.0 | legacy | linux | musl | arm64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-binaries.yml` |
+| 1.24.0 | legacy | linux | musl | arm64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.24.0 | legacy | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.24.0 | legacy | linux | musl | amd64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-binaries.yml` |
+| 1.24.0 | legacy | linux | musl | amd64 | dynamic-module | docker-validation | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.24.0 | legacy | debian12 | glibc | arm64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.24.0 | legacy | debian12 | glibc | amd64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.24.0 | legacy | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
