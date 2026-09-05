@@ -578,7 +578,7 @@ markdown_sha256_hex(const uint8_t *data, uintptr_t data_len,
     if (output == NULL || output_len < 64
         || (data == NULL && data_len != 0))
     {
-        return DYNCONF_ERR_INVALID_TYPE;
+        return DYNCONF_ERR_INVALID_ARGS;
     }
 
     selected_digest = test_contains_bytes(data, data_len,

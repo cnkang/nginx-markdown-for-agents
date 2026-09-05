@@ -101,6 +101,7 @@ ngx_buf_t *ngx_calloc_buf(ngx_pool_t *pool);
 ngx_chain_t *ngx_alloc_chain_link(ngx_pool_t *pool);
 
 #include "../../src/ngx_http_markdown_filter_module.h"
+#include "../../src/ngx_http_markdown_decompression_route.h"
 
 ngx_module_t ngx_http_markdown_filter_module;
 
@@ -2064,6 +2065,37 @@ test_brotli_error_classification(void)
     TEST_PASS("Brotli decoder error classification is consistent");
 }
 
+static void
+test_decompression_peak_budget_preflight(void)
+{
+    TEST_SUBSECTION("Decompression peak budget preflight");
+
+    TEST_ASSERT(
+        ngx_http_markdown_decompression_peak_within_budget(
+            20, 0, 30, 2, 80),
+        "single-layer peak at the budget must be accepted");
+    TEST_ASSERT(
+        !ngx_http_markdown_decompression_peak_within_budget(
+            20, 0, 30, 2, 79),
+        "single-layer peak over the budget must be rejected");
+    TEST_ASSERT(
+        !ngx_http_markdown_decompression_peak_within_budget(
+            20, 0, (size_t) -1, 2, 100),
+        "output multiplication overflow must be rejected");
+    TEST_ASSERT(
+        !ngx_http_markdown_decompression_peak_within_budget(
+            20, 10, 30, 3, 119),
+        "multi-layer peak including a linearized input must be rejected");
+    TEST_ASSERT(
+        ngx_http_markdown_decompression_peak_within_budget(
+            20, 10, 30, 3, 120),
+        "multi-layer peak including a linearized input must be accepted");
+    TEST_ASSERT(
+        ngx_http_markdown_decompression_peak_within_budget(
+            (size_t) -1, 0, (size_t) -1, 3, 0),
+        "unset budget must not impose a false overflow failure");
+}
+
 int
 main(void)
 {
@@ -2101,6 +2133,7 @@ main(void)
     test_gzip_concatenated_not_regressed();
     test_brotli_not_compiled_in();
     test_brotli_error_classification();
+    test_decompression_peak_budget_preflight();
 
     TEST_PASS("decompression_production: all tests passed");
     return 0;

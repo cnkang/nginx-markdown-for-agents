@@ -29,8 +29,8 @@
 //! trusted-proxy list management (`markdown_trusted_proxies_*`),
 //! base URL decision (`markdown_decide_base_url`), bounded decompression
 //! (`markdown_decompress_bounded`, `markdown_decompress_free`,
-//! `markdown_decomp_result_init`), ABI handshake (`markdown_ffi_abi_version`),
-//! encoding-chain validation (`markdown_encoding_chain_validate`),
+//! `markdown_decomp_result_init`), ABI handshake (`markdown_abi_version`),
+//! encoding-chain validation (`markdown_parse_encoding_chain`),
 //! conflict detection/release option/result init helpers (`markdown_options_init`),
 //! and error classification (`markdown_classify_error_code`).  Streaming FFI
 //! exports live in `ffi/streaming.rs`.  The table below lists the primary

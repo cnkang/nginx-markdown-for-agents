@@ -2637,9 +2637,10 @@ test_metrics_legacy_histogram_preserves_exclusive_bands(void)
                 "100ms legacy band must not subtract the 10ms band");
     TEST_ASSERT(v1.duration_full_buffer.buckets[8] == 3,
                 "1000ms legacy band must map directly");
-    TEST_ASSERT(v1.duration_full_buffer.buckets[9] == 4,
-                "bucket 9 carries the >1000ms band so rendering accumulates "
-                "to the total count");
+    TEST_ASSERT(v1.duration_full_buffer.buckets[9] == 0,
+                "legacy >1000ms band must not be mapped to a finite bucket");
+    TEST_ASSERT(v1.duration_full_buffer.count == 10,
+                "legacy latency total remains available through histogram count");
 
     TEST_PASS("legacy histogram preserves exclusive bands");
 }

@@ -1317,6 +1317,7 @@ ngx_http_markdown_streaming_send_output(
     const u_char *data, size_t len,
     ngx_flag_t last_buf)
 {
+    static u_char empty_buffer_sentinel;
     ngx_buf_t    *b;
     ngx_chain_t  *out;
     ngx_int_t     rc;
@@ -1333,11 +1334,11 @@ ngx_http_markdown_streaming_send_output(
     }
 
     /* Keep empty buffers in a valid, zero-length state even when the
-     * allocator does not guarantee zeroed memory.  The self-referential
-     * pos/last pair gives downstream filters explicit zero-length bounds
-     * (pos == last, non-NULL) so an empty terminal buffer is
-     * distinguishable from an uninitialized one. */
-    b->pos = (u_char *) b;
+     * allocator does not guarantee zeroed memory.  A static byte provides a
+     * non-NULL sentinel without type-punning the ngx_buf_t allocation;
+     * downstream filters see explicit zero-length bounds (pos == last).
+     */
+    b->pos = &empty_buffer_sentinel;
     b->last = b->pos;
 
     if (data != NULL && len > 0) {

@@ -5,6 +5,7 @@
 //! produce correct Markdown syntax.
 
 use crate::error::ConversionError;
+use crate::security::sanitize_url_value;
 use crate::streaming::budget::MemoryBudget;
 use crate::streaming::types::StreamEvent;
 
@@ -196,7 +197,10 @@ impl StructuralStateMachine {
     /// returns an immediate action. Unsupported start tags (table, svg, math, canvas) produce
     /// `StateMachineAction::FallbackRequired(structure)`. Some tags
     /// (structural wrappers, unknown tags, and `head`) are ignored and produce `StateMachineAction::None`. A self-closing
-    /// `img` produces an `Enter(Image { .. })` without pushing an additional inline context.
+    /// `img` with a safe, non-empty `src` produces an `Enter(Image { .. })`
+    /// without pushing an additional inline context.  Missing or blocked
+    /// sources preserve non-empty `alt` text as ordinary text, matching the
+    /// full-buffer converter.
     ///
     /// # Errors
     /// Returns `ConversionError::BudgetExceeded` if pushing a new context would exceed the configured stack budget.
@@ -267,26 +271,38 @@ impl StructuralStateMachine {
                 let src = attrs
                     .iter()
                     .find(|(k, _)| k == "src")
-                    .map(|(_, v)| v.clone())
-                    .unwrap_or_default();
+                    .and_then(|(_, v)| sanitize_url_value(v))
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned);
                 let alt = attrs
                     .iter()
                     .find(|(k, _)| k == "alt")
-                    .map(|(_, v)| v.clone())
+                    .map(|(_, v)| v.trim())
                     .unwrap_or_default();
-                let ctx = StructuralContext::Image { src, alt };
-                // <img> is a void element — always emit Enter without
-                // pushing to the stack, regardless of whether the HTML
-                // uses XHTML-style self-closing (`<img />`). html5ever's
-                // tokenizer sets self_closing only for the slash form,
-                // but <img> never has a matching end tag either way.
-                return Ok(StateMachineAction::Enter(ctx));
+                if let Some(src) = src {
+                    let ctx = StructuralContext::Image {
+                        src,
+                        alt: alt.to_string(),
+                    };
+                    // <img> is a void element — always emit Enter without
+                    // pushing to the stack, regardless of whether the HTML
+                    // uses XHTML-style self-closing (`<img />`). html5ever's
+                    // tokenizer sets self_closing only for the slash form,
+                    // but <img> never has a matching end tag either way.
+                    return Ok(StateMachineAction::Enter(ctx));
+                }
+                if alt.is_empty() {
+                    return Ok(StateMachineAction::None);
+                }
+                return Ok(StateMachineAction::Text(alt.to_string()));
             }
             "video" | "audio" => {
                 if let Some(src) = attrs
                     .iter()
                     .find(|(k, _)| k == "src")
-                    .map(|(_, v)| v.clone())
+                    .and_then(|(_, v)| sanitize_url_value(v))
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
                 {
                     // Media elements with inline src are emitted as URL-bearing
                     // artifacts for parity with full-buffer URL extraction.
@@ -304,7 +320,9 @@ impl StructuralStateMachine {
                 if let Some(src) = attrs
                     .iter()
                     .find(|(k, _)| *k == "src" || *k == "href")
-                    .map(|(_, v)| v.clone())
+                    .and_then(|(_, v)| sanitize_url_value(v))
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
                 {
                     let ctx = StructuralContext::Image {
                         src,
@@ -1127,6 +1145,29 @@ mod tests {
             .process_event(&start_tag_with_attrs("video", vec![("controls", "true")]))
             .unwrap();
         assert_eq!(action, StateMachineAction::None);
+    }
+
+    #[test]
+    fn test_image_without_usable_src_preserves_alt_text() {
+        let mut sm = default_sm();
+
+        let missing = sm
+            .process_event(&start_tag_with_attrs("img", vec![("alt", "No source")]))
+            .unwrap();
+        assert_eq!(missing, StateMachineAction::Text("No source".to_string()));
+
+        let blocked = sm
+            .process_event(&start_tag_with_attrs(
+                "img",
+                vec![("src", "javascript:alert(1)"), ("alt", "Blocked")],
+            ))
+            .unwrap();
+        assert_eq!(blocked, StateMachineAction::Text("Blocked".to_string()));
+
+        let empty = sm
+            .process_event(&start_tag_with_attrs("img", vec![("src", "")]))
+            .unwrap();
+        assert_eq!(empty, StateMachineAction::None);
     }
 
     #[test]

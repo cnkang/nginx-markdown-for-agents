@@ -13,6 +13,7 @@
 #include "ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
 
+#include <limits.h>
 #include <string.h>
 
 
@@ -48,6 +49,9 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
         ngx_table_elt_t  *headers;
 
         headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NULL;
+        }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
                 continue;
@@ -61,6 +65,180 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
     }
 
     return NULL;
+}
+
+/*
+ * Request-pool side state for captured validators.  The module context is
+ * cleared by an internal redirect, but the request pool and its cleanups are
+ * not.  Keep the original lengths here so orphan adoption never has to infer
+ * a length by scanning bytes that may no longer be NUL-terminated.
+ */
+typedef struct ngx_http_markdown_conditional_side_state_s {
+    ngx_table_elt_t  *header;
+    ngx_uint_t        original_hash;
+    size_t            original_value_len;
+    struct ngx_http_markdown_conditional_side_state_s *next;
+} ngx_http_markdown_conditional_side_state_t;
+
+typedef struct {
+    ngx_http_markdown_conditional_side_state_t  *entries;
+} ngx_http_markdown_conditional_side_table_t;
+
+static void
+ngx_http_markdown_conditional_side_table_cleanup(void *data)
+{
+    ngx_http_markdown_conditional_side_table_t  *table;
+
+    table = data;
+    if (table != NULL) {
+        table->entries = NULL;
+    }
+}
+
+static ngx_http_markdown_conditional_side_table_t *
+ngx_http_markdown_conditional_side_table(
+    const ngx_http_request_t *r)
+{
+    ngx_pool_cleanup_t  *cleanup;
+
+    if (r == NULL || r->pool == NULL) {
+        return NULL;
+    }
+
+    for (cleanup = r->pool->cleanup;
+         cleanup != NULL;
+         cleanup = cleanup->next)
+    {
+        if (cleanup->handler
+            == ngx_http_markdown_conditional_side_table_cleanup)
+        {
+            return cleanup->data;
+        }
+    }
+
+    return NULL;
+}
+
+static ngx_http_markdown_conditional_side_table_t *
+ngx_http_markdown_conditional_side_table_create(ngx_http_request_t *r)
+{
+    ngx_http_markdown_conditional_side_table_t  *table;
+    ngx_pool_cleanup_t                          *cleanup;
+
+    if (r == NULL || r->pool == NULL) {
+        return NULL;
+    }
+
+    table = ngx_http_markdown_conditional_side_table(r);
+    if (table != NULL) {
+        return table;
+    }
+
+    table = ngx_pcalloc(r->pool, sizeof(*table));
+    if (table == NULL) {
+        return NULL;
+    }
+
+    cleanup = ngx_pool_cleanup_add(r->pool, 0);
+    if (cleanup == NULL) {
+        return NULL;
+    }
+
+    cleanup->handler = ngx_http_markdown_conditional_side_table_cleanup;
+    cleanup->data = table;
+    return table;
+}
+
+static ngx_http_markdown_conditional_side_state_t *
+ngx_http_markdown_conditional_side_state_find(
+    const ngx_http_request_t *r, const ngx_table_elt_t *header)
+{
+    ngx_http_markdown_conditional_side_table_t  *table;
+    ngx_http_markdown_conditional_side_state_t  *state;
+
+    if (header == NULL) {
+        return NULL;
+    }
+
+    table = ngx_http_markdown_conditional_side_table(r);
+    if (table == NULL) {
+        return NULL;
+    }
+
+    for (state = table->entries; state != NULL; state = state->next) {
+        if (state->header == header) {
+            return state;
+        }
+    }
+
+    return NULL;
+}
+
+static ngx_http_markdown_conditional_side_state_t *
+ngx_http_markdown_conditional_side_state_add(
+    ngx_http_request_t *r, ngx_table_elt_t *header)
+{
+    ngx_http_markdown_conditional_side_table_t  *table;
+    ngx_http_markdown_conditional_side_state_t  *state;
+
+    if (r == NULL || header == NULL) {
+        return NULL;
+    }
+
+    table = ngx_http_markdown_conditional_side_table_create(r);
+    if (table == NULL) {
+        return NULL;
+    }
+
+    state = ngx_pcalloc(r->pool, sizeof(*state));
+    if (state == NULL) {
+        return NULL;
+    }
+
+    state->header = header;
+    state->original_hash = header->hash;
+    state->original_value_len = header->value.len;
+    state->next = table->entries;
+    table->entries = state;
+    return state;
+}
+
+/*
+ * Bound the defensive adoption check by the configured streaming buffer, the
+ * conditional-header cap, and the actual NGINX request-header buffer when it
+ * is available.  The saved length, rather than a terminator search, remains
+ * the source of truth for each captured field.
+ */
+static size_t
+ngx_http_markdown_conditional_adoption_limit(
+    const ngx_http_request_t *r, size_t configured_limit)
+{
+    ngx_buf_t  *header_buffer;
+    size_t      limit;
+    size_t      header_limit;
+
+    limit = configured_limit;
+    if (limit > NGX_HTTP_MARKDOWN_IF_NONE_MATCH_MAX) {
+        limit = NGX_HTTP_MARKDOWN_IF_NONE_MATCH_MAX;
+    }
+
+    if (r == NULL || r->header_in == NULL) {
+        return limit;
+    }
+
+    header_buffer = r->header_in;
+    if (header_buffer->start == NULL || header_buffer->end == NULL
+        || header_buffer->end < header_buffer->start)
+    {
+        return 0;
+    }
+
+    header_limit = (size_t) (header_buffer->end - header_buffer->start);
+    if (limit > header_limit) {
+        limit = header_limit;
+    }
+
+    return limit;
 }
 
 /*
@@ -92,14 +270,13 @@ ngx_http_markdown_adopt_first_restored(
 /*
  * Validate every suppressed candidate of one header name without
  * mutating anything.  Returns NGX_OK when all candidates (if any) are
- * safely adoptable, NGX_ERROR when any candidate's value lacks a
- * terminating NUL within the bounded scan.  Used to make cross-name
- * adoption atomic: both name sets must validate before either is
- * committed.
+ * safely adoptable, NGX_ERROR when a saved value exceeds the bounded request
+ * header limit.  Used to make cross-name adoption atomic: both name sets must
+ * validate before either is committed.
  */
 static ngx_int_t
 ngx_http_markdown_validate_conditional_candidates(ngx_http_request_t *r,
-    u_char *name, size_t name_len, size_t scan_limit)
+    u_char *name, size_t name_len, size_t adoption_limit)
 {
     if (r == NULL || name == NULL || name_len == 0) {
         return NGX_ERROR;
@@ -113,26 +290,34 @@ ngx_http_markdown_validate_conditional_candidates(ngx_http_request_t *r,
          part = part->next)
     {
         ngx_table_elt_t  *headers;
+        ngx_http_markdown_conditional_side_state_t  *state;
 
         headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].key.len != name_len
+            if (headers[i].key.data == NULL
+                || headers[i].key.len != name_len
                 || ngx_strncasecmp(headers[i].key.data, name, name_len) != 0)
             {
                 continue;
             }
 
-            if (headers[i].hash != 0) {
-                continue;
-            }
-
-            if (headers[i].value.len != 0
+            if (headers[i].hash != 0
+                || headers[i].value.len != 0
                 || headers[i].value.data == NULL)
             {
                 continue;
             }
 
-            if (memchr(headers[i].value.data, '\0', scan_limit) == NULL) {
+            state = ngx_http_markdown_conditional_side_state_find(
+                r, &headers[i]);
+            if (state == NULL) {
+                continue;
+            }
+
+            if (state->original_value_len > adoption_limit) {
                 return NGX_ERROR;
             }
         }
@@ -151,6 +336,8 @@ ngx_http_markdown_validate_conditional_candidates(ngx_http_request_t *r,
 
 typedef struct {
     ngx_table_elt_t  *entry;
+    ngx_uint_t        original_hash;
+    size_t            original_value_len;
 } ngx_http_markdown_adopt_rollback_t;
 
 /*
@@ -160,39 +347,36 @@ typedef struct {
  * live in one context instead of eight positional parameters.
  */
 typedef struct {
-    ngx_http_request_t                 *r;
-    size_t                              scan_limit;
+    size_t                              adoption_limit;
     ngx_uint_t                         *adopted_count;
     ngx_uint_t                         *rollback_count;
     ngx_http_markdown_adopt_rollback_t *rollback;
 } ngx_http_markdown_adopt_ctx_t;
 
-/* Roll back every adopted entry recorded so far: restored hash and
- * length both return to their suppressed-candidate values (0). */
+/* Roll back every adopted entry recorded so far to its saved state. */
 static void
 ngx_http_markdown_adopt_rollback_all(
     ngx_http_markdown_adopt_rollback_t *rollback, ngx_uint_t count)
 {
     for (ngx_uint_t i = 0; i < count; i++) {
-        rollback[i].entry->hash = 0;
-        rollback[i].entry->value.len = 0;
+        rollback[i].entry->hash = rollback[i].original_hash;
+        rollback[i].entry->value.len = rollback[i].original_value_len;
     }
 }
 
 /*
  * Commit adoption for one validator name after the caller has validated all
- * suppressed candidates.  Returns NGX_ERROR if the NUL-termination invariant
- * no longer holds while committing; otherwise records the first visible
- * entry and increments the number of adopted entries.  Every mutation is
- * appended to the rollback stack, which fails before mutating anything
- * when it is full.
+ * suppressed candidates.  The original length comes from the request-pool
+ * side table; no byte scan is needed while committing.  Every mutation is
+ * appended to the rollback stack, which fails before mutating anything when
+ * it is full.
  */
 static ngx_int_t
 ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
     u_char *name, size_t name_len, ngx_table_elt_t **first_restored,
     ngx_http_markdown_adopt_ctx_t *ctx)
 {
-    const u_char  *value_end;
+    ngx_http_markdown_conditional_side_state_t  *state;
 
     if (r == NULL || name == NULL || name_len == 0
         || first_restored == NULL || ctx == NULL)
@@ -211,8 +395,12 @@ ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
         ngx_table_elt_t  *headers;
 
         headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].key.len != name_len
+            if (headers[i].key.data == NULL
+                || headers[i].key.len != name_len
                 || ngx_strncasecmp(headers[i].key.data, name, name_len) != 0)
             {
                 continue;
@@ -230,9 +418,12 @@ ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
                 continue;
             }
 
-            value_end = (const u_char *) memchr(
-                headers[i].value.data, '\0', ctx->scan_limit);
-            if (value_end == NULL) {
+            state = ngx_http_markdown_conditional_side_state_find(
+                r, &headers[i]);
+            if (state == NULL) {
+                continue;
+            }
+            if (state->original_value_len > ctx->adoption_limit) {
                 return NGX_ERROR;
             }
             if (*ctx->rollback_count >= NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX) {
@@ -240,10 +431,13 @@ ngx_http_markdown_commit_one_conditional_headers(ngx_http_request_t *r,
                  * entry so the caller's rollback stays complete. */
                 return NGX_ERROR;
             }
-            headers[i].value.len = (size_t) (value_end
-                - headers[i].value.data);
-            headers[i].hash = 1;
             ctx->rollback[*ctx->rollback_count].entry = &headers[i];
+            ctx->rollback[*ctx->rollback_count].original_hash =
+                headers[i].hash;
+            ctx->rollback[*ctx->rollback_count].original_value_len =
+                headers[i].value.len;
+            headers[i].value.len = state->original_value_len;
+            headers[i].hash = 1;
             (*ctx->rollback_count)++;
             (*ctx->adopted_count)++;
             ngx_http_markdown_adopt_first_restored(
@@ -272,6 +466,7 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     ngx_http_markdown_adopt_rollback_t  rollback[
         NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX];
     ngx_http_markdown_adopt_ctx_t  ctx;
+    size_t             adoption_limit;
     ngx_int_t        inm_rc;
     ngx_int_t        ims_rc;
     ngx_int_t        im_rc;
@@ -281,8 +476,9 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
         return NGX_ERROR;
     }
 
-    ctx.r = r;
-    ctx.scan_limit = scan_limit;
+    adoption_limit = ngx_http_markdown_conditional_adoption_limit(
+        r, scan_limit);
+    ctx.adoption_limit = adoption_limit;
     ctx.adopted_count = &adopted_count;
     ctx.rollback_count = &rollback_count;
     ctx.rollback = rollback;
@@ -295,13 +491,13 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
      * validator set to the next PREACCESS pass.
      */
     inm_rc = ngx_http_markdown_validate_conditional_candidates(
-        r, inm_name, sizeof(inm_name) - 1, scan_limit);
+        r, inm_name, sizeof(inm_name) - 1, adoption_limit);
     ims_rc = ngx_http_markdown_validate_conditional_candidates(
-        r, ims_name, sizeof(ims_name) - 1, scan_limit);
+        r, ims_name, sizeof(ims_name) - 1, adoption_limit);
     im_rc = ngx_http_markdown_validate_conditional_candidates(
-        r, im_name, sizeof(im_name) - 1, scan_limit);
+        r, im_name, sizeof(im_name) - 1, adoption_limit);
     ius_rc = ngx_http_markdown_validate_conditional_candidates(
-        r, ius_name, sizeof(ius_name) - 1, scan_limit);
+        r, ius_name, sizeof(ius_name) - 1, adoption_limit);
     if (inm_rc != NGX_OK || ims_rc != NGX_OK
         || im_rc != NGX_OK || ius_rc != NGX_OK)
     {
@@ -634,8 +830,8 @@ ngx_http_markdown_suppress_captured_conditional_headers(
          * forwards request headers without checking hash==0; the empty
          * value length is what actually suppresses the validator from the
          * upstream request.  The value bytes stay request-pool owned and
-         * are restored by restore_captured_conditional_headers (or rebuilt
-         * via ngx_strlen after an internal redirect orphans the entry). */
+         * are restored by restore_captured_conditional_headers.  Orphaned
+         * entries use the request-pool side table for their saved lengths. */
         state->header->hash = 0;
         state->header->value.len = 0;
     }
@@ -770,6 +966,9 @@ ngx_http_markdown_if_match_value_matches(const u_char *value,
             p++;
         }
         token_end = p;
+        if (token_end < token_start) {
+            return 0;
+        }
         while (token_end > token_start
                && (token_end[-1] == ' ' || token_end[-1] == '\t'))
         {
@@ -872,58 +1071,6 @@ ngx_http_markdown_if_match_satisfied(const ngx_http_request_t *r,
         etag, etag_len);
 }
 
-/* Return whether a header entry carries a Last-Modified field value. */
-static ngx_flag_t
-ngx_http_markdown_is_last_modified_header(const ngx_table_elt_t *header)
-{
-    static u_char  last_modified_name[] = "Last-Modified";
-
-    return header != NULL
-           && header->key.data != NULL
-           && header->key.len == sizeof(last_modified_name) - 1
-           && ngx_strncasecmp(header->key.data, last_modified_name,
-                              header->key.len) == 0;
-}
-
-/* Find the active response Last-Modified header, ignoring invalidated slots. */
-static const ngx_table_elt_t *
-ngx_http_markdown_find_last_modified_header(const ngx_http_request_t *r)
-{
-    if (r == NULL) {
-        return NULL;
-    }
-
-    if (r->headers_out.last_modified != NULL
-        && r->headers_out.last_modified->hash != 0
-        && ngx_http_markdown_is_last_modified_header(
-               r->headers_out.last_modified))
-    {
-        return r->headers_out.last_modified;
-    }
-
-    for (const ngx_list_part_t *part = &r->headers_out.headers.part;
-         part != NULL;
-         part = part->next)
-    {
-        const ngx_table_elt_t  *headers;
-
-        headers = part->elts;
-        if (headers == NULL && part->nelts != 0) {
-            return NULL;
-        }
-
-        for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].hash != 0
-                && ngx_http_markdown_is_last_modified_header(&headers[i]))
-            {
-                return &headers[i];
-            }
-        }
-    }
-
-    return NULL;
-}
-
 /*
  * Evaluate If-Unmodified-Since against the response representation date.
  * Invalid dates and a missing Last-Modified header leave the condition
@@ -984,6 +1131,7 @@ typedef struct {
     size_t         single_len;
     ngx_uint_t     match_count;
     size_t         total_len;
+    ngx_flag_t     overflow;
 } ngx_http_markdown_if_none_match_measurement_t;
 
 /* Return whether a header entry carries an If-None-Match field value. */
@@ -1005,11 +1153,16 @@ ngx_http_markdown_add_if_none_match_length(
     ngx_http_markdown_if_none_match_measurement_t *measurement,
     size_t value_len)
 {
+    if (measurement == NULL) {
+        return NGX_ERROR;
+    }
+
     if (measurement->match_count > 0) {
         if (measurement->total_len > (size_t) -1 - 2
             || measurement->total_len + 2
                > NGX_HTTP_MARKDOWN_IF_NONE_MATCH_MAX)
         {
+            measurement->overflow = 1;
             return NGX_ERROR;
         }
         measurement->total_len += 2;
@@ -1019,6 +1172,7 @@ ngx_http_markdown_add_if_none_match_length(
         || value_len > NGX_HTTP_MARKDOWN_IF_NONE_MATCH_MAX
                        - measurement->total_len)
     {
+        measurement->overflow = 1;
         return NGX_ERROR;
     }
 
@@ -1284,6 +1438,32 @@ ngx_http_markdown_collect_if_none_match_value(
     return NGX_OK;
 }
 
+/* Distinguish an intentional If-None-Match size rejection from a malformed
+ * header or a pool failure.  Oversized If-None-Match is ignored by the
+ * conditional precedence rules; other collection failures remain fatal. */
+static ngx_flag_t
+ngx_http_markdown_if_none_match_is_oversized(
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_http_markdown_if_none_match_measurement_t  measurement;
+    ngx_int_t                                       rc;
+
+    if (r == NULL) {
+        return 0;
+    }
+
+    memset(&measurement, 0, sizeof(measurement));
+    if (ctx != NULL && ctx->conditional.captured) {
+        rc = ngx_http_markdown_measure_captured_if_none_match_with_fallback(
+            ctx, &measurement);
+    } else {
+        rc = ngx_http_markdown_measure_request_if_none_match(
+            r, &measurement);
+    }
+
+    return rc == NGX_ERROR && measurement.overflow;
+}
+
 /*
  * Return whether the request has a conditional validator that can be held
  * while a negotiated Markdown response is obtained.  Range requests remain
@@ -1328,6 +1508,7 @@ ngx_http_markdown_capture_conditional_request(
     ngx_table_elt_t  *range_header;
     ngx_http_markdown_conditional_header_state_t  *state;
     ngx_http_markdown_conditional_header_state_t  *tail;
+    ngx_http_markdown_conditional_side_state_t   *side_state;
     ngx_table_elt_t  *headers;
 
     if (r == NULL || ctx == NULL) {
@@ -1368,11 +1549,18 @@ ngx_http_markdown_capture_conditional_request(
 
     ctx->conditional.header_states = NULL;
     tail = NULL;
+    if (ngx_http_markdown_conditional_side_table_create(r) == NULL) {
+        return NGX_ERROR;
+    }
+
     for (ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
     {
         headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0
                 || !ngx_http_markdown_is_captured_conditional_name(
@@ -1381,14 +1569,24 @@ ngx_http_markdown_capture_conditional_request(
                 continue;
             }
 
+            side_state = ngx_http_markdown_conditional_side_state_find(
+                r, &headers[i]);
+            if (side_state == NULL) {
+                side_state = ngx_http_markdown_conditional_side_state_add(
+                    r, &headers[i]);
+                if (side_state == NULL) {
+                    return NGX_ERROR;
+                }
+            }
+
             state = ngx_pcalloc(r->pool, sizeof(*state));
             if (state == NULL) {
                 return NGX_ERROR;
             }
 
             state->header = &headers[i];
-            state->original_hash = headers[i].hash;
-            state->original_value_len = headers[i].value.len;
+            state->original_hash = side_state->original_hash;
+            state->original_value_len = side_state->original_value_len;
             if (tail == NULL) {
                 ctx->conditional.header_states = state;
             } else {
@@ -1457,10 +1655,9 @@ ngx_http_markdown_conditional_early_outcome(
  * be answered with the transformed Markdown representation, and that
  * representation is validated solely by its own ETag for cache revalidation;
  * source HTML freshness must never synthesize a Not Modified answer for
- * content this module replaces.  The C-side If-Unmodified-Since check uses
- * only an active response Last-Modified header, and requests carrying only
- * If-Modified-Since therefore fall through to conversion and receive a fresh
- * 200 response.
+ * content this module replaces.  If-Unmodified-Since is likewise ignored
+ * for the converted representation; requests carrying only a source-scoped
+ * date validator fall through to the normal Markdown response path.
  *
  * @param r        The request structure.
  * @param conf     Module configuration controlling conditional request behavior and ETag generation.
@@ -1524,6 +1721,7 @@ ngx_http_markdown_generate_conditional_result(
 {
     struct MarkdownOptions  options;
     struct MarkdownResult   *conv_result;
+    int                     error_len;
 
     *result = NULL;
 
@@ -1565,11 +1763,14 @@ ngx_http_markdown_generate_conditional_result(
     }
 
     if (conv_result->error_code != 0) {
+        error_len = (conv_result->error_len > (size_t) INT_MAX)
+            ? INT_MAX
+            : (int) conv_result->error_len;
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                      "markdown: conversion failed during conditional check: "
                      "error_code=%ud message=\"%*s\"",
                      conv_result->error_code,
-                     (conv_result->error_message != NULL) ? (ngx_int_t) conv_result->error_len : 0,
+                     (conv_result->error_message != NULL) ? error_len : 0,
                      (conv_result->error_message != NULL) ? conv_result->error_message : (u_char *) "");
 
         markdown_result_free(conv_result);
@@ -1595,6 +1796,50 @@ ngx_http_markdown_generate_conditional_result(
 
     *result = conv_result;
     return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_conditional_without_entity_etag(
+    const ngx_http_markdown_ctx_t *ctx,
+    const ngx_table_elt_t *ius_header,
+    const ngx_table_elt_t *last_modified_header,
+    struct FFIConditionalInput *cond_input,
+    struct FFIConditionalDecision *cond_decision)
+{
+    if (ngx_http_markdown_validate_if_unmodified_since(
+            ctx, ius_header, last_modified_header)
+        != NGX_OK)
+    {
+        return NGX_HTTP_PRECONDITION_FAILED;
+    }
+
+    markdown_decide_conditional(cond_input, cond_decision);
+    return ngx_http_markdown_conditional_early_outcome(cond_decision);
+}
+
+static ngx_int_t
+ngx_http_markdown_conditional_without_comparable_etag(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_ctx_t *ctx,
+    const ngx_table_elt_t *im_header,
+    const ngx_table_elt_t *ius_header,
+    const ngx_table_elt_t *last_modified_header)
+{
+    if (ngx_http_markdown_validate_if_unmodified_since(
+            ctx, ius_header, last_modified_header)
+        != NGX_OK)
+    {
+        return NGX_HTTP_PRECONDITION_FAILED;
+    }
+
+    /* If-Match must fail closed when entity-tag comparison is unavailable. */
+    if (im_header != NULL
+        && !ngx_http_markdown_if_match_satisfied(r, ctx, im_header, NULL, 0))
+    {
+        return NGX_HTTP_PRECONDITION_FAILED;
+    }
+
+    return NGX_DECLINED;
 }
 
 ngx_int_t
@@ -1632,21 +1877,29 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         r, ctx, &inm_header, &ims_header, &im_header, &ius_header,
         &range_header);
 
-    /* RFC 7232 section 3.3: a recipient MUST ignore If-Unmodified-Since
-     * when the request carries an If-Match header field.  The two
-     * validators address the same precondition; If-Match (entity tag)
-     * wins because it is evaluated first and is more specific. */
-    if (im_header != NULL) {
-        ius_header = NULL;
-    }
-
+    /* This handler is entered only for a negotiated Markdown response.
+     * Source Last-Modified cannot validate the transformed representation,
+     * so If-Unmodified-Since is ignored here; pass-through remains owned by
+     * NGINX's source-representation conditional handling. */
+    ius_header = NULL;
 
     inm_value.data = NULL;
     inm_value.len = 0;
     if (inm_header != NULL) {
         inm_rc = ngx_http_markdown_collect_if_none_match_value(
             r, ctx, &inm_value);
-        if (inm_rc != NGX_OK) {
+        if (inm_rc == NGX_ERROR) {
+            if (!ngx_http_markdown_if_none_match_is_oversized(r, ctx)) {
+                return NGX_ERROR;
+            }
+            /* An oversized If-None-Match field is ignored, but an
+             * independent If-Match field must still be evaluated below. */
+            inm_header = NULL;
+            inm_value.data = NULL;
+            inm_value.len = 0;
+        } else if (inm_rc == NGX_DECLINED) {
+            inm_header = NULL;
+        } else if (inm_rc != NGX_OK) {
             return NGX_ERROR;
         }
         inm_data = inm_value.data;
@@ -1676,7 +1929,9 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         ngx_http_markdown_has_no_transform(r) ? 1 : 0;
     cond_input.if_none_match = inm_data;
     cond_input.if_none_match_len = inm_len;
-    last_modified_header = ngx_http_markdown_find_last_modified_header(r);
+    /* The source Last-Modified header is deliberately not an input to a
+     * converted-representation decision. */
+    last_modified_header = NULL;
 
     needs_entity_etag =
         (conf->policy.conditional_requests
@@ -1684,38 +1939,14 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
          && (inm_header != NULL || im_header != NULL));
 
     if (!needs_entity_etag) {
-        if (ngx_http_markdown_validate_if_unmodified_since(
-                ctx, ius_header, last_modified_header)
-            != NGX_OK)
-        {
-            return NGX_HTTP_PRECONDITION_FAILED;
-        }
-
-        markdown_decide_conditional(&cond_input, &cond_decision);
-        return ngx_http_markdown_conditional_early_outcome(&cond_decision);
+        return ngx_http_markdown_conditional_without_entity_etag(
+            ctx, ius_header, last_modified_header,
+            &cond_input, &cond_decision);
     }
 
     if (!ngx_http_markdown_can_compare_etag(r, conf)) {
-        if (ngx_http_markdown_validate_if_unmodified_since(
-                ctx, ius_header, last_modified_header)
-            != NGX_OK)
-        {
-            return NGX_HTTP_PRECONDITION_FAILED;
-        }
-
-        /*
-         * If If-Match is present, we must fail closed (412) if we cannot evaluate it
-         * unless it is an asterisk '*'.
-         */
-        if (im_header != NULL) {
-            if (!ngx_http_markdown_if_match_satisfied(
-                    r, ctx, im_header, NULL, 0))
-            {
-                return NGX_HTTP_PRECONDITION_FAILED;
-            }
-        }
-
-        return NGX_DECLINED;
+        return ngx_http_markdown_conditional_without_comparable_etag(
+            r, ctx, im_header, ius_header, last_modified_header);
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -2010,6 +2241,25 @@ ngx_http_markdown_304_snapshot_restore(ngx_http_request_t *r,
         &snapshot->trailers_snapshot);
 }
 
+static ngx_int_t
+ngx_http_markdown_send_conditional_header(ngx_http_request_t *r,
+    const ngx_http_markdown_304_snapshot_t *snapshot)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_send_header(r);
+    if (rc == NGX_AGAIN) {
+        return NGX_AGAIN;
+    }
+
+    if (rc != NGX_OK && rc != NGX_DONE) {
+        ngx_http_markdown_304_snapshot_restore(r, snapshot);
+        return rc;
+    }
+
+    return NGX_DONE;
+}
+
 ngx_int_t
 ngx_http_markdown_send_304(ngx_http_request_t *r,
                            const struct MarkdownResult *result)
@@ -2130,13 +2380,8 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: 304 response with Vary: Accept");
 
-    rc = ngx_http_send_header(r);
-    if (rc == NGX_AGAIN) {
-        /* Keep the prepared 304 representation and let the header chain
-         * resume it on the next filter invocation. */
-        return NGX_AGAIN;
-    }
-    if (rc != NGX_OK && rc != NGX_DONE) {
+    rc = ngx_http_markdown_send_conditional_header(r, &snapshot);
+    if (rc != NGX_DONE) {
         return rc;
     }
 
@@ -2236,12 +2481,8 @@ ngx_http_markdown_send_412(ngx_http_request_t *r)
         return NGX_ERROR;
     }
 
-    rc = ngx_http_send_header(r);
-    if (rc == NGX_AGAIN) {
-        return NGX_AGAIN;
-    }
-    if (rc != NGX_OK && rc != NGX_DONE) {
-        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+    rc = ngx_http_markdown_send_conditional_header(r, &snapshot);
+    if (rc != NGX_DONE) {
         return rc;
     }
 

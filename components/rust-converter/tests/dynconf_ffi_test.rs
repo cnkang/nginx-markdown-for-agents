@@ -288,25 +288,25 @@ fn sha256_hex_empty_input_returns_ok() {
 }
 
 #[test]
-fn sha256_hex_null_output_returns_invalid_type() {
+fn sha256_hex_null_output_returns_invalid_args() {
     let input = b"test";
     let rc = unsafe { markdown_sha256_hex(input.as_ptr(), input.len(), ptr::null_mut(), 64) };
-    assert_eq!(rc, DYNCONF_ERR_INVALID_TYPE);
+    assert_eq!(rc, DYNCONF_ERR_INVALID_ARGS);
 }
 
 #[test]
-fn sha256_hex_short_output_returns_invalid_type() {
+fn sha256_hex_short_output_returns_invalid_args() {
     let input = b"test";
     let mut output = [0u8; 32];
     let rc = unsafe { markdown_sha256_hex(input.as_ptr(), input.len(), output.as_mut_ptr(), 32) };
-    assert_eq!(rc, DYNCONF_ERR_INVALID_TYPE);
+    assert_eq!(rc, DYNCONF_ERR_INVALID_ARGS);
 }
 
 #[test]
-fn sha256_hex_null_data_nonzero_len_returns_invalid_type() {
+fn sha256_hex_null_data_nonzero_len_returns_invalid_args() {
     let mut output = [0u8; 64];
     let rc = unsafe { markdown_sha256_hex(ptr::null(), 10, output.as_mut_ptr(), output.len()) };
-    assert_eq!(rc, DYNCONF_ERR_INVALID_TYPE);
+    assert_eq!(rc, DYNCONF_ERR_INVALID_ARGS);
 }
 
 // ─── markdown_dynconf_result_init ──────────────────────────────────────────

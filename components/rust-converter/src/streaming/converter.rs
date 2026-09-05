@@ -623,8 +623,20 @@ impl StreamingConverter {
                 .map_err(|e| self.wrap_error(e))?;
         }
 
+        // Closing structural contexts can grow emitter buffers after the last
+        // parser checkpoint.  Reconcile the converter-owned working set before
+        // terminal emission so finalize cannot silently cross the total budget.
+        self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
+
         // 6. Finalize emitter (flush all pending bytes)
         let final_markdown = self.emitter.finalize().map_err(|e| self.wrap_error(e))?;
+
+        // The terminal Vec is detached from the emitter by finalize(), so it
+        // is no longer included in estimate_working_set().  Charge its
+        // capacity while it is returned to the caller; this also catches
+        // capacity growth caused by the final newline normalization.
+        self.check_terminal_output_budget(final_markdown.capacity())
+            .map_err(|e| self.wrap_error(e))?;
 
         // Update incremental stats with final markdown
         self.update_incremental_stats(&final_markdown);
@@ -714,10 +726,20 @@ impl StreamingConverter {
                 .process_action(&action, &mut self.state_machine)?;
         }
 
+        // A safe finish can emit closing fences and separators after the
+        // failed feed's last budget check.  Check the reconciled resident set
+        // before detaching the closure output.
+        self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
+
         // 3. Return only closure bytes produced after uncommitted output was
         //    discarded. Do not call finalize(), which flushes all pending
         //    content and can leak bytes from the failed feed call.
         let closing_bytes = self.emitter.take_closure_output()?;
+
+        // take_closure_output() moves the returned Vec out of the emitter;
+        // account for its capacity as an additional terminal allocation.
+        self.check_terminal_output_budget(closing_bytes.capacity())
+            .map_err(|e| self.wrap_error(e))?;
 
         Ok(closing_bytes)
     }
@@ -1181,6 +1203,18 @@ impl StreamingConverter {
         // declared total-memory cap.
         self.budget.check_total(0, working_set)?;
         Ok(())
+    }
+
+    /// Check the total budget after terminal output has been detached from
+    /// the emitter and update the recorded peak with that returned capacity.
+    fn check_terminal_output_budget(
+        &mut self,
+        output_capacity: usize,
+    ) -> Result<(), ConversionError> {
+        let working_set = self.estimate_working_set();
+        let terminal_total = working_set.saturating_add(output_capacity);
+        self.stats.peak_memory_estimate = self.stats.peak_memory_estimate.max(terminal_total);
+        self.budget.check_total(working_set, output_capacity)
     }
 
     /// Enforce the configured parser-memory contract against the modeled
@@ -3040,6 +3074,26 @@ mod tests {
         conv.feed_chunk(b"<body><a href='/'>").unwrap();
         let err = conv.feed_chunk(&vec![b'x'; 64 * 1024]).unwrap_err();
 
+        assert_eq!(err.code(), 6);
+    }
+
+    /// Regression: finalize detaches its result Vec from the emitter.  The
+    /// detached capacity must still be charged to the total budget, including
+    /// capacity growth caused by the terminal newline normalization.
+    #[test]
+    fn test_finalize_charges_detached_output_capacity() {
+        let mut conv = make_converter();
+        conv.emitter
+            .process_action(
+                &StateMachineAction::Text("12345678".to_string()),
+                &mut conv.state_machine,
+            )
+            .expect("test text should fit the emitter buffer");
+        conv.budget.total = conv.estimate_working_set();
+
+        let err = conv
+            .finalize()
+            .expect_err("detached terminal output must consume total budget");
         assert_eq!(err.code(), 6);
     }
 
