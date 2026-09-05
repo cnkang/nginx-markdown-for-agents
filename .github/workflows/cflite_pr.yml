@@ -31,7 +31,12 @@ jobs:
           persist-credentials: false
 
       - name: Prepare non-root fuzz output
-        run: mkdir -p build-out
+        run: |
+          mkdir -p build-out out
+          # Docker-based fuzz actions write the shared workspace as root.
+          # Keep the host-side artifact directory writable for SARIF fallback
+          # creation and artifact upload after the container exits.
+          chmod 0777 out
 
       - uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
         id: build
@@ -45,6 +50,7 @@ jobs:
           mode: code-change
           fuzz-seconds: 600
           sanitizer: address
+          output-sarif: true
 
       - name: Ensure SARIF artifact exists
         if: always()
