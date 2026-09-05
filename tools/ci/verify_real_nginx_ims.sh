@@ -537,7 +537,7 @@ echo "==> Running conditional-request validation scenario"
   # If-Unmodified-Since against the origin Last-Modified value.
   code12="$(curl -sS -D resp12.headers -o resp12.body \
     -H 'If-Unmodified-Since: Thu, 01 Jan 1970 00:00:00 GMT' \
-    "http://127.0.0.1:${PORT}/source/index.html" \
+    "http://127.0.0.1:$((PORT + 1))/source/index.html" \
     -w "${HTTP_CODE_FORMAT}")"
   [[ "${code12}" == "412" ]] || {
     echo "Expected passthrough IUS response 412, got ${code12}" >&2
@@ -546,7 +546,7 @@ echo "==> Running conditional-request validation scenario"
   code13="$(curl -sS -D resp13.headers -o resp13.body \
     -H "If-Match: ${source_etag}" \
     -H 'If-Unmodified-Since: Thu, 01 Jan 1970 00:00:00 GMT' \
-    "http://127.0.0.1:${PORT}/source/index.html" \
+    "http://127.0.0.1:$((PORT + 1))/source/index.html" \
     -w "${HTTP_CODE_FORMAT}")"
   [[ "${code13}" == "412" ]] || {
     echo "Expected passthrough If-Match plus IUS response 412, got ${code13}" >&2

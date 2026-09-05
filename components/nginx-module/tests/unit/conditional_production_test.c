@@ -913,9 +913,9 @@ test_send_412_success_clears_body_headers(void)
     TEST_ASSERT(r->headers_out.status == NGX_HTTP_PRECONDITION_FAILED,
                 "412 status is set");
     TEST_ASSERT(r->header_only == 1,
-                "412 request is marked header-only (no chunked body)");
-    TEST_ASSERT(r->headers_out.content_length_n == -1,
-                "Content-Length cleared on 412");
+                "412 request is marked header-only (no response body)");
+    TEST_ASSERT(r->headers_out.content_length_n == 0,
+                "412 response is framed with an empty body");
     TEST_ASSERT(r->allow_ranges == 0,
                 "range state cleared on 412");
     TEST_ASSERT(count_vary_headers(r) == 1,
