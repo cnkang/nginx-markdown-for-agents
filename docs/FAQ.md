@@ -109,7 +109,7 @@ location /api/ {
 
 ### What happens if conversion fails?
 
-By default, the module uses a fail-open strategy (`markdown_error_policy pass;`). It returns the original eligible HTML response. If you want strict behavior instead, `markdown_error_policy fail_closed;` makes failures fail-closed.
+By default, the module uses a fail-open strategy (`markdown_error_policy pass;`). It returns the original eligible HTML response for failures before the response commit. After the module sends headers for streaming output, it can no longer restore the original body. The module then truncates the response or rejects it per `error_status`. The same applies when the replay buffer overflows. If you want strict behavior instead, `markdown_error_policy fail_closed;` makes failures fail-closed.
 
 For the canonical directive behavior, see [Configuration Guide](guides/CONFIGURATION.md). For the exact runtime branches, see [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md).
 
@@ -145,7 +145,7 @@ The full-buffer path buffers the eligible response before conversion. Large HTML
 3. **Disable optional features**: Turn off token estimation and front matter if not needed
 4. **Use CommonMark**: Faster than GFM flavor
 
-See [Performance Tuning](guides/OPERATIONS.md#performance-tuning) for details.
+See [Performance Tuning](guides/PERFORMANCE_TUNING.md) for details.
 
 ### Does it support streaming?
 
@@ -207,7 +207,9 @@ The module automatically detects and decompresses supported upstream compressed 
 
 Decoding runs in both processing paths: the full-buffer path and the
 streaming path (members stream through gzip/deflate/Brotli decoders with
-cumulative budget enforcement and truncation rejection). See
+cumulative budget enforcement and truncation rejection). Brotli streaming
+requires a build with `NGX_HTTP_BROTLI` support. Without it, Brotli falls
+back to bounded full-buffer decoding. See
 [DECOMPRESSION.md](features/DECOMPRESSION.md) for the member-lifecycle and
 budget model.
 

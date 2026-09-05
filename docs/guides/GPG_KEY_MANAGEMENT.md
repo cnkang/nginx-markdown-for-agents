@@ -76,8 +76,14 @@ and verifiability.
 | Channel | URL / Location | Priority |
 |---------|---------------|----------|
 | HTTPS (primary) | Future repository URL, for example `https://pkg.example.com/nginx-markdown/gpg.key` | Primary |
-| GitHub Releases | Attached to each release as `gpg.key` | Secondary |
 | Key server (optional) | `keys.openpgp.org` or `keyserver.ubuntu.com` | Optional |
+
+> **Never trust a key file attached to the release itself.** A `gpg.key`
+> shipped inside a GitHub Release asset shares the fate of the binaries
+> it is meant to authenticate: an attacker who replaces the release
+> artifacts can replace the attached key as well. Always obtain the key
+> from an independent channel above (or a source checkout) and verify
+> its fingerprint per §3 before use.
 
 ### Export Public Key
 
@@ -269,7 +275,7 @@ gpg --keyserver keys.openpgp.org --send-keys <OLD_KEY_ID>
 | Preparation | 1 week | Generate new key, test signing |
 | Transition start | Day 0 | Publish both keys, sign with new key |
 | Transition period | 90 days | Both keys valid, new packages use new key |
-| Transition end | Day 90 | Remove old key, revoke on key servers |
+| Transition end | Day 90 | Remove old key from active signing and keyserver publication; retain prior public keys in `packaging/nginx-markdown-for-agents-release.asc` so historical signatures stay verifiable |
 
 ---
 

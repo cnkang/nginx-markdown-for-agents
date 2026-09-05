@@ -52,6 +52,9 @@ privileged execution, then verifies both Markdown and HTML responses:
 # the repository, not downloaded from the Release), so the signature check
 # anchors on an independently delivered trust root.
 set -euo pipefail; RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSL -o "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc"; : "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to the release public key file (see key setup above)}"
+# The literal below is a copy of the canonical trust anchor in
+# docs/guides/GPG_KEY_MANAGEMENT.md; update it only after independently
+# authenticating the replacement fingerprint.
 TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "$GNUPGHOME"' EXIT; gpg --batch --homedir "$GNUPGHOME" --import "${RELEASE_KEY_PATH}"; VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1; CHECKSUM_LINE="$(awk -v file="${INSTALLER}" '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"; printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -; sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"; sudo nginx -t; sudo nginx -s reload
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
@@ -1215,6 +1218,8 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    wget "${BASE_URL}/SHA256SUMS"
    wget "${BASE_URL}/SHA256SUMS.asc"
    : "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to packaging/nginx-markdown-for-agents-release.asc from git repository}"
+   # Copy of the canonical value in docs/guides/GPG_KEY_MANAGEMENT.md;
+   # independently authenticate any replacement before changing this value.
    TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75
    gpg --import "${RELEASE_KEY_PATH}"
    VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \

@@ -17,7 +17,7 @@ or review action.
 - [ ] Streaming configuration guide is complete — Verify: `make docs-check` plus a signed accuracy review that checks defaults, enablement, shadow mode, rollback, and failure-mode guidance
 - [ ] Rollout cookbook is complete (streaming enable, shadow mode, gradual expansion) — Verify: `make docs-check` plus a signed accuracy review. The review checks
   enablement, staged rollout, rollback, and failure-mode guidance.
-- [ ] Compatibility matrix documentation is complete — Verify: `docs/project/compatibility-matrix-0-5-0.md` exists with all capabilities classified
+- [ ] Compatibility matrix documentation is complete — Verify: `docs/project/history/compatibility-matrix-0-5-0.md` exists with all capabilities classified
 - [ ] 0.5.0 non-goals are explicitly listed — Verify: `docs/project/release-gates-0-5-0.md` contains the non-goals section
 - [ ] CHANGELOG.md updated with 0.5.0 entry — Verify: `grep -En '^## \\[?0\.5\.0\\]?([[:space:]]|$)' CHANGELOG.md` returns at least one release heading
 - [ ] `make docs-check` passes — Verify: `make docs-check` exit code 0

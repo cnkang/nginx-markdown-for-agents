@@ -5,7 +5,7 @@
 > however the contract is now **semantic initializer first**. Zero
 > initialization is only a fallback. See
 > [FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) for the active ABI
-> contract and [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md) for
+> contract and [FFI_MIGRATION_HISTORY.md](FFI_MIGRATION_HISTORY.md) for
 > the migration history.
 
 ## Policy

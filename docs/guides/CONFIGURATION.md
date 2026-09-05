@@ -307,3 +307,6 @@ internal 1 MiB routing rule.
 
 `markdown_stream_flush_min` — REMOVED. No replacement. Flushing uses an
 internal heuristic.
+
+For the complete 0.9.2 before/after removal table, see
+[MIGRATION-0.9.2.md](MIGRATION-0.9.2.md#removed-active-directives--beforeafter).

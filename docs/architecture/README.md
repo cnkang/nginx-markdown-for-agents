@@ -40,7 +40,7 @@ Use it when you need more than deployment guidance but less than source-level im
 
 | Topic | Read |
 |-------|------|
-| FFI migration contract (historical v0.9.1 → v0.9.2 record) | [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md) |
+| FFI migration history (historical v0.9.1 → v0.9.2 record) | [FFI_MIGRATION_HISTORY.md](FFI_MIGRATION_HISTORY.md) |
 | Streaming security check order (0.7.x verification) | [streaming-check-order.md](streaming-check-order.md) |
 | Profile field map (0.9.1 historical field inventory) | [profile-inventory.md](profile-inventory.md) |
 | Profile system design (retired profile-system rationale) | [profiles.md](profiles.md) |
