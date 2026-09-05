@@ -174,7 +174,10 @@ remove_module_package() {
             die "Unsupported package format for module removal: ${PKG_FORMAT}"
             ;;
     esac
-    return 0
+    # Propagate the package-manager exit status: an unconditional
+    # `return 0` here would mask a failed module removal and let the
+    # lifecycle continue as if the package were gone (P1-8).
+    return "$?"
 }
 
 run_package_removal_lifecycle() {

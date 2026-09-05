@@ -30,7 +30,8 @@
 #   PKG_VERSION         Override package version (default: from Cargo.toml)
 #   DOCKER              Override docker binary (default: auto-detect)
 #   GATE3_SMOKE_IMAGES  Comma-separated list of smoke test images
-#                       (default: debian:12,ubuntu:24.04,almalinux:9)
+#                       (default: digest-pinned Debian 12, Ubuntu 24.04,
+#                       and AlmaLinux 9 images)
 #
 # NOTES:
 #   - macOS bash 3.2 compatible
@@ -49,7 +50,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 readonly SCRIPT_DIR PROJECT_ROOT
 
 readonly DEFAULT_NGINX_VERSION="1.26.3"
-readonly DEFAULT_SMOKE_IMAGES="debian:12,ubuntu:24.04,almalinux:9"
+readonly DEFAULT_SMOKE_IMAGES="debian:12@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443,ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517,almalinux:9@sha256:3a3fa7f043b142bc8008c8b308d39b47d2c84008addcd52f9f9a7a82d2a90474"
 readonly BUILD_IMAGE_TAG="nginx-markdown-gate3-build:local"
 readonly NFPM_VERSION="2.46.3"
 
@@ -235,7 +236,7 @@ build_module() {
     dockerfile="$(mktemp "${TMPDIR:-/tmp}/gate3-dockerfile.XXXXXX")"
 
     cat > "$dockerfile" <<DOCKERFILE
-FROM almalinux:9 AS builder
+FROM almalinux:9@sha256:3a3fa7f043b142bc8008c8b308d39b47d2c84008addcd52f9f9a7a82d2a90474 AS builder
 RUN dnf install -y \\
     gcc make ca-certificates curl-minimal pcre2-devel zlib-devel openssl-devel \\
     brotli-devel \\
@@ -289,7 +290,7 @@ RUN mkdir -p /output \\
     && readelf -d /output/ngx_http_markdown_filter_module.so | grep -i brotli \\
     && echo "--- libbrotlidec linkage confirmed ---"
 
-FROM ubuntu:24.04 AS packager
+FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS packager
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates rpm \\
     && rm -rf /var/lib/apt/lists/*

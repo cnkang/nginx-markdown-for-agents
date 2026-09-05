@@ -40,7 +40,9 @@ jobs:
         # package artifact flow, smoke matrix, and release-gate updates.
         nginx_channel: [stable]
     container:
-      image: ${{ matrix.os == 'almalinux-9' && 'almalinux:9' || 'amazonlinux:2023' }}
+      # Immutable multi-architecture index digests; update only after
+      # independently verifying the corresponding upstream tags.
+      image: ${{ matrix.os == 'almalinux-9' && 'almalinux@sha256:3a3fa7f043b142bc8008c8b308d39b47d2c84008addcd52f9f9a7a82d2a90474' || 'amazonlinux@sha256:181f98c48832fe926f8ca3b6ffeafcce128e96e77b93d08fbe9a9bc9403ce284' }}
     defaults:
       run:
         shell: bash
@@ -84,9 +86,11 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
         run: |
           bash ./packaging/scripts/install-verified-rustup.sh \
-            --arch "${{ matrix.arch }}" \
+            --arch "${MATRIX_ARCH}" \
             --toolchain "${RUST_TOOLCHAIN}"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           . "$HOME/.cargo/env"
@@ -101,9 +105,11 @@ jobs:
 
       - name: Resolve NGINX version
         id: nginx_version
+        env:
+          MATRIX_NGINX_CHANNEL: ${{ matrix.nginx_channel }}
         run: |
           . "$HOME/.cargo/env"
-          CHANNEL="${{ matrix.nginx_channel }}"
+          CHANNEL="${MATRIX_NGINX_CHANNEL}"
           case "${CHANNEL}" in
             stable)
               NGINX_VERSION="1.26.3"
@@ -133,13 +139,15 @@ jobs:
           echo "NGINX_SRC=/tmp/nginx-build/nginx-${NGINX_VERSION}" >> "$GITHUB_ENV"
 
       - name: Build Rust library
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
         run: |
           . "$HOME/.cargo/env"
-          case "${{ matrix.arch }}" in
+          case "${MATRIX_ARCH}" in
             amd64) RUST_TARGET="x86_64-unknown-linux-gnu" ;;
             arm64) RUST_TARGET="aarch64-unknown-linux-gnu" ;;
             *)
-              echo "ERROR: unsupported arch: ${{ matrix.arch }}" >&2
+              echo "ERROR: unsupported arch: ${MATRIX_ARCH}" >&2
               exit 1
               ;;
           esac

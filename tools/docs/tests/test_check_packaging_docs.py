@@ -314,12 +314,12 @@ class TestCheckNoHardcodedReleaseTags:
     def test_placeholder_passes(self):
         """Verify no errors when release URLs use a placeholder instead of a version."""
         text = "wget https://github.com/.../releases/download/<release_tag>/file.tar.gz\n"
-        assert check_no_hardcoded_release_tags(text) == []
+        assert check_no_hardcoded_release_tags(text, "fixture.md") == []
 
     def test_hardcoded_tag_fails(self):
         """Verify an error when a release URL contains a hardcoded version tag."""
         text = "wget https://github.com/.../releases/download/v0.3.0/file.tar.gz\n"
-        errors = check_no_hardcoded_release_tags(text)
+        errors = check_no_hardcoded_release_tags(text, "fixture.md")
         assert len(errors) == 1
         assert "v0.3.0" in errors[0]
 
@@ -332,12 +332,14 @@ class TestCheckNoHardcodedReleaseTags:
             / "PACKAGE_DISTRIBUTION.md"
         )
 
-        assert check_no_hardcoded_release_tags(guide.read_text(encoding="utf-8")) == []
+        assert check_no_hardcoded_release_tags(
+            guide.read_text(encoding="utf-8"), "PACKAGE_DISTRIBUTION.md"
+        ) == []
 
     def test_non_download_url_passes(self):
         """Verify no errors for GitHub release page URLs without download paths."""
         text = "See https://github.com/org/repo/releases for details\n"
-        assert check_no_hardcoded_release_tags(text) == []
+        assert check_no_hardcoded_release_tags(text, "fixture.md") == []
 
     def test_multiple_lines(self):
         """Verify all hardcoded tags across multiple lines are detected."""
@@ -345,7 +347,7 @@ class TestCheckNoHardcodedReleaseTags:
             "wget .../releases/download/v1.0.0/a.tar.gz\n"
             "wget .../releases/download/v2.0.0/b.tar.gz\n"
         )
-        assert len(check_no_hardcoded_release_tags(text)) == 2
+        assert len(check_no_hardcoded_release_tags(text, "fixture.md")) == 2
 
 
 # ---------------------------------------------------------------------------

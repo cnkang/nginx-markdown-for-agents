@@ -91,8 +91,9 @@ startupProbe:
 # on SIGQUIT.  The default preStop sends SIGQUIT to the container's nginx
 # master so a rolled-out pod finishes its in-flight conversions instead of
 # being killed mid-stream.  terminationGracePeriodSeconds bounds the total
-# drain window; raise it for long-running streaming conversions.  Override
-# lifecycle entirely (set to {}) when using a non-nginx entrypoint.
+# drain window; raise it for long-running streaming conversions.  Set
+# lifecycle: null to remove the default lifecycle block entirely when using a
+# non-nginx entrypoint.
 terminationGracePeriodSeconds: 30
 lifecycle:
   preStop:
@@ -104,6 +105,9 @@ markdown:
   # Disabled by default so the chart can run with a stock NGINX image.
   # To enable the module, use an image that already contains
   # ngx_http_markdown_filter_module.so and set loadModule to its path.
+  # This chart intentionally renders the safe request-path and metrics
+  # directives below. Authentication, trusted-proxy, dynamic-config,
+  # diagnostics, and front-matter directives require a custom nginx.conf.
   enabled: false
   onError: "pass"
   flavor: "commonmark"

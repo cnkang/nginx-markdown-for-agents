@@ -135,6 +135,8 @@ def check_config(text: str, path: str) -> list[Finding]:
 
 def scan_examples(root: Path = EXAMPLES_ROOT) -> list[Finding]:
     """Scan tracked production example configurations."""
+    if not root.is_dir():
+        return [Finding(str(root), 1, "examples root is missing or not a directory")]
     findings: list[Finding] = []
     for path in sorted(root.glob("*.conf")):
         relative = str(path.relative_to(REPO_ROOT))

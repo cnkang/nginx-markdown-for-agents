@@ -128,7 +128,7 @@ check_prerequisites() {
         return 2
     fi
 
-    if [ -z "$BASE_URL" ]; then
+    if [[ -z "$BASE_URL" ]]; then
         if ! command -v kubectl >/dev/null 2>&1; then
             log_error "kubectl is required for port-forward mode (or provide --url)"
             return 2
@@ -151,7 +151,7 @@ setup_port_forward() {
         --field-selector=status.phase=Running \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)" || true
 
-    if [ -z "$pod_name" ]; then
+    if [[ -z "$pod_name" ]]; then
         log_error "No running pod found with label '$LABEL_SELECTOR' in namespace '$NAMESPACE'"
         return 1
     fi
@@ -163,7 +163,7 @@ setup_port_forward() {
 
     # Wait for port-forward to be ready
     local retries=0
-    while [ $retries -lt 10 ]; do
+    while [[ $retries -lt 10 ]]; do
         if curl -s -o /dev/null --connect-timeout 1 "http://localhost:${LOCAL_PORT}/" 2>/dev/null; then
             log_info "Port-forward ready on localhost:${LOCAL_PORT}"
             return 0
@@ -183,7 +183,7 @@ setup_port_forward() {
 test_health_check() {
     log_info "Test: Pod health check"
 
-    if [ -z "$BASE_URL" ] && [ -n "$PORT_FORWARD_PID" ]; then
+    if [[ -z "$BASE_URL" && -n "$PORT_FORWARD_PID" ]]; then
         # Port-forward is active, pod is running
         log_pass "Pod is running and port-forward is active"
         return 0
@@ -195,7 +195,7 @@ test_health_check() {
         --connect-timeout "$CURL_TIMEOUT" \
         "${BASE_URL}/" 2>/dev/null)" || true
 
-    if [ -n "$http_code" ] && [ "$http_code" != "000" ]; then
+    if [[ -n "$http_code" && "$http_code" != "000" ]]; then
         log_pass "Service is reachable (HTTP $http_code)"
         return 0
     fi
@@ -219,7 +219,7 @@ test_markdown_conversion() {
         -H "Accept: text/markdown" \
         "${BASE_URL}/test" 2>/dev/null)" || true
 
-    if [ -z "$response" ]; then
+    if [[ -z "$response" ]]; then
         log_fail "Markdown conversion: no response received"
         return 1
     fi
@@ -298,7 +298,7 @@ test_accept_negotiation() {
         -w '%{content_type}' \
         "${BASE_URL}/test" 2>/dev/null)" || true
 
-    if [ -z "$content_type" ]; then
+    if [[ -z "$content_type" ]]; then
         log_fail "Accept negotiation: no response received"
         return 1
     fi
@@ -344,7 +344,7 @@ test_metrics_endpoint() {
     rm -f "$METRICS_BODY_FILE"
     METRICS_BODY_FILE=""
 
-    if [ -z "$http_code" ] || [ "$http_code" = "000" ]; then
+    if [[ -z "$http_code" || "$http_code" == "000" ]]; then
         log_fail "Metrics endpoint: no response received"
         return 1
     fi
@@ -380,10 +380,10 @@ test_metrics_endpoint() {
 # ---------------------------------------------------------------------------
 
 parse_args() {
-    while [ $# -gt 0 ]; do
+    while [[ $# -gt 0 ]]; do
         case "$1" in
             -u|--url)
-                if [ $# -lt 2 ]; then
+                if [[ $# -lt 2 ]]; then
                     log_error "Option $1 requires an argument"
                     return 2
                 fi
@@ -391,7 +391,7 @@ parse_args() {
                 shift 2
                 ;;
             -n|--namespace)
-                if [ $# -lt 2 ]; then
+                if [[ $# -lt 2 ]]; then
                     log_error "Option $1 requires an argument"
                     return 2
                 fi
@@ -399,7 +399,7 @@ parse_args() {
                 shift 2
                 ;;
             -l|--label)
-                if [ $# -lt 2 ]; then
+                if [[ $# -lt 2 ]]; then
                     log_error "Option $1 requires an argument"
                     return 2
                 fi
@@ -407,7 +407,7 @@ parse_args() {
                 shift 2
                 ;;
             -p|--port)
-                if [ $# -lt 2 ]; then
+                if [[ $# -lt 2 ]]; then
                     log_error "Option $1 requires an argument"
                     return 2
                 fi
@@ -415,7 +415,7 @@ parse_args() {
                 shift 2
                 ;;
             -m|--metrics)
-                if [ $# -lt 2 ]; then
+                if [[ $# -lt 2 ]]; then
                     log_error "Option $1 requires an argument"
                     return 2
                 fi
@@ -423,7 +423,7 @@ parse_args() {
                 shift 2
                 ;;
             -t|--timeout)
-                if [ $# -lt 2 ]; then
+                if [[ $# -lt 2 ]]; then
                     log_error "Option $1 requires an argument"
                     return 2
                 fi
@@ -467,7 +467,7 @@ main() {
     printf '\n' >&2
 
     # Set up connectivity
-    if [ -z "$BASE_URL" ]; then
+    if [[ -z "$BASE_URL" ]]; then
         setup_port_forward || exit 1
         BASE_URL="http://localhost:${LOCAL_PORT}"
     fi
@@ -489,7 +489,7 @@ main() {
     printf -- '-%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 >&2
     printf '\n' >&2
 
-    if [ "$FAIL_COUNT" -gt 0 ]; then
+    if [[ "$FAIL_COUNT" -gt 0 ]]; then
         return 1
     fi
 

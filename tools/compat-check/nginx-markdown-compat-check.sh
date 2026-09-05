@@ -57,7 +57,7 @@ if [[ ! -f "$VERSION_FILE" ]]; then
     printf '[ERROR] Unable to read project version from %s\n' "$VERSION_FILE" >&2
     exit 2
 fi
-PROJECT_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$VERSION_FILE" | head -n 1)"
+PROJECT_VERSION="$(sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$VERSION_FILE" | head -n 1)"
 
 if [[ -z "$PROJECT_VERSION" ]]; then
     printf '[ERROR] Unable to read project version from %s\n' "$VERSION_FILE" >&2

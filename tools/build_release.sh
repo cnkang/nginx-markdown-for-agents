@@ -140,6 +140,11 @@ if [[ ! "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 export RELEASE_VERSION
 
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required to build the feature manifest." >&2
+    exit 1
+fi
+
 FEATURE_MANIFEST_DIGEST="$(python3 - <<'PY'
 import hashlib
 import json

@@ -549,6 +549,22 @@ def _is_os_open_dir_fd(func: ast.AST, node: ast.Call) -> bool:
     )
 
 
+def _is_os_open_parent_dir(node: ast.Call) -> bool:
+    """Return True if *node* is ``os.open(path.parent, flags)``."""
+    func = node.func
+    if not (
+        isinstance(func, ast.Attribute)
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "os"
+        and func.attr == "open"
+    ):
+        return False
+    if not node.args:
+        return False
+    path_arg = node.args[0]
+    return isinstance(path_arg, ast.Attribute) and path_arg.attr == "parent"
+
+
 def _resolve_path_arg(node: ast.Call) -> ast.expr | None:
     """Return the expression that supplies the path for an open() or Path IO call.
 
@@ -605,6 +621,9 @@ def _check_single_call(
         return None, None
 
     if is_open and _is_os_open_dir_fd(node.func, node):
+        return None, None
+
+    if is_open and _is_os_open_parent_dir(node):
         return None, None
 
     if is_open and _is_network_opener_call(node):

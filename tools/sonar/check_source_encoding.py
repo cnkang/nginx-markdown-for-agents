@@ -71,6 +71,11 @@ BINARY_FIXTURE_PREFIXES: tuple[Path, ...] = (
 
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST: Path = Path("tools/sonar/encoding_exceptions.json")
+sys.path.insert(0, str(REPO_ROOT))
+
+from tools.lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 
 
 def _resolve_repository_path(path: Path, description: str) -> Path:
@@ -86,8 +91,11 @@ def _resolve_repository_path(path: Path, description: str) -> Path:
 
 def _run_git_ls_files() -> list[Path]:
     """Return all git-tracked file paths from the repository root."""
+    git = resolve_approved_executable("git")
+    if git is None:
+        raise FileNotFoundError("approved git executable is unavailable")
     result = subprocess.run(
-        ["git", "ls-files", "-z"],
+        [git, "ls-files", "-z"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=False,

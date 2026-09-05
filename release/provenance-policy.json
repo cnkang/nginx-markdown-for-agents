@@ -98,6 +98,34 @@
         "rpm -qip \"${RPM_ARTIFACT_PATH}\""
       ]
     },
+    "dynamic_module": {
+      "provenance_form": "candidate-release-artifact-index.json entry + module tarball sha256 + SBOM entry",
+      "predicate": "Dynamic-module provenance: candidate_sha + artifact sha256 + feature-manifest digest + ABI version + build runner identity + nginx version",
+      "producer": "candidate-bound release artifact index producer",
+      "consumer": "artifact-registry-check gate, release evidence checkpoint, downstream consumers",
+      "candidate_binding": {
+        "required_fields": [
+          "candidate_sha",
+          "artifact_sha256",
+          "feature_manifest_digest",
+          "abi_version",
+          "artifact_identity",
+          "producer",
+          "consumer",
+          "retention",
+          "storage_class",
+          "run_id",
+          "attempt",
+          "authoritative",
+          "superseded_attempt",
+          "retrieval_location"
+        ],
+        "validator": "artifact-registry-check and release evidence checkpoint"
+      },
+      "verification_commands": [
+        "make artifact-registry-check"
+      ]
+    },
     "oci": {
       "provenance_form": "Not applicable for the 0.9.2 release channel; no OCI publication workflow is wired",
       "predicate": "Not applicable; no OCI artifact or image digest is published for 0.9.2",

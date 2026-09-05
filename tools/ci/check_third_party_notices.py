@@ -16,11 +16,17 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from tools.lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
+
 NOTICES_PATH = ROOT / "THIRD-PARTY-NOTICES"
 _CARGO_TOML_NAME = "Cargo.toml"
 _CARGO_LOCK_NAME = "Cargo.lock"
@@ -160,6 +166,9 @@ def collect_workspace_lock_issues() -> list[str]:
     not part of this gate.
     """
     issues: list[str] = []
+    cargo = resolve_approved_executable("cargo")
+    if cargo is None:
+        return ["cargo is unavailable; cannot verify workspace Cargo.lock files"]
     for cargo_toml, cargo_lock in zip(
         SUB_WORKSPACE_CARGO_TOMLS, SUB_WORKSPACE_CARGO_LOCKS, strict=True
     ):
@@ -172,7 +181,7 @@ def collect_workspace_lock_issues() -> list[str]:
         try:
             completed = subprocess.run(
                 [
-                    "cargo",
+                    cargo,
                     "metadata",
                     "--format-version",
                     "1",
@@ -241,11 +250,11 @@ def main() -> int:
     return 0
 
 
-def report_missing_and_fail(missing: list[str]) -> int:
-    """Print missing dependency entries and return a non-zero exit code."""
+def report_missing_and_fail(issues: list[str]) -> int:
+    """Print dependency or lockfile issues and return a non-zero exit code."""
     print("THIRD-PARTY-NOTICES coverage check failed.")
-    print("The following runtime dependencies are not mentioned:")
-    for item in missing:
+    print("The following dependency or lockfile validation issues were found:")
+    for item in issues:
         print(f"  - {item}")
     print()
     print("Please update the THIRD-PARTY-NOTICES file in the repository root")

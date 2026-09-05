@@ -31,7 +31,7 @@ jobs:
         shell: bash
 
       - name: Install cargo-fuzz for fuzz smoke
-        run: cargo +nightly install cargo-fuzz --locked
+        run: cargo +nightly install cargo-fuzz --version 0.13.2 --locked
         shell: bash
 
       - name: Install cargo-llvm-cov for coverage gates

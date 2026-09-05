@@ -17,7 +17,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MAKEFILE = PROJECT_ROOT / "Makefile"
-FFI_CONTRACT_PATH = PROJECT_ROOT / "docs" / "architecture" / "FFI_MIGRATION_CONTRACT.md"
+FFI_CONTRACT_PATH = PROJECT_ROOT / "docs" / "architecture" / "FFI_MIGRATION_HISTORY.md"
 CHANGELOG_PATH = PROJECT_ROOT / "CHANGELOG.md"
 CARGO_TOML_PATH = PROJECT_ROOT / "components" / "rust-converter" / "Cargo.toml"
 RUST_TOOLCHAIN_PATH = PROJECT_ROOT / "rust-toolchain.toml"
@@ -30,8 +30,8 @@ CONFIG_DIRECTIVES_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ng
 ERROR_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "error" / "mod.rs"
 ABI_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "ffi" / "abi.rs"
 EXPORTS_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "ffi" / "exports.rs"
-RELEASE_GATES_MD = PROJECT_ROOT / "docs" / "project" / "release-gates" / "0.7.0-release-gates.md"
-VALIDATION_MATRIX_MD = PROJECT_ROOT / "docs" / "project" / "0.7.0-validation-matrix.md"
+RELEASE_GATES_MD = PROJECT_ROOT / "docs" / "project" / "history" / "release-gates" / "0.7.0-release-gates.md"
+VALIDATION_MATRIX_MD = PROJECT_ROOT / "docs" / "project" / "history" / "0.7.0-validation-matrix.md"
 PAYLOAD_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_payload_impl.h"
 CONVERSION_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_conversion_impl.h"
 DECISION_LOG_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_decision_log_impl.h"
@@ -313,9 +313,9 @@ def check_structure(result: ValidationResult) -> None:
         result.fail(RELEASE_GATES_070_DOC_GATE, "gate definitions incomplete")
 
     if FFI_CONTRACT_PATH.is_file():
-        result.pass_("ffi-contract:exists", "FFI migration contract exists")
+        result.pass_("ffi-contract:exists", "FFI migration history exists")
     else:
-        result.fail("ffi-contract:exists", "missing FFI migration contract")
+        result.fail("ffi-contract:exists", "missing FFI migration history")
 
     if cargo_txt := read(CARGO_TOML_PATH):
         try:

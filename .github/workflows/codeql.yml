@@ -184,7 +184,7 @@ jobs:
 
       - name: Install cargo-audit
         working-directory: components/rust-converter
-        run: cargo install cargo-audit --locked
+        run: cargo install cargo-audit --version 0.22.2 --locked
 
       - name: Rust dependency vulnerability audit
         working-directory: components/rust-converter

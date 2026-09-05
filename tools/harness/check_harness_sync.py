@@ -30,6 +30,11 @@ except ModuleNotFoundError:
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+
+from tools.lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 README_FILENAME = "README.md"
 DOCS_HARNESS_README = f"docs/harness/{README_FILENAME}"
 RISK_PACKS_README = f"risk-packs/{README_FILENAME}"
@@ -198,9 +203,12 @@ def _is_git_ignored(path: Path) -> bool:
     """
     try:
         relative_path = path.relative_to(REPO_ROOT)
+        git = resolve_approved_executable("git")
+        if git is None:
+            return False
         result = subprocess.run(
             [
-                "git",
+                git,
                 "-C",
                 str(REPO_ROOT),
                 "check-ignore",
@@ -299,61 +307,45 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
     return _result("manifest-structure", PASS, "manifest schema looks complete")
 
 
+def _iter_manifest_string_values(value: object):
+    """Yield non-empty strings from a manifest field list."""
+    if not isinstance(value, list):
+        return
+    for item in value:
+        if isinstance(item, str) and item.strip():
+            yield item
+
+
+def _iter_manifest_dict_field_values(manifest: dict, field: str):
+    """Yield field values and recursively visit a manifest dictionary."""
+    yield from _iter_manifest_string_values(manifest.get(field))
+    for key, child in manifest.items():
+        if key != field:
+            yield from _iter_manifest_field_values(child, field)
+
+
+def _iter_manifest_list_field_values(items: list, field: str):
+    """Recursively visit manifest list members."""
+    for child in items:
+        yield from _iter_manifest_field_values(child, field)
+
+
+def _iter_manifest_field_values(value: object, field: str):
+    """Yield non-empty string values for *field* from a nested manifest."""
+    if isinstance(value, dict):
+        yield from _iter_manifest_dict_field_values(value, field)
+    elif isinstance(value, list):
+        yield from _iter_manifest_list_field_values(value, field)
+
+
 def _iter_manifest_commands(value: object):
     """Yield command strings from nested manifest verification families."""
-    if isinstance(value, dict):
-        yield from _iter_manifest_dict_commands(value)
-    elif isinstance(value, list):
-        yield from _iter_manifest_list_commands(value)
-
-
-def _iter_manifest_dict_commands(value: dict):
-    """Yield commands and nested values from one manifest mapping."""
-    commands = value.get("commands")
-    if isinstance(commands, list):
-        for command in commands:
-            if isinstance(command, str) and command.strip():
-                yield command
-    for key, child in value.items():
-        if key != "commands":
-            yield from _iter_manifest_commands(child)
-
-
-def _iter_manifest_list_commands(value: list):
-    """Yield commands from one manifest list."""
-    for child in value:
-        yield from _iter_manifest_commands(child)
+    yield from _iter_manifest_field_values(value, "commands")
 
 
 def _iter_manifest_workflow_paths(value: object):
     """Yield explicit workflow paths from nested manifest families."""
-    if isinstance(value, dict):
-        yield from _iter_manifest_dict_workflow_paths(value)
-    elif isinstance(value, list):
-        yield from _iter_manifest_list_workflow_paths(value)
-
-
-def _iter_manifest_dict_workflow_paths(value: dict):
-    """Yield workflow paths and recurse through one manifest mapping."""
-    workflow_paths = value.get("workflow_paths")
-    if isinstance(workflow_paths, list):
-        yield from _iter_workflow_path_values(workflow_paths)
-    for key, child in value.items():
-        if key != "workflow_paths":
-            yield from _iter_manifest_workflow_paths(child)
-
-
-def _iter_manifest_list_workflow_paths(value: list):
-    """Yield workflow paths from one manifest list."""
-    for child in value:
-        yield from _iter_manifest_workflow_paths(child)
-
-
-def _iter_workflow_path_values(value: list):
-    """Yield non-empty workflow path strings from a manifest field."""
-    for path in value:
-        if isinstance(path, str) and path.strip():
-            yield path
+    yield from _iter_manifest_field_values(value, "workflow_paths")
 
 
 def _make_targets(makefile: Path) -> tuple[set[str], str | None]:

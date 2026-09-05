@@ -8,6 +8,8 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from .executable_validation import resolve_approved_executable
+
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHORT_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _SOURCE_RUN_RE = re.compile(
@@ -28,9 +30,12 @@ def _github_repository(repo_root: Path | None) -> str | None:
 
     if repo_root is None:
         return None
+    git = resolve_approved_executable("git")
+    if git is None:
+        return None
     try:
         result = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"],
+            [git, "config", "--get", "remote.origin.url"],
             capture_output=True,
             text=True,
             timeout=5,

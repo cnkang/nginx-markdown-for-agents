@@ -171,27 +171,27 @@ STANDALONE_VERSION_FORBIDDEN_SNIPPETS = [
 STANDALONE_RPM_WORKFLOW_FORBIDDEN_SNIPPETS = [
     'cp packaging/nfpm/scripts/preremove.sh "/tmp/${TARBALL_DIR}/"',
 ]
-RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS = [
-    "integrity-signing:",
-    "needs: [prepare, integrity-checksums]",
+RELEASE_CHECKSUM_SIGNING_SECURITY_SNIPPETS = [
+    "integrity-signature:",
+    "needs: [integrity-checksums, release-gate, official-docker-release-gate]",
     "environment: release-signing",
     "name: Preflight - validate GPG secrets",
     "GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}",
     "GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}",
     "GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}",
-    "name: Checkout repository",
+    "name: Checkout",
     "ref: ${{ github.sha }}",
     "persist-credentials: false",
     "name: Download SHA256SUMS",
-    "name: binary-checksums",
-    "name: Sign SHA256SUMS",
-    "./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS",
+    "name: checksums",
+    'name: GPG sign SHA256SUMS',
+    './packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS "${GPG_KEY_ID}"',
     "name: Upload SHA256SUMS.asc",
-    "name: binary-checksums-signature",
+    "name: checksums-signature",
     "path: artifacts/SHA256SUMS.asc",
     "if-no-files-found: error",
 ]
-RELEASE_BINARY_SIGNING_FORBIDDEN_SNIPPETS = [
+RELEASE_CHECKSUM_SIGNING_FORBIDDEN_SNIPPETS = [
     "ref: ${{ inputs.version }}",
     "ref: ${{ github.ref }}",
 ]
@@ -1253,20 +1253,20 @@ def validate_release_artifact_flow(result: ValidationResult) -> None:
             "smoke-runner:arch",
             "release-packages smoke tests must use arch-matched runners",
         )
-    _validate_release_binary_signing_security(result)
+    _validate_release_checksum_signing_security(result)
 
 
-def _validate_release_binary_signing_security(result: ValidationResult) -> None:
-    """Ensure the live binary-signing job binds inputs before using secrets."""
-    workflow = read_safe(RELEASE_BINARIES_WORKFLOW)
+def _validate_release_checksum_signing_security(result: ValidationResult) -> None:
+    """Ensure canonical checksum signing binds inputs before using secrets."""
+    workflow = read_safe(RELEASE_PACKAGES_WORKFLOW)
     if not workflow:
         result.fail(
             "release-signing-security:exists",
-            "release-binaries.yml is required for binary signing validation",
+            "release-packages.yml is required for checksum signing validation",
         )
         return
 
-    start = workflow.find("\n  integrity-signing:")
+    start = workflow.find("\n  integrity-signature:")
     # Locate the next top-level job key after start (two-space indentation
     # followed by a name and colon) rather than searching specifically for
     # package-artifacts, so the boundary stays correct when the job list
@@ -1281,29 +1281,31 @@ def _validate_release_binary_signing_security(result: ValidationResult) -> None:
     if start == -1:
         result.fail(
             "release-signing-security:job",
-            "release-binaries.yml must define a bounded integrity-signing job",
+            "release-packages.yml must define a bounded integrity-signature job",
         )
         return
 
     job = workflow[start:end]
     _check_snippets(
         job,
-        RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS,
+        RELEASE_CHECKSUM_SIGNING_SECURITY_SNIPPETS,
         "release-signing-security",
-        "release-binaries.yml integrity-signing job",
+        "release-packages.yml integrity-signature job",
         result,
     )
     _check_forbidden_snippets(
         job,
-        RELEASE_BINARY_SIGNING_FORBIDDEN_SNIPPETS,
+        RELEASE_CHECKSUM_SIGNING_FORBIDDEN_SNIPPETS,
         "release-signing-security",
-        "release-binaries.yml integrity-signing job",
+        "release-packages.yml integrity-signature job",
         result,
     )
 
     preflight_pos = job.find("name: Preflight - validate GPG secrets")
     checkout_pos = job.find("name: Checkout repository")
-    sign_pos = job.find("name: Sign SHA256SUMS")
+    if checkout_pos < 0:
+        checkout_pos = job.find("name: Checkout")
+    sign_pos = job.find("name: GPG sign SHA256SUMS")
     if (
         preflight_pos >= 0
         and checkout_pos >= 0

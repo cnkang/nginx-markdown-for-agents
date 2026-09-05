@@ -32,6 +32,9 @@ for _p in (str(REPO_ROOT), str(REPO_ROOT / "tools"), str(_GATES_DIR)):
         sys.path.insert(0, _p)
 
 from generate_soak_scenario_manifest import build_manifest  # noqa: E402
+from tools.lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 
 _CARGO_MANIFEST = REPO_ROOT / "components" / "rust-converter" / "Cargo.toml"
 
@@ -112,9 +115,12 @@ def _canonical_digest(path: Path) -> str:
 
 
 def _git(args: list[str]) -> str:
+    git = resolve_approved_executable("git")
+    if git is None:
+        raise ValueError("approved git executable is unavailable")
     try:
         result = subprocess.run(
-            ["git", *args],
+            [git, *args],
             cwd=REPO_ROOT,
             check=False,
             capture_output=True,
@@ -158,9 +164,12 @@ def _load_json(relative_path: str) -> dict:
 
 
 def _source_tree_digest() -> str:
+    git = resolve_approved_executable("git")
+    if git is None:
+        raise ValueError("approved git executable is unavailable")
     try:
         result = subprocess.run(
-            ["git", "ls-tree", "-r", "-z", "HEAD"],
+            [git, "ls-tree", "-r", "-z", "HEAD"],
             cwd=REPO_ROOT,
             check=False,
             capture_output=True,

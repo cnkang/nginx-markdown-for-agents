@@ -11,8 +11,13 @@
 #      an unknown ETag yields 200.
 #   3. If-Modified-Since carrying the source HTML mtime never yields 304
 #      for a converted response — conversion runs and delivers fresh 200.
-#   4. Proxied upstream responses obey the same validator contract.
-#   5. HEAD responses describe the Markdown representation only (no source
+#   4. If-Match failures return 412, weak tags are rejected, and '*' passes;
+#      If-Match takes precedence over an ignored converted-representation IUS.
+#   5. A converted 412 clears source ETag, digest, and Trailer metadata, and
+#      HEAD reports the failing precondition without a source Last-Modified.
+#   6. A passthrough source response retains NGINX's normal IUS 412 semantics.
+#   7. Proxied upstream responses obey the same validator contract.
+#   8. HEAD responses describe the Markdown representation only (no source
 #      Last-Modified either).
 #
 # Usage:
@@ -267,6 +272,13 @@ http {
 
         location / {
             root html;
+            add_header Digest "sha-256=source-html" always;
+            add_header Trailer "Digest" always;
+        }
+
+        location /source/ {
+            alias html/;
+            markdown_filter off;
         }
     }
 
@@ -311,7 +323,10 @@ echo "==> Running conditional-request validation scenario"
 
   rm -f resp0.headers resp1.headers resp1.body resp2.headers resp2.body \
         resp3.headers resp3.body resp4.headers resp4.body \
-        resp5.headers resp5.body resp6.headers
+        resp5.headers resp5.body resp6.headers resp7.headers resp7.body \
+        resp8.headers resp8.body resp9.headers resp9.body \
+        resp10.headers resp10.body resp11.headers resp12.headers resp12.body \
+        resp13.headers resp13.body
 
   # Harvest the source HTML validators from the module-free origin.
   code0="$(curl -sS -D resp0.headers -o /dev/null \
@@ -320,6 +335,8 @@ echo "==> Running conditional-request validation scenario"
   [[ "${code0}" == "200" ]] || { echo "Expected source HTML 200, got ${code0}" >&2; exit 1; }
   lm="$(awk 'BEGIN{IGNORECASE=1} /^Last-Modified:/ {sub(/^Last-Modified:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' resp0.headers)"
   [[ -n "${lm}" ]] || { echo "Source HTML missing Last-Modified header" >&2; exit 1; }
+  source_etag="$(awk 'BEGIN{IGNORECASE=1} /^ETag:/ {sub(/^ETag:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' resp0.headers)"
+  [[ -n "${source_etag}" ]] || { echo "Source HTML missing ETag header" >&2; exit 1; }
 
   # 1. Converted Markdown GET: fresh 200, Markdown Content-Type, Vary,
   #    Markdown-derived ETag, and never the source HTML Last-Modified.
@@ -433,8 +450,114 @@ echo "==> Running conditional-request validation scenario"
     exit 1
   fi
 
+  # 6. If-Match is evaluated against the generated Markdown ETag. A failed
+  # strong comparison returns 412 even when an independent IUS value is also
+  # stale; the converted representation ignores source Last-Modified.
+  code7="$(curl -sS -D resp7.headers -o resp7.body \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    -H 'If-Match: "different-etag-value"' \
+    -H 'If-Unmodified-Since: Thu, 01 Jan 1970 00:00:00 GMT' \
+    "http://127.0.0.1:${PORT}/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+  [[ "${code7}" == "412" ]] || {
+    echo "Expected failing If-Match response 412, got ${code7}" >&2
+    exit 1
+  }
+  if [[ -f resp7.body && -s resp7.body ]]; then
+    echo "Expected empty 412 response body, but resp7.body is non-empty" >&2
+    exit 1
+  fi
+  grep -qi '^Content-Type: text/markdown; charset=utf-8' resp7.headers || {
+    echo "412 response missing Markdown Content-Type" >&2
+    exit 1
+  }
+  for source_header in '^Last-Modified:' '^ETag:' '^Digest:' \
+      '^Content-Digest:' '^Content-MD5:' '^Repr-Digest:' '^Trailer:'; do
+    if grep -qi "${source_header}" resp7.headers; then
+      echo "412 response must not carry source header ${source_header}" >&2
+      exit 1
+    fi
+  done
+
+  # 7. If-Match uses strong comparison: a weak form of the returned ETag is
+  # rejected, while the wildcard succeeds.
+  code8="$(curl -sS -D resp8.headers -o resp8.body \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    -H "If-Match: W/${etag}" \
+    "http://127.0.0.1:${PORT}/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+  [[ "${code8}" == "412" ]] || {
+    echo "Expected weak If-Match response 412, got ${code8}" >&2
+    exit 1
+  }
+  code9="$(curl -sS -D resp9.headers -o resp9.body \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    -H 'If-Match: *' \
+    "http://127.0.0.1:${PORT}/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+  [[ "${code9}" == "200" ]] || {
+    echo "Expected wildcard If-Match response 200, got ${code9}" >&2
+    exit 1
+  }
+  grep -q '^# Hello IMS$' resp9.body || {
+    echo "Wildcard If-Match response is not converted Markdown" >&2
+    exit 1
+  }
+
+  # A matching If-Match plus a stale source date still succeeds because IUS
+  # is not a validator for the transformed Markdown representation.
+  code10="$(curl -sS -D resp10.headers -o resp10.body \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    -H "If-Match: ${etag}" \
+    -H 'If-Unmodified-Since: Thu, 01 Jan 1970 00:00:00 GMT' \
+    "http://127.0.0.1:${PORT}/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+  [[ "${code10}" == "200" ]] || {
+    echo "Expected matching If-Match plus converted IUS response 200, got ${code10}" >&2
+    exit 1
+  }
+
+  # HEAD follows the same failing-precondition path and must not reveal the
+  # source Last-Modified header.
+  code11="$(curl -sS -I -D resp11.headers -o /dev/null \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    -H 'If-Match: "different-etag-value"' \
+    "http://127.0.0.1:${PORT}/index.html" \
+    -w "${HTTP_CODE_FORMAT}" | tr -d '\n')"
+  [[ "${code11}" == "412" ]] || {
+    echo "Expected HEAD failing If-Match response 412, got ${code11}" >&2
+    exit 1
+  }
+  if grep -qi "${LAST_MODIFIED_HEADER_PATTERN}" resp11.headers; then
+    echo "HEAD 412 response carries source HTML Last-Modified" >&2
+    exit 1
+  fi
+
+  # Passthrough remains source-scoped: NGINX itself must reject a stale
+  # If-Unmodified-Since against the origin Last-Modified value.
+  code12="$(curl -sS -D resp12.headers -o resp12.body \
+    -H 'If-Unmodified-Since: Thu, 01 Jan 1970 00:00:00 GMT' \
+    "http://127.0.0.1:${PORT}/source/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+  [[ "${code12}" == "412" ]] || {
+    echo "Expected passthrough IUS response 412, got ${code12}" >&2
+    exit 1
+  }
+  code13="$(curl -sS -D resp13.headers -o resp13.body \
+    -H "If-Match: ${source_etag}" \
+    -H 'If-Unmodified-Since: Thu, 01 Jan 1970 00:00:00 GMT' \
+    "http://127.0.0.1:${PORT}/source/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+  [[ "${code13}" == "412" ]] || {
+    echo "Expected passthrough If-Match plus IUS response 412, got ${code13}" >&2
+    exit 1
+  }
+
   echo "Validation summary:"
   echo "  plain=${code0} get=${code1} inm_match=${code2} inm_miss=${code3} ims_only=${code4} proxy=${code5} head=${code6}"
+  echo "  if_match_fail=${code7} weak_if_match=${code8} wildcard_if_match=${code9}"
+  echo "  if_match_plus_ius=${code10} head_if_match_fail=${code11}"
+  echo "  passthrough_ius=${code12} passthrough_if_match_plus_ius=${code13}"
   echo "  source Last-Modified=${lm}"
   echo "  Markdown ETag=${etag}"
   echo "  Content-Length=${cl}"
