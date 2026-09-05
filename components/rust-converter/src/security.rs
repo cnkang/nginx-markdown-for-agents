@@ -821,6 +821,19 @@ mod tests {
     }
 
     #[test]
+    fn streaming_markdown_destination_escaper_matches_full_buffer() {
+        let url = "a <b>\\c\n\r\t z";
+        let mut streamed = String::new();
+        for_each_escaped_markdown_destination(url, |ch| streamed.push(ch));
+
+        assert_eq!(streamed, escape_markdown_destination(url));
+
+        let mut plain = String::new();
+        for_each_escaped_markdown_destination("safe", |ch| plain.push(ch));
+        assert_eq!(plain, "safe");
+    }
+
+    #[test]
     fn test_xxe_prevention_documentation() {
         let doc = xxe_prevention_documentation();
         assert!(doc.contains("html5ever"));
@@ -1472,6 +1485,19 @@ mod url_validation_tests {
             Cow::Owned(value) => assert!(value.capacity() >= expected.len()),
             Cow::Borrowed(_) => panic!("an escaped label must own its output"),
         }
+    }
+
+    #[test]
+    fn streaming_link_label_escaper_matches_full_buffer() {
+        let label = "[]\\<>*_`~\n";
+        let mut streamed = String::new();
+        for_each_escaped_link_label(label, |ch| streamed.push(ch));
+
+        assert_eq!(streamed, escape_link_label(label));
+
+        let mut plain = String::new();
+        for_each_escaped_link_label("plain", |ch| plain.push(ch));
+        assert_eq!(plain, "plain");
     }
 
     #[test]

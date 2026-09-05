@@ -2390,10 +2390,25 @@ mod tests {
     }
 
     #[test]
+    fn test_image_escapes_label_and_destination_in_place() {
+        let output = emit_html(&[
+            start_tag("p"),
+            self_closing_tag("img", vec![("src", r"pic (a)\\b"), ("alt", "a*[]")]),
+            end_tag("p"),
+        ]);
+
+        assert!(
+            output.contains(r"![a\*\[\]](<pic (a)\\\\b>)"),
+            "got: {output}"
+        );
+    }
+
+    #[test]
     fn test_image_without_usable_src_preserves_alt_without_empty_destination() {
         let output = emit_html(&[
             start_tag("p"),
             self_closing_tag("img", vec![("alt", "No source")]),
+            self_closing_tag("img", vec![("alt", "fallback *\n[x]")]),
             self_closing_tag(
                 "img",
                 vec![("src", "javascript:alert(1)"), ("alt", "Blocked")],
@@ -2407,6 +2422,10 @@ mod tests {
         assert!(
             output.contains("Blocked"),
             "blocked source alt was lost: {output}"
+        );
+        assert!(
+            output.contains(r"fallback \* \[x\]"),
+            "escaped fallback alt was lost: {output}"
         );
         assert!(
             !output.contains("!["),

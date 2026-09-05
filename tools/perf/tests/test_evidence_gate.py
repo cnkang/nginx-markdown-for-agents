@@ -98,6 +98,21 @@ def test_memory_points_with_peak_evidence():
     ]
 
 
+@pytest.mark.parametrize("input_bytes", [True, 1.5, "1048516"])
+def test_memory_points_reject_non_integer_input_counts(input_bytes):
+    """Memory evidence requires an integer byte count, never coercion."""
+    scenarios = [{
+        "name": "large-body",
+        "metrics": {
+            "input_bytes": input_bytes,
+            "baseline_rss_bytes": 10 * 1024 * 1024,
+            "peak_rss_bytes": 24 * 1024 * 1024,
+        },
+    }]
+
+    assert _extract_memory_points(scenarios) == []
+
+
 def test_memory_points_prefer_peak_rss_delta():
     """Peak RSS delta is preferred over post-run RSS.
 
