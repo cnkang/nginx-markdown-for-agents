@@ -354,6 +354,7 @@ def _conditional_validator_items(sources: dict[str, str]) -> BlockingItems:
         (
             "conditional validator surface",
             "ngx_http_markdown_handle_if_none_match" in sources["filter_h"]
+            and "ngx_http_markdown_handle_if_none_match" in sources["conversion"]
             and "ngx_http_markdown_if_match_satisfied" in conditional
             and "ngx_http_markdown_validate_if_unmodified_since" in conditional
             and "If-None-Match" in conditional
