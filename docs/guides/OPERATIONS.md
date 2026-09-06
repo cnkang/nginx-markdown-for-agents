@@ -146,7 +146,7 @@ Configure alerts based on these thresholds:
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
 | Failure rate | > 10% for 5 minutes | Page on-call engineer |
-| System error rate | > 1% for 5 minutes | Page on-call engineer |
+| System error rate (nginx_markdown_requests_total{reason="ffi_panic"}) | > 1% for 5 minutes | Page on-call engineer |
 | Conversion time (p95) | > 500ms for 10 minutes | Page on-call engineer |
 | Module crash | Worker restart detected | Page on-call engineer |
 
@@ -155,7 +155,7 @@ Configure alerts based on these thresholds:
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
 | Failure rate | > 5% for 10 minutes | Notify team channel |
-| Resource limit rate | > 5% for 10 minutes | Notify team channel |
+| Resource limit rate (nginx_markdown_requests_total{reason=~"memory_budget_exceeded|timeout|budget_exceeded"}) | > 5% for 10 minutes | Notify team channel |
 | Conversion time (p95) | > 200ms for 15 minutes | Notify team channel |
 | Memory usage | > 80% of limit | Notify team channel |
 

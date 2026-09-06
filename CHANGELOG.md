@@ -1803,7 +1803,7 @@ This release expands runtime configurability, tightens module internals and vali
 - Rust 1.91.0+
 
 ### Known Limitations
-- Streaming is the default engine. Full-buffer is the fallback.
+- Full-buffer conversion only. The module excludes streaming content types.
 - Requires uncompressed or automatically decompressed HTML input
 - Some complex HTML structures may not convert perfectly
 - Performance overhead for large documents

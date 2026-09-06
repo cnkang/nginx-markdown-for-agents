@@ -89,11 +89,15 @@ member is a failure.
 
 ## Commit and delivery
 
-The module commits headers before the first converted body buffer. A pre-commit
-failure can use the configured fail-open policy and replay the original
-buffered response only when the replay buffer contains every upstream byte
-read so far. If any upstream bytes have escaped that buffer, the module must
-fail closed or take the configured non-replay fallback. After commit, the
+The module commits headers before the first converted body buffer. A
+pre-commit failure can use the configured fail-open policy and replay the
+original buffered response only when the replay buffer contains every upstream
+byte read so far. In that case the module replays the already-read raw bytes,
+passes through the remaining upstream body directly, and records
+`nginx_markdown_streaming_events_total{transition="fallback",reason="precommit_html_error"}`
+(the `pass` policy) or returns 502 (the `fail_closed` policy). If any upstream
+bytes have escaped that buffer, the module must fail closed or take the
+configured non-replay fallback. After commit, the
 module cannot replay the original body.
 It enters safe-finish or abort handling.
 
