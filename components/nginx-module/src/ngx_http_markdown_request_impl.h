@@ -991,13 +991,17 @@ ngx_http_markdown_preaccess_handler(ngx_http_request_t *r)
     }
 
     ngx_http_markdown_prepare_preaccess_effective_conf(conf, &eff);
-    adoption_rc = ngx_http_markdown_prepare_preaccess_adoption(
-        r, &eff, ctx, &adopt_orphans, &ownership);
 
+    /* Method gate before adoption: non-GET/HEAD requests must not pay the
+     * bounded orphan-header scan (and its suppress/restore churn) — they
+     * can never own conditional validators for conversion. */
     if ((r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)) == 0) {
         ngx_http_markdown_restore_conditional_request(r, ctx);
         return NGX_DECLINED;
     }
+
+    adoption_rc = ngx_http_markdown_prepare_preaccess_adoption(
+        r, &eff, ctx, &adopt_orphans, &ownership);
 
     if (!ngx_http_markdown_prepare_preaccess_eligibility(
             r, conf, &eff, &filter_enabled))
