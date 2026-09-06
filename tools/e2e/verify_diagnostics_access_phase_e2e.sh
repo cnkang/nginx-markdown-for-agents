@@ -238,7 +238,7 @@ EOF
       "http://127.0.0.1:${PORT}/diagnostics" 2>/dev/null || echo "000")"
     if [[ "${primary_probe}" != "000" ]]; then
       loopback_alias_available=0
-      echo "SKIP: 127.0.0.2 is unavailable; skipping allow_deny unauthorized probes" >&2
+      echo "SKIP: 127.0.0.2 is unavailable; skipping ${policy} unauthorized probes" >&2
     else
       # Neither the alias probe nor the primary loopback probe reached
       # nginx: the server is unavailable, and running unauthorized probes

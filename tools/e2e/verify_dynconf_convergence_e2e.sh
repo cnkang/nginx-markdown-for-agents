@@ -327,7 +327,7 @@ while [[ $# -gt 0 ]]; do
                 echo "ERROR: --port requires an argument" >&2
                 exit 2
             fi
-            validate_port "--port" "$2"
+            validate_port "--port" "$2" || exit 2
             PORT="$2"
             shift 2
             ;;
@@ -336,7 +336,7 @@ while [[ $# -gt 0 ]]; do
                 echo "ERROR: --upstream-port requires an argument" >&2
                 exit 2
             fi
-            validate_port "--upstream-port" "$2"
+            validate_port "--upstream-port" "$2" || exit 2
             UPSTREAM_PORT="$2"
             shift 2
             ;;
