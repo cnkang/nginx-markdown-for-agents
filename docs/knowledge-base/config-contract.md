@@ -121,9 +121,9 @@ and malformed entries fail static NGINX configuration parsing (`nginx -t`).
 The generic `markdown_limits` directive is not parsed by the atomic dynconf
 path. Dynconf has its own supported-key schema and validation.
 Explicit zero values fail validation. This includes `max_inflight=0`.
-Configured `max_inflight` values must be integers greater than 0. The internal zero value
-for an unset or inherited `max_inflight` means unlimited. The `markdown_limits` keys
-themselves declare no explicit per-key defaults (inheritance-based `NGX_CONF_UNSET`).
+Configured `max_inflight` values must be integers between 1 and 65535. When unset
+or inherited, `max_inflight` merges to the default bound of 64 (there is no unlimited sentinel).
+The `markdown_limits` keys themselves declare no explicit per-key defaults (inheritance-based `NGX_CONF_UNSET`).
 CONFIGURATION_STRUCTURE.md documents the effective module defaults.
 
 | Key | Meaning |
@@ -131,7 +131,7 @@ CONFIGURATION_STRUCTURE.md documents the effective module defaults.
 | `conversion_timeout` | Wall-clock limit for conversion |
 | `parser_timeout` | Cooperative parser deadline (converter/FFI checkpoint allowance; not a preemptive interrupt; upstream stalls do not consume it) |
 | `conversion_memory` | Full-buffer input admission and generated-output bound; transient scratch allocations are charged against the same budget so over-budget conversion fails with a controlled error before peak memory grows past it |
-| `parser_memory` | Rust parser allocation bound |
+| `parser_budget` | Rust parser modeled working-set ceiling |
 | `streaming_buffer` | Streaming working/replay bound (dynconf: 64 KiB – 1 GiB) |
 | `decompressed_size` | Cumulative decompressed output bound |
 | `decompression_ratio` | Maximum decompressed/input ratio |

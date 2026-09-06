@@ -5,12 +5,13 @@
 This document describes the charset detection cascade implementation for the
 NGINX Markdown for Agents module. It follows Requirements FR-05.1, FR-05.2,
 and FR-05.3. Detection records the declared charset for policy and
-diagnostics. The current parser accepts UTF-8 only and does not transcode
-non-UTF-8 bytes.
+diagnostics. The parser transcodes non-UTF-8 bytes to UTF-8 through
+`encoding_rs` before HTML parsing. A declared charset therefore changes
+decoding instead of causing rejection.
 
 ## Requirements
 
-- **FR-05.1**: WHEN the Upstream_Response Content-Type includes a charset parameter, THE Module SHALL record that charset for diagnostics and policy. The module passes the original bytes to the UTF-8-only parser and defers non-UTF-8 transcoding.
+- **FR-05.1**: WHEN the Upstream_Response Content-Type includes a charset parameter, THE Module SHALL record that charset for diagnostics and policy. The module transcodes the source bytes to UTF-8 through `encoding_rs` before passing them to the parser.
 - **FR-05.2**: WHEN the Upstream_Response Content-Type does not include a charset parameter, THE Module SHALL attempt to detect charset from HTML meta tags
 - **FR-05.3**: WHEN charset detection fails, THE Module SHALL use a default charset (UTF-8 recommended)
 
@@ -68,7 +69,8 @@ Updated HTML parser with charset detection support:
 - `parse_html_with_charset(html: &[u8], content_type: Option<&str>) -> Result<RcDom, ConversionError>`
   - New function that accepts Content-Type header
   - Uses charset detection cascade
-  - Currently only supports UTF-8 parsing (logs warning for other charsets)
+  - Transcodes non-UTF-8 source bytes to UTF-8 via `encoding_rs` before
+    HTML parsing. UTF-8 input stays borrowed (zero-copy hot path)
   - Returns parsed DOM tree or error
 
 - `parse_html(html: &[u8]) -> Result<RcDom, ConversionError>`
@@ -163,18 +165,24 @@ Total: 35 unit tests for charset detection
 
 ### Transcoding Coverage
 
-The detector records the declared charset but does not transcode it. The
-parser receives the original bytes and validates UTF-8, so a response declared
-as a non-UTF-8 charset is not converted by the current contract. Invalid UTF-8
-bytes return an encoding error. The current release defers support for non-UTF-8
-decoding.
+The detector records the declared charset and honors it during decoding.
+`decode_html_to_utf8` in `parser.rs` keeps UTF-8 input borrowed (zero-copy)
+and transcodes any other `encoding_rs`-supported charset (for example
+ISO-8859-1, Windows-1252, Shift_JIS) into owned UTF-8 before HTML parsing.
+Invalid UTF-8 bytes in a UTF-8-declared response, an unsupported charset
+label, or a byte sequence invalid for the declared charset return an
+encoding error and the conversion fails closed. `encoding_rs` labels that
+map to UTF-8 internally (for example `utf8` aliases) stay on the borrowed
+path.
 
 ### Performance Considerations
 
 - Meta tag scanning limits to the first 1024 bytes for performance
 - This is sufficient as meta charset tags should appear in the `<head>` section
 - Content-Type parameter scanning is a bounded byte-level walk (no regex).
-  Regex applies only to HTML meta charset scanning
+  The HTML meta charset scan is a deterministic byte-level prescanner too:
+  it locates `<meta ...>` elements and parses their attribute lists without
+  regex backtracking.
 
 ## Integration Points
 
@@ -185,9 +193,9 @@ When the NGINX C module calls the Rust converter:
 1. Extract Content-Type header from upstream response
 2. Pass Content-Type to `MarkdownOptions.content_type` field
 3. Rust converter uses charset detection cascade
-4. The converter retains the detected charset for diagnostics and policy. It
-   passes the original bytes to the UTF-8-only parser without transcoding. A
-   declared non-UTF-8 charset does not change parser decoding in this release.
+4. The converter transcodes the source bytes to UTF-8 through the detected
+   charset (`encoding_rs`) before parsing. An unsupported or invalid charset
+   fails the conversion with an encoding error.
 
 ### Content-Type Parameter Parsing
 
@@ -203,7 +211,8 @@ wins.
 ### Error Handling
 
 - Missing or malformed charset parameter in Content-Type: Falls back to HTML meta tag detection
-- Invalid UTF-8 bytes in HTML: Returns `ConversionError::EncodingError`
+- Unsupported charset labels: Falls back to HTML meta tag detection when possible
+- Invalid bytes for the declared charset (including invalid UTF-8): Returns `ConversionError::EncodingError`
 - Empty input: Returns `ConversionError::InvalidInput`
 - Charset detection never fails (always returns UTF-8 as fallback). Parsing
   rejects only invalid UTF-8 bytes and empty input. Valid UTF-8 bytes remain
@@ -212,16 +221,17 @@ wins.
 
 ## Dependencies
 
-- `regex = "1.10"` - For Content-Type and HTML meta tag parsing
-- `html5ever = "0.39"` - For HTML parsing (UTF-8 only)
+- `regex = "1.10"` - Used by the decision engine for reason-code validation
+- `encoding_rs = "0.8"` - For decoding non-UTF-8 encodings to UTF-8
+- `html5ever = "0.39"` - For HTML DOM construction
+- Charset detection itself performs bounded byte-level scans (no regex)
 
 ## Future Enhancements
 
-1. **Charset Transcoding**: Add support for non-UTF-8 charsets using `encoding_rs`
-2. **BOM Detection**: Detect UTF-8/UTF-16 BOM (Byte Order Mark)
-3. **Configurable Scan Limit**: Make meta tag scan limit configurable
-4. **Charset Validation**: Validate detected charset against known encodings
-5. **Performance Metrics**: Track charset detection time and cache hit rates
+1. **BOM Detection**: Detect UTF-8/UTF-16 BOM (Byte Order Mark)
+2. **Configurable Scan Limit**: Make meta tag scan limit configurable
+3. **Charset Validation**: Validate detected charset against known encodings
+4. **Performance Metrics**: Track charset detection time and cache hit rates
 
 ## References
 
@@ -234,6 +244,7 @@ wins.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-03 | Kang | Aligned transcoding story with the implementation: parser transcodes non-UTF-8 charsets via encoding_rs, meta scanning is a byte-level prescanner, and unsupported or invalid charsets fail the conversion with an encoding error |
 | 0.9.2 | 2026-08-15 | Hermes | Error handling rejects only invalid UTF-8 bytes; valid UTF-8 passes even with a non-UTF-8 declared charset |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

@@ -5,7 +5,7 @@
 //! - Nesting depth enforcement (max 8 levels)
 //! - Duplicate-key detection within each object
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 
 /// Error kind for dynconf parsing failures.
@@ -255,7 +255,7 @@ fn parse_object(state: &mut ParseState, depth: usize) -> Result<JsonValue, Dynco
     state.skip_whitespace();
 
     let mut entries: Vec<(String, JsonValue)> = Vec::new();
-    let mut seen_keys: HashMap<String, ()> = HashMap::new();
+    let mut seen_keys: HashSet<String> = HashSet::new();
 
     // Empty object
     if state.peek() == Some(b'}') {
@@ -277,13 +277,13 @@ fn parse_object(state: &mut ParseState, depth: usize) -> Result<JsonValue, Dynco
         let key = parse_string(state)?;
 
         // Duplicate-key detection
-        if seen_keys.contains_key(&key) {
+        if seen_keys.contains(&key) {
             return Err(DynconfParseError::new(
                 DynconfParseErrorKind::DuplicateKey,
                 format!("duplicate key '{}' in object", key),
             ));
         }
-        seen_keys.insert(key.clone(), ());
+        seen_keys.insert(key.clone());
 
         // Expect colon
         state.skip_whitespace();

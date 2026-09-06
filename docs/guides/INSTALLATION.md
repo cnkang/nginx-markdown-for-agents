@@ -45,8 +45,20 @@ privileged execution, then verifies both Markdown and HTML responses:
 ```bash
 # Step 1: Download and authenticate the versioned release installer
 # Publication-dependent: RELEASE_TAG must be a published tag; v0.9.2 is an example for post-publication
-set -euo pipefail; RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSL -o "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc" -o nginx-markdown-for-agents-release.asc "${RELEASE_BASE}/nginx-markdown-for-agents-release.asc"
-TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "$GNUPGHOME"' EXIT; gpg --batch --homedir "$GNUPGHOME" --import nginx-markdown-for-agents-release.asc; VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1; CHECKSUM_LINE="$(awk -v file="${INSTALLER}" '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"; printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -; sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"; sudo nginx -t; sudo nginx -s reload
+# Key setup (once per operator, before the download step):
+#   git clone --depth 1 https://github.com/cnkang/nginx-markdown-for-agents ./nk-md-repo
+#   RELEASE_KEY_PATH="$(pwd)/nk-md-repo/packaging/nginx-markdown-for-agents-release.asc"
+# The key must be obtained out-of-band from the release assets (checked into
+# the repository, not downloaded from the Release). Cloning the same
+# repository is not itself an independent channel, so also authenticate the
+# pinned fingerprint below through a genuinely independent source (an HTTPS
+# page on a different domain, a web-of-trust signature, or a vendor
+# announcement) before trusting the verification.
+set -euo pipefail; RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSL -o "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc"; : "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to the release public key file (see key setup above)}"
+# The literal below is a copy of the canonical trust anchor in
+# docs/guides/GPG_KEY_MANAGEMENT.md; update it only after independently
+# authenticating the replacement fingerprint.
+TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "$GNUPGHOME"' EXIT; gpg --batch --homedir "$GNUPGHOME" --import "${RELEASE_KEY_PATH}"; VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1; CHECKSUM_LINE="$(awk -v file="${INSTALLER}" '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"; printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -; sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"; sudo nginx -t; sudo nginx -s reload
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 ```
@@ -321,7 +333,7 @@ Compile the module from source when you use a custom NGINX build or a platform w
 |-----------|----------------|---------|
 | **Rust Toolchain** | 1.97.1+ | Building the Rust converter (pinned baseline) |
 | **Cargo** | 1.97.1+ | Rust package manager (included with Rust) |
-| **cbindgen** | 0.29.2 | Generating C header files from Rust |
+| **cbindgen** | 0.29.4 | Generating C header files from Rust |
 | **NGINX** | 1.24.0+ | Web server (source code required for module compilation) |
 | **GCC/Clang** | GCC 4.8+ or Clang 3.4+ | C compiler for NGINX module |
 | **Make** | 3.81+ | Build automation |
@@ -359,7 +371,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 
 # Install cbindgen
-cargo install cbindgen --version 0.29.2 --locked
+cargo install cbindgen --version 0.29.4 --locked
 
 # Download NGINX source (example for 1.24.0)
 cd /tmp
@@ -383,7 +395,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 
 # Install cbindgen
-cargo install cbindgen --version 0.29.2 --locked
+cargo install cbindgen --version 0.29.4 --locked
 
 # Download NGINX source (example for 1.24.0)
 cd /tmp
@@ -413,7 +425,7 @@ source $HOME/.cargo/env
 rustup target add aarch64-apple-darwin
 
 # Install cbindgen
-cargo install cbindgen --version 0.29.2 --locked
+cargo install cbindgen --version 0.29.4 --locked
 
 # Download NGINX source (example for 1.24.0)
 cd /tmp
@@ -425,7 +437,7 @@ tar -xzf nginx-1.24.0.tar.gz
 
 ```bash
 # Check Rust version
-rustc --version  # Should be 1.97.0 or higher
+rustc --version  # Should be 1.97.1 or higher
 
 # Check Cargo version
 cargo --version
@@ -936,7 +948,7 @@ Look for `nginx_markdown_requests_total`,
 
 The default configuration uses `markdown_error_policy pass` (fail-open). This means:
 
-- If the module attempts a conversion and the conversion **fails** (for example timeout, converter error), it returns the original HTML response with `Content-Type: text/html`.
+- If the module attempts a conversion and the conversion **fails** (for example timeout, converter error), it returns the original HTML response with `Content-Type: text/html`. Replayable failures are pre-commit errors and full-buffer conversion. Post-commit streaming errors cannot replay the upstream body. They terminate the response instead of returning the original HTML.
 - This is **distinct** from requests that were never eligible for conversion (for example wrong `Content-Type`, non-200 status, missing `Accept: text/markdown` header). Those are "skipped" requests, not "fail-open."
 - To detect fail-open events, inspect the NGINX error log for conversion failure messages.
 
@@ -1188,9 +1200,12 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    nslookup github.com
    ```
 4. If the system is air-gapped, manually download the binary, signed
-   manifest, signature, and release public key on a connected machine. Confirm
-   the key's fingerprint through an independently authenticated channel before
-   importing it. The release asset itself is not the trust anchor.
+   manifest, and signature on a connected machine. The release public key
+   lives in the git repository (`packaging/nginx-markdown-for-agents-release.asc`)
+   rather than among the Release assets. Transfer it from a clone of the
+   repository along with the other files, and confirm the key's fingerprint
+   through an independently authenticated channel before importing it. The
+   release asset itself is not the trust anchor.
    Use manual download only for air-gapped or troubleshooting scenarios. Prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Set these values from a GitHub Release that lists both assets.
@@ -1198,13 +1213,18 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    NGINX_VERSION="<nginx-version>"
    OS_TYPE="<os-type>"
    ARCH="<arch>"
+   # Obtain the key from a repository clone, never from the Release assets:
+   #   git clone --depth 1 https://github.com/cnkang/nginx-markdown-for-agents ./nk-md-repo
+   RELEASE_KEY_PATH="/path/to/nk-md-repo/packaging/nginx-markdown-for-agents-release.asc"
    BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
    wget "${BASE_URL}/ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz"
    wget "${BASE_URL}/SHA256SUMS"
    wget "${BASE_URL}/SHA256SUMS.asc"
-   wget "${BASE_URL}/nginx-markdown-for-agents-release.asc"
+   : "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to packaging/nginx-markdown-for-agents-release.asc from git repository}"
+   # Copy of the canonical value in docs/guides/GPG_KEY_MANAGEMENT.md;
+   # independently authenticate any replacement before changing this value.
    TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75
-   gpg --import nginx-markdown-for-agents-release.asc
+   gpg --import "${RELEASE_KEY_PATH}"
    VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
      | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
    [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1

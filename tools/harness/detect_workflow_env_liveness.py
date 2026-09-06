@@ -229,22 +229,88 @@ def _mask_shell_non_expanding(run_text):
 
 
 def extract_run_vars(run_text):
-    """Return variable names referenced by $VAR / ${VAR} in a run block."""
+    """Return variable names referenced by $VAR / ${VAR} in a run block.
+
+    A `${VAR:-default}` (or `-`/`+`/`=`/`?` parameter-test) expansion
+    supplies its own fallback or side effect, so it is self-satisfying:
+    the reference is still reported, but the caller can treat it as
+    defaulted.  Plain `$VAR` and `${VAR}` are live references that must
+    resolve to a real definition.
+    """
     refs = set()
     if not isinstance(run_text, str):
         return refs
     masked = _mask_shell_non_expanding(_merge_continuations(run_text))
     # Mask ${{ }} expressions; they are not shell variables.
     masked = re.sub(r"\$\{\{.*?\}\}", " ", masked)
-    for pattern in (
-        r"\$\{(?:#)?([A-Za-z_][A-Za-z0-9_]*)",
-        r"\$([A-Za-z_][A-Za-z0-9_]*)",
+    # ${VAR<default-op>} — a parameter-test operator after the name makes
+    # the expansion self-satisfying; record it as a defaulted reference.
+    # Plain $VAR / ${VAR} remain live references.  ${VAR?msg} and
+    # ${VAR:?msg} are error-if-unset forms, so they stay live references.
+    for match in re.finditer(
+        r"\$\{(?:#)?([A-Za-z_]\w*)(:?[-+=])?", masked, re.ASCII
     ):
-        for match in re.finditer(pattern, masked):
-            name = match.group(1)
-            if not KNOWN_ENV_RE.match(name):
-                refs.add(name)
+        name = match.group(1)
+        if KNOWN_ENV_RE.match(name):
+            continue
+        if match.group(2):
+            refs.add(f"{name}#defaulted")
+        else:
+            refs.add(name)
+    # Plain $VAR references (non-braced) are always live references.
+    # Mask braced expansions first so ${FOO:-bar} does not also match
+    # the plain-$FOO pattern and defeat the #defaulted suppression.
+    plain_masked = re.sub(r"\$\{[^}]*\}", " ", masked)
+    for match in re.finditer(r"\$([A-Za-z_]\w*)", plain_masked, re.ASCII):
+        name = match.group(1)
+        if KNOWN_ENV_RE.match(name):
+            continue
+        refs.add(name)
     return refs
+
+
+def _match_assignment(line):
+    """Return the variable name assigned by `export NAME=...` or `NAME=...`."""
+    match = re.match(r"^(?:export\s+)?([A-Za-z_]\w*)=", line)
+    return match.group(1) if match else None
+
+
+def _match_case_assignment(line):
+    """Return the variable assigned by a case branch like `amd64) TARGET=...`."""
+    match = re.match(r"^[^)]*\)\s+(?:export\s+)?([A-Za-z_]\w*)=", line)
+    return match.group(1) if match else None
+
+
+def _match_for_variable(line):
+    """Return the loop variable of `for NAME in ...`."""
+    match = re.match(r"^for\s+([A-Za-z_]\w*)\s+in\b", line)
+    return match.group(1) if match else None
+
+
+def _match_read_variables(line):
+    """Return variable names captured by `read -r A B`.
+
+    A temporary assignment prefix (`IFS= read -r A`) and a `while` loop
+    head (`while IFS= read -r A; do`) are stripped first; the command
+    following them must actually be `read`, otherwise the `read` token
+    is just an argument to another command (`MODE=1 echo read -r ARCH`
+    captures nothing).
+    """
+    remainder = re.sub(
+        r"^(?:\s*while\s+)?(?:export\s+)?[A-Za-z_]\w*=", "", line, count=1
+    )
+    match = re.search(
+        r"^\s*read\s+(?:-[a-zA-Z]+\s+)*([A-Za-z_][A-Za-z0-9_\s]*)",
+        remainder,
+    )
+    if not match:
+        return ()
+    return tuple(
+        var
+        for var in match.group(1).split()
+        if re.match(r"^[A-Za-z_]\w*$", var)
+        and var not in ("do", "done", "then", "fi")
+    )
 
 
 def extract_shell_definitions(run_text):
@@ -253,39 +319,38 @@ def extract_shell_definitions(run_text):
     if not isinstance(run_text, str):
         return defined
     text = _merge_continuations(run_text)
+    # Mask comments and quoted literals before pattern matching so that
+    # `echo 'read -r X'` or `# read -r Y` cannot register a definition.
+    masked = _mask_shell_non_expanding(text)
+    # Source-detection must use the same masked text: a comment or quoted
+    # literal mentioning `source /etc/os-release` must not mark every
+    # OS-release variable as defined.
     sourced_os_release = bool(
-        re.search(r"(?:^|[\s;(])(?:\.|source)\s+/etc/os-release\b", text,
+        re.search(r"(?:^|[\s;(])(?:\.|source)\s+/etc/os-release\b", masked,
                   re.MULTILINE)
     )
     if sourced_os_release:
         defined |= OS_RELEASE_VARS
-    for line in text.splitlines():
+    for line in masked.splitlines():
         stripped = line.strip()
-        # export NAME=... / NAME=... command
-        match = re.match(r"^(?:export\s+)?([A-Za-z_]\w*)=", stripped)
-        if match:
-            defined.add(match.group(1))
+        name = _match_assignment(stripped)
+        if name is not None:
+            defined.add(name)
+            # A temporary assignment prefixing a command (e.g. `IFS= read -r A`)
+            # does not hide the command's own variable capture: the read
+            # variables must be recorded too, otherwise a following
+            # `${A}` reference is reported as an undefined variable.
+            defined.update(_match_read_variables(stripped))
             continue
-        # case branches: amd64) TARGET="..."
-        match = re.match(r"^[^)]*\)\s+(?:export\s+)?([A-Za-z_]\w*)=",
-                         stripped)
-        if match:
-            defined.add(match.group(1))
+        name = _match_case_assignment(stripped)
+        if name is not None:
+            defined.add(name)
             continue
-        match = re.match(r"^for\s+([A-Za-z_]\w*)\s+in\b", stripped)
-        if match:
-            defined.add(match.group(1))
+        name = _match_for_variable(stripped)
+        if name is not None:
+            defined.add(name)
             continue
-        # while IFS= read -r NAME  (loop variable is in scope in the body)
-        match = re.match(r"^while\s+.*\bread\s+(?:-[a-zA-Z]+\s+)*"
-                         r"([A-Za-z_]\w*)", stripped)
-        if match:
-            defined.add(match.group(1))
-            continue
-        match = re.match(r"^read\s+(?:-[a-zA-Z]+\s+)*([A-Za-z_]\w*)",
-                         stripped)
-        if match:
-            defined.add(match.group(1))
+        defined.update(_match_read_variables(stripped))
     return defined
 
 
@@ -338,6 +403,10 @@ def _report_undefined_variables(path, job_name, index, run_text, scoped,
                                 findings):
     local_defined = extract_shell_definitions(run_text)
     for var in sorted(extract_run_vars(run_text)):
+        # ${VAR:-default} style expansions are self-satisfying; the
+        # `#defaulted` suffix marks them and suppresses the report.
+        if var.endswith("#defaulted"):
+            continue
         if var in scoped or var in local_defined:
             continue
         if is_allowlisted(path.name, var):

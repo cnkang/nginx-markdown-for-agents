@@ -2,6 +2,19 @@
 
 set -e
 
+# Report a failed assertion with its captured context before aborting.
+check() {
+    local label="$1" condition="$2" context="${3:-}"
+    if eval "${condition}"; then
+        return 0
+    fi
+    printf 'FAIL: %s (condition: %s)\n' "${label}" "${condition}" >&2
+    if [[ -n "${context}" ]]; then
+        printf 'context:\n%s\n' "${context}" >&2
+    fi
+    exit 1
+}
+
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 FILTER_ORDERING_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/filter_ordering_test.sh"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/filter-ordering-strict.XXXXXX")"
@@ -49,9 +62,11 @@ strict_output="$(
 strict_status=$?
 set -e
 
-[[ "${plain_status}" -eq 0 ]]
-[[ "${strict_status}" -eq 1 ]]
-[[ "${plain_output}" == *"2 skipped"* ]]
-[[ "${strict_output}" == *"Required filter-ordering assertion skipped"* ]]
+check "plain-mode run exits 0" "[[ \"\${plain_status}\" -eq 0 ]]" "${plain_output}"
+check "strict-mode run exits 1" "[[ \"\${strict_status}\" -eq 1 ]]" "${strict_output}"
+check "plain-mode output reports 2 skipped" \
+    "[[ \"\${plain_output}\" == *\"2 skipped\"* ]]" "${plain_output}"
+check "strict-mode output reports the filter-ordering skip" \
+    "[[ \"\${strict_output}\" == *\"Required filter-ordering assertion skipped\"* ]]" "${strict_output}"
 
 echo "filter-ordering strict-mode regression passed"

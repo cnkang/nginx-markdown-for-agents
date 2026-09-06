@@ -348,7 +348,7 @@ fn validate_streaming_buffer(value: &JsonValue) -> Result<u64, DynconfParseError
             let parsed: i64 = raw.parse().map_err(|_| {
                 DynconfParseError::new(
                     DynconfParseErrorKind::ValueOutOfRange,
-                    format!("streaming_buffer value '{}' is not a valid integer", raw),
+                    format!("streaming_buffer value '{}' is not a valid integer or exceeds integer range", raw),
                 )
             })?;
 

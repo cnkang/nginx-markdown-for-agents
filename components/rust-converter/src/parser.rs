@@ -533,6 +533,9 @@ mod tests {
                 Err(ConversionError::InvalidInput(_)) => {
                     // Acceptable: invalid input detected
                 },
+                Err(ConversionError::ParseError(_)) => {
+                    // Acceptable: parse error caught by parser protection or catch_unwind
+                },
                 Err(e) => {
                     // Unexpected error type for malformed HTML
                     panic!("Unexpected error type for malformed HTML: {:?}", e);

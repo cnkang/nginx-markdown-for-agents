@@ -6,6 +6,8 @@ paths:
   - "components/rust-converter/src/**"
   - ".github/workflows/**"
   - "tools/**"
+  - "*.py"
+  - "*.sh"
 ---
 
 # Build Safety Rules (56–59, 70)

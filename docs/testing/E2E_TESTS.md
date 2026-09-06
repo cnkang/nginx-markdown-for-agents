@@ -66,6 +66,10 @@ make test-e2e-rust
 | `tools/e2e/verify_error_handling_e2e.sh` | Error passthrough, fail-open, 206 skip, max-size boundary |
 | `tools/e2e/verify_security_e2e.sh` | Security header and sanitizer behavior |
 | `tools/e2e/verify_streaming_failure_cache_e2e.sh` | Streaming failure cache and retry behavior |
+| `tools/ci/verify_real_nginx_ims.sh` | Real-NGINX conditional-validation (ETag/If-None-Match/If-Modified-Since matrix, runs under `test-all-e2e` with `NGINX_BIN`; mirrors `real-nginx-ims.yml` CI job) |
+| `tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh` | SSI / auth_request / filter-ordering / internal-redirect qualification (runs under `test-all-e2e` with `NGINX_BIN`; mirrors the runtime-regressions CI job) |
+| `tools/e2e/verify_dynconf_convergence_e2e.sh` | Dynamic-config convergence across NGINX workers (atomic replace, invalid candidate, reload-snapshot; runs under `test-all-e2e` with `NGINX_BIN`) |
+| `tools/ci/verify_non_streaming_nginx_module.sh` | Non-streaming production-module linkage check (`nginx -t`, builds its own Rust archive; runs under `test-all-e2e`) |
 
 The suite keeps the public command stable:
 

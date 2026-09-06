@@ -875,10 +875,12 @@ cache_trusted_executables() {
   cache_required_executable RM_BIN rm
   cache_required_executable SED_BIN sed
   cache_required_executable SH_BIN sh
+  cache_required_executable SORT_BIN sort
   cache_required_executable STAT_BIN stat
   cache_required_executable TAR_BIN tar
   cache_required_executable TR_BIN tr
   cache_required_executable UNAME_BIN uname
+  cache_required_executable WC_BIN wc
   cache_required_executable XARGS_BIN xargs
 
   cache_optional_executable FILE_BIN file
@@ -1946,7 +1948,7 @@ if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]]; then
         "Install sha256sum, shasum, or openssl and retry." \
         "Do not install the artifact without checksum verification."
     fi
-    EXPECTED_SHA256="$(printf '%s' "$DOWNLOAD_SHA256" | tr '[:upper:]' '[:lower:]')"
+    EXPECTED_SHA256="$(printf '%s' "$DOWNLOAD_SHA256" | "$TR_BIN" '[:upper:]' '[:lower:]')"
     if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
       die_with_error "checksum" \
         "Checksum verification failed for ${ASSET_NAME}. Expected: ${DOWNLOAD_SHA256}, Actual: ${ACTUAL_SHA256}." \
@@ -2040,14 +2042,14 @@ cd "$TMP_DIR"
 # Preflight the tar member list: reject absolute paths, path traversal, and
 # unexpected members.  The asset must contain exactly the expected module .so.
 echo "[+] Preflight tar member list for ${ASSET_NAME}"
-TAR_MEMBERS="$("$TAR_BIN" -tzf "$ASSET_NAME" 2>/dev/null | sort)"
+TAR_MEMBERS="$("$TAR_BIN" -tzf "$ASSET_NAME" 2>/dev/null | "$SORT_BIN")"
 if [[ -z "$TAR_MEMBERS" ]]; then
     die_with_error "extraction" \
         "Archive appears empty or unreadable." \
         "Re-download and try again."
 fi
 EXPECTED_MEMBER="ngx_http_markdown_filter_module.so"
-MEMBER_COUNT=$(echo "$TAR_MEMBERS" | wc -l | tr -d ' ')
+MEMBER_COUNT=$(printf '%s\n' "$TAR_MEMBERS" | "$WC_BIN" -l | "$TR_BIN" -d ' ')
 if [[ "$MEMBER_COUNT" -ne 1 ]]; then
     die_with_error "extraction" \
         "Archive contains $MEMBER_COUNT member(s), expected exactly 1 ($EXPECTED_MEMBER)." \
@@ -2063,15 +2065,15 @@ fi
 # `tar -tvzf` typeflags: '-' = regular file. BSD tar prints no typeflag for
 # regular files; GNU tar prints '-' — accept both, reject anything else.
 TAR_TYPEFLAG="$( "$TAR_BIN" -tvzf "$ASSET_NAME" 2>/dev/null \
-    | awk -v member="$EXPECTED_MEMBER" '$NF == member { print substr($0, 1, 1) }' \
-    | head -1)"
+    | "$AWK_BIN" -v member="$EXPECTED_MEMBER" '$NF == member { print substr($0, 1, 1) }' \
+    | "$HEAD_BIN" -1)"
 if [[ -n "$TAR_TYPEFLAG" && "$TAR_TYPEFLAG" != "-" ]]; then
     die_with_error "extraction" \
         "Archive member ${EXPECTED_MEMBER} is not a regular file (type flag '${TAR_TYPEFLAG}')." \
         "Refusing to extract a non-regular-file member."
 fi
 # Check for absolute paths or path traversal in member names (defense-in-depth)
-if echo "$TAR_MEMBERS" | grep -qE '^/|(^|/)\.\./'; then
+if printf '%s\n' "$TAR_MEMBERS" | "$GREP_BIN" -qE '^/|(^|/)\.\./'; then
     die_with_error "extraction" \
         "Archive member name contains absolute path or '..' traversal." \
         "Members: $TAR_MEMBERS"

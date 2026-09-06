@@ -312,10 +312,26 @@ cleanup() {
   local exit_code=$?
   log "Cleaning up..."
 
-  # Stop NGINX
-  if [[ -n "$NGINX_PID" ]] && kill -0 "$NGINX_PID" 2>/dev/null; then
-    kill "$NGINX_PID" 2>/dev/null || true
-    wait "$NGINX_PID" 2>/dev/null || true
+  # Stop NGINX.  The master PID may only be available via the PID file
+  # when run_scenario executed in a command substitution subshell.
+  local nginx_pid="$NGINX_PID"
+  if [[ -z "$nginx_pid" && -f "$PID_FILE" ]]; then
+    nginx_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  fi
+  # The PID file initially holds the script's own PID (written during
+  # setup); never kill ourselves when NGINX never started.
+  if [[ "$nginx_pid" == "$$" ]]; then
+    nginx_pid=""
+  fi
+  if [[ -n "$nginx_pid" ]] && kill -0 "$nginx_pid" 2>/dev/null; then
+    kill "$nginx_pid" 2>/dev/null || true
+    # A PID recovered from PID_FILE is not a shell child, so `wait`
+    # would fail immediately.  Poll for shutdown instead.
+    local i
+    for i in $(seq 1 50); do
+      kill -0 "$nginx_pid" 2>/dev/null || break
+      sleep 0.1
+    done
   fi
 
   # Stop upstream mock
@@ -619,7 +635,7 @@ http {
             # exceed the production default expansion ratio of 100. Keep the
             # benchmark's ratio budget explicit so these scenarios exercise
             # conversion and backpressure rather than ratio rejection.
-            markdown_limits conversion_memory=64m parser_memory=64m
+            markdown_limits conversion_memory=64m parser_budget=64m
                 conversion_timeout=2s parser_timeout=2s streaming_buffer=16m
                 decompression_ratio=2000 max_inflight=64;
             $profile_directives
@@ -665,6 +681,10 @@ start_nginx() {
   # Start NGINX (daemon off runs in background via &)
   "$NGINX_BIN" -c "$conf_path" -p "$NGINX_WORKDIR" &
   NGINX_PID=$!
+  # Persist the master PID: run_scenario executes in a command
+  # substitution subshell, so the parent shell's NGINX_PID stays empty
+  # and the EXIT trap would otherwise leak the NGINX process.
+  printf '%s\n' "$NGINX_PID" > "$PID_FILE"
 
   # Wait for NGINX to be ready
   local _attempts=0
@@ -692,9 +712,24 @@ except Exception:
 
 # stop_nginx gracefully stops the running NGINX instance.
 stop_nginx() {
-  if [[ -n "$NGINX_PID" ]] && kill -0 "$NGINX_PID" 2>/dev/null; then
-    kill -QUIT "$NGINX_PID" 2>/dev/null || true
-    wait "$NGINX_PID" 2>/dev/null || true
+  local nginx_pid="$NGINX_PID"
+  if [[ -z "$nginx_pid" && -f "$PID_FILE" ]]; then
+    nginx_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  fi
+  # The PID file initially holds the script's own PID (written during
+  # setup); never kill ourselves when NGINX never started.
+  if [[ "$nginx_pid" == "$$" ]]; then
+    nginx_pid=""
+  fi
+  if [[ -n "$nginx_pid" ]] && kill -0 "$nginx_pid" 2>/dev/null; then
+    kill -QUIT "$nginx_pid" 2>/dev/null || true
+    # A PID recovered from PID_FILE is not a shell child, so `wait`
+    # would fail immediately.  Poll for graceful shutdown instead.
+    local i
+    for i in $(seq 1 50); do
+      kill -0 "$nginx_pid" 2>/dev/null || break
+      sleep 0.1
+    done
     NGINX_PID=""
   fi
   return 0

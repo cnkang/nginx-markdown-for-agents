@@ -156,7 +156,7 @@ ngx_http_markdown_merge_inherited_values(ngx_http_markdown_conf_t *conf,
     ngx_flag_t  conversion_timeout_explicit;
     ngx_flag_t  parser_timeout_explicit;
     ngx_flag_t  conversion_memory_explicit;
-    ngx_flag_t  parser_memory_explicit;
+    ngx_flag_t  parser_budget_explicit;
     ngx_flag_t  streaming_buffer_explicit;
 
     max_size_set = (conf->max_size != NGX_CONF_UNSET_SIZE);
@@ -166,8 +166,8 @@ ngx_http_markdown_merge_inherited_values(ngx_http_markdown_conf_t *conf,
         (conf->limits.parser_timeout != NGX_CONF_UNSET_MSEC);
     conversion_memory_explicit =
         (conf->limits.conversion_memory != NGX_CONF_UNSET_SIZE);
-    parser_memory_explicit =
-        (conf->limits.parser_memory != NGX_CONF_UNSET_SIZE);
+    parser_budget_explicit =
+        (conf->limits.parser_budget != NGX_CONF_UNSET_SIZE);
     streaming_buffer_explicit =
         (conf->limits.streaming_buffer != NGX_CONF_UNSET_SIZE);
 
@@ -190,8 +190,8 @@ ngx_http_markdown_merge_inherited_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_size_value(conf->limits.conversion_memory,
                               prev->limits.conversion_memory,
                               NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_MEMORY_DEFAULT);
-    ngx_conf_merge_size_value(conf->limits.parser_memory,
-                              prev->limits.parser_memory,
+    ngx_conf_merge_size_value(conf->limits.parser_budget,
+                              prev->limits.parser_budget,
                               NGX_HTTP_MARKDOWN_LIMITS_PARSER_MEMORY_DEFAULT);
     ngx_conf_merge_size_value(conf->limits.streaming_buffer,
                               prev->limits.streaming_buffer,
@@ -219,8 +219,8 @@ ngx_http_markdown_merge_inherited_values(ngx_http_markdown_conf_t *conf,
     conf->limits.conversion_memory_explicit =
         conversion_memory_explicit
         || prev->limits.conversion_memory_explicit;
-    conf->limits.parser_memory_explicit =
-        parser_memory_explicit || prev->limits.parser_memory_explicit;
+    conf->limits.parser_budget_explicit =
+        parser_budget_explicit || prev->limits.parser_budget_explicit;
     conf->limits.streaming_buffer_explicit =
         streaming_buffer_explicit
         || prev->limits.streaming_buffer_explicit;
@@ -230,7 +230,7 @@ ngx_http_markdown_merge_inherited_values(ngx_http_markdown_conf_t *conf,
     if (!conf->decompress.max_size_explicit) {
         conf->max_size = conf->limits.conversion_memory;
     }
-    conf->decompress.parser_budget = conf->limits.parser_memory;
+    conf->decompress.parser_budget = conf->limits.parser_budget;
     conf->stream.budget = conf->limits.streaming_buffer;
     conf->decompress.max_size = conf->limits.decompressed_size;
     conf->routing.max_inflight = conf->limits.max_inflight;

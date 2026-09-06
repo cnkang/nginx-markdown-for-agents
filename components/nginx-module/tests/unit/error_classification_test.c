@@ -45,7 +45,7 @@ markdown_classify_error_code(uint32_t error_code)
     case ERROR_DECOMPRESSION_FORMAT_ERROR:
     case ERROR_DECOMPRESSION_TRUNCATED_INPUT:
     case ERROR_DECOMPRESSION_IO_ERROR:
-        return 4; /* DecompressionError */
+        return 0; /* ConversionError (matches Rust classify_error_code) */
 
 #if defined(MARKDOWN_STREAMING_ENABLED)
     case ERROR_POST_COMMIT:

@@ -21,6 +21,11 @@ from urllib.parse import urlsplit
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from tools.lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 ARCHIVE_SEGMENT = "docs/archive/"
 MAINTAINED_ROOT_DOCS = {"AGENTS.md", "README.md", "README_zh-CN.md"}
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
@@ -55,9 +60,12 @@ def iter_markdown_files() -> list[Path]:
     Only files under ``docs/`` (excluding the archive subtree) and top-level
     project docs (README, CHANGELOG, etc.) are included.
     """
+    git = resolve_approved_executable("git")
     try:
+        if git is None:
+            raise FileNotFoundError("approved git executable is unavailable")
         proc = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", "*.md"],
+            [git, "ls-files", "--cached", "--others", "--exclude-standard", "--", "*.md"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -87,9 +95,12 @@ def get_git_tracked_paths() -> set[str]:
 
     Falls back to an empty set if git is unavailable or the command fails.
     """
+    git = resolve_approved_executable("git")
+    if git is None:
+        return set()
     try:
         proc = subprocess.run(
-            ["git", "ls-files"],
+            [git, "ls-files"],
             cwd=ROOT,
             text=True,
             capture_output=True,

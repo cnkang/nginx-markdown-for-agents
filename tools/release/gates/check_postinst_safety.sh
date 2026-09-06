@@ -459,9 +459,6 @@ check_trusted_path() {
                     break
                 fi
                 ;;
-            *)
-                break
-                ;;
         esac
     done < "$stripped_tmp"
 

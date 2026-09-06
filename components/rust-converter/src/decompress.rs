@@ -282,13 +282,12 @@ fn has_zlib_header(input: &[u8]) -> bool {
 /// HTTP-standard form) is selected when the input begins with a plausible
 /// zlib header; otherwise the input is decoded as raw deflate (RFC 1951) for
 /// support for servers that provide raw deflate.  Because the header
-/// sniff is a heuristic (see [`has_zlib_header`]), a wrapped-mode decode that fails with
-/// a format error before producing any output is retried as raw RFC 1951.
-/// The retry is skipped once output has been produced (the framing was
-/// effectively confirmed) or when the failure is truncation/budget/I/O, so
-/// error classification stays intact.  This matches the C full-buffer
-/// decompressor's FORMAT_ERROR fallback so the decoding paths accept the
-/// same inputs.
+/// sniff is a heuristic (see [`has_zlib_header`]), any wrapped-mode format
+/// error is replayed from the beginning as raw RFC 1951.  The replay clears
+/// partial wrapped output and is skipped for truncation, budget, and I/O
+/// failures.  This matches the C full-buffer decompressor's
+/// FORMAT_ERROR fallback, including when wrapped inflate produced bytes
+/// before rejecting the ambiguous framing.
 fn decompress_deflate(
     input: &[u8],
     budget: usize,
@@ -317,8 +316,7 @@ fn retry_raw_deflate(
     mut output: Vec<u8>,
     err: DecompError,
 ) -> Result<DecompResult, DecompError> {
-    let should_retry =
-        zlib_wrapped && output.is_empty() && matches!(err, DecompError::FormatError(_));
+    let should_retry = zlib_wrapped && matches!(err, DecompError::FormatError(_));
     if !should_retry {
         return Err(err);
     }
@@ -810,6 +808,41 @@ mod tests {
             "fixture must satisfy the CMF/FLG sniff"
         );
         let result = decompress_bounded(&stream, Format::Deflate, 4096, 0).unwrap();
+        assert_eq!(result.output, payload);
+    }
+
+    #[test]
+    fn raw_deflate_replay_clears_partial_wrapped_output() {
+        const PAYLOAD_SIZE: usize = 0x0a9c;
+        let payload = vec![0u8; PAYLOAD_SIZE];
+        let mut stream = Vec::with_capacity(PAYLOAD_SIZE + 10);
+        stream.extend_from_slice(&[0x78, 0x9c, 0x0a, 0x63, 0xf5]);
+        stream.extend_from_slice(&payload);
+        stream.extend_from_slice(&[0x01, 0x00, 0x00, 0xff, 0xff]);
+
+        let mut wrapped_output = Vec::new();
+        let wrapped_error = deflate_decode_into(&stream, 32768, true, 0, &mut wrapped_output)
+            .expect_err("wrapped interpretation must reject the raw stream");
+        assert!(matches!(wrapped_error, DecompError::FormatError(_)));
+
+        /* zlib can have emitted bytes before reporting this format error;
+         * model that partial attempt explicitly and ensure raw replay does
+         * not retain its prefix.  The C implementation exercises the same
+         * fixture with z_stream::total_out > 0 before Z_DATA_ERROR. */
+        let partial_output = vec![0xa5; 17];
+        let replayed = retry_raw_deflate(
+            &stream,
+            32768,
+            true,
+            0,
+            partial_output,
+            DecompError::FormatError("ambiguous wrapped framing".to_string()),
+        )
+        .expect("raw replay must discard partial wrapped output");
+        assert_eq!(replayed.output, payload);
+
+        let result = decompress_bounded(&stream, Format::Deflate, 32768, 0)
+            .expect("raw replay must recover the ambiguous stream");
         assert_eq!(result.output, payload);
     }
 

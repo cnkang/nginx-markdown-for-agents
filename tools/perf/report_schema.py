@@ -136,10 +136,14 @@ def validate_report(report: dict) -> list[str]:
 
 
 def validate_module_benchmark(report: dict) -> list[str]:
-    """Validate a 0.9.1 module benchmark report against the required schema.
+    """Validate a module benchmark report against the required schema.
 
     Parameters:
-        report (dict): Module benchmark report to validate.
+        report (dict): Module benchmark report to validate. The retained
+            0.9.1 baseline keeps its historical ``profile`` scenario field
+            and is accepted as legacy (same provenance-bound exception as
+            evidence_gate's ``_uses_legacy_profile_contract``); 0.9.2
+            reports must use ``scenario_config``.
 
     Returns:
         list[str]: Validation errors found in the report, or an empty list when it is valid.
@@ -159,7 +163,7 @@ def validate_module_benchmark(report: dict) -> list[str]:
     if not isinstance(scenarios, list):
         errors.append("scenarios must be a list")
     else:
-        _validate_module_scenarios(scenarios, errors)
+        _validate_module_scenarios(scenarios, errors, legacy=_is_legacy_091_report(report))
 
     # memory_slope is optional: no benchmark generator emits the regression
     # object today, so requiring it would reject every checked-in baseline.
@@ -174,16 +178,30 @@ def validate_module_benchmark(report: dict) -> list[str]:
     return errors
 
 
-def _validate_module_scenarios(scenarios: list, errors: list[str]) -> None:
+def _is_legacy_091_report(report: dict) -> bool:
+    """Return whether the report keeps the retained 0.9.1 profile contract.
+
+    Delegates to evidence_gate's provenance-bound exception so the legacy
+    vocabulary cannot be opted into by merely adding the old field.
+    Imported lazily to keep this lightweight validator free of the
+    evidence-gate module cost.
+    """
+    from perf.evidence_gate import _uses_legacy_profile_contract
+
+    return bool(_uses_legacy_profile_contract(report))
+
+
+def _validate_module_scenarios(scenarios: list, errors: list[str], legacy: bool = False) -> None:
     """Validate required fields and metrics for module benchmark scenarios.
 
     Parameters:
         scenarios (list): Scenario entries to validate.
-        errors (list[str]): Collection to which validation errors are appended.
+        errors (list): Collection to which validation errors are appended.
+        legacy (bool): When True, accept the historical ``profile`` field
+            in place of ``scenario_config`` (retained 0.9.1 baseline only).
     """
     required_sc = {
         "name",
-        "scenario_config",
         "compression",
         "transfer_encoding",
         "concurrency",
@@ -194,6 +212,8 @@ def _validate_module_scenarios(scenarios: list, errors: list[str]) -> None:
             errors.append(f"scenarios[{i}] must be a dict")
             continue
         errors.extend(validate_required_fields(sc, required_sc, f"scenarios[{i}]"))
+        if "scenario_config" not in sc and not (legacy and "profile" in sc):
+            errors.append(f"scenarios[{i}] missing 'scenario_config'")
         if sc.get("status") == "completed" and "metrics" not in sc:
             errors.append(f"scenarios[{i}] missing 'metrics' for completed status")
         elif "metrics" in sc:

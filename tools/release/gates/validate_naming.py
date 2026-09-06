@@ -4,7 +4,7 @@ Naming convention validation for 0.5.0 release gates.
 
 Validates NGINX directives, Prometheus metrics, decision reason codes,
 and C macro constants against the naming conventions defined in
-docs/project/naming-conventions-0-5-0.md.
+docs/project/history/naming-conventions-0-5-0.md.
 
 Security: All regex patterns are pre-compiled constants — no user-supplied
 patterns are compiled at runtime (ReDoS prevention).

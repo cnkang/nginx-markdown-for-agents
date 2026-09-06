@@ -11,6 +11,7 @@
  */
 
 #include "test_common.h"
+#include <strings.h>
 
 /* Commit state constants used by branch-driven metric tests.
  * Values mirror production: PRE=0, POST=1. */
@@ -106,6 +107,14 @@ typedef struct {
     long         content_length;
     const char  *content_type;
 } test_request_t;
+
+static int
+is_valid_streaming_policy(const char *value)
+{
+    return strcasecmp(value, "off") == 0
+        || strcasecmp(value, "auto") == 0
+        || strcasecmp(value, "force") == 0;
+}
 
 /* Function prototypes */
 static ngx_uint_t
@@ -4144,9 +4153,7 @@ test_config_invalid_static_value(void)
          * Check if value is a valid static keyword
          * (case-insensitive: off, auto, force)
          */
-        is_valid_static = (strcasecmp(val, "off") == 0
-            || strcasecmp(val, "auto") == 0
-            || strcasecmp(val, "force") == 0);
+        is_valid_static = is_valid_streaming_policy(val);
 
         /*
          * Simulate markdown_streaming's closed value set.
@@ -4596,9 +4603,7 @@ test_preserve_valid_static_values(void)
          * Check case-insensitive match against
          * off, auto, force.
          */
-        is_valid = (strcasecmp(val, "off") == 0
-                    || strcasecmp(val, "auto") == 0
-                    || strcasecmp(val, "force") == 0);
+        is_valid = is_valid_streaming_policy(val);
 
         TEST_ASSERT(is_valid == 1,
             "Valid static value should be recognized");
@@ -4637,9 +4642,7 @@ test_policy_rejects_variable_expression(void)
 
         /* Check if value contains '$' */
         has_dollar = (strchr(val, '$') != NULL);
-        is_valid_policy = (strcasecmp(val, "off") == 0
-            || strcasecmp(val, "auto") == 0
-            || strcasecmp(val, "force") == 0);
+        is_valid_policy = is_valid_streaming_policy(val);
 
         TEST_ASSERT(has_dollar == 1,
             "test input should contain '$'");

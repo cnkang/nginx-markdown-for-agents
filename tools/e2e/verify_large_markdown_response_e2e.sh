@@ -5,7 +5,7 @@ set -euo pipefail
 # This script builds a local NGINX with the module and verifies that a ~1MB HTML
 # response can be converted to Markdown without stalling/timeouts.
 
-NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
+NGINX_VERSION="${NGINX_VERSION:-1.28.3}"
 PORT="${PORT:-18091}"
 KEEP_ARTIFACTS=0
 NGINX_BIN="${NGINX_BIN:-}"
@@ -122,7 +122,7 @@ else
   markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}"
 
   echo "==> Downloading/building NGINX ${NGINX_VERSION}"
-  curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
+  markdown_download_nginx_source "${NGINX_VERSION}" "${BUILDROOT}/nginx.tar.gz" "${WORKSPACE_ROOT}"
   mkdir -p "${BUILDROOT}/src"
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (

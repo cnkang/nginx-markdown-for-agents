@@ -3,7 +3,7 @@
 ## Review Process
 
 1. **Collect DoD assessments from all P0 sub-specs** — confirm each sub-spec has completed DoD self-assessment
-2. **Complete the release checklist** — verify each item in `docs/project/release-checklist-0-5-0.md`
+2. **Complete the release checklist** — verify each item in `docs/project/history/release-checklist-0-5-0.md`
 3. **Evaluate Streaming Evidence** — verify all streaming evidence items are sufficient
 4. **Write the decision record** — record Go or No-Go decision with rationale
 

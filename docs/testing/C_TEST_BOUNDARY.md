@@ -306,8 +306,8 @@ They are not duplicates.
 
 ## Relationship to the Test Surface Audit
 
-The `docs/project/0.6.3-test-surface-audit.md` classifies every in-scope test
-file. All files in `components/nginx-module/tests/unit/` and
+The historical 0.6.3 test-surface audit classified every in-scope test file.
+All files in `components/nginx-module/tests/unit/` and
 `components/nginx-module/tests/integration/` classify as **Keep as C** in
 that audit. This document provides the authoritative rationale for that
 classification.

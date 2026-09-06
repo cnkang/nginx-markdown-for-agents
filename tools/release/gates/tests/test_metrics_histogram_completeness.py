@@ -38,13 +38,25 @@ def _renderer_source() -> str:
     return RENDERER_PATH.read_text(encoding="utf-8")
 
 
-def _histogram_function(source: str) -> str:
-    start = source.find("ngx_http_markdown_metrics_v1_render_histogram(")
-    assert start != -1, "production histogram renderer function is missing"
+def _function_body(source: str, name: str) -> str:
+    """Extract a function definition while skipping forward declarations."""
+    signature = f"{name}("
+    search_from = 0
+    while True:
+        start = source.find(signature, search_from)
+        assert start != -1, f"production function {name} is missing"
+        brace = source.find("{", start)
+        assert brace != -1, f"function {name} has no body"
+        semicolon = source.find(";", start, brace)
+        if semicolon != -1:
+            search_from = semicolon + 1
+            continue
+        break
+
     # Walk forward from the signature balancing braces, so the extraction
     # does not depend on exact whitespace or a following static declaration.
     brace_depth = 0
-    i = start
+    i = brace
     while i < len(source):
         ch = source[i]
         if ch == "{":
@@ -54,7 +66,11 @@ def _histogram_function(source: str) -> str:
             if brace_depth == 0:
                 return source[start : i + 1]
         i += 1
-    raise AssertionError("histogram renderer function body is unbalanced")
+    raise AssertionError(f"function {name} body is unbalanced")
+
+
+def _histogram_function(source: str) -> str:
+    return _function_body(source, "ngx_http_markdown_metrics_v1_render_histogram")
 
 
 def _registry_artifact() -> dict:
@@ -109,20 +125,7 @@ def test_v1_mapping_does_not_put_gt_1000ms_in_finite_5s_bucket() -> None:
     # that body by brace-walking from the function signature so a matching
     # string in a later function cannot satisfy the assertions, and a
     # relocated assignment cannot escape the check.
-    start = source.index("ngx_http_markdown_metrics_map_v1_histogram")
-    depth = 0
-    end = None
-    for index in range(start, len(source)):
-        character = source[index]
-        if character == "{":
-            depth += 1
-        elif character == "}":
-            depth -= 1
-            if depth == 0:
-                end = index + 1
-                break
-    assert end is not None, "mapping helper body is unbalanced"
-    mapping = source[start:end]
+    mapping = _function_body(source, "ngx_http_markdown_metrics_map_v1_histogram")
     # buckets[9] is the finite le=5s boundary (see the v1 histogram band
     # contract).  >1000ms latency must not be placed in a dedicated
     # >1000ms bucket; the renderer folds everything past the last finite

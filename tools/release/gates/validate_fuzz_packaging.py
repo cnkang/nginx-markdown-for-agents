@@ -115,7 +115,10 @@ def check_fuzz_targets(result: ValidationResult) -> None:
     """Validate that fuzz targets are defined in fuzz/Cargo.toml."""
     content = read_safe(FUZZ_CARGO_TOML)
     if not content:
-        result.fail(FUZZ_TARGETS_GATE, "fuzz/Cargo.toml not found")
+        result.fail(
+            FUZZ_TARGETS_GATE,
+            f"{FUZZ_CARGO_TOML.relative_to(PROJECT_ROOT).as_posix()} not found",
+        )
         return
 
     # Check for [[bin]] sections which define fuzz targets
@@ -124,10 +127,15 @@ def check_fuzz_targets(result: ValidationResult) -> None:
         target_count = content.count("[[bin]]")
         result.pass_(
             FUZZ_TARGETS_GATE,
-            f"fuzz/Cargo.toml defines {target_count} fuzz target(s)",
+            f"{FUZZ_CARGO_TOML.relative_to(PROJECT_ROOT).as_posix()} defines "
+            f"{target_count} fuzz target(s)",
         )
     else:
-        result.fail(FUZZ_TARGETS_GATE, "no [[bin]] targets in fuzz/Cargo.toml")
+        result.fail(
+            FUZZ_TARGETS_GATE,
+            f"no [[bin]] targets in "
+            f"{FUZZ_CARGO_TOML.relative_to(PROJECT_ROOT).as_posix()}",
+        )
 
 
 def check_cflite_workflows(result: ValidationResult) -> None:

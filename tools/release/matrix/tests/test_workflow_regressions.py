@@ -76,23 +76,26 @@ def test_release_packages_normalizes_matrix_aliases_before_projection() -> None:
 
 
 def test_release_binaries_workflow_dispatch_can_publish_tag_assets() -> None:
-    """Manual recovery runs package-artifacts only after integrity checks pass."""
+    """Manual recovery publishes only artifacts that passed integrity checks."""
     workflow = _workflow_data("release-binaries.yml")
     assert "workflow_dispatch" in workflow["on"]
     package = workflow["jobs"]["package-artifacts"]
     upload = _step_by_name(package["steps"], "Upload workflow artifacts")
 
-    assert "needs.completeness-check.result == 'success'" in package["if"]
-    assert "needs.integrity-checksums.result == 'success'" in package["if"]
+    assert set(package["needs"]) == {
+        "prepare",
+        "completeness-check",
+        "integrity-checksums",
+    }
+    assert "if" not in package
     assert upload["with"]["if-no-files-found"] == "error"
 
 
-def test_release_binaries_publishes_signed_checksum_chain() -> None:
-    """Binary releases must bind every archive to a signed checksum file."""
+def test_release_binaries_delegates_signed_checksum_chain_to_release_packages() -> None:
+    """Only the canonical package workflow handles release signing."""
     workflow = _workflow_data("release-binaries.yml")
     jobs = workflow["jobs"]
     checksum_job = jobs["integrity-checksums"]
-    signing_job = jobs["integrity-signing"]
     publish = jobs["package-artifacts"]
     workflow_text = _workflow_text("release-binaries.yml")
 
@@ -102,14 +105,17 @@ def test_release_binaries_publishes_signed_checksum_chain() -> None:
     )
     assert "generate-checksums.sh -d artifacts/" in checksum_step["run"]
     assert "sha256sum --check SHA256SUMS" in checksum_step["run"]
-    assert set(signing_job["needs"]) == {"prepare", "integrity-checksums"}
-    assert "needs.prepare.outputs.publication_tag != ''" in signing_job["if"]
-    assert signing_job["environment"] == "release-signing"
-    assert "gpg-sign-checksums.sh" in workflow_text
-    assert "binary-checksums-signature" in workflow_text
-    assert "SHA256SUMS.asc" in workflow_text
-    assert "needs.integrity-checksums.result == 'success'" in publish["if"]
-    assert "needs.integrity-signing.result == 'success'" in publish["if"]
+    assert "integrity-signing" not in jobs
+    assert "gpg-sign-checksums.sh" not in workflow_text
+    assert "SHA256SUMS.asc" not in workflow_text
+    assert set(publish["needs"]) == {
+        "prepare",
+        "completeness-check",
+        "integrity-checksums",
+    }
+    release_packages = _workflow_text("release-packages.yml")
+    assert "integrity-signing:" in release_packages
+    assert "gpg-sign-checksums.sh" in release_packages
 
 
 def test_update_matrix_pr_creation_is_non_blocking_when_repo_disallows_actions_prs() -> None:
@@ -139,6 +145,34 @@ def test_non_streaming_verifier_changes_trigger_runtime_regressions() -> None:
     filters = yaml.load(filter_step["with"]["filters"], Loader=yaml.BaseLoader)
 
     assert "tools/ci/verify_non_streaming_nginx_module.sh" in filters["e2e"]
+
+
+def test_cflite_pr_sarif_job_has_artifact_when_fuzz_finds_no_crashes() -> None:
+    """The trusted SARIF job must not fail on a clean fuzz run."""
+    workflow_text = _workflow_text("cflite_pr.yml")
+    workflow = _workflow_data("cflite_pr.yml")
+
+    fuzz_steps = workflow["jobs"]["pr-fuzz"]["steps"]
+    prepare_output = _step_by_name(fuzz_steps, "Prepare non-root fuzz output")
+    prepare_sarif = _step_by_name(fuzz_steps, "Prepare non-root SARIF output")
+    ensure_sarif = _step_by_name(fuzz_steps, "Ensure SARIF artifact exists")
+
+    assert prepare_output["run"] == "mkdir -p build-out"
+    assert "mkdir -p out" in prepare_sarif["run"]
+    assert "chmod 0777 out" in prepare_sarif["run"]
+    run_fuzzers = next(
+        step for step in fuzz_steps
+        if step.get("uses", "").endswith(
+            "/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1"
+        )
+    )
+    assert run_fuzzers["with"]["output-sarif"] == "true"
+    assert ensure_sarif["if"] == "always()"
+    assert "pr-fuzz-empty.sarif" in ensure_sarif["run"]
+    assert "printf '%s\\n'" in ensure_sarif["run"]
+    assert "EOF" not in ensure_sarif["run"]
+    assert "name: pr-fuzz-out" in workflow_text
+    assert "  pr-fuzz-sarif:" in workflow_text
 
 
 def test_release_packages_tag_gate_requires_exact_approved_candidate() -> None:
@@ -260,10 +294,15 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
     steps = {step["name"]: step for step in job["steps"]}
     step_names = [step["name"] for step in job["steps"]]
     assert "Determine JS actions support" in steps
-    assert steps["Determine JS actions support"]["run"] == (
-        'echo "supported=${{ !(matrix.target.pkg_manager == \'apk\' && matrix.target.arch == \'aarch64\') }}" '
-        '>> "$GITHUB_OUTPUT"\n'
+    support_step = steps["Determine JS actions support"]
+    assert support_step["env"]["MATRIX_SUPPORTED"] == (
+        "${{ !(matrix.target.pkg_manager == 'apk' && "
+        "matrix.target.arch == 'aarch64') }}"
     )
+    assert support_step["run"] == (
+        'echo "supported=${MATRIX_SUPPORTED}" >> "$GITHUB_OUTPUT"\n'
+    )
+    assert "matrix." not in support_step["run"]
 
     resolve_step = _step_by_name(
         workflow["jobs"]["resolve-matrix"]["steps"],

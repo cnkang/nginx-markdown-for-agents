@@ -57,7 +57,12 @@ output_file="${tmp_dir}/clean.out"
 ${DETECTOR} "${src_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 0 ]]; then
-    pass "clean: using conf->error_status passes"
+    if grep -q "WARN" "${output_file}"; then
+        fail "clean: using conf->error_status passes" "unexpected WARN in output"
+        cat "${output_file}" >&2
+    else
+        pass "clean: using conf->error_status passes without warnings"
+    fi
 else
     fail "clean: using conf->error_status passes" "exit code ${exit_code}"
     cat "${output_file}" >&2

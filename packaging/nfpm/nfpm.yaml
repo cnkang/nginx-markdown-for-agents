@@ -8,6 +8,7 @@
 #   NGINX_VERSION        - Target NGINX version (e.g. 1.26.3)
 #   NGINX_VERSION_CEIL   - Upper NGINX version bound for the dependency range
 #   RPM_NGINX_EVR        - RPM dependency epoch/version/release (e.g. 1:1.26.3)
+#   RPM_NGINX_EVR_CEIL   - Exclusive upper RPM EVR bound for dependency checks
 #   NFPM_ARCH            - Target architecture (e.g. amd64, arm64)
 #
 # Usage:
@@ -18,10 +19,12 @@
 #   NGINX dynamic modules require ABI compatibility with the EXACT NGINX
 #   version they were compiled against; the core loader rejects any
 #   version difference (including patch) before signature checks.
-#   RPM dependency metadata pins the exact NGINX version. Debian package
-#   revisions are distribution-specific, so its dependency uses a closed
-#   interval (the pinned lower bound plus an exclusive next-patch ceiling),
-#   while the preinstall script enforces the exact version at install time.
+#   RPM dependency metadata requires the nginx-r${NGINX_VERSION} capability
+#   published by the official nginx.org package and retains the exact EVR
+#   bounds. Debian package revisions are distribution-specific, so its
+#   dependency uses a closed interval (the pinned lower bound plus an
+#   exclusive next-patch ceiling), while the preinstall script enforces the
+#   exact version at install time.
 
 name: "nginx-module-markdown-for-agents"
 arch: "${NFPM_ARCH}"
@@ -45,7 +48,9 @@ overrides:
       - "libbrotli1"
   rpm:
     depends:
-      - "nginx = ${RPM_NGINX_EVR}"
+      - "nginx-r${NGINX_VERSION}"
+      - "nginx >= ${RPM_NGINX_EVR}"
+      - "nginx < ${RPM_NGINX_EVR_CEIL}"
       - "libbrotli"
 
 contents:

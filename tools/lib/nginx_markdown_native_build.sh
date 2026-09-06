@@ -591,8 +591,44 @@ markdown_extract_header() {
   local header="$2"
 
   awk -v hdr="${header}" 'BEGIN { lower=tolower(hdr) }
-    tolower($1) == (lower ":") {
-      sub(/^[^:]+:[[:space:]]+/, ""); sub(/\r$/, ""); print; exit
+    tolower($0) ~ ("^" lower ":") {
+      sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit
     }' "${hdr_file}"
+  return 0
+}
+
+# Download an NGINX source tarball and verify it against the repository
+# checksum table (Rule 13). Fail-closed: any download or checksum error
+# aborts the caller.
+#
+# Args:
+#   $1 - NGINX version (e.g. "1.28.3"; must have a packaging/checksums.sha256 entry).
+#   $2 - Destination file path for the tarball.
+#   $3 - Workspace root (used to locate packaging/scripts/verify-checksum.sh).
+# Stdout:
+#   None.
+# Stderr:
+#   Download/verification diagnostics.
+# Returns:
+#   0 when the tarball downloads and verifies; 1 otherwise.
+markdown_download_nginx_source() {
+  local nginx_version="$1"
+  local dest_file="$2"
+  local workspace_root="$3"
+
+  curl --proto '=https' --tlsv1.2 -fsSL \
+    "https://nginx.org/download/nginx-${nginx_version}.tar.gz" \
+    -o "${dest_file}" || {
+    echo "ERROR: failed to download nginx-${nginx_version}.tar.gz" >&2
+    return 1
+  }
+
+  bash "${workspace_root}/packaging/scripts/verify-checksum.sh" \
+    -f "${dest_file}" \
+    -i "nginx-${nginx_version}" || {
+    echo "ERROR: checksum verification failed for nginx-${nginx_version}.tar.gz" >&2
+    return 1
+  }
+
   return 0
 }

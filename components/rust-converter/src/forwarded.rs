@@ -160,7 +160,15 @@ impl Cidr {
 
 /// Compare the first `prefix_len` bits of two byte arrays.
 fn prefix_match(network: &[u8], addr: &[u8], prefix_len: u8) -> bool {
-    debug_assert_eq!(network.len(), addr.len());
+    if network.len() != addr.len() {
+        return false;
+    }
+    let Some(max_bits) = network.len().checked_mul(8) else {
+        return false;
+    };
+    if usize::from(prefix_len) > max_bits {
+        return false;
+    }
     let mut bits = prefix_len as usize;
     let mut i = 0;
     while bits >= 8 {
@@ -368,12 +376,7 @@ pub fn validate_host(host: &str) -> Option<String> {
 ///
 /// `rest` is the substring after the leading `[`.
 fn validate_bracketed_ipv6(rest: &str) -> Option<String> {
-    let close = rest.find(']')?;
-    let addr = &rest[..close];
-    let after = &rest[close + 1..];
-
-    // The bracketed content must be a valid IPv6 literal.
-    addr.parse::<Ipv6Addr>().ok()?;
+    let (addr, after) = split_bracketed_ipv6(rest)?;
 
     if after.is_empty() {
         return Some(format!("[{addr}]"));
@@ -573,8 +576,7 @@ fn split_quoted(s: &str, sep: u8) -> Vec<String> {
             in_quote = true;
             current.push(c);
         } else if c as u32 == sep as u32 {
-            parts.push(current.clone());
-            current.clear();
+            parts.push(std::mem::take(&mut current));
         } else {
             current.push(c);
         }
@@ -675,16 +677,18 @@ fn validate_forwarded_host(host: &str) -> Option<String> {
     if name.is_empty() {
         return None;
     }
-    if let Some(p) = port {
+    let normalized_port = if let Some(p) = port {
         if p.contains(':') {
             return None;
         }
-        validate_port(p)?;
-    }
+        Some(normalize_port(p)?)
+    } else {
+        None
+    };
 
     let trimmed = validate_dns_name(name)?;
 
-    match port {
+    match normalized_port {
         Some(p) => Some(format!("{trimmed}:{p}")),
         None => Some(trimmed.to_string()),
     }
@@ -695,16 +699,21 @@ fn has_invalid_forwarded_characters(value: &str) -> bool {
 }
 
 fn validate_bracketed_host(rest: &str) -> Option<String> {
-    let close = rest.find(']')?;
-    let addr = &rest[..close];
-    let after = &rest[close + 1..];
-    addr.parse::<Ipv6Addr>().ok()?;
+    let (addr, after) = split_bracketed_ipv6(rest)?;
     if after.is_empty() {
         return Some(format!("[{addr}]"));
     }
     let port = after.strip_prefix(':')?;
-    validate_port(port)?;
-    Some(format!("[{addr}]:{port}"))
+    let normalized_port = normalize_port(port)?;
+    Some(format!("[{addr}]:{normalized_port}"))
+}
+
+fn split_bracketed_ipv6(rest: &str) -> Option<(&str, &str)> {
+    let close = rest.find(']')?;
+    let addr = &rest[..close];
+    let after = &rest[close + 1..];
+    addr.parse::<Ipv6Addr>().ok()?;
+    Some((addr, after))
 }
 
 fn validate_dns_name(name: &str) -> Option<&str> {
@@ -742,12 +751,16 @@ pub fn validate_proto(proto: &str) -> Option<String> {
 
 /// Validate a TCP port string in the range 1-65535.
 fn validate_port(port: &str) -> Option<()> {
+    normalize_port(port).map(|_| ())
+}
+
+fn normalize_port(port: &str) -> Option<String> {
     if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
     let value: u32 = port.parse().ok()?;
     if (1..=65535).contains(&value) {
-        Some(())
+        Some(value.to_string())
     } else {
         None
     }
@@ -971,20 +984,20 @@ fn build_xff_decision(
     let port = ports.as_ref()?.get(idx)?;
     let scheme = validate_proto(proto)?;
     let host = validate_forwarded_host(host_value)?;
-    validate_port(port)?;
+    let normalized_port = normalize_port(port)?;
 
     /* Host already carries a port (host:port form): X-Forwarded-Port is
      * redundant and must not be appended. */
     let host_with_port = if host.starts_with('[') {
         if host.ends_with(']') {
-            format!("{host}:{port}")
+            format!("{host}:{normalized_port}")
         } else {
             host
         }
     } else if host.contains(':') {
         host
     } else {
-        format!("{host}:{port}")
+        format!("{host}:{normalized_port}")
     };
 
     Some(BaseUrlDecision {
@@ -1303,11 +1316,19 @@ mod tests {
             Some("example.com:8080")
         );
         assert_eq!(
+            validate_forwarded_host("example.com:080").as_deref(),
+            Some("example.com:80")
+        );
+        assert_eq!(
             validate_forwarded_host("xn--80ak6aa92e.com").as_deref(),
             Some("xn--80ak6aa92e.com")
         );
         assert_eq!(
             validate_forwarded_host("[2001:db8::1]:443").as_deref(),
+            Some("[2001:db8::1]:443")
+        );
+        assert_eq!(
+            validate_forwarded_host("[2001:db8::1]:0443").as_deref(),
             Some("[2001:db8::1]:443")
         );
         assert_eq!(
@@ -1328,6 +1349,13 @@ mod tests {
         assert_eq!(validate_forwarded_host("[notv6]"), None);
         assert_eq!(validate_forwarded_host("2001:db8::1"), None);
         assert_eq!(validate_forwarded_host("foo%eth0.com"), None);
+    }
+
+    #[test]
+    fn prefix_match_rejects_invalid_lengths() {
+        assert!(!prefix_match(&[10, 0, 0, 0], &[10, 0, 0, 1], 33));
+        assert!(!prefix_match(&[10, 0, 0, 0], &[10, 0, 0], 8));
+        assert!(prefix_match(&[10, 0, 0, 0], &[10, 0, 0, 1], 24));
     }
 
     /* ---- Host validation (direct Host header fallback) ---- */

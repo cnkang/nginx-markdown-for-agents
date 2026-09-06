@@ -519,7 +519,7 @@ typedef struct {
     ngx_msec_t    conversion_timeout;   /* NGX_CONF_UNSET_MSEC */
     ngx_msec_t    parser_timeout;       /* NGX_CONF_UNSET_MSEC */
     size_t        conversion_memory;    /* NGX_CONF_UNSET_SIZE */
-    size_t        parser_memory;        /* NGX_CONF_UNSET_SIZE */
+    size_t        parser_budget;        /* NGX_CONF_UNSET_SIZE */
     size_t        streaming_buffer;     /* NGX_CONF_UNSET_SIZE */
     size_t        decompressed_size;    /* NGX_CONF_UNSET_SIZE */
     ngx_uint_t    decompression_ratio;  /* NGX_CONF_UNSET_UINT */
@@ -529,7 +529,7 @@ typedef struct {
     ngx_flag_t    conversion_timeout_explicit; /* operator set conversion_timeout */
     ngx_flag_t    parser_timeout_explicit;     /* operator set parser_timeout */
     ngx_flag_t    conversion_memory_explicit;  /* operator set conversion_memory */
-    ngx_flag_t    parser_memory_explicit;      /* operator set parser_memory */
+    ngx_flag_t    parser_budget_explicit;      /* operator set parser_budget */
     ngx_flag_t    streaming_buffer_explicit;   /* operator set streaming_buffer */
 } ngx_http_markdown_limits_t;
 
@@ -653,7 +653,7 @@ _Static_assert(MARKDOWN_FORMAT_BROTLI == MARKDOWN_FORMAT_DEFLATE + 1,
  *   NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT (10000ms)
  * - limits.conversion_memory:
  *   NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_MEMORY_DEFAULT (64MB)
- * - limits.parser_memory:
+ * - limits.parser_budget:
  *   NGX_HTTP_MARKDOWN_LIMITS_PARSER_MEMORY_DEFAULT (32MB)
  * - limits.streaming_buffer:
  *   NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT (2MB)
@@ -1018,6 +1018,8 @@ typedef struct {
     struct {
         struct ngx_table_elt_s      *if_none_match;
         struct ngx_table_elt_s      *if_modified_since;
+        struct ngx_table_elt_s      *if_match;
+        struct ngx_table_elt_s      *if_unmodified_since;
         ngx_http_markdown_conditional_header_state_t *header_states;
         ngx_http_markdown_conditional_ownership_t ownership;
         ngx_flag_t                  captured;
@@ -1952,6 +1954,15 @@ ngx_int_t ngx_http_markdown_capture_conditional_request(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
 void ngx_http_markdown_restore_conditional_request(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
+/*
+ * Restore suppressed validators without a module context, straight from the
+ * request-pool side table.  Used on failure routes that may run after an
+ * internal redirect cleared r->ctx: the fail-open invariant requires the
+ * source representation to be forwarded with its original HTTP validators,
+ * so suppressed orphans must never leak into a pass-through response.
+ */
+void ngx_http_markdown_restore_orphan_conditional_request(
+    ngx_http_request_t *r);
 /* Re-adopt suppressed validators orphaned by an internal redirect that
  * cleared the module context. */
 ngx_int_t ngx_http_markdown_adopt_orphan_conditional_headers(
@@ -1961,6 +1972,9 @@ ngx_int_t ngx_http_markdown_adopt_orphan_conditional_headers(
 /* Send 304 Not Modified response */
 ngx_int_t ngx_http_markdown_send_304(ngx_http_request_t *r,
     const struct MarkdownResult *result);
+
+/* Send 412 Precondition Failed response */
+ngx_int_t ngx_http_markdown_send_412(ngx_http_request_t *r);
 
 /*
  * Check if the response carries Cache-Control: no-transform.

@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import shutil
 import subprocess
 import sys
 from collections import Counter
@@ -43,6 +42,11 @@ from collections.abc import Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from tools.lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 AGENTS_FILENAME = "AGENTS.md"
 ARCHIVE_SEGMENT = "docs/archive/"
 # CHANGELOG.md keeps historical release prose. Changed-mode still audits it so
@@ -107,8 +111,11 @@ def _is_ignored(path: Path) -> bool:
     if ARCHIVE_SEGMENT in path.as_posix():
         return True
     try:
+        git = resolve_approved_executable("git")
+        if git is None:
+            return False
         out = subprocess.run(
-            ["git", "check-ignore", "-q", str(path)],
+            [git, "check-ignore", "-q", str(path)],
             cwd=ROOT,
             capture_output=True,
         )
@@ -425,7 +432,7 @@ def _require_git() -> str:
     Shared pre-check for the git-dependent helpers so a missing git never
     surfaces as a raw FileNotFoundError from subprocess.run.
     """
-    git = shutil.which("git")
+    git = resolve_approved_executable("git")
     if git is None:
         raise RuntimeError(
             "git executable not found on PATH; --changed and --base modes "

@@ -30,7 +30,7 @@
 #   1 — one or more violations detected
 #   2 — usage/argument error
 
-set -eu
+set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -52,13 +52,32 @@ NGX_AGAIN_APIS=(
 )
 
 tmp_violations=$(mktemp)
-trap 'rm -f "$tmp_violations"' EXIT
+# Bash 3.2 + set -u: an empty GREP_TEMPS would make a bare
+# ${GREP_TEMPS[@]} expansion in the trap abort; guard with the
+# ${arr[@]+...} idiom (Rule 11).
+GREP_TEMPS=()
+trap 'rm -f "$tmp_violations" ${GREP_TEMPS[@]+"${GREP_TEMPS[@]}"}' EXIT
 
 while IFS= read -r -d '' file; do
     for api in "${NGX_AGAIN_APIS[@]}"; do
-        # Find every call site of this API (matches "api(" as a call)
-        grep -n "${api}[[:space:]]*(" "$file" 2>/dev/null | \
-            while IFS=: read -r line_num content; do
+        # Find every call site of this API (matches "api(" as a call).
+        # grep exits 1 when a file has no call; that is the expected
+        # no-match result.  Any other grep failure (exit 2) or a failure
+        # inside the loop body must propagate under set -euo pipefail.
+        grep_matches="$(mktemp)"
+        GREP_TEMPS+=("$grep_matches")
+        grep_rc=0
+        grep -n "${api}[[:space:]]*(" "$file" 2>/dev/null > "$grep_matches" || grep_rc=$?
+        if [[ "$grep_rc" -eq 2 ]]; then
+            echo "ERROR: grep failed scanning $file for $api()" >&2
+            rm -f "$grep_matches"
+            exit 2
+        fi
+        if [[ "$grep_rc" -eq 1 ]]; then
+            rm -f "$grep_matches"
+            continue
+        fi
+        while IFS=: read -r line_num content; do
             [[ -z "$line_num" ]] && continue
             [[ -z "$content" ]] && continue
 
@@ -143,7 +162,8 @@ while IFS= read -r -d '' file; do
             if [[ "$has_again_branch" -eq 0 && ( -n "$fold_pattern" || "$immediate_return" -eq 1 ) ]]; then
                 echo "VIOLATION: $file:$line_num — call to $api() returns NGX_AGAIN but the call site has no explicit NGX_AGAIN branch (folded into error path or immediate return)" >> "$tmp_violations"
             fi
-        done
+        done < "$grep_matches"
+        rm -f "$grep_matches"
     done
 done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f -print0)
 

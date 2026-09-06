@@ -78,9 +78,9 @@ Independent of pruning, streaming conversion failures after the replay window
 **always enforce fail-closed behavior** — replay-window exhaustion is a
 hard safety boundary, not a policy choice. The configured streaming failure
 policy (including fail-open) applies only when the pre-commit replay
-precondition remains satisfied. Operators who need to avoid
-empty results keep the built-in selectors and exclude aggressive custom
-selectors instead.
+precondition remains satisfied. Operators who need to avoid empty results
+should set `markdown_prune_noise off` or use protection selectors. Retaining
+built-in selectors alone does not restore content removed by pruning.
 
 ### New FFI Fields
 

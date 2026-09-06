@@ -20,7 +20,7 @@ set -euo pipefail
 #   1 - an HTTP/2 assertion failed
 #   2 - usage or prerequisite error
 
-NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
+NGINX_VERSION="${NGINX_VERSION:-1.28.3}"
 PORT="${PORT:-18200}"
 KEEP_ARTIFACTS=0
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -44,7 +44,7 @@ Validate real HTTP/2 (ALPN) sessions through a module-enabled NGINX.
 Options:
   --keep-artifacts      Keep the build sandbox after the run
   --port PORT           TLS listener port (default 18200)
-  --nginx-version       NGINX version to build when no reusable binary (default 1.28.2)
+  --nginx-version       NGINX version to build when no reusable binary (default 1.28.3)
 
 Environment:
   NGINX_BIN             Reusable module-enabled NGINX binary (optional)
@@ -138,7 +138,7 @@ if [[ -z "${NGINX_BIN:-}" ]]; then
   echo "==> Building module-enabled NGINX with HTTP/2"
   RUST_TARGET="$(markdown_detect_rust_target)"
   markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}" --features streaming >/dev/null
-  curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
+  markdown_download_nginx_source "${NGINX_VERSION}" "${BUILDROOT}/nginx.tar.gz" "${WORKSPACE_ROOT}"
   mkdir -p "${BUILDROOT}/src"
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (
@@ -168,10 +168,10 @@ else
 fi
 
 echo "==> Writing HTTP/2 fixture configuration"
-MARKDOWN_TEST_BODY="$(printf '## Heading\n\nHello HTTP/2 markdown body.\n')"
-printf '%s' "${MARKDOWN_TEST_BODY}" > "${RUNTIME}/conf/body.md"
+HTML_TEST_BODY="$(printf '<!doctype html><html><body><h2>Heading</h2><p>Hello HTTP/2 markdown body.</p></body></html>\n')"
+printf '%s' "${HTML_TEST_BODY}" > "${RUNTIME}/conf/index.html"
 mkdir -p "${RUNTIME}/conf/streaming"
-printf '%s' "${MARKDOWN_TEST_BODY}" > "${RUNTIME}/conf/streaming/body.md"
+printf '%s' "${HTML_TEST_BODY}" > "${RUNTIME}/conf/streaming/index.html"
 
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
 worker_processes 1;
@@ -199,8 +199,8 @@ http {
             markdown_accept wildcard;
             markdown_streaming off;
             root ${RUNTIME}/conf;
-            index body.md;
-            default_type text/markdown;
+            index index.html;
+            default_type text/html;
         }
 
         location /streaming/ {
@@ -208,7 +208,8 @@ http {
             markdown_accept wildcard;
             markdown_streaming auto;
             root ${RUNTIME}/conf;
-            default_type text/markdown;
+            index index.html;
+            default_type text/html;
         }
     }
 }
@@ -261,7 +262,7 @@ grep -qi '^content-type: text/markdown' <<<"${H2_HEADERS}" \
   || fail "expected content-type text/markdown over HTTP/2"
 
 echo "==> HTTP/2 streaming delivery assertion"
-STREAM_BODY="$(curl -sk --http2 --max-time 10 "https://127.0.0.1:${PORT}/streaming/body.md" || true)"
+STREAM_BODY="$(curl -sk --http2 --max-time 10 "https://127.0.0.1:${PORT}/streaming/" || true)"
 grep -q "Hello HTTP/2 markdown body" <<<"${STREAM_BODY}" \
   || fail "streaming conversion failed over HTTP/2"
 

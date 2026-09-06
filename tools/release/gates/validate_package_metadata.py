@@ -74,7 +74,9 @@ NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
-    "nginx = ${RPM_NGINX_EVR}",
+    "nginx-r${NGINX_VERSION}",
+    "nginx >= ${RPM_NGINX_EVR}",
+    "nginx < ${RPM_NGINX_EVR_CEIL}",
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
     "packager: deb",
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
@@ -143,51 +145,75 @@ ARCH_RUNNER_SNIPPET = (
     "'ubuntu-24.04' }}"
 )
 STANDALONE_CONTAINER_BASH_SHELL = "defaults:\n      run:\n        shell: bash"
+STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET = (
+    "packaging/nfpm/scripts/render-nfpm-config.sh \\\n"
+    "            packaging/nfpm/scripts/preremove.sh \\\n"
+    "            \"/tmp/${TARBALL_DIR}/preremove.sh\" \\\n"
+    "            \"${NGINX_VERSION}\""
+)
 STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     "INPUT_VERSION: ${{ inputs.version }}",
+    "NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}",
     './packaging/scripts/validate-version.sh "$INPUT_VERSION"',
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "docs/guides/INSTALL.md",
     "docs/guides/PACKAGE_INSTALLATION.md",
     "docs/guides/PACKAGE_COMPATIBILITY.md",
+    "packaging/nfpm/scripts/render-nfpm-config.sh",
+    '"/tmp/${TARBALL_DIR}/preremove.sh"',
+    STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET,
     '--define "nginx_version ${NGINX_VERSION}"',
     "tools/release/gates/check_install_layout.sh dist/*.rpm",
 ]
 STANDALONE_VERSION_FORBIDDEN_SNIPPETS = [
     './packaging/scripts/validate-version.sh "${{ inputs.version }}"',
 ]
-RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS = [
-    "integrity-signing:",
-    "needs: [prepare, integrity-checksums]",
+STANDALONE_RPM_WORKFLOW_FORBIDDEN_SNIPPETS = [
+    'cp packaging/nfpm/scripts/preremove.sh "/tmp/${TARBALL_DIR}/"',
+]
+RELEASE_CHECKSUM_SIGNING_SECURITY_SNIPPETS = [
+    "integrity-signature:",
+    "needs: [integrity-checksums, release-gate, official-docker-release-gate]",
     "environment: release-signing",
     "name: Preflight - validate GPG secrets",
     "GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}",
     "GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}",
     "GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}",
-    "name: Checkout repository",
+    "name: Checkout",
     "ref: ${{ github.sha }}",
     "persist-credentials: false",
     "name: Download SHA256SUMS",
-    "name: binary-checksums",
-    "name: Sign SHA256SUMS",
-    "./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS",
+    "name: checksums",
+    'name: GPG sign SHA256SUMS',
+    './packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS "${GPG_KEY_ID}"',
     "name: Upload SHA256SUMS.asc",
-    "name: binary-checksums-signature",
+    "name: checksums-signature",
     "path: artifacts/SHA256SUMS.asc",
     "if-no-files-found: error",
 ]
-RELEASE_BINARY_SIGNING_FORBIDDEN_SNIPPETS = [
+RELEASE_CHECKSUM_SIGNING_FORBIDDEN_SNIPPETS = [
     "ref: ${{ inputs.version }}",
     "ref: ${{ github.ref }}",
 ]
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
-    "Requires:       nginx = 1:%{nginx_version}",
+    "Requires:       nginx-r%{nginx_version}",
+    "Requires:       nginx >= 1:%{nginx_version}",
+    "Conflicts:      nginx >= 1:%{nginx_version_ceil}",
     "Source0:        %{name}-%{version}.tar.gz",
     f"%setup -q -n {CANONICAL_PACKAGE_NAME}-%{{version}}",
     "# No-op: release-rpm.yml packages a prebuilt dynamic module.",
+    "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+    "NGINX_BIN=/usr/sbin/nginx",
+    "SED_BIN=/usr/bin/sed",
+    'if [ -x "$NGINX_BIN" ]; then',
+    '"$NGINX_BIN" -v 2>&1 | "$SED_BIN" -n',
     "install -m 0644 ngx_http_markdown_filter_module.so",
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
+]
+STANDALONE_RPM_SPEC_FORBIDDEN_SNIPPETS = [
+    "command -v nginx",
+    "$(nginx -v 2>&1 | sed ",
 ]
 FORBIDDEN_NAKED_EXACT_NGINX_DEPS = [
     "Requires:       nginx = %{nginx_version}",
@@ -235,7 +261,13 @@ NFPM_PREREMOVE_SNIPPETS = [
     "Remove that directive, run 'nginx -t', then retry package removal.",
     "No NGINX configuration was modified automatically.",
     'FORCE_REMOVE_SENTINEL="/etc/nginx/markdown-module-force-remove"',
+    "no trailing newline",
+    "printf '%s' '${FORCE_REMOVE_TOKEN}' | sudo tee '${FORCE_REMOVE_SENTINEL}' >/dev/null",
     "forced removal acknowledged",
+]
+RPM_FORCE_REMOVE_INSTRUCTION_SNIPPETS = [
+    "printf '%s' 'nginx-markdown-module force-remove v1'",
+    "sudo tee /etc/nginx/markdown-module-force-remove >/dev/null",
 ]
 RPM_PREUN_SNIPPETS = [
     "%preun",
@@ -1221,20 +1253,20 @@ def validate_release_artifact_flow(result: ValidationResult) -> None:
             "smoke-runner:arch",
             "release-packages smoke tests must use arch-matched runners",
         )
-    _validate_release_binary_signing_security(result)
+    _validate_release_checksum_signing_security(result)
 
 
-def _validate_release_binary_signing_security(result: ValidationResult) -> None:
-    """Ensure the live binary-signing job binds inputs before using secrets."""
-    workflow = read_safe(RELEASE_BINARIES_WORKFLOW)
+def _validate_release_checksum_signing_security(result: ValidationResult) -> None:
+    """Ensure canonical checksum signing binds inputs before using secrets."""
+    workflow = read_safe(RELEASE_PACKAGES_WORKFLOW)
     if not workflow:
         result.fail(
             "release-signing-security:exists",
-            "release-binaries.yml is required for binary signing validation",
+            "release-packages.yml is required for checksum signing validation",
         )
         return
 
-    start = workflow.find("\n  integrity-signing:")
+    start = workflow.find("\n  integrity-signature:")
     # Locate the next top-level job key after start (two-space indentation
     # followed by a name and colon) rather than searching specifically for
     # package-artifacts, so the boundary stays correct when the job list
@@ -1249,29 +1281,31 @@ def _validate_release_binary_signing_security(result: ValidationResult) -> None:
     if start == -1:
         result.fail(
             "release-signing-security:job",
-            "release-binaries.yml must define a bounded integrity-signing job",
+            "release-packages.yml must define a bounded integrity-signature job",
         )
         return
 
     job = workflow[start:end]
     _check_snippets(
         job,
-        RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS,
+        RELEASE_CHECKSUM_SIGNING_SECURITY_SNIPPETS,
         "release-signing-security",
-        "release-binaries.yml integrity-signing job",
+        "release-packages.yml integrity-signature job",
         result,
     )
     _check_forbidden_snippets(
         job,
-        RELEASE_BINARY_SIGNING_FORBIDDEN_SNIPPETS,
+        RELEASE_CHECKSUM_SIGNING_FORBIDDEN_SNIPPETS,
         "release-signing-security",
-        "release-binaries.yml integrity-signing job",
+        "release-packages.yml integrity-signature job",
         result,
     )
 
     preflight_pos = job.find("name: Preflight - validate GPG secrets")
     checkout_pos = job.find("name: Checkout repository")
-    sign_pos = job.find("name: Sign SHA256SUMS")
+    if checkout_pos < 0:
+        checkout_pos = job.find("name: Checkout")
+    sign_pos = job.find("name: GPG sign SHA256SUMS")
     if (
         preflight_pos >= 0
         and checkout_pos >= 0
@@ -1317,6 +1351,13 @@ def _validate_standalone_rpm_workflow(result: ValidationResult) -> None:
         rpm_workflow, STANDALONE_VERSION_FORBIDDEN_SNIPPETS,
         "standalone-rpm-workflow", RELEASE_RPM_WORKFLOW.name, result,
     )
+    _check_forbidden_snippets(
+        rpm_workflow,
+        STANDALONE_RPM_WORKFLOW_FORBIDDEN_SNIPPETS,
+        "standalone-rpm-workflow",
+        RELEASE_RPM_WORKFLOW.name,
+        result,
+    )
 
 
 def _validate_standalone_rpm_spec(result: ValidationResult) -> None:
@@ -1328,6 +1369,13 @@ def _validate_standalone_rpm_spec(result: ValidationResult) -> None:
     _check_snippets(
         rpm_spec, STANDALONE_RPM_SPEC_SNIPPETS, "standalone-rpm-spec",
         "RPM spec", result,
+    )
+    _check_forbidden_snippets(
+        rpm_spec,
+        STANDALONE_RPM_SPEC_FORBIDDEN_SNIPPETS,
+        "standalone-rpm-spec",
+        "RPM spec",
+        result,
     )
     if _contains_make_build_command(rpm_spec):
         result.fail(
@@ -1449,6 +1497,7 @@ def validate_nfpm_preremove_lifecycle(result: ValidationResult) -> None:
             "run_case unreadable remove 1",
             "content-bound one-shot force-removal sentinel",
             "No NGINX configuration was modified automatically",
+            "printf '%s' 'nginx-markdown-module force-remove v1' | sudo tee",
         ],
         "nfpm-preremove:test",
         "test-package-removal-guard.sh",
@@ -1460,6 +1509,37 @@ def validate_nfpm_preremove_lifecycle(result: ValidationResult) -> None:
         result.fail("rpm-preun:exists", "RPM spec not found")
         return
     _check_snippets(spec, RPM_PREUN_SNIPPETS, "rpm-preun", str(RPM_SPEC), result)
+    _check_snippets(
+        spec,
+        RPM_FORCE_REMOVE_INSTRUCTION_SNIPPETS,
+        "rpm-preun:force-remove-instruction",
+        str(RPM_SPEC),
+        result,
+    )
+
+    workflow = read_safe(RELEASE_PACKAGES_WORKFLOW)
+    if not workflow:
+        result.fail(
+            "nfpm-preremove:workflow-exists",
+            "release-packages.yml not found",
+        )
+        return
+    # The release workflow must render the preremove template exactly like
+    # the preinstall template; an unrendered %%TRUSTED_EXEC_PRELUDE%% would
+    # ship a preremove script that cannot resolve the trusted nginx
+    # executable and therefore fails every removal.
+    _check_snippets(
+        workflow,
+        [
+            "render-nfpm-config.sh",
+            "packaging/nfpm/scripts/preinstall.sh",
+            "packaging/nfpm/scripts/preremove.sh",
+            "${NFPM_TMP}/preremove.sh",
+        ],
+        "nfpm-preremove:workflow-render",
+        "release-packages.yml",
+        result,
+    )
 
 
 def validate_release_build_glibc_baseline(result: ValidationResult) -> None:

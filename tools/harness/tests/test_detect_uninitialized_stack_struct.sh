@@ -167,7 +167,58 @@ else
         "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
 fi
 
-# 5. An explicitly provided directory is scanned without the default
+# 5. A prefixed variable (`otherctx.field = 1`) must not be reported
+#    for a declaration of `ctx` (identifier boundary), and an equality
+#    comparison (`cf.pool == x`) must not be treated as an assignment.
+rm -f "${src_dir}/decls.h" "${src_dir}/pointer.c"
+cat >"${src_dir}/boundary.c" <<'C'
+static void
+test_prefix_and_eq(void)
+{
+    ngx_conf_t  ctx;
+    ngx_conf_t  otherctx;
+
+    memset(&otherctx, 0, sizeof(otherctx));
+    if (ctx.pool == &g_pool) {
+        return;
+    }
+    otherctx.pool2 = &g_pool;
+}
+C
+
+output_file="${tmp_dir}/boundary.out"
+exit_code=0
+run_detector "${src_dir}" "${output_file}" || exit_code=$?
+if [[ "${exit_code}" -eq 0 ]]; then
+    pass "ignores equality comparisons and prefixed variable names"
+else
+    fail "ignores equality comparisons and prefixed variable names" \
+        "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
+fi
+
+# 6. A digit-bearing field name must still be detected as an assignment.
+rm -f "${src_dir}/boundary.c"
+cat >"${src_dir}/digit_field.c" <<'C'
+static void
+test_digit_field(void)
+{
+    ngx_conf_t  cf;
+
+    cf.pool_field2 = &g_pool;
+}
+C
+
+output_file="${tmp_dir}/digit_field.out"
+exit_code=0
+run_detector "${src_dir}" "${output_file}" || exit_code=$?
+if [[ "${exit_code}" -ne 0 ]] && grep -q "ngx_conf_t 'cf'" "${output_file}"; then
+    pass "detects digit-bearing field assignments"
+else
+    fail "detects digit-bearing field assignments" \
+        "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
+fi
+
+# 7. An explicitly provided directory is scanned without the default
 #    src/tests path filter, so files outside a src/ or tests/ subtree are
 #    still reported.
 custom_dir="${tmp_dir}/custom"

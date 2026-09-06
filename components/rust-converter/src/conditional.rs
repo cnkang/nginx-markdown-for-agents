@@ -83,6 +83,12 @@ fn parse_if_none_match(header: &str) -> Vec<(bool, String)> {
 /// Note: strong comparison is used for If-Match (PUT/DELETE) which
 /// this module does not yet implement. Kept in test scope for
 /// completeness and future use.
+///
+/// Scope note (0.9.2): the NGINX C module implements If-Match precondition
+/// evaluation for Markdown-negotiated full-buffer responses (see
+/// ngx_http_markdown_if_match_satisfied in ngx_http_markdown_conditional.c);
+/// this Rust-side helper stays test-only because the FFI conditional decision
+/// path receives the If-Match comparison outcome, not the raw header.
 #[cfg(test)]
 fn etag_strong_match(a: (bool, &str), b: (bool, &str)) -> bool {
     !a.0 && !b.0 && a.1 == b.1

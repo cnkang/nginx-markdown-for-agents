@@ -76,7 +76,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Unified resource limits (0.9.2 frozen contract, 8 keys):
      *   conversion_timeout, parser_timeout, conversion_memory,
-     *   parser_memory, streaming_buffer, decompressed_size,
+     *   parser_budget, streaming_buffer, decompressed_size,
      *   decompression_ratio, max_inflight
      *
      * Any subset of keys may be given; unspecified keys inherit

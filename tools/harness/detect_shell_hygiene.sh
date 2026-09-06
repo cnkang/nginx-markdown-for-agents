@@ -258,6 +258,15 @@ WARNING_ENTRY_COUNT=0
 # For accuracy we count brace depth from the opening brace.
 echo "--- Pattern (a): Functions without explicit return statement ---" >&2
 
+# awk failure sentinel: `|| true` on an awk feed would swallow a failed
+# scan (unreadable file, awk syntax abort) and silently report a clean
+# result.  Each feed appends its exit status to a status file — process
+# substitutions run in a subshell, so in-memory counters would not
+# survive — and the summary replays the file as hard errors.
+AWK_STATUS_FILE="$(mktemp "${TMPDIR:-/tmp}/shell-hygiene-awk.XXXXXX")"
+trap 'rm -f "$AWK_STATUS_FILE"' EXIT
+: >"$AWK_STATUS_FILE"
+
 return_hits=0
 while IFS= read -r script_file; do
     # Skip exempt files
@@ -319,7 +328,11 @@ while IFS= read -r script_file; do
             }
             print func_name ":" func_line ":" has_return
         }
-    ' "$script_file" 2>/dev/null || true)
+    ' "$script_file" 2>/dev/null || {
+        rc=$?
+        printf '%s\n' "awk:${rc}:${script_file}" >>"$AWK_STATUS_FILE"
+        true
+    })
 done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
 
 if [[ "$return_hits" -eq 0 ]]; then
@@ -470,7 +483,11 @@ while IFS= read -r script_file; do
             }
             print case_line ":" has_default
         }
-    ' "$script_file" 2>/dev/null || true)
+    ' "$script_file" 2>/dev/null || {
+        rc=$?
+        printf '%s\n' "awk:${rc}:${script_file}" >>"$AWK_STATUS_FILE"
+        true
+    })
 done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
 
 if [[ "$case_hits" -eq 0 ]]; then
@@ -754,7 +771,11 @@ while IFS= read -r script_file; do
             close_same_line_terminators(line, "done")
             close_same_line_terminators(line, "esac")
         }
-    ' "$script_file" 2>/dev/null || true)
+    ' "$script_file" 2>/dev/null || {
+        rc=$?
+        printf '%s\n' "awk:${rc}:${script_file}" >>"$AWK_STATUS_FILE"
+        true
+    })
 done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
 
 if [[ "$negation_hits" -eq 0 ]]; then
@@ -801,10 +822,23 @@ for entry in ${WARNING_ENTRIES[@]+"${WARNING_ENTRIES[@]}"}; do
 done
 
 # ── Summary ──
+HYGIENE_AWK_ERRORS=0
+if [[ -s "$AWK_STATUS_FILE" ]]; then
+    while IFS=: read -r _awk_tag awk_rc awk_file; do
+        echo "  ERROR   ${awk_file} — awk analysis failed (exit ${awk_rc})" >&2
+        HYGIENE_AWK_ERRORS=$((HYGIENE_AWK_ERRORS + 1))
+    done <"$AWK_STATUS_FILE"
+    echo "" >&2
+fi
 echo "=== Summary ===" >&2
 echo "  Errors:   ${errors}" >&2
 echo "  Warnings: ${warnings} (${non_exempt_warnings} non-allowlisted)" >&2
 echo "" >&2
+
+if [[ "$HYGIENE_AWK_ERRORS" -gt 0 ]]; then
+    echo "FAIL: ${HYGIENE_AWK_ERRORS} awk scan failure(s) — results incomplete" >&2
+    exit 1
+fi
 
 if [[ "$errors" -gt 0 ]]; then
     echo "FAIL: ${errors} error(s) found — fix before merge" >&2

@@ -17,8 +17,12 @@ Required:
 - Keep reason-code behavior and tests aligned when eligibility logic changes.
 - For protocol edge statuses (for example 206), map to the intended reason consistently even in malformed upstream scenarios.
 - When adding a new reason code string definition and accessor function, the
-  developer must add corresponding `ngx_http_markdown_log_decision()` callsite(s) in
-  the same changeset.  A reason code that appears but never gets emitted at
+  developer must add corresponding `ngx_http_markdown_log_decision()`
+  callsite(s) in the same changeset for non-failure branches, or
+  `ngx_http_markdown_log_failure_decision()` callsite(s) for failure
+  branches (the dedicated failure-path logger used by
+  `ngx_http_markdown_handle_preaccess_failure` and every fail-open/reject
+  route).  A reason code that appears but never gets emitted at
   runtime is a contract violation — operators and docs will reference a code
   that never appears in logs.
 - When adding a new family of reason codes (for example a `STREAMING_*`

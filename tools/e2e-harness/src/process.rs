@@ -293,10 +293,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn graceful_stop_does_not_signal_after_child_was_reaped() -> Result<()> {
-        let mut exited_child = Command::new("/usr/bin/true").spawn()?;
+        let mut exited_child = Command::new("true").spawn()?;
         exited_child.wait()?;
 
-        let mut sentinel = Command::new("/bin/sleep").arg("30").spawn()?;
+        let mut sentinel = Command::new("sleep").arg("30").spawn()?;
         let mut process = NginxProcess {
             child: Some(exited_child),
             // Simulate the kernel reusing the reaped child's PID.

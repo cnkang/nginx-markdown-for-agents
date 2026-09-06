@@ -254,7 +254,7 @@ def _static_config_manifest(draw):
             ["on", "off"])), "explicit": draw(st.booleans())},
         "limits": {"value": draw(st.sampled_from([
             {"conversion_timeout": 30000, "parser_timeout": 10000,
-             "conversion_memory": 67108864, "parser_memory": 33554432,
+             "conversion_memory": 67108864, "parser_budget": 33554432,
              "streaming_buffer": 2097152, "decompressed_size": 10485760,
              "decompression_ratio": 100, "max_inflight": 64},
         ])), "explicit": draw(st.booleans())},
@@ -574,10 +574,12 @@ class TestLastErrorBounds:
         # Build an error whose tail crosses the 512-byte boundary with a
         # config filename: the redactor must scrub the complete filename
         # before truncation, leaving no path fragment in the output.
-        prefix = "x" * 480
+        prefix = "x" * 504
         error_text = prefix + " /etc/nginx/nginx.conf"
         redacted = redact_last_error(error_text)
-        assert len(redacted.encode("utf-8")) <= 512
+        assert len(error_text.encode("utf-8")) > 512
+        assert len(redacted.encode("utf-8")) == 512
+        assert redacted == prefix + " <redact"
         for pattern in _PATH_PATTERNS:
             assert not pattern.search(redacted), (
                 f"path fragment survived truncation: {redacted!r}"

@@ -84,6 +84,22 @@ while IFS= read -r -d '' file || [[ -n "$file" ]]; do
             continue
         fi
 
+        # Skip string-literal content: mask every double-quoted span,
+        # then re-check.  A token that survives only inside quotes is
+        # documentation text, not a live return statement.
+        masked="$trimmed"
+        while echo "$masked" | grep -q '"'; do
+            masked="$(echo "$masked" | sed 's|"[^"]*"||g')"
+            # A single quote character breaks the pairing loop.
+            if [[ "$(echo "$masked" | grep -c '"')" -eq 1 ]]; then
+                break
+            fi
+        done
+        if [[ "$masked" != "$trimmed" ]] \
+            && ! echo "$masked" | grep -qE 'return.*NGX_HTTP_(BAD_GATEWAY|INTERNAL_SERVER_ERROR)'; then
+            continue
+        fi
+
         # Check for hardcoded status in return
         if echo "$trimmed" | grep -qE 'return.*NGX_HTTP_(BAD_GATEWAY|INTERNAL_SERVER_ERROR)'; then
             echo "WARN: ${rel_path}:${line_num}: hardcoded HTTP error status in return" >&2

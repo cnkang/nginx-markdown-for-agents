@@ -83,7 +83,11 @@ impl MetadataExtractor {
 
         if metadata.url.is_none() {
             if let Some(canonical) = canonical {
-                metadata.url = self.resolve_and_sanitize_url(&canonical);
+                metadata.url = self.resolve_and_sanitize_url(&canonical).or_else(|| {
+                    self.base_url
+                        .as_deref()
+                        .and_then(Self::sanitize_metadata_url)
+                });
             } else {
                 metadata.url = self
                     .base_url
@@ -230,8 +234,14 @@ impl MetadataExtractor {
     }
 
     /// Resolve a metadata URL when configured, then filter dangerous schemes.
+    ///
+    /// Empty or whitespace-only values are rejected so the metadata field
+    /// stays unset and the canonical/base-URL fallback can apply.
     fn resolve_and_sanitize_url(&self, url: &str) -> Option<String> {
         let sanitized = Self::sanitize_metadata_url(url)?;
+        if sanitized.is_empty() {
+            return None;
+        }
         let resolved = self.resolve_url(&sanitized);
         Self::sanitize_metadata_url(&resolved)
     }

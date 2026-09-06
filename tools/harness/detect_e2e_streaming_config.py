@@ -37,7 +37,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 # Add tools directory to path for imports
@@ -467,7 +467,7 @@ def _gather_preamble(lines: list[str], location_line_num: int) -> str:
 # ---------------------------------------------------------------------------
 
 def _extract_nginx_from_rust(
-    content: str, _file_path: str,  # kept for API symmetry with _extract_nginx_from_shell
+    content: str, file_path: str,  # kept for API symmetry with _extract_nginx_from_shell
 ) -> tuple[list[tuple[str, int]], list[ScanError]]:
     """Extract nginx config from Rust raw strings or escaped string literals."""
     configs: list[tuple[str, int]] = []
@@ -488,6 +488,11 @@ def _extract_nginx_from_rust(
     # spans are skipped so quotes inside raw strings are not mistaken for
     # ordinary-string boundaries.
     configs.extend(_extract_rust_escaped_strings(content, errors, raw_spans))
+    # Nested scanners emit path-less ScanErrors; re-tag them so reports
+    # carry the scanned file like every other error path.
+    errors = [
+        replace(e, file_path=file_path) if not e.file_path else e for e in errors
+    ]
     return configs, errors
 
 

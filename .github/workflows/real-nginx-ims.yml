@@ -42,6 +42,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install system dependencies
         run: |
@@ -78,4 +80,7 @@ jobs:
         run: cargo check --all-targets
 
       - name: Run real NGINX If-Modified-Since validation
-        run: bash ./tools/ci/verify_real_nginx_ims.sh --nginx-version "${{ matrix.nginx_channel }}" --port "${{ matrix.port }}"
+        env:
+          MATRIX_NGINX_CHANNEL: ${{ matrix.nginx_channel }}
+          MATRIX_PORT: ${{ matrix.port }}
+        run: bash ./tools/ci/verify_real_nginx_ims.sh --nginx-version "${MATRIX_NGINX_CHANNEL}" --port "${MATRIX_PORT}"

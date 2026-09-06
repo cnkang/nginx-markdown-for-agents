@@ -17,7 +17,9 @@
 use crate::error::ConversionError;
 use crate::security::{
     MarkdownTextEscapeState, escape_link_label, escape_markdown_destination,
-    escape_markdown_text_with_state, sanitize_url_value,
+    escape_markdown_text_with_state, for_each_escaped_link_label,
+    for_each_escaped_markdown_destination, link_label_escaped_capacity,
+    markdown_destination_escaped_capacity, sanitize_url_value,
 };
 use crate::streaming::budget::MemoryBudget;
 use crate::streaming::state_machine::{
@@ -597,9 +599,12 @@ impl IncrementalEmitter {
                 self.link_text_overflow = false;
             }
             StructuralContext::Image { src, alt } => {
-                let escaped = escape_markdown_destination(src);
-                let escaped_alt = escape_link_label(alt);
-                self.write_str(&format!("![{}]({})", escaped_alt, escaped))?;
+                let Some(safe_src) = sanitize_url_value(src).filter(|value| !value.is_empty())
+                else {
+                    self.write_image_alt_fallback(alt.trim())?;
+                    return Ok(());
+                };
+                self.write_image_in_place(safe_src, alt)?;
             }
             StructuralContext::Bold => {
                 if self.in_link {
@@ -617,6 +622,76 @@ impl IncrementalEmitter {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    /// Emit a safe image without materializing escaped label and destination
+    /// strings.  The exact escaped lengths are checked before any bytes are
+    /// written, so the output-buffer budget remains atomic and the transient
+    /// `Cow`/`format!` allocations are avoided.
+    fn write_image_in_place(&mut self, src: &str, alt: &str) -> Result<(), ConversionError> {
+        let label_capacity =
+            link_label_escaped_capacity(alt).ok_or_else(|| ConversionError::BudgetExceeded {
+                stage: "output_buffer (image label size overflow)".to_string(),
+                used: usize::MAX,
+                limit: self.max_buffer_size,
+            })?;
+        let destination_capacity = markdown_destination_escaped_capacity(src).ok_or_else(|| {
+            ConversionError::BudgetExceeded {
+                stage: "output_buffer (image destination size overflow)".to_string(),
+                used: usize::MAX,
+                limit: self.max_buffer_size,
+            }
+        })?;
+        let label_bytes = if label_capacity == 0 {
+            alt.len()
+        } else {
+            label_capacity
+        };
+        let destination_bytes = if destination_capacity == 0 {
+            src.len()
+        } else {
+            destination_capacity
+        };
+        let image_bytes = 2usize
+            .checked_add(label_bytes)
+            .and_then(|size| size.checked_add(2))
+            .and_then(|size| size.checked_add(destination_bytes))
+            .and_then(|size| size.checked_add(1))
+            .ok_or_else(|| ConversionError::BudgetExceeded {
+                stage: "output_buffer (image size overflow)".to_string(),
+                used: usize::MAX,
+                limit: self.max_buffer_size,
+            })?;
+        self.check_buffer_budget(image_bytes)?;
+
+        self.last_text_ended_whitespace = false;
+        self.write_str("![")?;
+        for_each_escaped_link_label(alt, |ch| self.write_char(ch));
+        self.write_str("](")?;
+        for_each_escaped_markdown_destination(src, |ch| self.write_char(ch));
+        self.write_str(")")
+    }
+
+    /// Preserve the full-buffer fallback when an image has no usable source.
+    fn write_image_alt_fallback(&mut self, alt: &str) -> Result<(), ConversionError> {
+        if alt.is_empty() {
+            return Ok(());
+        }
+        let label_capacity =
+            link_label_escaped_capacity(alt).ok_or_else(|| ConversionError::BudgetExceeded {
+                stage: "output_buffer (image alt size overflow)".to_string(),
+                used: usize::MAX,
+                limit: self.max_buffer_size,
+            })?;
+        let label_bytes = if label_capacity == 0 {
+            alt.len()
+        } else {
+            label_capacity
+        };
+        self.check_buffer_budget(label_bytes)?;
+        self.last_text_ended_whitespace = false;
+        for_each_escaped_link_label(alt, |ch| self.write_char(ch));
         Ok(())
     }
 
@@ -1366,15 +1441,27 @@ impl IncrementalEmitter {
         if self.buffer.is_empty() {
             return Ok(());
         }
-        let output = if self.in_code_block {
+        if self.in_code_block {
             /* Skip trailing-whitespace normalization inside code blocks */
-            std::mem::take(&mut self.buffer)
-        } else {
-            let normalized = normalize_pending(&self.buffer);
-            self.buffer.clear();
-            normalized
-        };
-        let new_flushed_size = self.flushed.len().saturating_add(output.len());
+            let output = std::mem::take(&mut self.buffer);
+            let new_flushed_size = self.flushed.len().saturating_add(output.len());
+            if new_flushed_size > self.max_buffer_size {
+                return Err(ConversionError::BudgetExceeded {
+                    stage: "output_buffer (ready)".to_string(),
+                    used: new_flushed_size,
+                    limit: self.max_buffer_size,
+                });
+            }
+            self.flushed.extend_from_slice(&output);
+            return Ok(());
+        }
+
+        // Normalize the resident pending buffer in place.  The previous
+        // implementation allocated a second Vec and sampled memory only
+        // after that Vec had been dropped, so the transient duplicate was
+        // invisible to the aggregate budget ledger.
+        normalize_pending_in_place(&mut self.buffer);
+        let new_flushed_size = self.flushed.len().saturating_add(self.buffer.len());
         if new_flushed_size > self.max_buffer_size {
             return Err(ConversionError::BudgetExceeded {
                 stage: "output_buffer (ready)".to_string(),
@@ -1382,7 +1469,8 @@ impl IncrementalEmitter {
                 limit: self.max_buffer_size,
             });
         }
-        self.flushed.extend_from_slice(&output);
+        self.flushed.extend_from_slice(&self.buffer);
+        self.buffer.clear();
         Ok(())
     }
 }
@@ -1452,16 +1540,59 @@ fn normalize_text(text: &str) -> String {
 ///
 /// ```ignore
 /// let input = b"line1  \r\nline2\t\nlast   ";
-/// let out = normalize_pending(input);
+/// let mut out = input.to_vec();
+/// normalize_pending_in_place(&mut out);
 /// // CR (`\r`) may have been converted during earlier writes; this function preserves `\n`
 /// // structure and trims trailing spaces and tabs on each line.
 /// assert_eq!(out, b"line1\nline2\nlast");
 ///
 /// let input2 = b"keep\n";
-/// let out2 = normalize_pending(input2);
+/// let mut out2 = input2.to_vec();
+/// normalize_pending_in_place(&mut out2);
 /// assert_eq!(out2, b"keep\n");
 /// ```
-fn normalize_pending(bytes: &[u8]) -> Vec<u8> {
+fn normalize_pending_in_place(bytes: &mut Vec<u8>) {
+    if std::str::from_utf8(bytes).is_err() {
+        let normalized = normalize_pending_lossy(bytes);
+        *bytes = normalized;
+        return;
+    }
+
+    let original_len = bytes.len();
+    let ended_with_newline = bytes.last().copied() == Some(b'\n');
+    let mut read = 0usize;
+    let mut write = 0usize;
+
+    while read < original_len {
+        let line_end = bytes[read..original_len]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(original_len, |offset| read + offset);
+        let trimmed_len = std::str::from_utf8(&bytes[read..line_end])
+            .expect("valid UTF-8 was checked before in-place normalization")
+            .trim_end()
+            .len();
+        if trimmed_len > 0 {
+            bytes.copy_within(read..read + trimmed_len, write);
+            write += trimmed_len;
+        }
+        if line_end < original_len {
+            bytes[write] = b'\n';
+            write += 1;
+            read = line_end + 1;
+        } else {
+            read = line_end;
+        }
+    }
+
+    if ended_with_newline && !bytes[..write].ends_with(b"\n") {
+        bytes[write] = b'\n';
+        write += 1;
+    }
+    bytes.truncate(write);
+}
+
+fn normalize_pending_lossy(bytes: &[u8]) -> Vec<u8> {
     let text = String::from_utf8_lossy(bytes);
     let mut result = Vec::with_capacity(bytes.len());
     let mut lines = text.split('\n').peekable();
@@ -2258,6 +2389,80 @@ mod tests {
         assert!(output.contains("![A picture](pic.png)"), "got: {}", output);
     }
 
+    #[test]
+    fn test_image_escapes_label_and_destination_in_place() {
+        let output = emit_html(&[
+            start_tag("p"),
+            self_closing_tag("img", vec![("src", r"pic (a)\\b"), ("alt", "a*[]")]),
+            end_tag("p"),
+        ]);
+
+        assert!(
+            output.contains(r"![a\*\[\]](<pic (a)\\\\b>)"),
+            "got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_image_without_usable_src_preserves_alt_without_empty_destination() {
+        let output = emit_html(&[
+            start_tag("p"),
+            self_closing_tag("img", vec![("alt", "No source")]),
+            self_closing_tag("img", vec![("alt", "fallback *\n[x]")]),
+            self_closing_tag(
+                "img",
+                vec![("src", "javascript:alert(1)"), ("alt", "Blocked")],
+            ),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("No source"),
+            "missing source alt was lost: {output}"
+        );
+        assert!(
+            output.contains("Blocked"),
+            "blocked source alt was lost: {output}"
+        );
+        assert!(
+            output.contains(r"fallback \* \[x\]"),
+            "escaped fallback alt was lost: {output}"
+        );
+        assert!(
+            !output.contains("!["),
+            "unusable source must not emit image syntax: {output}"
+        );
+        assert!(
+            !output.contains("]()"),
+            "unusable source must not emit empty destination: {output}"
+        );
+    }
+
+    #[test]
+    fn test_image_preflights_exact_escaped_output_budget() {
+        let action = StateMachineAction::Enter(StructuralContext::Image {
+            src: "pic.png".to_string(),
+            alt: "alt".to_string(),
+        });
+
+        let mut accepted_budget = MemoryBudget {
+            output_buffer: 15,
+            ..MemoryBudget::default()
+        };
+        let mut accepted = IncrementalEmitter::new(&accepted_budget);
+        let mut sm = StructuralStateMachine::new(&accepted_budget);
+        accepted
+            .process_action(&action, &mut sm)
+            .expect("exact image output size should fit");
+
+        accepted_budget.output_buffer = 14;
+        let mut rejected = IncrementalEmitter::new(&accepted_budget);
+        let mut sm = StructuralStateMachine::new(&accepted_budget);
+        let error = rejected
+            .process_action(&action, &mut sm)
+            .expect_err("one byte below the image output size must fail");
+        assert_eq!(error.code(), 6);
+    }
+
     // ── Code block tests ────────────────────────────────────────────
 
     #[test]
@@ -2729,6 +2934,20 @@ mod tests {
                 "trailing whitespace should be removed"
             );
         }
+    }
+
+    #[test]
+    fn test_pending_normalization_reuses_resident_buffer() {
+        let budget = MemoryBudget::default();
+        let mut emitter = IncrementalEmitter::new(&budget);
+        emitter.buffer.extend_from_slice(b"line  \nnext\t");
+        let pending_capacity = emitter.buffer.capacity();
+
+        emitter.flush_to_ready().unwrap();
+
+        assert_eq!(emitter.flushed, b"line\nnext");
+        assert_eq!(emitter.buffer.capacity(), pending_capacity);
+        assert!(emitter.buffer.is_empty());
     }
 
     // ── Embedded content URL extraction ─────────────────────────────

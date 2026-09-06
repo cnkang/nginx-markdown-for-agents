@@ -24,6 +24,10 @@ SANITIZER_ENV ?= ASAN_OPTIONS=$(ASAN_OPTIONS_BASE) UBSAN_OPTIONS=print_stacktrac
 
 .PHONY: unit unit-smoke unit-clang-smoke unit-sanitize-smoke $(addprefix unit-,$(UNIT_NAMES)) integration-c integration-nginx e2e unit-coverage clean
 
+# Rebuild a unit target when any src/ file it directly includes changes
+# (see -MMD -MP in targets.mk).  Files are generated next to each binary.
+-include $(wildcard build/unit/*.d)
+
 build/unit build/integration build/generated:
 	@mkdir -p $@
 
@@ -72,7 +76,18 @@ build/unit/%: unit/%_test.c include/test_common.h | build/unit build/generated
 	  request_bypass_production) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-parameter" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  inflight) extra_srcs="helpers/inflight_peer.c"; extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	esac; \
-	$(CC) $(CFLAGS_COMMON) $(LDFLAGS_COMMON) $$extra_cflags -o "$@" "$<" $$extra_srcs $$extra_ldflags
+	objs=""; \
+	i=0; \
+	for src in "$<" $$extra_srcs; do \
+	  i=$$((i + 1)); \
+	  obj="build/unit/$*-src$${i}.o"; \
+	  objs="$${objs} $${obj}"; \
+	  $(CC) $(CFLAGS_COMMON) $$extra_cflags -MT "$@" -c "$${src}" -o "$${obj}" || { \
+	    printf 'ERROR: failed to compile unit source %s\n' "$${src}" >&2; \
+	    exit 1; \
+	  }; \
+	done; \
+	$(CC) $(LDFLAGS_COMMON) -o "$@" $$objs $$extra_ldflags
 
 unit: $(UNIT_BINS)
 	@set -e; \
@@ -122,7 +137,7 @@ COV_DIR ?= build/coverage
 unit-coverage:
 	@$(MAKE) clean
 	@$(MAKE) unit \
-		CFLAGS_COMMON="-Wall -Wextra -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -g --coverage -std=$(CSTD) -Iinclude -I../../rust-converter/include" \
+		CFLAGS_COMMON="-Wall -Wextra -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -g --coverage -std=$(CSTD) -Iinclude -I../../rust-converter/include -MMD -MP" \
 		LDFLAGS_COMMON="--coverage"
 	@mkdir -p $(COV_DIR)
 	lcov --capture --directory build/unit --output-file $(COV_DIR)/raw.lcov \

@@ -18,7 +18,7 @@ changes:
 
 ```bash
 set -euo pipefail
-limits="$(nginx -T 2>/dev/null | awk '
+if ! limits="$(nginx -T 2>/dev/null | awk '
   /^[[:space:]]*markdown_limits[[:space:]]/ {
     line = $0
     if ($0 ~ /;/) {
@@ -38,13 +38,16 @@ limits="$(nginx -T 2>/dev/null | awk '
       in_limits = 0
     }
   }
-')"
+')"; then
+  echo "warning: nginx -T failed; continuing without markdown_limits validation" >&2
+  limits=""
+fi
 # Missing markdown_limits entries only print a note.  The validation must
 # not exit nonzero, or set -e would abort this diagnostic script before the
 # metrics capture below.
 printf '%s\n' "$limits" | awk '
   /conversion_memory=/ { conversion = 1 }
-  /parser_memory=/ { parser = 1 }
+  /parser_budget=/ { parser = 1 }
   /streaming_buffer=/ { streaming = 1 }
   END {
     if (!conversion && !parser && !streaming) {
@@ -139,8 +142,9 @@ bytes form a valid zlib header, such as the common `78 9c` prefix. A rare raw
 RFC 1951 stream can begin with the same two bytes by coincidence. Because the
 streaming path cannot replay input after it has consumed a chunk, it reports a
 decompression format error and follows `markdown_error_policy` instead of
-retrying with raw framing. This is an intentional fail-closed safety choice,
-not evidence that a valid zlib-wrapped response is corrupt. Prefer
+retrying with raw framing. The raw-framing retry is unavailable in this path.
+With the default `pass` policy, a pre-commit failure returns the original
+response. Prefer
 standards-compliant zlib-wrapped deflate when controlling the upstream encoder.
 
 ## Pre-commit fallback
@@ -167,7 +171,7 @@ curl -s -H 'Accept: text/plain; version=0.0.4' \
 ```
 
 If fallback is frequent, first review `markdown_limits conversion_memory=...`,
-`parser_memory=...`, `parser_timeout=...`, and `streaming_buffer=...`. Keep
+`parser_budget=...`, `parser_timeout=...`, and `streaming_buffer=...`. Keep
 the values bounded and remember that `streaming_buffer` is a total working-set
 and pre-commit replay budget, not a network chunk size. Change one setting at
 a time. Also inspect the
@@ -199,7 +203,7 @@ You configure the active limits as key/value entries:
 ```nginx
 markdown_limits decompressed_size=20m decompression_ratio=100
     conversion_memory=64m conversion_timeout=10s
-    parser_memory=32m parser_timeout=5s streaming_buffer=2m
+    parser_budget=32m parser_timeout=5s streaming_buffer=2m
     max_inflight=64;
 ```
 

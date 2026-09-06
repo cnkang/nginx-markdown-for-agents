@@ -34,7 +34,11 @@ Publication and artifact availability are separate release gates.
    if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
      # systemd-managed NGINX: wait for a confirmed shutdown.
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-     if sudo systemctl is-active --quiet nginx; then
+     drain_status=$?
+     # Abort when the drain hit the timeout, and require an explicit
+     # "inactive" state: any other nonzero is-active result (query failure,
+     # failed unit) must not be treated as a confirmed stop.
+     if [ "$drain_status" -eq 124 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
        echo "NGINX did not stop within 30s — investigate before continuing" >&2
        exit 1
      fi
@@ -73,13 +77,19 @@ Publication and artifact availability are separate release gates.
      exit 1
    fi
    sudo cp "$MODULE_091_ARTIFACT" \
+       "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" && \
+       sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \
        "$MODULES_DIR/ngx_http_markdown_filter_module.so"
    ```
 
    Or download the 0.9.1 binary from the GitHub release archive. Verify the
    `SHA256SUMS` and `SHA256SUMS.asc` files, confirming the signing key's
    fingerprint through an independent trusted source, before copying or
-   installing the binary.
+   installing the binary. Follow the standard verification block in
+   `docs/guides/PACKAGE_INSTALLATION.md` (isolated `GNUPGHOME`, fingerprint
+   check against `docs/guides/GPG_KEY_MANAGEMENT.md` §3, `VALIDSIG`
+   extraction from the Good-signature status line) — the one-sentence
+   summary here is not a substitute for that procedure.
 
 3. **Restore the matching 0.9.1 configuration:**
 
@@ -134,14 +144,18 @@ Publication and artifact availability are separate release gates.
    sudo nginx -s quit
    if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-     if sudo systemctl is-active --quiet nginx; then
+     drain_status=$?
+     # Abort when the drain hit the timeout, and require an explicit
+     # "inactive" state: any other nonzero is-active result (query failure,
+     # failed unit) must not be treated as a confirmed stop.
+     if [ "$drain_status" -eq 124 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
        echo "NGINX did not stop within 30s — investigate before continuing" >&2
        exit 1
      fi
    else
-     # systemctl unavailable or does not manage NGINX: verify that the
-     # manually managed master process has stopped before continuing.
-     if pgrep -f "nginx: master process" >/dev/null 2>&1; then
+     # systemctl unavailable or does not manage NGINX: verify with a bounded
+     # drain that no NGINX process remains before continuing.
+     if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
        echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
        exit 1
      fi
@@ -155,7 +169,10 @@ Publication and artifact availability are separate release gates.
      echo "ERROR: cannot locate the NGINX modules directory" >&2
      exit 1
    fi
-   sudo cp objs/ngx_http_markdown_filter_module.so "$MODULES_DIR/"
+   sudo cp objs/ngx_http_markdown_filter_module.so \
+       "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" && \
+   sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \
+       "$MODULES_DIR/ngx_http_markdown_filter_module.so"
    sudo nginx -t && sudo nginx
    ```
 
@@ -212,14 +229,18 @@ Key reversions:
 sudo nginx -s quit
 if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
   timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-  if sudo systemctl is-active --quiet nginx; then
+  drain_status=$?
+  # Abort when the drain hit the timeout, and require an explicit
+  # "inactive" state: any other nonzero is-active result (query failure,
+  # failed unit) must not be treated as a confirmed stop.
+  if [ "$drain_status" -eq 124 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
     echo "NGINX did not stop within 30s — investigate before continuing" >&2
     exit 1
   fi
 else
-  # systemctl unavailable or does not manage NGINX: verify that the
-  # manually managed master process has stopped before continuing.
-  if pgrep -f "nginx: master process" >/dev/null 2>&1; then
+  # systemctl unavailable or does not manage NGINX: verify with a bounded
+  # drain that no NGINX process remains before continuing.
+  if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
     echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
     exit 1
   fi
@@ -232,6 +253,8 @@ if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
   exit 1
 fi
 sudo cp /path/to/ngx_http_markdown_filter_module.so.0.9.0 \
+    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" && \
+sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \
     "$MODULES_DIR/ngx_http_markdown_filter_module.so"
 sudo nginx -t && sudo nginx
 ```

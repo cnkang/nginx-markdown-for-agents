@@ -26,6 +26,9 @@ class Pair:
 PAIRS: list[Pair] = []
 
 
+TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+
+
 MIRROR_NOTE_PATTERNS = [
     re.compile(r"^> Mirror copy\..*$"),
     re.compile(r"^This file is a local copy of the maintained testing documentation\..*$"),
@@ -74,14 +77,97 @@ def _trim_edge_blanks(lines: list[str]) -> None:
         lines.pop()
 
 
+def _is_table_separator(line: str) -> bool:
+    """Return whether a line contains only Markdown table separators."""
+    stripped = line.strip()
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        return False
+
+    cells = stripped[1:-1].split("|")
+    if not cells:
+        return False
+    for cell in cells:
+        token = cell.strip()
+        if token.startswith(":"):
+            token = token[1:]
+        if token.endswith(":"):
+            token = token[:-1]
+        if not token or any(character != "-" for character in token):
+            return False
+    return True
+
+
+def _table_block_at(lines: list[str], index: int) -> tuple[int, str] | None:
+    """Return the end index and normalized table at ``index``, if present."""
+    if index + 1 >= len(lines):
+        return None
+    if not TABLE_ROW.match(lines[index]) or not _is_table_separator(lines[index + 1]):
+        return None
+
+    end = index + 2
+    while end < len(lines) and TABLE_ROW.match(lines[end]):
+        end += 1
+    block = "\n".join(line.strip() for line in lines[index:end])
+    return end, block
+
+
+def _table_blocks(lines: list[str]) -> list[tuple[int, str]]:
+    """Return normalized Markdown table blocks with their one-based starts."""
+    blocks: list[tuple[int, str]] = []
+    index = 0
+    section = ""
+    while index < len(lines):
+        if lines[index].lstrip().startswith("#"):
+            section = lines[index].lstrip("# ").strip().lower()
+
+        table = _table_block_at(lines, index)
+        if table is None:
+            index += 1
+            continue
+
+        start = index
+        index, block = table
+        # Document-update tables are intentionally repeated boilerplate, not
+        # competing copies of a volatile contract.  Require a substantial
+        # table so common two-row reference tables do not become noise.
+        if (section != "document updates" and index - start >= 5
+                and len(block) >= 300):
+            blocks.append((start + 1, block))
+    return blocks
+
+
+def _find_duplicate_tables(root: Path) -> list[tuple[str, int, str, int]]:
+    """Find identical substantial Markdown tables across tracked docs."""
+    occurrences: dict[str, list[tuple[str, int]]] = {}
+    for path in sorted(root.rglob("*.md")):
+        relative_path = path.relative_to(root)
+        if relative_path.parts and relative_path.parts[0] in {
+            "harness",
+            "project",
+            "releases",
+        }:
+            continue
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line_number, block in _table_blocks(lines):
+            occurrences.setdefault(block, []).append(
+                (str(path.relative_to(root.parent)), line_number)
+            )
+
+    duplicates: list[tuple[str, int, str, int]] = []
+    for locations in occurrences.values():
+        paths = {path for path, _ in locations}
+        if len(paths) < 2:
+            continue
+        first_path, first_line = locations[0]
+        for other_path, other_line in locations[1:]:
+            duplicates.append((first_path, first_line, other_path, other_line))
+    return duplicates
+
+
 def main() -> int:
     """Check all configured duplicate pairs and report drift."""
     root = Path(__file__).resolve().parents[2]
     failures = 0
-
-    if not PAIRS:
-        print("No duplicate documentation pairs configured.")
-        return 0
 
     for pair in PAIRS:
         canonical_path = root / pair.canonical
@@ -118,11 +204,22 @@ def main() -> int:
                 break
             print(line)
 
+    duplicate_tables = _find_duplicate_tables(root / "docs")
+    for first_path, first_line, second_path, second_line in duplicate_tables:
+        failures += 1
+        print(
+            "DUPLICATE TABLE: "
+            f"{first_path}:{first_line} == {second_path}:{second_line}"
+        )
+
     if failures:
-        print(f"\nDuplicate documentation drift detected in {failures} pair(s).")
+        print(f"\nDuplicate documentation drift detected in {failures} finding(s).")
         return 1
 
-    print(f"\nAll {len(PAIRS)} duplicate documentation pairs are in sync.")
+    if PAIRS:
+        print(f"\nAll {len(PAIRS)} duplicate documentation pairs are in sync.")
+    else:
+        print("\nNo explicit duplicate pairs; generic table duplication scan passed.")
     return 0
 
 

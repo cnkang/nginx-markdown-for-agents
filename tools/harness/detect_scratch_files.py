@@ -35,6 +35,11 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+
+from tools.lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 
 # Basename patterns (case-insensitive, full match) that indicate scratch.
 SCRATCH_BASENAME_RE = re.compile(
@@ -61,9 +66,13 @@ ALLOWLIST = [
 
 
 def tracked_files() -> list[str] | None:
+    git = resolve_approved_executable("git")
+    if git is None:
+        print("ERROR approved git executable is unavailable", file=sys.stderr)
+        return None
     try:
         result = subprocess.run(
-            ["git", "ls-files", "-z"],
+            [git, "ls-files", "-z"],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
@@ -78,9 +87,13 @@ def tracked_files() -> list[str] | None:
 
 
 def staged_files() -> list[str] | None:
+    git = resolve_approved_executable("git")
+    if git is None:
+        print("ERROR approved git executable is unavailable", file=sys.stderr)
+        return None
     try:
         result = subprocess.run(
-            ["git", "diff", "--cached", "--name-only",
+            [git, "diff", "--cached", "--name-only",
              "--diff-filter=ACR", "-z"],
             cwd=REPO_ROOT,
             capture_output=True,

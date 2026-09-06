@@ -80,3 +80,124 @@ def test_comment_open_call_is_not_reported(tmp_path):
 
     assert errors == []
     assert warnings == []
+
+
+def test_fstring_open_argument_is_flagged_unaudited(tmp_path):
+    """open() fed an f-string must be reported as an unparsed sink,
+    not silently skipped."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(base):\n"
+        "    with open(f\"{base}/file.txt\") as stream:\n"
+        "        return stream.read()\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert len(warnings) == 1
+    assert "dynamic expression" in warnings[0]
+
+
+def test_open_string_literal_inside_fixture_is_not_flagged(tmp_path):
+    """open() text embedded in a string literal is not a call site."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "content = 'with open(\"tools/release-matrix.json\") as f:'\n"
+        "assert content\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert warnings == []
+
+
+def test_identifier_with_attribute_access_is_unaudited(tmp_path):
+    """open(args.filename) is a dynamic member, not a safe bare variable."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(args):\n"
+        "    with open(args.filename, encoding='utf-8') as stream:\n"
+        "        return stream.read()\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert len(warnings) == 1
+    assert "dynamic expression" in warnings[0]
+
+
+def test_trailing_comment_open_does_not_warn(tmp_path):
+    """open() text inside a trailing comment is not a live call site."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load():\n"
+        "    value = calculate()  # open(path) documented here\n"
+        "    return value\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert warnings == []
+
+
+def test_two_open_calls_on_one_line_both_reported(tmp_path):
+    """A later live open() after an earlier quoted one is still a sink."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(a, b):\n"
+        "    with open(a) as f1, open(b) as f2:\n"
+        "        return f1.read() + f2.read()\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert len(errors) == 2
+    assert any("open(a)" in e for e in errors)
+    assert any("open(b)" in e for e in errors)
+    assert warnings == []
+
+
+def test_os_open_fstring_argument_is_unaudited(tmp_path):
+    """os.open() fed an f-string is an unparsed sink, not a skip."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "import os\n"
+        "def open_base(base):\n"
+        "    fd = os.open(f\"{base}/data\", os.O_RDONLY)\n"
+        "    return fd\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert len(warnings) == 1
+    assert "dynamic expression" in warnings[0]
+
+
+def test_os_open_concatenated_argument_still_classified(tmp_path):
+    """os.open() with a concatenated root is treated like builtin open():
+    the root identifier is classified, so an unvalidated base is an
+    error rather than silently skipped."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "import os\n"
+        "def open_base(base):\n"
+        "    fd = os.open(base + '/data', os.O_RDONLY)\n"
+        "    return fd\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert len(errors) == 1
+    assert "base" in errors[0]
+    assert warnings == []

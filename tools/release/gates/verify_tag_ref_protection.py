@@ -26,6 +26,13 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from tools.lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 
 REQUIRED_INCLUDE_PATTERN = "refs/tags/v*"
 REQUIRED_RULE_TYPES = frozenset({"deletion", "non_fast_forward", "update"})
@@ -70,9 +77,12 @@ class GitResolutionError(Exception):
 
 def _repository_from_origin() -> str:
     """Resolve the repository from the checkout's origin remote."""
+    git = resolve_approved_executable("git")
+    if git is None:
+        raise GitResolutionError("approved git executable is unavailable")
     try:
         result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
+            [git, "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
             check=False,

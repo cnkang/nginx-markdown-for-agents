@@ -21,8 +21,8 @@ Usage:
     directory defaults to project root
 
 Exit codes:
-  0 — no warnings found
-  1 — one or more warnings found
+  0 — no violations found
+  1 — one or more contract violations found
 """
 
 import re

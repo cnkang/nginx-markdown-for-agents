@@ -939,6 +939,21 @@ test_json_dynconf_state_branches(void)
     TEST_ASSERT(strstr(json, "\"last_error\":\"parse failed\"") != NULL,
                 "INVALID_NO_LKG branch should render last_error string");
 
+    /* Invalid UTF-8 must be escaped as byte values so the JSON remains
+     * valid. */
+    dynconf.last_error[0] = 'b';
+    dynconf.last_error[1] = 'a';
+    dynconf.last_error[2] = 'd';
+    dynconf.last_error[3] = 0xc3;
+    dynconf.last_error[4] = '(';
+    dynconf.last_error_len = 5;
+    memset(&b, 0, sizeof(b));
+    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+    TEST_ASSERT(rc == NGX_OK, "invalid UTF-8 diagnostics build should succeed");
+    json = (const char *) b.pos;
+    TEST_ASSERT(strstr(json, "\"last_error\":\"bad\\u00c3(\"") != NULL,
+                "invalid UTF-8 should be escaped in diagnostics JSON");
+
     /* Disabled/other: every field null including last_error. */
     memset(&dynconf, 0, sizeof(dynconf));
     dynconf.state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_DISABLED;

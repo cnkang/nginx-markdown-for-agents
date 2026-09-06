@@ -146,7 +146,7 @@ Configure alerts based on these thresholds:
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
 | Failure rate | > 10% for 5 minutes | Page on-call engineer |
-| System error rate | > 1% for 5 minutes | Page on-call engineer |
+| System error rate (nginx_markdown_requests_total{reason="ffi_panic"}) | > 1% for 5 minutes | Page on-call engineer |
 | Conversion time (p95) | > 500ms for 10 minutes | Page on-call engineer |
 | Module crash | Worker restart detected | Page on-call engineer |
 
@@ -155,7 +155,7 @@ Configure alerts based on these thresholds:
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
 | Failure rate | > 5% for 10 minutes | Notify team channel |
-| Resource limit rate | > 5% for 10 minutes | Notify team channel |
+| Resource limit rate (nginx_markdown_requests_total{reason=~"memory_budget_exceeded|timeout|budget_exceeded"}) | > 5% for 10 minutes | Notify team channel |
 | Conversion time (p95) | > 200ms for 15 minutes | Notify team channel |
 | Memory usage | > 80% of limit | Notify team channel |
 
@@ -717,7 +717,7 @@ systemctl restart nginx
 5. **Prevent recurrence:**
 ```nginx
 # Reduce resource limits
-    markdown_limits conversion_memory=5m parser_memory=5m conversion_timeout=3s parser_timeout=3s;
+    markdown_limits conversion_memory=5m parser_budget=5m conversion_timeout=3s parser_timeout=3s;
 
 # Enable fail-open
 markdown_error_policy pass;
@@ -1178,7 +1178,7 @@ These examples show what operators will see in `/var/log/nginx/error.log`. The e
 #### Conversion failed open (warn verbosity or higher)
 
 ```text
-2025/01/15 14:30:27 [warn] 1234#0: *569 markdown: outcome=failed_open stage=conversion reason=failed_open event=- method=GET uri=/blog/post-1 content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /blog/post-1 HTTP/1.1", upstream: "http://127.0.0.1:8080/blog/post-1", host: "example.com"
+2025/01/15 14:30:27 [warn] 1234#0: *569 markdown: outcome=failed_open stage=delivery reason=failed_open event=- method=GET uri=/blog/post-1 content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /blog/post-1 HTTP/1.1", upstream: "http://127.0.0.1:8080/blog/post-1", host: "example.com"
 ```
 
 #### Debug extended format
@@ -1269,7 +1269,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 ```bash
 # Extract URIs that failed conversion
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E 'reason=(failed_open|failed_closed)' | \
+  grep -E 'outcome=(failed_open|failed_closed|aborted)' | \
   sed -nE 's/.*uri=([^ ]+).*/\1/p' | sort | uniq -c | sort -rn
 ```
 
@@ -1356,7 +1356,7 @@ plain-text metric fields are part of the 0.9.2 contract.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-01 | Hermes | Align failed-outcome queries and outcome field with aborted; memory_budget_exceeded refers only to conversion_memory; parser_memory maps to budget_exceeded |
+| 0.9.2 | 2026-09-01 | Hermes | Align failed-outcome queries and outcome field with aborted; memory_budget_exceeded refers only to conversion_memory; parser_budget maps to budget_exceeded |
 | 0.9.2 | 2026-08-24 | Hermes | memory_budget_exceeded log pattern description now refers only to memory-limit failures |
 | 0.9.2 | 2026-08-15 | Hermes | Update failure categories to conversion_error, memory_budget_exceeded, timeout, and ffi_panic |
 | 0.9.2 | 2026-08-08 | Kang | Added missing nginx_markdown_streaming_peak_memory_bytes metric row |

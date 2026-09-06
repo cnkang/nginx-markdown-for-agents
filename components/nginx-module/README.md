@@ -52,8 +52,11 @@ For canonical architecture and repository-layout notes, prefer [../../docs/archi
 
 ## Removed: Streaming Threshold Directive (`markdown_stream_threshold`)
 
-The 0.9.2 release removed the `markdown_stream_threshold` directive and
-threshold-based routing. Since 0.9.2 the `markdown_streaming off|auto|force`
+The 0.9.2 release removed the `markdown_stream_threshold` directive, so
+operators can no longer configure the routing threshold. The `auto` policy
+retains an internal fixed 1 MiB routing threshold: responses below it take
+the full-buffer path, while larger or unknown-length responses are
+streaming candidates. Since 0.9.2 the `markdown_streaming off|auto|force`
 directive selects the processing path, and `markdown_limits
 streaming_buffer=` controls buffering. `markdown_limits` uses the current
 keys, for example `conversion_memory=` for the full-buffer memory ceiling.

@@ -40,7 +40,9 @@ Examples:
     --image-reference nginx:1.31.4 --image-digest sha256:DIGEST \
     --module-sha FULL_40_HEX_COMMIT_SHA \
     --image-name nginx-markdown-official-check:1.31.4-debian12-glibc-amd64
-  $(basename "$0") --artifact-dir /tmp/official-nginx-docker/row
+  $(basename "$0") --nginx-tag 1.31.4 --expected-nginx-version 1.31.4 \
+    --image-digest sha256:DIGEST \
+    --module-sha FULL_40_HEX_COMMIT_SHA --artifact-dir /tmp/official-nginx-docker/row
 
 Environment variables:
   NGINX_TAG   Default: mainline
@@ -265,7 +267,11 @@ append_step_summary() {
     echo "- Expected NGINX version: \`${EXPECTED_NGINX_VERSION}\`"
     echo "- Actual NGINX version: \`${ACTUAL_NGINX_VERSION:-<not-checked>}\`"
     echo "- Image reference: \`${IMAGE_REFERENCE}\`"
-    echo "- Image digest: \`${IMAGE_DIGEST}\`"
+    if [[ "${IMAGE_BINDING_ESTABLISHED}" -eq 1 ]]; then
+      echo "- Image digest: \`${IMAGE_DIGEST}\`"
+    else
+      echo "- Image digest binding: not established"
+    fi
     echo "- Platform: \`${MATRIX_OS:-<not-provided>}/${MATRIX_LIBC:-<not-provided>}/${MATRIX_ARCH:-<not-provided>}\`"
     echo "- Image: \`${IMAGE_NAME}\`"
     echo "- Module ref: \`${MODULE_REF}\`"

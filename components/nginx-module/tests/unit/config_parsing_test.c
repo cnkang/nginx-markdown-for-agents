@@ -12,9 +12,9 @@
 #define FLAVOR_GFM 1
 #define AUTH_ALLOW 0
 #define AUTH_DENY 1
-#define CACHE_VALIDATION_NONE    0
+#define CACHE_VALIDATION_DISABLED          0
 #define CACHE_VALIDATION_IF_MODIFIED_SINCE 1
-#define CACHE_VALIDATION_DISABLED          2
+#define CACHE_VALIDATION_FULL              2
 
 typedef struct {
     int markdown_filter;

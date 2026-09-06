@@ -36,7 +36,7 @@ Required:
 - `make test-e2e-rust` builds and runs the Rust harness migrated suite.
   `make test-rust` continues to refer only to the Rust converter test suite.
 - Every migrated scenario must have a parity entry in
-  `docs/project/0.6.3-e2e-parity.md` documenting the shell source,
+  `docs/project/history/0.6.3-e2e-parity.md` documenting the shell source,
   Rust scenario, case mapping, and any parity gaps.
 
 Verification:

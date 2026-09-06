@@ -49,7 +49,7 @@ Before contributing, ensure you have:
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
     # Install cbindgen
-    cargo install cbindgen --version 0.29.2 --locked
+    cargo install cbindgen --version 0.29.4 --locked
    ```
 
 3. **Build the project:**
