@@ -9,6 +9,7 @@ Source0:        %{name}-%{version}.tar.gz
 
 Requires:       nginx-r%{nginx_version}
 Requires:       nginx >= 1:%{nginx_version}
+Requires:       bash
 Conflicts:      nginx >= 1:%{nginx_version_ceil}
 
 %description
@@ -140,6 +141,10 @@ EOF
 # The exact token has no trailing newline and is consumed after one use, so
 # every affected removal transaction stays explicit.
 %preun
+# Use fixed system paths in this root-run scriptlet; never inherit a
+# caller's PATH when invoking the trusted preremove helper.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 if [ "$1" -eq 0 ]; then
     /bin/bash /usr/libexec/nginx-markdown-for-agents/preremove.sh remove
 fi

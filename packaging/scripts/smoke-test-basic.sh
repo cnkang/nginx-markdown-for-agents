@@ -176,7 +176,7 @@ remove_module_package() {
     esac
     # Propagate the package-manager exit status: an unconditional
     # `return 0` here would mask a failed module removal and let the
-    # lifecycle continue as if the package were gone (P1-8).
+    # lifecycle continue as if the package were gone.
     return "$?"
 }
 
@@ -342,7 +342,7 @@ CONF
 
     cat > "$negative_conf" <<CONF
 pid ${smoke_prefix}/negative.pid;
-error_log ${negative_log} notice;
+error_log ${smoke_prefix}/negative-error.log notice;
 daemon off;
 worker_processes 1;
 events { worker_connections 64; }

@@ -296,6 +296,9 @@ class TestGenerateManifest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, "expected failure without any version")
         # The failure must be the controlled 'no version' error, not a KeyError.
         self.assertIn("version", result.stderr.lower())
+        # A regression must fail with the controlled error message, not an
+        # unhandled Python traceback dumped on stderr.
+        self.assertNotIn("Traceback (most recent call last)", result.stderr)
 
 
 class TestValidateManifest(unittest.TestCase):
