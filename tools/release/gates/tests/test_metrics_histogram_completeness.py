@@ -88,7 +88,7 @@ def test_renderer_boundaries_match_registry() -> None:
     )
     assert match is not None, "renderer bucket boundary array is missing"
     bucket_body = match.group(1)
-    boundaries = [float(v) for v in re.findall(r'"([0-9.]+)"', bucket_body)]
+    boundaries = [float(v) for v in re.findall(r'"([^"]*)"', bucket_body)]
     assert boundaries == [float(value) for value in HISTOGRAM["bucket_boundaries"]]
     assert len(boundaries) == HISTOGRAM["bucket_count"]
 
