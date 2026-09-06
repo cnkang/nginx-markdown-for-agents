@@ -36,14 +36,20 @@ from lib.path_validation import validate_read_path
 C_EXTENSIONS = {".c", ".h"}
 
 
-def _handle_in_string(content: str, i: int, length: int, string_char: str) -> tuple[int, bool, str | None]:
-    """Process characters inside a string literal. Returns (new_i, in_string, string_char)."""
+def _handle_in_string(content: str, i: int, length: int, string_char: str) -> tuple[int, bool, str | None, int]:
+    """Process characters inside a string literal.
+
+    Returns (new_i, in_string, string_char, line_delta). line_delta is 1
+    when the skipped escape span contains a real newline (a backslash
+    continuation), so the caller can keep line numbers accurate.
+    """
     char = content[i]
     if char == "\\" and i + 1 < length:
-        return i + 2, True, string_char
+        line_delta = 1 if content[i + 1] == "\n" else 0
+        return i + 2, True, string_char, line_delta
     if char == string_char:
-        return i + 1, False, None
-    return i + 1, True, string_char
+        return i + 1, False, None, 0
+    return i + 1, True, string_char, 0
 
 
 def _handle_in_comment(content: str, i: int, length: int) -> tuple[int, bool]:
@@ -106,7 +112,8 @@ def _scan_file(path: Path) -> list[tuple[int, str]]:
             line_num += 1
 
         if in_string and string_char is not None:
-            i, in_string, string_char = _handle_in_string(content, i, length, string_char)
+            i, in_string, string_char, line_delta = _handle_in_string(content, i, length, string_char)
+            line_num += line_delta
             continue
 
         if in_block_comment:

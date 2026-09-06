@@ -136,7 +136,7 @@ while IFS= read -r -d '' file; do
             tail_code=$(sed -n "${window_start},${window_end}p" "$file")
 
             # Whole-init present?
-            if echo "$tail_code" | grep -qE "memset[[:space:]]*\(&${var_name}|memzero[[:space:]]*\(&${var_name}|${var_name}[[:space:]]*=[[:space:]]*\{|${var_name}[[:space:]]*=[[:space:]]*0;|_init[[:space:]]*\(&${var_name}|init_[a-z_]+[[:space:]]*\([^;]*&${var_name}"; then
+            if echo "$tail_code" | grep -qE "memset[[:space:]]*\(&${var_name}|memzero[[:space:]]*\(&${var_name}|(^|[^[:alnum:]_])${var_name}[[:space:]]*=[[:space:]]*\{|(^|[^[:alnum:]_])${var_name}[[:space:]]*=[[:space:]]*0;|_init[[:space:]]*\(&${var_name}|init_[a-z_]+[[:space:]]*\([^;]*&${var_name}"; then
                 continue
             fi
 

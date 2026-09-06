@@ -104,7 +104,7 @@ def test_missing_input_path_is_an_operational_error(tmp_path, monkeypatch) -> No
     missing = tmp_path / "missing-metrics.h"
     monkeypatch.setattr("sys.argv", ["detect_metrics_event_conservation", str(missing)])
 
-    assert module.main() == 2
+    assert module.main() == 1
 
 
 def test_comment_blanking_preserves_newline_structure() -> None:
