@@ -691,6 +691,13 @@ ngx_http_markdown_restore_conditional_request(
     g_restore_calls++;
 }
 
+void
+ngx_http_markdown_restore_orphan_conditional_request(ngx_http_request_t *r)
+{
+    UNUSED(r);
+    g_restore_calls++;
+}
+
 ngx_int_t
 ngx_http_markdown_adopt_orphan_conditional_headers(
     ngx_http_request_t *r, size_t scan_limit,

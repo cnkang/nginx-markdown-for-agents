@@ -898,8 +898,15 @@ ngx_http_markdown_handle_preaccess_adoption_failure(
                   "markdown: conditional validator adoption "
                   "exceeded the configured request buffer limit");
     /* Restore captured validators before exposing a uniform pass-through
-     * state to the error handlers or durable bypass. */
+     * state to the error handlers or durable bypass.  On a main request
+     * whose context is gone (internal redirect), the ctx-based restore is
+     * a no-op and the suppressed orphans would leak into the fail-open
+     * pass-through with their validators still hidden — restore them
+     * directly from the side table.  Both calls are no-ops when nothing
+     * was suppressed, and a live ctx never carries orphan entries the
+     * ctx-based pass has not already restored. */
     ngx_http_markdown_restore_conditional_request(r, ctx);
+    ngx_http_markdown_restore_orphan_conditional_request(r);
     failure_rc = ngx_http_markdown_handle_preaccess_failure(
         r, ctx, conf, eff);
     if (failure_rc != NGX_DECLINED) {

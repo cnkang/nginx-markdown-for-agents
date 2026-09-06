@@ -269,19 +269,83 @@ ngx_http_markdown_adopt_first_restored(
 }
 
 /*
- * Validate every suppressed candidate of one header name without
- * mutating anything.  Returns NGX_OK when all candidates (if any) are
+ * Restore every suppressed entry of one conditional header name directly
+ * from the request-pool side table.  A suppressed entry (hash == 0, zeroed
+ * length) that has a side-table record is an orphan of this module's own
+ * suppression; restore its original hash and length exactly.  Entries
+ * without a side-table record were never touched by this module and are
+ * left alone.
+ */
+static void
+ngx_http_markdown_restore_suppressed_name(ngx_http_request_t *r,
+    u_char *name, size_t name_len)
+{
+    if (r == NULL || name == NULL || name_len == 0) {
+        return;
+    }
+    if (r->headers_in.headers.part.nelts == 0) {
+        return;
+    }
+
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+        const ngx_http_markdown_conditional_side_state_t  *state;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return;
+        }
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].key.data == NULL
+                || headers[i].key.len != name_len
+                || ngx_strncasecmp(headers[i].key.data, name, name_len) != 0)
+            {
+                continue;
+            }
+
+            if (headers[i].hash != 0
+                || headers[i].value.len != 0
+                || headers[i].value.data == NULL)
+            {
+                continue;
+            }
+
+            state = ngx_http_markdown_conditional_side_state_find(
+                r, &headers[i]);
+            if (state == NULL) {
+                continue;
+            }
+
+            headers[i].hash = state->original_hash;
+            headers[i].value.len = state->original_value_len;
+        }
+    }
+}
+
+/*
+ * Validate every suppressed candidate of one header name without mutating
+ * anything, and count them.  Returns NGX_OK when all candidates (if any) are
  * safely adoptable, NGX_ERROR when a saved value exceeds the bounded request
- * header limit.  Used to make cross-name adoption atomic: both name sets must
- * validate before either is committed.
+ * header limit.  On NGX_OK, *pending_count receives the number of suppressed
+ * entries this name would adopt, so the caller can size the rollback state
+ * from the actual candidate count instead of a fixed snapshot capacity.
+ * Used to make cross-name adoption atomic: all name sets must validate
+ * before any is committed.
  */
 static ngx_int_t
 ngx_http_markdown_validate_conditional_candidates(ngx_http_request_t *r,
-    u_char *name, size_t name_len, size_t adoption_limit)
+    u_char *name, size_t name_len, size_t adoption_limit,
+    ngx_uint_t *pending_count)
 {
-    if (r == NULL || name == NULL || name_len == 0) {
+    if (r == NULL || name == NULL || name_len == 0
+        || pending_count == NULL)
+    {
         return NGX_ERROR;
     }
+    *pending_count = 0;
     if (r->headers_in.headers.part.nelts == 0) {
         return NGX_OK;
     }
@@ -321,20 +385,22 @@ ngx_http_markdown_validate_conditional_candidates(ngx_http_request_t *r,
             if (state->original_value_len > adoption_limit) {
                 return NGX_ERROR;
             }
+
+            (*pending_count)++;
         }
     }
 
     return NGX_OK;
 }
 
-/* Bounded rollback stack for cross-name atomic adoption (Rule 39):
+/* Rollback snapshot for cross-name atomic adoption (Rule 39):
  * if any commit step fails midway, every mutated entry must return to
- * its suppressed state.  The stack capacity is fixed; the validation
- * pass runs first, so a realistic commit failure is a defensive
- * TOCTOU check, and the bounded snapshot must fail BEFORE mutating
+ * its suppressed state.  The snapshot is allocated from the request pool
+ * with one slot per validated candidate (the validation pass counts the
+ * pending entries before any mutation), so capacity is always sufficient
+ * and the commit path cannot exhaust it — a commit failure is a defensive
+ * TOCTOU check, and the request-pool snapshot must fail BEFORE mutating
  * anything rather than silently truncating rollback state. */
-#define NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX  16
-
 typedef struct {
     ngx_table_elt_t  *entry;
     ngx_uint_t        original_hash;
@@ -351,6 +417,7 @@ typedef struct {
     size_t                              adoption_limit;
     ngx_uint_t                         *adopted_count;
     ngx_uint_t                         *rollback_count;
+    ngx_uint_t                          rollback_capacity;
     ngx_http_markdown_adopt_rollback_t *rollback;
 } ngx_http_markdown_adopt_ctx_t;
 
@@ -395,9 +462,14 @@ ngx_http_markdown_commit_conditional_header(
         return NGX_OK;
     }
 
-    if (state->original_value_len > ctx->adoption_limit
-        || *ctx->rollback_count >= NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX)
-    {
+    if (state->original_value_len > ctx->adoption_limit) {
+        return NGX_ERROR;
+    }
+
+    if (*ctx->rollback_count >= ctx->rollback_capacity) {
+        /* Defensive TOCTOU guard: the validation pass sized this snapshot
+         * for exactly these candidates, so this is unreachable unless the
+         * header list changed concurrently.  Fail before mutating. */
         return NGX_ERROR;
     }
 
@@ -475,8 +547,12 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     ngx_table_elt_t  *ius;
     ngx_uint_t       adopted_count;
     ngx_uint_t       rollback_count;
-    ngx_http_markdown_adopt_rollback_t  rollback[
-        NGX_HTTP_MARKDOWN_ADOPT_ROLLBACK_MAX];
+    ngx_uint_t       pending_inm;
+    ngx_uint_t       pending_ims;
+    ngx_uint_t       pending_im;
+    ngx_uint_t       pending_ius;
+    ngx_uint_t       pending_total;
+    ngx_http_markdown_adopt_rollback_t  *rollback;
     ngx_http_markdown_adopt_ctx_t  ctx;
     size_t             adoption_limit;
     ngx_int_t        inm_rc;
@@ -493,23 +569,27 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     ctx.adoption_limit = adoption_limit;
     ctx.adopted_count = &adopted_count;
     ctx.rollback_count = &rollback_count;
-    ctx.rollback = rollback;
+    ctx.rollback = NULL;
+    ctx.rollback_capacity = 0;
 
     /*
      * Cross-name atomic adoption: validate ALL suppressed sets before
      * committing any.  A failure in one name must leave the request
      * headers entirely unchanged — restoring If-None-Match and then
      * failing on If-Modified-Since would expose a partially re-owned
-     * validator set to the next PREACCESS pass.
+     * validator set to the next PREACCESS pass.  Each pass also counts
+     * its pending candidates so the rollback snapshot can be sized
+     * exactly (no fixed capacity cap).
      */
+    pending_total = 0;
     inm_rc = ngx_http_markdown_validate_conditional_candidates(
-        r, inm_name, sizeof(inm_name) - 1, adoption_limit);
+        r, inm_name, sizeof(inm_name) - 1, adoption_limit, &pending_inm);
     ims_rc = ngx_http_markdown_validate_conditional_candidates(
-        r, ims_name, sizeof(ims_name) - 1, adoption_limit);
+        r, ims_name, sizeof(ims_name) - 1, adoption_limit, &pending_ims);
     im_rc = ngx_http_markdown_validate_conditional_candidates(
-        r, im_name, sizeof(im_name) - 1, adoption_limit);
+        r, im_name, sizeof(im_name) - 1, adoption_limit, &pending_im);
     ius_rc = ngx_http_markdown_validate_conditional_candidates(
-        r, ius_name, sizeof(ius_name) - 1, adoption_limit);
+        r, ius_name, sizeof(ius_name) - 1, adoption_limit, &pending_ius);
     if (inm_rc != NGX_OK || ims_rc != NGX_OK
         || im_rc != NGX_OK || ius_rc != NGX_OK)
     {
@@ -518,6 +598,30 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
         r->headers_in.if_match = NULL;
         r->headers_in.if_unmodified_since = NULL;
         return NGX_ERROR;
+    }
+
+    pending_total = pending_inm + pending_ims + pending_im + pending_ius;
+    if (pending_total > (ngx_uint_t) (-1) / sizeof(*rollback)) {
+        /* Count itself would overflow the allocation size. */
+        r->headers_in.if_none_match = NULL;
+        r->headers_in.if_modified_since = NULL;
+        r->headers_in.if_match = NULL;
+        r->headers_in.if_unmodified_since = NULL;
+        return NGX_ERROR;
+    }
+
+    if (pending_total != 0) {
+        rollback = ngx_palloc(r->pool,
+                              pending_total * sizeof(*rollback));
+        if (rollback == NULL) {
+            r->headers_in.if_none_match = NULL;
+            r->headers_in.if_modified_since = NULL;
+            r->headers_in.if_match = NULL;
+            r->headers_in.if_unmodified_since = NULL;
+            return NGX_ERROR;
+        }
+        ctx.rollback = rollback;
+        ctx.rollback_capacity = pending_total;
     }
 
     adopted_count = 0;
@@ -536,7 +640,7 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     {
         /* Undo every entry already adopted by the failing pass so the
          * request headers are left exactly as they were (Rule 39). */
-        ngx_http_markdown_adopt_rollback_all(rollback, rollback_count);
+        ngx_http_markdown_adopt_rollback_all(ctx.rollback, rollback_count);
         r->headers_in.if_none_match = NULL;
         r->headers_in.if_modified_since = NULL;
         r->headers_in.if_match = NULL;
@@ -1646,6 +1750,46 @@ ngx_http_markdown_restore_conditional_request(
 
     ngx_http_markdown_restore_captured_conditional_headers(r, ctx);
     ctx->conditional.suppressed = 0;
+}
+
+/*
+ * Restore every suppressed orphan validator directly from the request-pool
+ * side table, without a module context.
+ *
+ * Failure routes run after an internal redirect may find the module context
+ * cleared (r->ctx memzeroed) while the capture's suppressed request-header
+ * entries (hash == 0, zeroed length) survive on the request.  The fail-open
+ * invariant requires the source representation to be forwarded with its
+ * original HTTP validators intact: leaving the orphans suppressed would turn
+ * an intended 304 into a 200 with a full body, and an intended 412 into a
+ * silently bypassed precondition.  Every side-table entry is restored —
+ * a request may legitimately carry repeated validator fields.
+ *
+ * Suppressed entries are identifiable without ctx: only capture/adopt
+ * suppression clears the hash while keeping the key, so every entry matching
+ * a conditional name with hash == 0 and a side-table record is an orphan of
+ * this module's own suppression.
+ */
+void
+ngx_http_markdown_restore_orphan_conditional_request(ngx_http_request_t *r)
+{
+    static u_char  inm_name[] = "If-None-Match";
+    static u_char  ims_name[] = "If-Modified-Since";
+    static u_char  im_name[] = "If-Match";
+    static u_char  ius_name[] = "If-Unmodified-Since";
+
+    if (r == NULL) {
+        return;
+    }
+
+    ngx_http_markdown_restore_suppressed_name(r, inm_name,
+                                              sizeof(inm_name) - 1);
+    ngx_http_markdown_restore_suppressed_name(r, ims_name,
+                                              sizeof(ims_name) - 1);
+    ngx_http_markdown_restore_suppressed_name(r, im_name,
+                                              sizeof(im_name) - 1);
+    ngx_http_markdown_restore_suppressed_name(r, ius_name,
+                                              sizeof(ius_name) - 1);
 }
 
 /*

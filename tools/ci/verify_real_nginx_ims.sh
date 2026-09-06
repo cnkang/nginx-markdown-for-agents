@@ -8,7 +8,8 @@
 #   1. A Markdown-negotiated response returns 200 with correct Content-Type,
 #      a Markdown-derived ETag, and NO source HTML Last-Modified header.
 #   2. If-None-Match carrying the returned Markdown ETag yields 304;
-#      an unknown ETag yields 200.
+#      an unknown ETag yields 200.  17 repeated If-None-Match fields (more
+#      than the historical rollback capacity) still validate to 304.
 #   3. If-Modified-Since carrying the source HTML mtime never yields 304
 #      for a converted response — conversion runs and delivers fresh 200.
 #   4. If-Match failures return 412, weak tags are rejected, and '*' passes;
@@ -390,6 +391,25 @@ echo "==> Running conditional-request validation scenario"
 
   [[ "${code2}" == "304" ]] || { echo "Expected matching ETag response 304, got ${code2}" >&2; exit 1; }
   [[ "${code3}" == "200" ]] || { echo "Expected unknown ETag response 200, got ${code3}" >&2; exit 1; }
+
+  # 2b. Repeated If-None-Match fields: the module must restore every
+  #     suppressed entry (17 exceeds the historical fixed rollback capacity)
+  #     and still validate the converted response against its ETag.  A
+  #     count-capped or capacity-capped adoption would turn the 304 into a
+  #     full-body 200 with the validators hidden.
+  inm_fields=()
+  for i in $(seq 1 17); do
+    inm_fields+=(-H "If-None-Match: ${etag}")
+  done
+  code2r="$(curl -sS -D resp2r.headers -o resp2r.body \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    "${inm_fields[@]}" \
+    "http://127.0.0.1:${PORT}/index.html" \
+    -w "${HTTP_CODE_FORMAT}")"
+  [[ "${code2r}" == "304" ]] || {
+    echo "Expected 17x repeated matching If-None-Match to yield 304, got ${code2r}" >&2
+    exit 1
+  }
 
   # curl creates an empty file for a 304 with -o on most platforms; accept missing or empty.
   if [[ -f resp2.body && -s resp2.body ]]; then
