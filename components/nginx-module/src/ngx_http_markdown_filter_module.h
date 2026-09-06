@@ -1954,6 +1954,15 @@ ngx_int_t ngx_http_markdown_capture_conditional_request(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
 void ngx_http_markdown_restore_conditional_request(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
+/*
+ * Restore suppressed validators without a module context, straight from the
+ * request-pool side table.  Used on failure routes that may run after an
+ * internal redirect cleared r->ctx: the fail-open invariant requires the
+ * source representation to be forwarded with its original HTTP validators,
+ * so suppressed orphans must never leak into a pass-through response.
+ */
+void ngx_http_markdown_restore_orphan_conditional_request(
+    ngx_http_request_t *r);
 /* Re-adopt suppressed validators orphaned by an internal redirect that
  * cleared the module context. */
 ngx_int_t ngx_http_markdown_adopt_orphan_conditional_headers(

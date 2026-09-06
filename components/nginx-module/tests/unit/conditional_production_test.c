@@ -730,16 +730,18 @@ create_header_list(void)
     if (list == NULL) return NULL;
     memset(list, 0, sizeof(*list));
 
+    /* 32 slots: the repeated-validator capacity test needs more than the
+     * legacy 16-entry snapshot size in a single list. */
     elts = (ngx_table_elt_t *) ngx_palloc(NULL,
-        sizeof(ngx_table_elt_t) * 16);
+        sizeof(ngx_table_elt_t) * 32);
     if (elts == NULL) return NULL;
-    memset(elts, 0, sizeof(ngx_table_elt_t) * 16);
+    memset(elts, 0, sizeof(ngx_table_elt_t) * 32);
 
     list->part.elts = elts;
     list->part.nelts = 0;
     list->part.next = NULL;
     list->size = sizeof(ngx_table_elt_t);
-    list->nalloc = 16;
+    list->nalloc = 32;
     return list;
 }
 
@@ -1667,6 +1669,141 @@ test_adopt_orphan_rejects_saved_length_over_limit(void)
     TEST_ASSERT(r->headers_in.if_none_match == NULL,
                 "typed pointer is not rebuilt after rejection");
     TEST_PASS("orphan adoption rejects saved length over limit");
+}
+
+/*
+ * Rollback-capacity regression: more than the historical fixed snapshot
+ * capacity (16) of pending candidates must adopt successfully now that the
+ * snapshot is sized from the validation pass instead of a constant.  17
+ * short If-None-Match entries + 15 If-Modified-Since entries = 32 pending
+ * rollbacks, covering both the count-cap removal and a multi-name sum.
+ */
+static void
+test_adopt_orphan_beyond_legacy_capacity(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conditional_ownership_t ownership;
+    ngx_table_elt_t *first_inm;
+    ngx_table_elt_t *first_ims;
+    enum { INM_COUNT = 17, IMS_COUNT = 15 };
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    first_inm = NULL;
+    first_ims = NULL;
+    for (int i = 0; i < INM_COUNT; i++) {
+        ngx_table_elt_t *h = add_header(&r->headers_in.headers,
+                                        "if-none-match", "\"v\"");
+        if (h == NULL) { TEST_FAIL("inm header alloc failed"); return; }
+        if (first_inm == NULL) {
+            first_inm = h;
+        }
+    }
+    for (int i = 0; i < IMS_COUNT; i++) {
+        ngx_table_elt_t *h = add_header(&r->headers_in.headers,
+                                        "If-Modified-Since", "date");
+        if (h == NULL) { TEST_FAIL("ims header alloc failed"); return; }
+        if (first_ims == NULL) {
+            first_ims = h;
+        }
+    }
+    r->headers_in.if_none_match = first_inm;
+    r->headers_in.if_modified_since = first_ims;
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "all repeated validators are captured");
+    TEST_ASSERT(first_inm->hash == 0 && first_ims->hash == 0,
+                "captured entries are hidden");
+
+    /* Internal redirect loses the context; adoption must restore every
+     * entry even though the total exceeds the legacy snapshot capacity. */
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&ownership, 0, sizeof(ownership));
+    TEST_ASSERT(ngx_http_markdown_adopt_orphan_conditional_headers(
+                    r, NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT,
+                    &ownership) == NGX_OK,
+                "adoption beyond the legacy snapshot capacity succeeds");
+    TEST_ASSERT(ownership.entry_count == INM_COUNT + IMS_COUNT,
+                "ownership records every adopted entry");
+    TEST_ASSERT(first_inm->hash != 0 && first_ims->hash != 0,
+                "first entries of both names are restored");
+    TEST_ASSERT(r->headers_in.if_none_match == first_inm
+                && r->headers_in.if_modified_since == first_ims,
+                "typed pointers are rebuilt from the first entries");
+
+    /* Every single entry must be visible again, not just the heads. */
+    ngx_uint_t restored = 0;
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t *headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash != 0) {
+                restored++;
+            }
+        }
+    }
+    TEST_ASSERT(restored == INM_COUNT + IMS_COUNT,
+                "every adopted entry regains visibility");
+
+    TEST_PASS("orphan adoption handles more entries than the legacy capacity");
+}
+
+/*
+ * Failure-route invariant: restoring without a module context (the
+ * internal-redirect case) must un-suppress every side-table orphan, so a
+ * fail-open pass-through carries the original validators instead of
+ * silently bypassing 304/412 semantics.
+ */
+static void
+test_restore_orphan_conditional_request(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *inm;
+    ngx_table_elt_t *ims;
+    const size_t ims_len = sizeof("Wed, 21 Oct 2015 07:28:00 GMT") - 1;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    inm = add_header(&r->headers_in.headers, "if-none-match", "\"v\"");
+    ims = add_header(&r->headers_in.headers,
+                     "If-Modified-Since", "Wed, 21 Oct 2015 07:28:00 GMT");
+    r->headers_in.if_none_match = inm;
+    r->headers_in.if_modified_since = ims;
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "validators are captured and suppressed");
+    TEST_ASSERT(inm->hash == 0 && ims->hash == 0,
+                "suppression clears the hashes");
+
+    /* Simulate the internal redirect: context lost, headers suppressed. */
+    memset(&ctx, 0, sizeof(ctx));
+    ngx_http_markdown_restore_orphan_conditional_request(r);
+    TEST_ASSERT(inm->hash != 0 && inm->value.len == sizeof("\"v\"") - 1,
+                "orphan If-None-Match is restored without a context");
+    TEST_ASSERT(ims->hash != 0 && ims->value.len == ims_len,
+                "orphan If-Modified-Since is restored without a context");
+
+    /* Never-captured entries must be untouched by the orphan restore. */
+    ngx_table_elt_t *plain = add_header(&r->headers_in.headers,
+                                        "If-Match", "\"plain\"");
+    ngx_http_markdown_restore_orphan_conditional_request(r);
+    TEST_ASSERT(plain->hash == 1
+                && plain->value.len == sizeof("\"plain\"") - 1,
+                "entries without a side-table record are untouched");
+
+    TEST_PASS("orphan restore rebuilds validators without a context");
 }
 
 static void
@@ -3439,6 +3576,8 @@ main(void)
     test_adopt_orphan_restores_repeated_validators();
     test_adopt_orphan_uses_saved_length_for_non_nul_value();
     test_adopt_orphan_rejects_saved_length_over_limit();
+    test_adopt_orphan_beyond_legacy_capacity();
+    test_restore_orphan_conditional_request();
     test_adopt_orphan_with_empty_headers();
     test_adopt_orphan_skips_invalid_len();
     test_adopt_orphan_skips_null_data();
