@@ -89,7 +89,7 @@ TRANSITION_ALLOWLIST: frozenset[str] = _canonical_transition_allowlist()
 
 # The 19 State Machine Events (DIFFERENT from transition label values)
 # These must NEVER appear as streaming_events_total transition labels
-STATE_MACHINE_EVENTS: Set[str] = frozenset({
+STATE_MACHINE_EVENTS: frozenset[str] = frozenset({
     "header_filter_entry",
     "body_chunk_received",
     "last_buf_received",
