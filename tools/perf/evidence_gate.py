@@ -1227,6 +1227,9 @@ def _check_metric_predicates(
     """Check metric predicate invariants for a single scenario."""
     m = scenario.get("metrics") or scenario.get("results") or scenario
     if not isinstance(m, dict):
+        violations.append(
+            (name, "metrics", "scenario metrics/results must be an object")
+        )
         return
     for check in invariant["checks"]:
         value = _path_metric_value(m, check["metric"])
@@ -2813,8 +2816,8 @@ def _scenario_environment_mismatches(
     regression percentages are meaningless.
     """
     violations: list[tuple[str, str]] = []
-    cur_metrics = cur.get("metrics", {})
-    base_metrics = base.get("metrics", {})
+    cur_metrics = cur.get("metrics") or cur.get("results") or cur
+    base_metrics = base.get("metrics") or base.get("results") or base
     cur_bytes = cur_metrics.get("input_bytes")
     base_bytes = base_metrics.get("input_bytes")
     if cur_bytes != base_bytes:
