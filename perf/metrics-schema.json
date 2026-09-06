@@ -501,7 +501,7 @@
                       "required": ["status"]
                     },
                     "then": {
-                      "required": ["metrics", "load_integrity", "response_correctness"],
+                      "required": ["metrics", "load_integrity", "response_correctness", "compression", "transfer_encoding", "concurrency"],
                       "properties": {
                         "metrics": {
                           "required": [
@@ -532,6 +532,118 @@
                       "required": ["status"]
                     },
                     "then": { "required": ["reason"] }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "name": { "const": "plain-small" }
+                      },
+                      "required": ["name"]
+                    },
+                    "then": {
+                      "properties": {
+                        "compression": { "const": "none" },
+                        "transfer_encoding": { "const": "identity" }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "name": { "const": "chunked-medium" }
+                      },
+                      "required": ["name"]
+                    },
+                    "then": {
+                      "properties": {
+                        "compression": { "const": "none" },
+                        "transfer_encoding": { "const": "chunked" }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "name": { "const": "gzip-large" }
+                      },
+                      "required": ["name"]
+                    },
+                    "then": {
+                      "properties": {
+                        "compression": { "const": "gzip" },
+                        "transfer_encoding": { "const": "identity" }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "name": { "const": "large-body" }
+                      },
+                      "required": ["name"]
+                    },
+                    "then": {
+                      "properties": {
+                        "compression": { "const": "none" },
+                        "transfer_encoding": { "const": "identity" }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "name": { "const": "streaming-first" }
+                      },
+                      "required": ["name"]
+                    },
+                    "then": {
+                      "properties": {
+                        "compression": { "const": "none" },
+                        "transfer_encoding": { "const": "chunked" }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "name": { "const": "gzip-streaming-first" }
+                      },
+                      "required": ["name"]
+                    },
+                    "then": {
+                      "properties": {
+                        "compression": { "const": "gzip" },
+                        "transfer_encoding": { "const": "chunked" }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "name": { "const": "deflate-streaming-first" }
+                      },
+                      "required": ["name"]
+                    },
+                    "then": {
+                      "properties": {
+                        "compression": { "const": "deflate" },
+                        "transfer_encoding": { "const": "chunked" }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "name": { "const": "brotli-streaming-first" }
+                      },
+                      "required": ["name"]
+                    },
+                    "then": {
+                      "properties": {
+                        "compression": { "const": "brotli" },
+                        "transfer_encoding": { "const": "chunked" }
+                      }
+                    }
                   }
                 ]
               }

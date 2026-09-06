@@ -312,10 +312,20 @@ cleanup() {
   local exit_code=$?
   log "Cleaning up..."
 
-  # Stop NGINX
-  if [[ -n "$NGINX_PID" ]] && kill -0 "$NGINX_PID" 2>/dev/null; then
-    kill "$NGINX_PID" 2>/dev/null || true
-    wait "$NGINX_PID" 2>/dev/null || true
+  # Stop NGINX.  The master PID may only be available via the PID file
+  # when run_scenario executed in a command substitution subshell.
+  local nginx_pid="$NGINX_PID"
+  if [[ -z "$nginx_pid" && -f "$PID_FILE" ]]; then
+    nginx_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  fi
+  # The PID file initially holds the script's own PID (written during
+  # setup); never kill ourselves when NGINX never started.
+  if [[ "$nginx_pid" == "$$" ]]; then
+    nginx_pid=""
+  fi
+  if [[ -n "$nginx_pid" ]] && kill -0 "$nginx_pid" 2>/dev/null; then
+    kill "$nginx_pid" 2>/dev/null || true
+    wait "$nginx_pid" 2>/dev/null || true
   fi
 
   # Stop upstream mock
@@ -665,6 +675,10 @@ start_nginx() {
   # Start NGINX (daemon off runs in background via &)
   "$NGINX_BIN" -c "$conf_path" -p "$NGINX_WORKDIR" &
   NGINX_PID=$!
+  # Persist the master PID: run_scenario executes in a command
+  # substitution subshell, so the parent shell's NGINX_PID stays empty
+  # and the EXIT trap would otherwise leak the NGINX process.
+  printf '%s\n' "$NGINX_PID" > "$PID_FILE"
 
   # Wait for NGINX to be ready
   local _attempts=0
@@ -692,9 +706,18 @@ except Exception:
 
 # stop_nginx gracefully stops the running NGINX instance.
 stop_nginx() {
-  if [[ -n "$NGINX_PID" ]] && kill -0 "$NGINX_PID" 2>/dev/null; then
-    kill -QUIT "$NGINX_PID" 2>/dev/null || true
-    wait "$NGINX_PID" 2>/dev/null || true
+  local nginx_pid="$NGINX_PID"
+  if [[ -z "$nginx_pid" && -f "$PID_FILE" ]]; then
+    nginx_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  fi
+  # The PID file initially holds the script's own PID (written during
+  # setup); never kill ourselves when NGINX never started.
+  if [[ "$nginx_pid" == "$$" ]]; then
+    nginx_pid=""
+  fi
+  if [[ -n "$nginx_pid" ]] && kill -0 "$nginx_pid" 2>/dev/null; then
+    kill -QUIT "$nginx_pid" 2>/dev/null || true
+    wait "$nginx_pid" 2>/dev/null || true
     NGINX_PID=""
   fi
   return 0
