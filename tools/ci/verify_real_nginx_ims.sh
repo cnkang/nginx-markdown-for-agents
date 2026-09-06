@@ -8,8 +8,10 @@
 #   1. A Markdown-negotiated response returns 200 with correct Content-Type,
 #      a Markdown-derived ETag, and NO source HTML Last-Modified header.
 #   2. If-None-Match carrying the returned Markdown ETag yields 304;
-#      an unknown ETag yields 200.  17 repeated If-None-Match fields (more
-#      than the historical rollback capacity) still validate to 304.
+#      an unknown ETag yields 200.  17 repeated If-None-Match field
+#      values in one comma-separated field line (more than the historical
+#      rollback capacity) still validate to 304.  Duplicate header lines
+#      themselves are rejected by NGINX with 400 before module code runs.
 #   3. If-Modified-Since carrying the source HTML mtime never yields 304
 #      for a converted response — conversion runs and delivers fresh 200.
 #   4. If-Match failures return 412, weak tags are rejected, and '*' passes;
@@ -397,13 +399,20 @@ echo "==> Running conditional-request validation scenario"
   #     and still validate the converted response against its ETag.  A
   #     count-capped or capacity-capped adoption would turn the 304 into a
   #     full-body 200 with the validators hidden.
-  inm_fields=()
+  #
+  #     The repeated values ride in a single field line (RFC 9110 field
+  #     list syntax, comma-separated): duplicate header *lines* are rejected
+  #     by the NGINX core itself with 400 before any module code runs.
+  inm_value=""
   for i in $(seq 1 17); do
-    inm_fields+=(-H "If-None-Match: ${etag}")
+    if [[ -n "${inm_value}" ]]; then
+      inm_value+=", "
+    fi
+    inm_value+="${etag}"
   done
   code2r="$(curl -sS -D resp2r.headers -o resp2r.body \
     -H "${ACCEPT_MARKDOWN_HEADER}" \
-    "${inm_fields[@]}" \
+    -H "If-None-Match: ${inm_value}" \
     "http://127.0.0.1:${PORT}/index.html" \
     -w "${HTTP_CODE_FORMAT}")"
   [[ "${code2r}" == "304" ]] || {

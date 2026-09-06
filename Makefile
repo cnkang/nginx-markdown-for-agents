@@ -347,6 +347,7 @@ test-all-e2e:
 	$(MAKE) verify-large-e2e
 	$(MAKE) verify-brotli-streaming-e2e
 	$(MAKE) verify-http2-alpn-e2e
+	$(MAKE) verify-real-nginx-ims-e2e
 	@echo "=== test-all-e2e: ALL E2E SCENARIOS PASSED ==="
 
 # Coverage gate — coverage-gate from ci.yml.  Requires lcov and a
@@ -1491,6 +1492,19 @@ verify-metrics-endpoint-e2e:
 
 verify-conditional-requests-e2e:
 	./tools/e2e/verify_conditional_requests_e2e.sh
+
+# Real-NGINX IMS validation — mirrors the real-nginx-ims.yml CI job
+# (and the macOS smoke job).  The CI job builds its own module-enabled
+# NGINX; locally the script reuses the NGINX_BIN passed to test-all-e2e.
+# Skipped when only NGINX_URL (a running fixture) is supplied because the
+# script manages its own NGINX lifecycle and cannot attach to an external
+# one.
+verify-real-nginx-ims-e2e:
+	@if test -z "$(NGINX_BIN)"; then \
+		echo "SKIP: real-NGINX IMS validation requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
+	else \
+		NGINX_BIN="$(NGINX_BIN)" bash tools/ci/verify_real_nginx_ims.sh --port 18088; \
+	fi
 
 verify-config-merge-e2e:
 	./tools/e2e/verify_config_merge_e2e.sh
