@@ -6,11 +6,13 @@
  * immediate definitive failure.
  *
  * Tests verify expand_buf overflow semantics and origin classification
- * correctness.
+ * correctness against the production streaming decompression
+ * implementation (ngx_http_markdown_streaming_decomp_impl.h).
  */
 
 #include "../include/test_common.h"
 #include <limits.h>
+#include <zlib.h>
 
 #define NGX_OK 0
 #define NGX_ERROR (-1)
@@ -18,72 +20,63 @@
 #include <ngx_http_markdown_filter_module.h>
 
 /*
- * Minimal ngx_log_t for expand_buf signature.
+ * Minimal ngx_log_t for expand_buf signature: complete the struct
+ * forward-declared by the nginx_stubs ngx_core.h.
  */
-typedef struct { int unused; } ngx_log_t_stub;
-#define ngx_log_t ngx_log_t_stub
+struct ngx_log_s {
+    int unused;
+};
+
+#define ngx_memcpy memcpy
+#define NGX_MAX_SIZE_T_VALUE SIZE_MAX
 
 /*
- * Minimal expand_buf implementation that mirrors production logic.
- * Tests verify the return code semantics independently of the full
- * NGINX dependency chain.
+ * Pool cleanup stand-ins: the production create path registers a
+ * cleanup handler through ngx_pool_cleanup_add.  The struct shapes
+ * mirror the production linked-list cleanup structure so the
+ * implementation header compiles; this suite only exercises
+ * expand_buf, so the pool APIs are declared and never called.
  */
-static ngx_int_t
-test_expand_buf(
-    u_char **heap_buf_ptr,
-    u_char **buf_ptr,
-    size_t *buf_size_ptr,
-    size_t max_size,
-    ngx_log_t *log)
+typedef struct test_pool_cleanup_s test_pool_cleanup_t;
+typedef test_pool_cleanup_t ngx_pool_cleanup_t;
+
+struct test_pool_cleanup_s {
+    void                 (*handler)(void *data);
+    void                  *data;
+    ngx_pool_cleanup_t    *next;
+};
+
+struct ngx_pool_s {
+    ngx_pool_cleanup_t    *cleanups;
+};
+
+/*
+ * Allocator stubs for the production implementation included below.
+ * expand_buf allocates with ngx_alloc and releases with ngx_free; the
+ * remaining pool/cleanup APIs are declared (not defined) because the
+ * create path that references them is not exercised by this suite and
+ * the linker drops the unreferenced static functions.
+ */
+void *
+ngx_alloc(size_t size, ngx_log_t *log)
 {
-    u_char  *new_buf;
-    size_t   old_size;
-    size_t   new_size;
-
     (void) log;
-
-    old_size = *buf_size_ptr;
-
-    if (old_size > (size_t) -1 / 2) {
-        if (heap_buf_ptr != NULL && *heap_buf_ptr != NULL) {
-            free(*heap_buf_ptr);
-            *heap_buf_ptr = NULL;
-        }
-        return NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR;
-    }
-
-    new_size = old_size * 2;
-    if (max_size > 0 && new_size > max_size) {
-        /*
-         * Never shrink below old_size: the caller copies old_size
-         * bytes into the new buffer after this helper returns, so a
-         * smaller allocation would overflow the heap.
-         */
-        new_size = (max_size < old_size) ? old_size : max_size;
-    }
-
-    new_buf = malloc(new_size);
-    if (new_buf == NULL) {
-        if (heap_buf_ptr != NULL && *heap_buf_ptr != NULL) {
-            free(*heap_buf_ptr);
-            *heap_buf_ptr = NULL;
-        }
-        return NGX_ERROR;
-    }
-
-    if (old_size > 0) {
-        memcpy(new_buf, *buf_ptr, old_size);
-    }
-
-    if (heap_buf_ptr != NULL && *heap_buf_ptr != NULL) {
-        free(*heap_buf_ptr);
-    }
-
-    *heap_buf_ptr = new_buf;
-    *buf_ptr = new_buf;
-    *buf_size_ptr = new_size;
-    return NGX_OK;
+    return malloc(size);
 }
+
+void
+ngx_free(void *p)
+{
+    free(p);
+}
+
+void *ngx_palloc(ngx_pool_t *pool, size_t size);
+void *ngx_pcalloc(ngx_pool_t *pool, size_t size);
+void *ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size);
+
+/* Include the production streaming decompression implementation so that
+ * expand_buf is compiled against the stubs above. */
+#include "../src/ngx_http_markdown_streaming_decomp_impl.h"
 
 
 /* --- Test: expand_buf overflow → OVERFLOW_ERROR --- */
@@ -101,7 +94,7 @@ test_expand_buf_overflow(void)
     buf = heap_buf;
     buf_size = (size_t) -1 / 2 + 1;
 
-    rc = test_expand_buf(&heap_buf, &buf, &buf_size, 0, NULL);
+    rc = ngx_http_markdown_streaming_decomp_expand_buf(&heap_buf, &buf, &buf_size, 0, NULL);
 
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR,
         "size_t overflow must return OVERFLOW_ERROR");
@@ -128,7 +121,7 @@ test_expand_buf_success(void)
     buf = heap_buf;
     buf_size = 64;
 
-    rc = test_expand_buf(&heap_buf, &buf, &buf_size, 0, NULL);
+    rc = ngx_http_markdown_streaming_decomp_expand_buf(&heap_buf, &buf, &buf_size, 0, NULL);
 
     TEST_ASSERT(rc == NGX_OK, "must succeed");
     TEST_ASSERT(buf_size == 128, "size must double");
@@ -155,7 +148,7 @@ test_expand_buf_max_size(void)
     buf = heap_buf;
     buf_size = 64;
 
-    rc = test_expand_buf(&heap_buf, &buf, &buf_size, 96, NULL);
+    rc = ngx_http_markdown_streaming_decomp_expand_buf(&heap_buf, &buf, &buf_size, 96, NULL);
 
     TEST_ASSERT(rc == NGX_OK, "must succeed");
     TEST_ASSERT(buf_size == 96, "must cap to max_size");
@@ -184,7 +177,7 @@ test_expand_buf_max_size_below_old_size(void)
     buf = heap_buf;
     buf_size = 64;
 
-    rc = test_expand_buf(&heap_buf, &buf, &buf_size, 32, NULL);
+    rc = ngx_http_markdown_streaming_decomp_expand_buf(&heap_buf, &buf, &buf_size, 32, NULL);
 
     TEST_ASSERT(rc == NGX_OK, "must succeed");
     TEST_ASSERT(buf_size == 64,

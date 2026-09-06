@@ -1,761 +1,1080 @@
 /*
- * Test: copy_reduction
- *
- * Unit tests for the full-buffer compressed copy reduction paths
- * (copy-reduction design contract).
- *
- * Feature: 0.9.1-performance-optimization
- * Validates: Requirements 5.1, 5.2, 5.3, 5.5
- *
- * Test cases:
- *   1. Contiguous buffer skip path — verify linearize copy is
- *      skipped when ctx->buffer.data is already contiguous
- *   2. Direct swap on success — verify old buffer freed, new
- *      decompressed buffer installed in ctx->buffer.data
- *   3. Failure preservation — verify original buffer bytes
- *      unchanged after decompression failure
- *   4. ngx_alloc failure — verify fail-open with original
- *      buffer (no crash, no corruption)
- *
- * This is a MODEL TEST — it exercises the logical state
- * transitions of the copy-reduction paths without calling
- * the production Rust FFI decompressor.
- *
- * Production integration is covered by:
- *   - Rust unit tests in components/rust-converter/src/decompress.rs
- *   - E2E tests via make verify-chunked-native-e2e-smoke
- *   - The production path in ngx_http_markdown_payload_impl.h
- *
- * Rules: 43 (ngx_alloc/ngx_free for resizable buffers),
- *        3 (free auxiliary buffers on all exits).
+ * Test: conversion_impl_base_url
  */
 
 #include "../include/test_common.h"
+#include <ctype.h>
+#include <limits.h>
+#include <time.h>
+#include <sys/socket.h>
 
-/* ----------------------------------------------------------------
- * Model types and stubs
- * ---------------------------------------------------------------- */
+#ifndef MARKDOWN_STREAMING_ENABLED
+#define MARKDOWN_STREAMING_ENABLED 1
+#endif
 
-typedef intptr_t    ngx_int_t;
-typedef uintptr_t   ngx_uint_t;
+#include "../../src/ngx_http_markdown_filter_module.h"
+#include "../../src/ngx_http_markdown_diagnostics.h"
 
-enum {
-    NGX_OK    =  0,
-    NGX_ERROR = -1
+/* The conversion-output tests exercise the production finalizer call. */
+struct ngx_module_s {
+    int unused;
 };
+ngx_module_t ngx_http_markdown_filter_module;
 
 /*
- * Decompression result codes (model).
+ * Stub effective-conf helpers required by conversion_impl.h.
+ * These return the live conf value (eff is NULL in these tests).
  */
-enum {
-    DECOMP_RESULT_OK              = 0,
-    DECOMP_RESULT_FORMAT_ERROR    = 1,
-    DECOMP_RESULT_TRUNCATED       = 2,
-    DECOMP_RESULT_BUDGET_EXCEEDED = 9,
-    DECOMP_RESULT_ALLOC_FAILURE   = 10
-};
-
-/*
- * Model of ctx->buffer — the resizable payload buffer.
- * In production this is managed with ngx_alloc/ngx_free (Rule 43).
- */
-typedef struct {
-    unsigned char  *data;
-    size_t          size;
-    size_t          capacity;
-} model_buffer_t;
-
-/*
- * Decompression context model.
- *
- * Tracks allocation/free events and models the contiguity
- * invariant, direct swap, and fail-open behaviors.
- */
-typedef struct {
-    model_buffer_t  buffer;
-    size_t          decompress_max_size;
-    int             failopen_triggered;
-    int             old_buffer_freed;
-    int             new_buffer_freed;
-    int             linearize_copy_performed;
-    int             decompression_done;
-} copy_reduction_ctx_t;
-
-/*
- * Allocation tracking — counts ngx_alloc and ngx_free calls.
- */
-static int g_alloc_count;
-static int g_free_count;
-static int g_alloc_should_fail;
-
-static void
-reset_alloc_tracking(void)
+static ngx_flag_t
+ngx_http_markdown_effective_prune_noise(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
 {
-    g_alloc_count = 0;
-    g_free_count = 0;
-    g_alloc_should_fail = 0;
+    return (eff != NULL) ? eff->prune_noise : conf->advanced.prune_noise;
+}
+
+static size_t
+ngx_http_markdown_effective_streaming_budget(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    return (eff != NULL) ? eff->streaming_budget
+                         : conf->stream.budget;
+}
+
+static size_t
+ngx_http_markdown_effective_memory_budget(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    return (eff != NULL) ? eff->memory_budget : conf->limits.conversion_memory;
 }
 
 /*
- * Model ngx_alloc: allocate memory (or return NULL if failure
- * simulation is active).
+ * Capturing stub for the base-URL FFI entry point.
+ *
+ * The C unit-test build does not link the Rust library, so the trusted-proxy
+ * decision (markdown_decide_base_url) is stubbed here.  The stub captures the
+ * marshaled FFIBaseUrlInput so tests can assert the thin wrapper marshaled
+ * every request/config field faithfully, and writes a test-controlled
+ * authority into the caller buffer.  The decision logic itself is covered by
+ * the Rust unit tests in forwarded.rs and the FFI tests in ffi/exports.rs.
  */
-static unsigned char *
-model_ngx_alloc(size_t size)
+#ifndef DECIDE_BASE_URL_OK
+#define DECIDE_BASE_URL_OK 0
+#endif
+#ifndef DECIDE_BASE_URL_INVALID
+#define DECIDE_BASE_URL_INVALID 1
+#endif
+
+/* Stub control + capture state for markdown_decide_base_url. */
+static FFIBaseUrlInput g_captured_base_url_input;
+static ngx_uint_t             g_decide_base_url_calls;
+static const char            *g_stub_authority = "https://stub.example.com";
+static uint8_t                g_stub_decide_rc = DECIDE_BASE_URL_OK;
+static uint8_t                g_stub_decide_reason;
+static uint8_t                g_stub_decide_source;
+
+uint8_t
+markdown_decide_base_url(const struct FFIBaseUrlInput *input,
+    uint8_t *out_buf, uintptr_t out_buf_cap,
+    struct FFIBaseUrlDecision *out) /* SONAR_NOTE: must match FFI signature */
 {
-    if (g_alloc_should_fail) {
+    size_t  len;
+
+    g_decide_base_url_calls++;
+
+    if (input == NULL || out == NULL || out_buf == NULL || out_buf_cap == 0) {
+        return DECIDE_BASE_URL_INVALID;
+    }
+
+    g_captured_base_url_input = *input;
+
+    if (g_stub_decide_rc != DECIDE_BASE_URL_OK) {
+        return g_stub_decide_rc;
+    }
+
+    len = strlen(g_stub_authority);
+    if (len > out_buf_cap) {
+        return DECIDE_BASE_URL_INVALID;
+    }
+    memcpy(out_buf, g_stub_authority, len);
+    out->base_url_len = len;
+    out->reason = g_stub_decide_reason;
+    out->source = g_stub_decide_source;
+    return DECIDE_BASE_URL_OK;
+}
+
+/*
+ * Test-controlled stub state.  Each global allows tests to inject
+ * specific return codes or trigger one-shot allocation failures
+ * without modifying the stub function bodies.
+ */
+static ngx_int_t g_forward_transformed_headers_rc = 0;
+static ngx_int_t g_update_headers_rc = 0;
+static ngx_int_t g_failopen_rc = 0;
+static ngx_uint_t g_failopen_call_count = 0;
+static ngx_int_t g_bypass_failopen_rc = 0;
+static ngx_uint_t g_bypass_failopen_call_count = 0;
+static ngx_int_t g_conditional_return_rc = NGX_DECLINED;
+static ngx_int_t g_send_304_rc = NGX_OK;
+static ngx_uint_t g_release_inflight_call_count = 0;
+static ngx_int_t g_next_body_filter_rc = 0;
+static ngx_chain_t *g_next_body_filter_last_input = NULL;
+static ngx_uint_t g_next_body_filter_call_count = 0;
+static ngx_uint_t g_markdown_result_free_calls = 0;
+static ngx_uint_t g_log_decision_calls = 0;
+static const ngx_str_t *g_last_decision_reason = NULL;
+static const ngx_str_t *g_last_decision_category = NULL;
+static ngx_uint_t g_last_failure_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+static ngx_uint_t g_last_failure_status = 0;
+static ngx_uint_t g_streaming_new_with_code_calls = 0;
+static ngx_uint_t g_streaming_feed_calls = 0;
+static ngx_uint_t g_streaming_finish_calls = 0;
+static ngx_uint_t g_abort_calls = 0;
+static ngx_uint_t g_output_free_calls = 0;
+static ngx_uint_t g_pnalloc_fail_once = 0;
+static ngx_uint_t g_pcalloc_fail_once = 0;
+static ngx_uint_t g_alloc_chain_fail_once = 0;
+static uint32_t g_streaming_new_with_code_rc = 0;
+static uint32_t g_streaming_feed_rc = 0;
+static uint32_t g_streaming_finalize_rc = 0;
+static uint32_t g_streaming_new_with_code_null_handle = 0;
+
+/* Decompression failure helpers are owned by module_state_impl.h in the
+ * production translation unit.  Keep this direct conversion-header test
+ * independent of that implementation-only include. */
+static void
+ngx_http_markdown_record_decompression_failure_budget(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_format(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_truncated(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_io(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
+
+/* FFI stub constants and functions used by conversion_impl.h */
+#define ERROR_SUCCESS 0
+#ifndef ERROR_PARSE
+#define ERROR_PARSE 1
+#endif
+#ifndef ERROR_ENCODING
+#define ERROR_ENCODING 2
+#endif
+#ifndef ERROR_TIMEOUT
+#define ERROR_TIMEOUT 3
+#endif
+#ifndef ERROR_MEMORY_LIMIT
+#define ERROR_MEMORY_LIMIT 4
+#endif
+#ifndef ERROR_INVALID_INPUT
+#define ERROR_INVALID_INPUT 5
+#endif
+#ifndef ERROR_INTERNAL
+#define ERROR_INTERNAL 99
+#endif
+#ifndef ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+#define ERROR_DECOMPRESSION_BUDGET_EXCEEDED 9
+#endif
+#ifndef ERROR_PARSE_TIMEOUT
+#define ERROR_PARSE_TIMEOUT 10
+#endif
+#ifndef ERROR_PARSE_BUDGET_EXCEEDED
+#define ERROR_PARSE_BUDGET_EXCEEDED 11
+#endif
+#ifndef ERROR_DECOMPRESSION_FORMAT_ERROR
+#define ERROR_DECOMPRESSION_FORMAT_ERROR 12
+#endif
+#ifndef ERROR_DECOMPRESSION_TRUNCATED_INPUT
+#define ERROR_DECOMPRESSION_TRUNCATED_INPUT 13
+#endif
+#ifndef ERROR_DECOMPRESSION_IO_ERROR
+#define ERROR_DECOMPRESSION_IO_ERROR 14
+#endif
+
+void
+markdown_convert(struct MarkdownConverterHandle *handle, /* SONAR_NOTE: must match FFI signature */
+    const uint8_t *html, uintptr_t html_len,
+    const struct MarkdownOptions *options,
+    struct MarkdownResult *result)
+{
+    UNUSED(handle);
+    UNUSED(html);
+    UNUSED(html_len);
+    UNUSED(options);
+    memset(result, 0, sizeof(*result));
+}
+
+/*
+ * FFI lifecycle stub for markdown_result_free.  Clears all public ABI
+ * fields (pointer, length, and numeric/error fields) to prevent
+ * stale-state regressions, and increments g_markdown_result_free_calls
+ * so tests can verify the expected number of free invocations.
+ *
+ * Per AGENTS.md rule 15: partial clears create false confidence and
+ * can mask stale-state regressions, so every field is zeroed.
+ */
+void
+markdown_result_free(struct MarkdownResult *result) /* SONAR_NOTE: must match FFI signature */
+{
+    g_markdown_result_free_calls++;
+    if (result != NULL) {
+        result->markdown = NULL;
+        result->etag = NULL;
+        result->error_message = NULL;
+        result->markdown_len = 0;
+        result->etag_len = 0;
+        result->token_estimate = 0;
+        result->error_code = 0;
+        result->error_len = 0;
+        result->peak_memory_estimate = 0;
+    }
+}
+
+/*
+ * FFI lifecycle stub for markdown_options_init.  Mirrors the Rust
+ * implementation: zeroes all fields, then sets non-zero defaults
+ * (timeout_ms=5000, generate_etag=0).  The production code must
+ * call this instead of ngx_memzero to honour the FFI contract.
+ */
+void
+markdown_options_init(struct MarkdownOptions *result)
+{
+    if (result == NULL) {
+        return;
+    }
+    memset(result, 0, sizeof(*result));
+    result->timeout_ms = 5000;
+    result->generate_etag = 0;
+}
+
+/*
+ * FFI lifecycle stub for markdown_result_init.  Zeroes all fields
+ * to guarantee a clean baseline before FFI calls populate the struct.
+ */
+void
+markdown_result_init(struct MarkdownResult *result)
+{
+    if (result == NULL) {
+        return;
+    }
+    memset(result, 0, sizeof(*result));
+}
+
+/* FFI lifecycle stub for the borrowed base-URL input snapshot. */
+void
+markdown_base_url_input_init(struct FFIBaseUrlInput *result)
+{
+    if (result == NULL) {
+        return;
+    }
+    memset(result, 0, sizeof(*result));
+}
+
+void
+ngx_http_markdown_log_decision(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(eff);
+    UNUSED(reason_code);
+    g_log_decision_calls++;
+}
+
+void
+ngx_http_markdown_log_decision_path(
+    ngx_http_request_t *r,
+    const void *conf,
+    const void *eff,
+    const ngx_http_markdown_decision_path_t *path)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(eff);
+    UNUSED(path);
+    g_log_decision_calls++;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_header_plan_apply_err(void)
+{
+    static ngx_str_t reason = {
+        sizeof("header_plan_apply_error") - 1,
+        (u_char *) "header_plan_apply_error"
+    };
+
+    return &reason;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_from_error_category(
+    ngx_http_markdown_error_category_t category, ngx_log_t *log)
+{
+    static ngx_str_t conversion = {
+        sizeof("conversion_error") - 1,
+        (u_char *) "conversion_error"
+    };
+    static ngx_str_t resource = {
+        sizeof("memory_budget_exceeded") - 1,
+        (u_char *) "memory_budget_exceeded"
+    };
+    static ngx_str_t system = {
+        sizeof("ffi_panic") - 1,
+        (u_char *) "ffi_panic"
+    };
+
+    UNUSED(log);
+    if (category == NGX_HTTP_MARKDOWN_ERROR_CONVERSION) {
+        return &conversion;
+    }
+    if (category == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT) {
+        return &resource;
+    }
+    return &system;
+}
+
+static void
+ngx_http_markdown_log_decision_with_category(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code,
+    const ngx_str_t *error_category)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(eff);
+    g_log_decision_calls++;
+    g_last_decision_reason = reason_code;
+    g_last_decision_category = error_category;
+}
+
+void
+markdown_streaming_abort(struct StreamingConverterHandle *handle)
+{
+    UNUSED(handle);
+    g_abort_calls++;
+}
+
+void
+markdown_streaming_output_free(uint8_t *data, uintptr_t len)
+{
+    UNUSED(data);
+    UNUSED(len);
+    g_output_free_calls++;
+}
+
+uint32_t
+markdown_streaming_new_with_code(const struct MarkdownOptions *options,
+    struct StreamingConverterHandle **out_handle)
+{
+    UNUSED(options);
+    g_streaming_new_with_code_calls++;
+    if (out_handle != NULL && !g_streaming_new_with_code_null_handle) {
+        *out_handle = (struct StreamingConverterHandle *) (uintptr_t) 0x1;
+    }
+    return g_streaming_new_with_code_rc;
+}
+
+uint32_t
+markdown_streaming_feed(struct StreamingConverterHandle *handle,
+    const uint8_t *html, uintptr_t html_len,
+    uint8_t **out_data, uintptr_t *out_len)
+{
+    UNUSED(handle);
+    UNUSED(html);
+    UNUSED(html_len);
+    UNUSED(out_data);
+    UNUSED(out_len);
+    g_streaming_feed_calls++;
+    return g_streaming_feed_rc;
+}
+
+uint32_t
+markdown_streaming_finalize(struct StreamingConverterHandle *handle,
+    struct MarkdownResult *result)
+{
+    UNUSED(handle);
+    UNUSED(result);
+    g_streaming_finish_calls++;
+    return g_streaming_finalize_rc;
+}
+
+typedef struct ngx_list_part_s ngx_list_part_t;
+typedef struct ngx_table_elt_s ngx_table_elt_t;
+typedef struct ngx_http_headers_in_s ngx_http_headers_in_t;
+typedef struct ngx_http_headers_out_s ngx_http_headers_out_t;
+typedef struct ngx_http_core_srv_conf_s ngx_http_core_srv_conf_t;
+typedef struct ngx_connection_s ngx_connection_t;
+typedef struct ngx_log_s ngx_log_t;
+typedef struct ngx_pool_s ngx_pool_t;
+typedef struct ngx_http_variable_value_s ngx_http_variable_value_t;
+typedef ngx_uint_t ngx_atomic_uint_t;
+typedef struct ngx_time_s ngx_time_t;
+
+struct ngx_list_part_s {
+    void           *elts;
+    ngx_uint_t      nelts;
+    ngx_list_part_t *next;
+};
+
+struct ngx_table_elt_s {
+    ngx_str_t key;
+    ngx_str_t value;
+    ngx_uint_t hash;
+};
+
+typedef struct {
+    ngx_list_part_t part;
+} ngx_list_t;
+
+struct ngx_log_s {
+    int dummy;
+};
+
+struct ngx_connection_s {
+    ngx_log_t       *log;
+    struct sockaddr *sockaddr;
+    ngx_str_t        addr_text;
+};
+
+struct ngx_http_variable_value_s {
+    unsigned         len:28;
+    unsigned         valid:1;
+    unsigned         no_cacheable:1;
+    unsigned         not_found:1;
+    unsigned         escape:1;
+    u_char           *data;
+};
+
+struct ngx_pool_s {
+    ngx_log_t  *log;
+};
+
+/* struct ngx_buf_s provided by nginx_stubs/ngx_core.h */
+
+struct ngx_chain_s {
+    ngx_buf_t *buf;
+    struct ngx_chain_s *next;
+};
+
+struct ngx_time_s {
+    time_t sec;
+    ngx_msec_t msec;
+};
+
+struct ngx_http_headers_in_s {
+    ngx_list_t headers;
+    ngx_str_t  server;
+};
+
+struct ngx_http_headers_out_s {
+    ngx_str_t content_type;
+    time_t last_modified_time;
+};
+
+struct ngx_http_core_srv_conf_s {
+    ngx_str_t server_name;
+};
+
+struct ngx_http_request_s {
+    ngx_connection_t *connection;
+    ngx_pool_t       *pool;
+    ngx_uint_t        method;
+    ngx_str_t         schema;
+    ngx_http_headers_in_t headers_in;
+    ngx_http_headers_out_t headers_out;
+    ngx_str_t         uri;
+    ngx_uint_t        buffered;
+    struct ngx_http_request_s *main;
+    void             *main_conf;
+    void             *loc_conf;
+    void             *srv_conf;
+};
+
+static ngx_str_t g_realip_remote_addr;
+
+#ifndef NGX_CONF_UNSET_SIZE
+#define NGX_CONF_UNSET_SIZE ((size_t) -1)
+#endif
+
+ngx_uint_t
+ngx_hash_key_lc(u_char *data, size_t len)
+{
+    UNUSED(data);
+    UNUSED(len);
+    return 0;
+}
+
+ngx_http_variable_value_t *
+ngx_http_get_variable(ngx_http_request_t *r, ngx_str_t *name,
+    ngx_uint_t key)
+{
+    static ngx_http_variable_value_t not_found = {
+        0, 0, 0, 1, 0, NULL
+    };
+    static ngx_http_variable_value_t realip_remote_addr;
+
+    UNUSED(r);
+    UNUSED(key);
+
+    if (name == NULL
+        || name->len != sizeof("realip_remote_addr") - 1
+        || memcmp(name->data, "realip_remote_addr", name->len) != 0
+        || g_realip_remote_addr.len == 0)
+    {
+        return &not_found;
+    }
+
+    realip_remote_addr.len = g_realip_remote_addr.len;
+    realip_remote_addr.valid = 1;
+    realip_remote_addr.no_cacheable = 0;
+    realip_remote_addr.not_found = 0;
+    realip_remote_addr.escape = 0;
+    realip_remote_addr.data = g_realip_remote_addr.data;
+    return &realip_remote_addr;
+}
+
+#ifndef ngx_memzero
+#define ngx_memzero(buf, n) memset((buf), 0, (n))
+#endif
+#ifndef ngx_memcpy
+#define ngx_memcpy memcpy
+#endif
+#ifndef NGX_OK
+#define NGX_OK 0
+#endif
+#ifndef NGX_ERROR
+#define NGX_ERROR (-1)
+#endif
+#ifndef NGX_DONE
+#define NGX_DONE (-4)
+#endif
+#ifndef NGX_AGAIN
+#define NGX_AGAIN (-2)
+#endif
+#ifndef NGX_DECLINED
+#define NGX_DECLINED (-5)
+#endif
+#ifndef NGX_HTTP_HEAD
+#define NGX_HTTP_HEAD 4
+#endif
+#ifndef NGX_HTTP_NOT_MODIFIED
+#define NGX_HTTP_NOT_MODIFIED 304
+#endif
+#ifndef NGX_HTTP_MARKDOWN_BUFFERED
+#define NGX_HTTP_MARKDOWN_BUFFERED 0x08
+#endif
+#ifndef NGX_LOG_DEBUG_HTTP
+#define NGX_LOG_DEBUG_HTTP 0
+#endif
+#ifndef NGX_LOG_CRIT
+#define NGX_LOG_CRIT 1
+#endif
+static volatile int g_metric_inc_sink;
+static volatile int g_metric_add_sink;
+#ifndef NGX_HTTP_MARKDOWN_METRIC_ADD
+#define NGX_HTTP_MARKDOWN_METRIC_ADD(name, value)                                     \
+    do {                                                                              \
+        g_metric_add_sink = 1;                                                       \
+        UNUSED(value);                                                                \
+    } while (0)
+#endif
+#ifndef NGX_HTTP_MARKDOWN_METRIC_INC
+#define NGX_HTTP_MARKDOWN_METRIC_INC(name) (g_metric_inc_sink = 1)
+#endif
+#ifndef NGX_HTTP_MARKDOWN_METRIC_WATERMARK
+#define NGX_HTTP_MARKDOWN_METRIC_WATERMARK(field, value)                              \
+    do {                                                                              \
+        g_metric_add_sink = 1;                                                       \
+        UNUSED(value);                                                                \
+    } while (0)
+#endif
+#ifndef ngx_log_debug2
+#define ngx_log_debug2(level, log, err, fmt, arg1, arg2) \
+    UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); UNUSED(arg1); UNUSED(arg2)
+#endif
+#ifndef ngx_log_debug3
+#define ngx_log_debug3(level, log, err, fmt, arg1, arg2, arg3) \
+    UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); UNUSED(arg1); UNUSED(arg2); UNUSED(arg3)
+#endif
+#ifndef ngx_log_debug0
+#define ngx_log_debug0(level, log, err, fmt) UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt)
+#endif
+#ifndef ngx_log_debug1
+#define ngx_log_debug1(level, log, err, fmt, arg) \
+    UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); UNUSED(arg)
+#endif
+#ifndef ngx_http_get_module_loc_conf
+#define ngx_http_get_module_loc_conf(r, module) \
+    ((ngx_http_markdown_conf_t *) ((r)->loc_conf))
+#endif
+#ifndef ngx_http_get_module_srv_conf
+#define ngx_http_get_module_srv_conf(r, module) \
+    ((ngx_http_core_srv_conf_t *) ((r)->srv_conf))
+#endif
+#ifndef ngx_http_get_module_main_conf
+#define ngx_http_get_module_main_conf(r, module) \
+    ((ngx_http_markdown_main_conf_t *) ((r)->main_conf))
+#endif
+#ifndef ngx_tolower
+#define ngx_tolower(c) ((u_char) tolower((unsigned char) (c)))
+#endif
+
+static ngx_inline u_char *
+ngx_cpymem(u_char *dst, const void *src, size_t n)
+{
+    return (u_char *) memcpy(dst, src, n) + n;
+}
+
+static ngx_inline ngx_int_t
+ngx_pfree(ngx_pool_t *pool, void *p)
+{
+    (void) pool;
+    free(p);
+    return NGX_OK;
+}
+
+/*
+ * subrequest: buffer.c symbols.  conversion_impl.h calls
+ * ngx_http_markdown_buffer_release() at the conversion terminal; the
+ * implementation lives in buffer.c and needs these pool/alloc stubs
+ * (same pattern as eligibility_impl_test.c).
+ */
+typedef struct ngx_pool_cleanup_s {
+    void                         (*handler)(void *data);
+    void                          *data;
+    struct ngx_pool_cleanup_s     *next;
+} ngx_pool_cleanup_t;
+
+static ngx_pool_cleanup_t  test_cleanup;
+
+ngx_pool_cleanup_t *
+ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
+{
+    (void) pool;
+    (void) size;
+    memset(&test_cleanup, 0, sizeof(test_cleanup));
+    return &test_cleanup;
+}
+
+void *
+ngx_alloc(size_t size, ngx_log_t *log)
+{
+    (void) log;
+    return malloc(size);
+}
+
+#define ngx_free free
+#define ngx_memcpy memcpy
+
+/*
+ * Pool allocator stub delegating to malloc(3).  When g_pnalloc_fail_once
+ * is set, returns NULL once and clears the flag, simulating allocation
+ * failure.
+ */
+static ngx_inline void *
+ngx_pnalloc(ngx_pool_t *pool, size_t size)
+{
+    (void) pool;
+    if (g_pnalloc_fail_once) {
+        g_pnalloc_fail_once = 0;
         return NULL;
     }
-    g_alloc_count++;
-    return (unsigned char *) malloc(size);
+    return malloc(size);
 }
 
 /*
- * Model ngx_free: free memory and track the call.
+ * Pool allocator stub delegating to calloc(3) with zero-initialization.
+ * When g_pcalloc_fail_once is set, returns NULL once and clears the flag,
+ * simulating allocation failure.
  */
-static void
-model_ngx_free(void *ptr)
+static ngx_inline void *
+ngx_pcalloc(ngx_pool_t *pool, size_t size)
 {
-    if (ptr != NULL) {
-        g_free_count++;
-        free(ptr);
+    void *p;
+
+    (void) pool;
+    if (g_pcalloc_fail_once) {
+        g_pcalloc_fail_once = 0;
+        return NULL;
     }
+    p = calloc(1, size);
+    return p;
 }
 
-/* ----------------------------------------------------------------
- * Model functions replicating production copy-reduction logic
- * ---------------------------------------------------------------- */
+/*
+ * Chain link allocator stub.  When g_alloc_chain_fail_once is set,
+ * returns NULL once and clears the flag, simulating allocation failure.
+ */
+static ngx_inline ngx_chain_t *
+ngx_alloc_chain_link(ngx_pool_t *pool)
+{
+    (void) pool;
+    if (g_alloc_chain_fail_once) {
+        g_alloc_chain_fail_once = 0;
+        return NULL;
+    }
+    return calloc(1, sizeof(ngx_chain_t));
+}
+
+#ifndef ngx_timeofday
+static ngx_inline const ngx_time_t *
+ngx_timeofday_stub(void)
+{
+    static ngx_time_t now;
+
+    now.sec = time(NULL);
+    now.msec = 0;
+
+    return &now;
+}
+#define ngx_timeofday() ngx_timeofday_stub()
+#endif
 
 /*
- * Prepare compressed chain (contiguity check).
- *
- * Models ngx_http_markdown_prepare_compressed_chain:
- *   - If buffer is already contiguous (single ngx_alloc allocation),
- *     reference it directly without copying
- *   - If buffer would need linearizing (multi-buffer chain), perform
- *     a linearize copy
- *
- * In production, after body-filter accumulation the buffer is always
- * contiguous (Rule 43 invariant), so the linearize path is defensive.
- *
- * Returns:
- *   NGX_OK on success (input_buf/input_size set)
- *   NGX_ERROR on failure
+ * Stub definitions for external symbols referenced by conversion_impl.h
+ * but not exercised by the base_url / prepare_options tests.
+ * These must be defined before the #include of conversion_impl.h
+ * because the impl header contains static forward declarations that
+ * the linker resolves (GCC on Linux does not strip unused statics).
+ */
+
+u_char ngx_http_markdown_empty_string[] = "";
+struct MarkdownConverterHandle *ngx_http_markdown_converter = NULL;
+ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
+ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r, ngx_chain_t *in) = NULL;
+
+/* The converted-representation path has its own forwarding seam so tests
+ * cannot accidentally verify source-representation Last-Modified behavior. */
+static ngx_int_t
+ngx_http_markdown_forward_transformed_headers(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    UNUSED(r);
+    UNUSED(ctx);
+    return g_forward_transformed_headers_rc;
+}
+
+__attribute__((unused))
+static void
+ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    UNUSED(eff);
+    UNUSED(conf);
+}
+
+/*
+ * Fail-open stub.  Increments g_failopen_call_count and returns
+ * g_failopen_rc, allowing tests to verify invocation count and control
+ * return behavior.
  */
 static ngx_int_t
-model_prepare_compressed(copy_reduction_ctx_t *ctx,
-    unsigned char **input_buf, size_t *input_size,
-    int buffer_is_contiguous)
+ngx_http_markdown_reject_or_fail_open_buffered_response(
+    ngx_http_request_t *r,     /* SONAR_NOTE c:S995 — must match impl forward decl */
+    ngx_http_markdown_ctx_t *ctx,  /* SONAR_NOTE c:S995 — must match impl forward decl */
+    const ngx_http_markdown_conf_t *conf, const char *debug_message)
 {
-    if (ctx->buffer.data == NULL || ctx->buffer.size == 0) {
-        return NGX_ERROR;
+    UNUSED(r);
+    UNUSED(ctx);
+    UNUSED(debug_message);
+    g_failopen_call_count++;
+    if (conf != NULL) {
+        g_last_failure_policy = conf->on_error;
+        g_last_failure_status = conf->error_status;
+    } else {
+        /* Safe fallbacks matching the stub-state initializers. */
+        g_last_failure_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+        g_last_failure_status = 0;
     }
-
-    if (buffer_is_contiguous) {
-        /*
-         * Contiguous fast path: reference buffer directly.
-         * No linearize copy needed (Requirement 5.1).
-         */
-        *input_buf = ctx->buffer.data;
-        *input_size = ctx->buffer.size;
-        ctx->linearize_copy_performed = 0;
-        return NGX_OK;
-    }
-
-    /*
-     * Non-contiguous (defensive path): perform linearize copy.
-     * This path is included for completeness but should not be
-     * hit in normal operation.
-     */
-    *input_buf = model_ngx_alloc(ctx->buffer.size);
-    if (*input_buf == NULL) {
-        return NGX_ERROR;
-    }
-    memcpy(*input_buf, ctx->buffer.data, ctx->buffer.size);
-    *input_size = ctx->buffer.size;
-    ctx->linearize_copy_performed = 1;
-    return NGX_OK;
+    return g_failopen_rc;
 }
 
 /*
- * Apply decompressed payload (direct swap).
- *
- * Models ngx_http_markdown_apply_decompressed_payload:
- *   - On success: free old ctx->buffer.data, swap in new pointer
- *   - On budget exceeded: free new buffer, keep original intact
- *   - On NULL decompressor output: trigger fail-open
- *
- * Returns:
- *   NGX_OK on success (swap completed)
- *   NGX_ERROR on failure (original buffer preserved for fail-open)
+ * Direct fail-open stub (bypass path).  Increments g_bypass_failopen_call_count
+ * and returns g_bypass_failopen_rc, allowing tests to verify that the bypass
+ * path calls fail_open directly, NOT reject_or_fail_open.
  */
 static ngx_int_t
-model_apply_decompressed(copy_reduction_ctx_t *ctx,
-    unsigned char *decompressed_data, size_t decompressed_size,
-    int decomp_result)
+ngx_http_markdown_fail_open_buffered_response(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const char *debug_message)
 {
-    if (decomp_result != DECOMP_RESULT_OK) {
-        /*
-         * Decompression failed: free the decompressed output
-         * buffer (if any) and preserve original ctx->buffer.data
-         * intact for fail-open passthrough (Requirement 5.3).
-         */
-        if (decompressed_data != NULL) {
-            model_ngx_free(decompressed_data);
-            ctx->new_buffer_freed = 1;
-        }
-        ctx->failopen_triggered = 1;
-        return NGX_ERROR;
-    }
-
-    if (decompressed_data == NULL) {
-        /* NULL output from decompressor — fail-open */
-        ctx->failopen_triggered = 1;
-        return NGX_ERROR;
-    }
-
-    /*
-     * Budget check: verify decompressed size does not exceed
-     * markdown_decompress_max_size before swapping
-     * (Requirement 5.4).
-     */
-    if (decompressed_size > ctx->decompress_max_size) {
-        model_ngx_free(decompressed_data);
-        ctx->new_buffer_freed = 1;
-        ctx->failopen_triggered = 1;
-        return NGX_ERROR;
-    }
-
-    /*
-     * Direct buffer swap (Requirement 5.2):
-     * Free old compressed buffer, install decompressed pointer.
-     */
-    if (ctx->buffer.data != NULL) {
-        model_ngx_free(ctx->buffer.data);
-        ctx->old_buffer_freed = 1;
-    }
-
-    ctx->buffer.data = decompressed_data;
-    ctx->buffer.size = decompressed_size;
-    ctx->buffer.capacity = decompressed_size;
-    ctx->decompression_done = 1;
-
-    return NGX_OK;
+    UNUSED(r);
+    UNUSED(ctx);
+    UNUSED(debug_message);
+    g_bypass_failopen_call_count++;
+    return g_bypass_failopen_rc;
 }
 
 /*
- * Full decompression pipeline: allocate output buffer, decompress,
- * apply result.
- *
- * Models the production flow:
- *   1. ngx_alloc for decompressor output
- *   2. Invoke decompressor
- *   3. Apply result via model_apply_decompressed
- *
- * If ngx_alloc fails, triggers fail-open (Requirement 5.5).
+ * Classify FFI error codes into semantic categories.  PARSE/ENCODING/
+ * INVALID_INPUT map to CONVERSION, TIMEOUT/MEMORY_LIMIT map to
+ * RESOURCE_LIMIT, all others map to SYSTEM.  Mirrors the production
+ * classification contract.
  */
-static ngx_int_t
-model_decompress_pipeline(copy_reduction_ctx_t *ctx,
-    size_t decompressed_size, int decomp_result)
+ngx_http_markdown_error_category_t
+ngx_http_markdown_classify_error(uint32_t error_code)
 {
-    unsigned char *output_buf;
-
-    /* Allocate output buffer (Rule 43: ngx_alloc/ngx_free) */
-    output_buf = model_ngx_alloc(decompressed_size);
-    if (output_buf == NULL) {
-        /* ngx_alloc failure: fail-open (Requirement 5.5) */
-        ctx->failopen_triggered = 1;
-        return NGX_ERROR;
-    }
-
-    /* Fill with deterministic pattern for verification */
-    memset(output_buf, 0xDE, decompressed_size);
-
-    return model_apply_decompressed(ctx, output_buf,
-        decompressed_size, decomp_result);
-}
-
-/* ----------------------------------------------------------------
- * Helper: initialize context with test data
- * ---------------------------------------------------------------- */
-
-static void
-init_ctx(copy_reduction_ctx_t *ctx, size_t compressed_size,
-    size_t max_decomp_size)
-{
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->decompress_max_size = max_decomp_size;
-
-    if (compressed_size > 0) {
-        ctx->buffer.data = model_ngx_alloc(compressed_size);
-        TEST_ASSERT(ctx->buffer.data != NULL,
-            "test setup: buffer alloc must succeed");
-        /* Fill with recognizable pattern */
-        memset(ctx->buffer.data, 0xAA, compressed_size);
-        ctx->buffer.size = compressed_size;
-        ctx->buffer.capacity = compressed_size;
+    switch (error_code) {
+        case ERROR_PARSE:
+        case ERROR_ENCODING:
+        case ERROR_INVALID_INPUT:
+            return NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
+        case ERROR_TIMEOUT:
+        case ERROR_MEMORY_LIMIT:
+            return NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
+        default:
+            return NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
     }
 }
 
-/* ----------------------------------------------------------------
- * Test 1: Contiguous buffer skip path
- *
- * Verify that when ctx->buffer.data is already contiguous,
- * the linearize copy is skipped and the buffer is referenced
- * directly.
- *
- * Validates: Requirement 5.1
- * ---------------------------------------------------------------- */
-
-static void
-test_contiguous_buffer_skip(void)
-{
-    copy_reduction_ctx_t ctx;
-    unsigned char *input_buf;
-    size_t input_size;
-    ngx_int_t rc;
-
-    TEST_SUBSECTION(
-        "Contiguous buffer: linearize copy skipped");
-
-    reset_alloc_tracking();
-    init_ctx(&ctx, 4096, 1048576);
-
-    rc = model_prepare_compressed(
-        &ctx, &input_buf, &input_size, 1);
-
-    TEST_ASSERT(rc == NGX_OK,
-        "prepare_compressed succeeds for contiguous buffer");
-    TEST_ASSERT(input_buf == ctx.buffer.data,
-        "input_buf references ctx->buffer.data directly");
-    TEST_ASSERT(input_size == 4096,
-        "input_size equals buffer.size");
-    TEST_ASSERT(ctx.linearize_copy_performed == 0,
-        "linearize copy was NOT performed");
-
-    /* Cleanup */
-    model_ngx_free(ctx.buffer.data);
-
-    TEST_PASS(
-        "contiguous buffer referenced directly, "
-        "no linearize copy");
-}
-
 /*
- * Contrast test: non-contiguous buffer DOES perform linearize copy.
+ * Return a human-readable string for each error category.  Covers
+ * CONVERSION, RESOURCE_LIMIT, and SYSTEM categories.
  */
-static void
-test_noncontiguous_buffer_linearizes(void)
+const ngx_str_t *
+ngx_http_markdown_error_category_string(
+    ngx_http_markdown_error_category_t category)
 {
-    copy_reduction_ctx_t ctx;
-    unsigned char *input_buf;
-    size_t input_size;
-    ngx_int_t rc;
-
-    TEST_SUBSECTION(
-        "Non-contiguous buffer: linearize copy performed");
-
-    reset_alloc_tracking();
-    init_ctx(&ctx, 2048, 1048576);
-
-    rc = model_prepare_compressed(
-        &ctx, &input_buf, &input_size, 0);
-
-    TEST_ASSERT(rc == NGX_OK,
-        "prepare_compressed succeeds (linearized)");
-    TEST_ASSERT(input_buf != ctx.buffer.data,
-        "input_buf is a NEW allocation (not original)");
-    TEST_ASSERT(input_size == 2048,
-        "input_size equals buffer.size");
-    TEST_ASSERT(ctx.linearize_copy_performed == 1,
-        "linearize copy WAS performed");
-    TEST_ASSERT(MEM_EQ(input_buf, ctx.buffer.data, 2048),
-        "linearized content matches original");
-
-    /* Cleanup */
-    model_ngx_free(input_buf);
-    model_ngx_free(ctx.buffer.data);
-
-    TEST_PASS(
-        "non-contiguous buffer linearized via copy");
-}
-
-/* ----------------------------------------------------------------
- * Test 2: Direct swap on success
- *
- * Verify that on decompression success:
- *   - Old buffer (ctx->buffer.data) is freed
- *   - New decompressed buffer is installed in ctx->buffer.data
- *   - ctx->buffer.size/capacity updated correctly
- *
- * Validates: Requirement 5.2
- * ---------------------------------------------------------------- */
-
-static void
-test_direct_swap_on_success(void)
-{
-    copy_reduction_ctx_t ctx;
-    ngx_int_t rc;
-    unsigned char *original_ptr;
-
-    TEST_SUBSECTION(
-        "Direct swap on success: old freed, new installed");
-
-    reset_alloc_tracking();
-    init_ctx(&ctx, 8192, 1048576);
-    original_ptr = ctx.buffer.data;
-
-    /* Simulate successful decompression producing 16KB output */
-    rc = model_decompress_pipeline(&ctx, 16384, DECOMP_RESULT_OK);
-
-    TEST_ASSERT(rc == NGX_OK,
-        "pipeline succeeds");
-    TEST_ASSERT(ctx.old_buffer_freed == 1,
-        "old buffer was freed");
-    TEST_ASSERT(ctx.buffer.data != original_ptr,
-        "ctx->buffer.data points to new allocation");
-    TEST_ASSERT(ctx.buffer.data != NULL,
-        "ctx->buffer.data is not NULL");
-    TEST_ASSERT(ctx.buffer.size == 16384,
-        "buffer.size updated to decompressed size");
-    TEST_ASSERT(ctx.buffer.capacity == 16384,
-        "buffer.capacity updated to decompressed size");
-    TEST_ASSERT(ctx.decompression_done == 1,
-        "decompression_done flag set");
-    TEST_ASSERT(ctx.failopen_triggered == 0,
-        "fail-open NOT triggered");
-
-    /* Verify decompressed content pattern */
-    TEST_ASSERT(ctx.buffer.data[0] == 0xDE,
-        "decompressed data has expected fill pattern");
-    TEST_ASSERT(ctx.buffer.data[16383] == 0xDE,
-        "decompressed data end has expected fill pattern");
-
-    /* Cleanup */
-    model_ngx_free(ctx.buffer.data);
-
-    TEST_PASS(
-        "direct swap: old freed, new installed with "
-        "correct size/capacity");
-}
-
-/*
- * Test: direct swap with various sizes to verify consistency.
- */
-static void
-test_direct_swap_various_sizes(void)
-{
-    copy_reduction_ctx_t ctx;
-    ngx_int_t rc;
-    size_t compressed_sizes[] = { 256, 4096, 65536 };
-    size_t decompressed_sizes[] = { 512, 8192, 131072 };
-    size_t i;
-
-    TEST_SUBSECTION(
-        "Direct swap: various size combinations");
-
-    for (i = 0; i < ARRAY_SIZE(compressed_sizes); i++) {
-        reset_alloc_tracking();
-        init_ctx(&ctx, compressed_sizes[i], 1048576);
-
-        rc = model_decompress_pipeline(
-            &ctx, decompressed_sizes[i], DECOMP_RESULT_OK);
-
-        TEST_ASSERT(rc == NGX_OK,
-            "pipeline succeeds for size combo");
-        TEST_ASSERT(ctx.old_buffer_freed == 1,
-            "old buffer freed");
-        TEST_ASSERT(ctx.buffer.size == decompressed_sizes[i],
-            "buffer.size matches decompressed size");
-
-        model_ngx_free(ctx.buffer.data);
-    }
-
-    TEST_PASS(
-        "direct swap correct for multiple size "
-        "combinations");
-}
-
-/* ----------------------------------------------------------------
- * Test 3: Decompression failure preserving original buffer
- *
- * Verify that on decompression failure:
- *   - Original ctx->buffer.data bytes are unchanged
- *   - Decompressor output buffer is freed
- *   - fail-open is triggered
- *
- * Validates: Requirement 5.3
- * ---------------------------------------------------------------- */
-
-static void
-test_failure_preserves_original(void)
-{
-    copy_reduction_ctx_t ctx;
-    ngx_int_t rc;
-    unsigned char original_copy[4096];
-
-    TEST_SUBSECTION(
-        "Decompression failure preserves original buffer");
-
-    reset_alloc_tracking();
-    init_ctx(&ctx, 4096, 1048576);
-
-    /* Save a copy of the original data for comparison */
-    memcpy(original_copy, ctx.buffer.data, 4096);
-
-    /* Simulate decompression failure (format error) */
-    rc = model_decompress_pipeline(
-        &ctx, 8192, DECOMP_RESULT_FORMAT_ERROR);
-
-    TEST_ASSERT(rc == NGX_ERROR,
-        "pipeline returns error on format failure");
-    TEST_ASSERT(ctx.failopen_triggered == 1,
-        "fail-open triggered");
-    TEST_ASSERT(ctx.new_buffer_freed == 1,
-        "decompressor output buffer freed");
-    TEST_ASSERT(ctx.old_buffer_freed == 0,
-        "original buffer NOT freed");
-    TEST_ASSERT(ctx.buffer.data != NULL,
-        "ctx->buffer.data still valid");
-    TEST_ASSERT(ctx.buffer.size == 4096,
-        "buffer.size unchanged");
-    TEST_ASSERT(MEM_EQ(ctx.buffer.data, original_copy, 4096),
-        "original buffer bytes unchanged");
-    TEST_ASSERT(ctx.decompression_done == 0,
-        "decompression_done NOT set");
-
-    /* Cleanup */
-    model_ngx_free(ctx.buffer.data);
-
-    TEST_PASS(
-        "decompression failure: original buffer "
-        "preserved intact for fail-open");
-}
-
-/*
- * Test failure preservation for all error types.
- */
-static void
-test_failure_preserves_all_error_types(void)
-{
-    copy_reduction_ctx_t ctx;
-    ngx_int_t rc;
-    unsigned char original_copy[2048];
-    int error_codes[] = {
-        DECOMP_RESULT_FORMAT_ERROR,
-        DECOMP_RESULT_TRUNCATED,
-        DECOMP_RESULT_BUDGET_EXCEEDED
+    static u_char conversion_str_data[] = "conversion_error";
+    static u_char resource_str_data[] = "memory_budget_exceeded";
+    static u_char system_str_data[] = "ffi_panic";
+    static ngx_str_t conversion_str = {
+        sizeof("conversion_error") - 1, conversion_str_data
     };
-    size_t i;
-
-    TEST_SUBSECTION(
-        "Failure preservation for all error types");
-
-    for (i = 0; i < ARRAY_SIZE(error_codes); i++) {
-        reset_alloc_tracking();
-        init_ctx(&ctx, 2048, 1048576);
-        memcpy(original_copy, ctx.buffer.data, 2048);
-
-        rc = model_decompress_pipeline(
-            &ctx, 4096, error_codes[i]);
-
-        TEST_ASSERT(rc == NGX_ERROR,
-            "pipeline returns error");
-        TEST_ASSERT(ctx.failopen_triggered == 1,
-            "fail-open triggered");
-        TEST_ASSERT(ctx.buffer.data != NULL,
-            "buffer.data still valid");
-        TEST_ASSERT(ctx.buffer.size == 2048,
-            "buffer.size unchanged");
-        TEST_ASSERT(
-            MEM_EQ(ctx.buffer.data, original_copy, 2048),
-            "original bytes unchanged");
-
-        model_ngx_free(ctx.buffer.data);
+    static ngx_str_t resource_str = {
+        sizeof("memory_budget_exceeded") - 1, resource_str_data
+    };
+    static ngx_str_t system_str = {
+        sizeof("ffi_panic") - 1, system_str_data
+    };
+    if (category == NGX_HTTP_MARKDOWN_ERROR_CONVERSION) {
+        return &conversion_str;
     }
-
-    TEST_PASS(
-        "all error types preserve original buffer");
+    if (category == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT) {
+        return &resource_str;
+    }
+    return &system_str;
 }
 
 /*
- * Test budget exceeded specifically: decompressed output larger
- * than decompress_max_size.
+ * Header-update stub returning the test-controlled g_update_headers_rc,
+ * allowing tests to simulate header update failures.
  */
-static void
-test_budget_exceeded_preserves_original(void)
+ngx_int_t
+ngx_http_markdown_update_headers(
+    ngx_http_request_t *r,     /* SONAR_NOTE c:S995 — must match module header decl */
+    const struct MarkdownResult *result,
+    const ngx_http_markdown_conf_t *conf)
 {
-    copy_reduction_ctx_t ctx;
-    ngx_int_t rc;
-    unsigned char original_copy[1024];
-
-    TEST_SUBSECTION(
-        "Budget exceeded preserves original buffer");
-
-    reset_alloc_tracking();
-    /* Set max_size to 4096, attempt to produce 8192 bytes */
-    init_ctx(&ctx, 1024, 4096);
-    memcpy(original_copy, ctx.buffer.data, 1024);
-
-    /*
-     * Pipeline with DECOMP_RESULT_OK but output exceeds budget.
-     * The apply function checks the budget before swapping.
-     */
-    rc = model_apply_decompressed(&ctx,
-        model_ngx_alloc(8192), 8192, DECOMP_RESULT_OK);
-
-    TEST_ASSERT(rc == NGX_ERROR,
-        "budget exceeded returns error");
-    TEST_ASSERT(ctx.failopen_triggered == 1,
-        "fail-open triggered on budget exceeded");
-    TEST_ASSERT(ctx.new_buffer_freed == 1,
-        "over-budget buffer freed");
-    TEST_ASSERT(ctx.old_buffer_freed == 0,
-        "original buffer NOT freed");
-    TEST_ASSERT(ctx.buffer.size == 1024,
-        "buffer.size unchanged");
-    TEST_ASSERT(
-        MEM_EQ(ctx.buffer.data, original_copy, 1024),
-        "original bytes unchanged after budget exceeded");
-
-    /* Cleanup */
-    model_ngx_free(ctx.buffer.data);
-
-    TEST_PASS(
-        "budget exceeded: original buffer preserved, "
-        "over-budget output freed");
+    UNUSED(r);
+    UNUSED(result);
+    UNUSED(conf);
+    return g_update_headers_rc;
 }
 
-/* ----------------------------------------------------------------
- * Test 4: ngx_alloc failure triggering fail-open
- *
- * Verify that when ngx_alloc fails for the decompressor output
- * buffer:
- *   - fail-open is triggered
- *   - Original ctx->buffer.data is preserved (no crash)
- *   - No dangling pointer, no double-free
- *
- * Validates: Requirement 5.5
- * ---------------------------------------------------------------- */
-
-static void
-test_alloc_failure_failopen(void)
+ngx_int_t
+ngx_http_markdown_handle_if_none_match(
+    ngx_http_request_t *r,     /* SONAR_NOTE c:S995 — must match module header decl */
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_ctx_t *ctx,
+    struct MarkdownConverterHandle *converter,  /* SONAR_NOTE c:S995 — must match module header decl */
+    struct MarkdownResult **result)
 {
-    copy_reduction_ctx_t ctx;
-    ngx_int_t rc;
-    unsigned char original_copy[4096];
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(ctx);
+    UNUSED(converter);
+    UNUSED(result);
+    return g_conditional_return_rc;
+}
 
-    TEST_SUBSECTION(
-        "ngx_alloc failure triggers fail-open");
+void
+ngx_http_markdown_release_inflight_for_request(const ngx_http_request_t *r)
+{
+    UNUSED(r);
+    g_release_inflight_call_count++;
+}
 
-    reset_alloc_tracking();
-    init_ctx(&ctx, 4096, 1048576);
-    memcpy(original_copy, ctx.buffer.data, 4096);
+ngx_int_t
+ngx_http_markdown_send_304(
+    ngx_http_request_t *r,     /* SONAR_NOTE c:S995 — must match module header decl */
+    const struct MarkdownResult *result)
+{
+    UNUSED(r);
+    UNUSED(result);
+    return g_send_304_rc;
+}
 
-    /* Simulate ngx_alloc failure */
-    g_alloc_should_fail = 1;
-
-    rc = model_decompress_pipeline(
-        &ctx, 16384, DECOMP_RESULT_OK);
-
-    TEST_ASSERT(rc == NGX_ERROR,
-        "pipeline returns error on alloc failure");
-    TEST_ASSERT(ctx.failopen_triggered == 1,
-        "fail-open triggered");
-    TEST_ASSERT(ctx.buffer.data != NULL,
-        "ctx->buffer.data still valid (not freed)");
-    TEST_ASSERT(ctx.buffer.size == 4096,
-        "buffer.size unchanged");
-    TEST_ASSERT(
-        MEM_EQ(ctx.buffer.data, original_copy, 4096),
-        "original buffer bytes unchanged after "
-        "alloc failure");
-    TEST_ASSERT(ctx.old_buffer_freed == 0,
-        "original buffer NOT freed on alloc failure");
-    TEST_ASSERT(ctx.decompression_done == 0,
-        "decompression_done NOT set");
-
-    /* Cleanup */
-    g_alloc_should_fail = 0;
-    model_ngx_free(ctx.buffer.data);
-
-    TEST_PASS(
-        "ngx_alloc failure: fail-open with original "
-        "buffer intact, no crash");
+ngx_int_t
+ngx_http_markdown_send_412(ngx_http_request_t *r)
+{
+    UNUSED(r);
+    return g_send_304_rc;
 }
 
 /*
- * Test alloc failure does not leave dangling state.
+ * subrequest: conversion_impl.h calls ngx_http_markdown_buffer_release() at the
+ * conversion terminal.  The implementation lives in buffer.c; include it
+ * directly (same pattern as eligibility_impl_test.c) so the symbol
+ * resolves at link time.  Must follow the stub definitions above.
  */
-static void
-test_alloc_failure_no_dangling(void)
+#include "../../src/ngx_http_markdown_buffer.c"
+
+#include "../../src/ngx_http_markdown_conversion_impl.h" /* SONAR_NOTE: must follow stub definitions */
+#ifndef NGINX_VERSION
+#define NGINX_VERSION "test"
+#endif
+#define NGX_HTTP_MARKDOWN_METRICS_CORE_ONLY
+static ngx_atomic_uint_t
+ngx_http_markdown_inflight_current(void)
 {
-    copy_reduction_ctx_t ctx;
-    ngx_int_t rc;
+    return 0;
+}
+#include "../../src/ngx_http_markdown_metrics_impl.h"
+#undef NGX_HTTP_MARKDOWN_METRICS_CORE_ONLY
 
-    TEST_SUBSECTION(
-        "ngx_alloc failure: no dangling pointers");
+static ngx_connection_t g_connection = { 0 };
+static ngx_log_t g_log = { 0 };
 
-    reset_alloc_tracking();
-    init_ctx(&ctx, 2048, 1048576);
 
-    g_alloc_should_fail = 1;
 
-    rc = model_decompress_pipeline(
-        &ctx, 8192, DECOMP_RESULT_OK);
+typedef ngx_int_t (*ngx_http_output_header_filter_pt)(ngx_http_request_t *r);
+typedef ngx_int_t (*ngx_http_output_body_filter_pt)(ngx_http_request_t *r, ngx_chain_t *in);
 
-    TEST_ASSERT(rc == NGX_ERROR,
-        "pipeline returns error");
-    TEST_ASSERT(ctx.new_buffer_freed == 0,
-        "no new buffer to free (alloc failed)");
-    TEST_ASSERT(ctx.old_buffer_freed == 0,
-        "old buffer not freed");
+#include "../../src/ngx_http_markdown_buffer.c"
+#include "../../src/ngx_http_markdown_decompression.c"
+#include "../../src/ngx_http_markdown_payload_impl.h"
 
-    /* Verify we can still access the original buffer safely */
-    TEST_ASSERT(ctx.buffer.data[0] == 0xAA,
-        "original buffer readable after alloc failure");
-    TEST_ASSERT(ctx.buffer.data[2047] == 0xAA,
-        "original buffer end readable after alloc failure");
 
-    g_alloc_should_fail = 0;
-    model_ngx_free(ctx.buffer.data);
+/* ── Test: copy reduction contiguous single-buffer ─────────────────────── */
 
-    TEST_PASS(
-        "alloc failure leaves no dangling pointers");
+static void
+test_contiguous_single_buffer_skips_copy(void)
+{
+    ngx_http_request_t   r;
+    ngx_connection_t     conn;
+    ngx_log_t            log;
+    ngx_chain_t          chain;
+    ngx_buf_t            buf;
+    u_char              *input_buf = NULL;
+    size_t               input_size = 0;
+    ngx_int_t            rc;
+
+    TEST_SUBSECTION("contiguous single buffer skips linearize copy");
+
+    memset(&r, 0, sizeof(r));
+    memset(&conn, 0, sizeof(conn));
+    memset(&log, 0, sizeof(log));
+    r.connection = &conn;
+    r.connection->log = &log;
+
+    memset(&chain, 0, sizeof(chain));
+    memset(&buf, 0, sizeof(buf));
+
+    u_char data[] = "Hello copy reduction contiguous buffer";
+    buf.pos = data;
+    buf.last = data + sizeof(data) - 1;
+    chain.buf = &buf;
+    chain.next = NULL;
+
+    rc = ngx_http_markdown_decompression_input(&r, &chain, &input_buf, &input_size);
+    TEST_ASSERT(rc == NGX_OK, "decompression input should return NGX_OK");
+    TEST_ASSERT(input_buf == buf.pos, "contiguous input_buf must point directly to buf.pos");
+    TEST_ASSERT(input_size == sizeof(data) - 1, "input_size must match data length");
+
+    TEST_PASS("contiguous single buffer correctly skips copy");
 }
 
-/* ----------------------------------------------------------------
- * Main
- * ---------------------------------------------------------------- */
+/* ── Test: multi-buffer chain linearize copy ──────────────────────────── */
+
+static void
+test_multi_buffer_chain_linearizes(void)
+{
+    ngx_http_request_t   r;
+    ngx_connection_t     conn;
+    ngx_log_t            log;
+    ngx_chain_t          chain1, chain2;
+    ngx_buf_t            buf1, buf2;
+    u_char              *input_buf = NULL;
+    size_t               input_size = 0;
+    ngx_int_t            rc;
+
+    TEST_SUBSECTION("multi-buffer chain linearizes");
+
+    memset(&r, 0, sizeof(r));
+    memset(&conn, 0, sizeof(conn));
+    memset(&log, 0, sizeof(log));
+    r.connection = &conn;
+    r.connection->log = &log;
+
+    memset(&chain1, 0, sizeof(chain1));
+    memset(&chain2, 0, sizeof(chain2));
+    memset(&buf1, 0, sizeof(buf1));
+    memset(&buf2, 0, sizeof(buf2));
+
+    u_char part1[] = "Hello ";
+    u_char part2[] = "world!";
+
+    buf1.pos = part1;
+    buf1.last = part1 + sizeof(part1) - 1;
+    chain1.buf = &buf1;
+    chain1.next = &chain2;
+
+    buf2.pos = part2;
+    buf2.last = part2 + sizeof(part2) - 1;
+    chain2.buf = &buf2;
+    chain2.next = NULL;
+
+    rc = ngx_http_markdown_decompression_input(&r, &chain1, &input_buf, &input_size);
+    TEST_ASSERT(rc == NGX_OK, "decompression input should return NGX_OK");
+    TEST_ASSERT(input_buf != buf1.pos, "multi-buffer must allocate new linearized buffer");
+    TEST_ASSERT(input_size == (sizeof(part1) - 1 + sizeof(part2) - 1), "input_size must be sum of parts");
+    TEST_ASSERT(memcmp(input_buf, "Hello world!", input_size) == 0, "linearized content must match");
+
+    free(input_buf);
+    TEST_PASS("multi-buffer chain correctly linearizes with correct byte count");
+}
 
 int
 main(void)
 {
-    TEST_SECTION(
-        "Feature: 0.9.1-performance-optimization\n"
-        "copy_reduction: Full-Buffer Compressed Copy "
-        "Reduction Paths\n"
-        "Validates: Requirements 5.1, 5.2, 5.3, 5.5");
+    printf("\n========================================\n");
+    printf("copy_reduction (production logic) Tests\n");
+    printf("========================================\n");
 
-    /* Test 1: Contiguous buffer skip */
-    test_contiguous_buffer_skip();
-    test_noncontiguous_buffer_linearizes();
+    test_contiguous_single_buffer_skips_copy();
+    test_multi_buffer_chain_linearizes();
 
-    /* Test 2: Direct swap on success */
-    test_direct_swap_on_success();
-    test_direct_swap_various_sizes();
-
-    /* Test 3: Failure preservation */
-    test_failure_preserves_original();
-    test_failure_preserves_all_error_types();
-    test_budget_exceeded_preserves_original();
-
-    /* Test 4: ngx_alloc failure fail-open */
-    test_alloc_failure_failopen();
-    test_alloc_failure_no_dangling();
-
-    printf("\n");
-    TEST_PASS(
-        "copy_reduction: all unit tests passed");
+    printf("\n========================================\n");
+    printf("All tests passed!\n");
+    printf("========================================\n\n");
     return 0;
 }

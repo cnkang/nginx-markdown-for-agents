@@ -36,16 +36,29 @@ typedef uintptr_t       ngx_uint_t;
 typedef int             ngx_flag_t;
 
 /* ----------------------------------------------------------------
- * Compression type enum (mirrors production)
+ * Compression type enum (bound to the production format constants
+ * from markdown_converter.h via the production routing header)
  * ---------------------------------------------------------------- */
+
+#include "../../src/ngx_http_markdown_decompression_route.h"
 
 typedef enum {
     NGX_HTTP_MARKDOWN_COMPRESSION_NONE    = 0,
-    NGX_HTTP_MARKDOWN_COMPRESSION_GZIP    = 1,
-    NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE = 2,
-    NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI  = 3,
-    NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN = 4
+    NGX_HTTP_MARKDOWN_COMPRESSION_GZIP    = MARKDOWN_FORMAT_GZIP + 1,
+    NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE = MARKDOWN_FORMAT_DEFLATE + 1,
+    NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI  = MARKDOWN_FORMAT_BROTLI + 1,
+    NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN = MARKDOWN_FORMAT_BROTLI + 2
 } ngx_http_markdown_compression_type_e;
+
+_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+                   == MARKDOWN_FORMAT_GZIP + 1,
+               "gzip C/R format mapping drifted");
+_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+                   == MARKDOWN_FORMAT_DEFLATE + 1,
+               "deflate C/R format mapping drifted");
+_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+                   == MARKDOWN_FORMAT_BROTLI + 1,
+               "Brotli C/R format mapping drifted");
 
 /* ----------------------------------------------------------------
  * Cache validation mode enum
@@ -113,14 +126,12 @@ ngx_http_markdown_decomp_routing_decision(
     /*
      * Condition 4: encoding must be supported by streaming
      * decompressor.  Gzip, deflate, and Brotli (when compiled)
-     * are supported in 0.9.1.
+     * are supported in 0.9.1.  Delegates to the production
+     * capability predicate from decompression_route.h so a
+     * production format change fails this test.
      */
-    if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
-        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
-#ifdef NGX_HTTP_BROTLI
-        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
-#endif
-        ) {
+    if (!ngx_http_markdown_decompression_is_streamable(
+            (unsigned) encoding)) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 

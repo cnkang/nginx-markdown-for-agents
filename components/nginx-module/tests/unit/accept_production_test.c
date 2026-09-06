@@ -862,6 +862,52 @@ test_accept_collection_error_guards(void)
     TEST_PASS("Accept collection error guards exercised");
 }
 
+static void
+test_should_convert_typed_singleton_validation(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    ngx_table_elt_t *typed;
+    ngx_str_t out;
+    ngx_uint_t reason;
+    static char oversized[NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX + 1];
+
+    memset(oversized, 'x', sizeof(oversized));
+
+    /* A typed singleton whose value has length but no storage must be
+     * rejected like a malformed list field-line, not aliased into the
+     * negotiation input. */
+    memset(&r, 0, sizeof(r));
+    memset(&conf, 0, sizeof(conf));
+    g_pool_offset = 0;
+    r.headers_in.headers = *create_header_list();
+    typed = add_header(&r.headers_in.headers, "Accept", "x");
+    typed->value.data = NULL;
+    typed->value.len = 1;
+    r.headers_in.accept = typed;
+    TEST_ASSERT(ngx_http_markdown_should_convert(
+                    &r, &conf, &reason) == 0,
+                "typed singleton with NULL data does not convert");
+    TEST_ASSERT(reason == NEGOTIATE_REASON_INTERNAL_ERROR,
+                "typed singleton with NULL data reports an internal error");
+    TEST_ASSERT(ngx_http_markdown_get_accept_value(&r, &out) == NGX_ERROR,
+                "typed singleton with NULL data fails value collection");
+
+    /* A typed singleton above the combined-value cap must be rejected
+     * instead of reaching negotiation with the oversized value. */
+    memset(&r, 0, sizeof(r));
+    g_pool_offset = 0;
+    r.headers_in.headers = *create_header_list();
+    typed = add_header(&r.headers_in.headers, "Accept", oversized);
+    r.headers_in.accept = typed;
+    TEST_ASSERT(ngx_http_markdown_should_convert(
+                    &r, &conf, &reason) == 0,
+                "oversized typed singleton does not convert");
+    TEST_ASSERT(reason == NEGOTIATE_REASON_INTERNAL_ERROR,
+                "oversized typed singleton reports an internal error");
+    TEST_PASS("typed singleton validation exercised");
+}
+
 int
 main(void)
 {
@@ -893,6 +939,7 @@ main(void)
     test_should_convert_out_reason_null();
     test_accept_result_vary_mapping();
     test_markdown_options_init_defaults();
+    test_should_convert_typed_singleton_validation();
     test_markdown_options_init_null();
 
     printf("\n========================================\n");
