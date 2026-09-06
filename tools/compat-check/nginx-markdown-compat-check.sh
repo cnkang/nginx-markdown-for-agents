@@ -57,7 +57,20 @@ if [[ ! -f "$VERSION_FILE" ]]; then
     printf '[ERROR] Unable to read project version from %s\n' "$VERSION_FILE" >&2
     exit 2
 fi
-PROJECT_VERSION="$(sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$VERSION_FILE" | head -n 1)"
+# Extract the version from the [package] table only.  Anchoring on the
+# table header prevents a dependency's `version = "..."` line (which may
+# appear earlier in the file) from shadowing the project version.
+PROJECT_VERSION="$(awk '
+    /^[[:space:]]*\[package\]/ { in_package = 1; next }
+    /^[[:space:]]*\[/ { in_package = 0 }
+    in_package && /^[[:space:]]*version[[:space:]]*=[[:space:]]*"/ {
+        line = $0
+        sub(/^[[:space:]]*version[[:space:]]*=[[:space:]]*"/, "", line)
+        sub(/".*/, "", line)
+        print line
+        exit
+    }
+' "$VERSION_FILE")"
 
 if [[ -z "$PROJECT_VERSION" ]]; then
     printf '[ERROR] Unable to read project version from %s\n' "$VERSION_FILE" >&2
