@@ -11,6 +11,13 @@ ownership, v1 compatibility policy) see
 [FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md). For the initialization
 contract see [FFI_INITIALIZATION_CONTRACT.md](FFI_INITIALIZATION_CONTRACT.md).
 
+### Active reason-code accessors
+
+The reason-code accessors are production FFI exports (not removed history).
+Source: `components/rust-converter/src/decision/reason_code.rs`, exporting
+`markdown_reason_code_str`, `markdown_reason_code_metric_key`, and
+`markdown_reason_code_count`.
+
 ## Historical ABI identity
 
 The v0.9.1 baseline identifier was `MARKDOWN_ABI_VERSION = 1`. The current
