@@ -407,6 +407,21 @@ ngx_http_markdown_get_accept_value(ngx_http_request_t *r, ngx_str_t *out)
 
     accept_header = ngx_http_markdown_get_accept_header(r);
     if (accept_header != NULL) {
+        /* The typed singleton path applies the same validation as
+         * ngx_http_markdown_collect_accept_header: reject a value with
+         * length but no storage, and enforce the combined-value cap, so
+         * a singleton request reaches negotiation with exactly the
+         * guarantees of the merged multi-field-line path. */
+        if (accept_header->value.len > 0
+            && accept_header->value.data == NULL)
+        {
+            return NGX_ERROR;
+        }
+        if (accept_header->value.len
+            > NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX)
+        {
+            return NGX_ERROR;
+        }
         out->data = accept_header->value.data;
         out->len = accept_header->value.len;
         return NGX_OK;
