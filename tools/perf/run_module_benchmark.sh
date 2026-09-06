@@ -325,7 +325,13 @@ cleanup() {
   fi
   if [[ -n "$nginx_pid" ]] && kill -0 "$nginx_pid" 2>/dev/null; then
     kill "$nginx_pid" 2>/dev/null || true
-    wait "$nginx_pid" 2>/dev/null || true
+    # A PID recovered from PID_FILE is not a shell child, so `wait`
+    # would fail immediately.  Poll for shutdown instead.
+    local i
+    for i in $(seq 1 50); do
+      kill -0 "$nginx_pid" 2>/dev/null || break
+      sleep 0.1
+    done
   fi
 
   # Stop upstream mock
@@ -717,7 +723,13 @@ stop_nginx() {
   fi
   if [[ -n "$nginx_pid" ]] && kill -0 "$nginx_pid" 2>/dev/null; then
     kill -QUIT "$nginx_pid" 2>/dev/null || true
-    wait "$nginx_pid" 2>/dev/null || true
+    # A PID recovered from PID_FILE is not a shell child, so `wait`
+    # would fail immediately.  Poll for graceful shutdown instead.
+    local i
+    for i in $(seq 1 50); do
+      kill -0 "$nginx_pid" 2>/dev/null || break
+      sleep 0.1
+    done
     NGINX_PID=""
   fi
   return 0
