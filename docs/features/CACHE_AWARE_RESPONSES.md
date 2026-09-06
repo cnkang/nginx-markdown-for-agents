@@ -159,14 +159,16 @@ location /docs/ {
 **Performance Note**: `full` requires conversion to generate a Markdown-variant ETag for comparison, which has performance implications for conditional requests.
 
 For a Markdown-negotiated GET or HEAD request, the module captures incoming
-`If-None-Match` and `If-Modified-Since` values before a static handler, proxy,
-or proxy cache can evaluate them against the source HTML representation.
+`If-None-Match`, `If-Modified-Since`, `If-Match`, and `If-Unmodified-Since`
+values before a static handler, proxy, or proxy cache can evaluate them
+against the source HTML representation.
 Only the captured `If-None-Match` validates a converted Markdown response,
 and only in `full` mode (against the Markdown ETag). The captured
 `If-Modified-Since` never validates a converted representation.
 When the request passes through as the original source representation
-(unconverted or fail-open passthrough), the module restores both captured
-validators — the `If-None-Match` and the `If-Modified-Since` — so
+(unconverted or fail-open passthrough), the module restores every captured
+validator — `If-None-Match`, `If-Modified-Since`, `If-Match`, and
+`If-Unmodified-Since` — so
 source-only conditional behavior remains available against the original
 HTML response.
 
@@ -204,6 +206,34 @@ Vary: Accept
 
 # Updated content...
 ```
+
+### If-Match and If-Unmodified-Since (Preconditions)
+
+`If-Match` and `If-Unmodified-Since` act as precondition headers: they protect
+write-style semantics (optimistic concurrency on PUT/DELETE behind the
+proxy). The full-buffer conversion path evaluates them independently of
+`markdown_cache_validation` mode:
+
+```http
+GET /page.html HTTP/1.1
+Accept: text/markdown
+If-Match: "a1b2c3d4e5f6"
+```
+
+For a converted response, the module compares `If-Match` against the
+Markdown-variant ETag with strong comparison (RFC 9110 §13.1.1). A mismatch
+returns `412 Precondition Failed`. A match lets the conditional
+`If-None-Match` evaluation proceed. `*` matches any existing representation.
+When no comparable ETag exists (for example, conversion produced none), the
+module fails closed with `412` rather than silently passing.
+
+The module evaluates `If-Unmodified-Since` against the source
+`Last-Modified` on the paths that still carry it. The
+converted-representation decision deliberately excludes the source
+timestamp, so a bare `If-Unmodified-Since` cannot validate the Markdown
+variant. When the request passes through as the original source
+representation, the module restores both headers and NGINX applies its
+standard semantics against the HTML response.
 
 ### If-Modified-Since (Time-Based)
 
