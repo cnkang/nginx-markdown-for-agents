@@ -294,7 +294,7 @@ http {
         location /md/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_limits conversion_memory=10m parser_memory=10m conversion_timeout=120s;
+            markdown_limits conversion_memory=10m parser_budget=10m conversion_timeout=120s;
             markdown_error_policy pass;
 
             proxy_http_version 1.1;
@@ -305,7 +305,7 @@ http {
         location /md-reject/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_limits conversion_memory=10m parser_memory=10m conversion_timeout=120s;
+            markdown_limits conversion_memory=10m parser_budget=10m conversion_timeout=120s;
             markdown_error_policy fail_closed;
 
             proxy_http_version 1.1;
@@ -316,7 +316,7 @@ http {
         location /md-small/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_limits conversion_memory=64k parser_memory=64k streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=64k parser_budget=64k streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
 
             proxy_http_version 1.1;

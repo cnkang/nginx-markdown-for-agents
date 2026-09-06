@@ -279,7 +279,7 @@ http {
             markdown_log_verbosity debug;
             markdown_token_estimate on;
             markdown_error_policy pass;
-            markdown_limits conversion_memory=1m parser_memory=1m streaming_buffer=64k conversion_timeout=5s parser_timeout=5s;
+            markdown_limits conversion_memory=1m parser_budget=1m streaming_buffer=64k conversion_timeout=5s parser_timeout=5s;
         }
 
         location /auth {
@@ -376,7 +376,7 @@ http {
         location /small-limit {
             root html;
             markdown_filter on;
-            markdown_limits conversion_memory=64k parser_memory=64k streaming_buffer=64k;
+            markdown_limits conversion_memory=64k parser_budget=64k streaming_buffer=64k;
         }
 
         location /log-error {
@@ -393,7 +393,7 @@ http {
             markdown_accept wildcard;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
-            markdown_limits conversion_memory=1m parser_memory=1m streaming_buffer=64k;
+            markdown_limits conversion_memory=1m parser_budget=1m streaming_buffer=64k;
         }
 
         # Gzip under streaming-enabled location (incremental decompression)
@@ -406,7 +406,7 @@ http {
             markdown_cache_validation off;
             markdown_error_policy pass;
             markdown_log_verbosity debug;
-            markdown_limits conversion_memory=1m parser_memory=1m streaming_buffer=64k;
+            markdown_limits conversion_memory=1m parser_budget=1m streaming_buffer=64k;
         }
 
         # Streaming + gzip proxy + tiny budget + reject
@@ -417,7 +417,7 @@ http {
             markdown_accept wildcard;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=64k conversion_memory=1m parser_memory=1m;
+            markdown_limits streaming_buffer=64k conversion_memory=1m parser_budget=1m;
             markdown_error_policy fail_closed;
             markdown_log_verbosity debug;
         }
@@ -533,7 +533,7 @@ http {
             markdown_filter on;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=64k conversion_memory=64k parser_memory=64k;
+            markdown_limits streaming_buffer=64k conversion_memory=64k parser_budget=64k;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
         }
@@ -543,7 +543,7 @@ http {
             markdown_filter on;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=64k conversion_memory=64k parser_memory=64k;
+            markdown_limits streaming_buffer=64k conversion_memory=64k parser_budget=64k;
             markdown_error_policy fail_closed;
             markdown_log_verbosity debug;
         }
@@ -590,7 +590,7 @@ http {
             markdown_filter on;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=10m conversion_memory=10m parser_memory=10m;
+            markdown_limits streaming_buffer=10m conversion_memory=10m parser_budget=10m;
             markdown_token_estimate on;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
@@ -614,7 +614,7 @@ http {
             markdown_accept wildcard;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=10m conversion_memory=10m parser_memory=10m;
+            markdown_limits streaming_buffer=10m conversion_memory=10m parser_budget=10m;
             markdown_error_policy pass;
             markdown_token_estimate on;
             markdown_log_verbosity debug;

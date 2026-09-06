@@ -337,7 +337,7 @@ increment `nginx_markdown_conversion_attempts_total` nor assign
 `engine="full_buffer"`, because conversion never starts. The module
 forwards the original response without evaluating `markdown_error_policy`
 (prechecked passthrough). Generated-output, transient-working-set, and
-`parser_memory` failures are **not** prechecked at header time: they can
+`parser_budget` failures are **not** prechecked at header time: they can
 only appear during conversion, so those cases go through
 `markdown_error_policy` like any other conversion failure.
 

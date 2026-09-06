@@ -329,7 +329,7 @@ jq empty dashboard.json
 | `markdown_on_wildcard` | `markdown_accept wildcard` | Different syntax; controls wildcard Accept matching |
 | `markdown_decompress_max_size` | `markdown_limits decompressed_size=` key | Removed directive (0.9.x) |
 | `markdown_parse_timeout` | `markdown_limits parser_timeout=` key | Removed directive (0.9.x) |
-| `markdown_parser_budget` | `markdown_limits parser_memory=` key | Removed directive (0.9.x) |
+| `markdown_parser_budget` | `markdown_limits parser_budget=` key | Removed directive (0.9.x) |
 | `markdown_stream_threshold` | _(no replacement)_ | Internal 1 MiB routing heuristic |
 | `markdown_stream_flush_min` | _(no replacement)_ | Internal flush heuristic |
 | `markdown_streaming_auto_threshold` | `markdown_streaming_engine on\|off` + `markdown_stream_threshold=<size>` (0.9.0 pair) | Removed directive; explicit policy replaces the heuristic |

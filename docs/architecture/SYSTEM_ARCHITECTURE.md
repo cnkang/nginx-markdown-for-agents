@@ -313,7 +313,7 @@ attacks. C classifies `DecompressionBudgetExceeded` (FFI code 5) as
 
 ### Parser Timeout and Budget
 The `markdown_limits parser_timeout=` (default 10s) and `markdown_limits
-parser_memory=` (default 32m) keys limit parsing time and memory. Error codes
+parser_budget=` (default 32m) keys limit parsing time and memory. Error codes
 `Timeout` (9) and `BudgetExceeded` (10) map to
 `resource_limit`.
 
@@ -371,7 +371,7 @@ surface before the 1.0 LTS compatibility freeze:
   profile, and OTel directives. Removed names fail `nginx -t`
   with the standard `unknown directive` error.
 - **`markdown_limits` keys**: conversion_timeout, parser_timeout,
-  conversion_memory, parser_memory, streaming_buffer, decompressed_size,
+  conversion_memory, parser_budget, streaming_buffer, decompressed_size,
   decompression_ratio, and max_inflight replace the former standalone
   limit directives.
 - **Metrics freeze**: The production endpoint emits the eleven-family v1

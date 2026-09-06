@@ -40,7 +40,7 @@ before/after examples.
   replacement. Four directives map to `markdown_limits`. Use downstream
   buffering for the removed flush directive. Use key=value syntax for
   `streaming_buffer=`,
-  `parser_timeout=`, `parser_memory=`, and `decompressed_size=`.
+  `parser_timeout=`, `parser_budget=`, and `decompressed_size=`.
 - **Profile presets removed.** The release removes `balanced`, `strict_cache`,
   and `streaming_first`. Use explicit directives to configure limits.
 - **OTel subsystem removed.** The experimental `markdown_otel` /

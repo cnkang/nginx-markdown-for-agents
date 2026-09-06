@@ -10,7 +10,7 @@
  * Validates: Requirements 2.3
  *
  * For any valid combination of the 8 limit keys (conversion_timeout,
- * parser_timeout, conversion_memory, parser_memory, streaming_buffer,
+ * parser_timeout, conversion_memory, parser_budget, streaming_buffer,
  * decompressed_size, decompression_ratio, max_inflight) with values
  * within allowed ranges:
  *   - Parsing produces the same values as specified
@@ -462,7 +462,7 @@ init_limits_unset(ngx_http_markdown_conf_t *mcf)
     mcf->limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     mcf->limits.parser_timeout = NGX_CONF_UNSET_MSEC;
     mcf->limits.conversion_memory = NGX_CONF_UNSET_SIZE;
-    mcf->limits.parser_memory = NGX_CONF_UNSET_SIZE;
+    mcf->limits.parser_budget = NGX_CONF_UNSET_SIZE;
     mcf->limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
     mcf->limits.decompressed_size = NGX_CONF_UNSET_SIZE;
     mcf->limits.decompression_ratio = NGX_CONF_UNSET_UINT;
@@ -622,7 +622,7 @@ test_property1a_valid_combinations_roundtrip(void)
         if (mask & 0x08) {
             exp_pm = random_size();
             format_size_arg((int)arg_idx - 1,
-                "parser_memory", exp_pm);
+                "parser_budget", exp_pm);
             g_args[arg_idx].data = (u_char *)g_arg_bufs[arg_idx-1];
             g_args[arg_idx].len = strlen(g_arg_bufs[arg_idx-1]);
             arg_idx++;
@@ -697,12 +697,12 @@ test_property1a_valid_combinations_roundtrip(void)
         }
 
         if (mask & 0x08) {
-            TEST_ASSERT(mcf.limits.parser_memory == exp_pm,
-                "parser_memory must match generated value");
+            TEST_ASSERT(mcf.limits.parser_budget == exp_pm,
+                "parser_budget must match generated value");
         } else {
             TEST_ASSERT(
-                mcf.limits.parser_memory == NGX_CONF_UNSET_SIZE,
-                "parser_memory must remain UNSET");
+                mcf.limits.parser_budget == NGX_CONF_UNSET_SIZE,
+                "parser_budget must remain UNSET");
         }
 
         if (mask & 0x10) {
@@ -766,8 +766,8 @@ test_property1b_duplicate_keys_rejected(void)
     static u_char parser_timeout_b[] = "parser_timeout=3s";
     static u_char conversion_memory_a[] = "conversion_memory=128m";
     static u_char conversion_memory_b[] = "conversion_memory=256m";
-    static u_char parser_memory_a[] = "parser_memory=128m";
-    static u_char parser_memory_b[] = "parser_memory=256m";
+    static u_char parser_budget_a[] = "parser_budget=128m";
+    static u_char parser_budget_b[] = "parser_budget=256m";
     static u_char streaming_buffer_a[] = "streaming_buffer=128k";
     static u_char streaming_buffer_b[] = "streaming_buffer=256k";
     static u_char decompressed_size_a[] = "decompressed_size=1m";
@@ -798,8 +798,8 @@ test_property1b_duplicate_keys_rejected(void)
         "duplicate parser_timeout must be rejected");
     ASSERT_DUPLICATE(conversion_memory_a, conversion_memory_b,
         "duplicate conversion_memory must be rejected");
-    ASSERT_DUPLICATE(parser_memory_a, parser_memory_b,
-        "duplicate parser_memory must be rejected");
+    ASSERT_DUPLICATE(parser_budget_a, parser_budget_b,
+        "duplicate parser_budget must be rejected");
     ASSERT_DUPLICATE(streaming_buffer_a, streaming_buffer_b,
         "duplicate streaming_buffer must be rejected");
     ASSERT_DUPLICATE(decompressed_size_a, decompressed_size_b,
@@ -903,7 +903,7 @@ test_property1d_zero_values_rejected(void)
     static u_char z1[] = "conversion_timeout=0ms";
     static u_char z2[] = "parser_timeout=0s";
     static u_char z3[] = "conversion_memory=0k";
-    static u_char z4[] = "parser_memory=0m";
+    static u_char z4[] = "parser_budget=0m";
     static u_char z5[] = "streaming_buffer=0g";
     static u_char z6[] = "decompressed_size=0k";
     static u_char z7[] = "decompression_ratio=0";
@@ -948,7 +948,7 @@ test_property1e_overflow_values_rejected(void)
     static u_char o1[] = "conversion_timeout=2h";
     static u_char o2[] = "parser_timeout=3601s";
     static u_char o3[] = "conversion_memory=2g";
-    static u_char o4[] = "parser_memory=2g";
+    static u_char o4[] = "parser_budget=2g";
     static u_char o5[] = "streaming_buffer=2g";
     static u_char o6[] = "decompressed_size=2g";
     static u_char o7[] = "decompression_ratio=10001";
@@ -989,7 +989,7 @@ test_property1f_malformed_args_rejected(void)
     char *rc;
     static u_char m1[] = "conversion_timeout";
     static u_char m2[] = "=5s";
-    static u_char m3[] = "parser_memory:32m";
+    static u_char m3[] = "parser_budget:32m";
 
     TEST_SUBSECTION("Property 1f: Malformed arguments rejected");
 
@@ -1058,7 +1058,7 @@ test_property1g_all_keys_specified(void)
         format_duration_arg(0, "conversion_timeout", ct);
         format_duration_arg(1, "parser_timeout", pt);
         format_size_arg(2, "conversion_memory", cm);
-        format_size_arg(3, "parser_memory", pm);
+        format_size_arg(3, "parser_budget", pm);
         format_size_arg(4, "streaming_buffer", sb);
         format_size_arg(5, "decompressed_size", ds);
         format_uint_arg(6, "decompression_ratio", dr);
@@ -1082,8 +1082,8 @@ test_property1g_all_keys_specified(void)
             "parser_timeout roundtrip");
         TEST_ASSERT(mcf.limits.conversion_memory == cm,
             "conversion_memory roundtrip");
-        TEST_ASSERT(mcf.limits.parser_memory == pm,
-            "parser_memory roundtrip");
+        TEST_ASSERT(mcf.limits.parser_budget == pm,
+            "parser_budget roundtrip");
         TEST_ASSERT(mcf.limits.streaming_buffer == sb,
             "streaming_buffer roundtrip");
         TEST_ASSERT(mcf.limits.decompressed_size == ds,

@@ -747,7 +747,7 @@ http {
             markdown_streaming off;
             markdown_cache_validation full;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
-                parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k
+                parser_budget=${MARKDOWN_MAX_SIZE} streaming_buffer=64k
                 conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -771,7 +771,7 @@ http {
             markdown_accept wildcard;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
-                parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
+                parser_budget=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
                 parser_timeout=120s
                 streaming_buffer=${MARKDOWN_MAX_SIZE}
                 decompression_ratio=1000;
@@ -789,7 +789,7 @@ http {
             markdown_accept wildcard;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
-                parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
+                parser_budget=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
                 parser_timeout=120s
                 streaming_buffer=${MARKDOWN_MAX_SIZE}
                 decompression_ratio=1000;
@@ -809,7 +809,7 @@ http {
             markdown_accept wildcard;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
-                parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
+                parser_budget=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
                 parser_timeout=120s
                 streaming_buffer=256k decompression_ratio=1000;
             markdown_error_policy pass;

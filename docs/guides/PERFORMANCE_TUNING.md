@@ -14,7 +14,7 @@ markdown_streaming auto;
 markdown_auto_decompress on;
 markdown_cache_validation ims_only;
 markdown_limits conversion_memory=64m conversion_timeout=10s
-    parser_memory=32m parser_timeout=5s streaming_buffer=2m
+    parser_budget=32m parser_timeout=5s streaming_buffer=2m
     decompressed_size=20m decompression_ratio=100 max_inflight=64;
 ```
 
@@ -26,7 +26,7 @@ markdown_streaming off;
 markdown_auto_decompress on;
 markdown_cache_validation full;
 markdown_limits conversion_memory=64m conversion_timeout=10s
-    parser_memory=32m parser_timeout=5s decompressed_size=16m
+    parser_budget=32m parser_timeout=5s decompressed_size=16m
     decompression_ratio=50 max_inflight=64;
 ```
 
@@ -38,7 +38,7 @@ markdown_streaming force;
 markdown_auto_decompress on;
 markdown_cache_validation ims_only;
 markdown_limits conversion_memory=128m conversion_timeout=30s
-    parser_memory=64m parser_timeout=10s streaming_buffer=8m
+    parser_budget=64m parser_timeout=10s streaming_buffer=8m
     decompressed_size=64m decompression_ratio=100 max_inflight=128;
 ```
 
@@ -54,7 +54,7 @@ Tune one bounded setting at a time and record the resulting metrics:
 2. `markdown_cache_validation` controls whether the module requires complete output.
 3. `markdown_auto_decompress` controls compressed-response conversion.
 4. `markdown_limits streaming_buffer` bounds streaming working memory.
-5. `markdown_limits conversion_memory` and `parser_memory` bound conversion
+5. `markdown_limits conversion_memory` and `parser_budget` bound conversion
    allocations.
 6. `markdown_limits decompressed_size` and `decompression_ratio` protect
    compressed inputs.

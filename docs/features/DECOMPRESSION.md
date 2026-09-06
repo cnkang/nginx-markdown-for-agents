@@ -63,14 +63,14 @@ location / {
 
 - `decompressed_size` caps the cumulative decompressed output.
 - `decompression_ratio` caps expansion relative to compressed input.
-- `conversion_memory` bounds the cumulative input bytes accepted for conversion. `parser_memory` bounds the estimated parser working set separately.
+- `conversion_memory` bounds the cumulative input bytes accepted for conversion. `parser_budget` bounds the estimated parser working set separately.
 - `markdown_error_policy pass` preserves the original response. `fail_closed`
   returns the configured error status.
 
 The module checks the limits in both full-buffer and streaming paths. Gzip member
 resets do not reset the response-wide accounting, and truncated final streams
 get rejected. Parser and streaming memory remain independently bounded by
-`parser_memory` and `streaming_buffer`. All growing buffers have explicit
+`parser_budget` and `streaming_buffer`. All growing buffers have explicit
 limits and error paths release auxiliary storage.
 
 ## Error classification

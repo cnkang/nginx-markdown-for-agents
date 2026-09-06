@@ -209,7 +209,7 @@ if [[ -n "$DIAG" ]]; then
     pass "diagnostics endpoint accessible"
 
     # Check for resource limit config keys
-    for key in "decompressed_size" "parser_timeout" "parser_memory"; do
+    for key in "decompressed_size" "parser_timeout" "parser_budget"; do
         if echo "$DIAG" | grep -q "\"$key\""; then
             pass "diagnostics key present: $key"
         else

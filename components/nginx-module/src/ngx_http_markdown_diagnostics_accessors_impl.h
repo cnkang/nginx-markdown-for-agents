@@ -514,9 +514,9 @@ ngx_http_markdown_manifest_field_limits(
         || ngx_http_markdown_manifest_json_u64(builder,
             (uint64_t) conf->limits.max_inflight) != NGX_OK
         || ngx_http_markdown_manifest_literal(builder,
-            ",\"parser_memory\":") != NGX_OK
+            ",\"parser_budget\":") != NGX_OK
         || ngx_http_markdown_manifest_json_u64(builder,
-            (uint64_t) conf->limits.parser_memory) != NGX_OK
+            (uint64_t) conf->limits.parser_budget) != NGX_OK
         || ngx_http_markdown_manifest_literal(builder,
             ",\"parser_timeout\":") != NGX_OK
         || ngx_http_markdown_manifest_json_u64(builder,

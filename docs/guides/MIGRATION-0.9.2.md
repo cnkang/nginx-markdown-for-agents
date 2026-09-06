@@ -329,7 +329,7 @@ markdown_parser_budget 32m;
 markdown_decompress_max_size 20m;
 
 # AFTER (0.9.2)
-markdown_limits parser_timeout=10s parser_memory=32m decompressed_size=20m;
+markdown_limits parser_timeout=10s parser_budget=32m decompressed_size=20m;
 ```
 
 ### `markdown_otel` / `markdown_otel_endpoint` → removed
@@ -399,7 +399,7 @@ directive with key=value pairs:
 markdown_limits conversion_timeout=30s
                parser_timeout=10s
                conversion_memory=64m
-               parser_memory=32m
+               parser_budget=32m
                streaming_buffer=2m
                decompressed_size=10m
                decompression_ratio=100
@@ -411,14 +411,14 @@ markdown_limits conversion_timeout=30s
 | `conversion_timeout` | duration (ms, s) | 30s | 1ms–1h |
 | `parser_timeout` | duration (ms, s) | 10s | 1ms–1h |
 | `conversion_memory` | size (k, m, g) | 64m | 64k–1g |
-| `parser_memory` | size (k, m, g) | 32m | 64k–1g |
+| `parser_budget` | size (k, m, g) | 32m | 64k–1g |
 | `streaming_buffer` | size (k, m, g) | 2m | 64k–1g |
 | `decompressed_size` | size (k, m, g) | 10m | 64k–1g |
 | `decompression_ratio` | integer | 100 | 1–10000 |
 | `max_inflight` | integer | 64 | 1–65535 |
 
 Cross-key constraints: `parser_timeout <= conversion_timeout`,
-`parser_memory <= conversion_memory`, `streaming_buffer <= conversion_memory`.
+`parser_budget <= conversion_memory`, `streaming_buffer <= conversion_memory`.
 The 0.9.2 default for `streaming_buffer` is 2 MiB, the same default that
 0.9.1 used. The 256 KiB value appeared only in the removed profiles
 (balanced and streaming_first). Pin `markdown_limits streaming_buffer=2m`

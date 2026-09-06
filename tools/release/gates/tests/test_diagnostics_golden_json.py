@@ -254,7 +254,7 @@ def _static_config_manifest(draw):
             ["on", "off"])), "explicit": draw(st.booleans())},
         "limits": {"value": draw(st.sampled_from([
             {"conversion_timeout": 30000, "parser_timeout": 10000,
-             "conversion_memory": 67108864, "parser_memory": 33554432,
+             "conversion_memory": 67108864, "parser_budget": 33554432,
              "streaming_buffer": 2097152, "decompressed_size": 10485760,
              "decompression_ratio": 100, "max_inflight": 64},
         ])), "explicit": draw(st.booleans())},

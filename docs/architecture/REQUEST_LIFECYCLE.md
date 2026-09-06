@@ -41,7 +41,7 @@ policy midway through processing.
 
 The effective view includes `enabled` (the `filter` field), `prune_noise`,
 `log_verbosity`, `error_policy`, and `streaming_buffer` as runtime-overridable
-fields. `conversion_memory`, `parser_memory`, `decompressed_size`,
+fields. `conversion_memory`, `parser_budget`, `decompressed_size`,
 `decompression_ratio`, `conversion_timeout`, `parser_timeout`, and
 `max_inflight` remain static NGINX configuration constraints owned by the
 configuration lifecycle.
@@ -76,10 +76,10 @@ encoding. `markdown_limits` configures the decompression limits:
 
 ```nginx
 # Example values; the defaults are conversion_memory=64m,
-# conversion_timeout=30s, parser_memory=32m, parser_timeout=10s,
+# conversion_timeout=30s, parser_budget=32m, parser_timeout=10s,
 # streaming_buffer=2m, decompressed_size=10m.
 markdown_limits conversion_memory=64m conversion_timeout=30s
-    parser_memory=32m parser_timeout=10s streaming_buffer=2m
+    parser_budget=32m parser_timeout=10s streaming_buffer=2m
     decompressed_size=10m decompression_ratio=100 max_inflight=64;
 ```
 

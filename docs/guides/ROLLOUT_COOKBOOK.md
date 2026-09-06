@@ -1401,7 +1401,7 @@ http {
     markdown_cache_validation ims_only;
     markdown_error_policy pass;
     markdown_limits conversion_memory=64m conversion_timeout=10s
-        parser_memory=32m parser_timeout=5s streaming_buffer=2m
+        parser_budget=32m parser_timeout=5s streaming_buffer=2m
         decompressed_size=20m decompression_ratio=100 max_inflight=64;
 
     server {

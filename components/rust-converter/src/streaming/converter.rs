@@ -139,7 +139,7 @@ pub struct StreamingConverter {
     utf8_tail: Vec<u8>,
     /// Parser memory budget in bytes (0 = unlimited).
     /// Limits the conservative resident working-set estimate used by the
-    /// streaming parser. Populated from the `markdown_limits parser_memory=`
+    /// streaming parser. Populated from the `markdown_limits parser_budget=`
     /// limit via FFI.
     parser_budget: u64,
     /// Whether a leading UTF-8 BOM (U+FEFF) has been checked/stripped from the

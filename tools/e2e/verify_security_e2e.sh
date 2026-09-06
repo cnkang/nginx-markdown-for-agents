@@ -287,7 +287,7 @@ http {
         location /md/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_limits conversion_memory=10m parser_memory=10m conversion_timeout=120s;
+            markdown_limits conversion_memory=10m parser_budget=10m conversion_timeout=120s;
             markdown_error_policy pass;
 
             proxy_http_version 1.1;

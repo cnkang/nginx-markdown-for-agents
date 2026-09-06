@@ -742,7 +742,7 @@ create_unset_conf(void)
     conf->limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     conf->limits.parser_timeout = NGX_CONF_UNSET_MSEC;
     conf->limits.conversion_memory = NGX_CONF_UNSET_SIZE;
-    conf->limits.parser_memory = NGX_CONF_UNSET_SIZE;
+    conf->limits.parser_budget = NGX_CONF_UNSET_SIZE;
     conf->limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
     conf->limits.decompressed_size = NGX_CONF_UNSET_SIZE;
     conf->limits.decompression_ratio = NGX_CONF_UNSET_UINT;
@@ -872,9 +872,9 @@ test_default_values_property(void)
     TEST_ASSERT(child->limits.conversion_memory
         == NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_MEMORY_DEFAULT,
         "limits.conversion_memory default should be 64m");
-    TEST_ASSERT(child->limits.parser_memory
+    TEST_ASSERT(child->limits.parser_budget
         == NGX_HTTP_MARKDOWN_LIMITS_PARSER_MEMORY_DEFAULT,
-        "limits.parser_memory default should be 32m");
+        "limits.parser_budget default should be 32m");
     TEST_ASSERT(child->limits.streaming_buffer
         == NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT,
         "limits.streaming_buffer default should be 2m");

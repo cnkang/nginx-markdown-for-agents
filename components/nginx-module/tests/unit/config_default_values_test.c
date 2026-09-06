@@ -9,7 +9,7 @@
  * Verified defaults:
  *   - decompressed_size: uses the default when unset
  *   - parser_timeout: 10000ms (10 seconds)
- *   - parser_memory: 32MB (32 * 1024 * 1024 bytes)
+ *   - parser_budget: 32MB (32 * 1024 * 1024 bytes)
  *   - dynconf_dry_run: 0 (off)
  *
  * This test exercises the merge function with both parent and child at
@@ -284,7 +284,7 @@ test_defaults_both_unset(void)
     TEST_ASSERT(child->decompress.parse_timeout == NGX_CONF_UNSET_MSEC,
         "parser_timeout should start as NGX_CONF_UNSET_MSEC");
     TEST_ASSERT(child->decompress.parser_budget == NGX_CONF_UNSET_SIZE,
-        "parser_memory should start as NGX_CONF_UNSET_SIZE");
+        "parser_budget should start as NGX_CONF_UNSET_SIZE");
     TEST_ASSERT(child->advanced.dynconf_dry_run == NGX_CONF_UNSET,
         "dynconf_dry_run should start as NGX_CONF_UNSET");
 
@@ -311,12 +311,12 @@ test_defaults_both_unset(void)
         "parser_timeout should default to 10000ms (10s)");
 
     /*
-     * parser_memory: 32MB (32 * 1024 * 1024).
+     * parser_budget: 32MB (32 * 1024 * 1024).
      * Allows parsing of large documents while preventing OOM from
      * adversarial inputs with deep nesting or excessive node counts.
      */
     TEST_ASSERT(child->decompress.parser_budget == 32 * 1024 * 1024,
-        "parser_memory should default to 32MB");
+        "parser_budget should default to 32MB");
 
     /*
      * dynconf_dry_run: 0 (off).
@@ -423,7 +423,7 @@ test_explicit_decompressed_size_preserved(void)
 }
 
 /*
- * Test 4: Verify parser_timeout and parser_memory inheritance from parent.
+ * Test 4: Verify parser_timeout and parser_budget inheritance from parent.
  */
 static void
 test_directives_inherit_from_parent(void)
@@ -446,7 +446,7 @@ test_directives_inherit_from_parent(void)
 
     /* Set parent values (simulates http-level config) */
     parent->limits.parser_timeout = 10000;              /* 10s */
-    parent->limits.parser_memory = 32 * 1024 * 1024;   /* 32MB */
+    parent->limits.parser_budget = 32 * 1024 * 1024;   /* 32MB */
     parent->advanced.dynconf_dry_run = 1;       /* on */
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
@@ -456,7 +456,7 @@ test_directives_inherit_from_parent(void)
     TEST_ASSERT(child->decompress.parse_timeout == 10000,
         "parser_timeout should inherit from parent (10s)");
     TEST_ASSERT(child->decompress.parser_budget == 32 * 1024 * 1024,
-        "parser_memory should inherit from parent (32MB)");
+        "parser_budget should inherit from parent (32MB)");
     TEST_ASSERT(child->advanced.dynconf_dry_run == 1,
         "dynconf_dry_run should inherit from parent (on)");
 
@@ -491,12 +491,12 @@ test_directives_child_override(void)
 
     /* Set parent values */
     parent->limits.parser_timeout = 10000;
-    parent->limits.parser_memory = 32 * 1024 * 1024;
+    parent->limits.parser_budget = 32 * 1024 * 1024;
     parent->advanced.dynconf_dry_run = 1;
 
     /* Set child overrides */
     child->limits.parser_timeout = 5000;                  /* 5s */
-    child->limits.parser_memory = 16 * 1024 * 1024;       /* 16MB */
+    child->limits.parser_budget = 16 * 1024 * 1024;       /* 16MB */
     child->advanced.dynconf_dry_run = 0;        /* off */
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
@@ -506,7 +506,7 @@ test_directives_child_override(void)
     TEST_ASSERT(child->decompress.parse_timeout == 5000,
         "child parser_timeout override (5s) should win");
     TEST_ASSERT(child->decompress.parser_budget == 16 * 1024 * 1024,
-        "child parser_memory override (16MB) should win");
+        "child parser_budget override (16MB) should win");
     TEST_ASSERT(child->advanced.dynconf_dry_run == 0,
         "child dynconf_dry_run override (off) should win");
 
@@ -614,9 +614,9 @@ test_limits_cross_key_explicitness_aware(void)
 
     /*
      * Case 1: parent fully unset, child sets only conversion_memory=10m.
-     * parser_memory resolves to its 32m default, which exceeds 10m, but
-     * because parser_memory was never explicit the merge must succeed and
-     * clamp parser_memory down to 10m.
+     * parser_budget resolves to its 32m default, which exceeds 10m, but
+     * because parser_budget was never explicit the merge must succeed and
+     * clamp parser_budget down to 10m.
      */
     memset(&cf, 0, sizeof(cf));
     cf.pool = &g_pool;
@@ -631,8 +631,8 @@ test_limits_cross_key_explicitness_aware(void)
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
     TEST_ASSERT(rc == NGX_CONF_OK,
         "only conversion_memory=10m explicit must pass");
-    TEST_ASSERT(child->limits.parser_memory == 10 * 1024 * 1024,
-        "default parser_memory must clamp down to explicit conversion_memory");
+    TEST_ASSERT(child->limits.parser_budget == 10 * 1024 * 1024,
+        "default parser_budget must clamp down to explicit conversion_memory");
     TEST_ASSERT(child->decompress.parser_budget == 10 * 1024 * 1024,
         "parser memory mirror must reflect the clamp");
 
@@ -640,7 +640,7 @@ test_limits_cross_key_explicitness_aware(void)
     free(child);
 
     /*
-     * Case 2: explicit parser_memory=64m + conversion_memory=10m -> reject.
+     * Case 2: explicit parser_budget=64m + conversion_memory=10m -> reject.
      */
     memset(&cf, 0, sizeof(cf));
     cf.pool = &g_pool;
@@ -650,12 +650,12 @@ test_limits_cross_key_explicitness_aware(void)
     TEST_ASSERT(parent != NULL, "parent conf allocation (case 2)");
     TEST_ASSERT(child != NULL, "child conf allocation (case 2)");
 
-    child->limits.parser_memory = 64 * 1024 * 1024;
+    child->limits.parser_budget = 64 * 1024 * 1024;
     child->limits.conversion_memory = 10 * 1024 * 1024;
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "explicit parser_memory=64m > conversion_memory=10m must fail");
+        "explicit parser_budget=64m > conversion_memory=10m must fail");
 
     free(parent);
     free(child);
@@ -698,7 +698,7 @@ main(void)
     printf("\nVerified defaults summary:\n");
     printf("  decompressed_size   : default and explicit limit paths\n");
     printf("  parser_timeout      : 10000ms (10 seconds)\n");
-    printf("  parser_memory       : 33554432 bytes (32MB)\n");
+    printf("  parser_budget       : 33554432 bytes (32MB)\n");
     printf("  dynconf_dry_run     : 0 (off)\n");
     printf("\n");
 
