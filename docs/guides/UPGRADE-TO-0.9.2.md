@@ -258,7 +258,28 @@ sudo nginx -t || {
     echo "ERROR: configuration restore failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
     exit 1
   }
+  # Restore the remaining backed-up configuration directories. cp -a of the
+  # whole directory replaces each target wholesale; targets absent from the
+  # backup are removed only when the source copy succeeded.
+  for CONFIG_DIR in "conf.d" "modules-enabled"; do
+    if [[ -d "${CONFIG_BACKUP_DIR}/${CONFIG_DIR}" ]]; then
+      sudo rm -rf "${NGINX_CONF_DIR}/${CONFIG_DIR}"
+      sudo cp -a "${CONFIG_BACKUP_DIR}/${CONFIG_DIR}" "${NGINX_CONF_DIR}/${CONFIG_DIR}" 2>/dev/null || {
+        echo "ERROR: ${CONFIG_DIR} restore failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+        exit 1
+      }
+    else
+      sudo rm -rf "${NGINX_CONF_DIR}/${CONFIG_DIR}"
+    fi
+  done
   sudo nginx -t && echo "INFO: previous module and configuration restored and verified." >&2
+  # The rollback left NGINX stopped; restart it on the restored, validated
+  # pair using the ownership decision recorded before the stop.
+  if [[ "$systemd_managed" -eq 1 ]]; then
+    sudo systemctl start nginx
+  else
+    sudo nginx
+  fi
   exit 1
 }
 
@@ -369,15 +390,29 @@ else
         echo "INFO: no running NGINX master found; skipping 'nginx -s quit'"
     fi
 fi
+# Back up the running module BEFORE the swap so a failed validation can
+# restore the pre-upgrade binary; back it up first, then replace.
+MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
+if [[ -e "${MODULE_BACKUP}" ]]; then
+    echo "Preserving existing pre-upgrade module backup: ${MODULE_BACKUP}"
+else
+    sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
+        "${MODULE_BACKUP}.staged"
+    sudo mv -f "${MODULE_BACKUP}.staged" "${MODULE_BACKUP}"
+fi
 sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
     "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
-# Back up the running module first so a failed validation can restore it.
-MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
-sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" "${MODULE_BACKUP}"
 if ! sudo nginx -t; then
   echo "ERROR: nginx -t failed after module swap; restoring previous module..." >&2
   sudo mv -f "${MODULE_BACKUP}" "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
   sudo nginx -t && echo "INFO: previous module restored and configuration verified." >&2
+  # The rollback left NGINX stopped; restart it on the restored, validated
+  # pair using the ownership decision recorded before the stop.
+  if [[ "$systemd_managed" -eq 1 ]]; then
+    sudo systemctl start nginx
+  else
+    sudo nginx
+  fi
   exit 1
 fi
 rm -f "${MODULE_BACKUP}" 2>/dev/null || sudo rm -f "${MODULE_BACKUP}"
