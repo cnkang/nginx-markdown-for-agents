@@ -169,7 +169,7 @@ CURRENT_LIMIT_KEYS = [
     "conversion_timeout",
     "parser_timeout",
     "conversion_memory",
-    "parser_memory",
+    "parser_budget",
     "streaming_buffer",
     "decompressed_size",
     "decompression_ratio",

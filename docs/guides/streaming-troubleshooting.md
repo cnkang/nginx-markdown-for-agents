@@ -38,13 +38,16 @@ limits="$(nginx -T 2>/dev/null | awk '
       in_limits = 0
     }
   }
-')"
+')"; then
+  echo "warning: nginx -T failed; continuing without markdown_limits validation" >&2
+  limits=""
+fi
 # Missing markdown_limits entries only print a note.  The validation must
 # not exit nonzero, or set -e would abort this diagnostic script before the
 # metrics capture below.
 printf '%s\n' "$limits" | awk '
   /conversion_memory=/ { conversion = 1 }
-  /parser_memory=/ { parser = 1 }
+  /parser_budget=/ { parser = 1 }
   /streaming_buffer=/ { streaming = 1 }
   END {
     if (!conversion && !parser && !streaming) {
@@ -168,7 +171,7 @@ curl -s -H 'Accept: text/plain; version=0.0.4' \
 ```
 
 If fallback is frequent, first review `markdown_limits conversion_memory=...`,
-`parser_memory=...`, `parser_timeout=...`, and `streaming_buffer=...`. Keep
+`parser_budget=...`, `parser_timeout=...`, and `streaming_buffer=...`. Keep
 the values bounded and remember that `streaming_buffer` is a total working-set
 and pre-commit replay budget, not a network chunk size. Change one setting at
 a time. Also inspect the
@@ -200,7 +203,7 @@ You configure the active limits as key/value entries:
 ```nginx
 markdown_limits decompressed_size=20m decompression_ratio=100
     conversion_memory=64m conversion_timeout=10s
-    parser_memory=32m parser_timeout=5s streaming_buffer=2m
+    parser_budget=32m parser_timeout=5s streaming_buffer=2m
     max_inflight=64;
 ```
 

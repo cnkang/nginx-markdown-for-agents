@@ -303,7 +303,7 @@ typedef struct {
     ngx_uint_t  conversion_timeout;
     ngx_uint_t  parser_timeout;
     ngx_uint_t  conversion_memory;
-    ngx_uint_t  parser_memory;
+    ngx_uint_t  parser_budget;
     ngx_uint_t  streaming_buffer;
     ngx_uint_t  decompressed_size;
     ngx_uint_t  decompression_ratio;
@@ -316,8 +316,8 @@ static u_char  ngx_http_markdown_limit_key_parser_timeout[] =
     "parser_timeout";
 static u_char  ngx_http_markdown_limit_key_conversion_memory[] =
     "conversion_memory";
-static u_char  ngx_http_markdown_limit_key_parser_memory[] =
-    "parser_memory";
+static u_char  ngx_http_markdown_limit_key_parser_budget[] =
+    "parser_budget";
 static u_char  ngx_http_markdown_limit_key_streaming_buffer[] =
     "streaming_buffer";
 static u_char  ngx_http_markdown_limit_key_decompressed_size[] =
@@ -448,21 +448,21 @@ ngx_http_markdown_apply_conversion_memory_limit(ngx_conf_t *cf,
 }
 
 static char *
-ngx_http_markdown_apply_parser_memory_limit(ngx_conf_t *cf,
+ngx_http_markdown_apply_parser_budget_limit(ngx_conf_t *cf,
     ngx_command_t *cmd, ngx_http_markdown_conf_t *mcf,
     const ngx_str_t *val, ngx_http_markdown_limits_seen_t *seen)
 {
     size_t  sz;
 
-    if (seen->parser_memory) {
-        return "has a duplicate \"parser_memory\" key";
+    if (seen->parser_budget) {
+        return "has a duplicate \"parser_budget\" key";
     }
 
-    seen->parser_memory = 1;
+    seen->parser_budget = 1;
     sz = ngx_http_markdown_parse_size(val);
     if (sz == (size_t) NGX_ERROR || sz == 0) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "invalid \"parser_memory\" value \"%V\" in \"%V\"; "
+            "invalid \"parser_budget\" value \"%V\" in \"%V\"; "
             "must be a positive size (e.g. 32m)",
             val, &cmd->name);
         return NGX_CONF_ERROR;
@@ -472,13 +472,13 @@ ngx_http_markdown_apply_parser_memory_limit(ngx_conf_t *cf,
         || sz > NGX_HTTP_MARKDOWN_LIMITS_SIZE_MAX)
     {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "\"parser_memory\" value \"%V\" in \"%V\" "
+            "\"parser_budget\" value \"%V\" in \"%V\" "
             "is outside the allowed range (64k..1g)",
             val, &cmd->name);
         return NGX_CONF_ERROR;
     }
 
-    mcf->limits.parser_memory = sz;
+    mcf->limits.parser_budget = sz;
     return NGX_CONF_OK;
 }
 
@@ -657,10 +657,10 @@ ngx_http_markdown_apply_limit_arg(ngx_conf_t *cf, ngx_command_t *cmd,
     }
 
     if (ngx_http_markdown_arg_equals(
-            key, ngx_http_markdown_limit_key_parser_memory,
-            sizeof(ngx_http_markdown_limit_key_parser_memory) - 1))
+            key, ngx_http_markdown_limit_key_parser_budget,
+            sizeof(ngx_http_markdown_limit_key_parser_budget) - 1))
     {
-        return ngx_http_markdown_apply_parser_memory_limit(
+        return ngx_http_markdown_apply_parser_budget_limit(
             cf, cmd, mcf, val, seen);
     }
 
@@ -700,7 +700,7 @@ ngx_http_markdown_apply_limit_arg(ngx_conf_t *cf, ngx_command_t *cmd,
     ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
         "unknown key \"%V\" in \"%V\" directive; valid keys are "
         "conversion_timeout, parser_timeout, conversion_memory, "
-        "parser_memory, streaming_buffer, decompressed_size, "
+        "parser_budget, streaming_buffer, decompressed_size, "
         "decompression_ratio, max_inflight",
         key, &cmd->name);
     return NGX_CONF_ERROR;
@@ -712,7 +712,7 @@ ngx_http_markdown_apply_limit_arg(ngx_conf_t *cf, ngx_command_t *cmd,
  * Unified limits block with 8 semantically orthogonal keys.  Grammar:
  *
  *   markdown_limits conversion_timeout=<time> parser_timeout=<time>
- *                   conversion_memory=<size> parser_memory=<size>
+ *                   conversion_memory=<size> parser_budget=<size>
  *                   streaming_buffer=<size> decompressed_size=<size>
  *                   decompression_ratio=<N> max_inflight=<N>;
  *
@@ -767,7 +767,7 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                 "invalid value \"%V\" in \"%V\" directive, "
                 "each argument must be key=value "
                 "(conversion_timeout|parser_timeout|conversion_memory|"
-                "parser_memory|streaming_buffer|decompressed_size|"
+                "parser_budget|streaming_buffer|decompressed_size|"
                 "decompression_ratio|max_inflight)",
                 &value[i], &cmd->name);
             return NGX_CONF_ERROR;

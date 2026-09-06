@@ -106,7 +106,7 @@ transient scratch allocations (normalizer buffers, table containers,
 working-set reservations) also draw against it.  A conversion
 that would grow the generated Markdown or its transient working set past
 this value aborts with a controlled `MemoryLimit` error instead of
-exceeding the configured peak.  `parser_memory` remains the independent
+exceeding the configured peak.  `parser_budget` remains the independent
 bound for the Rust parser's DOM/working-set allocations.
 
 This is the primary defense for the full-buffer path: since `parse_document`
@@ -114,7 +114,7 @@ has no interruption mechanism, limiting input size bounds the worst-case parse t
 
 ### 2.2 Parser Memory Budget
 
-**Directive**: `markdown_limits parser_memory=<size>`
+**Directive**: `markdown_limits parser_budget=<size>`
 
 - **Default**: 32 MiB
 - **Enforcement**:
@@ -126,7 +126,7 @@ has no interruption mechanism, limiting input size bounds the worst-case parse t
     estimate, not an exact process-RSS measurement. html5ever does not expose
     allocator accounting. Exceeding it returns
     `ConversionError::ParseBudgetExceeded`.
-  - **Key mapping**: `markdown_limits parser_memory=<size>` binds to the FFI
+  - **Key mapping**: `markdown_limits parser_budget=<size>` binds to the FFI
     field `parser_memory_budget`.
   - **Full-buffer path**: Enforced before parsing with a conservative estimate
     derived from input bytes, tag openers, transcoding, parser scratch, and
@@ -153,7 +153,7 @@ sub-budgets:
 
 The separate streaming pipeline budget is still built with
 `MemoryBudget::for_total(...)` from the effective `conversion_memory` and
-`streaming_buffer` limits. `parser_memory` is an independent modeled
+`streaming_buffer` limits. `parser_budget` is an independent modeled
 parser-working-set ceiling. It does not accumulate all bytes ever received.
 
 ### 2.3 Parse Timeout (Cooperative Checkpoints)
@@ -252,7 +252,7 @@ For the full-buffer path, html5ever's tree builder handles deep nesting
 according to the HTML5 spec (which defines a maximum nesting depth of 512
 for formatting elements). In this path `markdown_limits conversion_memory=`
 bounds the cumulative input bytes accepted for conversion, while
-`markdown_limits parser_memory=` bounds the estimated full-buffer working
+`markdown_limits parser_budget=` bounds the estimated full-buffer working
 set through pre-parse and checkpoint checks. The live DOM tree size itself
 is not bounded by `conversion_memory`.
 
@@ -304,7 +304,7 @@ Request arrives
     │   └─ Input capped by markdown_limits conversion_memory= before parsing
     │      (default 64 MiB, configurable). An oversized input with a known
     │      size is classified as not_eligible. Parser working-set estimates
-    │      are bounded separately by parser_memory=
+    │      are bounded separately by parser_budget=
     │
     ├─ Full-buffer post-parse deadline checkpoint
     │   ├─ parser_timeout= (nonzero, from parse_start, check first)
@@ -357,7 +357,7 @@ claim that the overall deadline triggers before the parser deadline.
 1. Input size (`markdown_limits conversion_memory=<size>`) — checked first, before FFI call
 2. Overall FFI deadline (`markdown_limits conversion_timeout=<time>`) — the authoritative upper bound, measured from `conversion_start`. The converter checks it after `parser_timeout` at the pre-parse and post-parse checkpoints. The converter uses it as the only deadline for DOM traversal and output processing. Omit the key to accept the merged 30-second default. An explicit `conversion_timeout=0` fails config validation. The handler rejects zero. Operators cannot disable the deadline through configuration.
 3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — when nonzero, the converter measures it from `conversion_start` for the pre-parse check and from `parse_start` for the post-parse check. The converter evaluates it before the overall deadline at both parser checkpoints. If elapsed time exceeds both deadlines, the converter reports the parser timeout. The two checks are separately configured, not an earlier-of/minimum deadline. At the FFI layer, a zero `conversion_timeout` would still leave a nonzero parser deadline applicable. Through NGINX configuration, the overall deadline is always the merged 30-second default or an explicit nonzero value.
-4. Memory budget (`markdown_limits parser_memory=<size>`) — enforced per
+4. Memory budget (`markdown_limits parser_budget=<size>`) — enforced per
    parsing path: streaming parsing applies allocation preflight/checkpoints
    as the parser grows its buffers. Full-buffer parsing uses a conservative
    pre-parse estimate before the FFI call, then allocation checkpoints as
@@ -412,7 +412,7 @@ Additional notes:
 |-------|--------|------|-------------------|
 | Input size (`markdown_limits conversion_memory=`) | ✅ Implemented | Both | C body filter pre-check |
 | Parse timeout (`markdown_limits parser_timeout=`) | ✅ Implemented | Full-buffer and streaming | Engine-specific cooperative checkpoints in Rust |
-| Parser memory budget (`markdown_limits parser_memory=`) | ✅ Implemented | Streaming | Modeled working-set checkpoints |
+| Parser memory budget (`markdown_limits parser_budget=`) | ✅ Implemented | Streaming | Modeled working-set checkpoints |
 | Parser memory budget (full-buffer) | ✅ Implemented | Full-buffer | Conservative pre-parse estimate |
 | Depth limit (explicit directive) | ⏳ Planned | — | Future: configurable max nesting |
 | Node-count limit (explicit directive) | ⏳ Planned | — | Future: configurable max nodes |
@@ -424,7 +424,7 @@ Additional notes:
 |------|----------|---------|
 | 3 | `ERROR_TIMEOUT` | Elapsed time exceeds `conversion_timeout` (the overall FFI deadline) |
 | 10 | `ERROR_PARSE_TIMEOUT` | Elapsed time exceeds the parser checkpoint deadline (`parser_timeout`) |
-| 11 | `ERROR_PARSE_BUDGET_EXCEEDED` | The estimated parser working set exceeds `parser_memory`, or a later memory checkpoint fails — not only a single allocation failure |
+| 11 | `ERROR_PARSE_BUDGET_EXCEEDED` | The estimated parser working set exceeds `parser_budget`, or a later memory checkpoint fails — not only a single allocation failure |
 
 At the two full-buffer parser checkpoints, the converter checks the parser
 deadline first, then the overall deadline. If only the overall deadline has
@@ -446,7 +446,7 @@ config validation rejects an explicit zero and the merge fills the
 ```nginx
 # Unified resource limits for the conversion pipeline
 markdown_limits conversion_timeout=30s parser_timeout=10s
-    conversion_memory=64m parser_memory=32m streaming_buffer=2m;
+    conversion_memory=64m parser_budget=32m streaming_buffer=2m;
 ```
 
 For full directive syntax and examples, see `docs/guides/CONFIGURATION.md`.
@@ -479,6 +479,6 @@ For full directive syntax and examples, see `docs/guides/CONFIGURATION.md`.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-24 | Kang | Named the parser_memory to parser_memory_budget FFI key mapping and located the full-buffer pre-parse check before parse_html_with_charset |
+| 0.9.2 | 2026-08-24 | Kang | Named the parser_budget to parser_memory_budget FFI key mapping and located the full-buffer pre-parse check before parse_html_with_charset |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.7.0 | 2026-05-17 | Kang | Initial parser budget documentation (parser budget) |

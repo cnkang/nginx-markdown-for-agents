@@ -519,7 +519,7 @@ typedef struct {
     ngx_msec_t    conversion_timeout;   /* NGX_CONF_UNSET_MSEC */
     ngx_msec_t    parser_timeout;       /* NGX_CONF_UNSET_MSEC */
     size_t        conversion_memory;    /* NGX_CONF_UNSET_SIZE */
-    size_t        parser_memory;        /* NGX_CONF_UNSET_SIZE */
+    size_t        parser_budget;        /* NGX_CONF_UNSET_SIZE */
     size_t        streaming_buffer;     /* NGX_CONF_UNSET_SIZE */
     size_t        decompressed_size;    /* NGX_CONF_UNSET_SIZE */
     ngx_uint_t    decompression_ratio;  /* NGX_CONF_UNSET_UINT */
@@ -529,7 +529,7 @@ typedef struct {
     ngx_flag_t    conversion_timeout_explicit; /* operator set conversion_timeout */
     ngx_flag_t    parser_timeout_explicit;     /* operator set parser_timeout */
     ngx_flag_t    conversion_memory_explicit;  /* operator set conversion_memory */
-    ngx_flag_t    parser_memory_explicit;      /* operator set parser_memory */
+    ngx_flag_t    parser_budget_explicit;      /* operator set parser_budget */
     ngx_flag_t    streaming_buffer_explicit;   /* operator set streaming_buffer */
 } ngx_http_markdown_limits_t;
 
@@ -653,7 +653,7 @@ _Static_assert(MARKDOWN_FORMAT_BROTLI == MARKDOWN_FORMAT_DEFLATE + 1,
  *   NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT (10000ms)
  * - limits.conversion_memory:
  *   NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_MEMORY_DEFAULT (64MB)
- * - limits.parser_memory:
+ * - limits.parser_budget:
  *   NGX_HTTP_MARKDOWN_LIMITS_PARSER_MEMORY_DEFAULT (32MB)
  * - limits.streaming_buffer:
  *   NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT (2MB)

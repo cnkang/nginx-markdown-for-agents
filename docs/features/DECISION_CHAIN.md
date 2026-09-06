@@ -158,7 +158,7 @@ When conversion fails (either `failed_open` or `failed_closed`), the module reco
 |---------------------|---------|
 | `conversion_error` | HTML parse or conversion error — the input HTML could not be processed |
 | `timeout` | In the full-buffer FFI path, the pre-parse and post-parse checkpoints check `parser_timeout=` before `conversion_timeout=`. The parser deadline starts at `conversion_start` before parsing and at `parse_start` after parsing. The overall deadline starts at `conversion_start` at both checkpoints and controls traversal/output afterward. If elapsed time exceeds both deadlines at one checkpoint, the converter reports parser timeout. A nonzero `parser_timeout=` still applies when `conversion_timeout` is unset (the merge supplies the 30-second overall default; an explicit `0` is rejected by the config handler). The two are not collapsed into an earlier-of deadline. |
-| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from the `not_eligible` size gate and takes precedence for parser allocations |
+| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_budget=`; this is distinct from the `not_eligible` size gate and takes precedence for parser allocations |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
 | `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Decompression](../features/DECOMPRESSION.md)) |
 | `replay_error` | Fail-open replay buffer init/append failure |
@@ -231,7 +231,7 @@ implementation events are not registry entries.
 | `decompression_truncated_input` | Compressed input was truncated (incomplete stream) |
 | `decompression_io_error` | I/O error during decompression operation |
 | `timeout` | Conversion exceeded a deadline. In the full-buffer path, the converter checks `parser_timeout=` before `conversion_timeout=` at the pre-parse and post-parse checkpoints. It measures the parser deadline from `conversion_start` and `parse_start` respectively. Traversal and output then use only the remaining overall deadline. A nonzero `parser_timeout=` remains active when `conversion_timeout` is unset (the merge supplies the 30-second overall default; an explicit `0` is rejected by the config handler). |
-| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=` (default 32m) |
+| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_budget=` (default 32m) |
 | `memory_budget_exceeded` | `markdown_limits conversion_memory=` exceeded while buffering an unknown-size body, or another conversion working-set memory limit; the module records category `resource_limit` and increments `failures_resource_limit` |
 | `overload` | Inflight guard rejected the request |
 | `invalid_dynconf` / `degraded_snapshot` | Dynamic configuration error / degraded snapshot |

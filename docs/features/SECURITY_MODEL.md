@@ -326,7 +326,7 @@ The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs th
 - Conservative resource limits: `decompressed_size` 10MB (cumulative
   decompressed-output cap), `conversion_memory` 64MB (input admission +
   generated-output budget), `conversion_timeout` 30s, `parser_timeout`
-  10s, `parser_memory` 32MB, `streaming_buffer` 2MB — with cooperative
+  10s, `parser_budget` 32MB, `streaming_buffer` 2MB — with cooperative
   parser checkpoints. An in-progress parse may overshoot its configured
   `parser_timeout`
 - Fail-open returns the original HTML after a conversion failure.

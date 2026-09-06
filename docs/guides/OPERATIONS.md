@@ -717,7 +717,7 @@ systemctl restart nginx
 5. **Prevent recurrence:**
 ```nginx
 # Reduce resource limits
-    markdown_limits conversion_memory=5m parser_memory=5m conversion_timeout=3s parser_timeout=3s;
+    markdown_limits conversion_memory=5m parser_budget=5m conversion_timeout=3s parser_timeout=3s;
 
 # Enable fail-open
 markdown_error_policy pass;
@@ -1356,7 +1356,7 @@ plain-text metric fields are part of the 0.9.2 contract.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-01 | Hermes | Align failed-outcome queries and outcome field with aborted; memory_budget_exceeded refers only to conversion_memory; parser_memory maps to budget_exceeded |
+| 0.9.2 | 2026-09-01 | Hermes | Align failed-outcome queries and outcome field with aborted; memory_budget_exceeded refers only to conversion_memory; parser_budget maps to budget_exceeded |
 | 0.9.2 | 2026-08-24 | Hermes | memory_budget_exceeded log pattern description now refers only to memory-limit failures |
 | 0.9.2 | 2026-08-15 | Hermes | Update failure categories to conversion_error, memory_budget_exceeded, timeout, and ffi_panic |
 | 0.9.2 | 2026-08-08 | Kang | Added missing nginx_markdown_streaming_peak_memory_bytes metric row |

@@ -213,7 +213,7 @@ http {
             markdown_streaming off;
             markdown_cache_validation full;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
-                conversion_timeout=600s parser_memory=${MARKDOWN_PARSER_MEMORY};
+                conversion_timeout=600s parser_budget=${MARKDOWN_PARSER_MEMORY};
             markdown_error_policy pass;
             markdown_log_verbosity info;
         }
@@ -323,7 +323,7 @@ echo "Allowed-size huge-body summary:"
 echo "  nginx_version=${NGINX_VERSION}"
 echo "  arch=$(uname -m)"
 echo "  markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}"
-echo "  markdown_limits parser_memory=${MARKDOWN_PARSER_MEMORY}"
+echo "  markdown_limits parser_budget=${MARKDOWN_PARSER_MEMORY}"
 echo "  convert_100m=$(cat "${RAW_DIR}/convert-100m.get.metrics")"
 if [[ -f "${RAW_DIR}/failopen-1g-invalid.get.metrics" ]]; then
   echo "  failopen_1g=$(cat "${RAW_DIR}/failopen-1g-invalid.get.metrics")"

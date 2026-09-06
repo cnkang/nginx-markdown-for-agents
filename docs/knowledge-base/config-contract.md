@@ -131,7 +131,7 @@ CONFIGURATION_STRUCTURE.md documents the effective module defaults.
 | `conversion_timeout` | Wall-clock limit for conversion |
 | `parser_timeout` | Cooperative parser deadline (converter/FFI checkpoint allowance; not a preemptive interrupt; upstream stalls do not consume it) |
 | `conversion_memory` | Full-buffer input admission and generated-output bound; transient scratch allocations are charged against the same budget so over-budget conversion fails with a controlled error before peak memory grows past it |
-| `parser_memory` | Rust parser allocation bound |
+| `parser_budget` | Rust parser modeled working-set ceiling |
 | `streaming_buffer` | Streaming working/replay bound (dynconf: 64 KiB – 1 GiB) |
 | `decompressed_size` | Cumulative decompressed output bound |
 | `decompression_ratio` | Maximum decompressed/input ratio |
