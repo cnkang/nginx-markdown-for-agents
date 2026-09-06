@@ -481,6 +481,8 @@ def _calc_fallback_rate(scenarios: list[dict]) -> float | None:
         if scenario is None:
             return None
         m = scenario.get("metrics") or scenario.get("results") or scenario
+        if not isinstance(m, dict):
+            return None
         failopen = m.get("precommit_failopen_total")
         requests = m.get("streaming_requests_total")
         if (
@@ -1224,6 +1226,8 @@ def _check_metric_predicates(
 ) -> None:
     """Check metric predicate invariants for a single scenario."""
     m = scenario.get("metrics") or scenario.get("results") or scenario
+    if not isinstance(m, dict):
+        return
     for check in invariant["checks"]:
         value = _path_metric_value(m, check["metric"])
         if not check["predicate"](value):
@@ -2343,6 +2347,13 @@ def _canonical_baseline_fallback_violations(
     for name in _CRITICAL_STREAMING_SCENARIOS:
         scenario = by_name.get(name, {})
         metrics = scenario.get("metrics") or scenario.get("results") or scenario
+        if not isinstance(metrics, dict):
+            violations.append((
+                f"{role}.fallback_rate",
+                f"{name}: scenario metrics must be an object "
+                f"(actual={type(metrics).__name__})",
+            ))
+            continue
         failopen = metrics.get("precommit_failopen_total")
         requests = metrics.get("streaming_requests_total")
         if failopen is None:
@@ -2783,18 +2794,45 @@ def _check_environment_compatibility(
     for name in sorted(_CRITICAL_SCENARIOS):
         if name not in cur_scenarios or name not in base_scenarios:
             continue
-        cur_metrics = cur_scenarios[name].get("metrics", {})
-        base_metrics = base_scenarios[name].get("metrics", {})
-        cur_bytes = cur_metrics.get("input_bytes")
-        base_bytes = base_metrics.get("input_bytes")
-        if cur_bytes != base_bytes:
-            violations.append(
-                (
-                    f"scenario.{name}.input_bytes",
-                    f"current={cur_bytes!r} vs baseline={base_bytes!r}",
-                )
+        violations.extend(
+            _scenario_environment_mismatches(
+                name, cur_scenarios[name], base_scenarios[name]
             )
+        )
 
+    return violations
+
+
+def _scenario_environment_mismatches(
+    name: str, cur: dict, base: dict,
+) -> list[tuple[str, str]]:
+    """Return [(field, detail)] for a single scenario's environment fields.
+
+    Compares the fixture identity of a scenario between the current and
+    baseline reports: input size and concurrency must match, otherwise
+    regression percentages are meaningless.
+    """
+    violations: list[tuple[str, str]] = []
+    cur_metrics = cur.get("metrics", {})
+    base_metrics = base.get("metrics", {})
+    cur_bytes = cur_metrics.get("input_bytes")
+    base_bytes = base_metrics.get("input_bytes")
+    if cur_bytes != base_bytes:
+        violations.append(
+            (
+                f"scenario.{name}.input_bytes",
+                f"current={cur_bytes!r} vs baseline={base_bytes!r}",
+            )
+        )
+    cur_conc = cur.get("concurrency")
+    base_conc = base.get("concurrency")
+    if cur_conc != base_conc:
+        violations.append(
+            (
+                f"scenario.{name}.concurrency",
+                f"current={cur_conc!r} vs baseline={base_conc!r}",
+            )
+        )
     return violations
 
 
