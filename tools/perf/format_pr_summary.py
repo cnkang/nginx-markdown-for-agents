@@ -224,7 +224,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
         return 1
 
-    md = format_summary(report)  # type: ignore[arg-type]
+    try:
+        md = format_summary(report)  # type: ignore[arg-type]
+    except ValueError as e:
+        print(f"ERROR: failed to format summary: {e}", file=sys.stderr)
+        return 1
 
     if args.output:
         try:
