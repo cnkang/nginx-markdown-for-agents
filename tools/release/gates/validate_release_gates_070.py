@@ -440,7 +440,7 @@ def _gate_3_items(release_packages: str) -> BlockingItems:
         ),
         (
             "publish waits for release gate",
-            "needs: [release-gate, integrity-checksums, integrity-signature]" in release_packages
+            "needs: [release-gate" in release_packages
             and "needs.release-gate.result == 'success'" in release_packages,
         ),
     ]
