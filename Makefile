@@ -1530,8 +1530,11 @@ verify-conditional-requests-e2e:
 # script manages its own NGINX lifecycle and cannot attach to an external
 # one.
 verify-real-nginx-ims-e2e:
-	@if test -z "$(NGINX_BIN)"; then \
-		echo "SKIP: real-NGINX IMS validation requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
+	@if test -n "$(SKIP)"; then \
+		echo "SKIP: real-NGINX IMS validation skipped explicitly (SKIP=1)" >&2; \
+	elif test -z "$(NGINX_BIN)"; then \
+		echo "FAIL: real-NGINX IMS validation requires NGINX_BIN (NGINX_URL fixture mode not supported); set SKIP=1 to skip explicitly" >&2; \
+		exit 1; \
 	else \
 		NGINX_BIN="$(NGINX_BIN)" bash tools/ci/verify_real_nginx_ims.sh --port 18088; \
 	fi
@@ -1540,8 +1543,11 @@ verify-real-nginx-ims-e2e:
 # real module-enabled NGINX — mirrors the "Run native SSI and filter-ordering
 # qualification" step of the CI runtime-regressions job.
 verify-subrequest-filter-ordering-native-e2e:
-	@if test -z "$(NGINX_BIN)"; then \
-		echo "SKIP: filter-ordering native E2E requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
+	@if test -n "$(SKIP)"; then \
+		echo "SKIP: filter-ordering native E2E skipped explicitly (SKIP=1)" >&2; \
+	elif test -z "$(NGINX_BIN)"; then \
+		echo "FAIL: filter-ordering native E2E requires NGINX_BIN (NGINX_URL fixture mode not supported); set SKIP=1 to skip explicitly" >&2; \
+		exit 1; \
 	else \
 		REQUIRE_FILTER_ORDERING_ALL=1 REQUIRE_AUTH_SUBREQUEST=1 \
 			bash tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18099; \
@@ -1568,8 +1574,11 @@ verify-diagnostics-access-phase-e2e:
 	./tools/e2e/verify_diagnostics_access_phase_e2e.sh
 
 verify-dynconf-convergence-e2e:
-	@if test -z "$(NGINX_BIN)"; then \
-		echo "SKIP: dynamic-config convergence E2E requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
+	@if test -n "$(SKIP)"; then \
+		echo "SKIP: dynamic-config convergence E2E skipped explicitly (SKIP=1)" >&2; \
+	elif test -z "$(NGINX_BIN)"; then \
+		echo "FAIL: dynamic-config convergence E2E requires NGINX_BIN (NGINX_URL fixture mode not supported); set SKIP=1 to skip explicitly" >&2; \
+		exit 1; \
 	else \
 		bash tools/e2e/verify_dynconf_convergence_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18103; \
 	fi
