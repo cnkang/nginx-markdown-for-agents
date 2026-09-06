@@ -83,7 +83,11 @@ impl MetadataExtractor {
 
         if metadata.url.is_none() {
             if let Some(canonical) = canonical {
-                metadata.url = self.resolve_and_sanitize_url(&canonical);
+                metadata.url = self.resolve_and_sanitize_url(&canonical).or_else(|| {
+                    self.base_url
+                        .as_deref()
+                        .and_then(Self::sanitize_metadata_url)
+                });
             } else {
                 metadata.url = self
                     .base_url
