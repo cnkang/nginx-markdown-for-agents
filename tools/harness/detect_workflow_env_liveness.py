@@ -245,9 +245,10 @@ def extract_run_vars(run_text):
     masked = re.sub(r"\$\{\{.*?\}\}", " ", masked)
     # ${VAR<default-op>} — a parameter-test operator after the name makes
     # the expansion self-satisfying; record it as a defaulted reference.
-    # Plain $VAR / ${VAR} remain live references.
+    # Plain $VAR / ${VAR} remain live references.  ${VAR?msg} and
+    # ${VAR:?msg} are error-if-unset forms, so they stay live references.
     for match in re.finditer(
-        r"\$\{(?:#)?([A-Za-z_][A-Za-z0-9_]*)([:+\-=?])?", masked
+        r"\$\{(?:#)?([A-Za-z_][A-Za-z0-9_]*)([:]?[-+=])?", masked
     ):
         name = match.group(1)
         if KNOWN_ENV_RE.match(name):
@@ -256,6 +257,15 @@ def extract_run_vars(run_text):
             refs.add(f"{name}#defaulted")
         else:
             refs.add(name)
+    # Plain $VAR references (non-braced) are always live references.
+    # Mask braced expansions first so ${FOO:-bar} does not also match
+    # the plain-$FOO pattern and defeat the #defaulted suppression.
+    plain_masked = re.sub(r"\$\{[^}]*\}", " ", masked)
+    for match in re.finditer(r"\$([A-Za-z_][A-Za-z0-9_]*)", plain_masked):
+        name = match.group(1)
+        if KNOWN_ENV_RE.match(name):
+            continue
+        refs.add(name)
     return refs
 
 
