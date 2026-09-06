@@ -15,6 +15,47 @@ from pathlib import Path
 _SAFE_REL_PATH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 
 
+def _skip_masked_region(src: str, i: int, length: int) -> int:
+    """Skip a comment or string literal starting at *src[i]*.
+
+    *i* must point at the region opener.  Returns the index of the first
+    character after the region, or *length* when the region is unterminated
+    (the file ends mid-comment or mid-string).
+    """
+    if src.startswith("//", i):
+        end = src.find("\n", i)
+        return length if end == -1 else end + 1
+    if src.startswith("/*", i):
+        end = src.find("*/", i + 2)
+        return length if end == -1 else end + 2
+    quote = src[i]
+    j = i + 1
+    while j < length:
+        ch = src[j]
+        if ch == "\\":
+            j += 2
+            continue
+        if ch == quote:
+            return j + 1
+        j += 1
+    return length
+
+
+def _find_code_semicolon(src: str, start: int, limit: int) -> int:
+    """Return the offset of the first ``;`` in *src[start:limit]* that is
+    not inside a comment or string literal, or -1 when none exists."""
+    i = start
+    while i < limit:
+        ch = src[i]
+        if ch == ";":
+            return i
+        if ch == "/" or ch in "\"'":
+            i = _skip_masked_region(src, i, limit)
+        else:
+            i += 1
+    return -1
+
+
 def sanitize_source_arg(source: str) -> Path | None:
     if not source:
         print("source path is empty", file=sys.stderr)
@@ -85,9 +126,11 @@ def find_function_slice(src: str, function_name: str, needle: str) -> tuple[int,
             return None
 
         # Prototypes and declarations can contain the same needle.  Advance
-        # to the next occurrence when a semicolon appears before the first
-        # opening brace, rather than extracting an unrelated later block.
-        if src.find(";", start, brace_start) != -1:
+        # to the next occurrence when a code semicolon appears before the
+        # first opening brace, rather than extracting an unrelated later
+        # block.  Semicolons inside comments or string literals do not
+        # terminate a definition (for example a comment mentioning a `;`).
+        if _find_code_semicolon(src, start, brace_start) != -1:
             search_from = start + len(needle)
             continue
         break
