@@ -393,7 +393,7 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
 - Failure rate exceeding 5% of conversion attempts over any 1-hour window
 - Latency spikes correlated with peak traffic periods
 - Client reports of unexpected content
-- One path failing significantly more than others: `grep "reason=failed_open\|reason=failed_closed" \| grep -oP 'uri=\K[^ ]+' \| sort \| uniq -c`
+- One path failing significantly more than others: `grep "outcome=failed_open\|outcome=failed_closed" \| grep -oP 'uri=\K[^ ]+' \| sort \| uniq -c`
 ---
 
 ### Stage 4: Production — Broader Scope
@@ -464,7 +464,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 
 # Path-specific failure check
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "reason=failed_open\|reason=failed_closed" | \
+  grep -E "outcome=failed_open\|outcome=failed_closed" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c
 
 # Verify no internal system-failure categories
@@ -1183,11 +1183,11 @@ Decision log entries use the format `markdown decision: reason=<REASON_CODE> ...
 ```bash
 # Count all conversion failures
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "reason=failed_open\|reason=failed_closed" -c
+  grep -E "outcome=failed_open\|outcome=failed_closed" -c
 
 # Show the most recent failures with full context
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "reason=failed_open\|reason=failed_closed" | tail -10
+  grep -E "outcome=failed_open\|outcome=failed_closed" | tail -10
 ```
 
 #### Check for system-level failures
@@ -1229,7 +1229,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 ```bash
 # Identify which URIs are failing most often
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "reason=failed_open|reason=failed_closed" | \
+  grep -E "outcome=failed_open|outcome=failed_closed" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c | sort -rn | head -10
 ```
 
@@ -1360,7 +1360,7 @@ Stop expanding rollout scope and investigate if any of the following occur:
 | Conversion latency exceeding `markdown_limits` | Conversions are taking too long — may indicate large pages, resource contention, or converter performance issues | Check latency buckets; look for conversions in the highest `le` bucket or timeouts in logs |
 | Upstream error rate increase | The module may be causing upstream issues (unlikely but possible with decompression or buffering interactions) | Compare upstream 5xx rates before and after enablement |
 | Unexpected `Content-Type` in responses | Converted responses have wrong Content-Type, or non-HTML responses are being processed | `curl -sD - -H "Accept: text/markdown" http://localhost/your-path/ \| grep Content-Type` |
-| One path failing significantly more than others | Path-specific issue — the HTML structure on that path may not convert cleanly | Per-URI failure check: `grep "reason=failed_open\|reason=failed_closed" \| grep -oP 'uri=\K[^ ]+' \| sort \| uniq -c` |
+| One path failing significantly more than others | Path-specific issue — the HTML structure on that path may not convert cleanly | Per-URI failure check: `grep "outcome=failed_open\|outcome=failed_closed" \| grep -oP 'uri=\K[^ ]+' \| sort \| uniq -c` |
 | `not_eligible` or `disabled` for paths you expect to convert | Upstream responses changed — content type is no longer `text/html` or response size exceeds `markdown_limits` | Check skip reason distribution filtered by URI |
 
 When a trigger fires:
@@ -1484,13 +1484,15 @@ increases by exactly one between the two snapshots for that single request.
 during the measurement window** — no other conversion requests (including
 scheduled crawlers, health probes, or other tenants on a shared instance).
 With concurrent traffic, the cumulative counter cannot attribute deliveries
-to this request. Use request-correlated evidence instead: issue the probe
-with a **unique probe token** — a random query parameter (for example
-`?probe=<uuid>`) so the decision-log entry's URI field identifies exactly
-this request. A generated request header only helps if a decision-log field
-records it, which the schema does not do today. Prefer the query parameter,
-because the bare path is not a correlation key since unrelated requests share it.
-Confirm the probe token decision-log entry for the delivered engine. Note
+to this request. Use request-correlated evidence instead: issue the probe on a
+**unique path** — embed the random token as a path segment (for example
+`/probe/<uuid>/`) so the decision-log entry's URI field (which records the
+parsed request path and never the query string) identifies exactly this
+request. A generated request header only helps if a decision-log field
+records it, which the schema does not do today. A query parameter is equally
+unusable because the decision log never prints query args. The unique path
+segment is the correlation key since unrelated requests never share it.
+Confirm the probe-path decision-log entry for the delivered engine. Note
 that `streaming_events_total` has no URI/path label, so it cannot scope
 to a probe path. For byte accounting compare deltas of
 `nginx_markdown_output_bytes_total`. Never use a delivery count as a byte

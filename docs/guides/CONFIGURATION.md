@@ -12,8 +12,10 @@ load_module modules/ngx_http_markdown_filter_module.so;
 
 # Minimal upstream used by the example proxy_pass below.
 # Replace with your actual origin service (or proxy to a socket/port).
+# The upstream MUST NOT be the port this server itself listens on,
+# otherwise NGINX proxies each request back to itself.
 upstream backend {
-    server 127.0.0.1:8080;
+    server 127.0.0.1:8081;
 }
 
 http {

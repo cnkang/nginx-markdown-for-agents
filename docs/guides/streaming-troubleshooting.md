@@ -18,7 +18,7 @@ changes:
 
 ```bash
 set -euo pipefail
-limits="$(nginx -T 2>/dev/null | awk '
+if ! limits="$(nginx -T 2>/dev/null | awk '
   /^[[:space:]]*markdown_limits[[:space:]]/ {
     line = $0
     if ($0 ~ /;/) {
