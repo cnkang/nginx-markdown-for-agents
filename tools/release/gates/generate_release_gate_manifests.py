@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tomllib
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 # Sibling module import: this script is invoked as
@@ -59,10 +60,29 @@ _SEMVER_PATTERN = r"\d+\.\d+\.\d+"
 FUZZ_QUALIFICATION_RECORD_NAME = "fuzz-qualification-record.json"
 SOAK_QUALIFICATION_RECORD_NAME = "soak-qualification-record.json"
 
-RELEASE_VERSION = _release_version()
-RELEASE_ARTIFACT_ROOT = Path("artifacts") / "release" / RELEASE_VERSION
-OUTPUT_ROOT = REPO_ROOT / RELEASE_ARTIFACT_ROOT
-FEATURE_MANIFEST = OUTPUT_ROOT / "official-build-feature-manifest.json"
+
+@lru_cache(maxsize=1)
+def _release_state() -> tuple[str, Path, Path]:
+    """Return (release_version, artifact_root, output_root).
+
+    Resolved lazily (and once per process) so an invalid or unreadable
+    Cargo version surfaces from ``main()``'s ERROR-prefixed handler with
+    a failure exit code instead of an import-time traceback.
+    """
+    version = _release_version()
+    artifact_root = Path("artifacts") / "release" / version
+    return version, artifact_root, REPO_ROOT / artifact_root
+
+
+def release_version() -> str:
+    """Active release version, resolved on first use."""
+    return _release_state()[0]
+
+
+def _release_artifact_ref(filename: str) -> str:
+    """Return a repository-relative path under the active release directory."""
+    return (_release_state()[1] / filename).as_posix()
+
 ABI_HEADER = REPO_ROOT / "components" / "rust-converter" / "include" / "markdown_converter.h"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 FINAL_EVIDENCE_SCHEMA = "schemas/final-evidence-manifest.schema.json"
@@ -71,13 +91,15 @@ SHORT_SOAK_SCOPE = "release/scope/short-soak-scope.json"
 CANONICAL_PERF_ENV = "release/performance/canonical-environment.json"
 
 
-def _release_artifact_ref(filename: str) -> str:
-    """Return a repository-relative path under the active release directory."""
-    return (RELEASE_ARTIFACT_ROOT / filename).as_posix()
+def _feature_manifest_path() -> Path:
+    """Path of the official-build feature manifest for the active release."""
+    return _release_state()[2] / "official-build-feature-manifest.json"
 
 
-TRACKED_RELEASE_INPUTS = (
-    _release_artifact_ref("official-build-feature-manifest.json"),
+# Static tracked inputs; the versioned official-build feature manifest path
+# is appended lazily via _tracked_release_inputs() so a bad Cargo version
+# surfaces from main() rather than at import time.
+_STATIC_RELEASE_INPUTS = (
     "docs/releases/release-matrix.json",
     "schemas/release-matrix.schema.json",
     FINAL_EVIDENCE_SCHEMA,
@@ -91,6 +113,16 @@ TRACKED_RELEASE_INPUTS = (
     CANONICAL_PERF_ENV,
     "components/rust-converter/include/markdown_converter.h",
 )
+
+
+@lru_cache(maxsize=1)
+def _tracked_release_inputs() -> tuple[str, ...]:
+    """Tracked release inputs including the versioned feature-manifest path."""
+    return (
+        _release_artifact_ref("official-build-feature-manifest.json"),
+    ) + _STATIC_RELEASE_INPUTS
+
+
 
 
 def _utc_now() -> str:
@@ -192,14 +224,14 @@ def _branch_name() -> str:
 
 def build_candidate_manifest(candidate_sha: str, created_at: str) -> dict:
     """Build a candidate manifest using only clean-checkout inputs."""
-    for relative_path in TRACKED_RELEASE_INPUTS:
+    for relative_path in _tracked_release_inputs():
         if not (REPO_ROOT / relative_path).is_file():
             raise ValueError(f"required tracked release input is missing: {relative_path}")
 
     input_digests = {
-        path: _sha256_file(REPO_ROOT / path) for path in TRACKED_RELEASE_INPUTS
+        path: _sha256_file(REPO_ROOT / path) for path in _tracked_release_inputs()
     }
-    feature_digest = _canonical_digest(FEATURE_MANIFEST)
+    feature_digest = _canonical_digest(_feature_manifest_path())
     matrix_digest = _sha256_file(REPO_ROOT / "docs/releases/release-matrix.json")
     ffi_digest = _sha256_file(ABI_HEADER)
     # The canonical performance environment (NGINX version, runner, rust
@@ -213,7 +245,7 @@ def build_candidate_manifest(candidate_sha: str, created_at: str) -> dict:
         "branch": _branch_name(),
         "source_tree_digest": _source_tree_digest(),
         "frozen_at": created_at,
-        "required_inputs": list(TRACKED_RELEASE_INPUTS),
+        "required_inputs": list(_tracked_release_inputs()),
         "input_digests": input_digests,
         "feature_manifest_digest": feature_digest,
         "final_ffi_freeze_digest": ffi_digest,
@@ -322,7 +354,7 @@ def build_artifact_index(candidate_sha: str, created_at: str, artifact_root: Pat
     )
     if not files:
         raise ValueError(f"no DEB/RPM artifacts found under {artifact_root}")
-    feature_digest = _canonical_digest(FEATURE_MANIFEST)
+    feature_digest = _canonical_digest(_feature_manifest_path())
     abi_text = ABI_HEADER.read_text(encoding="utf-8")
     match = re.search(r"#define\s+MARKDOWN_ABI_VERSION\s+(\d+)", abi_text)
     if match is None:
@@ -385,7 +417,7 @@ def _record_value(path: Path, field: str = "status"):
 
 def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, dict]:
     """Build transparent evidence for this job and its separate CI jobs."""
-    root = OUTPUT_ROOT
+    root = _release_state()[2]
     fuzz_pass = _record_value(root / FUZZ_QUALIFICATION_RECORD_NAME, "blocking_pass")
     soak_status = _record_value(root / SOAK_QUALIFICATION_RECORD_NAME)
     # The blocking performance evidence is produced by the release-gate job's
@@ -544,29 +576,30 @@ def main(argv: list[str] | None = None) -> int:
     try:
         candidate_sha = _candidate_sha(args.candidate_sha)
         created_at = _utc_now()
+        output_root = _release_state()[2]
         if args.phase in {"inputs", "all"}:
-            _write_json(OUTPUT_ROOT / "release-candidate-sha-manifest.json",
+            _write_json(output_root / "release-candidate-sha-manifest.json",
                         build_candidate_manifest(candidate_sha, created_at))
             blocking, corpus = build_fuzz_manifests(candidate_sha, created_at)
-            _write_json(OUTPUT_ROOT / "blocking-fuzz-target-manifest.json", blocking)
-            _write_json(OUTPUT_ROOT / "corpus-seed-manifest.json", corpus)
+            _write_json(output_root / "blocking-fuzz-target-manifest.json", blocking)
+            _write_json(output_root / "corpus-seed-manifest.json", corpus)
 
             soak_scope_path = REPO_ROOT / SHORT_SOAK_SCOPE
             soak_scope = _load_json(SHORT_SOAK_SCOPE)
             _write_json(
-                OUTPUT_ROOT / "short-soak-scenario-manifest.json",
+                output_root / "short-soak-scenario-manifest.json",
                 build_manifest(soak_scope, candidate_sha, soak_scope_path, created_at),
             )
         if args.phase in {"artifact", "all"}:
             artifact_root = (REPO_ROOT / args.artifact_root).resolve()
             _write_json(
-                OUTPUT_ROOT / "candidate-release-artifact-index.json",
+                output_root / "candidate-release-artifact-index.json",
                 build_artifact_index(candidate_sha, created_at, artifact_root),
             )
         if args.phase in {"final", "all"}:
             evidence, observation = build_final_evidence(candidate_sha, created_at)
-            _write_json(OUTPUT_ROOT / "final-evidence-manifest.json", evidence)
-            _write_json(OUTPUT_ROOT / "observation-state.json", observation)
+            _write_json(output_root / "final-evidence-manifest.json", evidence)
+            _write_json(output_root / "observation-state.json", observation)
     except (OSError, ValueError, ImportError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

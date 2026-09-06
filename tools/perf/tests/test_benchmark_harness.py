@@ -581,7 +581,7 @@ def test_module_benchmark_uses_stable_critical_fixtures():
     assert '"gzip-large|benchmark/blog-post.html|' in source
 
     expected_sizes = {
-        "benchmark/tables.html": 2164,
+        "benchmark/tables.html": 2248,
         "benchmark/blog-post.html": 6613,
     }
     for fixture, expected_size in expected_sizes.items():

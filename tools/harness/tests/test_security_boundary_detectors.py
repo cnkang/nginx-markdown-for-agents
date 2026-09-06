@@ -14,8 +14,7 @@ sys.path.insert(0, str(REPO_ROOT / "packaging" / "scripts"))
 
 from harness.detect_production_auth_transport import check_config  # noqa: E402
 from harness.detect_release_supply_chain import (  # noqa: E402
-    ALMALINUX_9,
-    ALPINE_320,
+    builder_image_refs,
     check_homebrew_formula,
     check_homebrew_publisher,
     check_ingress_smoke,
@@ -31,13 +30,15 @@ from verify_git_archive import compare_archives  # noqa: E402
 from verify_homebrew_formula import verify_formula_equivalence  # noqa: E402
 
 
+_ALMALINUX_9_REF, _ALPINE_320_REF = builder_image_refs()
+
 def test_release_builder_digest_policy_rejects_mutable_tag() -> None:
     """A release builder tag without its reviewed manifest digest fails."""
     files = {
         "tools/build_release/Dockerfile.glibc": "ARG OS_BASE=almalinux\n",
-        "tools/build_release/Dockerfile.musl": f"ARG OS_BASE={ALPINE_320}\n",
+        "tools/build_release/Dockerfile.musl": f"ARG OS_BASE={_ALPINE_320_REF}\n",
         ".github/workflows/release-packages.yml": (
-            f"    container: {ALMALINUX_9}\n"
+            f"    container: {_ALMALINUX_9_REF}\n"
         ),
     }
 

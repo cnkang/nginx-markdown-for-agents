@@ -229,21 +229,33 @@ def _mask_shell_non_expanding(run_text):
 
 
 def extract_run_vars(run_text):
-    """Return variable names referenced by $VAR / ${VAR} in a run block."""
+    """Return variable names referenced by $VAR / ${VAR} in a run block.
+
+    A `${VAR:-default}` (or `-`/`+`/`=`/`?` parameter-test) expansion
+    supplies its own fallback or side effect, so it is self-satisfying:
+    the reference is still reported, but the caller can treat it as
+    defaulted.  Plain `$VAR` and `${VAR}` are live references that must
+    resolve to a real definition.
+    """
     refs = set()
     if not isinstance(run_text, str):
         return refs
     masked = _mask_shell_non_expanding(_merge_continuations(run_text))
     # Mask ${{ }} expressions; they are not shell variables.
     masked = re.sub(r"\$\{\{.*?\}\}", " ", masked)
-    for pattern in (
-        r"\$\{(?:#)?([A-Za-z_][A-Za-z0-9_]*)",
-        r"\$([A-Za-z_][A-Za-z0-9_]*)",
+    # ${VAR<default-op>} — a parameter-test operator after the name makes
+    # the expansion self-satisfying; record it as a defaulted reference.
+    # Plain $VAR / ${VAR} remain live references.
+    for match in re.finditer(
+        r"\$\{(?:#)?([A-Za-z_][A-Za-z0-9_]*)([:+\-=?])?", masked
     ):
-        for match in re.finditer(pattern, masked):
-            name = match.group(1)
-            if not KNOWN_ENV_RE.match(name):
-                refs.add(name)
+        name = match.group(1)
+        if KNOWN_ENV_RE.match(name):
+            continue
+        if match.group(2):
+            refs.add(f"{name}#defaulted")
+        else:
+            refs.add(name)
     return refs
 
 
@@ -381,6 +393,10 @@ def _report_undefined_variables(path, job_name, index, run_text, scoped,
                                 findings):
     local_defined = extract_shell_definitions(run_text)
     for var in sorted(extract_run_vars(run_text)):
+        # ${VAR:-default} style expansions are self-satisfying; the
+        # `#defaulted` suffix marks them and suppresses the report.
+        if var.endswith("#defaulted"):
+            continue
         if var in scoped or var in local_defined:
             continue
         if is_allowlisted(path.name, var):

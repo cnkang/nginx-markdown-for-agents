@@ -79,6 +79,11 @@ printf 'link invoked\\n' >> "$FAKE_CC_LINK_MARKER"
     environment = os.environ.copy()
     environment["FAKE_CC_STATE"] = str(state_file)
     environment["FAKE_CC_LINK_MARKER"] = str(link_marker)
+    # Keep the child make independent of any caller-provided flags (e.g. -n/-k);
+    # inherited -j is safe today because the recipe compiles in a serial loop,
+    # but dropping MAKEFLAGS keeps the exact compile-count assertion stable.
+    environment.pop("MAKEFLAGS", None)
+    environment.pop("MFLAGS", None)
 
     completed = subprocess.run(
         ["make", "-B", "build/unit/headers", f"CC={compiler}"],

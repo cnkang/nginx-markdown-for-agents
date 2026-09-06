@@ -224,8 +224,11 @@ def _display_path(path: Path) -> str:
 
 
 def _resolve_scan_root() -> Path:
-    if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
-        return Path(validate_read_path(sys.argv[1]))
+    scan_root = next(
+        (arg for arg in sys.argv[1:] if not arg.startswith("--")), None
+    )
+    if scan_root is not None:
+        return Path(validate_read_path(scan_root))
     return REPO_ROOT
 
 

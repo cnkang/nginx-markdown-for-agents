@@ -9,6 +9,7 @@ that can promote externally supplied bytes into distributed artifacts.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 import re
 from urllib.parse import urlsplit
 import sys
@@ -51,14 +52,33 @@ def _load_and_validate_builder_digests(path: Path) -> dict:
     return data
 
 
-_BUILDER_DIGESTS = _load_and_validate_builder_digests(
-    REPO_ROOT / "tools" / "lib" / "builder_digests.json"
-)
-
 #: Immutable release-builder base image references; single source of truth is
 #: ``tools/lib/builder_digests.json``.
-ALMALINUX_9 = _BUILDER_DIGESTS["almalinux_9"]["image"]
-ALPINE_320 = _BUILDER_DIGESTS["alpine_320"]["image"]
+_ALMALINUX_9_KEY = "almalinux_9"
+_ALPINE_320_KEY = "alpine_320"
+
+
+@lru_cache(maxsize=1)
+def builder_image_refs() -> tuple[str, str]:
+    """Return (almalinux_9, alpine_320) builder base-image references.
+
+    Loaded lazily (and once per process) so an unreadable or invalid
+    digests file surfaces from the guarded scan path instead of an
+    import-time traceback.
+    """
+    digests = _load_and_validate_builder_digests(
+        REPO_ROOT / "tools" / "lib" / "builder_digests.json"
+    )
+    return digests[_ALMALINUX_9_KEY]["image"], digests[_ALPINE_320_KEY]["image"]
+
+
+def _default_builder_image_refs() -> tuple[str, str]:
+    """Best-effort image refs for call sites without an explicit pair.
+
+    Raises the underlying load error when the digests file cannot be
+    read; guarded callers (scan_repository) never rely on this path.
+    """
+    return builder_image_refs()
 
 
 @dataclass(frozen=True)
@@ -95,10 +115,13 @@ def _require_order(
 def check_release_builder_digests(
     files: dict[str, str],
     *,
-    almalinux_9: str = ALMALINUX_9,
-    alpine_320: str = ALPINE_320,
+    almalinux_9: str | None = None,
+    alpine_320: str | None = None,
 ) -> list[Finding]:
     """Require reviewed manifest digests on artifact-producing builders."""
+    default_almalinux_9, default_alpine_320 = builder_image_refs()
+    almalinux_9 = default_almalinux_9 if almalinux_9 is None else almalinux_9
+    alpine_320 = default_alpine_320 if alpine_320 is None else alpine_320
     expected = {
         "tools/build_release/Dockerfile.glibc": f"ARG OS_BASE={almalinux_9}",
         "tools/build_release/Dockerfile.musl": f"ARG OS_BASE={alpine_320}",

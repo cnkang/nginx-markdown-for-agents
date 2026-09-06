@@ -7,7 +7,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DETECTOR="bash ${SCRIPT_DIR}/../detect_workflow_input_injection.sh"
+DETECTOR=(bash "${SCRIPT_DIR}/../detect_workflow_input_injection.sh")
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -66,7 +66,7 @@ jobs:
 Y
 
 output_file="${tmp_dir}/clean.out"
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 0 ]]; then
     pass "clean workflow (env-routed input) passes"
@@ -95,7 +95,7 @@ jobs:
 Y
 
 output_file="${tmp_dir}/vuln.out"
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]]; then
     pass "vulnerable workflow (direct input interpolation) detected"
@@ -120,7 +120,7 @@ jobs:
         run: ${{ steps.resolve.outputs.command }}
 Y
 
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]]; then
     pass "command output interpolation detected"
@@ -134,7 +134,7 @@ rm -f "${wf_dir}/command-output.yml"
 # Test 4: Empty workflows dir -> PASS
 empty_dir="${tmp_dir}/empty-wf"
 mkdir -p "${empty_dir}"
-${DETECTOR} "${empty_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${empty_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 0 ]]; then
     pass "empty workflows dir passes"
@@ -156,7 +156,7 @@ jobs:
           echo "Building ${PKG_VERSION}"
 Y
 
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]]; then
     pass "block scalar with trailing comment detected"
@@ -179,7 +179,7 @@ jobs:
           echo "Building ${PKG_VERSION}"
 Y
 
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]]; then
     pass "indentation-indicator block scalar detected"
@@ -202,7 +202,7 @@ jobs:
           echo "Building ${PKG_VERSION}"
 Y
 
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]]; then
     pass "chomping+indentation indicator order detected"
@@ -225,7 +225,7 @@ jobs:
         run: echo "${{ steps['resolve'].outputs['result'] }}"
 Y
 
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]]; then
     pass "bracket-notation step output interpolation detected"
@@ -251,7 +251,7 @@ jobs:
           echo "${{ github.head_ref }}"
 Y
 
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]]; then
     pass "index-form event selector interpolation detected"
@@ -276,7 +276,7 @@ jobs:
       - name: Run
         run: echo "\${{ ${expr} }}"
 Y
-    ${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+    "${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
     local rc=$?
     if [[ ${rc} -eq 1 ]] && grep -Fq "${expr}" "${output_file}"; then
         pass "${name} detected"
@@ -307,7 +307,7 @@ jobs:
       - name: Use
         run: echo "${{ steps['meta'].outputs['version'] }}"
 Y
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 0 ]]; then
     pass "bracket-form benign output selector (version) not flagged"
@@ -333,7 +333,7 @@ jobs:
         run: echo "${{ steps.meta.outputs.version }}" && ${{ steps.resolve.outputs.command }}
 Y
 
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]] \
     && grep -q 'multiple-outputs.yml' "${output_file}" \
@@ -358,7 +358,7 @@ jobs:
       - name: Use
         run: echo "${{ steps.meta.outputs.version }}"
 Y
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 0 ]]; then
     pass "dot-form benign output selector (version) not flagged"
@@ -383,7 +383,7 @@ jobs:
     with:
       module_ref: ${{ github.ref_name }}
 Y
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 0 ]]; then
     pass "reusable-workflow with values are not treated as shell source"
@@ -409,7 +409,7 @@ jobs:
           PKG_VERSION="${{ inputs.version }}"
           echo "Building ${PKG_VERSION}"
 Y
-${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
 exit_code=$?
 if [[ ${exit_code} -eq 1 ]] && grep -Fq 'inputs.version' "${output_file}"; then
     pass "blank line inside run block does not clear run state"

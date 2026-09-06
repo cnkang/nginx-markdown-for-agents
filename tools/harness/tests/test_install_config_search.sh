@@ -44,10 +44,16 @@ printf '%s\n' 'markdown_filter on;' \
   > "${TMP_DIR}/conf.d/odd
 name.conf"
 
-conf_tree_contains_pattern "${TMP_DIR}" '*.conf' \
-  '^[[:space:]]*load_module[[:space:]]+.*example\.so[[:space:]]*;'
-conf_tree_contains_pattern "${TMP_DIR}" '*.conf' \
-  '^[[:space:]]*markdown_filter[[:space:]]+on[[:space:]]*;'
+if ! conf_tree_contains_pattern "${TMP_DIR}" '*.conf' \
+  '^[[:space:]]*load_module[[:space:]]+.*example\.so[[:space:]]*;'; then
+  echo "FAIL: pattern not found: load_module example.so directive" >&2
+  exit 1
+fi
+if ! conf_tree_contains_pattern "${TMP_DIR}" '*.conf' \
+  '^[[:space:]]*markdown_filter[[:space:]]+on[[:space:]]*;'; then
+  echo "FAIL: pattern not found: markdown_filter on directive" >&2
+  exit 1
+fi
 if conf_tree_contains_pattern "${TMP_DIR}" '*.conf' 'not_present'; then
   echo "FAIL: config search reported a missing pattern" >&2
   exit 1

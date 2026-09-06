@@ -166,6 +166,10 @@ def collect_workspace_lock_issues() -> list[str]:
     not part of this gate.
     """
     issues: list[str] = []
+    if not any(manifest.is_file() for manifest in SUB_WORKSPACE_CARGO_TOMLS):
+        # Nothing to verify: do not require cargo when there are no
+        # sub-workspace manifests on disk.
+        return issues
     cargo = resolve_approved_executable("cargo")
     if cargo is None:
         return ["cargo is unavailable; cannot verify workspace Cargo.lock files"]
