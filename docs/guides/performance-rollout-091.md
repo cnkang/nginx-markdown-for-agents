@@ -299,18 +299,41 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
    make build
    ```
 
-3. Replace the module binary and perform a complete restart:
+3. Derive the modules directory from the installed NGINX build (RPM
+   packages use /usr/lib64/nginx/modules, Debian packages
+   /usr/lib/nginx/modules), back up the current module, stage the new
+   one, then atomically replace the binary and perform a complete
+   restart:
    ```bash
-   # Derive the modules directory from the installed NGINX build; RPM
-   # packages use /usr/lib64/nginx/modules, Debian packages /usr/lib/nginx/modules.
    MODULES_DIR="$(nginx -V 2>&1 | sed -nE 's/.*--modules-path=([^ ]+).*/\1/p')"
    if [ -z "$MODULES_DIR" ]; then
      echo "cannot determine the NGINX modules path from nginx -V" >&2
      exit 1
    fi
-   sudo cp components/nginx-module/src/ngx_http_markdown_filter_module.so \
-     "$MODULES_DIR/"
-   # Abort the rollout if the replaced module fails configuration validation;
+   # Stage the rebuild beside the current module first, back up the
+   # running binary, verify the copy, and only then swap atomically.  A
+   # plain cp over the live .so is not atomic and can tear the mapping
+   # for active workers.
+   sudo install -m 0755 \
+     components/nginx-module/src/ngx_http_markdown_filter_module.so \
+     "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.staged"
+   MODULE_BACKUP="${MODULES_DIR}/ngx_http_markdown_filter_module.so.pre-0.9.1.bak"
+   if [ -e "$MODULE_BACKUP" ]; then
+     echo "preserving existing module backup: $MODULE_BACKUP" >&2
+   else
+     sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
+       "$MODULE_BACKUP"
+   fi
+   if ! sudo cmp -s \
+       "${MODULES_DIR}/ngx_http_markdown_filter_module.so" "$MODULE_BACKUP"; then
+     echo "ERROR: module backup verification failed; leaving the current module in place" >&2
+     sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.staged"
+     exit 1
+   fi
+   sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.staged" \
+     "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+   # Abort the rollout if the replaced module fails configuration
+   # validation; the backup above keeps the previous binary recoverable.
    # never restart with a broken module in place.
    sudo nginx -t || {
      echo "ERROR: nginx -t failed after module replacement; restore the previous module and re-validate" >&2

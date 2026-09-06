@@ -17,7 +17,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Fail-open (pre-commit) | ✅ | ✅ | Streaming: configurable via `markdown_error_policy` |
 | Fail-open (post-commit) | N/A | ❌ | Post-commit errors produce truncated output |
 | `parser_budget` budget | ✅ | ✅ | Rust parser modeled working-set ceiling (`parser_memory_budget`): enforced by the conservative pre-parse estimate on the full-buffer path and checked continuously on the streaming path |
-| `conversion_memory` budget | ✅ | ✅ | Cumulative input-size cap shared by buffered and streaming paths |
+| `conversion_memory` budget | ✅ | ✅ | Hard cumulative input-size cap shared by buffered and streaming paths; the same value also funds the full-buffer generated-output budget and transient scratch allocations (see [Parser Budget](PARSER_BUDGET.md)) |
 | Prometheus metrics | ✅ | ✅ | Additional streaming-specific counters |
 | Token estimation header | ✅ | ❌ | Requires full output; not available in streaming |
 | Front matter (YAML) | ✅ | ✅ | Emitted in pre-commit phase |
@@ -71,11 +71,12 @@ the response to the client (pre-commit) handle the same way. With
 error status and do not pass through the original body. `status N` uses that
 explicit status policy.
 Errors that occur after headers have already been sent (post-commit) cannot
-roll back. When a later gzip member fails, the module attempts a safe
-Markdown finish that preserves earlier decompressed output and appends
-Markdown closing bytes — but only when it can complete that finish. When
-completion is not possible, the module aborts the conversion without
-replaying output, and the client receives a truncated response.
+roll back, and the outcome depends on whether a safe finish is possible.
+When a later gzip member fails, the module can still finish safely: it
+completes the remaining Markdown, preserving earlier decompressed output and
+appending the Markdown closing bytes. When a safe finish is not possible,
+the module aborts the conversion without replaying output, and the client
+receives a truncated response.
 
 ### Token estimation
 

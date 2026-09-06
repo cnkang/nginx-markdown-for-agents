@@ -65,7 +65,7 @@ The counters follow these conservation rules:
 - `conversion_attempts_total` increments at most once per request.
 - `conversion_deliveries_total` and output bytes increment only after the
   downstream filter accepts the converted response.
-- failed-open, failed-closed, terminal abort, and client-abort paths do not
+- fail-open, fail-closed, terminal abort, and client-abort paths do not
   count as successful deliveries.
 - the in-flight counter (diagnostics-only, not a Prometheus family) returns
   to zero after cleanup and quiescence.

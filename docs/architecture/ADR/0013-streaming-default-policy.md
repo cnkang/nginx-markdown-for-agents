@@ -28,8 +28,12 @@ streaming definition and updated threshold.
 
 Default to `auto` mode per RFC 0008 section 2.1:
 
-1. Responses with `Content-Length` >= `markdown_stream_threshold`
-   (target default: 1m) use the true streaming path.
+1. Responses with `Content-Length` >= the configured streaming size
+   threshold (target default: 1m) use the true streaming path.
+   `markdown_stream_threshold` is historical wording from this ADR's era:
+   under the active Config V2 surface only `markdown_streaming
+   off|auto|force` remains a directive, and the threshold is no longer an
+   operator-facing configuration knob.
 2. Responses with chunked transfer encoding (no `Content-Length`) or absent
    `Content-Length` become streaming candidates (subject to additional
    eligibility checks per RFC 0008 section 2.2).

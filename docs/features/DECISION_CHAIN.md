@@ -68,9 +68,10 @@ flowchart TD
 > which specific check short-circuited. The individual failing check is still
 > visible in the decision log's structured metadata (`method`, `content_type`,
 > `status`) for diagnostics, but the reason code string is `not_eligible`.
-> The size check (check 6) is the exception: an over-limit response reports the
-> dedicated `not_eligible` classification (the size check is an eligibility
-> gate, not a conversion failure), as [Parser Budget](PARSER_BUDGET.md) documents.
+> The size check (check 6) shares the same `not_eligible` code with checks
+> 2–5 and 7: an over-limit response reports `not_eligible` because the size
+> gate is an eligibility decision, not a conversion failure, as [Parser
+> Budget](PARSER_BUDGET.md) documents.
 
 ## Check Order
 

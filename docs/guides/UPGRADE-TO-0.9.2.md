@@ -272,7 +272,12 @@ sudo nginx -t || {
       sudo rm -rf "${NGINX_CONF_DIR}/${CONFIG_DIR}"
     fi
   done
-  sudo nginx -t && echo "INFO: previous module and configuration restored and verified." >&2
+  if sudo nginx -t; then
+    echo "INFO: previous module and configuration restored and verified." >&2
+  else
+    echo "ERROR: restored module and configuration still fail validation; do not start NGINX. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}." >&2
+    exit 1
+  fi
   # The rollback left NGINX stopped; restart it on the restored, validated
   # pair using the ownership decision recorded before the stop.
   if [[ "$systemd_managed" -eq 1 ]]; then
@@ -359,6 +364,16 @@ fi
 sudo cp objs/ngx_http_markdown_filter_module.so \
     "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new"
 sudo nginx -t
+# Back up the running module BEFORE stopping NGINX so a failed
+# validation or start can always restore the pre-upgrade binary.
+MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
+if [[ -e "${MODULE_BACKUP}" ]]; then
+    echo "Preserving existing pre-upgrade module backup: ${MODULE_BACKUP}"
+else
+    sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
+        "${MODULE_BACKUP}.staged"
+    sudo mv -f "${MODULE_BACKUP}.staged" "${MODULE_BACKUP}"
+fi
 # Record the service-manager ownership decision BEFORE stopping: after
 # a successful stop, is-active is false even on systemd-managed hosts.
 systemd_managed=0
@@ -390,22 +405,16 @@ else
         echo "INFO: no running NGINX master found; skipping 'nginx -s quit'"
     fi
 fi
-# Back up the running module BEFORE the swap so a failed validation can
-# restore the pre-upgrade binary; back it up first, then replace.
-MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
-if [[ -e "${MODULE_BACKUP}" ]]; then
-    echo "Preserving existing pre-upgrade module backup: ${MODULE_BACKUP}"
-else
-    sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
-        "${MODULE_BACKUP}.staged"
-    sudo mv -f "${MODULE_BACKUP}.staged" "${MODULE_BACKUP}"
-fi
 sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
     "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
 if ! sudo nginx -t; then
   echo "ERROR: nginx -t failed after module swap; restoring previous module..." >&2
   sudo mv -f "${MODULE_BACKUP}" "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
-  sudo nginx -t && echo "INFO: previous module restored and configuration verified." >&2
+  if ! sudo nginx -t; then
+    echo "ERROR: restored module also fails validation; do not start NGINX. Restore manually from ${MODULE_BACKUP} and your configuration backup." >&2
+    exit 1
+  fi
+  echo "INFO: previous module restored and configuration verified." >&2
   # The rollback left NGINX stopped; restart it on the restored, validated
   # pair using the ownership decision recorded before the stop.
   if [[ "$systemd_managed" -eq 1 ]]; then
@@ -415,12 +424,27 @@ if ! sudo nginx -t; then
   fi
   exit 1
 fi
-rm -f "${MODULE_BACKUP}" 2>/dev/null || sudo rm -f "${MODULE_BACKUP}"
+# Start a fresh master with the new module and validate it before
+# discarding the pre-upgrade backup: a failed start or an unhealthy
+# post-start check must leave ${MODULE_BACKUP} available for rollback.
 if [[ "$systemd_managed" -eq 1 ]]; then
     sudo systemctl start nginx
 else
     sudo nginx
 fi
+# Post-start verification: the new master must be serving before the
+# backup is removed.
+sleep 1
+if ! pgrep -x nginx >/dev/null 2>&1; then
+  echo "ERROR: NGINX master not running after start; keeping ${MODULE_BACKUP} for rollback" >&2
+  exit 1
+fi
+curl -fsS -o /dev/null --max-time 10 \
+    -H 'Accept: text/markdown' http://localhost/ || {
+  echo "ERROR: post-start check failed; keeping ${MODULE_BACKUP} for rollback" >&2
+  exit 1
+}
+rm -f "${MODULE_BACKUP}" 2>/dev/null || sudo rm -f "${MODULE_BACKUP}"
 ```
 
 ---
