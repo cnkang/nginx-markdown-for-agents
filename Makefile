@@ -111,8 +111,8 @@ RUST_RELEASE_FEATURES ?= streaming
 rust-lib:
 	@echo "Building Rust library for $(RUST_TARGET)..."
 	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --release --features $(RUST_RELEASE_FEATURES)
-	@command -v cbindgen >/dev/null 2>&1 && [ "$$(cbindgen --version)" = "cbindgen 0.29.2" ] || { \
-	  echo "ERROR: cbindgen 0.29.2 required (found: $$(cbindgen --version 2>/dev/null || echo none)). The generated header is committed and fingerprinted; versions differ and produce a different header, which fails the ABI drift check. Install with: cargo install cbindgen --version 0.29.2 --locked" >&2; \
+	@command -v cbindgen >/dev/null 2>&1 && [ "$$(cbindgen --version)" = "cbindgen 0.29.4" ] || { \
+	  echo "ERROR: cbindgen 0.29.4 required (found: $$(cbindgen --version 2>/dev/null || echo none)). The generated header is committed and fingerprinted; versions differ and produce a different header, which fails the ABI drift check. Install with: cargo install cbindgen --version 0.29.4 --locked" >&2; \
 	  exit 127; \
 	}
 	@echo "Generating C header with cbindgen..."
