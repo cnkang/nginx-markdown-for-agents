@@ -109,8 +109,8 @@ the module still loads with the active NGINX binary.
 
 ### Musl dynamic-module release path
 
-The compatibility matrix in this document lists `release-binaries.yml` as the owner
-workflow of the musl dynamic-module rows (that workflow remains the manual
+The compatibility matrix in this document lists `release-packages.yml` as the owner
+workflow of the musl dynamic-module rows (`release-binaries.yml` remains the manual
 rebuild tool for existing releases). For the 0.9.2 release cycle the
 `musl-build` job of `release-packages.yml` builds the musl tarballs
 **before** publication (tag + `workflow_dispatch` triggers). `release-binaries.yml`

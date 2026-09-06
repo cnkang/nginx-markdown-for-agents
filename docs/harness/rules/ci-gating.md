@@ -8,6 +8,8 @@ paths:
   - "examples/**/Dockerfile*"
   - "tools/build_release/**"
   - "tools/harness/detect_release_supply_chain.py"
+  - "tools/harness/detect_workflow_env_liveness.py"
+  - "tools/harness/tests/test_detect_workflow_env_liveness.py"
 ---
 
 ## CI Gating

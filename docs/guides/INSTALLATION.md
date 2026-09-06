@@ -49,8 +49,11 @@ privileged execution, then verifies both Markdown and HTML responses:
 #   git clone --depth 1 https://github.com/cnkang/nginx-markdown-for-agents ./nk-md-repo
 #   RELEASE_KEY_PATH="$(pwd)/nk-md-repo/packaging/nginx-markdown-for-agents-release.asc"
 # The key must be obtained out-of-band from the release assets (checked into
-# the repository, not downloaded from the Release), so the signature check
-# anchors on an independently delivered trust root.
+# the repository, not downloaded from the Release). Cloning the same
+# repository is not itself an independent channel, so also authenticate the
+# pinned fingerprint below through a genuinely independent source (an HTTPS
+# page on a different domain, a web-of-trust signature, or a vendor
+# announcement) before trusting the verification.
 set -euo pipefail; RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSL -o "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc"; : "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to the release public key file (see key setup above)}"
 # The literal below is a copy of the canonical trust anchor in
 # docs/guides/GPG_KEY_MANAGEMENT.md; update it only after independently
@@ -434,7 +437,7 @@ tar -xzf nginx-1.24.0.tar.gz
 
 ```bash
 # Check Rust version
-rustc --version  # Should be 1.97.0 or higher
+rustc --version  # Should be 1.97.1 or higher
 
 # Check Cargo version
 cargo --version
@@ -945,7 +948,7 @@ Look for `nginx_markdown_requests_total`,
 
 The default configuration uses `markdown_error_policy pass` (fail-open). This means:
 
-- If the module attempts a conversion and the conversion **fails** (for example timeout, converter error), it returns the original HTML response with `Content-Type: text/html`.
+- If the module attempts a conversion and the conversion **fails** (for example timeout, converter error), it returns the original HTML response with `Content-Type: text/html`. Replayable failures are pre-commit errors and full-buffer conversion. Post-commit streaming errors cannot replay the upstream body. They terminate the response instead of returning the original HTML.
 - This is **distinct** from requests that were never eligible for conversion (for example wrong `Content-Type`, non-200 status, missing `Accept: text/markdown` header). Those are "skipped" requests, not "fail-open."
 - To detect fail-open events, inspect the NGINX error log for conversion failure messages.
 

@@ -56,7 +56,7 @@ release.
 ## Historical v0.9.1 baseline
 
 The [0.9.1 release notes](../releases/0.9.1-release-notes.md), the
-[migration guide](../guides/MIGRATION-0.9.0.md), and the changelog document
+[migration guide](../guides/MIGRATION-0.9.1.md), and the changelog document
 the completed baseline and compatibility reset. These are historical evidence
 for the current plan, not an active release objective.
 

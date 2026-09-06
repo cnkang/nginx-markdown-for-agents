@@ -190,7 +190,12 @@ markdown_accept;           # Error: missing value
 **Expected behavior:**
 - Default: strict
 - Context: http, server, location
-- When enabled: converts on Accept: */* or Accept: text/*
+- `strict`: converts only when the request carries an explicit
+  `Accept: text/markdown` header.  Wildcards (`*/*`, `text/*`) do not convert.
+- `wildcard`: converts on `Accept: text/markdown` and on the wildcard
+  values `Accept: */*` or `Accept: text/*`.
+- `force`: converts regardless of the Accept header (including when no
+  Accept header is present).
 
 ---
 
