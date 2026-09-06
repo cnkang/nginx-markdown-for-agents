@@ -98,16 +98,9 @@ while IFS= read -r line; do
         continue
     fi
 
-    # Reject trailing comments rather than stripping them: the pinned ref
-    # must stand alone after extraction.
-    case "$ref" in
-        *"#"*)
-            echo "  [FAIL] Commented SHA pin (ref must stand alone): $file: $content" >&2
-            VIOLATIONS=$((VIOLATIONS + 1))
-            continue
-            ;;
-        *) ;;
-    esac
+    # Strip a trailing version comment (e.g. "# v7.0.1") — it documents
+    # the pin but is not part of the ref.
+    ref="${ref%%#*}"
 
     ref="$(echo "$ref" | tr -d '[:space:]')"
 

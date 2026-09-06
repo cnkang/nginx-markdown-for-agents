@@ -119,9 +119,10 @@ def check_release_builder_digests(
     alpine_320: str | None = None,
 ) -> list[Finding]:
     """Require reviewed manifest digests on artifact-producing builders."""
-    default_almalinux_9, default_alpine_320 = builder_image_refs()
-    almalinux_9 = default_almalinux_9 if almalinux_9 is None else almalinux_9
-    alpine_320 = default_alpine_320 if alpine_320 is None else alpine_320
+    if almalinux_9 is None or alpine_320 is None:
+        default_almalinux_9, default_alpine_320 = builder_image_refs()
+        almalinux_9 = default_almalinux_9 if almalinux_9 is None else almalinux_9
+        alpine_320 = default_alpine_320 if alpine_320 is None else alpine_320
     expected = {
         "tools/build_release/Dockerfile.glibc": f"ARG OS_BASE={almalinux_9}",
         "tools/build_release/Dockerfile.musl": f"ARG OS_BASE={alpine_320}",
