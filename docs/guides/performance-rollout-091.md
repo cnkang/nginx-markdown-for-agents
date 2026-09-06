@@ -265,8 +265,7 @@ guaranteed for all requests, so streaming decompression is automatically
 disabled for requests that no longer select the streaming path.
 
 Setting `auto_decompress off` directly breaks condition (1), disabling all
-decompression routing (compressed responses pass through unconverted or route
-to full-buffer decompression depending on engine selection).
+decompression routing (compressed responses pass through unconverted).
 
 New requests evaluate these conditions at header-filter time. In-flight
 requests complete with their existing configuration.
