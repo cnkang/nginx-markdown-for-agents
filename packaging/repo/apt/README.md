@@ -253,7 +253,25 @@ cp "${REPO_ROOT:-.}/packaging/nginx-markdown-for-agents-release.asc" \
 KEYRING="$(mktemp -d)/keyring.gpg"
 gpg --no-default-keyring --keyring "$KEYRING" \
     --import nginx-markdown-for-agents-release.asc
-gpg --no-default-keyring --keyring "$KEYRING" --fingerprint
+set -o pipefail
+expected_fingerprints="$(printf '%s\n' \
+    '7A37''4368''7FEE''E031''3128''3550''3872''4643''EA12''C02A' \
+    '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"
+expected_signing_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
+actual_fingerprints="$(gpg --batch --with-colons --show-keys \
+    --fingerprint nginx-markdown-for-agents-release.asc \
+    | awk -F: '$1 == "fpr" { print toupper($10) }' | sort)" \
+    || { echo "failed to list key fingerprints" >&2; exit 1; }
+actual_signing_fingerprint="$(gpg --batch --with-colons --show-keys \
+        --fingerprint nginx-markdown-for-agents-release.asc \
+        | awk -F: -v expected="$expected_signing_fingerprint" \
+            '$1 == "fpr" && toupper($10) == expected { print toupper($10) }')" \
+    || { echo "failed to extract signing fingerprint" >&2; exit 1; }
+if [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]] \
+    || [[ "${actual_signing_fingerprint}" != "${expected_signing_fingerprint}" ]]; then
+    echo "unexpected signing-key fingerprint set" >&2
+    exit 1
+fi
 gpg --no-default-keyring --keyring "$KEYRING" --verify SHA256SUMS.asc SHA256SUMS
 # Every file listed in SHA256SUMS must be present before `sha256sum -c`
 # passes.  Select the checksum line for the exact artifact you fetched and
@@ -300,8 +318,25 @@ trap 'rm -rf "${GNUPGDIR}"' EXIT
 gpg --no-default-keyring --homedir "${GNUPGDIR}" \
     --keyring "${GNUPGDIR}/markdown-keyring.gpg" \
     --import packaging/nginx-markdown-for-agents-release.asc
-gpg --no-default-keyring --homedir "${GNUPGDIR}" \
-    --keyring "${GNUPGDIR}/markdown-keyring.gpg" --fingerprint
+set -o pipefail
+expected_fingerprints="$(printf '%s\n' \
+    '7A37''4368''7FEE''E031''3128''3550''3872''4643''EA12''C02A' \
+    '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"
+expected_signing_fingerprint='15C792438EAA762B421E60D21E8D41E7D19A8A75'
+actual_fingerprints="$(gpg --batch --with-colons --show-keys \
+    --fingerprint packaging/nginx-markdown-for-agents-release.asc \
+    | awk -F: '$1 == "fpr" { print toupper($10) }' | sort)" \
+    || { echo "failed to list key fingerprints" >&2; exit 1; }
+actual_signing_fingerprint="$(gpg --batch --with-colons --show-keys \
+        --fingerprint packaging/nginx-markdown-for-agents-release.asc \
+        | awk -F: -v expected="$expected_signing_fingerprint" \
+            '$1 == "fpr" && toupper($10) == expected { print toupper($10) }')" \
+    || { echo "failed to extract signing fingerprint" >&2; exit 1; }
+if [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]] \
+    || [[ "${actual_signing_fingerprint}" != "${expected_signing_fingerprint}" ]]; then
+    echo "unexpected signing-key fingerprint set" >&2
+    exit 1
+fi
 # Install the keyring directly from the checked-in .asc file; the
 # temporary keyring above is used only for fingerprint verification.
 sudo gpg --dearmor \

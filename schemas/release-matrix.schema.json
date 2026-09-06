@@ -118,12 +118,12 @@
         "image_ref": {
           "type": "string",
           "pattern": "^[^@\\s]+@?[^\\s]*$",
-          "description": "Immutable or tag-qualified container image reference. Blocking Docker rows must resolve it with image_digest."
+          "description": "Immutable or tag-qualified container image reference. Classified as an upstream input under the OCI provenance policy (not a published release artifact). Blocking Docker rows must resolve it with image_digest."
         },
         "image_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "Content digest bound to the image_ref for release-blocking Docker validation."
+          "description": "Content digest bound to the image_ref for release-blocking Docker validation. Classified as an upstream input under the OCI provenance policy (not a published release artifact)."
         }
       }
     },

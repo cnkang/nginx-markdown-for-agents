@@ -34,6 +34,7 @@ REPO_BASE_URL="${REPO_BASE_URL:-https://packages.nginx-markdown.dev}"
 EXPECTED_FINGERPRINT="${EXPECTED_FINGERPRINT:-15C792438EAA762B421E60D21E8D41E7D19A8A75}"
 PASS_COUNT=0
 FAIL_COUNT=0
+VERIFY_RUN_COUNT=0
 
 pass() {
     PASS_COUNT=$((PASS_COUNT + 1))
@@ -186,6 +187,7 @@ if [[ "$MODE" = "apt" ]] || [ "$MODE" = "both" ]; then
             # Verify signature
             VERIFY_OUTPUT=$(gpg --no-default-keyring --keyring "$KEYRING" \
                 --verify "$RELEASE_GPG" "$RELEASE_FILE" 2>&1) || true
+            VERIFY_RUN_COUNT=$((VERIFY_RUN_COUNT + 1))
 
             if echo "$VERIFY_OUTPUT" | grep -qi "good signature"; then
                 pass "APT Release.gpg signature VALID"
@@ -206,6 +208,7 @@ if [[ "$MODE" = "apt" ]] || [ "$MODE" = "both" ]; then
     if curl -sf -o "$INRELEASE_FILE" "$APT_INRELEASE_URL" 2>/dev/null; then
         VERIFY_IR=$(gpg --no-default-keyring --keyring "$KEYRING" \
             --verify "$INRELEASE_FILE" 2>&1) || true
+        VERIFY_RUN_COUNT=$((VERIFY_RUN_COUNT + 1))
 
         if echo "$VERIFY_IR" | grep -qi "good signature"; then
             pass "APT InRelease signature VALID"
@@ -237,6 +240,7 @@ if [[ "$MODE" = "yum" ]] || [ "$MODE" = "both" ]; then
 
             VERIFY_YUM=$(gpg --no-default-keyring --keyring "$KEYRING" \
                 --verify "$REPOMD_ASC" "$REPOMD_FILE" 2>&1) || true
+            VERIFY_RUN_COUNT=$((VERIFY_RUN_COUNT + 1))
 
             if echo "$VERIFY_YUM" | grep -qi "good signature"; then
                 pass "YUM repomd.xml signature VALID"
@@ -260,6 +264,7 @@ if [[ "$MODE" = "yum" ]] || [ "$MODE" = "both" ]; then
                 RPM_SIG=""
                 RPM_RC=0
                 RPM_SIG=$(rpm -K "$rpm_file" 2>&1) || RPM_RC=$?
+                VERIFY_RUN_COUNT=$((VERIFY_RUN_COUNT + 1))
                 if [[ "$RPM_RC" -eq 0 ]] \
                     && ! echo "$RPM_SIG" | grep -qi "NOT OK" \
                     && echo "$RPM_SIG" | grep -qi "pgp\|gpg.*OK\|digests signatures OK"; then
@@ -281,10 +286,15 @@ fi
 
 echo "" >&2
 echo "=== GPG Verification Results ===" >&2
-echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
+echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed, $VERIFY_RUN_COUNT signature verifications executed" >&2
 
 if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
+    exit 1
+fi
+
+if [[ "$VERIFY_RUN_COUNT" -eq 0 ]]; then
+    echo "FAIL: no signature verification executed" >&2
     exit 1
 fi
 

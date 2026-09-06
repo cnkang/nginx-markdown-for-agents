@@ -25,7 +25,7 @@ NGINX_VERSION="$3"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PRELUDE_PATH="${SCRIPT_DIR}/shared-prelude.sh"
 
-if [[ ! -f "$PRELUDE_PATH" ]]; then
+if [[ ! -s "$PRELUDE_PATH" ]]; then
     printf 'ERROR: shared prelude not found: %s\n' "$PRELUDE_PATH" >&2
     exit 1
 fi
