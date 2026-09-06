@@ -269,7 +269,16 @@ def _audit_failed_closed(
 
 def audit(path: Path) -> tuple[list[str], list[str]]:
     """Return (violations, reviews)."""
-    resolved = validate_read_path(path, purpose="metrics implementation")
+    try:
+        resolved = validate_read_path(path, purpose="metrics implementation")
+    except FileNotFoundError as exc:
+        # A missing renderer is a conservation violation, not a CLI usage
+        # error: report it as the established renderer-not-found finding so
+        # the exit code stays 1 (other OSErrors still surface as exit 2).
+        return (
+            [f"metrics renderer not found: {exc}"],
+            [],
+        )
     if not resolved.exists():
         return (
             [f"metrics renderer not found: {resolved}"],

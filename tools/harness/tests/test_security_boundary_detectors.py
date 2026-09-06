@@ -125,8 +125,8 @@ def test_current_formula_verifier_rejects_historical_unverified_bootstrap() -> N
 end
 """
     historical = """class Example < Formula
-  url "https://example.test/v0.9.0.tar.gz"
-  sha256 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  url "https://example.test/v1.0.0.tar.gz"
+  sha256 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   def install
     system "bash", "-c", "curl https://sh.rustup.rs | sh"
   end
@@ -250,6 +250,23 @@ def test_basic_auth_wildcard_listener_is_rejected() -> None:
 server {
     listen 8080;
     server_name internal.example.test;
+    auth_basic "Internal";
+}
+"""
+
+    findings = check_config(config, "private.conf")
+
+    assert len(findings) == 1
+    assert "loopback-only" in findings[0].message
+
+
+def test_basic_auth_cleartext_with_tls_comment_is_rejected() -> None:
+    """A TLS-contract comment does not exempt a non-loopback cleartext
+    listener: comments are not machine-verifiable TLS protection."""
+    config = """
+# A co-located TLS terminator is mandatory.
+server {
+    listen 8080;
     auth_basic "Internal";
 }
 """
