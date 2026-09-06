@@ -109,7 +109,7 @@ location /api/ {
 
 ### What happens if conversion fails?
 
-By default, the module uses a fail-open strategy (`markdown_error_policy pass;`). It returns the original eligible HTML response for failures before the response commit. After the module sends headers for streaming output, it can no longer restore the original body. The module then truncates the response and terminates the stream. The same applies when the replay buffer overflows. If you want strict behavior instead, `markdown_error_policy fail_closed;` makes failures fail-closed.
+By default, the module uses a fail-open strategy (`markdown_error_policy pass;`). It returns the original eligible HTML response for failures before the response commit. After the module sends headers for streaming output, it can no longer restore the original body. The module then truncates the response and terminates the stream. The same applies when the replay buffer overflows before the response commit. The module then falls back to the configured policy (safe streaming, full-buffer conversion, or fail-closed rejection) rather than replaying a partial body. If you want strict behavior instead, `markdown_error_policy fail_closed;` makes failures fail-closed.
 
 For the canonical directive behavior, see [Configuration Guide](guides/CONFIGURATION.md). For the exact runtime branches, see [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md).
 

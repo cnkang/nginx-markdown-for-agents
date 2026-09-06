@@ -49,7 +49,7 @@ If infrastructure or resource constraints block a cell, the sub-spec must record
 The required coverage set is the complete Cartesian product of the listed
 dimensions: 2 platforms x 3 NGINX versions x 4 response size tiers x 2
 conversion engines x 5 conversion paths = 240 tuples.  Full-buffer conversion
-tuples above the 64 MiB tier (the Extra-Large convert tuples, for example
+tuples above the 64MB tier (the Extra-Large convert tuples, for example
 TM-031) hit the size-limit rejection path by design: the module rejects
 inputs at or above the conversion ceiling, so those tuples do not require a
 covering sub-spec.  Before release,
