@@ -56,6 +56,7 @@ build/unit/%: unit/%_test.c include/test_common.h | build/unit build/generated
 	  deflate_parity) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \
 	  buf_len_safe) extra_cflags="-I../src -Iinclude/nginx_stubs" ;; \
 	  streaming_decomp|streaming_decomp_routing) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED"; extra_ldflags="-lz" ;; \
+	  decomp_routing_property) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  postcommit_terminal_origin) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  streaming_decomp_brotli) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -DNGX_HTTP_BROTLI $$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null || echo '-I/opt/homebrew/include -I/usr/local/include')"; extra_ldflags="-lz $$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null || echo '-L/opt/homebrew/lib -L/usr/local/lib -lbrotlidec -lbrotlienc')" ;; \
 	  brotli_trailing_property|brotli_budget_property|brotli_error_prop_property|brotli_noprogress_property) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -DNGX_HTTP_BROTLI $$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null || echo '-I/opt/homebrew/include -I/usr/local/include')"; extra_ldflags="-lz $$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null || echo '-L/opt/homebrew/lib -L/usr/local/lib -lbrotlidec -lbrotlienc')" ;; \
@@ -65,6 +66,8 @@ build/unit/%: unit/%_test.c include/test_common.h | build/unit build/generated
 	  stream_postcommit|stream_replay|stream_commit|streaming_replay_overflow_security) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  streaming_impl) extra_cflags="-I../src -Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \
 	  conversion_impl_base_url) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+	  failopen_delivery_after_downstream|delivery_decision_failopen) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+	  copy_reduction) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_handlers_impl|limits_parsing_property) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  streaming_config_contract|directive_context_default_inherit_property|context_negative_property) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  eligibility_impl|hard_excluded_params_case|hard_excluded_types_security|status_code_excluded_security) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
