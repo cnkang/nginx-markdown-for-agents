@@ -303,6 +303,15 @@ run_module_behavior_smoke() {
     diagnostics_file="${smoke_prefix}/diagnostics.json"
     negative_log="${smoke_prefix}/negative.log"
 
+    # NGINX writes the default access log to <prefix>/logs/access.log; the
+    # mktemp prefix has no logs/ directory, so every config below redirects
+    # access_log explicitly to a path that exists.  Without this, the
+    # positive case fails to start (loudly) and the negative nginx -t
+    # control would fail for the wrong reason — turning the negative
+    # control into a false pass.
+    mkdir -p "${smoke_prefix}/logs" \
+        || die "Failed to create the smoke NGINX logs directory"
+
     cat > "$smoke_root/index.html" <<'HTML'
 <!doctype html>
 <html><body><h1>Package smoke fixture</h1><p>module request</p></body></html>
@@ -424,6 +433,15 @@ CONF
     if "$NGINX_BIN" -t -p "$smoke_prefix" -c "$negative_conf" \
         >"$negative_log" 2>&1; then
         die "Negative module smoke control unexpectedly passed without load_module"
+    fi
+    # The negative control must fail for the RIGHT reason: the config uses
+    # markdown_filter, which without load_module is an unknown directive.
+    # A failure caused instead by an unrelated setup problem (missing logs
+    # directory, bad pid path) would make this check a false pass.
+    if ! grep -Eq 'unknown directive[[:space:]]+"markdown_filter"' \
+        "$negative_log"; then
+        cat "$negative_log" >&2 || true
+        die "Negative control failed for an unexpected reason (expected: unknown directive \"markdown_filter\")"
     fi
     info "Negative control rejected markdown_filter during nginx -t without the module"
 
