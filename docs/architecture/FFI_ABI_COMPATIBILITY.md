@@ -43,12 +43,12 @@ Rust owns:
 
 ```text
 MARKDOWN_ABI_VERSION = 2
-MARKDOWN_HEADER_HASH = 0x8d0eab17c2e46c45
+MARKDOWN_HEADER_HASH = 0x8551f78b4d150c64
 MARKDOWN_SYMBOL_SET_HASH = 0x4d34d6a1507cb9cc
 MARKDOWN_LAYOUT_FINGERPRINT = 0x5082868a7afe5890
 
 markdown_abi_version() -> 2
-markdown_abi_header_hash() -> 0x8d0eab17c2e46c45
+markdown_abi_header_hash() -> 0x8551f78b4d150c64
 markdown_abi_symbol_set_hash() -> 0x4d34d6a1507cb9cc
 markdown_abi_layout_fingerprint() -> 0x5082868a7afe5890
 ```
@@ -144,7 +144,7 @@ The two checked-in copies are:
 1. `components/rust-converter/include/markdown_converter.h` (generated), and
 2. `components/nginx-module/src/markdown_converter.h` (bundled consumer copy).
 
-They must be byte-identical. Regenerate with pinned `cbindgen 0.29.2`, copy the
+They must be byte-identical. Regenerate with pinned `cbindgen 0.29.4`, copy the
 header, and run:
 
 ```bash
