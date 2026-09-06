@@ -209,10 +209,11 @@ Vary: Accept
 
 ### If-Match and If-Unmodified-Since (Preconditions)
 
-`If-Match` and `If-Unmodified-Since` act as precondition headers: they protect
-write-style semantics (optimistic concurrency on PUT/DELETE behind the
-proxy). The full-buffer conversion path evaluates them independently of
-`markdown_cache_validation` mode:
+`If-Match` and `If-Unmodified-Since` are precondition headers. The module
+evaluates them only for the Markdown-negotiated `GET` and `HEAD` requests it
+handles (eligibility covers only those methods). It does not process
+write-style methods such as `PUT` or `DELETE`. The full-buffer conversion
+path evaluates them independently of `markdown_cache_validation` mode:
 
 ```http
 GET /page.html HTTP/1.1
