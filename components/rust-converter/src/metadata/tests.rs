@@ -257,7 +257,12 @@ fn test_metadata_extraction_times_out_during_traversal() {
 
     let dom = parse_html(html.as_bytes()).unwrap();
     let extractor = MetadataExtractor::new(None, false);
-    let mut ctx = ConversionContext::new(Duration::from_nanos(1));
+    // A deadline that reliably passes the entry-point check_timeout()
+    // (the DOM is already built and the extractor is constructed before
+    // the context starts its clock) but expires while the 4000-meta
+    // fixture is traversed: the per-100-node checkpoint must trip
+    // mid-walk, not at the entry check.
+    let mut ctx = ConversionContext::new(Duration::from_micros(100));
 
     let result = extractor.extract_with_context(&dom, &mut ctx);
 
