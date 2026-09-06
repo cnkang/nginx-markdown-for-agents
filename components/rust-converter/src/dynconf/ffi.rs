@@ -252,9 +252,11 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
     let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         // Validate input
         if data.is_null() && data_len > 0 {
+            // Pointer-contract violations use INVALID_ARGS; INVALID_TYPE is
+            // reserved for JSON value-type errors.
             // SAFETY: result was validated non-NULL above.
             unsafe {
-                write_error(result, DYNCONF_ERR_INVALID_TYPE);
+                write_error(result, DYNCONF_ERR_INVALID_ARGS);
             }
             return;
         }

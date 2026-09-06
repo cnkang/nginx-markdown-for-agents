@@ -256,7 +256,8 @@ test_is_cache_control_header_match(void)
 static void
 test_is_cache_control_header_no_match(void)
 {
-    ngx_table_elt_t h;
+    ngx_table_elt_t h = { 0 };
+    h.hash = 1;
     h.key.data = (u_char *) "Content-Type";
     h.key.len = 12;
     ngx_flag_t rc = ngx_http_markdown_is_cache_control_header(&h);
@@ -267,7 +268,8 @@ test_is_cache_control_header_no_match(void)
 static void
 test_is_cache_control_header_wrong_len(void)
 {
-    ngx_table_elt_t h;
+    ngx_table_elt_t h = { 0 };
+    h.hash = 1;
     h.key.data = (u_char *) "Cache-Control";
     h.key.len = 5;
     ngx_flag_t rc = ngx_http_markdown_is_cache_control_header(&h);

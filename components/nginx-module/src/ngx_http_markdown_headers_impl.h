@@ -1326,7 +1326,9 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
  * Markdown content type, and adds `Vary: Accept`.
  *
  * @param r Current HTTP request.
- * @return NGX_OK on success; NGX_ERROR if header preparation or allocation fails.
+ * @return NGX_OK on success; NGX_ERROR if header preparation or allocation
+ * fails; NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_RESTORE_FAILED if the snapshot
+ * cannot be restored.
  */
 ngx_int_t
 ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
