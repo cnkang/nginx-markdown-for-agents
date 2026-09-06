@@ -350,6 +350,8 @@ def _conditional_validator_items(sources: dict[str, str]) -> BlockingItems:
     drop the precondition pair.
     """
     conditional = sources["conditional"]
+    unit_test_name = "conditional_production_test.c"
+    unit_test_path = PROJECT_ROOT / "components" / "nginx-module" / "tests" / "unit" / unit_test_name
     return [
         (
             "conditional validator surface",
@@ -364,13 +366,9 @@ def _conditional_validator_items(sources: dict[str, str]) -> BlockingItems:
         ),
         (
             "conditional validator unit coverage",
-            "conditional_production_test.c" in sources["unit_test_files"]
-            and "test_handle_if_match_mismatch_returns_412" in read(
-                PROJECT_ROOT / "components" / "nginx-module" / "tests"
-                / "unit" / "conditional_production_test.c")
-            and "test_handle_if_unmodified_since_ignores_source_last_modified" in read(
-                PROJECT_ROOT / "components" / "nginx-module" / "tests"
-                / "unit" / "conditional_production_test.c"),
+            unit_test_name in sources["unit_test_files"]
+            and "test_handle_if_match_mismatch_returns_412" in read(unit_test_path)
+            and "test_handle_if_unmodified_since_ignores_source_last_modified" in read(unit_test_path),
         ),
     ]
 

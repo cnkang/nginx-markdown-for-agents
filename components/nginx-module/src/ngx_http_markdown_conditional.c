@@ -581,7 +581,6 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
      * its pending candidates so the rollback snapshot can be sized
      * exactly (no fixed capacity cap).
      */
-    pending_total = 0;
     inm_rc = ngx_http_markdown_validate_conditional_candidates(
         r, inm_name, sizeof(inm_name) - 1, adoption_limit, &pending_inm);
     ims_rc = ngx_http_markdown_validate_conditional_candidates(
