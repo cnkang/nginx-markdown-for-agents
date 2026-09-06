@@ -1176,7 +1176,7 @@ rate. Use decision logs for reason distributions.
 
 ### Log Patterns to Check
 
-Decision log entries use the format `markdown decision: reason=<REASON_CODE> ...` and appear in the NGINX error log. Use these `grep` patterns to check for specific outcomes:
+Decision log entries use the format `markdown: reason=<REASON_CODE> ...` and appear in the NGINX error log. Use these `grep` patterns to check for specific outcomes:
 
 #### Check for conversion failures
 

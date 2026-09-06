@@ -1178,7 +1178,7 @@ These examples show what operators will see in `/var/log/nginx/error.log`. The e
 #### Conversion failed open (warn verbosity or higher)
 
 ```text
-2025/01/15 14:30:27 [warn] 1234#0: *569 markdown: outcome=failed_open stage=conversion reason=failed_open event=- method=GET uri=/blog/post-1 content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /blog/post-1 HTTP/1.1", upstream: "http://127.0.0.1:8080/blog/post-1", host: "example.com"
+2025/01/15 14:30:27 [warn] 1234#0: *569 markdown: outcome=failed_open stage=delivery reason=failed_open event=- method=GET uri=/blog/post-1 content_type=text/html while sending to client, client: 10.0.0.5, server: example.com, request: "GET /blog/post-1 HTTP/1.1", upstream: "http://127.0.0.1:8080/blog/post-1", host: "example.com"
 ```
 
 #### Debug extended format
