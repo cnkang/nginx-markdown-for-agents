@@ -248,7 +248,7 @@ def extract_run_vars(run_text):
     # Plain $VAR / ${VAR} remain live references.  ${VAR?msg} and
     # ${VAR:?msg} are error-if-unset forms, so they stay live references.
     for match in re.finditer(
-        r"\$\{(?:#)?([A-Za-z_][A-Za-z0-9_]*)([:]?[-+=])?", masked
+        r"\$\{(?:#)?([A-Za-z_]\w*)(:?[-+=])?", masked, re.ASCII
     ):
         name = match.group(1)
         if KNOWN_ENV_RE.match(name):
@@ -261,7 +261,7 @@ def extract_run_vars(run_text):
     # Mask braced expansions first so ${FOO:-bar} does not also match
     # the plain-$FOO pattern and defeat the #defaulted suppression.
     plain_masked = re.sub(r"\$\{[^}]*\}", " ", masked)
-    for match in re.finditer(r"\$([A-Za-z_][A-Za-z0-9_]*)", plain_masked):
+    for match in re.finditer(r"\$([A-Za-z_]\w*)", plain_masked, re.ASCII):
         name = match.group(1)
         if KNOWN_ENV_RE.match(name):
             continue
