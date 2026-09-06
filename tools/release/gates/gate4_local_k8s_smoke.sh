@@ -251,8 +251,8 @@ validate_helm_template() {
     # not an unrelated template defect.  Assert the rendered output
     # names the missing image values before passing.
     if ! grep -qF "image.repository" <<< "$zero_override_out" \
-        && ! grep -qF "image.tag" <<< "$zero_override_out"; then
-        fail "helm template with zero overrides failed for an unexpected reason (image.repository/image.tag not mentioned)"
+        || ! grep -qF "image.tag" <<< "$zero_override_out"; then
+        fail "helm template with zero overrides failed for an unexpected reason (image.repository/image.tag not both mentioned)"
         printf '%s\n' "$zero_override_out" >&2
         return 1
     fi

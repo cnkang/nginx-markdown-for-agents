@@ -94,11 +94,12 @@ if [ -x "$NGINX_BIN" ]; then
         echo "ERROR: trusted sed executable not found at $SED_BIN" >&2
         exit 1
     fi
-    if ! GUARD_NGINX_VERSION="$("$NGINX_BIN" -v 2>&1 | "$SED_BIN" -n 's/.*nginx version: nginx\/\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"; then
-        echo "ERROR: could not inspect the installed NGINX version" >&2
+    GUARD_NGINX_VERSION="$("$NGINX_BIN" -v 2>&1 | "$SED_BIN" -n 's/.*nginx version: nginx\/\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+    if [ -z "${GUARD_NGINX_VERSION}" ]; then
+        echo "ERROR: could not determine the installed NGINX version" >&2
         exit 1
     fi
-    if [ -n "${GUARD_NGINX_VERSION}" ] && [ "${GUARD_NGINX_VERSION}" != "%{nginx_version}" ]; then
+    if [ "${GUARD_NGINX_VERSION}" != "%{nginx_version}" ]; then
         echo "ERROR: installed NGINX version ${GUARD_NGINX_VERSION} does not match the exact version %{nginx_version} this module was built for" >&2
         echo "  This package provides a dynamic module for nginx.org %{nginx_version} ONLY." >&2
         echo "  The NGINX core loader rejects any other version (including a patch release)." >&2
