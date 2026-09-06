@@ -62,10 +62,10 @@ jobs:
 
       - name: Install cbindgen
         run: |
-          if command -v cbindgen >/dev/null 2>&1 && [ "$(cbindgen --version)" = "cbindgen 0.29.2" ]; then
-            echo "cbindgen 0.29.2 already installed"
+          if command -v cbindgen >/dev/null 2>&1 && [ "$(cbindgen --version)" = "cbindgen 0.29.4" ]; then
+            echo "cbindgen 0.29.4 already installed"
           else
-            cargo install cbindgen --version 0.29.2 --locked
+            cargo install cbindgen --version 0.29.4 --locked
           fi
 
       - name: Build Rust converter

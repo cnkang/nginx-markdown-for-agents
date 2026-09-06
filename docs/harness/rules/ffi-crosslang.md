@@ -138,7 +138,7 @@ Verification:
   the result."  This prevents the recurring pattern of Rust source
   changes that forget to regenerate the C header.  The `cbindgen` version
   used in CI must pin to the same version across all workflows
-  (for example `cbindgen 0.29.2`) to avoid version-dependent output
+  (for example `cbindgen 0.29.4`) to avoid version-dependent output
   differences.
 
 ---

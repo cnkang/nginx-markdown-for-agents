@@ -264,8 +264,8 @@ jobs:
         run: |
           python3 -m pip install -r requirements-dev.txt -r requirements-perf.txt lizard complexipy
           if ! command -v cbindgen >/dev/null 2>&1 \
-              || [[ "$(cbindgen --version)" != "cbindgen 0.29.2" ]]; then
-            cargo install cbindgen --version 0.29.2 --locked
+              || [[ "$(cbindgen --version)" != "cbindgen 0.29.4" ]]; then
+            cargo install cbindgen --version 0.29.4 --locked
           fi
         shell: bash
 
