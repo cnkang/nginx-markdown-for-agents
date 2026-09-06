@@ -12,7 +12,7 @@ All sub-specs map their test plans to this matrix. Combined coverage must addres
 | NGINX Version | 1.24.x (LTS), 1.26.x (stable), 1.27.x (mainline) |
 | Response Size Tier | Small ([0, 10KB)), Medium ([10KB, 1MB)), Large ([1MB, 64MB)), Extra-Large ([64MB, ∞)) — half-open disjoint boundaries: exactly 10KB maps to Medium, exactly 1MB maps to Large, exactly 64MB maps to Extra-Large |
 | Conversion Engine | full-buffer, streaming |
-| Conversion Path | convert (successful conversion), skip (ineligible skip), fallback/fail-open (pre-commit fallback), fail-closed (controlled reject before headers), post-commit failure (stream terminated after headers) |
+| Conversion Path | convert (successful conversion), skip (ineligible skip), fallback/fail-open (pre-commit fallback to full-buffer, or pre-commit fail-open serving original HTML — two distinct paths with different reason codes and outputs, covered as one matrix value), fail-closed (controlled reject before headers), post-commit failure (stream terminated after headers) |
 
 ## Coverage Mapping Template
 
@@ -34,7 +34,7 @@ canonical key — never reuse the same ID for different tuples.
 ```
 
 These two rows illustrate the format only. They are not counted toward the
-required cross-product coverage or the 240 required tuples.
+required cross-product coverage or the 234 required tuples.
 
 ## Gap Record Format
 
@@ -48,11 +48,12 @@ If infrastructure or resource constraints block a cell, the sub-spec must record
 
 The required coverage set is the complete Cartesian product of the listed
 dimensions: 2 platforms x 3 NGINX versions x 4 response size tiers x 2
-conversion engines x 5 conversion paths = 240 tuples.  Full-buffer conversion
-tuples above the 64MB tier (the Extra-Large convert tuples, for example
-TM-031) hit the size-limit rejection path by design: the module rejects
-inputs at or above the conversion ceiling, so those tuples do not require a
-covering sub-spec.  Before release,
+conversion engines x 5 conversion paths = 240 tuples.  Six of them — the
+Extra-Large full-buffer convert tuples (TM-031, TM-071, TM-111, TM-151,
+TM-191, TM-231) — hit the size-limit rejection path by design: the module
+rejects inputs at or above the conversion ceiling, so they are recorded as
+Expected-Rejection and excluded from the required set, leaving 234 required
+tuples.  Before release,
 aggregate all sub-spec coverage mappings. Ensure every required tuple has at
 least one covering sub-spec. Covering each value independently is not
 sufficient. The following table enumerates the complete required set in
@@ -91,7 +92,7 @@ process records a covering sub-spec:
 | TM-028 | Ubuntu | 1.24.x | Large | streaming | fallback/fail-open | — | Pending |
 | TM-029 | Ubuntu | 1.24.x | Large | streaming | fail-closed | — | Pending |
 | TM-030 | Ubuntu | 1.24.x | Large | streaming | post-commit failure | — | Pending |
-| TM-031 | Ubuntu | 1.24.x | Extra-Large | full-buffer | convert | size-limit rejection by design (see coverage-set note above) | Expected-Rejection |
+| TM-031 | Ubuntu | 1.24.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-032 | Ubuntu | 1.24.x | Extra-Large | full-buffer | skip | — | Pending |
 | TM-033 | Ubuntu | 1.24.x | Extra-Large | full-buffer | fallback/fail-open | — | Pending |
 | TM-034 | Ubuntu | 1.24.x | Extra-Large | full-buffer | fail-closed | — | Pending |
@@ -131,7 +132,7 @@ process records a covering sub-spec:
 | TM-068 | Ubuntu | 1.26.x | Large | streaming | fallback/fail-open | — | Pending |
 | TM-069 | Ubuntu | 1.26.x | Large | streaming | fail-closed | — | Pending |
 | TM-070 | Ubuntu | 1.26.x | Large | streaming | post-commit failure | — | Pending |
-| TM-071 | Ubuntu | 1.26.x | Extra-Large | full-buffer | convert | — | Pending |
+| TM-071 | Ubuntu | 1.26.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-072 | Ubuntu | 1.26.x | Extra-Large | full-buffer | skip | — | Pending |
 | TM-073 | Ubuntu | 1.26.x | Extra-Large | full-buffer | fallback/fail-open | — | Pending |
 | TM-074 | Ubuntu | 1.26.x | Extra-Large | full-buffer | fail-closed | — | Pending |
@@ -171,7 +172,7 @@ process records a covering sub-spec:
 | TM-108 | Ubuntu | 1.27.x | Large | streaming | fallback/fail-open | — | Pending |
 | TM-109 | Ubuntu | 1.27.x | Large | streaming | fail-closed | — | Pending |
 | TM-110 | Ubuntu | 1.27.x | Large | streaming | post-commit failure | — | Pending |
-| TM-111 | Ubuntu | 1.27.x | Extra-Large | full-buffer | convert | — | Pending |
+| TM-111 | Ubuntu | 1.27.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-112 | Ubuntu | 1.27.x | Extra-Large | full-buffer | skip | — | Pending |
 | TM-113 | Ubuntu | 1.27.x | Extra-Large | full-buffer | fallback/fail-open | — | Pending |
 | TM-114 | Ubuntu | 1.27.x | Extra-Large | full-buffer | fail-closed | — | Pending |
@@ -211,7 +212,7 @@ process records a covering sub-spec:
 | TM-148 | macOS | 1.24.x | Large | streaming | fallback/fail-open | — | Pending |
 | TM-149 | macOS | 1.24.x | Large | streaming | fail-closed | — | Pending |
 | TM-150 | macOS | 1.24.x | Large | streaming | post-commit failure | — | Pending |
-| TM-151 | macOS | 1.24.x | Extra-Large | full-buffer | convert | — | Pending |
+| TM-151 | macOS | 1.24.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-152 | macOS | 1.24.x | Extra-Large | full-buffer | skip | — | Pending |
 | TM-153 | macOS | 1.24.x | Extra-Large | full-buffer | fallback/fail-open | — | Pending |
 | TM-154 | macOS | 1.24.x | Extra-Large | full-buffer | fail-closed | — | Pending |
@@ -251,7 +252,7 @@ process records a covering sub-spec:
 | TM-188 | macOS | 1.26.x | Large | streaming | fallback/fail-open | — | Pending |
 | TM-189 | macOS | 1.26.x | Large | streaming | fail-closed | — | Pending |
 | TM-190 | macOS | 1.26.x | Large | streaming | post-commit failure | — | Pending |
-| TM-191 | macOS | 1.26.x | Extra-Large | full-buffer | convert | — | Pending |
+| TM-191 | macOS | 1.26.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-192 | macOS | 1.26.x | Extra-Large | full-buffer | skip | — | Pending |
 | TM-193 | macOS | 1.26.x | Extra-Large | full-buffer | fallback/fail-open | — | Pending |
 | TM-194 | macOS | 1.26.x | Extra-Large | full-buffer | fail-closed | — | Pending |
@@ -291,7 +292,7 @@ process records a covering sub-spec:
 | TM-228 | macOS | 1.27.x | Large | streaming | fallback/fail-open | — | Pending |
 | TM-229 | macOS | 1.27.x | Large | streaming | fail-closed | — | Pending |
 | TM-230 | macOS | 1.27.x | Large | streaming | post-commit failure | — | Pending |
-| TM-231 | macOS | 1.27.x | Extra-Large | full-buffer | convert | — | Pending |
+| TM-231 | macOS | 1.27.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-232 | macOS | 1.27.x | Extra-Large | full-buffer | skip | — | Pending |
 | TM-233 | macOS | 1.27.x | Extra-Large | full-buffer | fallback/fail-open | — | Pending |
 | TM-234 | macOS | 1.27.x | Extra-Large | full-buffer | fail-closed | — | Pending |
@@ -306,6 +307,7 @@ process records a covering sub-spec:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Mark all six Extra-Large full-buffer convert tuples Expected-Rejection and exclude them from the required set (240 → 234 required tuples) |
 | 0.9.2 | 2026-09-06 | Kang | Annotate the Extra-Large full-buffer convert tuple as an expected size-limit rejection; no covering sub-spec required |
 | 0.9.2 | 2026-08-15 | Hermes | Define the required coverage set as the complete 240-tuple Cartesian product (five conversion paths) |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
