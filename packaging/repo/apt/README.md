@@ -272,7 +272,8 @@ if [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]] \
     echo "unexpected signing-key fingerprint set" >&2
     exit 1
 fi
-gpg --no-default-keyring --keyring "$KEYRING" --verify SHA256SUMS.asc SHA256SUMS
+gpg --no-default-keyring --keyring "$KEYRING" --verify SHA256SUMS.asc SHA256SUMS \
+    || { echo "signature verification failed for SHA256SUMS" >&2; exit 1; }
 # Every file listed in SHA256SUMS must be present before `sha256sum -c`
 # passes.  Select the checksum line for the exact artifact you fetched and
 # fail unless exactly one entry matches (an empty selection would make
@@ -319,6 +320,10 @@ gpg --no-default-keyring --homedir "${GNUPGDIR}" \
     --keyring "${GNUPGDIR}/markdown-keyring.gpg" \
     --import packaging/nginx-markdown-for-agents-release.asc
 set -o pipefail
+# During a key rotation overlap, the key URL carries both the old and the
+# new key: add the new key's fingerprints to this expected set (and keep
+# the old ones) until the old key is retired, so the refresh procedure
+# accepts signatures made by either key.
 expected_fingerprints="$(printf '%s\n' \
     '7A37''4368''7FEE''E031''3128''3550''3872''4643''EA12''C02A' \
     '15C7''9243''8EAA''762B''421E''60D2''1E8D''41E7''D19A''8A75' | sort)"

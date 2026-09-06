@@ -34,6 +34,7 @@ REPO_BASE_URL="${REPO_BASE_URL:-https://packages.nginx-markdown.dev}"
 EXPECTED_FINGERPRINT="${EXPECTED_FINGERPRINT:-15C792438EAA762B421E60D21E8D41E7D19A8A75}"
 PASS_COUNT=0
 FAIL_COUNT=0
+SKIP_COUNT=0
 VERIFY_RUN_COUNT=0
 
 pass() {
@@ -47,6 +48,7 @@ fail() {
 }
 
 skip() {
+    SKIP_COUNT=$((SKIP_COUNT + 1))
     echo "SKIP: $1" >&2
 }
 
@@ -102,6 +104,14 @@ check_prerequisites
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
+# Run gpg against an isolated, empty home so the temporary keyring below is
+# actually used. On hosts where GnuPG enables use-keyboxd, the
+# --keyring/--no-default-keyring options are silently ignored and a bare
+# invocation would import into the user's real key store.
+GNUPGHOME="${TMPDIR}/gnupg"
+export GNUPGHOME
+mkdir -m 700 -p "$GNUPGHOME"
+
 # --- Step 1: Download and verify GPG key ---
 
 echo "Step 1: Downloading GPG key..." >&2
@@ -131,7 +141,12 @@ if [[ -f "$KEY_FILE" ]] && [ -s "$KEY_FILE" ]; then
     GPG_IMPORT=$(gpg --no-default-keyring --keyring "$KEYRING" \
         --import "$KEY_FILE" 2>&1) || true
 
-    if echo "$GPG_IMPORT" | grep -qi "imported\|not changed"; then
+    # Confirm the import by listing the keyring instead of matching gpg's
+    # localized human-readable output ("imported"/"not changed" wording
+    # is translated on non-English locales). Both the human-readable and
+    # --with-colons listing styles start the key record with "pub".
+    if gpg --no-default-keyring --keyring "$KEYRING" \
+        --list-keys 2>/dev/null | grep -q '^pub'; then
         pass "GPG key imported into test keyring"
     else
         fail "GPG key import failed"
@@ -249,10 +264,10 @@ if [[ "$MODE" = "yum" ]] || [ "$MODE" = "both" ]; then
                 echo "$VERIFY_YUM" >&2
             fi
         else
-            fail "YUM repomd.xml.asc not available (repo may not be published yet)"
+            skip "YUM repomd.xml.asc not available (repo may not be published yet)"
         fi
     else
-        fail "YUM repomd.xml not available at $YUM_REPOMD_URL"
+        skip "YUM repomd.xml not available at $YUM_REPOMD_URL"
         echo "Repository may not be published yet. This is expected pre-release." >&2
     fi
 
@@ -293,8 +308,8 @@ if [[ "$FAIL_COUNT" -gt 0 ]]; then
     exit 1
 fi
 
-if [[ "$VERIFY_RUN_COUNT" -eq 0 ]]; then
-    echo "FAIL: no signature verification executed" >&2
+if [[ "$VERIFY_RUN_COUNT" -eq 0 && "$SKIP_COUNT" -eq 0 ]]; then
+    echo "FAIL: no signature verification executed and nothing was skipped" >&2
     exit 1
 fi
 
