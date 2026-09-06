@@ -230,8 +230,14 @@ impl MetadataExtractor {
     }
 
     /// Resolve a metadata URL when configured, then filter dangerous schemes.
+    ///
+    /// Empty or whitespace-only values are rejected so the metadata field
+    /// stays unset and the canonical/base-URL fallback can apply.
     fn resolve_and_sanitize_url(&self, url: &str) -> Option<String> {
         let sanitized = Self::sanitize_metadata_url(url)?;
+        if sanitized.is_empty() {
+            return None;
+        }
         let resolved = self.resolve_url(&sanitized);
         Self::sanitize_metadata_url(&resolved)
     }

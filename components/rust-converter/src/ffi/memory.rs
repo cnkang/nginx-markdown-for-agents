@@ -102,7 +102,13 @@ pub(crate) fn set_success_result(result: &mut MarkdownResult, output: Conversion
 /// inconsistent pointer/length pair: a NULL pointer with a non-zero length,
 /// or a non-NULL pointer with a zero length, is treated as already-released
 /// and cleared defensively instead of asserting or constructing a fat
-/// pointer from invalid parts.
+/// pointer from invalid parts.  Both defensive paths deliberately leak the
+/// allocation when the pointer itself is non-NULL: without a consistent
+/// length the original boxed slice cannot be reconstructed, and a deliberate
+/// bounded leak is strictly safer than reconstructing from invalid parts
+/// (the pre-0.9.2 UB behavior).  Normal callers never hit these paths —
+/// empty results are always exported as the canonical (NULL, 0) pair — so
+/// the leak is reachable only through caller-side (data, len) corruption.
 pub(crate) fn free_buffer(ptr_field: &mut *mut u8, len_field: &mut usize) {
     if (*ptr_field).is_null() {
         // NULL pointer: nothing to release.  A stray non-zero length is

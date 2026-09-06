@@ -492,7 +492,7 @@ struct ngx_http_headers_in_s {
 
 struct ngx_http_headers_out_s {
     ngx_str_t content_type;
-    ngx_msec_t last_modified_time;
+    time_t last_modified_time;
 };
 
 struct ngx_http_core_srv_conf_s {
@@ -2605,7 +2605,7 @@ test_conditional_match_propagates_terminal_done(void)
                 "conditional match does not expose a conversion result");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
                 "conditional match clears module buffering before 304");
-    TEST_ASSERT((time_t) r.headers_out.last_modified_time == (time_t) -1,
+    TEST_ASSERT(r.headers_out.last_modified_time == -1,
                 "conditional match clears source Last-Modified state");
 
     TEST_PASS("conditional match propagates terminal NGX_DONE");

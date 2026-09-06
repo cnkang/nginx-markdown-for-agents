@@ -789,6 +789,7 @@ test_fifo_watch_path_is_rejected_promptly(void)
     snprintf(fifo_path, sizeof(fifo_path),
              "/tmp/nginx-markdown-dynconf-fifo-%ld",
              (long) getpid());
+    unlink(fifo_path);
     TEST_ASSERT(mkfifo(fifo_path, 0600) == 0,
                 "fixture FIFO should be created");
 
