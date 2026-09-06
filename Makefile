@@ -77,6 +77,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
         docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline decompression-metric-contract-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-092-canonical release-gates-check-092 release-gates-check-all release-gates-check-strict \
+        release-pytest-check test-nginx-integration-c \
         release-matrix-check \
         streaming-evidence-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
@@ -93,6 +94,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         verify-streaming-failure-cache-e2e-plan \
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
         verify-auth-cache-e2e verify-status-codes-e2e \
+        verify-subrequest-filter-ordering-native-e2e verify-non-streaming-module-e2e \
         verify-diagnostics-access-phase-e2e verify-dynconf-convergence-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
@@ -244,6 +246,11 @@ test-nginx-integration:
 	$(MAKE) -C $(NGINX_TEST_DIR) integration-c
 	$(MAKE) -C $(NGINX_TEST_DIR) integration-nginx
 
+# Pure-C integration harness (no nginx binary needed) — mirrors the CI
+# `integration-c` step exactly; catches C-level runtime regressions locally.
+test-nginx-integration-c:
+	$(MAKE) -C $(NGINX_TEST_DIR) integration-c
+
 test-e2e:
 	$(MAKE) -C $(NGINX_TEST_DIR) e2e
 
@@ -298,6 +305,7 @@ TEST_ALL_CORE := \
 	test-nginx-unit-streaming \
 	test-nginx-unit-clang-smoke \
 	test-nginx-unit-sanitize-smoke \
+	test-nginx-integration-c \
 	test-property \
 	docs-check \
 	kb-contract-check \
@@ -311,7 +319,10 @@ TEST_ALL_CORE := \
 	schema-drift-check \
 	reason-codegen-check \
 	release-gates-check \
+	release-gates-check-070-strict \
+	release-pytest-check \
 	release-matrix-check \
+	test-corpus-determinism \
 	complexity-check \
 	workflow-context-check \
 	license-check
@@ -348,6 +359,9 @@ test-all-e2e:
 	$(MAKE) verify-brotli-streaming-e2e
 	$(MAKE) verify-http2-alpn-e2e
 	$(MAKE) verify-real-nginx-ims-e2e
+	$(MAKE) verify-subrequest-filter-ordering-native-e2e
+	$(MAKE) verify-dynconf-convergence-e2e
+	$(MAKE) verify-non-streaming-module-e2e
 	@echo "=== test-all-e2e: ALL E2E SCENARIOS PASSED ==="
 
 # Coverage gate — coverage-gate from ci.yml.  Requires lcov and a
@@ -727,6 +741,18 @@ release-gates-check:
 	$(MAKE) reason-codegen-check
 	python3 tools/release/gates/validate_package_metadata.py
 	python3 packaging/scripts/test_generate_checksums.py
+
+# Lightweight local mirror of the CI/tag 070 strict gate (file-assertion only).
+# Catches doc/workflow drift locally before CI does.
+release-gates-check-070-strict:
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.2 python3 tools/release/gates/validate_release_gates_070.py --mode strict
+
+# Lightweight local mirror of the CI `release-gates` job (pytest suites only;
+# 41 gate + 12 matrix test files). Catches release-gate/matrix regressions
+# locally before CI does.
+release-pytest-check:
+	PYTHONPATH=. python3 -m pytest -q tools/release/matrix/tests/
+	PYTHONPATH=. python3 -m pytest -q tools/release/gates/tests/
 
 # release-gates-check-070: comprehensive v0.7.0 release readiness gate.
 # (The 070 gate packages the CURRENT 0.9.2 version by default —
@@ -1506,6 +1532,25 @@ verify-real-nginx-ims-e2e:
 		NGINX_BIN="$(NGINX_BIN)" bash tools/ci/verify_real_nginx_ims.sh --port 18088; \
 	fi
 
+# SSI / auth_request / filter-ordering / internal-redirect qualification with a
+# real module-enabled NGINX — mirrors the "Run native SSI and filter-ordering
+# qualification" step of the CI runtime-regressions job.
+verify-subrequest-filter-ordering-native-e2e:
+	@if test -z "$(NGINX_BIN)"; then \
+		echo "SKIP: filter-ordering native E2E requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
+	else \
+		REQUIRE_FILTER_ORDERING_ALL=1 REQUIRE_AUTH_SUBREQUEST=1 \
+			bash tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18099; \
+	fi
+
+# Non-streaming production-module linkage check — builds the Rust archive
+# without optional features, compiles and links every NGINX module source and
+# passes `nginx -t`.  Self-contained (downloads and builds its own NGINX), so
+# it runs unconditionally; mirrors the CI "Verify non-streaming production
+# module linkage" step.
+verify-non-streaming-module-e2e:
+	bash tools/ci/verify_non_streaming_nginx_module.sh
+
 verify-config-merge-e2e:
 	./tools/e2e/verify_config_merge_e2e.sh
 
@@ -1519,7 +1564,11 @@ verify-diagnostics-access-phase-e2e:
 	./tools/e2e/verify_diagnostics_access_phase_e2e.sh
 
 verify-dynconf-convergence-e2e:
-	./tools/e2e/verify_dynconf_convergence_e2e.sh
+	@if test -z "$(NGINX_BIN)"; then \
+		echo "SKIP: dynamic-config convergence E2E requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
+	else \
+		bash tools/e2e/verify_dynconf_convergence_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18103; \
+	fi
 
 # ── Coverage targets ────────────────────────────────────────────────
 # Generate lcov reports consumed by SonarCloud.  Output lands in
