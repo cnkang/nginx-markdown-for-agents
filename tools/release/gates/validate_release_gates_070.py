@@ -38,6 +38,7 @@ DECISION_LOG_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ng
 HEADERS_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_headers_impl.h"
 DECOMPRESSION_C = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_decompression.c"
 FILTER_MODULE_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_filter_module.h"
+CONDITIONAL_C = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_conditional.c"
 REASON_CODE_SOURCE = "components/rust-converter/src/decision/reason_code.rs"
 REASON_CODE_FFI_EXPORTS = (
     "markdown_reason_code_str",
@@ -339,6 +340,40 @@ def check_structure(result: ValidationResult) -> None:
         result.fail(CARGO_VERSION_070_GATE, "Cargo.toml missing")
 
 
+def _conditional_validator_items(sources: dict[str, str]) -> BlockingItems:
+    """Conditional-validator surface checks (Gate 1 additions).
+
+    All four HTTP validators must stay wired through the conditional module,
+    not just the cache-validation pair.  The C module implements If-Match and
+    If-Unmodified-Since precondition evaluation; a gate that only checks
+    If-None-Match / If-Modified-Since would let a future refactor silently
+    drop the precondition pair.
+    """
+    conditional = sources["conditional"]
+    return [
+        (
+            "conditional validator surface",
+            "ngx_http_markdown_handle_if_none_match" in sources["filter_h"]
+            and "ngx_http_markdown_if_match_satisfied" in conditional
+            and "ngx_http_markdown_validate_if_unmodified_since" in conditional
+            and "If-None-Match" in conditional
+            and "If-Modified-Since" in conditional
+            and "If-Match" in conditional
+            and "If-Unmodified-Since" in conditional,
+        ),
+        (
+            "conditional validator unit coverage",
+            "conditional_production_test.c" in sources["unit_test_files"]
+            and "test_handle_if_match_mismatch_returns_412" in read(
+                PROJECT_ROOT / "components" / "nginx-module" / "tests"
+                / "unit" / "conditional_production_test.c")
+            and "test_handle_if_unmodified_since_ignores_source_last_modified" in read(
+                PROJECT_ROOT / "components" / "nginx-module" / "tests"
+                / "unit" / "conditional_production_test.c"),
+        ),
+    ]
+
+
 def _gate_1_items(sources: dict[str, str]) -> BlockingItems:
     """Gate 1 blocking items from the source dict built by _build_blocking_items."""
     return [
@@ -350,7 +385,7 @@ def _gate_1_items(sources: dict[str, str]) -> BlockingItems:
         ("decomp budget exceeded metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total)" in sources["payload"]),
         ("decomp budget exceeded return code", "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in sources["filter_h"] and "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in sources["decomp"]),
         ("decomp budget exceeded resource_limit path", "NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT" in sources["payload"] and "DECOMP_BUDGET_EXCEEDED" in sources["payload"]),
-    ]
+    ] + _conditional_validator_items(sources)
 
 
 def _gate_2_items(
@@ -503,6 +538,7 @@ def _build_blocking_items() -> dict[str, BlockingItems]:
         "decomp": decomp, "filter_h": filter_h, "ffi_contract": ffi_contract,
         "unit_test_files": unit_test_files, "conversion": conversion,
         "decision_log": decision_log, "headers": headers,
+        "conditional": read(CONDITIONAL_C),
         "release_packages": release_packages,
         "release_rpm": release_rpm,
     }
