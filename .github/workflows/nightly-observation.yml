@@ -128,6 +128,10 @@ jobs:
               raise SystemExit(f"unexpected command for blocking row {row_id!r}")
           if not isinstance(row.get("blocking"), bool):
               raise SystemExit(f"sanitizer row {row_id!r} blocking must be boolean")
+          sanitizer = row.get("sanitizer", [])
+          if not isinstance(sanitizer, list) or not all(
+                  isinstance(item, str) for item in sanitizer):
+              raise SystemExit(f"sanitizer row {row_id!r} sanitizer must be a list of strings")
           def _safe_output(value: object) -> str:
               # GITHUB_OUTPUT is a single key=value line per entry; any
               # embedded newline would corrupt the key=value framing.
