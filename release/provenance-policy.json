@@ -131,6 +131,10 @@
       "predicate": "Not applicable; no OCI artifact or image digest is published for 0.9.2",
       "producer": "Not part of the 0.9.2 release channel",
       "consumer": "Not applicable until an OCI workflow and its immutable identity binding are published",
+      "input_classification": {
+        "image_ref": "upstream input: base/runtime image reference consumed at build and scan time; not a published release artifact",
+        "image_digest": "upstream input: content digest pinning image_ref for build reproducibility and test-matrix validation; not a published release artifact"
+      },
       "candidate_binding": {
         "required_fields": [],
         "validator": "Not applicable; no OCI artifact is published"

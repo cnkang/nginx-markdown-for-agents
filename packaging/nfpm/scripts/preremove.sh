@@ -39,6 +39,14 @@ info() {
     printf '[preremove] %s\n' "$1" >&2
 }
 
+# print_force_remove_instructions prints the operator procedure for
+# acknowledging a forced removal out of band when the active NGINX
+# configuration cannot be verified.
+print_force_remove_instructions() {
+    info "Create ${FORCE_REMOVE_SENTINEL} with the exact token (no trailing newline):"
+    info "  printf '%s' '${FORCE_REMOVE_TOKEN}' | sudo tee '${FORCE_REMOVE_SENTINEL}' >/dev/null"
+}
+
 # force_remove_acknowledged returns 0 when the sentinel file content
 # matches the required token byte-for-byte with no trailing newline.
 # A newline-terminated file, a longer file, an empty file, or an
@@ -93,6 +101,7 @@ check_active_configuration() {
         # into a false negative for sufficiently large nginx -T output.
         if [[ "$nginx_status" -ne 0 ]]; then
             info "Unable to inspect the active NGINX configuration with the trusted binary."
+            print_force_remove_instructions
             return 2
         fi
         if printf '%s\n' "$nginx_dump" \
@@ -135,8 +144,7 @@ check_active_configuration() {
     # configuration cannot be verified. The persistent force-removal sentinel
     # is the explicit operator path for an out-of-band verification.
     info "The complete NGINX include graph could not be verified."
-    info "Create ${FORCE_REMOVE_SENTINEL} with the exact token (no trailing newline):"
-    info "  printf '%s' '${FORCE_REMOVE_TOKEN}' | sudo tee '${FORCE_REMOVE_SENTINEL}' >/dev/null"
+    print_force_remove_instructions
     return 2
 }
 

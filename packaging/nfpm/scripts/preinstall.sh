@@ -96,6 +96,13 @@ case "$ACTION" in
             fi
         done <<< "${NGINX_VERSION_OUTPUT}"
 
+        if [[ -z "${INSTALLED_NGINX_VERSION}" \
+            && "${NGINX_VERSION_OUTPUT}" =~ nginx/[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+            warn "Installed NGINX is not an nginx.org build (distro package revision detected)."
+            warn "Refusing installation because ABI compatibility cannot be verified."
+            exit 1
+        fi
+
         if [[ -z "${INSTALLED_NGINX_VERSION}" ]]; then
             warn "Could not determine installed NGINX version from 'nginx -v'."
             warn "Refusing installation because ABI compatibility cannot be verified."

@@ -16,7 +16,7 @@
         "gpg --verify SHA256SUMS.asc SHA256SUMS",
         "shasum -a 256 -c SHA256SUMS"
       ],
-      "release_pipeline": "packaging/scripts/generate-checksums.sh (producer) -> packaging/scripts/gpg-sign-checksums.sh (signer) -> integrity-signing job in .github/workflows/release-packages.yml"
+      "release_pipeline": "packaging/scripts/generate-checksums.sh (producer) -> packaging/scripts/gpg-sign-checksums.sh (signer) -> integrity-signature job in .github/workflows/release-packages.yml"
     },
     "dynamic_module": {
       "signing_mechanism": "GPG detached signature over the archive checksum file (SHA256SUMS.asc), using the repository release-signing key",

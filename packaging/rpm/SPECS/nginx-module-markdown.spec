@@ -86,26 +86,24 @@ PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 NGINX_BIN=/usr/sbin/nginx
 SED_BIN=/usr/bin/sed
-# $1==1 during upgrade, $1==2 during erase — run the guard only for
-# install/upgrade (not erase), and tolerate a missing nginx binary
-# (the RPM dependencies still enforce the capability and floor/ceiling).
-if [ "$1" -ne 0 ]; then
-    if [ -x "$NGINX_BIN" ]; then
-        if [ ! -x "$SED_BIN" ]; then
-            echo "ERROR: trusted sed executable not found at $SED_BIN" >&2
-            exit 1
-        fi
-        if ! GUARD_NGINX_VERSION="$("$NGINX_BIN" -v 2>&1 | "$SED_BIN" -n 's/.*nginx version: nginx\/\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"; then
-            echo "ERROR: could not inspect the installed NGINX version" >&2
-            exit 1
-        fi
-        if [ -n "${GUARD_NGINX_VERSION}" ] && [ "${GUARD_NGINX_VERSION}" != "%{nginx_version}" ]; then
-            echo "ERROR: installed NGINX version ${GUARD_NGINX_VERSION} does not match the exact version %{nginx_version} this module was built for" >&2
-            echo "  This package provides a dynamic module for nginx.org %{nginx_version} ONLY." >&2
-            echo "  The NGINX core loader rejects any other version (including a patch release)." >&2
-            echo "  Install nginx-%{nginx_version} and retry." >&2
-            exit 1
-        fi
+# $1==1 during install, $1==2 during upgrade; erase uses %preun with $1==0,
+# so %pre never runs on erase. Tolerate a missing nginx binary (the RPM
+# dependencies still enforce the capability and floor/ceiling).
+if [ -x "$NGINX_BIN" ]; then
+    if [ ! -x "$SED_BIN" ]; then
+        echo "ERROR: trusted sed executable not found at $SED_BIN" >&2
+        exit 1
+    fi
+    if ! GUARD_NGINX_VERSION="$("$NGINX_BIN" -v 2>&1 | "$SED_BIN" -n 's/.*nginx version: nginx\/\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"; then
+        echo "ERROR: could not inspect the installed NGINX version" >&2
+        exit 1
+    fi
+    if [ -n "${GUARD_NGINX_VERSION}" ] && [ "${GUARD_NGINX_VERSION}" != "%{nginx_version}" ]; then
+        echo "ERROR: installed NGINX version ${GUARD_NGINX_VERSION} does not match the exact version %{nginx_version} this module was built for" >&2
+        echo "  This package provides a dynamic module for nginx.org %{nginx_version} ONLY." >&2
+        echo "  The NGINX core loader rejects any other version (including a patch release)." >&2
+        echo "  Install nginx-%{nginx_version} and retry." >&2
+        exit 1
     fi
 fi
 
