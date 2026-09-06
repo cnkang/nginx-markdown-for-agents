@@ -247,6 +247,15 @@ validate_helm_template() {
         printf '%s\n' "$zero_override_out" >&2
         return 1
     fi
+    # The failure must be the expected image-required validation error,
+    # not an unrelated template defect.  Assert the rendered output
+    # names the missing image values before passing.
+    if ! grep -qF "image.repository" <<< "$zero_override_out" \
+        && ! grep -qF "image.tag" <<< "$zero_override_out"; then
+        fail "helm template with zero overrides failed for an unexpected reason (image.repository/image.tag not mentioned)"
+        printf '%s\n' "$zero_override_out" >&2
+        return 1
+    fi
     pass "helm template with zero overrides rejected (image.repository/image.tag required)"
 
     # Render with an explicit stock-nginx image (the supported
