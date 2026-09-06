@@ -488,7 +488,7 @@ echo "==> Running conditional-request validation scenario"
     -H "${ACCEPT_MARKDOWN_HEADER}" \
     -H 'If-Match: "different-etag-value"' \
     -H "${STALE_IF_UNMODIFIED_SINCE_HEADER}" \
-    "http://127.0.0.1:${PORT}/index.html" \
+    "http://127.0.0.1:${PORT}/proxy/index.html" \
     -w "${HTTP_CODE_FORMAT}")"
   [[ "${code7}" == "412" ]] || {
     echo "Expected failing If-Match response 412, got ${code7}" >&2

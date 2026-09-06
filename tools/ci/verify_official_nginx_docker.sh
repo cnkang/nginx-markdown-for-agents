@@ -456,13 +456,6 @@ docker run -d \
   -p "127.0.0.1:${PORT}:8080" \
   "${IMAGE_NAME}" >/dev/null
 
-echo "==> Verifying container runs as a non-root user"
-runtime_uid="$(docker exec "${CONTAINER_NAME}" id -u)"
-[[ "${runtime_uid}" != "0" ]] || {
-  echo "Container must not run as root" >&2
-  exit 1
-}
-
 echo "==> Waiting for nginx to become ready"
 ready=0
 for _ in $(seq 1 30); do
@@ -471,10 +464,19 @@ for _ in $(seq 1 30); do
     ready=1
     break
   fi
+  # Retry while the container runtime finishes creating the container, so
+  # a not-yet-running container does not fail the exec below.
   sleep 1
 done
 [[ "${ready}" -eq 1 ]] || {
   echo "Container did not become ready on port ${PORT}" >&2
+  exit 1
+}
+
+echo "==> Verifying container runs as a non-root user"
+runtime_uid="$(docker exec "${CONTAINER_NAME}" id -u)"
+[[ "${runtime_uid}" != "0" ]] || {
+  echo "Container must not run as root" >&2
   exit 1
 }
 
