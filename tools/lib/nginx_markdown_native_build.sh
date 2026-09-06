@@ -591,8 +591,8 @@ markdown_extract_header() {
   local header="$2"
 
   awk -v hdr="${header}" 'BEGIN { lower=tolower(hdr) }
-    tolower($1) == (lower ":") {
-      sub(/^[^:]+:[[:space:]]+/, ""); sub(/\r$/, ""); print; exit
+    tolower($0) ~ ("^" lower ":") {
+      sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit
     }' "${hdr_file}"
   return 0
 }

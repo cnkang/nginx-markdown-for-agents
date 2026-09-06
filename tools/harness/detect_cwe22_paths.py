@@ -810,6 +810,11 @@ def _scan_single_open_match(
         # A comment line cannot contain a live call.
         return match_errors, match_warnings
 
+    segment_end = (
+        open_matches[match_idx + 1].start()
+        if match_idx + 1 < len(open_matches)
+        else len(line)
+    )
     prev_char = line[open_match.start() - 1] if open_match.start() > 0 else " "
     if prev_char == ".":
         # Method call `receiver.open(...)`.  The OPEN_CALL_RE match
@@ -819,16 +824,17 @@ def _scan_single_open_match(
         # handled through the builtin branch).
         if re.match(r"os\.$", line[max(0, open_match.start() - 3):open_match.start()]):
             return match_errors, match_warnings
-        first_arg = _extract_path_open_receiver(line)
+        # Scope receiver extraction to this match's segment (from the
+        # receiver start through the next open() match) so an earlier
+        # call on the same line cannot mis-attribute this one's
+        # receiver.  The receiver precedes the match, so the segment
+        # must start there.
+        receiver_start = _receiver_start(line, open_match.start())
+        first_arg = _extract_path_open_receiver(line[receiver_start:segment_end])
     else:
         # Builtin open()/os.open(): scope argument extraction to
         # the current match so an earlier call on the same line
         # cannot mis-attribute this one's arguments.
-        segment_end = (
-            open_matches[match_idx + 1].start()
-            if match_idx + 1 < len(open_matches)
-            else len(line)
-        )
         first_arg = _extract_builtin_open_first_arg(
             line[open_match.start():segment_end]
         )

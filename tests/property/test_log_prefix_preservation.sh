@@ -60,8 +60,10 @@ echo ""
 # capture failures) and d42971f5 (+1 NGX_LOG_ERR: inflight guard rejection).
 # Updated 2026-09-03: 353 — 59e7b41c (rollback-safe orphan conditional
 # header adoption) adds +2 NGX_LOG_DEBUG0 while removing one, net +1.
-# Updated 2026-09-04: 357 — send_412 auth Cache-Control hardening adds
-# +1 NGX_LOG_ERR for the 412 path failure (mirroring 304 path).
+# Updated 2026-09-04: 357 — the 412 precondition-failure path adds +4 sites:
+# e287050a (+3 NGX_LOG_ERR/DEBUG_HTTP: send_412 precondition failure plus the
+# resolver's pre- and post-restore debug traces) and 303c06e1 (+1 NGX_LOG_ERR:
+# hardened 412 representation transaction failure).
 # Updated 2026-09-05: 359 — decompression peak-budget rejection adds
 # +2 NGX_LOG_WARN sites for single- and multi-layer resource-limit paths.
 BASELINE_LOG_SITES=359

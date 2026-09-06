@@ -205,13 +205,14 @@ class TestRequiredWorkflowPresence:
 
 
 class TestCLI:
-    """CLI contract: the detector must exit 0 or 1."""
+    """CLI contract: the detector must exit 0 when the repository is clean."""
 
-    def test_cli_runs_and_returns_valid_exit_code(self, tmp_path: Path):
+    def test_cli_runs_and_returns_clean_exit(self) -> None:
+        # The detector derives its scan root from __file__, not the cwd, so
+        # no fixture tree is needed; the repository must be clean today.
         result = subprocess.run(
             [sys.executable, str(DETECTOR)],
             capture_output=True, text=True,
-            cwd=tmp_path,
             check=False,
         )
         assert result.returncode == 0, f"expected exit 0, got {result.returncode}; stderr:\n{result.stderr}"
