@@ -109,6 +109,11 @@ println!("Markdown will use approximately {} tokens", tokens);
   disappeared in 0.9.2)
 - When `markdown_token_estimate off;`, the module computes no estimate and emits no header
   (zero conversion overhead)
+- The header is emitted only for **full-buffer** conversions when
+  `markdown_token_estimate on;`: the estimator needs the complete output
+  length, which a streaming response does not know up front. Streaming
+  responses never carry `X-Markdown-Tokens` (see
+  [Streaming Compatibility](STREAMING_COMPATIBILITY.md#token-estimation))
 
 ## Test Coverage
 

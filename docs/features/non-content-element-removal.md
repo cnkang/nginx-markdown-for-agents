@@ -144,7 +144,7 @@ Embedded content elements (`<iframe>`, `<object>`, `<embed>`) also use a strip-t
 
 ## Related: Media Element URL Extraction
 
-Media elements (`<video>`, `<audio>`) have their `src` URL extracted as a Markdown link before traversing fallback children. Video `poster` thumbnails become Markdown images. Child `<source>` elements have their `src` extracted with `type` as label. `<track>` elements use `label` as link text. Image map `<area>` elements have their `href` extracted as links with `alt`/`title` as text. This ensures AI agents see all referenced resource URLs without losing information.
+Media elements (`<video>`, `<audio>`) have their `src` URL extracted as a Markdown link before traversing fallback children. Video `poster` thumbnails become Markdown images. Child `<source>` elements have their `src` extracted with `type` as label. `<track>` elements use `label` as link text. Image map `<area>` elements have their `href` extracted as links with `alt`/`title` as text. Extraction covers only resource URLs that pass the module's dangerous-scheme suppression (`javascript:`, `data:`, and other dangerous schemes are never emitted), so agents see exactly the resource URLs the response safely references — no unsafe URLs leak through this path.
 
 ## Verification
 

@@ -210,14 +210,21 @@ wins.
 
 ### Error Handling
 
-- Missing or malformed charset parameter in Content-Type: Falls back to HTML meta tag detection
-- Unsupported charset labels: Falls back to HTML meta tag detection when possible
-- Invalid bytes for the declared charset (including invalid UTF-8): Returns `ConversionError::EncodingError`
+Parsing a body fails in four scenarios:
+
 - Empty input: Returns `ConversionError::InvalidInput`
-- Charset detection never fails (always returns UTF-8 as fallback). Parsing
-  rejects only invalid UTF-8 bytes and empty input. Valid UTF-8 bytes remain
-  parseable even when the declared charset is not UTF-8. The fallback and
-  conversion-error behavior stay unchanged
+- Unsupported charset label: Returns `ConversionError::EncodingError`
+  (the label cannot be mapped to a supported encoding)
+- Invalid bytes for the declared charset: Returns `ConversionError::EncodingError`
+- Invalid UTF-8 bytes (declared or detected charset is UTF-8): Returns
+  `ConversionError::EncodingError`
+
+Missing or malformed charset parameters fall back down the cascade
+(Content-Type parameter, then HTML meta tag, then UTF-8 default). Charset
+detection itself never fails: it always returns a charset, defaulting to
+UTF-8. Valid UTF-8 bytes remain parseable even when the declared charset is
+not UTF-8, because the converter only transcodes when the declared charset
+differs from UTF-8.
 
 ## Dependencies
 

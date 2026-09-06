@@ -393,7 +393,8 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
 - Failure rate exceeding 5% of conversion attempts over any 1-hour window
 - Latency spikes correlated with peak traffic periods
 - Client reports of unexpected content
-- One path failing significantly more than others: `grep "outcome=failed_open\|outcome=failed_closed" \| grep -oP 'uri=\K[^ ]+' \| sort \| uniq -c`
+- One path failing significantly more than others: `grep -E "outcome=(failed_open|failed_closed|aborted)" | grep -oP 'uri=\K[^ ]+' | sort | uniq -c`
+
 ---
 
 ### Stage 4: Production — Broader Scope
@@ -464,7 +465,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 
 # Path-specific failure check
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "outcome=failed_open\|outcome=failed_closed" | \
+  grep -E "outcome=(failed_open|failed_closed|aborted)" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c
 
 # Verify no internal system-failure categories
@@ -1355,12 +1356,12 @@ Stop expanding rollout scope and investigate if any of the following occur:
 
 | Trigger | What It Means | How to Detect |
 |---------|---------------|---------------|
-| Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep -E "reason=(failed_open|failed_closed)" /var/log/nginx/error.log \| tail -20` or watch the failed `requests_total` series |
+| Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | Decision-log failure outcomes: `grep -E "outcome=(failed_open|failed_closed|aborted)" /var/log/nginx/error.log \| tail -20` (the `reason` field carries the underlying cause, not the outcome), or watch the failed `requests_total` series |
 | Repeated internal failure reasons | Internal failure categories appear repeatedly, for example `memory_budget_exceeded` or `ffi_panic` — check the decision logs | Inspect the `category=` field in decision log entries and the NGINX logs; these categories do not appear as `requests_total` reason labels |
 | Conversion latency exceeding `markdown_limits` | Conversions are taking too long — may indicate large pages, resource contention, or converter performance issues | Check latency buckets; look for conversions in the highest `le` bucket or timeouts in logs |
 | Upstream error rate increase | The module may be causing upstream issues (unlikely but possible with decompression or buffering interactions) | Compare upstream 5xx rates before and after enablement |
 | Unexpected `Content-Type` in responses | Converted responses have wrong Content-Type, or non-HTML responses are being processed | `curl -sD - -H "Accept: text/markdown" http://localhost/your-path/ \| grep Content-Type` |
-| One path failing significantly more than others | Path-specific issue — the HTML structure on that path may not convert cleanly | Per-URI failure check: `grep "outcome=failed_open\|outcome=failed_closed" \| grep -oP 'uri=\K[^ ]+' \| sort \| uniq -c` |
+| One path failing significantly more than others | Path-specific issue — the HTML structure on that path may not convert cleanly | Per-URI failure check: `grep -E "outcome=(failed_open|failed_closed|aborted)" \| grep -oP 'uri=\K[^ ]+' \| sort \| uniq -c` |
 | `not_eligible` or `disabled` for paths you expect to convert | Upstream responses changed — content type is no longer `text/html` or response size exceeds `markdown_limits` | Check skip reason distribution filtered by URI |
 
 When a trigger fires:

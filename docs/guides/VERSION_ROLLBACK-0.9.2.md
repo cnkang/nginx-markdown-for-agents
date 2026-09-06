@@ -43,10 +43,13 @@ Publication and artifact availability are separate release gates.
        exit 1
      fi
    else
-     # systemctl unavailable or does not manage NGINX: independently verify
-     # that no NGINX master process remains before replacing the module.
-     if pgrep -x nginx >/dev/null 2>&1; then
-       echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
+     # systemctl unavailable or does not manage NGINX: poll for the master
+     # process to exit after 'nginx -s quit' (graceful shutdown drains
+     # in-flight requests first), then confirm it is really gone.
+     timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'
+     drain_status=$?
+     if [ "$drain_status" -eq 124 ] || pgrep -x nginx >/dev/null 2>&1; then
+       echo "NGINX master process still running 30s after 'nginx -s quit' — investigate before continuing" >&2
        exit 1
      fi
    fi

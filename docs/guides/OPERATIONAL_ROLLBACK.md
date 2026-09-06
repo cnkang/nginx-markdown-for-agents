@@ -422,14 +422,35 @@ Any observation checkpoint result that does not meet the "safe to continue" crit
 
 After applying any rollback method, verify that the change took effect. Run these checks in order.
 
-### 1. Check Logs for `disabled`
+### 1. Verify Conversion Is Disabled (Counter Delta First)
 
-After disabling conversion (Methods A and B), the decision log should show `disabled` for affected traffic:
+After disabling conversion (Methods A and B), verify the disablement with a
+counter delta across a probe request; a log entry alone is not proof, because
+`disabled` decision-log entries require `markdown_log_verbosity` info (or
+debug) to be emitted at all:
 
 ```bash
-# Watch for new disabled entries after reload
-grep "markdown:" /var/log/nginx/error.log | \
-  grep "outcome=skipped" | grep "reason=disabled" | tail -10
+# Disabled decisions appear only when markdown_log_verbosity is info
+# (or debug).  Confirm the level, then verify by delta: request a
+# known-convertible path before and after the reload and require the
+# conversion counters to stay flat across the probe, instead of trusting
+# that a log entry alone proves the disablement.
+nginx -T 2>/dev/null | grep markdown_log_verbosity   # expect: info (or debug)
+
+PROBE_PATH="rollback-probe-$(date +%s)"
+BASE=$(curl -s -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
+  grep -E 'nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)')
+curl -s -o /dev/null -H 'Accept: text/markdown' "http://localhost/${PROBE_PATH}"
+AFTER=$(curl -s -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
+  grep -E 'nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)')
+[ "$BASE" = "$AFTER" ] && echo "OK: conversion counters flat across the probe (conversion disabled)" \
+  || echo "FAIL: conversion counters moved across the probe"
+# Optional log corroboration (requires markdown_log_verbosity info or
+# debug, and an error-log level that includes info): the probe must show
+# its own uniquely named path in a disabled decision entry.
+tail -50 /var/log/nginx/error.log | grep "markdown:" | grep "reason=disabled" | grep "${PROBE_PATH}"
 ```
 
 For Method C (restoring fail-open), trigger a known conversion failure first and

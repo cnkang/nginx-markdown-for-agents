@@ -34,7 +34,7 @@ All 0.4.0 sub-specs must follow these conventions for any new operator-facing su
 |----------------------------------------|--------------------------------------|
 | `markdown_filter`                      | Enable/disable the filter            |
 | `markdown_memory_budget`               | Maximum response size to convert     |
-| `markdown_timeout`                     | Conversion timeout                   |
+| `markdown_timeout` (retired 0.9.0)     | Conversion timeout — superseded by `markdown_limits conversion_timeout=` / `parser_timeout=` (authoritative parser-timeout syntax) |
 | `markdown_error_policy`                | Failure policy (pass / fail_closed)  |
 | `markdown_flavor`                      | Markdown output flavor               |
 | `markdown_token_estimate`              | Token estimation metadata            |
