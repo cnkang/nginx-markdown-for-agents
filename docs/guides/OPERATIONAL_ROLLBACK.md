@@ -456,7 +456,7 @@ tail -c +"$((LOG_OFFSET + 1))" /var/log/nginx/error.log \
 The offset excludes earlier history but does not identify a single request.
 On a host with concurrent Markdown traffic, unrelated requests can satisfy
 the check. Trigger the request on a uniquely named path (for example
-`/known-failing-path?probe=<timestamp>`) and match that path in the grep, or
+`/known-failing-path/<uuid>`) and match that path in the grep, or
 quiesce competing traffic for the duration of the verification.
 
 ### 2. Confirm Metrics Stop Incrementing

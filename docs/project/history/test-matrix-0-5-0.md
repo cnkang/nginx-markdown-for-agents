@@ -48,7 +48,11 @@ If infrastructure or resource constraints block a cell, the sub-spec must record
 
 The required coverage set is the complete Cartesian product of the listed
 dimensions: 2 platforms x 3 NGINX versions x 4 response size tiers x 2
-conversion engines x 5 conversion paths = 240 tuples. Before release,
+conversion engines x 5 conversion paths = 240 tuples.  Full-buffer conversion
+tuples above the 64 MiB tier (the Extra-Large convert tuples, for example
+TM-031) hit the size-limit rejection path by design: the module rejects
+inputs at or above the conversion ceiling, so those tuples do not require a
+covering sub-spec.  Before release,
 aggregate all sub-spec coverage mappings. Ensure every required tuple has at
 least one covering sub-spec. Covering each value independently is not
 sufficient. The following table enumerates the complete required set in
@@ -87,7 +91,7 @@ process records a covering sub-spec:
 | TM-028 | Ubuntu | 1.24.x | Large | streaming | fallback/fail-open | — | Pending |
 | TM-029 | Ubuntu | 1.24.x | Large | streaming | fail-closed | — | Pending |
 | TM-030 | Ubuntu | 1.24.x | Large | streaming | post-commit failure | — | Pending |
-| TM-031 | Ubuntu | 1.24.x | Extra-Large | full-buffer | convert | — | Pending |
+| TM-031 | Ubuntu | 1.24.x | Extra-Large | full-buffer | convert | size-limit rejection by design (see coverage-set note above) | Expected-Rejection |
 | TM-032 | Ubuntu | 1.24.x | Extra-Large | full-buffer | skip | — | Pending |
 | TM-033 | Ubuntu | 1.24.x | Extra-Large | full-buffer | fallback/fail-open | — | Pending |
 | TM-034 | Ubuntu | 1.24.x | Extra-Large | full-buffer | fail-closed | — | Pending |
@@ -302,5 +306,6 @@ process records a covering sub-spec:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-06 | Kang | Annotate the Extra-Large full-buffer convert tuple as an expected size-limit rejection; no covering sub-spec required |
 | 0.9.2 | 2026-08-15 | Hermes | Define the required coverage set as the complete 240-tuple Cartesian product (five conversion paths) |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

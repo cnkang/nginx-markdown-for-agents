@@ -34,7 +34,11 @@ Publication and artifact availability are separate release gates.
    if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
      # systemd-managed NGINX: wait for a confirmed shutdown.
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-     if sudo systemctl is-active --quiet nginx; then
+     drain_status=$?
+     # Abort when the drain hit the timeout, and require an explicit
+     # "inactive" state: any other nonzero is-active result (query failure,
+     # failed unit) must not be treated as a confirmed stop.
+     if [ "$drain_status" -eq 124 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
        echo "NGINX did not stop within 30s — investigate before continuing" >&2
        exit 1
      fi
@@ -140,14 +144,18 @@ Publication and artifact availability are separate release gates.
    sudo nginx -s quit
    if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-     if sudo systemctl is-active --quiet nginx; then
+     drain_status=$?
+     # Abort when the drain hit the timeout, and require an explicit
+     # "inactive" state: any other nonzero is-active result (query failure,
+     # failed unit) must not be treated as a confirmed stop.
+     if [ "$drain_status" -eq 124 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
        echo "NGINX did not stop within 30s — investigate before continuing" >&2
        exit 1
      fi
    else
-     # systemctl unavailable or does not manage NGINX: verify that the
-     # manually managed master process has stopped before continuing.
-     if pgrep -f "nginx: master process" >/dev/null 2>&1; then
+     # systemctl unavailable or does not manage NGINX: verify with a bounded
+     # drain that no NGINX process remains before continuing.
+     if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
        echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
        exit 1
      fi
@@ -221,14 +229,18 @@ Key reversions:
 sudo nginx -s quit
 if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
   timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-  if sudo systemctl is-active --quiet nginx; then
+  drain_status=$?
+  # Abort when the drain hit the timeout, and require an explicit
+  # "inactive" state: any other nonzero is-active result (query failure,
+  # failed unit) must not be treated as a confirmed stop.
+  if [ "$drain_status" -eq 124 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
     echo "NGINX did not stop within 30s — investigate before continuing" >&2
     exit 1
   fi
 else
-  # systemctl unavailable or does not manage NGINX: verify that the
-  # manually managed master process has stopped before continuing.
-  if pgrep -f "nginx: master process" >/dev/null 2>&1; then
+  # systemctl unavailable or does not manage NGINX: verify with a bounded
+  # drain that no NGINX process remains before continuing.
+  if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
     echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
     exit 1
   fi

@@ -103,7 +103,7 @@ VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
-awk -v pkg="${PKG}" '$2 == pkg { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS | sha256sum -c -
+CHECKSUM_LINE="$(awk -v file="${PKG}" '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"; printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -
 sudo apt install "./${PKG}"
 ```
 
@@ -139,7 +139,7 @@ VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
-awk -v pkg=" ${PKG}$" '$0 ~ pkg { count++; line=$0 } END { if (count == 1) print line; else exit 1 }' SHA256SUMS | sha256sum -c -
+CHECKSUM_LINE="$(awk -v file="${PKG}" '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"; printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -
 sudo rpm -Uvh "./${PKG}"
 ```
 

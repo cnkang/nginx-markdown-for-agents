@@ -221,7 +221,7 @@ The following build arguments control the image build:
 | Build Arg | Default | Description |
 |-----------|---------|-------------|
 | `NGINX_VERSION` | `1.27.2` | NGINX version for module compilation. Must match the NGINX binary in the base image exactly. Minimum supported: 1.24.0. |
-| `NGINX_INGRESS_IMAGE` | `nginx/nginx-ingress@sha256:60f690...` | Immutable base Ingress Controller image. Custom values must include a full digest and contain an NGINX binary. |
+| `NGINX_INGRESS_IMAGE` | `nginx/nginx-ingress@sha256:60f690573c0599aadd45468899f9baaa97a4775e852c4402b0003a1e58a8dc17` | Immutable base Ingress Controller image. Custom values must include a full digest and contain an NGINX binary. |
 | `MODULE_REPO` | `https://github.com/cnkang/nginx-markdown-for-agents.git` | Git repository URL for the module source code. |
 | `MODULE_REF` | `main` | Branch or tag used only as a reachability hint when direct object fetch is unavailable. |
 | `MODULE_SHA` | required | Full 40-character reviewed commit identity. The build verifies exact equality before running repository code. |

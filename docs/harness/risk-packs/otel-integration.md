@@ -34,7 +34,11 @@ ADRs, and migration material are historical sync points for the removed
 trace-context behavior. Do not cite any of them as current source or
 configuration contracts.
 
-## Minimum Verification
+## Historical minimum verification (pre-0.9.2)
+
+The commands below were the minimum verification set when the trace-context
+behavior was live.  They document what the archived pack used to require, not
+the current release requirements.
 
 ```bash
 make test-nginx-unit
