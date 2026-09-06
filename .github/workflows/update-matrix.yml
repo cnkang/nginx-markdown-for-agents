@@ -49,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           allowed_files=$'tools/release-matrix.json\ndocs/releases/release-matrix.json\ndocs/guides/INSTALLATION.md'
-          changed_files="$(git diff --name-only)"
+          changed_files="$(git diff --name-only HEAD; git ls-files --others --exclude-standard)"
           if [[ -n "$changed_files" ]]; then
             while IFS= read -r path; do
               if [[ "$allowed_files" != *$'\n'"$path"$'\n'* &&
@@ -176,7 +176,7 @@ jobs:
           git apply matrix-update.patch
           git diff --check
           allowed_files=$'tools/release-matrix.json\ndocs/releases/release-matrix.json\ndocs/guides/INSTALLATION.md'
-          changed_files="$(git diff --name-only)"
+          changed_files="$(git diff --name-only HEAD; git ls-files --others --exclude-standard)"
           while IFS= read -r path; do
             if [[ -z "$path" ]]; then
               continue
