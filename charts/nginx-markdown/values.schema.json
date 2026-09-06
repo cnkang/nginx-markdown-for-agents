@@ -59,7 +59,7 @@
           "properties": {
             "conversionMemory": { "type": "string" },
             "conversionTimeout": { "type": "string" },
-            "parserMemory": { "type": "string" },
+            "parserBudget": { "type": "string" },
             "parserTimeout": { "type": "string" },
             "streamingBuffer": { "type": "string" },
             "decompressedSize": { "type": "string" },

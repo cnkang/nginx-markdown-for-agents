@@ -146,7 +146,7 @@ markdown:
     conversionMemory: ""
     conversionTimeout: ""
     # streamingBuffer: "2m"
-    # parserMemory: "32m"
+    # parserBudget: "32m"
     # parserTimeout: "10s"
     # decompressedSize: "10m"
     # decompressionRatio: 100
