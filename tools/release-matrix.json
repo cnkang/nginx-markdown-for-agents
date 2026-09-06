@@ -53,7 +53,7 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
@@ -81,7 +81,7 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
@@ -229,7 +229,7 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
@@ -257,7 +257,7 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
@@ -369,7 +369,7 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
@@ -397,7 +397,7 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
@@ -481,7 +481,7 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
@@ -509,7 +509,7 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
@@ -657,7 +657,7 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },
@@ -685,7 +685,7 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 2
     },

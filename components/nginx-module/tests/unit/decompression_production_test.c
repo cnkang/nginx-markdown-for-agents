@@ -101,6 +101,7 @@ ngx_buf_t *ngx_calloc_buf(ngx_pool_t *pool);
 ngx_chain_t *ngx_alloc_chain_link(ngx_pool_t *pool);
 
 #include "../../src/ngx_http_markdown_filter_module.h"
+#include "../../src/ngx_http_markdown_decompression_route.h"
 
 ngx_module_t ngx_http_markdown_filter_module;
 
@@ -1794,6 +1795,87 @@ test_deflate_raw_trailing_data(void)
 }
 
 /*
+ * A valid raw stored-block stream can begin with bytes that also satisfy the
+ * zlib header check.  The wrapped interpretation of this fixture emits one
+ * byte before reaching an invalid block, while the raw interpretation
+ * decompresses the complete payload.  The fallback must therefore replay the
+ * input even after wrapped inflate has produced output.
+ */
+static void
+test_deflate_raw_zlib_like_prefix_after_wrapped_output(void)
+{
+    enum {
+        raw_payload_size = 0x0a9c,
+        compressed_size = raw_payload_size + 10
+    };
+    u_char    *compressed;
+    u_char     wrapped_output[raw_payload_size];
+    ngx_buf_t  in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t  rc;
+    z_stream   wrapped;
+    int        zrc;
+
+    init_request(&r);
+    compressed = ngx_alloc(compressed_size, r.connection->log);
+    TEST_ASSERT(compressed != NULL,
+                "ambiguous raw-deflate fixture allocation should succeed");
+
+    /*
+     * First raw block: LEN=0x0a9c, NLEN=0xf563.  The final empty stored
+     * block completes the raw stream.  After the 78 9c prefix is consumed as
+     * a zlib header, the remaining bytes make wrapped inflate produce output
+     * and then report a format error.
+     */
+    compressed[0] = 0x78;
+    compressed[1] = 0x9c;
+    compressed[2] = 0x0a;
+    compressed[3] = 0x63;
+    compressed[4] = 0xf5;
+    memset(compressed + 5, 0, raw_payload_size);
+    compressed[5 + raw_payload_size] = 0x01;
+    compressed[6 + raw_payload_size] = 0x00;
+    compressed[7 + raw_payload_size] = 0x00;
+    compressed[8 + raw_payload_size] = 0xff;
+    compressed[9 + raw_payload_size] = 0xff;
+
+    ngx_memzero(&wrapped, sizeof(wrapped));
+    wrapped.next_in = compressed;
+    wrapped.avail_in = compressed_size;
+    wrapped.next_out = wrapped_output;
+    wrapped.avail_out = sizeof(wrapped_output);
+    zrc = inflateInit2(&wrapped, MAX_WBITS);
+    TEST_ASSERT(zrc == Z_OK,
+                "ambiguous fixture wrapped inflate init should succeed");
+    zrc = inflate(&wrapped, Z_NO_FLUSH);
+    TEST_ASSERT(zrc == Z_DATA_ERROR && wrapped.total_out > 0,
+                "wrapped interpretation should fail after producing output");
+    inflateEnd(&wrapped);
+
+    in = make_chain(compressed, compressed_size, &in_buf);
+    out = NULL;
+    rc = ngx_http_markdown_decompress(
+        &r, NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, &in, &out);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "raw deflate fallback should replay after wrapped output");
+    TEST_ASSERT(out != NULL && out->buf != NULL,
+                "replayed raw deflate should produce output");
+    TEST_ASSERT((size_t) (out->buf->last - out->buf->pos)
+                == raw_payload_size,
+                "replayed raw deflate output length should match");
+    TEST_ASSERT(memcmp(out->buf->pos, compressed + 5, raw_payload_size) == 0,
+                "replayed raw deflate output should match the raw payload");
+
+    release_output(out);
+    ngx_free(compressed);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "ambiguous raw-deflate output should release all buffers");
+}
+
+/*
  * Test that clean deflate (no trailing data) still succeeds for both
  * zlib-wrapped and raw deflate formats.  This is the positive control
  * ensuring the trailing-data guard does not over-reject valid streams.
@@ -1961,26 +2043,57 @@ test_brotli_error_classification(void)
         TEST_ASSERT(
             ngx_http_markdown_brotli_error_classify(code)
                 == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-            "Brotli reserved/generic code must use the system-error class");
+            "Brotli reserved/generic code must use the internal-error class");
     }
     for (code = -23; code >= -24; code--) {
         TEST_ASSERT(
             ngx_http_markdown_brotli_error_classify(code)
                 == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-            "Brotli reserved allocation code must use the system-error class");
+            "Brotli reserved allocation code must use the internal-error class");
     }
     for (code = -28; code >= -29; code--) {
         TEST_ASSERT(
             ngx_http_markdown_brotli_error_classify(code)
                 == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-            "Brotli reserved allocation code must use the system-error class");
+            "Brotli reserved allocation code must use the internal-error class");
     }
     TEST_ASSERT(
         ngx_http_markdown_brotli_error_classify(-31)
             == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
-        "Brotli unreachable code must use the system-error class");
+        "Brotli unreachable code must use the internal-error class");
 
     TEST_PASS("Brotli decoder error classification is consistent");
+}
+
+static void
+test_decompression_peak_budget_preflight(void)
+{
+    TEST_SUBSECTION("Decompression peak budget preflight");
+
+    TEST_ASSERT(
+        ngx_http_markdown_decompression_peak_within_budget(
+            20, 0, 30, 2, 80),
+        "single-layer peak at the budget must be accepted");
+    TEST_ASSERT(
+        !ngx_http_markdown_decompression_peak_within_budget(
+            20, 0, 30, 2, 79),
+        "single-layer peak over the budget must be rejected");
+    TEST_ASSERT(
+        !ngx_http_markdown_decompression_peak_within_budget(
+            20, 0, (size_t) -1, 2, 100),
+        "output multiplication overflow must be rejected");
+    TEST_ASSERT(
+        !ngx_http_markdown_decompression_peak_within_budget(
+            20, 10, 30, 3, 119),
+        "multi-layer peak including a linearized input must be rejected");
+    TEST_ASSERT(
+        ngx_http_markdown_decompression_peak_within_budget(
+            20, 10, 30, 3, 120),
+        "multi-layer peak including a linearized input must be accepted");
+    TEST_ASSERT(
+        ngx_http_markdown_decompression_peak_within_budget(
+            (size_t) -1, 0, (size_t) -1, 3, 0),
+        "unset budget must not impose a false overflow failure");
 }
 
 int
@@ -2015,10 +2128,12 @@ main(void)
     test_gzip_truncated_input();
     test_deflate_zlib_trailing_data();
     test_deflate_raw_trailing_data();
+    test_deflate_raw_zlib_like_prefix_after_wrapped_output();
     test_deflate_clean_still_succeeds();
     test_gzip_concatenated_not_regressed();
     test_brotli_not_compiled_in();
     test_brotli_error_classification();
+    test_decompression_peak_budget_preflight();
 
     TEST_PASS("decompression_production: all tests passed");
     return 0;

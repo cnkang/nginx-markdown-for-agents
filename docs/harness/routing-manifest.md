@@ -34,6 +34,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `soak-qualification` | focused semantic | `make test-e2e-rust-soak` |
 | `version-consistency` | focused semantic | `bash tools/harness/detect_version_consistency.sh`, `make harness-security-checks` |
 | `regex-security` | cheap blocker | `make regex-security-check` |
+| `complexity` | cheap blocker | `make complexity-check` |
 | `e2e-streaming-config` | cheap blocker | `make e2e-streaming-config-check` |
 | `sonar-encoding` | cheap blocker | `make sonar-encoding-check` |
 | `diagnostics-access-phase` | focused semantic | `make verify-diagnostics-access-phase-e2e` (requires `NGINX_BIN` and `NGINX_MODULE_SO`; emits `SKIP` when unavailable) |
@@ -52,7 +53,7 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 |------|------------------|---------------------|-----|
 | `runtime-streaming` | request/response streaming, pending chains, fail-open behavior, replay buffer integrity | observability | [risk-packs/runtime-streaming.md](risk-packs/runtime-streaming.md) |
 | `ffi-boundary` | Rust/C ABI, header sync, option and error-code drift | observability | [risk-packs/ffi-boundary.md](risk-packs/ffi-boundary.md) |
-| `observability-metrics` | metrics schema, output semantics, release visibility | docs-tooling | [risk-packs/observability-metrics.md](risk-packs/observability-metrics.md) |
+| `observability-metrics` | metrics schema, Prometheus output semantics, release visibility | docs-tooling | [risk-packs/observability-metrics.md](risk-packs/observability-metrics.md) |
 | `docs-tooling-drift` | docs, validators, CI path filters, operator commands | observability | [risk-packs/docs-tooling-drift.md](risk-packs/docs-tooling-drift.md) |
 | `nginx-protocol-safety` | auth/cache-control, conditional requests, status and header semantics | observability, docs-tooling | [risk-packs/nginx-protocol-safety.md](risk-packs/nginx-protocol-safety.md) |
 | `tooling-path-security` | tooling path validation, safe path I/O, subprocess argument safety, shell hygiene, const correctness | docs-tooling, release-governance | [risk-packs/tooling-path-security.md](risk-packs/tooling-path-security.md) |

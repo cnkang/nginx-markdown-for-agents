@@ -83,9 +83,16 @@ run_preinstall() {
     local target="$1"
     local action="${2:-install}"
     local script
-    script="$(sed -e "s|%%NGINX_VERSION%%|${target}|g" \
-                  -e "s|^TRUSTED_PATH_ROOT=\"\"$|TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\"|" \
-                  "${PREINSTALL}")"
+    local rendered_path
+    rendered_path="$(mktemp "${FAKE_ROOT}/rendered.XXXXXX")"
+    if ! "${SCRIPT_DIR}/../nfpm/scripts/render-nfpm-config.sh" \
+        "${PREINSTALL}" "${rendered_path}" "${target}"; then
+        echo "FATAL: failed to render preinstall template" >&2
+        exit 2
+    fi
+    script="$(sed -e "s|^TRUSTED_PATH_ROOT=\"\"$|TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\"|" \
+                  "${rendered_path}")"
+    rm -f "${rendered_path}"
 
     # Assert the substitution landed
     if ! echo "${script}" | grep -q "TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\""; then
@@ -212,23 +219,21 @@ else
     pass "failed 'nginx -v' execution aborts with exit 1"
 fi
 
-# Scenario 9: an unrendered package template must never compare against the
-# literal placeholder and proceed.
+# Scenario 9: an unrendered package template must never silently pass the
+# packaging chain.  The render step validates the NGINX version strictly, so
+# a literal %%NGINX_VERSION%% placeholder (unrendered template artifact)
+# must be rejected at render time — never shipped into a package.
 fake_nginx "1.26.3"
-unresolved_script="$(sed -e "s|^TRUSTED_PATH_ROOT=\"\"$|TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\"|" \
-    "${PREINSTALL}")"
-# Assert the TRUSTED_PATH_ROOT substitution landed exactly like run_preinstall
-# does: a silent substitution failure would test an unhardened script.
-if ! echo "${unresolved_script}" | grep -q "TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\""; then
-    echo "FATAL: TRUSTED_PATH_ROOT substitution failed — test infrastructure broken" >&2
-    exit 2
-fi
-rc=0
-bash -c "${unresolved_script}" preinstall.sh install 2>/dev/null || rc=$?
-if [[ "${rc}" -eq 1 ]]; then
-    pass "unresolved package target is rejected"
+unresolved_path="$(mktemp "${FAKE_ROOT}/unresolved.XXXXXX")"
+render_status=0
+"${SCRIPT_DIR}/../nfpm/scripts/render-nfpm-config.sh" "${PREINSTALL}" \
+    "${unresolved_path}" "%%NGINX_VERSION%%" \
+    2>/dev/null || render_status=$?
+rm -f "${unresolved_path}"
+if [[ "${render_status}" -ne 0 ]]; then
+    pass "unresolved package target is rejected at render time"
 else
-    fail "unresolved package target returned unexpected status ${rc}"
+    fail "unresolved package target passed render; placeholder must be rejected"
 fi
 
 # Scenario 10: negative control — simultaneous PATH injection AND
@@ -264,10 +269,14 @@ exit 0
 EOF
 chmod +x "${EVIL_DIR}/nginx"
 
-# Run preinstall WITHOUT our sandbox substitution — use the script as-is
-# (only substitute %%NGINX_VERSION%%) so TRUSTED_PATH_ROOT="" stays literal.
+# Run preinstall WITHOUT our sandbox substitution — use a rendered copy so
+# the prelude is present, but TRUSTED_PATH_ROOT="" stays literal.
 # The attacker injects TRUSTED_PATH_ROOT via environment.
-evil_script="$(sed "s|%%NGINX_VERSION%%|1.26.3|g" "${PREINSTALL}")"
+evil_path="$(mktemp "${EVIL_DIR}/evil-rendered.XXXXXX")"
+"${SCRIPT_DIR}/../nfpm/scripts/render-nfpm-config.sh" \
+    "${PREINSTALL}" "${evil_path}" "1.26.3"
+evil_script="$(<"${evil_path}")"
+rm -f "${evil_path}"
 if ! PATH="${EVIL_DIR}:${PATH}" TRUSTED_PATH_ROOT="${EVIL_DIR}" \
     bash -c "${evil_script}" preinstall.sh install 2>/dev/null; then
     echo "Scenario 10: preinstall returned nonzero; continuing with the " \

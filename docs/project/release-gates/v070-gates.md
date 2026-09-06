@@ -7,7 +7,7 @@
 | Created | 2026-05-17 |
 | Superseded by | 0.9.2 release gates (`validate_release_gates_070.py`/`_092` are versioned separately) |
 | Source | design.md §14.0 |
-| Detailed Gates | [0.7.0-release-gates.md](./0.7.0-release-gates.md) |
+| Detailed Gates | [0.7.0-release-gates.md](../history/release-gates/0.7.0-release-gates.md) |
 
 > **Historical record.** This document defines the 6 release gates for v0.7.0
 > as specified in the technical design (§14.0). We retain it as a verifiable
@@ -75,7 +75,7 @@ evidence references.
 | 2.1 | FFI boundary tests | `make test-rust && make test-nginx-unit` | Exit 0 |
 | 2.2 | cbindgen header drift check | `make build && make check-headers` | No drift detected |
 | 2.3 | Rust E2E tests | `make test-e2e-rust` | Exit 0 |
-| 2.4 | Migration contract doc coverage | Manual review | All FFI functions documented in `docs/architecture/FFI_MIGRATION_CONTRACT.md` |
+| 2.4 | Migration history doc coverage | Manual review | All FFI functions documented in `docs/architecture/FFI_MIGRATION_HISTORY.md` |
 
 **Fail action**: Block release. Resolve FFI boundary or migration contract gaps.
 

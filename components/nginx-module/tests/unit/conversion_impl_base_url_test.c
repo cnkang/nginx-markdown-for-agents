@@ -492,7 +492,7 @@ struct ngx_http_headers_in_s {
 
 struct ngx_http_headers_out_s {
     ngx_str_t content_type;
-    ngx_msec_t last_modified_time;
+    time_t last_modified_time;
 };
 
 struct ngx_http_core_srv_conf_s {
@@ -930,6 +930,13 @@ ngx_http_markdown_send_304(
 {
     UNUSED(r);
     UNUSED(result);
+    return g_send_304_rc;
+}
+
+ngx_int_t
+ngx_http_markdown_send_412(ngx_http_request_t *r)
+{
+    UNUSED(r);
     return g_send_304_rc;
 }
 
@@ -2598,7 +2605,7 @@ test_conditional_match_propagates_terminal_done(void)
                 "conditional match does not expose a conversion result");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
                 "conditional match clears module buffering before 304");
-    TEST_ASSERT((time_t) r.headers_out.last_modified_time == (time_t) -1,
+    TEST_ASSERT(r.headers_out.last_modified_time == -1,
                 "conditional match clears source Last-Modified state");
 
     TEST_PASS("conditional match propagates terminal NGX_DONE");
@@ -2630,8 +2637,10 @@ test_metrics_legacy_histogram_preserves_exclusive_bands(void)
                 "100ms legacy band must not subtract the 10ms band");
     TEST_ASSERT(v1.duration_full_buffer.buckets[8] == 3,
                 "1000ms legacy band must map directly");
-    TEST_ASSERT(v1.duration_full_buffer.buckets[9] == 4,
-                "greater-than-1000ms legacy band must map directly");
+    TEST_ASSERT(v1.duration_full_buffer.buckets[9] == 0,
+                "legacy >1000ms band must not be mapped to a finite bucket");
+    TEST_ASSERT(v1.duration_full_buffer.count == 10,
+                "legacy latency total remains available through histogram count");
 
     TEST_PASS("legacy histogram preserves exclusive bands");
 }

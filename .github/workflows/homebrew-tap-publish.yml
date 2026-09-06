@@ -59,6 +59,12 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TRIGGER_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          APPROVED_CANDIDATE_SHA: ${{ secrets.RELEASE_APPROVED_CANDIDATE_SHA }}
+          RELEASE_OWNER: ${{ github.repository_owner }}
+          RELEASE_REPO: ${{ github.event.repository.name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
 
@@ -69,10 +75,42 @@ jobs:
           fi
 
           version="${RELEASE_TAG#v}"
-          ./packaging/scripts/validate-version.sh "${version}" >/dev/null
-
           git fetch --force --depth=1 origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
           tag_commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+
+          if [[ "${EVENT_NAME}" == "release" && -n "${TRIGGER_SHA}" ]]; then
+            expected_commit="$(git rev-parse --verify "${TRIGGER_SHA}^{commit}" 2>/dev/null || echo "${TRIGGER_SHA}")"
+            if [[ "${tag_commit}" != "${expected_commit}" ]]; then
+              echo "::error::Tag commit ${tag_commit} does not match trigger commit ${expected_commit}." >&2
+              exit 1
+            fi
+          fi
+          # The tap is a downstream publication channel: only the immutable,
+          # independently approved release candidate may be promoted — a tag
+          # that merely resolves to its own trigger commit proves nothing
+          # about qualification (S6-1).
+          if [[ -z "${APPROVED_CANDIDATE_SHA}" ]]; then
+            echo "::error::RELEASE_APPROVED_CANDIDATE_SHA is not configured." >&2
+            exit 1
+          fi
+          if [[ "${tag_commit}" != "${APPROVED_CANDIDATE_SHA}" ]]; then
+            echo "::error::Release tag ${RELEASE_TAG} (${tag_commit}) does not match the protected approved release candidate." >&2
+            exit 1
+          fi
+          branch_relation="$(gh api "repos/${RELEASE_OWNER}/${RELEASE_REPO}/compare/${tag_commit}...${DEFAULT_BRANCH}" --jq '.status')"
+          case "${branch_relation}" in
+            ahead|identical)
+              ;;
+            *)
+              echo "::error::Approved candidate ${tag_commit} is not an ancestor of ${DEFAULT_BRANCH} (status: ${branch_relation:-missing})." >&2
+              exit 1
+              ;;
+          esac
+          # Run repository-owned validation only after the tag has passed the
+          # immutable candidate and protected-branch checks above.  A tag
+          # workflow must not let unapproved repository code run before those
+          # checks complete (S6-1).
+          ./packaging/scripts/validate-version.sh "${version}" >/dev/null
           tag_version="$(
             git show "${tag_commit}:components/rust-converter/Cargo.toml" \
               | sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \

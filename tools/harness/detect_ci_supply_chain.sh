@@ -77,17 +77,31 @@ while IFS= read -r line; do
     file="${line%%:*}"
     content="${line#*:}"
 
-    # Skip comments
+    # Skip local actions (uses: ./path) — no @ref to validate — and lines
+    # whose uses: keyword sits inside a comment.
     case "$content" in
+        *"uses: ./"*|"uses: ./") continue ;;
         *"#"*uses:*) continue ;;
         *) ;;
     esac
 
-    # Check if the ref after @ is a 40-char hex string
-    ref="${content##*@}"
-    # Trim trailing whitespace and comments
+    # Anchor @ extraction to the action-name token: owner/repo@ref
+    # (first @ after the uses: keyword), never last-@ anywhere in the line.
+    ref="${content#*uses:}"
+    ref="${ref#*[[:space:]]}"
+    ref="${ref%%[[:space:]]*}"          # action token = owner/repo@ref
+    action="${ref%%@*}"
+    ref="${ref#*@}"                     # ref = first @ after action name
+
+    # A well-formed use line is exactly "uses: owner/repo@ref".
+    if [[ -z "$action" || "$ref" == "$action" ]]; then
+        continue
+    fi
+
+    # Strip a trailing version comment (e.g. "# v7.0.1") — it documents
+    # the pin but is not part of the ref.
     ref="${ref%%#*}"
-    ref="${ref%% *}"
+
     ref="$(echo "$ref" | tr -d '[:space:]')"
 
     if [[ ${#ref} -ne 40 ]]; then

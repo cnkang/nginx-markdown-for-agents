@@ -102,6 +102,12 @@ _RE_MODULE_FUNCS: dict[str, int] = {
     "subn": 0,
 }
 
+_SHELL_PARAMETER_EXPANSION_RE = re.compile(
+    # ``re.ASCII`` keeps ``\w`` aligned with shell variable-name syntax.
+    r"\$\{[^}]*\}|\$(?!\d)\w+",
+    re.ASCII,
+)
+
 
 # ---------------------------------------------------------------------------
 # Per-API signature definitions (positional index for each named argument)
@@ -4363,7 +4369,7 @@ def _build_shell_finding(
             input_scope=_SHELL_ARG_INPUT_SCOPE,
             reason=reason, remediation=remediation,
         )
-    if engine == Engine.SHELL_PCRE and "$" in pattern:
+    if engine == Engine.SHELL_PCRE and _SHELL_PARAMETER_EXPANSION_RE.search(pattern):
         return RegexFinding(
             severity=Severity.REVIEW, engine=engine, file_path=rel_path,
             line=line_num, function=_SHELL_FUNCTION_NAME, api=command, pattern=pattern,

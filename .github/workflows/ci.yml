@@ -16,7 +16,7 @@ on:
       - "perf/**"
       - "packaging/**"
       - "release/**"
-      - "artifacts/release/0.9.2/**"
+      - "artifacts/release/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
       - "examples/production/**"
@@ -47,7 +47,7 @@ on:
       - "perf/**"
       - "packaging/**"
       - "release/**"
-      - "artifacts/release/0.9.2/**"
+      - "artifacts/release/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
       - "examples/production/**"
@@ -204,7 +204,7 @@ jobs:
             contract_gates:
               - 'schemas/**'
               - 'release/**'
-              - 'artifacts/release/0.9.2/**'
+              - 'artifacts/release/**'
               - 'components/rust-converter/src/decision/reason_code.rs'
               - 'tools/release/gates/**'
               - 'tools/harness/**'
@@ -407,10 +407,10 @@ jobs:
 
       - name: Install cbindgen
         run: |
-          if command -v cbindgen >/dev/null 2>&1 && [ "$(cbindgen --version)" = "cbindgen 0.29.2" ]; then
-            echo "cbindgen 0.29.2 already installed"
+          if command -v cbindgen >/dev/null 2>&1 && [ "$(cbindgen --version)" = "cbindgen 0.29.4" ]; then
+            echo "cbindgen 0.29.4 already installed"
           else
-            cargo install cbindgen --version 0.29.2 --locked
+            cargo install cbindgen --version 0.29.4 --locked
           fi
 
       - name: Generate header and verify no drift

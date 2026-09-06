@@ -394,8 +394,9 @@ class TestReleaseGateSnippetExpectations:
         constraints probed with dpkg-compatible comparisons), not via literal
         snippet matching.
         """
-        assert 'nginx (>= ${NGINX_VERSION})' not in validator.NFPM_REQUIRED_SNIPPETS
-        assert "nginx = ${RPM_NGINX_EVR}" in validator.NFPM_REQUIRED_SNIPPETS
+        assert "nginx (>= ${NGINX_VERSION})" not in validator.NFPM_REQUIRED_SNIPPETS
+        assert "nginx >= ${RPM_NGINX_EVR}" in validator.NFPM_REQUIRED_SNIPPETS
+        assert "nginx < ${RPM_NGINX_EVR_CEIL}" in validator.NFPM_REQUIRED_SNIPPETS
 
         nfpm_content = validator.NFPM_CONFIG.read_text(encoding="utf-8")
         contract_ok, contract_errors = validator.validate_nfpm_deb_dependency_contract(
@@ -439,13 +440,25 @@ class TestReleaseGateSnippetExpectations:
 
         NGINX dynamic modules require an exact version match; the core
         loader rejects any difference (including patch) before signature
-        checks.  The RPM spec must pin the exact version with the
-        nginx.org epoch prefix (1:), never a branch-scoped floor, and
-        never a naked exact dep without the epoch.
+        checks. The RPM metadata must require the official nginx-r capability
+        as well as express a closed floor-and-ceiling interval between the
+        pinned version and the next patch, never a floor-only branch-scoped
+        dependency and never a naked exact dep without the epoch.
         """
-        assert "Requires:       nginx = 1:%{nginx_version}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "nginx-r${NGINX_VERSION}" in validator.NFPM_REQUIRED_SNIPPETS
+        assert (
+            "Requires:       nginx-r%{nginx_version}"
+            in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        )
+        assert "Requires:       nginx >= 1:%{nginx_version}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "Conflicts:      nginx >= 1:%{nginx_version_ceil}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "nginx = 1:%{nginx_version}" not in validator.STANDALONE_RPM_SPEC_SNIPPETS
         assert "Requires:       nginx = %{nginx_version}" in validator.FORBIDDEN_NAKED_EXACT_NGINX_DEPS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "PATH=/usr/sbin:/usr/bin:/sbin:/bin" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "NGINX_BIN=/usr/sbin/nginx" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert "SED_BIN=/usr/bin/sed" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+        assert '"$NGINX_BIN" -v 2>&1 | "$SED_BIN" -n' in validator.STANDALONE_RPM_SPEC_SNIPPETS
 
     def test_preremove_regex_is_shell_ere_safe(self) -> None:
         """Keep the module-load regex free of invalid ERE quote escapes."""
@@ -466,8 +479,32 @@ class TestReleaseGateSnippetExpectations:
         snippets = validator.STANDALONE_RPM_WORKFLOW_SNIPPETS
         assert env_binding in snippets
         assert validator_cmd in snippets
+        assert "NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}" in snippets
+        assert "packaging/nfpm/scripts/render-nfpm-config.sh" in snippets
+        assert '"/tmp/${TARBALL_DIR}/preremove.sh"' in snippets
         assert direct_interpolation not in snippets
         assert direct_interpolation in validator.STANDALONE_VERSION_FORBIDDEN_SNIPPETS
+
+    def test_standalone_rpm_workflow_requires_rendered_preremove(
+        self, monkeypatch
+    ) -> None:
+        """The standalone tarball must not carry an unresolved template."""
+        output_path = '"/tmp/${TARBALL_DIR}/preremove.sh"'
+        removed_snippets = {
+            output_path,
+            validator.STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET,
+        }
+        content = "\n".join(
+            snippet
+            for snippet in validator.STANDALONE_RPM_WORKFLOW_SNIPPETS
+            if snippet not in removed_snippets
+        )
+        monkeypatch.setattr(validator, "read_safe", lambda _path: content)
+        result = validator.ValidationResult()
+
+        validator._validate_standalone_rpm_workflow(result)
+
+        assert result.has_failures
 
     def test_standalone_rpm_workflow_rejects_direct_expression_in_shell(
         self, monkeypatch
@@ -490,39 +527,45 @@ class TestReleaseGateSnippetExpectations:
             for status, check_id, _message in result.results
         )
 
-    def test_binary_signing_uses_immutable_checkout_and_release_environment(self) -> None:
-        """Ensure the live signing job binds secrets to the prepared commit."""
-        snippets = validator.RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS
-        assert "integrity-signing:" in snippets
+    def test_checksum_signing_uses_immutable_checkout_and_release_environment(self) -> None:
+        """Ensure canonical checksum signing binds secrets to the prepared commit."""
+        snippets = validator.RELEASE_CHECKSUM_SIGNING_SECURITY_SNIPPETS
+        assert "integrity-signature:" in snippets
         assert "environment: release-signing" in snippets
         assert "ref: ${{ github.sha }}" in snippets
         assert "persist-credentials: false" in snippets
-        assert "./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS" in snippets
+        assert (
+            './packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS "${GPG_KEY_ID}"'
+            in snippets
+        )
 
-    def test_binary_signing_forbids_caller_selected_ref_checkout(self) -> None:
+    def test_checksum_signing_forbids_caller_selected_ref_checkout(self) -> None:
         """Ensure signing workflow cannot reintroduce caller-selected checkout."""
-        assert "ref: ${{ inputs.version }}" in validator.RELEASE_BINARY_SIGNING_FORBIDDEN_SNIPPETS
+        assert (
+            "ref: ${{ inputs.version }}"
+            in validator.RELEASE_CHECKSUM_SIGNING_FORBIDDEN_SNIPPETS
+        )
 
-    def test_binary_signing_validator_fails_when_live_job_is_missing(
+    def test_checksum_signing_validator_fails_when_live_job_is_missing(
         self, monkeypatch
     ) -> None:
-        """Do not pass because a retired signing workflow is absent."""
+        """Do not pass when the canonical signing job is absent."""
         monkeypatch.setattr(validator, "read_safe", lambda _path: "name: unrelated")
         result = validator.ValidationResult()
 
-        validator._validate_release_binary_signing_security(result)
+        validator._validate_release_checksum_signing_security(result)
 
         assert result.has_failures
 
-    def test_binary_signing_validator_checks_the_live_job(self, monkeypatch) -> None:
-        """Validate the actual release-binaries signing job contract."""
-        job = "\n  integrity-signing:\n" + "\n".join(
-            f"    {snippet}" for snippet in validator.RELEASE_BINARY_SIGNING_SECURITY_SNIPPETS
-        ) + "\n  package-artifacts:\n"
+    def test_checksum_signing_validator_checks_the_live_job(self, monkeypatch) -> None:
+        """Validate the canonical release-packages signing job contract."""
+        job = "\n  integrity-signature:\n" + "\n".join(
+            f"    {snippet}" for snippet in validator.RELEASE_CHECKSUM_SIGNING_SECURITY_SNIPPETS
+        ) + "\n  publish:\n"
         monkeypatch.setattr(validator, "read_safe", lambda _path: job)
         result = validator.ValidationResult()
 
-        validator._validate_release_binary_signing_security(result)
+        validator._validate_release_checksum_signing_security(result)
 
         assert not result.has_failures, result.results
 
@@ -583,6 +626,11 @@ class TestReleaseGateSnippetExpectations:
         validator.validate_nfpm_preremove_lifecycle(result)
         assert not result.has_failures, result.results
         assert "remove|0)" in validator.NFPM_PREREMOVE_SNIPPETS
+        assert "no trailing newline" in validator.NFPM_PREREMOVE_SNIPPETS
+        assert validator.RPM_FORCE_REMOVE_INSTRUCTION_SNIPPETS == [
+            "printf '%s' 'nginx-markdown-module force-remove v1'",
+            "sudo tee /etc/nginx/markdown-module-force-remove >/dev/null",
+        ]
         assert "%preun" in validator.RPM_PREUN_SNIPPETS
 
     def test_release_build_uses_rpm_glibc_baseline(self) -> None:

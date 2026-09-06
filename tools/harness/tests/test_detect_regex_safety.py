@@ -468,6 +468,14 @@ class TestShellRegex:
         reviews = [f for f in findings if f.severity == Severity.REVIEW]
         assert reviews
 
+    def test_escaped_dollar_anchor_is_not_shell_expansion(self, tmp_path: Path) -> None:
+        """A literal or regex-anchor dollar must not be treated as a variable."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -P '\\$' file.txt\n", tmp_path
+        )
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert not reviews
+
     def _scan_shell_content(self, content: str, tmp_path: Path):
         """Write shell content to a temp file and scan it."""
         f = tmp_path / "test.sh"

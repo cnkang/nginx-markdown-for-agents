@@ -311,8 +311,12 @@ def audit_file(path: Path) -> tuple[list[str], list[str]]:
     """
     violations: list[str] = []
     reviews: list[str] = []
-    resolved = validate_read_path(path, purpose="source file")
-    text = resolved.read_text(encoding="utf-8", errors="replace")
+    try:
+        resolved = validate_read_path(path, purpose="source file")
+        text = resolved.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        reviews.append(f"{path}: unable to read file ({exc})")
+        return violations, reviews
     for name, body in _iter_functions(text):
         code = _strip_literals_and_comments(body)
         if not METHOD_REF_RE.search(code):

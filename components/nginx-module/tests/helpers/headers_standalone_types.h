@@ -63,6 +63,7 @@ typedef struct {
 typedef struct {
     ngx_str_t content_type;
     ngx_str_t charset;
+    ngx_str_t *override_charset;
     size_t content_type_len;
     u_char *content_type_lowcase;
     ngx_uint_t content_type_hash;

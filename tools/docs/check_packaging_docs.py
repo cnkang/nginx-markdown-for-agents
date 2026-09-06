@@ -324,7 +324,7 @@ def check_content_negotiation_sop(text: str) -> list[str]:
     return errors
 
 
-def check_no_hardcoded_release_tags(text: str) -> list[str]:
+def check_no_hardcoded_release_tags(text: str, document_label: str) -> list[str]:
     """Check 16: No hardcoded old release tags in download URLs.
 
     Download URLs should use placeholders (``<release_tag>``) rather than
@@ -332,7 +332,7 @@ def check_no_hardcoded_release_tags(text: str) -> list[str]:
     """
     errors: list[str] = []
     errors.extend(
-        f"Line {line_no}: hardcoded release tag in download URL (use <release_tag> placeholder instead): {line.strip()}"
+        f"{document_label}: line {line_no}: hardcoded release tag in download URL (use <release_tag> placeholder instead): {line.strip()}"
         for line_no, line in enumerate(text.splitlines(), 1)
         if re.search(r"releases/download/v\d+\.\d+\.\d+", line)
     )
@@ -435,10 +435,14 @@ def main() -> int:
         ("Content negotiation SOP", check_content_negotiation_sop(text)),
         ("Demo config exists", check_demo_config_exists()),
         ("Demo config content", check_demo_config_content()),
-        ("No hardcoded release tags", check_no_hardcoded_release_tags(text)),
+        ("No hardcoded release tags", check_no_hardcoded_release_tags(
+            text, "INSTALLATION.md"
+        )),
         (
             "Package distribution has no hardcoded release tags",
-            check_no_hardcoded_release_tags(package_distribution_text),
+            check_no_hardcoded_release_tags(
+                package_distribution_text, "PACKAGE_DISTRIBUTION.md"
+            ),
         ),
     ]
 

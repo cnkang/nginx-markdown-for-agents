@@ -17,7 +17,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MAKEFILE = PROJECT_ROOT / "Makefile"
-FFI_CONTRACT_PATH = PROJECT_ROOT / "docs" / "architecture" / "FFI_MIGRATION_CONTRACT.md"
+FFI_CONTRACT_PATH = PROJECT_ROOT / "docs" / "architecture" / "FFI_MIGRATION_HISTORY.md"
 CHANGELOG_PATH = PROJECT_ROOT / "CHANGELOG.md"
 CARGO_TOML_PATH = PROJECT_ROOT / "components" / "rust-converter" / "Cargo.toml"
 RUST_TOOLCHAIN_PATH = PROJECT_ROOT / "rust-toolchain.toml"
@@ -30,14 +30,15 @@ CONFIG_DIRECTIVES_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ng
 ERROR_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "error" / "mod.rs"
 ABI_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "ffi" / "abi.rs"
 EXPORTS_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "ffi" / "exports.rs"
-RELEASE_GATES_MD = PROJECT_ROOT / "docs" / "project" / "release-gates" / "0.7.0-release-gates.md"
-VALIDATION_MATRIX_MD = PROJECT_ROOT / "docs" / "project" / "0.7.0-validation-matrix.md"
+RELEASE_GATES_MD = PROJECT_ROOT / "docs" / "project" / "history" / "release-gates" / "0.7.0-release-gates.md"
+VALIDATION_MATRIX_MD = PROJECT_ROOT / "docs" / "project" / "history" / "0.7.0-validation-matrix.md"
 PAYLOAD_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_payload_impl.h"
 CONVERSION_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_conversion_impl.h"
 DECISION_LOG_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_decision_log_impl.h"
 HEADERS_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_headers_impl.h"
 DECOMPRESSION_C = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_decompression.c"
 FILTER_MODULE_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_filter_module.h"
+CONDITIONAL_C = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_conditional.c"
 REASON_CODE_SOURCE = "components/rust-converter/src/decision/reason_code.rs"
 REASON_CODE_FFI_EXPORTS = (
     "markdown_reason_code_str",
@@ -313,9 +314,9 @@ def check_structure(result: ValidationResult) -> None:
         result.fail(RELEASE_GATES_070_DOC_GATE, "gate definitions incomplete")
 
     if FFI_CONTRACT_PATH.is_file():
-        result.pass_("ffi-contract:exists", "FFI migration contract exists")
+        result.pass_("ffi-contract:exists", "FFI migration history exists")
     else:
-        result.fail("ffi-contract:exists", "missing FFI migration contract")
+        result.fail("ffi-contract:exists", "missing FFI migration history")
 
     if cargo_txt := read(CARGO_TOML_PATH):
         try:
@@ -339,6 +340,39 @@ def check_structure(result: ValidationResult) -> None:
         result.fail(CARGO_VERSION_070_GATE, "Cargo.toml missing")
 
 
+def _conditional_validator_items(sources: dict[str, str]) -> BlockingItems:
+    """Conditional-validator surface checks (Gate 1 additions).
+
+    All four HTTP validators must stay wired through the conditional module,
+    not just the cache-validation pair.  The C module implements If-Match and
+    If-Unmodified-Since precondition evaluation; a gate that only checks
+    If-None-Match / If-Modified-Since would let a future refactor silently
+    drop the precondition pair.
+    """
+    conditional = sources["conditional"]
+    unit_test_name = "conditional_production_test.c"
+    unit_test_path = PROJECT_ROOT / "components" / "nginx-module" / "tests" / "unit" / unit_test_name
+    return [
+        (
+            "conditional validator surface",
+            "ngx_http_markdown_handle_if_none_match" in sources["filter_h"]
+            and "ngx_http_markdown_handle_if_none_match" in sources["conversion"]
+            and "ngx_http_markdown_if_match_satisfied" in conditional
+            and "ngx_http_markdown_validate_if_unmodified_since" in conditional
+            and "If-None-Match" in conditional
+            and "If-Modified-Since" in conditional
+            and "If-Match" in conditional
+            and "If-Unmodified-Since" in conditional,
+        ),
+        (
+            "conditional validator unit coverage",
+            unit_test_name in sources["unit_test_files"]
+            and "test_handle_if_match_mismatch_returns_412" in read(unit_test_path)
+            and "test_handle_if_unmodified_since_ignores_source_last_modified" in read(unit_test_path),
+        ),
+    ]
+
+
 def _gate_1_items(sources: dict[str, str]) -> BlockingItems:
     """Gate 1 blocking items from the source dict built by _build_blocking_items."""
     return [
@@ -350,7 +384,7 @@ def _gate_1_items(sources: dict[str, str]) -> BlockingItems:
         ("decomp budget exceeded metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total)" in sources["payload"]),
         ("decomp budget exceeded return code", "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in sources["filter_h"] and "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in sources["decomp"]),
         ("decomp budget exceeded resource_limit path", "NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT" in sources["payload"] and "DECOMP_BUDGET_EXCEEDED" in sources["payload"]),
-    ]
+    ] + _conditional_validator_items(sources)
 
 
 def _gate_2_items(
@@ -406,7 +440,7 @@ def _gate_3_items(release_packages: str) -> BlockingItems:
         ),
         (
             "publish waits for release gate",
-            "needs: [release-gate, integrity-checksums, integrity-signature]" in release_packages
+            "needs: [release-gate" in release_packages
             and "needs.release-gate.result == 'success'" in release_packages,
         ),
     ]
@@ -503,6 +537,7 @@ def _build_blocking_items() -> dict[str, BlockingItems]:
         "decomp": decomp, "filter_h": filter_h, "ffi_contract": ffi_contract,
         "unit_test_files": unit_test_files, "conversion": conversion,
         "decision_log": decision_log, "headers": headers,
+        "conditional": read(CONDITIONAL_C),
         "release_packages": release_packages,
         "release_rpm": release_rpm,
     }

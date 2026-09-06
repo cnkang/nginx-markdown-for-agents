@@ -1473,6 +1473,31 @@ fn reference_normalize_line_whitespace(line: &str) -> String {
     result
 }
 
+/// Emit a normalized line (code-block passthrough or whitespace fold)
+/// with its surrounding bookkeeping, returning whether the line was blank.
+///
+/// Split out of `fused_normalize` so each branch stays linear and the
+/// normalization contract is directly unit-testable per line.
+fn emit_fused_line(output: &mut String, trimmed: &str, in_code_block: bool) -> bool {
+    if trimmed.is_empty() {
+        return true;
+    }
+    if in_code_block {
+        output.push_str(trimmed);
+    } else {
+        output.push_str(&reference_normalize_line_whitespace(trimmed));
+    }
+    output.push('\n');
+    false
+}
+
+/// Strip a single trailing block of blank lines from `output`.
+fn trim_trailing_blank_lines(output: &mut String) {
+    while output.ends_with("\n\n") {
+        output.pop();
+    }
+}
+
 /// Fused normalization function that replicates the FusedNormalizer path used
 /// for large documents (> 256KB). Since FusedNormalizer is `pub(crate)`, we
 /// replicate its logic here for direct comparison with the reference path.
@@ -1488,10 +1513,20 @@ fn fused_normalize(input: &str) -> String {
             in_code_block = !in_code_block;
         }
 
-        prev_blank = append_reference_body_line(&mut output, line, in_code_block, prev_blank);
+        let trimmed = line.trim_end();
+        let blank = emit_fused_line(&mut output, trimmed, in_code_block);
+        if blank && !prev_blank {
+            output.push('\n');
+        }
+        prev_blank = blank;
     }
 
-    finalize_reference_normalization(output)
+    if !output.ends_with('\n') {
+        output.push('\n');
+    } else {
+        trim_trailing_blank_lines(&mut output);
+    }
+    output
 }
 
 proptest! {

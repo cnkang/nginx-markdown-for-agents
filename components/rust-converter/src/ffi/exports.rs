@@ -29,9 +29,10 @@
 //! trusted-proxy list management (`markdown_trusted_proxies_*`),
 //! base URL decision (`markdown_decide_base_url`), bounded decompression
 //! (`markdown_decompress_bounded`, `markdown_decompress_free`,
-//! `markdown_decomp_result_init`), conflict detection/release
-//! option/result init helpers (`markdown_options_init`), and
-//! error classification (`markdown_classify_error_code`).  Streaming FFI
+//! `markdown_decomp_result_init`), ABI handshake (`markdown_abi_version`),
+//! encoding-chain validation (`markdown_parse_encoding_chain`),
+//! conflict detection/release option/result init helpers (`markdown_options_init`),
+//! and error classification (`markdown_classify_error_code`).  Streaming FFI
 //! exports live in `ffi/streaming.rs`.  The table below lists the primary
 //! entry points;
 //! see the per-function documentation for the complete list.
@@ -290,6 +291,8 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
 /// - `accept_header` either points to `accept_header_len` readable bytes
 ///   or is NULL when `accept_header_len == 0`
 /// - `result` points to writable storage for a `FFIAcceptResult`
+/// - `result` is thread-locally owned by the calling thread and not shared
+///   concurrently across threads without external synchronization
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_negotiate_accept(
     accept_header: *const u8,

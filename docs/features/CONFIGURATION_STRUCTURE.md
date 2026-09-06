@@ -34,7 +34,7 @@ typedef struct {
         ngx_flag_t   auto_decompress;
         size_t       max_size;       /* limits.decompressed_size */
         ngx_msec_t   parse_timeout;  /* limits.parser_timeout */
-        size_t       parser_budget;  /* limits.parser_memory */
+        size_t       parser_budget;  /* limits.parser_budget */
     } decompress;
 
     ngx_http_markdown_limits_t limits;
@@ -51,7 +51,7 @@ The exact C declaration is authoritative:
 
 ```nginx
 markdown_limits conversion_timeout=30s parser_timeout=10s
-    conversion_memory=64m parser_memory=32m streaming_buffer=2m
+    conversion_memory=64m parser_budget=32m streaming_buffer=2m
     decompressed_size=10m decompression_ratio=100 max_inflight=64;
 ```
 
@@ -60,18 +60,15 @@ The merge step then binds the effective values to the runtime fields shown in
 the structure above and rejects cross-key violations before mutation:
 
 - `parser_timeout <= conversion_timeout` when `conversion_timeout` is nonzero
-- `parser_memory <= conversion_memory`
+- `parser_budget <= conversion_memory`
 - `streaming_buffer <= conversion_memory`
 
-Zero handling: an unset `conversion_timeout` leaves the overall conversion
-deadline disabled. An explicit `conversion_timeout=0` is **rejected by the
-config handler** (must be a positive duration). Operators cannot opt into
-the disabled state by writing 0 — they leave the key unset. A nonzero `parser_timeout`
-stays valid beside it and keeps its parser-phase deadline, including when
-both keys are explicitly configured. When `conversion_timeout` is nonzero and
-both keys are explicitly configured, `nginx -t` fails if
-`parser_timeout` exceeds it. When only one side is explicit, the merge step
-clamps the parser value down only to a nonzero conversion bound.
+Zero handling: `conversion_timeout=0` is **rejected by the config handler**
+(must be a positive duration). When omitted, `conversion_timeout` defaults to 30s
+via configuration merge. A nonzero `parser_timeout` (default 10s) limits only the parser
+phase. When both keys are explicitly configured, `nginx -t` fails if
+`parser_timeout` exceeds `conversion_timeout`. When only one side is explicit, the merge step
+clamps the parser value down to the effective conversion bound.
 
 `streaming_buffer` is the total per-request streaming working-set and
 pre-commit replay budget. It is not merely a transport chunk size. A value

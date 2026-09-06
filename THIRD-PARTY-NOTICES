@@ -224,7 +224,7 @@ Section C: Build-Time Tool Dependencies (not distributed in binary)
 
 ================================================================================
 
-15. cbindgen 0.29.2
+15. cbindgen 0.29.4
     https://github.com/mozilla/cbindgen
     License: MPL-2.0
     Copyright (c) Mozilla Corporation

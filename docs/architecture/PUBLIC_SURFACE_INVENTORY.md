@@ -122,7 +122,7 @@ selection surfaces no longer exist.
 
 ### Prometheus families currently emitted
 
-These 12 production names are the frozen registry:
+These 11 production names are the frozen registry:
 
 ```text
 nginx_markdown_requests_total

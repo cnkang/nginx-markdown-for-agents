@@ -68,6 +68,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         install \
         test test-rust rust-fmt-check rust-clippy-check test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-canonical test-e2e-rust test-e2e-contract-scripts test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
+        test-all-e2e test-all-coverage \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
         official-feature-manifest-generate \
@@ -76,20 +77,24 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
         docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline decompression-metric-contract-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-092-canonical release-gates-check-092 release-gates-check-all release-gates-check-strict \
+        release-pytest-check test-nginx-integration-c \
         release-matrix-check \
         streaming-evidence-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
         test-rust-fuzz-qualification test-e2e-rust-soak \
+        docs-check-base release-perf-evidence-blocking \
         perf-evidence-check \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-brotli-streaming-e2e \
+        verify-http2-alpn-e2e \
         verify-encoding-chain-e2e \
         verify-streaming-failure-cache-e2e \
         verify-streaming-failure-cache-e2e-plan \
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
         verify-auth-cache-e2e verify-status-codes-e2e \
+        verify-subrequest-filter-ordering-native-e2e verify-non-streaming-module-e2e \
         verify-diagnostics-access-phase-e2e verify-dynconf-convergence-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
@@ -106,6 +111,10 @@ RUST_RELEASE_FEATURES ?= streaming
 rust-lib:
 	@echo "Building Rust library for $(RUST_TARGET)..."
 	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --release --features $(RUST_RELEASE_FEATURES)
+	@command -v cbindgen >/dev/null 2>&1 && [ "$$(cbindgen --version)" = "cbindgen 0.29.4" ] || { \
+	  echo "ERROR: cbindgen 0.29.4 required (found: $$(cbindgen --version 2>/dev/null || echo none)). The generated header is committed and fingerprinted; versions differ and produce a different header, which fails the ABI drift check. Install with: cargo install cbindgen --version 0.29.4 --locked" >&2; \
+	  exit 127; \
+	}
 	@echo "Generating C header with cbindgen..."
 	cd $(RUST_DIR) && mkdir -p include && cbindgen --quiet --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
 	python3 tools/harness/normalize_cbindgen_header.py
@@ -241,6 +250,11 @@ test-nginx-integration:
 	$(MAKE) -C $(NGINX_TEST_DIR) integration-c
 	$(MAKE) -C $(NGINX_TEST_DIR) integration-nginx
 
+# Pure-C integration harness (no nginx binary needed) — mirrors the CI
+# `integration-c` step exactly; catches C-level runtime regressions locally.
+test-nginx-integration-c:
+	$(MAKE) -C $(NGINX_TEST_DIR) integration-c
+
 test-e2e:
 	$(MAKE) -C $(NGINX_TEST_DIR) e2e
 
@@ -295,6 +309,7 @@ TEST_ALL_CORE := \
 	test-nginx-unit-streaming \
 	test-nginx-unit-clang-smoke \
 	test-nginx-unit-sanitize-smoke \
+	test-nginx-integration-c \
 	test-property \
 	docs-check \
 	kb-contract-check \
@@ -308,7 +323,10 @@ TEST_ALL_CORE := \
 	schema-drift-check \
 	reason-codegen-check \
 	release-gates-check \
+	release-gates-check-070-strict \
+	release-pytest-check \
 	release-matrix-check \
+	test-corpus-determinism \
 	complexity-check \
 	workflow-context-check \
 	license-check
@@ -344,6 +362,10 @@ test-all-e2e:
 	$(MAKE) verify-large-e2e
 	$(MAKE) verify-brotli-streaming-e2e
 	$(MAKE) verify-http2-alpn-e2e
+	$(MAKE) verify-real-nginx-ims-e2e
+	$(MAKE) verify-subrequest-filter-ordering-native-e2e
+	$(MAKE) verify-dynconf-convergence-e2e
+	$(MAKE) verify-non-streaming-module-e2e
 	@echo "=== test-all-e2e: ALL E2E SCENARIOS PASSED ==="
 
 # Coverage gate — coverage-gate from ci.yml.  Requires lcov and a
@@ -724,6 +746,18 @@ release-gates-check:
 	python3 tools/release/gates/validate_package_metadata.py
 	python3 packaging/scripts/test_generate_checksums.py
 
+# Lightweight local mirror of the CI/tag 070 strict gate (file-assertion only).
+# Catches doc/workflow drift locally before CI does.
+release-gates-check-070-strict:
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.2 python3 tools/release/gates/validate_release_gates_070.py --mode strict
+
+# Lightweight local mirror of the CI `release-gates` job (pytest suites only;
+# 41 gate + 12 matrix test files). Catches release-gate/matrix regressions
+# locally before CI does.
+release-pytest-check:
+	PYTHONPATH=. python3 -m pytest -q tools/release/matrix/tests/
+	PYTHONPATH=. python3 -m pytest -q tools/release/gates/tests/
+
 # release-gates-check-070: comprehensive v0.7.0 release readiness gate.
 # (The 070 gate packages the CURRENT 0.9.2 version by default —
 # the gate name is the baseline lineage, not the packaged version; every
@@ -812,12 +846,17 @@ release-gates-check-070:
 				nginx_version="$${NGINX_VERSION:-1.26.3}"; \
 				nginx_version_ceil="$$(awk 'BEGIN { split(ARGV[1], p, "."); printf "%d.%d.%d", p[1], p[2], p[3] + 1 }' "$$nginx_version")"; \
 				rpm_nginx_evr="$${RPM_NGINX_EVR:-1:$$nginx_version}"; \
+				rpm_nginx_evr_ceil="$${RPM_NGINX_EVR_CEIL:-1:$$nginx_version_ceil}"; \
 				nfpm_preinstall="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preinstall.XXXXXX")"; \
+				nfpm_preremove="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preremove.XXXXXX")"; \
 				nfpm_config="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-nfpm.XXXXXX")"; \
-				trap 'rm -f "$$nfpm_preinstall" "$$nfpm_config"' EXIT; \
+				trap 'rm -f "$$nfpm_preinstall" "$$nfpm_preremove" "$$nfpm_config"' EXIT; \
 				packaging/nfpm/scripts/render-nfpm-config.sh \
 					packaging/nfpm/scripts/preinstall.sh "$$nfpm_preinstall" "$$nginx_version"; \
-				sed "s|./packaging/nfpm/scripts/preinstall.sh|$$nfpm_preinstall|" \
+				packaging/nfpm/scripts/render-nfpm-config.sh \
+					packaging/nfpm/scripts/preremove.sh "$$nfpm_preremove" "$$nginx_version"; \
+				sed -e "s|./packaging/nfpm/scripts/preinstall.sh|$$nfpm_preinstall|" \
+				    -e "s|./packaging/nfpm/scripts/preremove.sh|$$nfpm_preremove|" \
 					packaging/nfpm/nfpm.yaml > "$$nfpm_config"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
 					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
@@ -826,7 +865,7 @@ release-gates-check-070:
 					--target "dist/nginx-module-markdown-for-agents_$${pkg_version}_nginx-$${nginx_version}_$${nfpm_arch}.deb"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
 					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
-					RPM_NGINX_EVR="$$rpm_nginx_evr" NFPM_ARCH="$$nfpm_arch" \
+					RPM_NGINX_EVR="$$rpm_nginx_evr" RPM_NGINX_EVR_CEIL="$$rpm_nginx_evr_ceil" NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager rpm \
 					--target "dist/nginx-module-markdown-for-agents-$${pkg_version}-nginx$${nginx_version}-1.$${rpm_arch}.rpm"; \
 			else \
@@ -1484,6 +1523,38 @@ verify-metrics-endpoint-e2e:
 verify-conditional-requests-e2e:
 	./tools/e2e/verify_conditional_requests_e2e.sh
 
+# Real-NGINX IMS validation — mirrors the real-nginx-ims.yml CI job
+# (and the macOS smoke job).  The CI job builds its own module-enabled
+# NGINX; locally the script reuses the NGINX_BIN passed to test-all-e2e.
+# Skipped when only NGINX_URL (a running fixture) is supplied because the
+# script manages its own NGINX lifecycle and cannot attach to an external
+# one.
+verify-real-nginx-ims-e2e:
+	@if test -z "$(NGINX_BIN)"; then \
+		echo "SKIP: real-NGINX IMS validation requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
+	else \
+		NGINX_BIN="$(NGINX_BIN)" bash tools/ci/verify_real_nginx_ims.sh --port 18088; \
+	fi
+
+# SSI / auth_request / filter-ordering / internal-redirect qualification with a
+# real module-enabled NGINX — mirrors the "Run native SSI and filter-ordering
+# qualification" step of the CI runtime-regressions job.
+verify-subrequest-filter-ordering-native-e2e:
+	@if test -z "$(NGINX_BIN)"; then \
+		echo "SKIP: filter-ordering native E2E requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
+	else \
+		REQUIRE_FILTER_ORDERING_ALL=1 REQUIRE_AUTH_SUBREQUEST=1 \
+			bash tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18099; \
+	fi
+
+# Non-streaming production-module linkage check — builds the Rust archive
+# without optional features, compiles and links every NGINX module source and
+# passes `nginx -t`.  Self-contained (downloads and builds its own NGINX), so
+# it runs unconditionally; mirrors the CI "Verify non-streaming production
+# module linkage" step.
+verify-non-streaming-module-e2e:
+	bash tools/ci/verify_non_streaming_nginx_module.sh
+
 verify-config-merge-e2e:
 	./tools/e2e/verify_config_merge_e2e.sh
 
@@ -1497,7 +1568,11 @@ verify-diagnostics-access-phase-e2e:
 	./tools/e2e/verify_diagnostics_access_phase_e2e.sh
 
 verify-dynconf-convergence-e2e:
-	./tools/e2e/verify_dynconf_convergence_e2e.sh
+	@if test -z "$(NGINX_BIN)"; then \
+		echo "SKIP: dynamic-config convergence E2E requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
+	else \
+		bash tools/e2e/verify_dynconf_convergence_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18103; \
+	fi
 
 # ── Coverage targets ────────────────────────────────────────────────
 # Generate lcov reports consumed by SonarCloud.  Output lands in

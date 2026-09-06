@@ -100,7 +100,7 @@ markdown_error_policy pass fail_closed; # Error: too many arguments
 **Expected behavior:**
 - Default: pass (fail-open)
 - Context: http, server, location
-- Error message: "invalid value \"%s\" in \"markdown_error_policy\" directive, it must be \"pass\" or \"fail_closed\""
+- Error message: "invalid value \"%s\" in \"markdown_error_policy\" directive, it must be \"pass\", \"fail_closed\", or \"status <code>\""
 
 ---
 
@@ -190,7 +190,12 @@ markdown_accept;           # Error: missing value
 **Expected behavior:**
 - Default: strict
 - Context: http, server, location
-- When enabled: converts on Accept: */* or Accept: text/*
+- `strict`: converts only when the request carries an explicit
+  `Accept: text/markdown` header.  Wildcards (`*/*`, `text/*`) do not convert.
+- `wildcard`: converts on `Accept: text/markdown` and on the wildcard
+  values `Accept: */*` or `Accept: text/*`.
+- `force`: converts regardless of the Accept header (including when no
+  Accept header is present).
 
 ---
 

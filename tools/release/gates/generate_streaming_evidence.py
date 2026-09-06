@@ -31,6 +31,9 @@ from tools.release.gates.validate_streaming_evidence import (  # noqa: E402
     _sha256_file,
     _sha256_tree,
 )
+from tools.lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 from lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
@@ -96,6 +99,10 @@ def _validate_marker_ids(payload: dict[str, object]) -> None:
             "parity marker known_difference_observation_ids must be "
             "non-empty strings"
         )
+    if len(set(observations)) != len(observations):
+        raise ValueError(
+            "parity marker known_difference_observation_ids must be unique"
+        )
     if payload["known_difference_count"] != len(observations):
         raise ValueError(
             "parity marker known-difference count does not match observations"
@@ -127,9 +134,13 @@ def _parse_marker(stdout: str) -> dict[str, object]:
 
 
 def _run_parity() -> dict[str, object]:
+    cargo = resolve_approved_executable("cargo")
+    if cargo is None:
+        raise RuntimeError("approved cargo executable is unavailable")
+    parity_command = [cargo, *PARITY_COMMAND[1:]]
     try:
         result = subprocess.run(
-            PARITY_COMMAND,
+            parity_command,
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
@@ -148,8 +159,11 @@ def _run_parity() -> dict[str, object]:
 
 
 def _git_output(*args: str) -> str:
+    git = resolve_approved_executable("git")
+    if git is None:
+        raise RuntimeError("approved git executable is unavailable")
     result = subprocess.run(
-        ["git", *args],
+        [git, *args],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -161,8 +175,11 @@ def _git_output(*args: str) -> str:
 
 
 def _rustc_version() -> str:
+    rustc = resolve_approved_executable("rustc")
+    if rustc is None:
+        raise RuntimeError("approved rustc executable is unavailable")
     result = subprocess.run(
-        ["rustc", "--version"],
+        [rustc, "--version"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

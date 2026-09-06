@@ -279,7 +279,7 @@ http {
             markdown_log_verbosity debug;
             markdown_token_estimate on;
             markdown_error_policy pass;
-            markdown_limits conversion_memory=1m parser_memory=1m streaming_buffer=64k conversion_timeout=5s parser_timeout=5s;
+            markdown_limits conversion_memory=1m parser_budget=1m streaming_buffer=64k conversion_timeout=5s parser_timeout=5s;
         }
 
         location /auth {
@@ -324,14 +324,6 @@ http {
         }
 
         location /no-conditional {
-            root html;
-            markdown_filter on;
-            markdown_cache_validation off;
-        }
-
-        # Cache validation disabled; exercises the branch where If-None-Match
-        # is present but module-side ETag comparison cannot proceed.
-        location /no-etag {
             root html;
             markdown_filter on;
             markdown_cache_validation off;
@@ -384,7 +376,7 @@ http {
         location /small-limit {
             root html;
             markdown_filter on;
-            markdown_limits conversion_memory=64k parser_memory=64k streaming_buffer=64k;
+            markdown_limits conversion_memory=64k parser_budget=64k streaming_buffer=64k;
         }
 
         location /log-error {
@@ -401,7 +393,7 @@ http {
             markdown_accept wildcard;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
-            markdown_limits conversion_memory=1m parser_memory=1m streaming_buffer=64k;
+            markdown_limits conversion_memory=1m parser_budget=1m streaming_buffer=64k;
         }
 
         # Gzip under streaming-enabled location (incremental decompression)
@@ -414,7 +406,7 @@ http {
             markdown_cache_validation off;
             markdown_error_policy pass;
             markdown_log_verbosity debug;
-            markdown_limits conversion_memory=1m parser_memory=1m streaming_buffer=64k;
+            markdown_limits conversion_memory=1m parser_budget=1m streaming_buffer=64k;
         }
 
         # Streaming + gzip proxy + tiny budget + reject
@@ -425,7 +417,7 @@ http {
             markdown_accept wildcard;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=64k conversion_memory=1m parser_memory=1m;
+            markdown_limits streaming_buffer=64k conversion_memory=1m parser_budget=1m;
             markdown_error_policy fail_closed;
             markdown_log_verbosity debug;
         }
@@ -541,7 +533,7 @@ http {
             markdown_filter on;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=64k conversion_memory=64k parser_memory=64k;
+            markdown_limits streaming_buffer=64k conversion_memory=64k parser_budget=64k;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
         }
@@ -551,7 +543,7 @@ http {
             markdown_filter on;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=64k conversion_memory=64k parser_memory=64k;
+            markdown_limits streaming_buffer=64k conversion_memory=64k parser_budget=64k;
             markdown_error_policy fail_closed;
             markdown_log_verbosity debug;
         }
@@ -598,7 +590,7 @@ http {
             markdown_filter on;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=10m conversion_memory=10m parser_memory=10m;
+            markdown_limits streaming_buffer=10m conversion_memory=10m parser_budget=10m;
             markdown_token_estimate on;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
@@ -622,7 +614,7 @@ http {
             markdown_accept wildcard;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=10m conversion_memory=10m parser_memory=10m;
+            markdown_limits streaming_buffer=10m conversion_memory=10m parser_budget=10m;
             markdown_error_policy pass;
             markdown_token_estimate on;
             markdown_log_verbosity debug;
@@ -726,7 +718,7 @@ EOF
 # ── Create test HTML fixtures ───────────────────────────────────────
 
 # Create subdirectories for location blocks that use root html
-for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional no-etag \
+for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional \
               no-wildcard disabled gfm commonmark small-limit log-error \
               streaming streaming-auto streaming-off streaming-tiny-budget \
               streaming-fullsupport streaming-ims-only \
@@ -754,7 +746,7 @@ HTML
 # Copy index.html to all subdirectories so location blocks serve 200.
 # Note: small-limit is intentionally excluded — it only receives large.html
 # (below) so the size-limit rejection test exercises the over-limit path.
-for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional no-etag \
+for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional \
               no-wildcard disabled gfm commonmark log-error \
               streaming streaming-auto streaming-off streaming-tiny-budget \
               streaming-fullsupport streaming-ims-only \
@@ -946,9 +938,9 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag"' \
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag"' \
   "http://127.0.0.1:${PORT}/no-conditional/index.html" -o /dev/null -w "  INM disabled bypass: HTTP %{http_code}\n"
 
-# If-None-Match with ETag disabled (branch: cannot compare)
+# If-None-Match with ETag disabled (branch: cannot compare, ims-only)
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag-disabled"' \
-  "http://127.0.0.1:${PORT}/no-etag/index.html" -o /dev/null -w "  INM etag-off bypass: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/ims-only/index.html" -o /dev/null -w "  INM etag-off bypass: HTTP %{http_code}\n"
 
 # Malformed If-None-Match (unterminated quote)
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "unterminated' \
@@ -1331,9 +1323,9 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag1", "etag2", "etag3"' \
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: W/"weak-etag-value"' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  INM weak quoted: HTTP %{http_code}\n"
 
-# Conditional: If-None-Match wildcard to no-etag (etag off, should bypass)
+# Conditional: If-None-Match wildcard to ims-only (etag off, should bypass)
 curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: *' \
-  "http://127.0.0.1:${PORT}/no-etag/index.html" -o /dev/null -w "  no-etag wildcard INM: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/ims-only/index.html" -o /dev/null -w "  ims-only wildcard INM: HTTP %{http_code}\n"
 
 # ── Extended Accept negotiation scenarios (coverage for ngx_http_markdown_accept.c) ──
 

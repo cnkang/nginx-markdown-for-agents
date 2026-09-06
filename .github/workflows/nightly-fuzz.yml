@@ -25,6 +25,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -39,12 +41,14 @@ jobs:
           cache-bin: false
 
       - name: Install cargo-fuzz
-        run: cargo +nightly install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --version 0.13.2 --locked
 
       - name: Run nightly fuzz target
+        env:
+          FUZZ_TARGET: ${{ matrix.target }}
         run: |
           cd components/rust-converter
-          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=300
+          cargo +nightly fuzz run "${FUZZ_TARGET}" -- -max_total_time=300
 
       - name: Upload fuzz artifacts
         if: always()

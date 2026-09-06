@@ -581,7 +581,7 @@ def test_module_benchmark_uses_stable_critical_fixtures():
     assert '"gzip-large|benchmark/blog-post.html|' in source
 
     expected_sizes = {
-        "benchmark/tables.html": 2164,
+        "benchmark/tables.html": 2248,
         "benchmark/blog-post.html": 6613,
     }
     for fixture, expected_size in expected_sizes.items():
@@ -1194,6 +1194,28 @@ class TestReportSchemaConformance:
         errors = validate_module_benchmark(report)
 
         assert any("scenario_config" in error for error in errors)
+
+    def test_module_validation_accepts_legacy_091_profile(self):
+        """The retained 0.9.1 profile contract passes only with legacy provenance."""
+        from tools.perf.report_schema import _validate_module_scenarios
+
+        legacy_scenario = {
+            "name": "plain-small",
+            "profile": "streaming_first",
+            "compression": "none",
+            "transfer_encoding": "identity",
+            "concurrency": 10,
+            "status": "completed",
+            "metrics": {},
+        }
+
+        legacy_errors: list = []
+        _validate_module_scenarios([dict(legacy_scenario)], legacy_errors, legacy=True)
+        assert not any("scenario_config" in e for e in legacy_errors)
+
+        modern_errors: list = []
+        _validate_module_scenarios([dict(legacy_scenario)], modern_errors, legacy=False)
+        assert any("scenario_config" in e for e in modern_errors)
 
     def _get_schema_props(self):
         """Return the module_benchmark properties from the schema."""

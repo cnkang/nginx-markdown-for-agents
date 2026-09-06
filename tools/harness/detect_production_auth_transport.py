@@ -47,6 +47,9 @@ def _server_blocks(text: str) -> tuple[list[tuple[int, str]], bool]:
             if re.search(r"\bserver\s*\{", line):
                 start = index
                 depth = line.count("{") - line.count("}")
+                if depth == 0:
+                    blocks.append((start + 1, "\n".join(original_lines[start : index + 1])))
+                    start = None
             continue
         depth += line.count("{") - line.count("}")
         if depth == 0:
@@ -132,6 +135,8 @@ def check_config(text: str, path: str) -> list[Finding]:
 
 def scan_examples(root: Path = EXAMPLES_ROOT) -> list[Finding]:
     """Scan tracked production example configurations."""
+    if not root.is_dir():
+        return [Finding(str(root), 1, "examples root is missing or not a directory")]
     findings: list[Finding] = []
     for path in sorted(root.glob("*.conf")):
         relative = str(path.relative_to(REPO_ROOT))

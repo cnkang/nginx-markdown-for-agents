@@ -101,7 +101,7 @@ fn parse_valid_json_error_policy_is_not_set() {
 // ─── markdown_dynconf_parse: error paths ───────────────────────────────────
 
 #[test]
-fn parse_null_data_nonzero_len_returns_invalid_type() {
+fn parse_null_data_nonzero_len_returns_invalid_args() {
     let mut result = FFIDynconfResult {
         error_code: u32::MAX,
         error_message: ptr::null(),
@@ -120,7 +120,7 @@ fn parse_null_data_nonzero_len_returns_invalid_type() {
         markdown_dynconf_result_init(&mut result);
         markdown_dynconf_parse(ptr::null(), 10, &mut result);
     }
-    assert_eq!(result.error_code, DYNCONF_ERR_INVALID_TYPE);
+    assert_eq!(result.error_code, DYNCONF_ERR_INVALID_ARGS);
     assert!(!result.error_message.is_null());
     assert!(result.error_message_len > 0);
     assert!(result.source_digest.is_null());
@@ -288,25 +288,25 @@ fn sha256_hex_empty_input_returns_ok() {
 }
 
 #[test]
-fn sha256_hex_null_output_returns_invalid_type() {
+fn sha256_hex_null_output_returns_invalid_args() {
     let input = b"test";
     let rc = unsafe { markdown_sha256_hex(input.as_ptr(), input.len(), ptr::null_mut(), 64) };
-    assert_eq!(rc, DYNCONF_ERR_INVALID_TYPE);
+    assert_eq!(rc, DYNCONF_ERR_INVALID_ARGS);
 }
 
 #[test]
-fn sha256_hex_short_output_returns_invalid_type() {
+fn sha256_hex_short_output_returns_invalid_args() {
     let input = b"test";
     let mut output = [0u8; 32];
     let rc = unsafe { markdown_sha256_hex(input.as_ptr(), input.len(), output.as_mut_ptr(), 32) };
-    assert_eq!(rc, DYNCONF_ERR_INVALID_TYPE);
+    assert_eq!(rc, DYNCONF_ERR_INVALID_ARGS);
 }
 
 #[test]
-fn sha256_hex_null_data_nonzero_len_returns_invalid_type() {
+fn sha256_hex_null_data_nonzero_len_returns_invalid_args() {
     let mut output = [0u8; 64];
     let rc = unsafe { markdown_sha256_hex(ptr::null(), 10, output.as_mut_ptr(), output.len()) };
-    assert_eq!(rc, DYNCONF_ERR_INVALID_TYPE);
+    assert_eq!(rc, DYNCONF_ERR_INVALID_ARGS);
 }
 
 // ─── markdown_dynconf_result_init ──────────────────────────────────────────

@@ -13,7 +13,7 @@
 #                                              [--nginx-bin-output FILE] [--buildroot-output FILE]
 #
 # Environment variables:
-#   NGINX_VERSION   NGINX version to build (default: 1.28.2)
+#   NGINX_VERSION   NGINX version to build (default: 1.28.3)
 #   PORT            Listen port (default: 18089)
 #   BACKEND_PORT    Backend server port (default: 19089)
 #   NGINX_BIN       Optional reusable module-enabled nginx binary
@@ -23,7 +23,7 @@
 #   1 if any check fails or prerequisites are missing.
 set -euo pipefail
 
-NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
+NGINX_VERSION="${NGINX_VERSION:-1.28.3}"
 PORT="${PORT:-18089}"
 BACKEND_PORT="${BACKEND_PORT:-19089}"
 KEEP_ARTIFACTS=0
@@ -244,7 +244,7 @@ else
   markdown_prepare_rust_converter_release "${WORKSPACE_ROOT}" "${RUST_TARGET}" --features streaming >/dev/null
 
   echo "==> Downloading/building NGINX ${NGINX_VERSION}"
-  curl --proto '=https' --tlsv1.2 -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o "${BUILDROOT}/nginx.tar.gz"
+  markdown_download_nginx_source "${NGINX_VERSION}" "${BUILDROOT}/nginx.tar.gz" "${WORKSPACE_ROOT}"
   mkdir -p "${BUILDROOT}/src"
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (
@@ -416,7 +416,7 @@ fi
 
 echo "==> Case 5: upstream representation trailer suppressed after conversion"
 : > "${RAW_DIR}/trailer.body"
-trailer_code="$(curl -sS -D "${RAW_DIR}/trailer.hdr" -o "${RAW_DIR}/trailer.body" \
+trailer_code="$(curl -sS --max-time 30 -D "${RAW_DIR}/trailer.hdr" -o "${RAW_DIR}/trailer.body" \
   -H 'Accept: text/markdown' \
   "http://127.0.0.1:${PORT}/trailer" \
   -w '%{http_code}')"

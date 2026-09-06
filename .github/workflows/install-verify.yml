@@ -378,15 +378,23 @@ jobs:
       matrix:
         target: ${{ fromJson(needs.resolve-matrix.outputs.targets) }}
     container: ${{ matrix.target.container || null }}
+    defaults:
+      run:
+        # Container images (Alpine) lack bash by default; run blocks use bashisms.
+        shell: bash
 
     steps:
       - name: Determine JS actions support
         id: js_actions_support
+        env:
+          MATRIX_SUPPORTED: ${{ !(matrix.target.pkg_manager == 'apk' && matrix.target.arch == 'aarch64') }}
+        shell: sh
         run: |
-          echo "supported=${{ !(matrix.target.pkg_manager == 'apk' && matrix.target.arch == 'aarch64') }}" >> "$GITHUB_OUTPUT"
+          echo "supported=${MATRIX_SUPPORTED}" >> "$GITHUB_OUTPUT"
 
       - name: Install prerequisites (Alpine)
         if: matrix.target.pkg_manager == 'apk'
+        shell: sh
         run: |
           apk update
           apk add --no-cache bash curl gawk gnupg python3 tar coreutils git ca-certificates
@@ -516,13 +524,15 @@ jobs:
           mkdir -p "${{ runner.temp }}/install-verify"
 
       - name: Capture environment snapshot
+        env:
+          MATRIX_TARGET_NAME: ${{ matrix.target.name }}
         run: |
           RESULTS_DIR="${{ runner.temp }}/install-verify"
           {
             echo "=== Environment Snapshot ==="
             echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             echo "Hostname: $(hostname)"
-            echo "Target: ${{ matrix.target.name }}"
+            echo "Target: ${MATRIX_TARGET_NAME}"
             echo ""
             echo "--- uname -a ---"
             uname -a
@@ -830,6 +840,9 @@ jobs:
           TARGET_ARCH: ${{ matrix.target.arch }}
           TARGET_VARIANT: ${{ matrix.target.variant }}
           EXPECTED_INSTALL_SUCCESS: ${{ matrix.target.expected_install_success && 'true' || 'false' }}
+          MATRIX_TARGET_NAME: ${{ matrix.target.name }}
+          MATRIX_TARGET_RUNNER: ${{ matrix.target.runner }}
+          MATRIX_TARGET_CONTAINER: ${{ matrix.target.container || 'none' }}
           SUMMARY_REF: ${{ github.event.inputs.ref || github.ref }}
           SUMMARY_VERSION: ${{ github.event.inputs.version || 'latest' }}
           INSTALL_EXIT: ${{ steps.install.outputs.install_exit }}
@@ -845,13 +858,13 @@ jobs:
             echo "========================================"
             echo " Install Verification Summary"
             echo "========================================"
-            echo "Environment:        ${{ matrix.target.name }}"
+            echo "Environment:        ${MATRIX_TARGET_NAME}"
             echo "Variant:            ${TARGET_VARIANT}"
             echo "Target nginx:       ${TARGET_NGINX}"
             echo "Target os_type:     ${TARGET_OS_TYPE}"
             echo "Target arch:        ${TARGET_ARCH}"
-            echo "Runner:             ${{ matrix.target.runner }}"
-            echo "Container:          ${{ matrix.target.container || 'none' }}"
+            echo "Runner:             ${MATRIX_TARGET_RUNNER}"
+            echo "Container:          ${MATRIX_TARGET_CONTAINER}"
             echo "Ref:                ${SUMMARY_REF}"
             echo "Module version:     ${SUMMARY_VERSION}"
             echo "Date:               $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -882,7 +895,7 @@ jobs:
           cat "${RESULTS_DIR}/summary.txt"
 
           if grep -q "Overall result: FAIL" "${RESULTS_DIR}/summary.txt"; then
-            echo "::error::Verification failed for ${{ matrix.target.name }}. See artifacts for details."
+            echo "::error::Verification failed for ${MATRIX_TARGET_NAME}. See artifacts for details."
             exit 1
           fi
 

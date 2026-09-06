@@ -602,7 +602,7 @@ test_merge_conf(void)
     parent.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     parent.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
     parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
-    parent.limits.parser_memory = NGX_CONF_UNSET_SIZE;
+    parent.limits.parser_budget = NGX_CONF_UNSET_SIZE;
     parent.limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
     parent.limits.decompressed_size = NGX_CONF_UNSET_SIZE;
     parent.limits.decompression_ratio = NGX_CONF_UNSET_UINT;
@@ -633,7 +633,7 @@ test_merge_conf(void)
     parent.limits.conversion_timeout = 30000;
     parent.limits.parser_timeout = 10000;
     parent.limits.conversion_memory = 64 * 1024 * 1024;
-    parent.limits.parser_memory = 32 * 1024 * 1024;
+    parent.limits.parser_budget = 32 * 1024 * 1024;
     parent.limits.streaming_buffer = 2 * 1024 * 1024;
     parent.limits.decompressed_size = 10 * 1024 * 1024;
     parent.limits.decompression_ratio = 100;
@@ -676,7 +676,7 @@ test_merge_conf(void)
     child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
-    child.limits.parser_memory = NGX_CONF_UNSET_SIZE;
+    child.limits.parser_budget = NGX_CONF_UNSET_SIZE;
     child.limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
     child.limits.decompressed_size = NGX_CONF_UNSET_SIZE;
     child.limits.decompression_ratio = NGX_CONF_UNSET_UINT;
@@ -729,7 +729,7 @@ test_merge_conf(void)
     child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
-    child.limits.parser_memory = NGX_CONF_UNSET_SIZE;
+    child.limits.parser_budget = NGX_CONF_UNSET_SIZE;
     child.limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
     child.limits.decompressed_size = NGX_CONF_UNSET_SIZE;
     child.limits.decompression_ratio = NGX_CONF_UNSET_UINT;
@@ -1087,7 +1087,7 @@ test_merge_conf_double_unset(void)
     parent.limits.conversion_memory = 64 * 1024 * 1024;
     parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
     parent.limits.parser_timeout = 10000;
-    parent.limits.parser_memory = 32 * 1024 * 1024;
+    parent.limits.parser_budget = 32 * 1024 * 1024;
     parent.limits.conversion_timeout = 30000;
     parent.limits.streaming_buffer = 2 * 1024 * 1024;
     parent.limits.decompressed_size = 10 * 1024 * 1024;
@@ -1131,7 +1131,7 @@ test_merge_conf_double_unset(void)
     child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
-    child.limits.parser_memory = NGX_CONF_UNSET_SIZE;
+    child.limits.parser_budget = NGX_CONF_UNSET_SIZE;
     child.limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
     child.limits.decompressed_size = NGX_CONF_UNSET_SIZE;
     child.limits.decompression_ratio = NGX_CONF_UNSET_UINT;
@@ -1344,7 +1344,7 @@ test_decompress_max_size_zero_rejected(void)
     parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
     parent.limits.conversion_timeout = 30000;
     parent.limits.parser_timeout = 30000;
-    parent.limits.parser_memory = 10 * 1024 * 1024;
+    parent.limits.parser_budget = 10 * 1024 * 1024;
     parent.limits.conversion_memory = 64 * 1024 * 1024;
     parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 
@@ -1398,7 +1398,7 @@ test_streaming_full_force_conflict_rejected(void)
     parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
     parent.limits.conversion_timeout = 30000;
     parent.limits.parser_timeout = 30000;
-    parent.limits.parser_memory = 10 * 1024 * 1024;
+    parent.limits.parser_budget = 10 * 1024 * 1024;
     parent.limits.conversion_memory = 64 * 1024 * 1024;
     parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 
@@ -1454,7 +1454,7 @@ test_streaming_full_auto_warns_but_succeeds(void)
     parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
     parent.limits.conversion_timeout = 30000;
     parent.limits.parser_timeout = 30000;
-    parent.limits.parser_memory = 10 * 1024 * 1024;
+    parent.limits.parser_budget = 10 * 1024 * 1024;
     parent.limits.conversion_memory = 64 * 1024 * 1024;
     parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 

@@ -12,8 +12,10 @@ load_module modules/ngx_http_markdown_filter_module.so;
 
 # Minimal upstream used by the example proxy_pass below.
 # Replace with your actual origin service (or proxy to a socket/port).
+# The upstream MUST NOT be the port this server itself listens on,
+# otherwise NGINX proxies each request back to itself.
 upstream backend {
-    server 127.0.0.1:8080;
+    server 127.0.0.1:8081;
 }
 
 http {
@@ -22,7 +24,7 @@ http {
     markdown_auto_decompress on;
     markdown_error_policy pass;
     markdown_limits conversion_memory=64m conversion_timeout=10s
-        parser_memory=32m parser_timeout=5s streaming_buffer=2m
+        parser_budget=32m parser_timeout=5s streaming_buffer=2m
         decompressed_size=10m decompression_ratio=100 max_inflight=64;
 
     server {
@@ -89,7 +91,7 @@ streaming_buffer=2m`.
 | `conversion_timeout` | Wall-clock limit for conversion |
 | `parser_timeout` | Cooperative parser deadline |
 | `conversion_memory` | Full-buffer input admission and generated-output bound; transient scratch allocations are also charged against this budget so conversion aborts with a controlled error instead of growing peak memory past it |
-| `parser_memory` | Rust parser allocation bound |
+| `parser_budget` | Rust parser modeled working-set ceiling |
 | `streaming_buffer` | Per-request streaming working-set and replay budget |
 | `decompressed_size` | Cumulative decompressed output bound |
 | `decompression_ratio` | Maximum decompressed/input ratio |
@@ -99,7 +101,7 @@ Example:
 
 ```nginx
 markdown_limits conversion_timeout=10s parser_timeout=5s
-    conversion_memory=64m parser_memory=32m streaming_buffer=2m
+    conversion_memory=64m parser_budget=32m streaming_buffer=2m
     decompressed_size=10m decompression_ratio=100 max_inflight=64;
 ```
 
@@ -297,7 +299,7 @@ pre-commit replay memory. This setting does not select the upstream chunk size.
 `markdown_limits parser_timeout=` key instead.
 
 `markdown_parser_budget` — REMOVED. Use the
-`markdown_limits parser_memory=` key instead.
+`markdown_limits parser_budget=` key instead.
 
 `markdown_stream_threshold` — REMOVED. No replacement. The threshold is an
 internal 1 MiB routing rule.
@@ -307,3 +309,6 @@ internal 1 MiB routing rule.
 
 `markdown_stream_flush_min` — REMOVED. No replacement. Flushing uses an
 internal heuristic.
+
+For the complete 0.9.2 before/after removal table, see
+[MIGRATION-0.9.2.md](MIGRATION-0.9.2.md#removed-active-directives--beforeafter).

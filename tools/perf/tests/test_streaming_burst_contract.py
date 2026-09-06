@@ -55,7 +55,7 @@ def test_native_e2e_covers_256k_continuous_compression_bursts():
 
 def test_module_benchmark_declares_compression_ratio_budget():
     source = MODULE_BENCHMARK.read_text(encoding="utf-8")
-    marker = "markdown_limits conversion_memory=64m parser_memory=64m"
+    marker = "markdown_limits conversion_memory=64m parser_budget=64m"
     start = source.index(marker)
     end = source.index("$profile_directives", start)
     limits_block = source[start:end]

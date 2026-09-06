@@ -11,7 +11,7 @@ Extends the v0.7.0 gate framework with v0.8.0-specific checks:
    - conf->streaming.* fields are NOT in C source
 3. New v0.8.0 streaming directives are registered and documented
 4. Release gate Makefile target uses 0.8 validators
-5. FFI migration contract mentions 0.8.0 changes
+5. FFI migration history mentions 0.8.0 changes
 
 Exit codes:
   0 - All checks passed
@@ -69,7 +69,7 @@ CONFIG_CORE_H = (
     / "src"
     / "ngx_http_markdown_config_core_impl.h"
 )
-FFI_CONTRACT_PATH = PROJECT_ROOT / "docs" / "architecture" / "FFI_MIGRATION_CONTRACT.md"
+FFI_CONTRACT_PATH = PROJECT_ROOT / "docs" / "architecture" / "FFI_MIGRATION_HISTORY.md"
 CHANGELOG_PATH = PROJECT_ROOT / "CHANGELOG.md"
 MIGRATION_08_PATH = PROJECT_ROOT / "docs" / "guides" / "MIGRATION-0.8.md"
 STREAMING_IMPL_H = (

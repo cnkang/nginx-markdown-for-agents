@@ -393,7 +393,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     conf->limits.parser_timeout = NGX_CONF_UNSET_MSEC;
     conf->limits.conversion_memory = NGX_CONF_UNSET_SIZE;
-    conf->limits.parser_memory = NGX_CONF_UNSET_SIZE;
+    conf->limits.parser_budget = NGX_CONF_UNSET_SIZE;
     conf->limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
     conf->limits.decompressed_size = NGX_CONF_UNSET_SIZE;
     conf->limits.decompression_ratio = NGX_CONF_UNSET_UINT;
@@ -401,7 +401,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->limits.conversion_timeout_explicit = 0;
     conf->limits.parser_timeout_explicit = 0;
     conf->limits.conversion_memory_explicit = 0;
-    conf->limits.parser_memory_explicit = 0;
+    conf->limits.parser_budget_explicit = 0;
     conf->limits.streaming_buffer_explicit = 0;
 
     conf->advanced.prune_noise = NGX_CONF_UNSET;
@@ -449,7 +449,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      *
      * After inheritance/merge resolves all 8 effective values, verify:
      *   parser_timeout <= conversion_timeout
-     *   parser_memory  <= conversion_memory
+     *   parser_budget  <= conversion_memory
      *   streaming_buffer <= conversion_memory
      *
      * Explicitness-aware semantics: a violation fails nginx -t only when
@@ -478,24 +478,24 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         conf->limits.parser_timeout = conf->limits.conversion_timeout;
     }
 
-    if (conf->limits.parser_memory > conf->limits.conversion_memory) {
-        if (conf->limits.parser_memory_explicit
+    if (conf->limits.parser_budget > conf->limits.conversion_memory) {
+        if (conf->limits.parser_budget_explicit
             && conf->limits.conversion_memory_explicit)
         {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                 "markdown_limits cross-key constraint violated: "
-                "parser_memory (%uz) must not exceed "
+                "parser_budget (%uz) must not exceed "
                 "conversion_memory (%uz)",
-                conf->limits.parser_memory,
+                conf->limits.parser_budget,
                 conf->limits.conversion_memory);
             return NGX_CONF_ERROR;
         }
         ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
-            "markdown_limits parser_memory clamped from %uz to "
+            "markdown_limits parser_budget clamped from %uz to "
             "conversion_memory %uz (only one side explicit)",
-            conf->limits.parser_memory,
+            conf->limits.parser_budget,
             conf->limits.conversion_memory);
-        conf->limits.parser_memory = conf->limits.conversion_memory;
+        conf->limits.parser_budget = conf->limits.conversion_memory;
     }
 
     if (conf->limits.streaming_buffer > conf->limits.conversion_memory) {
@@ -523,7 +523,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * downstream readers observe the same effective values.
      */
     conf->decompress.parse_timeout = conf->limits.parser_timeout;
-    conf->decompress.parser_budget = conf->limits.parser_memory;
+    conf->decompress.parser_budget = conf->limits.parser_budget;
     conf->stream.budget = conf->limits.streaming_buffer;
 
     ngx_http_markdown_apply_memory_budget_override(conf, prev, max_size_set);

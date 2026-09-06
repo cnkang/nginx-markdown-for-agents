@@ -12,9 +12,9 @@ permissions: {}
 
 # Release integrity:
 #   - Every dynamic-module archive is listed in SHA256SUMS.
-#   - Tag artifacts additionally carry SHA256SUMS.asc, signed in the
-#     protected release-signing environment.
-#   - This workflow only builds, signs, and uploads workflow artifacts.
+#   - GPG signatures are produced only by the canonical release-packages.yml
+#     workflow after its protected release gate.
+#   - This workflow only builds, verifies, and uploads workflow artifacts.
 #     release-packages.yml is the sole GitHub Release publication path.
 
 jobs:
@@ -25,7 +25,6 @@ jobs:
       contents: read
     outputs:
       matrix_entries: ${{ steps.resolve.outputs.matrix_entries }}
-      publication_tag: ${{ steps.validate_ref.outputs.publication_tag }}
     steps:
       - name: Validate requested ref
         id: validate_ref
@@ -147,8 +146,12 @@ jobs:
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Build Module
+        env:
+          MATRIX_NGINX: ${{ matrix.nginx }}
+          MATRIX_OS_TYPE: ${{ matrix.os_type }}
+          MATRIX_ARCH: ${{ matrix.arch }}
         run: |
-          ./tools/build_release.sh ${{ matrix.nginx }} ${{ matrix.os_type }} ${{ matrix.arch }}
+          ./tools/build_release.sh "${MATRIX_NGINX}" "${MATRIX_OS_TYPE}" "${MATRIX_ARCH}"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -227,72 +230,10 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
-  integrity-signing:
-    name: Sign Binary Checksums
-    needs: [prepare, integrity-checksums]
-    if: >-
-      needs.prepare.outputs.publication_tag != ''
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    environment: release-signing
-    steps:
-      - name: Preflight - validate GPG secrets
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
-        run: |
-          MISSING=()
-          [[ -z "${GPG_PRIVATE_KEY}" ]] && MISSING+=("GPG_PRIVATE_KEY")
-          [[ -z "${GPG_PASSPHRASE}" ]] && MISSING+=("GPG_PASSPHRASE")
-          [[ -z "${GPG_KEY_ID}" ]] && MISSING+=("GPG_KEY_ID")
-          if [[ ${#MISSING[@]} -gt 0 ]]; then
-            echo "ERROR: Missing required GPG secrets in 'release-signing' environment:" >&2
-            printf '  - %s\n' "${MISSING[@]}" >&2
-            exit 1
-          fi
-        shell: bash
-
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
-      - name: Download SHA256SUMS
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: binary-checksums
-          path: artifacts
-
-      - name: Sign SHA256SUMS
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
-        run: |
-          ./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS "${GPG_KEY_ID}"
-        shell: bash
-
-      - name: Upload SHA256SUMS.asc
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: binary-checksums-signature
-          path: artifacts/SHA256SUMS.asc
-          if-no-files-found: error
-          retention-days: 5
-
   package-artifacts:
     name: Upload Binary Artifacts
-    needs: [prepare, completeness-check, integrity-checksums, integrity-signing]
+    needs: [prepare, completeness-check, integrity-checksums]
     runs-on: ubuntu-latest
-    if: >-
-      always()
-      && needs.completeness-check.result == 'success'
-      && needs.integrity-checksums.result == 'success'
-      && (needs.integrity-signing.result == 'success'
-          || needs.integrity-signing.result == 'skipped')
     permissions:
       contents: read
     steps:
@@ -305,13 +246,6 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: binary-checksums
-          path: release-assets
-
-      - name: Download SHA256SUMS.asc (tag)
-        if: needs.integrity-signing.result == 'success'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: binary-checksums-signature
           path: release-assets
 
       - name: Set up Python
@@ -404,6 +338,5 @@ jobs:
             artifacts/nginx-version-groups.json
             artifacts/nginx-version-groups.md
             release-assets/SHA256SUMS
-            release-assets/SHA256SUMS.asc
           if-no-files-found: error
           retention-days: 5

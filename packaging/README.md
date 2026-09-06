@@ -38,6 +38,7 @@ The configuration uses template variables injected by the CI matrix:
 | `NGINX_VERSION` | Target NGINX version from build matrix | `1.26.3` |
 | `NGINX_VERSION_CEIL` | Exclusive upper bound of the pinned NGINX version (X.Y.Z -> X.Y.Z+1) required by the DEB dependency interval | `1.26.4` |
 | `RPM_NGINX_EVR` | Exact RPM dependency epoch/version/release | `1:1.26.3` |
+| `RPM_NGINX_EVR_CEIL` | Exclusive upper RPM EVR bound for dependency checks | `1:1.26.4` |
 | `NFPM_ARCH` | Target architecture | `amd64`, `arm64` |
 
 ### Building Packages Locally
@@ -51,16 +52,22 @@ export NGINX_VERSION_CEIL="$(awk 'BEGIN {
   printf "%d.%d.%d", parts[1], parts[2], parts[3] + 1;
 }' "${NGINX_VERSION}")"
 export RPM_NGINX_EVR="1:${NGINX_VERSION}"
+export RPM_NGINX_EVR_CEIL="1:${NGINX_VERSION_CEIL}"
 export NFPM_ARCH="amd64"
 
-# Render the version-bound preinstall script before nFPM copies maintainer
-# scripts into the package.  Keep the tracked template unchanged.
+# Render the maintainer scripts before nFPM copies them into the package.
+# The preinstall script is version-bound, while preremove also needs the
+# trusted executable prelude. Keep the tracked templates unchanged.
 NFPM_TMP="$(mktemp -d)"
 trap 'rm -rf "${NFPM_TMP}"' EXIT
 packaging/nfpm/scripts/render-nfpm-config.sh \
   packaging/nfpm/scripts/preinstall.sh "${NFPM_TMP}/preinstall.sh" \
   "${NGINX_VERSION}"
-sed "s|./packaging/nfpm/scripts/preinstall.sh|${NFPM_TMP}/preinstall.sh|" \
+packaging/nfpm/scripts/render-nfpm-config.sh \
+  packaging/nfpm/scripts/preremove.sh "${NFPM_TMP}/preremove.sh" \
+  "${NGINX_VERSION}"
+sed -e "s|./packaging/nfpm/scripts/preinstall.sh|${NFPM_TMP}/preinstall.sh|" \
+  -e "s|./packaging/nfpm/scripts/preremove.sh|${NFPM_TMP}/preremove.sh|" \
   packaging/nfpm/nfpm.yaml > "${NFPM_TMP}/nfpm.yaml"
 
 # Generate DEB

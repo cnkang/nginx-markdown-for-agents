@@ -145,6 +145,7 @@ def check_sonar_token_steps(text: str) -> list[Finding]:
 def scan_workflows(root: Path = WORKFLOW_ROOT) -> list[Finding]:
     """Scan all workflow files, failing closed on read errors."""
     findings: list[Finding] = []
+    seen_sonarcloud = False
     for path in sorted((*root.glob("*.yml"), *root.glob("*.yaml"))):
         relative = str(path.relative_to(REPO_ROOT))
         try:
@@ -155,7 +156,16 @@ def scan_workflows(root: Path = WORKFLOW_ROOT) -> list[Finding]:
             continue
         findings.extend(find_broad_env_secrets(text, relative))
         if path.name == "sonarcloud.yml":
+            seen_sonarcloud = True
             findings.extend(check_sonar_token_steps(text))
+    if not seen_sonarcloud:
+        findings.append(
+            Finding(
+                str(root / "sonarcloud.yml"),
+                1,
+                "required sonarcloud.yml workflow is missing",
+            )
+        )
     return findings
 
 

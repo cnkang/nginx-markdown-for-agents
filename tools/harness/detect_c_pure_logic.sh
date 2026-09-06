@@ -7,7 +7,7 @@
 # Rust-first FFI Migration Contract (Rust-first migration, ADR-0010).
 #
 # The authoritative migration decisions live in the manual audit
-# (docs/architecture/FFI_MIGRATION_CONTRACT.md).  This detector is a
+# (docs/architecture/FFI_MIGRATION_HISTORY.md).  This detector is a
 # fast first-pass signal, not the source of truth.
 #
 # Modes:
@@ -197,7 +197,7 @@ echo "" >&2
 
 if [[ "$candidates" -gt 0 ]]; then
     echo "NOTE: Advisory findings. Consult" >&2
-    echo "  docs/architecture/FFI_MIGRATION_CONTRACT.md for authoritative" >&2
+    echo "  docs/architecture/FFI_MIGRATION_HISTORY.md for historical" >&2
     echo "  migration decisions (manual audit)." >&2
 else
     echo "No pure-logic migration candidates detected." >&2
