@@ -767,7 +767,10 @@ ngx_http_markdown_metrics_check_access(ngx_http_request_t *r)
     if (r->connection->sockaddr->sa_family == AF_INET) {
         const struct sockaddr_in *sin =
             (const struct sockaddr_in *) r->connection->sockaddr;
-        if (ntohl(sin->sin_addr.s_addr) != INADDR_LOOPBACK) {
+        /* Accept the whole 127.0.0.0/8 loopback range, not only
+         * 127.0.0.1: any address in the range is a local peer. */
+        if ((ntohl(sin->sin_addr.s_addr) & 0xff000000U)
+            != 0x7f000000U) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                          "markdown: access denied from non-localhost IPv4 address");
             return NGX_HTTP_FORBIDDEN;
@@ -777,11 +780,24 @@ ngx_http_markdown_metrics_check_access(ngx_http_request_t *r)
     else if (r->connection->sockaddr->sa_family == AF_INET6) {
         const struct sockaddr_in6 *sin6 =
             (const struct sockaddr_in6 *) r->connection->sockaddr;
-        if (!IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
-            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                         "markdown: access denied from non-localhost IPv6 address");
-            return NGX_HTTP_FORBIDDEN;
+        /* Accept ::1 and IPv4-mapped IPv6 addresses whose embedded
+         * IPv4 address is in 127.0.0.0/8 (e.g. ::ffff:127.0.0.1). */
+        if (IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
+            return NGX_OK;
         }
+        if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
+            uint32_t  v4;
+            v4 = ((uint32_t) sin6->sin6_addr.s6_addr[12] << 24)
+                 | ((uint32_t) sin6->sin6_addr.s6_addr[13] << 16)
+                 | ((uint32_t) sin6->sin6_addr.s6_addr[14] << 8)
+                 | (uint32_t) sin6->sin6_addr.s6_addr[15];
+            if ((ntohl(v4) & 0xff000000U) == 0x7f000000U) {
+                return NGX_OK;
+            }
+        }
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown: access denied from non-localhost IPv6 address");
+        return NGX_HTTP_FORBIDDEN;
     }
 #endif
     else {
