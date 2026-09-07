@@ -425,9 +425,9 @@ After applying any rollback method, verify that the change took effect. Run thes
 ### 1. Verify Conversion Is Disabled (Counter Delta First)
 
 After disabling conversion (Methods A and B), verify the disablement with a
-counter delta across a probe request; a log entry alone is not proof, because
-`disabled` decision-log entries require `markdown_log_verbosity` info (or
-debug) to be emitted at all:
+counter delta across a probe request. A log entry alone is not proof, because
+the module emits `disabled` decision-log entries only at
+`markdown_log_verbosity` info (or debug):
 
 ```bash
 # Disabled decisions appear only when markdown_log_verbosity is info
@@ -437,19 +437,29 @@ debug) to be emitted at all:
 # that a log entry alone proves the disablement.
 nginx -T 2>/dev/null | grep markdown_log_verbosity   # expect: info (or debug)
 
-PROBE_PATH="rollback-probe-$(date +%s)"
-BASE=$(curl -s -H 'Accept: text/plain; version=0.0.4' \
+# Use a fixed, known-convertible fixture (a path your site has already
+# verified to return text/html and convert to Markdown).  A freshly
+# generated URL could 404, and a 404 never reaches the conversion chain,
+# so a flat counter delta would prove nothing.
+PROBE_PATH="/known-convertible-page"   # adjust to your verified fixture
+BASE=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
   http://localhost/markdown-metrics | \
-  grep -E 'nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)')
-curl -s -o /dev/null -H 'Accept: text/markdown' "http://localhost/${PROBE_PATH}"
-AFTER=$(curl -s -H 'Accept: text/plain; version=0.0.4' \
+  grep -E 'nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)') \
+  || { echo "FAIL: could not read BASE metrics snapshot"; exit 1; }
+test -n "$BASE" || { echo "FAIL: BASE metrics snapshot is empty"; exit 1; }
+curl -fsS -o /dev/null -H 'Accept: text/markdown' \
+  "http://localhost${PROBE_PATH}" \
+  || { echo "FAIL: probe request to ${PROBE_PATH} failed"; exit 1; }
+AFTER=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
   http://localhost/markdown-metrics | \
-  grep -E 'nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)')
+  grep -E 'nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)') \
+  || { echo "FAIL: could not read AFTER metrics snapshot"; exit 1; }
+test -n "$AFTER" || { echo "FAIL: AFTER metrics snapshot is empty"; exit 1; }
 [ "$BASE" = "$AFTER" ] && echo "OK: conversion counters flat across the probe (conversion disabled)" \
   || echo "FAIL: conversion counters moved across the probe"
 # Optional log corroboration (requires markdown_log_verbosity info or
 # debug, and an error-log level that includes info): the probe must show
-# its own uniquely named path in a disabled decision entry.
+# its own path in a disabled decision entry.
 tail -50 /var/log/nginx/error.log | grep "markdown:" | grep "reason=disabled" | grep "${PROBE_PATH}"
 ```
 
@@ -624,6 +634,7 @@ connections drain or close (see the reload semantics above).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Disablement probe uses a fixed known-convertible fixture, fail-closed curl for both metric snapshots, and rejects empty snapshots before the counter comparison |
 | 0.9.2 | 2026-08-15 | Kang | Reload semantics distinguish new workers from keep-alive connections; Accept header on metric curls |
 | 0.9.2 | 2026-08-15 | Hermes | Use current metric names in the pre-rollback metric check |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire the large-response threshold directive) |
