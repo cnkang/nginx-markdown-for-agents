@@ -64,6 +64,8 @@ usage() {
     echo "  GPG_KEY_URL          — URL to GPG public key (default: checked-in file)" >&2
     echo "  REPO_BASE_URL        — base URL of package repository" >&2
     echo "  EXPECTED_FINGERPRINT — expected GPG signing-subkey fingerprint (default: published)" >&2
+    echo "  ALLOW_UNPUBLISHED=1  — pre-release opt-in: all-skip runs exit 0; a" >&2
+    echo "                         release run must not set this" >&2
     exit 2
 }
 
@@ -308,8 +310,16 @@ if [[ "$FAIL_COUNT" -gt 0 ]]; then
     exit 1
 fi
 
-if [[ "$VERIFY_RUN_COUNT" -eq 0 && "$SKIP_COUNT" -eq 0 ]]; then
-    echo "FAIL: no signature verification executed and nothing was skipped" >&2
+if [[ "$VERIFY_RUN_COUNT" -eq 0 ]]; then
+    if [[ "${ALLOW_UNPUBLISHED:-0}" = "1" && "$SKIP_COUNT" -gt 0 ]]; then
+        echo "SKIP-ONLY PASS: no signature verification ran; ALLOW_UNPUBLISHED=1 accepted the unpublished-repository skips" >&2
+        exit 0
+    fi
+    if [[ "$SKIP_COUNT" -gt 0 ]]; then
+        echo "FAIL: every signature verification was skipped (repository not published). A release run must verify at least one signature; set ALLOW_UNPUBLISHED=1 only for pre-release runs against an unpublished repository." >&2
+    else
+        echo "FAIL: no signature verification executed" >&2
+    fi
     exit 1
 fi
 

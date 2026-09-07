@@ -184,7 +184,10 @@ def validate_manifest(
                 continue
             malformed = [
                 key
-                for key in ("filename", "format", "version", "nginx_version", "sha256")
+                for key in (
+                    "filename", "format", "version", "nginx_version",
+                    "libc", "arch", "sha256",
+                )
                 if key in pkg and not isinstance(pkg[key], str)
             ]
             if malformed:
