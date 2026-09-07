@@ -15,7 +15,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | ETag generation | ✅ | ❌ | No ETag for committed streaming responses |
 | Conditional requests (304) | ✅ | ⚠️ | Only If-None-Match/ETag validation requires full buffering. In `ims_only` mode a converted response never produces a 304: the stream commit clears the upstream `Last-Modified` (both fields), so source `If-Modified-Since` cannot validate the converted representation. Source IMS still applies to pass-through responses |
 | Fail-open (pre-commit) | ✅ | ✅ | Streaming: configurable via `markdown_error_policy` |
-| Fail-open (post-commit) | N/A | ❌ | Post-commit errors produce truncated output |
+| Fail-open (post-commit) | N/A | ⚠️ | Later gzip-member failures finish the remaining Markdown safely (safe finish); only failures where safe completion is impossible abort with truncated output |
 | `parser_budget` budget | ✅ | ✅ | Rust parser modeled working-set ceiling (`parser_memory_budget`): enforced by the conservative pre-parse estimate on the full-buffer path and checked continuously on the streaming path |
 | `conversion_memory` budget | ✅ | ✅ | Hard cumulative input-size cap shared by buffered and streaming paths; the same value also funds the full-buffer generated-output budget and transient scratch allocations (see [Parser Budget](PARSER_BUDGET.md)) |
 | Prometheus metrics | ✅ | ✅ | Additional streaming-specific counters |
@@ -95,7 +95,8 @@ Use **streaming** when:
 
 - Responses are large and you want bounded memory usage
 - Time-to-first-byte matters more than conditional caching
-- You accept that post-commit errors produce truncated output
+- You accept that post-commit errors that cannot finish safely truncate the
+  response (safe-finish failures complete the remaining Markdown)
 
 Use **auto** (default since 0.8.0) to let the module choose based on the bounded response-shape heuristic.
 
@@ -110,6 +111,7 @@ Use **auto** (default since 0.8.0) to let the module choose based on the bounded
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Split the post-commit fail-open outcome: later gzip-member failures finish the remaining Markdown safely; only impossible-safe-finish failures abort with truncated output |
 | 0.9.2 | 2026-08-24 | Kang | Corrected the parser_budget budget row: the bound covers both paths (full-buffer pre-parse estimate plus streaming enforcement), not streaming only |
 | 0.9.2 | 2026-08-19 | Hermes | Document the accepted no-ETag-for-streaming constraint (full-buffer vs streaming path divergence, user-confirmed) |
 | 0.9.2 | 2026-08-15 | Hermes | Deflate streaming misclassification reports a format error instead of failing closed |
