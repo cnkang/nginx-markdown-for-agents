@@ -388,6 +388,15 @@ def load_and_normalize(path: str) -> Dict[str, Any]:
         with open(validated, encoding="utf-8") as handle:
             doc = json.load(handle)
         return normalize_document(doc)
+    except ValueError as exc:
+        # validate_read_path rejects traversal and unsafe components with
+        # ValueError; MatrixNormalizationError is itself a ValueError, so
+        # this also re-raises normalization failures unchanged while the
+        # CLI's error contract stays a clean one-line message, not a
+        # traceback.
+        raise MatrixNormalizationError(
+            f"cannot normalize matrix file {path}: {exc}"
+        ) from exc
     except (OSError, json.JSONDecodeError) as exc:
         raise MatrixNormalizationError(
             f"cannot read matrix file {path}: {exc}"

@@ -455,8 +455,12 @@ AFTER=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
   grep -E 'nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)') \
   || { echo "FAIL: could not read AFTER metrics snapshot"; exit 1; }
 test -n "$AFTER" || { echo "FAIL: AFTER metrics snapshot is empty"; exit 1; }
-[ "$BASE" = "$AFTER" ] && echo "OK: conversion counters flat across the probe (conversion disabled)" \
-  || echo "FAIL: conversion counters moved across the probe"
+if [ "$BASE" = "$AFTER" ]; then
+  echo "OK: conversion counters flat across the probe (conversion disabled)"
+else
+  echo "FAIL: conversion counters moved across the probe" >&2
+  exit 1
+fi
 # Optional log corroboration (requires markdown_log_verbosity info or
 # debug, and an error-log level that includes info): the probe must show
 # its own path in a disabled decision entry.

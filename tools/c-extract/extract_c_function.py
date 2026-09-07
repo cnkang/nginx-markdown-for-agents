@@ -41,6 +41,27 @@ def _skip_masked_region(src: str, i: int, length: int) -> int:
     return length
 
 
+def _find_code_brace(src: str, start: int, limit: int) -> int:
+    """Return the offset of the first ``{`` in *src[start:limit]* that is
+    not inside a comment or string literal, or -1 when none exists."""
+    i = start
+    while i < limit:
+        ch = src[i]
+        if ch == "{":
+            return i
+        # Mirror _find_code_semicolon: only real comment openers or
+        # string/char literals mask a brace; a bare ``/`` is the division
+        # operator and stays ordinary code.
+        if (ch == "/" and i + 1 < limit
+                and (src[i + 1] == "/" or src[i + 1] == "*")):
+            i = _skip_masked_region(src, i, limit)
+        elif ch in "\"'":
+            i = _skip_masked_region(src, i, limit)
+        else:
+            i += 1
+    return -1
+
+
 def _find_code_semicolon(src: str, start: int, limit: int) -> int:
     """Return the offset of the first ``;`` in *src[start:limit]* that is
     not inside a comment or string literal, or -1 when none exists."""
@@ -128,7 +149,7 @@ def find_function_slice(src: str, function_name: str, needle: str) -> tuple[int,
             print(f"failed to find function signature for {function_name}", file=sys.stderr)
             return None
 
-        brace_start = src.find("{", start)
+        brace_start = _find_code_brace(src, start, len(src))
         if brace_start == -1:
             print(f"failed to find function body start for {function_name}", file=sys.stderr)
             return None
