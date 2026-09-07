@@ -156,9 +156,9 @@ docker build -f examples/kubernetes/Dockerfile.ingress \
 
 #### Custom NGINX Version
 
-Override the NGINX version **and** the base image together: the module must
-be compiled against the exact NGINX build shipped in the base image, or the
-load fails with an ABI mismatch.
+Override the NGINX version **and** the base image together. The module must
+use a build compiled against the exact NGINX build shipped in the base
+image, or the load fails with an ABI mismatch.
 
 ```bash
 docker build -f examples/kubernetes/Dockerfile.ingress \

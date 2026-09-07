@@ -409,9 +409,13 @@ sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
     "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
 if ! sudo nginx -t; then
   echo "ERROR: nginx -t failed after module swap; restoring previous module..." >&2
-  sudo mv -f "${MODULE_BACKUP}" "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+  # Copy (not move) so MODULE_BACKUP survives this restore even if the
+  # second validation below fails: the backup must stay available for
+  # manual recovery on every failure path.
+  sudo cp -a "${MODULE_BACKUP}" \
+      "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
   if ! sudo nginx -t; then
-    echo "ERROR: restored module also fails validation; do not start NGINX. Restore manually from ${MODULE_BACKUP} and your configuration backup." >&2
+    echo "ERROR: restored module also fails validation; do not start NGINX. ${MODULE_BACKUP} is preserved — restore manually from it and your configuration backup." >&2
     exit 1
   fi
   echo "INFO: previous module restored and configuration verified." >&2
@@ -432,18 +436,37 @@ if [[ "$systemd_managed" -eq 1 ]]; then
 else
     sudo nginx
 fi
-# Post-start verification: the new master must be serving before the
-# backup is removed.
+# Post-start verification: the new master must be serving and converting
+# before the backup is removed.  Probe a fixed, known-convertible fixture
+# (a path already verified to return text/html upstream and convert to
+# Markdown) and require the converted representation, not just any
+# response: a 404 or an unconverted pass-through would prove nothing.
 sleep 1
-if ! pgrep -x nginx >/dev/null 2>&1; then
+if [[ "$systemd_managed" -eq 1 ]]; then
+    if ! systemctl is-active --quiet nginx; then
+      echo "ERROR: nginx service inactive after start; keeping ${MODULE_BACKUP} for rollback" >&2
+      exit 1
+    fi
+elif ! pgrep -x nginx >/dev/null 2>&1; then
   echo "ERROR: NGINX master not running after start; keeping ${MODULE_BACKUP} for rollback" >&2
   exit 1
 fi
-curl -fsS -o /dev/null --max-time 10 \
-    -H 'Accept: text/markdown' http://localhost/ || {
-  echo "ERROR: post-start check failed; keeping ${MODULE_BACKUP} for rollback" >&2
+PROBE_PATH="/known-convertible-page"   # adjust to your verified fixture
+PROBE_BODY="$(mktemp)"
+if ! curl -fsS --max-time 10 -H 'Accept: text/markdown' \
+        -o "${PROBE_BODY}" "http://localhost${PROBE_PATH}"; then
+  echo "ERROR: post-start check failed (probe request); keeping ${MODULE_BACKUP} for rollback" >&2
+  rm -f "${PROBE_BODY}"
   exit 1
-}
+fi
+if ! grep -q '^# ' "${PROBE_BODY}" \
+    && ! head -c 1 "${PROBE_BODY}" | grep -q '[*-`]'; then
+  echo "ERROR: post-start check failed (response is not Markdown); keeping ${MODULE_BACKUP} for rollback" >&2
+  echo "  Inspect the probe response and verify ${PROBE_PATH} converts before removing the backup." >&2
+  rm -f "${PROBE_BODY}"
+  exit 1
+fi
+rm -f "${PROBE_BODY}"
 rm -f "${MODULE_BACKUP}" 2>/dev/null || sudo rm -f "${MODULE_BACKUP}"
 ```
 
@@ -559,5 +582,6 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Source-build restore copies the backup (never consumes it), the post-start check prefers systemctl is-active on systemd hosts, and backup removal waits for a known-convertible fixture to return Markdown |
 | 0.9.2 | 2026-08-15 | Kang | Added Step 5 migrate-the-configuration before restart |
 | 0.9.2 | 2026-07-30 | Kang | Initial upgrade guide for 0.9.2 |

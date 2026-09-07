@@ -228,7 +228,7 @@ export in `GPG_PRIVATE_KEY`:
 #### Step 4: Update Repository Metadata Signatures
 
 This step applies **only when a self-hosted APT/YUM repository serves the
-packages**: repository metadata signatures must be refreshed with the new
+packages**: refresh the repository metadata signatures with the new
 key so clients that verify repository metadata accept the rotated key. The
 GitHub Release DEB/RPM channel carries no repository metadata — its rotation
 stays unconditional and stops at the package signatures from Step 3.
@@ -414,4 +414,5 @@ If you suspect the signing key got compromised, rotate immediately:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Reworded the repository-metadata rotation step to active voice; no behavior change |
 | 0.7.0 | 2026-05-17 | spec-agent | Initial GPG key management documentation |
