@@ -57,7 +57,7 @@ Three general eligibility gates apply uniformly to every codec:
 `markdown_cache_validation` not `full`. The fourth condition is a codec
 precondition, evaluated per codec: the response's content coding must map
 to a codec the build actually supports. For Brotli that precondition is
-`NGX_HTTP_BROTLI` being defined at build time
+the build defines `NGX_HTTP_BROTLI` at compile time
 (`NGX_MARKDOWN_BROTLI_STREAMING=on|auto` with the decoder dependency
 present). In Brotli-disabled builds the general gates may still hold, but
 Brotli responses fail the codec precondition and remain on the full-buffer
@@ -292,4 +292,5 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Reworded the Brotli precondition to active voice (the build defines NGX_HTTP_BROTLI); no behavior change |
 | 0.9.1 | 2026-07-17 | Kang | Initial ADR for Brotli streaming decompression promotion |
