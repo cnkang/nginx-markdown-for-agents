@@ -70,9 +70,33 @@ ngx_free(void *p)
     free(p);
 }
 
-void *ngx_palloc(ngx_pool_t *pool, size_t size);
-void *ngx_pcalloc(ngx_pool_t *pool, size_t size);
-void *ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size);
+/*
+ * Pool/cleanup APIs: the create path that references them is not
+ * exercised by this suite, but GNU ld with --gc-sections still links the
+ * intermediate code sections, so provide safe definitions instead of
+ * relying on the platform linker dropping them.
+ */
+void *
+ngx_palloc(ngx_pool_t *pool, size_t size)
+{
+    (void) pool;
+    return malloc(size);
+}
+
+void *
+ngx_pcalloc(ngx_pool_t *pool, size_t size)
+{
+    (void) pool;
+    return calloc(1, size);
+}
+
+void *
+ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
+{
+    (void) pool;
+    (void) size;
+    return NULL;
+}
 
 /* Include the production streaming decompression implementation so that
  * expand_buf is compiled against the stubs above. */
