@@ -49,7 +49,15 @@ def _find_code_semicolon(src: str, start: int, limit: int) -> int:
         ch = src[i]
         if ch == ";":
             return i
-        if ch == "/" or ch in "\"'":
+        # Only a real comment opener (``//`` or ``/*``) or a string/char
+        # literal starts a masked region.  A bare ``/`` is the division
+        # operator and must be consumed as ordinary code, otherwise the
+        # scanner would treat it as a quote start and mask the rest of the
+        # region, hiding a real prototype terminator.
+        if (ch == "/" and i + 1 < limit
+                and (src[i + 1] == "/" or src[i + 1] == "*")):
+            i = _skip_masked_region(src, i, limit)
+        elif ch in "\"'":
             i = _skip_masked_region(src, i, limit)
         else:
             i += 1
