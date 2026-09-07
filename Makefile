@@ -346,6 +346,12 @@ test-all:
 # Native E2E suite — the runtime-regressions + brotli-build-matrix jobs
 # from ci.yml.  Requires NGINX_BIN (a module-enabled binary) or an
 # NGINX_URL fixture; fails with guidance when neither is provided.
+#
+# Three targets manage their own NGINX lifecycle (real-NGINX IMS,
+# filter-ordering qualification, dynamic-config convergence) and cannot
+# attach to an external NGINX_URL fixture, so they are skipped with an
+# explicit SKIP=1 when only NGINX_URL is supplied.  NGINX_BIN runs keep
+# every scenario.
 test-all-e2e:
 	@test -n "$(NGINX_BIN)" -o -n "$(NGINX_URL)" || { \
 		echo "FAIL: test-all-e2e requires NGINX_BIN (module-enabled nginx) or NGINX_URL (running fixture)" >&2; \
@@ -362,9 +368,15 @@ test-all-e2e:
 	$(MAKE) verify-large-e2e
 	$(MAKE) verify-brotli-streaming-e2e
 	$(MAKE) verify-http2-alpn-e2e
-	$(MAKE) verify-real-nginx-ims-e2e
-	$(MAKE) verify-subrequest-filter-ordering-native-e2e
-	$(MAKE) verify-dynconf-convergence-e2e
+	@test -n "$(NGINX_BIN)" || { \
+		echo "SKIP: real-NGINX IMS / filter-ordering / dynconf convergence manage their own NGINX (NGINX_BIN-only; skipped in NGINX_URL fixture mode)" >&2; \
+		true; \
+	}
+	@if test -n "$(NGINX_BIN)"; then \
+		$(MAKE) verify-real-nginx-ims-e2e; \
+		$(MAKE) verify-subrequest-filter-ordering-native-e2e; \
+		$(MAKE) verify-dynconf-convergence-e2e; \
+	fi
 	$(MAKE) verify-non-streaming-module-e2e
 	@echo "=== test-all-e2e: ALL E2E SCENARIOS PASSED ==="
 
