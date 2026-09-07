@@ -367,12 +367,14 @@ sudo nginx -t
 # Back up the running module BEFORE stopping NGINX so a failed
 # validation or start can always restore the pre-upgrade binary.
 MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
+MODULE_BACKUP_OWNED=0
 if [[ -e "${MODULE_BACKUP}" ]]; then
     echo "Preserving existing pre-upgrade module backup: ${MODULE_BACKUP}"
 else
     sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
         "${MODULE_BACKUP}.staged"
     sudo mv -f "${MODULE_BACKUP}.staged" "${MODULE_BACKUP}"
+    MODULE_BACKUP_OWNED=1
 fi
 # Record the service-manager ownership decision BEFORE stopping: after
 # a successful stop, is-active is false even on systemd-managed hosts.
@@ -467,7 +469,13 @@ if ! grep -q '^# ' "${PROBE_BODY}" \
   exit 1
 fi
 rm -f "${PROBE_BODY}"
-rm -f "${MODULE_BACKUP}" 2>/dev/null || sudo rm -f "${MODULE_BACKUP}"
+# Discard the backup only when THIS run created it; a pre-existing backup
+# left by an earlier upgrade stays until that upgrade's cleanup removes it.
+if [[ "${MODULE_BACKUP_OWNED}" -eq 1 ]]; then
+  rm -f "${MODULE_BACKUP}" 2>/dev/null || sudo -S -p '' rm -f "${MODULE_BACKUP}"
+else
+  echo "INFO: keeping pre-existing ${MODULE_BACKUP} (not created by this run)"
+fi
 ```
 
 ---

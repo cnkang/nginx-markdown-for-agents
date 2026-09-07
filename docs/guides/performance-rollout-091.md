@@ -336,7 +336,14 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
    # validation; the backup above keeps the previous binary recoverable.
    # never restart with a broken module in place.
    sudo nginx -t || {
-     echo "ERROR: nginx -t failed after module replacement; restore the previous module and re-validate" >&2
+     echo "ERROR: nginx -t failed after module replacement; restoring the previous module" >&2
+     sudo cp -a "$MODULE_BACKUP" \
+       "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+     if ! sudo nginx -t; then
+       echo "ERROR: restored module also fails validation; do not start NGINX. $MODULE_BACKUP is preserved — recover manually." >&2
+       exit 1
+     fi
+     echo "INFO: previous module restored and validated; rollout aborted" >&2
      exit 1
    }
    # Restart through systemd only when it actually owns the running NGINX

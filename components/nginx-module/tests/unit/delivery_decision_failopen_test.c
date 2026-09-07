@@ -65,8 +65,8 @@ test_production_latch_contracts(void)
      * this translation unit cannot reach the setting functions without
      * pulling in the full filter chain, so only assert that the flag is a
      * distinct state that cleanup/establish helpers control.  The real
-     * set/clear transitions are covered by failopen_delivery_after_
-     * downstream_test.c against the production code paths. */
+     * set/clear transitions are covered by request_bypass_production_
+     * test.c against the production code paths. */
     TEST_ASSERT(ctx.fullbuffer.failopen_delivery_pending == 0,
                 "latch defaults clear on a fresh context");
 

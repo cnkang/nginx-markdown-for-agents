@@ -393,7 +393,7 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
 - Failure rate exceeding 5% of conversion attempts over any 1-hour window
 - Latency spikes correlated with peak traffic periods
 - Client reports of unexpected content
-- One path failing significantly more than others: `grep -E "outcome=(failed_open|failed_closed|aborted)" | grep -oP 'uri=\K[^ ]+' | sort | uniq -c`
+- One path failing significantly more than others: `grep "markdown:" /var/log/nginx/error.log | grep -E "outcome=(failed_open|failed_closed|aborted)" | grep -oP 'uri=\K[^ ]+' | sort | uniq -c`
 
 ---
 
