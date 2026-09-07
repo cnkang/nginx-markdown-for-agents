@@ -214,7 +214,7 @@ Parsing a body fails in four scenarios:
 
 - Empty input: Returns `ConversionError::InvalidInput`
 - Unsupported charset label: Returns `ConversionError::EncodingError`
-  (the label cannot be mapped to a supported encoding)
+  (the module cannot map the label to a supported encoding)
 - Invalid bytes for the declared charset: Returns `ConversionError::EncodingError`
 - Invalid UTF-8 bytes (declared or detected charset is UTF-8): Returns
   `ConversionError::EncodingError`
@@ -251,6 +251,7 @@ differs from UTF-8.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Reworded the unsupported-label error note to active voice; no behavior change |
 | 0.9.2 | 2026-09-03 | Kang | Aligned transcoding story with the implementation: parser transcodes non-UTF-8 charsets via encoding_rs, meta scanning is a byte-level prescanner, and unsupported or invalid charsets fail the conversion with an encoding error |
 | 0.9.2 | 2026-08-15 | Hermes | Error handling rejects only invalid UTF-8 bytes; valid UTF-8 passes even with a non-UTF-8 declared charset |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
