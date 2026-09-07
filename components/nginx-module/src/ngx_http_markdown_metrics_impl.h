@@ -791,7 +791,14 @@ ngx_http_markdown_metrics_check_access(ngx_http_request_t *r)
                  | ((uint32_t) sin6->sin6_addr.s6_addr[13] << 16)
                  | ((uint32_t) sin6->sin6_addr.s6_addr[14] << 8)
                  | (uint32_t) sin6->sin6_addr.s6_addr[15];
-            if ((ntohl(v4) & 0xff000000U) == 0x7f000000U) {
+            /* The bytes are assembled in host order above (byte 12 is the
+             * most significant octet of the embedded IPv4 address), so the
+             * /8 comparison uses the value directly.  Applying ntohl()
+             * here would byte-swap the already host-order value again on
+             * little-endian hosts and deny legitimate v4-mapped loopback
+             * peers.  The AF_INET branch above differs: sin_addr.s_addr is
+             * stored in network byte order, so ntohl() is required there. */
+            if ((v4 & 0xff000000U) == 0x7f000000U) {
                 return NGX_OK;
             }
         }
