@@ -870,9 +870,17 @@ test_should_convert_typed_singleton_validation(void)
     ngx_table_elt_t *typed;
     ngx_str_t out;
     ngx_uint_t reason;
-    static char oversized[NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX + 1];
+    /* One extra byte for the NUL terminator that strlen() requires, plus
+     * the value bytes themselves: the buffer is two bytes longer than the
+     * acceptance cap so the value stays above it after the terminator. */
+    static char oversized[NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX + 2];
 
-    memset(oversized, 'x', sizeof(oversized));
+    /* Fill only the value bytes and keep an explicit NUL terminator at the
+     * end so add_header's strlen() reads inside the buffer: the value is
+     * still longer than NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX, exercising
+     * the oversized-singleton rejection branch. */
+    memset(oversized, 'x', sizeof(oversized) - 1);
+    oversized[sizeof(oversized) - 1] = '\0';
 
     /* A typed singleton whose value has length but no storage must be
      * rejected like a malformed list field-line, not aliased into the

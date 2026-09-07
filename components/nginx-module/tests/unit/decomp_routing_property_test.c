@@ -44,21 +44,29 @@ typedef int             ngx_flag_t;
 
 typedef enum {
     NGX_HTTP_MARKDOWN_COMPRESSION_NONE    = 0,
-    NGX_HTTP_MARKDOWN_COMPRESSION_GZIP    = MARKDOWN_FORMAT_GZIP + 1,
-    NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE = MARKDOWN_FORMAT_DEFLATE + 1,
-    NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI  = MARKDOWN_FORMAT_BROTLI + 1,
-    NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN = MARKDOWN_FORMAT_BROTLI + 2
+    NGX_HTTP_MARKDOWN_COMPRESSION_GZIP    = 1,
+    NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE = 2,
+    NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI  = 3,
+    NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN = 4
 } ngx_http_markdown_compression_type_e;
 
-_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
-                   == MARKDOWN_FORMAT_GZIP + 1,
+/* Drift check: the local enum pins literal values so a change to the
+ * production MARKDOWN_FORMAT_* constants cannot move both sides together.
+ * The production constants live in markdown_converter.h (GZIP == 0,
+ * DEFLATE == 1, BROTLI == 2); each C enumerator must stay exactly one past
+ * its Rust counterpart. */
+_Static_assert(MARKDOWN_FORMAT_GZIP == 0
+                   && NGX_HTTP_MARKDOWN_COMPRESSION_GZIP == 1,
                "gzip C/R format mapping drifted");
-_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
-                   == MARKDOWN_FORMAT_DEFLATE + 1,
+_Static_assert(MARKDOWN_FORMAT_DEFLATE == 1
+                   && NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE == 2,
                "deflate C/R format mapping drifted");
-_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
-                   == MARKDOWN_FORMAT_BROTLI + 1,
+_Static_assert(MARKDOWN_FORMAT_BROTLI == 2
+                   && NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI == 3,
                "Brotli C/R format mapping drifted");
+_Static_assert(NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN
+                   == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI + 1,
+               "unknown sentinel must follow the last real format");
 
 /* ----------------------------------------------------------------
  * Cache validation mode enum
