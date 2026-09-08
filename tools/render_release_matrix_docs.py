@@ -83,7 +83,7 @@ for _sections in SECTION_REGISTRY.values():
 TIER_DEFINITIONS: dict[str, str] = {
     "supported": "CI passes, artifact produced, install verified, release gate blocks.",
     "experimental": "Available, not guaranteed, CI non-blocking, noted in release notes.",
-    "best-effort": "Source only, docs only, not a gate.",
+    "best-effort": "The project may produce an artifact for the listed platform but the row is not a release gate. Availability is not guaranteed and the row does not block the release. Source-only rows use this tier when they are not part of the prebuilt-package surface.",
     "unsupported": "No artifacts, no commitment.",
 }
 

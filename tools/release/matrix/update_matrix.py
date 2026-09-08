@@ -515,14 +515,16 @@ def _supported_dynamic_entry(entry: dict) -> dict | None:
     artifact types are ignored.  Canonical generated rows carry no
     ``support_tier`` (projection happens here), so the optional path keeps
     them eligible instead of dropping them for a missing tier field.
+    Best-effort/pending rows (newly discovered versions awaiting manual
+    verification, see ``_mark_new_versions_pending``) are projected with
+    their tier preserved so the auto-diff sees them; only unknown tiers are
+    dropped.
     """
     normalized = normalize_compatibility_entry(entry, require_fields=False)
     if normalized.get("artifact_type") != "dynamic-module":
         return _source_only_entry(normalized)
-    if (
-        normalized.get("support_tier") is not None
-        and normalized.get("support_tier") != "supported"
-    ):
+    tier = normalized.get("support_tier")
+    if tier is not None and tier not in ("supported", "best-effort"):
         return None
     try:
         version, os_type, arch = _matrix_entry_identity(normalized)
@@ -534,7 +536,7 @@ def _supported_dynamic_entry(entry: dict) -> dict | None:
         "nginx": version,
         "os_type": os_type,
         "arch": arch,
-        "support_tier": "full",
+        "support_tier": "full" if tier != "best-effort" else "best-effort",
     }
 
 
@@ -1122,6 +1124,43 @@ def _added_version_track_map(diff: MatrixDiff) -> dict[str, str]:
     return {_version_track(version): version for version in diff.added_versions}
 
 
+def _mark_new_versions_pending(
+    entries: list[dict], diff: MatrixDiff
+) -> list[dict]:
+    """Keep newly discovered NGINX versions out of automatic support.
+
+    The updater may discover a release before this repository has run the
+    required platform and artifact checks.  Preserve the generated row, but
+    bind it to an explicit pending/best-effort state until a maintainer
+    records verification evidence.  Existing rows keep their reviewed tier.
+    """
+    pending_versions = set(diff.added_versions)
+    if not pending_versions:
+        return entries
+
+    marked: list[dict] = []
+    recorded_date = datetime.now(timezone.utc).date().isoformat()
+    for entry in entries:
+        candidate = dict(entry)
+        try:
+            version = _matrix_entry_identity(entry)[0]
+        except (TypeError, ValueError):
+            marked.append(candidate)
+            continue
+        if version in pending_versions:
+            candidate["support_tier"] = "best-effort"
+            candidate["verification_state"] = "pending"
+            candidate["support_stage"] = "best-effort"
+            candidate["date"] = recorded_date
+            candidate["source"] = "nginx.org"
+            candidate["provenance"] = {
+                "kind": "nginx.org",
+                "reference": NGINX_DOWNLOAD_URL,
+            }
+        marked.append(candidate)
+    return marked
+
+
 def _update_entry_version_for_track(entry: dict, track_map: dict[str, str]) -> None:
     """Update legacy and canonical nginx version keys when their track advances."""
     for key in ("nginx_version", "nginx"):
@@ -1187,16 +1226,20 @@ def _canonical_dynamic_entry(
         # A bare arch value (for example "aarch64" via the arch alias)
         # is not a canonical target triple; construct the full triple.
         target = f"{normalized_arch}-unknown-linux-{target_env}"
-    return {
+    generated = {
         "nginx_version": version,
         "os": "linux",
         "libc": libc,
         "target": target,
         "artifact_type": "dynamic-module",
-        "support_tier": SUPPORT_TIER,
+        "support_tier": normalized.get("support_tier", SUPPORT_TIER),
         "feature_manifest_digest": _feature_manifest_digest(),
         "abi_version": _frozen_abi_version(),
     }
+    for key in ("verification_state", "support_stage", "date", "source", "provenance"):
+        if key in normalized:
+            generated[key] = normalized[key]
+    return generated
 
 
 def _feature_manifest_digest() -> str:
@@ -1327,14 +1370,16 @@ def _run_write_mode(
     except OSError:
         matrix_backup = None
 
+    effective_merged = _mark_new_versions_pending(merged, diff)
+
     try:
         if _is_canonical_document(data):
-            _replace_canonical_dynamic_entries(data, merged)
+            _replace_canonical_dynamic_entries(data, effective_merged)
         else:
             data["updated_at"] = datetime.now(timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             )
-            data["matrix"] = merged
+            data["matrix"] = effective_merged
 
             # Update entries with the new version numbers if they exist
             _update_entries_for_added_versions(data, diff)
@@ -1350,7 +1395,7 @@ def _run_write_mode(
         return 1
 
     # Generate new doc content (restores matrix on SystemExit)
-    new_doc_content = _write_doc_with_rollback(merged, matrix_backup)
+    new_doc_content = _write_doc_with_rollback(effective_merged, matrix_backup)
 
     # Write doc atomically (restores matrix on failure)
     result = _atomic_doc_write(new_doc_content, matrix_backup)

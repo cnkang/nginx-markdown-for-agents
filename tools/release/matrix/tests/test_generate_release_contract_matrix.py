@@ -118,3 +118,34 @@ def test_source_row_must_use_platform_independent_identity() -> None:
     source["entries"][-1]["os"] = "linux"
     with pytest.raises(ValueError, match="source row"):
         projection.build_projection(source)
+
+
+def test_support_metadata_and_explicit_exclusions_are_projected() -> None:
+    """Support state and provenance survive the generated projection."""
+    source = policy_matrix()
+    source["policy_exclusions"] = {
+        "nginx_versions_below": "1.24.0",
+        "operating_systems": ["ubuntu-22.04"],
+        "reason": "outside the pre-LTS contract",
+    }
+    source["entries"][0].update(
+        {
+            "verification_state": "pending",
+            "support_stage": "compat-floor",
+            "date": "2026-09-07",
+            "source": "ubuntu-default-repo",
+            "provenance": {
+                "kind": "ubuntu-default-repo",
+                "reference": "ubuntu:24.04",
+            },
+        }
+    )
+
+    result = projection.build_projection(source)
+    assert result["policy_exclusions"]["operating_systems"] == ["ubuntu-22.04"]
+    entry = next(
+        row for row in result["entries"] if row["target"] == "x86_64-unknown-linux-gnu"
+    )
+    assert entry["verification_state"] == "pending"
+    assert entry["support_stage"] == "compat-floor"
+    assert entry["provenance"]["kind"] == "ubuntu-default-repo"

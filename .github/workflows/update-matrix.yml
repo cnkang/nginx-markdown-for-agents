@@ -38,6 +38,9 @@ jobs:
       - name: Run matrix updater
         run: python3 tools/release/matrix/update_matrix.py
 
+      - name: Enforce pending state for auto-discovered versions
+        run: python3 tools/release/matrix/validate_auto_update_policy.py
+
       - name: Generate release-contract matrix projection
         run: python3 tools/release/matrix/generate_release_contract_matrix.py --write
 
