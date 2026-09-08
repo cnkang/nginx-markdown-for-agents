@@ -1425,10 +1425,15 @@ def _run_write_mode(
         return 1
 
     # Generate new doc content (restores matrix on SystemExit)
-    doc_entries = (
-        _matrix_entry_list(data, MATRIX_PATH)
-        if _is_canonical_document(data) else effective_merged
-    )
+    if _is_canonical_document(data):
+        try:
+            doc_entries = _matrix_entry_list(data, MATRIX_PATH)
+        except (TypeError, ValueError, OSError) as exc:
+            _restore_matrix_backup(matrix_backup)
+            print(f"Error reading canonical matrix: {exc}", file=sys.stderr)
+            return 1
+    else:
+        doc_entries = effective_merged
     new_doc_content = _write_doc_with_rollback(doc_entries, matrix_backup)
 
     # Write doc atomically (restores matrix on failure)

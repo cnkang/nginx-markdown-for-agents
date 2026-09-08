@@ -349,8 +349,31 @@ class ValidationResult:
         return any(s == "FAIL" for s, _, _ in self.results)
 
 
+def _enclosing_initializer(source: str, pos: int) -> str | None:
+    """Return the text of the C initializer block enclosing ``pos``.
+
+    Scans backward from ``pos`` for the opening ``{`` of the enclosing
+    brace block and forward for its matching close, so the caller can
+    inspect exactly one command-table entry instead of a fixed-width
+    window that may bleed into the neighbouring entry.
+    """
+    open_pos = source.rfind("{", 0, pos)
+    if open_pos < 0:
+        return None
+    depth = 0
+    for i in range(open_pos, len(source)):
+        ch = source[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return source[open_pos : i + 1]
+    return None
+
+
 def read_safe(path: Path) -> str:
-    """Read a file only if it resolves within PROJECT_ROOT; return \'\' otherwise."""
+    """Read a file only if it resolves within PROJECT_ROOT; return '' otherwise."""
     resolved = path.resolve()
     try:
         resolved.relative_to(PROJECT_ROOT.resolve())
@@ -413,9 +436,11 @@ def check_directive_not_in_source(
     # 0.9.2 keeps the five convergence removals in the command table so
     # nginx -t can emit an explicit migration error.  They are removed from
     # the active contract because their command entry uses the rejecting
-    # handler rather than a configuration setter.
-    entry = source[match.start() : match.start() + 1200]
-    if "ngx_http_markdown_removed_directive" in entry:
+    # handler rather than a configuration setter.  Inspect only the
+    # enclosing initializer block of the matched directive, not a fixed
+    # window that can bleed into the neighbouring command entry.
+    block = _enclosing_initializer(source, match.start())
+    if block is not None and "ngx_http_markdown_removed_directive" in block:
         result.pass_(check_id, "removed directive retained with rejecting handler")
         return
     result.fail(
