@@ -126,6 +126,10 @@ if [[ ! -f "${MODULE_PATH}" ]]; then
   exit 1
 fi
 if [[ -e "${MODULE_BACKUP}" ]]; then
+  if ! sudo -n cmp -s -- "${MODULE_BACKUP}" "${MODULE_PATH}"; then
+    echo "ERROR: existing backup differs from the installed module or cannot be read; inspect it before upgrading" >&2
+    exit 1
+  fi
   echo "Preserving existing module backup: ${MODULE_BACKUP}"
 else
   sudo cp -a "${MODULE_PATH}" "${MODULE_BACKUP}"

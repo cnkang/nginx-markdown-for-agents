@@ -189,6 +189,9 @@ Publication and artifact availability are separate release gates.
    fi
    # Replace the whole tree so stale 0.9.2 include files cannot survive.
    sudo cp -a -- "${CONFIG_BACKUP}" "${CONFIG_DIR}.restore-0.9.1"
+   # Keep the 0.9.2 module binary so a failed rollback can be undone.
+   sudo cp -a -- "$MODULES_DIR/ngx_http_markdown_filter_module.so" \
+       "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-rollback"
    sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.pre-rollback"
    if ! sudo mv -- "${CONFIG_DIR}.restore-0.9.1" "${CONFIG_DIR}"; then
      sudo mv -- "${CONFIG_DIR}.pre-rollback" "${CONFIG_DIR}"
@@ -198,7 +201,15 @@ Publication and artifact availability are separate release gates.
        "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" && \
    sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \
        "$MODULES_DIR/ngx_http_markdown_filter_module.so"
-   sudo nginx -t && sudo nginx
+   if ! sudo nginx -t; then
+     echo "ERROR: rollback module fails nginx -t; restoring the 0.9.2 configuration tree and module" >&2
+     sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed"
+     sudo mv -- "${CONFIG_DIR}.pre-rollback" "${CONFIG_DIR}"
+     sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-rollback" \
+         "$MODULES_DIR/ngx_http_markdown_filter_module.so"
+     exit 1
+   fi
+   sudo nginx
    ```
 
 ### Helm

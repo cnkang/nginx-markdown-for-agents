@@ -1428,6 +1428,9 @@ def _run_write_mode(
     if _is_canonical_document(data):
         try:
             doc_entries = _matrix_entry_list(data, MATRIX_PATH)
+        except SystemExit:
+            _restore_matrix_backup(matrix_backup)
+            raise
         except (TypeError, ValueError, OSError) as exc:
             _restore_matrix_backup(matrix_backup)
             print(f"Error reading canonical matrix: {exc}", file=sys.stderr)

@@ -151,7 +151,7 @@ while IFS= read -r match; do
         fi
     fi
     parse_size_hits=$((parse_size_hits + 1))
-done < <(grep -rnE '\bngx_parse_size\b.*\(size_t|\(size_t.*\bngx_parse_size\b' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':[[:space:]]*/\\*|:[[:space:]]*\\*|:[[:space:]]*//' || true)
+done < <(grep -rnE '\bngx_parse_size\b.*\(size_t|\(size_t.*\bngx_parse_size\b' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':[[:space:]]*/\*|:[[:space:]]*\*|:[[:space:]]*//' || true)
 
 if [[ "$parse_size_hits" -eq 0 ]]; then
     echo "$NONE_FOUND_MSG" >&2

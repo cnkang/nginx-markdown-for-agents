@@ -179,7 +179,6 @@ typedef struct ngx_http_markdown_conf_s {
     } routing;
     struct {
         ngx_uint_t    policy;
-        ngx_flag_t    policy_explicit;
         size_t        threshold;
         ngx_flag_t    threshold_explicit;
         size_t        precommit_buffer;
@@ -684,7 +683,6 @@ test_access_and_json_builder(void)
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
-    conf.stream.policy_explicit = 1;
     memset(&authorization, 0, sizeof(authorization));
     authorization.value.data = authorization_value;
     authorization.value.len = sizeof(authorization_value) - 1;
@@ -873,7 +871,6 @@ test_diagnostics_has_no_removed_profile_surface(void)
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
-    conf.stream.policy_explicit = 0;
     memset(&b, 0, sizeof(b));
 
     rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
