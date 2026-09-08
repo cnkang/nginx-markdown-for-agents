@@ -18,6 +18,36 @@ After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
 **Upgrade path:** update your nginx.conf to remove/replace removed directives
 (see tables below), replace the module binary, then run `nginx -t` to validate.
 
+## Default-policy actions
+
+> **Authentication action:** `markdown_auth_policy` changes from `allow` to
+> `deny`. Authenticated requests receive the original HTML without conversion;
+> this policy never rejects the request. Set `markdown_auth_policy allow;`
+> explicitly to retain the previous conversion behavior.
+
+> **Streaming action:** `markdown_streaming` changes from `auto` to `off`.
+> Unset and `off` use bounded full-buffer conversion. Opt in with
+> `markdown_streaming auto;` or `markdown_streaming force;`. Explicit `auto`
+> prefers streaming after safety checks, regardless of response size.
+
+## Integer identifier migration
+
+| Identifier | Old integer | New integer |
+|---|---|---|
+| reason `invalid_dynconf` | 21 | Retired |
+| reason `degraded_snapshot` | 22 | Retired |
+| reason `header_plan_apply_error` | 23 | 21 |
+| reason `streaming_mid_flight_error` | 24 | 22 |
+| reason `bypass_no_transform` | 25 | 23 |
+| reason `encoding_header_invalid` | 26 | 24 |
+| ErrorClass / FFIErrorClass | 8 | 6 |
+| ErrorClass / FFIErrorClass | 9 | 7 |
+
+Consumers that persist reason integers must resolve the stored meaning through
+the string `metric_key` before adopting the new registry. Do not reinterpret
+old integers with the new enum. Retired reasons have no current replacement.
+Migrate error-class integers by their named class and the table above.
+
 ## Static configuration migration
 
 The 0.9.2 pre-LTS convergence removed the runtime dynconf subsystem.
@@ -264,10 +294,10 @@ markdown_stream_excluded_types text/csv application/xml;
 
 ### `markdown_stream_threshold` → removed (internalized)
 
-The streaming threshold is now a fixed internal constant (1 MiB). Chunked
-responses (no Content-Length) stream only when `markdown_streaming` permits
-streaming. The directive's `off` behavior stays unchanged. Chunked
-responses do not stream unconditionally.
+Explicit `markdown_streaming auto` prefers streaming after safety checks,
+regardless of response size. There is no size threshold. The default is
+`off`: unset and `off` use bounded full-buffer conversion. Chunked responses
+stream only when an explicit `auto` or `force` policy permits streaming.
 
 ```nginx
 # BEFORE (0.9.1)

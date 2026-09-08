@@ -11,7 +11,8 @@ track that harness rather than private local steering files.
 ## Current Assessment
 
 As of the **current release line (0.9.2)**, the project includes a
-streaming-default conversion model with full-buffer fallback,
+bounded full-buffer conversion by default (`markdown_streaming off`),
+with explicit streaming opt-in,
 Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, unified decompression budget via
@@ -258,7 +259,7 @@ details.
 
 The following limitations appear in the documentation:
 
-1. **Streaming Is Default**: Streaming is the default policy, with
+1. **Full-Buffer Default**: Unset and `off` select bounded full-buffer conversion, with
    `markdown_streaming off|auto|force`. `off` explicitly selects full-buffer
    conversion and ineligible or failed streaming requests follow fallback
    policy.
@@ -392,8 +393,8 @@ See `examples/docker/` for Docker build examples.
 **NGINX Markdown for Agents** is on the 0.9.x line: 0.9.2 is the current
 development line and 0.9.1 is the latest released patch. The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
-streaming-default conversion model, bounded-memory processing, a full-buffer
-fallback, and a repo-owned validation harness. Release readiness remains tied
+bounded full-buffer default, explicit streaming opt-in, bounded-memory
+processing, and a repo-owned validation harness. Release readiness remains tied
 to the current release matrix and the evidence-producing gates described in
 the active release documentation.
 
