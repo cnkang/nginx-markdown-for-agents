@@ -158,15 +158,11 @@ docker build -f examples/kubernetes/Dockerfile.ingress \
 
 Override the NGINX version **and** the base image together. The module must
 use a build compiled against the exact NGINX build shipped in the base
-image, or the load fails with an ABI mismatch.
-
-```bash
-docker build -f examples/kubernetes/Dockerfile.ingress \
-  --build-arg NGINX_VERSION=1.26.3 \
-  --build-arg NGINX_INGRESS_IMAGE=nginx:1.26.3@sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860 \
-  --build-arg MODULE_SHA="$(git rev-parse HEAD)" \
-  -t my-nginx-markdown:nginx-1.26.3 .
-```
+image, or the load fails with an ABI mismatch. The F5 Ingress Controller
+image pins its own NGINX build, so a custom NGINX version requires the
+plain NGINX base image (see the plain-NGINX example below); the
+`NGINX_INGRESS_IMAGE` argument then selects the matching `nginx:<version>`
+image instead of the Ingress Controller image.
 
 #### Custom Ingress Controller Image
 

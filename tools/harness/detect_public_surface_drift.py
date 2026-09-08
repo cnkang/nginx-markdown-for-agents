@@ -58,6 +58,17 @@ FINAL_METRIC_COUNT = 10
 REMOVED_DIRECTIVE_HANDLER = "ngx_http_markdown_removed_directive"
 FINAL_REJECT_ONLY_COUNT = 5
 
+# The five convergence removals retained as reject-only migration entries
+# (LTS-R008/R009): three dynconf directives and two custom-selector
+# directives.  The inventory must contain exactly these names.
+REJECT_ONLY_NAMES = frozenset({
+    "markdown_dynamic_config",
+    "markdown_dynamic_config_path",
+    "markdown_dynconf_dry_run",
+    "markdown_prune_selectors",
+    "markdown_prune_protection_selectors",
+})
+
 DIRECTIVE_RE = re.compile(r'ngx_string\("(markdown_[^"\\]+)"\)')
 REASON_CODE_RE = re.compile(r'^\s+(\w+)\s*=\s*(\d+)\s*,', re.MULTILINE)
 METRIC_NAME_RE = re.compile(r'\b(nginx_markdown_[a-z0-9_]+)\b')
@@ -208,6 +219,18 @@ def _validate_reject_only_migration(inventory):
         errors.append(
             "post-convergence inventory must contain exactly {} reject-only "
             "migration directives".format(FINAL_REJECT_ONLY_COUNT))
+    names = {entry.get("name") for entry in reject_only
+             if isinstance(entry, dict)}
+    missing = sorted(REJECT_ONLY_NAMES - names)
+    if missing:
+        errors.append(
+            "reject_only_directives missing required names: {}".format(
+                ", ".join(missing)))
+    extra = sorted(names - REJECT_ONLY_NAMES)
+    if extra:
+        errors.append(
+            "reject_only_directives contains unexpected names: {}".format(
+                ", ".join(extra)))
     for index, entry in enumerate(reject_only):
         if not isinstance(entry, dict):
             errors.append(
