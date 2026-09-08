@@ -311,10 +311,12 @@ def test_reject_only_migration_directive_shape_is_validated() -> None:
     inventory = copy.deepcopy(detector.load_inventory())
     inventory["reject_only_directives"][0]["status"] = "active"
     inventory["reject_only_directives"][1]["handler"] = "ngx_other_handler"
+    inventory["reject_only_directives"][2]["classification"] = "active"
 
     errors = detector.validate_inventory_schema(inventory)
 
     assert "reject_only_directives[0].status must be reject_only" in errors
+    assert "reject_only_directives[2].classification must be reject_only" in errors
     assert (
         "reject_only_directives[1].handler must be {}".format(
             detector.REMOVED_DIRECTIVE_HANDLER)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import jsonschema
 from pathlib import Path
 
 from tools.release.gates import validate_pre_lts_status as validator
@@ -60,6 +61,16 @@ def _valid_report() -> dict:
 
 def test_valid_report_passes() -> None:
     assert validator.validate_report(_valid_report(), SCHEMA) == []
+
+
+def test_schema_rejects_pass_with_conditions() -> None:
+    report = _valid_report()
+    checker = jsonschema.Draft202012Validator(SCHEMA)
+    assert checker.is_valid(report)
+    report["statuses"]["SPEC_READY"]["conditions"] = ["review pending"]
+    assert not checker.is_valid(report)
+    report["statuses"]["SPEC_READY"]["state"] = "NON_BLOCKING_OBSERVATION"
+    assert checker.is_valid(report)
 
 
 def test_pending_is_not_a_status_vocabulary_value() -> None:

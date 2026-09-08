@@ -50,6 +50,7 @@ def validate_policy(matrix: dict[str, Any], diff: dict[str, Any]) -> list[str]:
 
     violations: list[str] = []
     added_set = set(added)
+    matched_versions: set[str] = set()
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             violations.append(f"entries[{index}] is not an object")
@@ -57,6 +58,7 @@ def validate_policy(matrix: dict[str, Any], diff: dict[str, Any]) -> list[str]:
         version = entry.get("nginx_version", entry.get("nginx"))
         if version not in added_set:
             continue
+        matched_versions.add(version)
         support_tier = entry.get("support_tier")
         verification_state = entry.get("verification_state")
         support_stage = entry.get("support_stage")
@@ -76,6 +78,8 @@ def validate_policy(matrix: dict[str, Any], diff: dict[str, Any]) -> list[str]:
                 f"entries[{index}] version {version} must have a non-primary "
                 f"support_stage (got {support_stage!r})"
             )
+    for version in sorted(added_set - matched_versions):
+        violations.append(f"added version {version} has no matrix entries")
     return violations
 
 
