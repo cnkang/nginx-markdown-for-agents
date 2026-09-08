@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import sys
 from typing import Any
@@ -34,6 +35,14 @@ def _source_capabilities(root: pathlib.Path, features: str) -> dict[str, Any]:
     (RUST_RELEASE_FEATURES); the full-buffer engine and the retained content
     encodings are unconditional parts of the Rust library, so their presence
     is verified against the source that the build compiles.
+
+    The C module independently gates streaming through the
+    ``NGX_MARKDOWN_RUST_FEATURES`` environment variable consumed by
+    ``components/nginx-module/config`` (it adds
+    ``-DMARKDOWN_STREAMING_ENABLED`` only when the feature list contains
+    ``streaming``).  A gate that trusts only the requested ``--features``
+    argument can certify a build whose C side was configured without
+    streaming, so the environment variable is cross-checked here.
     """
     encoding = (root / "components/rust-converter/src/encoding.rs").read_text(
         encoding="utf-8"
@@ -50,11 +59,25 @@ def _source_capabilities(root: pathlib.Path, features: str) -> dict[str, Any]:
 
     enabled_features = {f.strip() for f in features.split(",") if f.strip()}
 
+    # Cross-check the C-side feature gate: components/nginx-module/config
+    # maps NGX_MARKDOWN_RUST_FEATURES (default -> prune_noise_regions,
+    # streaming; none -> empty) to -DMARKDOWN_STREAMING_ENABLED.  If the
+    # environment pins a feature list that omits streaming while the Rust
+    # build claims it, the compiled C module cannot actually stream.
+    c_features_env = os.environ.get("NGX_MARKDOWN_RUST_FEATURES")
+    c_streaming = True
+    if c_features_env is not None:
+        c_features = {
+            f.strip() for f in c_features_env.split(",") if f.strip()
+        } if c_features_env != "none" else set()
+        c_streaming = "streaming" in c_features
+
     return {
         "engines": {
             "full_buffer": "ngx_http_markdown_fullbuffer_cleanup" in conversion,
             "streaming": "streaming" in enabled_features
-            and "ngx_http_markdown_select_processing_path" in streaming,
+            and "ngx_http_markdown_select_processing_path" in streaming
+            and c_streaming,
         },
         "encodings": {
             "identity": "Identity" in encoding,
@@ -65,6 +88,7 @@ def _source_capabilities(root: pathlib.Path, features: str) -> dict[str, Any]:
         },
         "source_root": str(root),
         "features": features,
+        "c_features_env": c_features_env,
     }
 
 
