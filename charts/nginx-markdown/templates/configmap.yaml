@@ -57,12 +57,6 @@ data:
         {{- end }}
         {{- if .Values.markdown.prune }}
         markdown_prune_noise {{ ternary "on" "off" .Values.markdown.prune.noise }};
-        {{- if .Values.markdown.prune.selectors }}
-        markdown_prune_selectors "{{ .Values.markdown.prune.selectors | replace "\\" "\\\\" | replace "\"" "\\\"" }}";
-        {{- end }}
-        {{- if .Values.markdown.prune.protectionSelectors }}
-        markdown_prune_protection_selectors "{{ .Values.markdown.prune.protectionSelectors | replace "\\" "\\\\" | replace "\"" "\\\"" }}";
-        {{- end }}
         {{- end }}
         {{- if .Values.markdown.contentTypes }}
         markdown_content_types {{ join " " .Values.markdown.contentTypes }};
