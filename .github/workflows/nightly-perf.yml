@@ -35,7 +35,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.1
           # rustfmt + clippy required by make complexity-check and cargo clippy gates
           components: rustfmt,clippy
 
@@ -251,7 +251,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.1
           targets: x86_64-unknown-linux-gnu
           components: rustfmt,clippy
 
