@@ -1375,7 +1375,8 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
     )
     data["entries"] = dynamic_entries + other_entries
     for entry in data["entries"]:
-        entry["nginx_channel"] = classify_version(entry["nginx_version"])
+        if _is_generated_dynamic_row(entry):
+            entry["nginx_channel"] = classify_version(entry["nginx_version"])
     data.pop("updated_at", None)
     data.pop("matrix", None)
 

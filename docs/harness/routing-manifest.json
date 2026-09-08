@@ -475,6 +475,8 @@
         "components/nginx-module/src/ngx_http_markdown_request_impl.h",
         "components/nginx-module/src/ngx_http_markdown_filter_module.c",
         "components/nginx-module/src/ngx_http_markdown_filter_module.h",
+        "components/nginx-module/src/ngx_http_markdown_effective_conf_impl.h",
+        "components/nginx-module/src/ngx_http_markdown_config_core_impl.h",
         "examples/nginx-configs/**",
         "components/nginx-module/tests/**",
         "tools/e2e/**",
