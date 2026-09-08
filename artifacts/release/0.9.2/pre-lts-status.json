@@ -1,0 +1,81 @@
+{
+  "branch": "dev/wip-0.9.2rc7",
+  "candidate": {
+    "authorization": "not-granted",
+    "source_sha": "ae1772c914b15496bed4a19d9fab0a00a8edf93a",
+    "working_tree": "dirty"
+  },
+  "captured_at": "2026-09-08T00:00:00Z",
+  "release": "0.9.2",
+  "schema_version": 1,
+  "statuses": {
+    "IMPLEMENTATION_COMPLETE": {
+      "conditions": [
+        "working-tree review and candidate freeze remain outstanding",
+        "authoritative package signing and production installation remain open"
+      ],
+      "evidence": [
+        "artifacts/release/0.9.2/build-identity.json",
+        "artifacts/release/0.9.2/release-candidate-sha-manifest.json",
+        "docs/architecture/pre-lts-lifecycle-ffi-invariant-mapping.md"
+      ],
+      "state": "NON_BLOCKING_OBSERVATION"
+    },
+    "LTS_DECISION_PENDING": {
+      "conditions": [
+        "the user must decide whether to keep converging or enter LTS after evidence review"
+      ],
+      "evidence": [
+        "docs/releases/0.9.2-post-observation-decision-template.md"
+      ],
+      "state": "NON_BLOCKING_OBSERVATION"
+    },
+    "OBSERVATION_STATUS": {
+      "conditions": [
+        "observation is user-owned and must not be inferred from local smoke tests"
+      ],
+      "evidence": [
+        "docs/releases/0.9.2-observation-plan.md",
+        "docs/releases/0.9.2-observation-freeze.md"
+      ],
+      "phase_state": "not-started",
+      "state": "AWAITING_SOAK_OBSERVATION_EXTERNAL"
+    },
+    "PRE_LTS_READY": {
+      "conditions": [
+        "candidate-bound performance, fuzz, and short-soak records are blocking-pending",
+        "authoritative package signing, arm64 package evidence, and production installation remain open",
+        "capacity measurements and the >=72h mixed-load run are not complete"
+      ],
+      "evidence": [
+        "artifacts/release/0.9.2/release-candidate-sha-manifest.json",
+        "artifacts/release/0.9.2/build-identity.json",
+        "artifacts/release/0.9.2/capacity-analysis.json",
+        "docs/releases/0.9.2-observation-plan.md"
+      ],
+      "state": "AWAITING_SOAK_OBSERVATION_EXTERNAL"
+    },
+    "SPEC_READY": {
+      "conditions": [],
+      "evidence": [
+        ".kiro/specs/62-pre-lts-convergence-092/requirements.md",
+        ".kiro/specs/62-pre-lts-convergence-092/design.md",
+        ".kiro/specs/62-pre-lts-convergence-092/tasks.md"
+      ],
+      "state": "PASS"
+    },
+    "SUPPORT_MATRIX_VERIFIED": {
+      "conditions": [
+        "remaining package and container rows, authoritative signing, and arm64 package evidence remain pending",
+        "native x86_64 is verified with pinned Rust 1.97.1 on Arch Linux; the x86_64 nginx.org DEB smoke, extracted RPM module load/request smoke, and RPM package-manager lifecycle under explicit --nosignature validation pass in native NGINX 1.30.4"
+      ],
+      "evidence": [
+        "tools/release-matrix.json",
+        "docs/releases/release-matrix.json",
+        "artifacts/release/0.9.2/build-identity.json",
+        "python3 tools/release/gates/validate_release_matrix_schema.py"
+      ],
+      "state": "NON_BLOCKING_OBSERVATION"
+    }
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cnkang/nginx-markdown-for-agents/schemas/pre-lts-status.schema.json",
+  "title": "0.9.2 pre-LTS status report",
+  "description": "Machine-readable release-level status vocabulary. A PASS record has no outstanding conditions; external observation and pending review stay distinct from PASS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release", "captured_at", "branch", "candidate", "statuses"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "release": { "const": "0.9.2" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "branch": { "type": "string", "minLength": 1 },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_sha", "working_tree", "authorization"],
+      "properties": {
+        "source_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "working_tree": { "enum": ["clean", "dirty"] },
+        "authorization": { "enum": ["not-granted", "granted"] }
+      }
+    },
+    "statuses": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "SPEC_READY",
+        "IMPLEMENTATION_COMPLETE",
+        "SUPPORT_MATRIX_VERIFIED",
+        "PRE_LTS_READY",
+        "OBSERVATION_STATUS",
+        "LTS_DECISION_PENDING"
+      ],
+      "properties": {
+        "SPEC_READY": { "$ref": "#/$defs/status" },
+        "IMPLEMENTATION_COMPLETE": { "$ref": "#/$defs/status" },
+        "SUPPORT_MATRIX_VERIFIED": { "$ref": "#/$defs/status" },
+        "PRE_LTS_READY": { "$ref": "#/$defs/status" },
+        "OBSERVATION_STATUS": { "$ref": "#/$defs/observation-status" },
+        "LTS_DECISION_PENDING": { "$ref": "#/$defs/status" }
+      }
+    }
+  },
+  "$defs": {
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "evidence", "conditions"],
+      "properties": {
+        "state": {
+          "enum": [
+            "PASS",
+            "REAL_FAIL",
+            "ENV_BLOCKED",
+            "NOT_APPLICABLE",
+            "AWAITING_SOAK_OBSERVATION_EXTERNAL",
+            "NON_BLOCKING_OBSERVATION"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "conditions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "phase_state": {
+          "enum": ["not-started", "in-progress", "completed-scope"]
+        }
+      }
+    },
+    "observation-status": {
+      "allOf": [
+        { "$ref": "#/$defs/status" },
+        {
+          "properties": {
+            "phase_state": {
+              "enum": ["not-started", "in-progress", "completed-scope"]
+            }
+          },
+          "required": ["phase_state"]
+        }
+      ]
+    }
+  }
+}
