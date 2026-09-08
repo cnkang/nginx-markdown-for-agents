@@ -75,7 +75,7 @@ def _channel_from_toolchain_file(
 ) -> str | None:
     """Extract the channel from a rust-toolchain(.toml) file body.
 
-    TOML form: `channel = "1.97.1"`; legacy form: a bare channel on the
+    TOML form: `channel = "1.98.1"`; legacy form: a bare channel on the
     first non-empty line.  The bare-line fallback only applies to the
     legacy `rust-toolchain` file: a `rust-toolchain.toml` without a
     channel key must not fall back to its first line (e.g. a
@@ -166,7 +166,7 @@ def _expand_toolchain_name(channel: str) -> str:
     """Map a bare channel to its installed host-triple toolchain name.
 
     Rustup names installed toolchains ``<channel>-<host-triple>`` (e.g.
-    ``1.97.1-aarch64-apple-darwin``).  If a toolchain directory with that
+    ``1.98.1-aarch64-apple-darwin``).  If a toolchain directory with that
     suffix exists, return the full name; otherwise return the channel as-is
     so callers fail closed instead of resolving the wrong binary.
     """

@@ -84,7 +84,7 @@ def _minimal_valid_diagnostics() -> dict:
             "build_kind": "release",
             "source_sha": "a" * 40,
             "nginx_version": "1.27.0",
-            "rust_version": "1.97.1",
+            "rust_version": "1.98.1",
             "feature_manifest_digest": "sha256:" + "c" * 64,
             "features": [],
         },

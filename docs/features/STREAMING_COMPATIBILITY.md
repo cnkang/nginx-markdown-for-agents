@@ -22,7 +22,6 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Token estimation header | ✅ | ❌ | Requires full output; not available in streaming |
 | Front matter (YAML) | ✅ | ✅ | Emitted in pre-commit phase |
 | Noise pruning | ✅ | ✅ | Applied during parsing |
-| Dynamic configuration | ✅ | ✅ | Runtime engine switching supported |
 | Decompression (gzip) | ✅ | ✅ | Member-aware; streaming since 0.9.1 |
 | Decompression (deflate) | ✅ | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 fallback: full-buffer retries as raw after a zero-output format error; streaming detects once on the first two bytes and reports a format error for misclassified streams; streaming since 0.9.1 |
 | Decompression (Brotli) | ✅ | ✅ | Requires `NGX_HTTP_BROTLI`; streaming since 0.9.1 |
@@ -98,7 +97,9 @@ Use **streaming** when:
 - You accept that post-commit errors that cannot finish safely truncate the
   response (safe-finish failures complete the remaining Markdown)
 
-Use **auto** (default since 0.8.0) to let the module choose based on the bounded response-shape heuristic.
+Use **auto** (default) to prefer streaming for eligible responses. The
+module selects the processing path from the policy and hard compatibility
+constraints, not a response-size heuristic.
 
 ## Related Documentation
 

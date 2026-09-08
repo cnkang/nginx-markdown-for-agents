@@ -87,7 +87,7 @@ curl -s -H 'Accept: application/json' \
 ```
 
 - `off` intentionally selects full-buffer.
-- `auto` uses the module's internal bounded eligibility heuristic.
+- `auto` prefers streaming for eligible responses.
 - `force` requests streaming, but does not override a hard incompatibility.
 
 The following conditions still select full-buffer or passthrough:
@@ -110,7 +110,7 @@ curl -s -H 'Accept: text/plain; version=0.0.4' \
   grep -E 'conversion_attempts_total|streaming_events_total'
 ```
 
-Do not add a threshold directive: the size heuristic is intentionally an
+Do not add a threshold directive: the processing-path selection is an
 internal implementation detail of the frozen contract.
 
 ## Compressed response is not streaming
