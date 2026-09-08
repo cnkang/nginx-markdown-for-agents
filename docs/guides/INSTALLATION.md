@@ -730,12 +730,12 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | best-effort |
 | 1.30.4 | stable | debian12 | glibc | arm64 | supported |
 | 1.30.4 | stable | debian12 | glibc | amd64 | supported |
-| 1.28.3 | legacy | debian12 | glibc | arm64 | supported |
-| 1.28.3 | legacy | debian12 | glibc | amd64 | supported |
-| 1.26.3 | legacy | debian12 | glibc | arm64 | supported |
-| 1.26.3 | legacy | debian12 | glibc | amd64 | supported |
-| 1.24.0 | legacy | debian12 | glibc | arm64 | supported |
-| 1.24.0 | legacy | debian12 | glibc | amd64 | supported |
+| 1.28.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.28.3 | stable | debian12 | glibc | amd64 | supported |
+| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
+| 1.24.0 | stable | debian12 | glibc | arm64 | supported |
+| 1.24.0 | stable | debian12 | glibc | amd64 | supported |
 
 ### docker-image
 
@@ -745,10 +745,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.5 | mainline | debian12 | glibc | amd64 | best-effort |
 | 1.31.5 | mainline | alpine3.24 | musl | arm64 | best-effort |
 | 1.31.5 | mainline | alpine3.24 | musl | amd64 | best-effort |
-| 1.26.3 | legacy | debian12 | glibc | arm64 | supported |
-| 1.26.3 | legacy | debian12 | glibc | amd64 | supported |
-| 1.26.3 | legacy | alpine3.20 | musl | arm64 | supported |
-| 1.26.3 | legacy | alpine3.20 | musl | amd64 | supported |
+| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | supported |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | supported |
 
 ### dynamic-module
 
@@ -770,8 +770,8 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.26.3 | stable | linux | musl | arm64 | supported |
 | 1.26.3 | stable | linux | glibc | amd64 | supported |
 | 1.26.3 | stable | linux | musl | amd64 | supported |
-| 1.24.0 | legacy | ubuntu-24.04 | glibc | arm64 | best-effort |
-| 1.24.0 | legacy | ubuntu-24.04 | glibc | amd64 | best-effort |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | best-effort |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | best-effort |
 | 1.24.0 | stable | linux | glibc | arm64 | supported |
 | 1.24.0 | stable | linux | musl | arm64 | supported |
 | 1.24.0 | stable | linux | glibc | amd64 | supported |
@@ -781,7 +781,7 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.26.3 | legacy | macos | darwin | arm64 | experimental |
+| 1.26.3 | stable | macos | darwin | arm64 | experimental |
 
 ### rpm-package
 
@@ -791,19 +791,19 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.5 | mainline | almalinux9 | glibc | amd64 | best-effort |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | supported |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | supported |
-| 1.28.3 | legacy | almalinux9 | glibc | arm64 | supported |
-| 1.28.3 | legacy | almalinux9 | glibc | amd64 | supported |
-| 1.26.3 | legacy | almalinux9 | glibc | arm64 | supported |
-| 1.26.3 | legacy | almalinux9 | glibc | amd64 | supported |
-| 1.24.0 | legacy | almalinux9 | glibc | arm64 | supported |
-| 1.24.0 | legacy | almalinux9 | glibc | amd64 | supported |
+| 1.28.3 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.28.3 | stable | almalinux9 | glibc | amd64 | supported |
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | supported |
+| 1.24.0 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.24.0 | stable | almalinux9 | glibc | amd64 | supported |
 
 ### source
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
 | 1.28.3 | stable | any | n/a | any | best-effort |
-| 1.26.3 | legacy | any | n/a | any | best-effort |
+| 1.26.3 | stable | any | n/a | any | best-effort |
 <!-- END:release-matrix:installation-matrix -->
 
 ---
