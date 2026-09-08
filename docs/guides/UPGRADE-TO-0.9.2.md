@@ -324,8 +324,8 @@ git checkout --detach "${RELEASE_TAG}"
 ### 2. Update Rust toolchain
 
 ```bash
-rustup toolchain install 1.97.1
-rustup default 1.97.1
+rustup toolchain install 1.98.1
+rustup default 1.98.1
 ```
 
 ### 3. Build the Rust converter

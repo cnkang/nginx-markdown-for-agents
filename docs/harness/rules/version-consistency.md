@@ -140,7 +140,7 @@ PASS: Chart.yaml version: 0.9.2
 PASS: Chart.yaml appVersion: 0.9.2
 PASS: fuzz/Cargo.toml dep version: 0.9.2
 PASS: corpus/Cargo.toml dep version: 0.9.2
-Rust baseline consistency check PASSED: toolchain=1.97.1, MSRV=1.97
+Rust baseline consistency check PASSED: toolchain=1.98.1, MSRV=1.98
 INFO: Homebrew formula: 0.9.1 (intentionally previous; updated by publish workflow)
 
 PASS: All version checks passed

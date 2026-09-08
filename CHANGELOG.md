@@ -139,6 +139,10 @@ before/after examples.
 
 ### Added
 
+- Rust source-build baseline raised to 1.98.1 (MSRV 1.98). Repository,
+  CI, and release builds pin the exact toolchain via `rust-toolchain.toml`.
+  Source builders must run `rustup toolchain install 1.98.1`. Prebuilt
+  module users do not need Rust.
 - OTel removal is explicit: the experimental module directives, metrics,
   spans, and export paths are not built into 0.9.2. The historical ownership
   sketch remains in ADR-0006 for traceability. Use NGINX's native OTel module
