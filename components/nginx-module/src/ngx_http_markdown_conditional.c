@@ -81,8 +81,12 @@ typedef struct ngx_http_markdown_conditional_side_state_s {
 } ngx_http_markdown_conditional_side_state_t;
 
 typedef struct {
+    ngx_http_request_t                          *request;
     ngx_http_markdown_conditional_side_state_t  *entries;
     ngx_list_t                                  original_headers;
+    ngx_list_part_t                            *shadow_tail;
+    ngx_uint_t                                  shadow_tail_count;
+    ngx_list_part_t                            *appended_headers;
     ngx_flag_t                                  headers_shadowed;
 } ngx_http_markdown_conditional_side_table_t;
 
@@ -113,7 +117,12 @@ ngx_http_markdown_conditional_side_table(
         if (cleanup->handler
             == &ngx_http_markdown_conditional_side_table_cleanup)
         {
-            return cleanup->data;
+            ngx_http_markdown_conditional_side_table_t *table;
+
+            table = cleanup->data;
+            if (table != NULL && table->request == r) {
+                return table;
+            }
         }
     }
 
@@ -146,6 +155,7 @@ ngx_http_markdown_conditional_side_table_create(ngx_http_request_t *r)
     }
 
     cleanup->handler = ngx_http_markdown_conditional_side_table_cleanup;
+    table->request = r;
     cleanup->data = table;
     return table;
 }
@@ -272,6 +282,10 @@ ngx_http_markdown_shadow_captured_conditional_headers(
     if (shadow == NULL) {
         return NGX_ERROR;
     }
+    table->appended_headers = ngx_pcalloc(r->pool, sizeof(ngx_list_part_t));
+    if (table->appended_headers == NULL) {
+        return NGX_ERROR;
+    }
 
     for (ngx_list_part_t *part = &source->part;
          part != NULL;
@@ -317,6 +331,8 @@ ngx_http_markdown_shadow_captured_conditional_headers(
     if (r->headers_in.headers.last == &shadow->part) {
         r->headers_in.headers.last = &r->headers_in.headers.part;
     }
+    table->shadow_tail = r->headers_in.headers.last;
+    table->shadow_tail_count = table->shadow_tail->nelts;
     return NGX_OK;
 }
 
@@ -325,6 +341,8 @@ ngx_http_markdown_restore_shadowed_conditional_headers(
     ngx_http_request_t *r)
 {
     ngx_http_markdown_conditional_side_table_t  *table;
+    ngx_list_part_t                            *tail, *last, *appended;
+    ngx_uint_t                                  capacity;
 
     if (r == NULL) {
         return;
@@ -335,7 +353,30 @@ ngx_http_markdown_restore_shadowed_conditional_headers(
         return;
     }
 
+    /* Splice only entries appended after capture, without allocation or
+     * copying headers that another module may reference by address. */
+    tail = table->shadow_tail;
+    last = r->headers_in.headers.last;
+    capacity = r->headers_in.headers.nalloc;
+    appended = tail->next;
+    if (tail->nelts > table->shadow_tail_count) {
+        table->appended_headers->elts = (ngx_table_elt_t *) tail->elts
+                                      + table->shadow_tail_count;
+        table->appended_headers->nelts = tail->nelts - table->shadow_tail_count;
+        table->appended_headers->next = tail->next;
+        appended = table->appended_headers;
+        if (last == tail) {
+            last = appended;
+            capacity -= table->shadow_tail_count;
+        }
+    }
+
     r->headers_in.headers = table->original_headers;
+    if (appended != NULL) {
+        r->headers_in.headers.last->next = appended;
+        r->headers_in.headers.last = last;
+        r->headers_in.headers.nalloc = capacity;
+    }
     ngx_memzero(&table->original_headers, sizeof(table->original_headers));
     table->headers_shadowed = 0;
 }

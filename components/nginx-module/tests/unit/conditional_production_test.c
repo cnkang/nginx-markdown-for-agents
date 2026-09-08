@@ -347,6 +347,8 @@ ngx_list_create(ngx_pool_t *pool, ngx_uint_t n, size_t size)
     return list;
 }
 
+static ngx_flag_t g_list_grow;
+
 ngx_table_elt_t *
 ngx_list_push(ngx_list_t *list)
 {
@@ -356,6 +358,20 @@ ngx_list_push(ngx_list_t *list)
     ngx_list_part_t *part = list->last;
     ngx_table_elt_t *elts = (ngx_table_elt_t *) part->elts;
 
+    if (part->nelts == list->nalloc && g_list_grow) {
+        ngx_list_part_t *next = ngx_pcalloc(list->pool, sizeof(*next));
+        if (next == NULL) {
+            return NULL;
+        }
+        next->elts = ngx_pcalloc(list->pool, list->nalloc * list->size);
+        if (next->elts == NULL) {
+            return NULL;
+        }
+        part->next = next;
+        list->last = next;
+        part = next;
+        elts = part->elts;
+    }
     if (part->nelts < list->nalloc) {
         ngx_table_elt_t *h = &elts[part->nelts];
         part->nelts++;
@@ -2010,6 +2026,12 @@ test_subrequest_capture_does_not_mutate_shared_validators(void)
                 && validator->hash == 0 && validator->value.len == 0,
                 "subrequest capture must not alter parent suppression");
 
+    ngx_http_markdown_restore_conditional_request(subrequest, &subrequest_ctx);
+    TEST_ASSERT(ngx_http_markdown_conditional_side_table(parent)->headers_shadowed,
+                "shared-pool subrequest restore preserves parent shadow state");
+    TEST_ASSERT(validator->hash == 0 && validator->value.len == 0,
+                "subrequest restore preserves parent suppression");
+
     ngx_http_markdown_restore_conditional_request(parent, &parent_ctx);
     TEST_ASSERT(validator->hash != 0
                 && validator->value.len == sizeof("\"parent-etag\"") - 1,
@@ -3401,7 +3423,7 @@ test_capture_conditional_state_paths(void)
 }
 
 static void
-test_shadow_list_last_rebind(void)
+check_shadow_list_restore(ngx_uint_t original_count, ngx_uint_t append_count)
 {
     ngx_http_request_t *r;
     ngx_http_markdown_ctx_t ctx;
@@ -3409,19 +3431,31 @@ test_shadow_list_last_rebind(void)
     ngx_uint_t found = 0;
 
     g_pool_offset = 0;
+    g_list_grow = 1;
     r = make_req();
     if (r == NULL) {
         TEST_FAIL("request allocation failed");
         return;
     }
     add_header(&r->headers_in.headers, "If-None-Match", "\"one\"");
+    for (ngx_uint_t i = 0; i < original_count; i++) {
+        TEST_ASSERT(add_header(&r->headers_in.headers, "X-Original", "kept")
+                        != NULL, "original header append succeeds");
+    }
     memset(&ctx, 0, sizeof(ctx));
 
     TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
                     == NGX_OK,
                 "conditional capture succeeds and installs the shadow list");
-    TEST_ASSERT(r->headers_in.headers.last == &r->headers_in.headers.part,
-                "shadow copy rebinds last to the request's embedded part");
+    if (r->headers_in.headers.part.next == NULL) {
+        TEST_ASSERT(r->headers_in.headers.last == &r->headers_in.headers.part,
+                    "single-part shadow rebinds its embedded tail");
+    }
+
+    for (ngx_uint_t i = 0; i < append_count; i++) {
+        TEST_ASSERT(add_header(&r->headers_in.headers, "X-Extra", "kept")
+                        != NULL, "shadow overflow append succeeds");
+    }
 
     /* Appending through the real NGINX list semantics must make the new
      * header visible to iteration starting at headers.part. */
@@ -3454,9 +3488,35 @@ test_shadow_list_last_rebind(void)
                 "header appended after shadow is visible to iteration");
 
     ngx_http_markdown_restore_conditional_request(r, &ctx);
-    TEST_ASSERT(r->headers_in.headers.last == &r->headers_in.headers.part,
-                "restore returns the original list with a valid last pointer");
+    TEST_ASSERT(ngx_http_markdown_find_request_header(
+                    r, (u_char *) "X-Appended", sizeof("X-Appended") - 1)
+                    == appended,
+                "restore preserves the appended header and its address");
+    TEST_ASSERT(add_header(&r->headers_in.headers, "X-After", "restored")
+                    != NULL,
+                "restored list remains appendable");
+    TEST_ASSERT(ngx_http_markdown_find_request_header(
+                    r, (u_char *) "X-After", sizeof("X-After") - 1) != NULL,
+                "post-restore append remains visible");
+    found = 0;
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL; part = part->next)
+    {
+        found += part->nelts;
+    }
+    TEST_ASSERT(found == original_count + append_count + 3,
+                "restore preserves every header exactly once");
     TEST_PASS("shadow list last-pointer rebind exercised");
+    g_list_grow = 0;
+}
+
+static void
+test_shadow_list_last_rebind(void)
+{
+    check_shadow_list_restore(0, 0);
+    check_shadow_list_restore(1, 0);
+    check_shadow_list_restore(7, 40);
+    check_shadow_list_restore(40, 40);
 }
 
 static void
