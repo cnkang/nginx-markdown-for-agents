@@ -67,6 +67,39 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
     return NULL;
 }
 
+/* Find a header by name inside an arbitrary header list (not necessarily
+ * r->headers_in.headers).  Used to reconcile shadow-list modifications back
+ * onto the original entries during restoration. */
+static ngx_table_elt_t *
+ngx_http_markdown_find_header_in_list(
+    ngx_list_t *list, u_char *name, size_t name_len)
+{
+    if (list == NULL || name == NULL || name_len == 0) {
+        return NULL;
+    }
+
+    for (ngx_list_part_t *part = &list->part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NULL;
+        }
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].key.len == name_len
+                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+            {
+                return &headers[i];
+            }
+        }
+    }
+
+    return NULL;
+}
+
 /*
  * Request-pool side state for captured validators.  The module context is
  * cleared by an internal redirect, but the request pool and its cleanups are
@@ -368,6 +401,38 @@ ngx_http_markdown_restore_shadowed_conditional_headers(
         if (last == tail) {
             last = appended;
             capacity -= table->shadow_tail_count;
+        }
+    }
+
+    /* Reconcile shadow-list modifications back onto the original entries
+     * before restoring the original list: a downstream module may have
+     * replaced a value or invalidated a hash on the shadow copy, and the
+     * original entries must reflect those changes while keeping their
+     * address identity (typed header pointers reference the originals). */
+    {
+        ngx_list_t  *shadow = &r->headers_in.headers;
+
+        for (ngx_list_part_t *part = &shadow->part;
+             part != NULL;
+             part = part->next)
+        {
+            ngx_table_elt_t  *headers;
+
+            headers = part->elts;
+            if (headers == NULL && part->nelts != 0) {
+                return;
+            }
+            for (ngx_uint_t i = 0; i < part->nelts; i++) {
+                ngx_table_elt_t  *orig;
+
+                orig = ngx_http_markdown_find_header_in_list(
+                    &table->original_headers,
+                    headers[i].key.data, headers[i].key.len);
+                if (orig != NULL) {
+                    orig->hash = headers[i].hash;
+                    orig->value = headers[i].value;
+                }
+            }
         }
     }
 

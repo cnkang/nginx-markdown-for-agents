@@ -3510,6 +3510,77 @@ check_shadow_list_restore(ngx_uint_t original_count, ngx_uint_t append_count)
     g_list_grow = 0;
 }
 
+/* A downstream module may modify an existing (non-validator) header on the
+ * shadow list between capture and restore — replace its value or invalidate
+ * its hash.  Restoration must carry those modifications back onto the
+ * original entries (which keep their address identity) instead of
+ * reinstating the pre-capture values. */
+static void
+test_shadow_restore_preserves_existing_header_modifications(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *orig;
+    ngx_table_elt_t *shadow_elt;
+
+    g_pool_offset = 0;
+    g_list_grow = 1;
+    r = make_req();
+    if (r == NULL) {
+        TEST_FAIL("request allocation failed");
+        return;
+    }
+    add_header(&r->headers_in.headers, "If-None-Match", "\"one\"");
+    orig = add_header(&r->headers_in.headers, "X-Mutable", "before");
+    TEST_ASSERT(orig != NULL, "original X-Mutable header added");
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "conditional capture succeeds and installs the shadow list");
+
+    /* Locate the shadow copy of X-Mutable and modify it. */
+    shadow_elt = ngx_http_markdown_find_request_header(
+        r, (u_char *) "X-Mutable", sizeof("X-Mutable") - 1);
+    TEST_ASSERT(shadow_elt != NULL && shadow_elt != orig,
+                "shadow copy exists and is a distinct entry");
+    shadow_elt->value.data = (u_char *) "after";
+    shadow_elt->value.len = sizeof("after") - 1;
+    shadow_elt->hash = 0;
+
+    ngx_http_markdown_restore_conditional_request(r, &ctx);
+
+    /* The original entry keeps its address but carries the new value and
+     * the invalidated hash.  find_request_header skips hash==0 entries, so
+     * locate the entry by direct list traversal here. */
+    {
+        ngx_table_elt_t *found = NULL;
+        for (ngx_list_part_t *part = &r->headers_in.headers.part;
+             part != NULL; part = part->next)
+        {
+            ngx_table_elt_t *headers = part->elts;
+            for (ngx_uint_t i = 0; i < part->nelts; i++) {
+                if (headers[i].key.len == sizeof("X-Mutable") - 1
+                    && ngx_strncmp(headers[i].key.data, "X-Mutable",
+                                   sizeof("X-Mutable") - 1) == 0)
+                {
+                    found = &headers[i];
+                }
+            }
+        }
+        TEST_ASSERT(found == orig,
+                    "restore keeps the original X-Mutable address");
+        TEST_ASSERT(orig->value.len == sizeof("after") - 1
+                    && ngx_strncmp(orig->value.data, "after",
+                                   sizeof("after") - 1) == 0,
+                    "restore carries the modified value back to the original");
+        TEST_ASSERT(orig->hash == 0,
+                    "restore carries the invalidated hash back to the original");
+    }
+    TEST_PASS("shadow modifications reconciled onto original entries");
+    g_list_grow = 0;
+}
+
 static void
 test_shadow_list_last_rebind(void)
 {
@@ -3773,6 +3844,7 @@ main(void)
     test_collect_inm_captured_copy_and_alloc_failure();
     test_capture_conditional_state_paths();
     test_shadow_list_last_rebind();
+    test_shadow_restore_preserves_existing_header_modifications();
     test_conditional_helper_guards();
     test_handle_inm_etag_mismatch();
     test_handle_inm_with_ims_header();
