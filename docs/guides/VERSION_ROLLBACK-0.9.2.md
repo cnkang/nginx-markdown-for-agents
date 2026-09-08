@@ -165,13 +165,33 @@ Publication and artifact availability are separate release gates.
        exit 1
      fi
    fi
-   # Restore the versioned 0.9.1 nginx.conf here.
-   # Locate the module directory explicitly: derive it from the active nginx
-   # configuration, or set MODULES_DIR yourself when following this procedure
-   # independently.
+   # The backup must contain nginx.conf, conf.d, module-enablement files,
+   # and every included configuration file from the 0.9.1 deployment.
+   set -euo pipefail
+   CONFIG_BACKUP="${CONFIG_BACKUP:?set the complete versioned 0.9.1 configuration directory}"
+   CONFIG_FILE="$(nginx -V 2>&1 | sed -n 's/.*--conf-path=\([^ ]*\).*/\1/p')"
+   if [[ "${CONFIG_FILE}" != /*/nginx.conf \
+       || ! -f "${CONFIG_BACKUP}/nginx.conf" ]]; then
+     echo "ERROR: confirm the configuration backup and active NGINX paths" >&2
+     exit 1
+   fi
+   CONFIG_DIR="${CONFIG_FILE%/nginx.conf}"
+   if [[ -z "${CONFIG_DIR}" || "${CONFIG_DIR}" == / \
+       || -e "${CONFIG_DIR}.restore-0.9.1" \
+       || -e "${CONFIG_DIR}.pre-rollback" ]]; then
+     echo "ERROR: unsafe configuration path or an earlier rollback exists" >&2
+     exit 1
+   fi
    MODULES_DIR="${MODULES_DIR:-$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')}"
    if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
      echo "ERROR: cannot locate the NGINX modules directory" >&2
+     exit 1
+   fi
+   # Replace the whole tree so stale 0.9.2 include files cannot survive.
+   sudo cp -a -- "${CONFIG_BACKUP}" "${CONFIG_DIR}.restore-0.9.1"
+   sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.pre-rollback"
+   if ! sudo mv -- "${CONFIG_DIR}.restore-0.9.1" "${CONFIG_DIR}"; then
+     sudo mv -- "${CONFIG_DIR}.pre-rollback" "${CONFIG_DIR}"
      exit 1
    fi
    sudo cp objs/ngx_http_markdown_filter_module.so \

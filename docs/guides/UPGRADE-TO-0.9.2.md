@@ -371,6 +371,11 @@ sudo nginx -t
 MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
 MODULE_BACKUP_OWNED=0
 if [[ -e "${MODULE_BACKUP}" ]]; then
+    if ! sudo -n cmp -s -- "${MODULE_BACKUP}" \
+        "${MODULES_DIR}/ngx_http_markdown_filter_module.so"; then
+        echo "ERROR: existing backup differs from the installed module or cannot be read; inspect it before upgrading" >&2
+        exit 1
+    fi
     echo "Preserving existing pre-upgrade module backup: ${MODULE_BACKUP}"
 else
     sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
@@ -482,7 +487,10 @@ rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
 # Discard the backup only when THIS run created it; a pre-existing backup
 # left by an earlier upgrade stays until that upgrade's cleanup removes it.
 if [[ "${MODULE_BACKUP_OWNED}" -eq 1 ]]; then
-  rm -f "${MODULE_BACKUP}" 2>/dev/null || sudo -S -p '' rm -f "${MODULE_BACKUP}"
+  if ! sudo -n rm -f -- "${MODULE_BACKUP}"; then
+    echo "ERROR: backup cleanup failed; remove the verified backup with administrator access" >&2
+    exit 1
+  fi
 else
   echo "INFO: keeping pre-existing ${MODULE_BACKUP} (not created by this run)"
 fi
