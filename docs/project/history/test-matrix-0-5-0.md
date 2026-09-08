@@ -54,7 +54,9 @@ TM-229, TM-277) — hit the size-limit rejection path by design: the module
 rejects inputs at or above the conversion ceiling, so this document excludes
 them from the required set, leaving 282 required tuples.  The fallback and fail-open
 paths are separate coverage obligations: each carries its own reason code
-and output, so no tuple may cover both at once.  Before release,
+and output, so no tuple may cover both at once. A streaming-to-full-buffer
+fallback does not count an already counted full-buffer conversion again.
+Before release,
 aggregate all sub-spec coverage mappings. Ensure every required tuple has at
 least one covering sub-spec. Covering each value independently is not
 sufficient. The following table enumerates the complete required set in

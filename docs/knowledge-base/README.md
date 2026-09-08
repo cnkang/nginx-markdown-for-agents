@@ -39,8 +39,9 @@ removed or not part of the contract.
 
 ### 3. Removed ≠ deprecated
 
-Directives removed in 0.9.2 fail `nginx -t` with NGINX's standard
-`unknown directive` error — there are no migration stubs left. If docs or
+Five convergence names remain reject-only migration entries, as listed below.
+Other removed names fail `nginx -t` with NGINX's standard
+`unknown directive` error. If docs or
 configs reference a removed directive, they are stale. Migration and removal
 documentation may use removed directive names (including naming
 `markdown_stream_threshold` and `markdown_stream_types` in before/after
@@ -54,7 +55,7 @@ The five convergence names (`markdown_dynamic_config`,
 `markdown_dynamic_config_path`, `markdown_dynconf_dry_run`,
 `markdown_prune_selectors`, and `markdown_prune_protection_selectors`) remain
 registered only as reject-only migration entries. They fail `nginx -t` with an
- explicit migration message. They are not active configuration directives.
+explicit migration message. They are not active configuration directives.
 
 ## Contract Loading
 

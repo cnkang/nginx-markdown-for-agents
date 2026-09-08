@@ -9,14 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Maintenance and hardening release. Fixes diagnostics and reason-code mapping
 gaps, records the removal and historical disposition of the experimental OTel
-surface, removes the unsafe worker-local dynconf restore path, and establishes
+surface, removes the runtime dynconf subsystem, and establishes
 a public surface source metadata and ABI drift gate for release integrity.
 
 ### Breaking Changes
 
 0.9.2 is the breaking release before 1.0. The release reduces the
-configuration surface from 63 directives to 25. Configurations that use a
-removed directive fail `nginx -t` with `unknown directive` until migrated. See
+configuration surface to 20 active directives and five reject-only migration
+entries. Those five names produce migration errors; other removed names
+produce `unknown directive` errors. See
 [docs/guides/0.9.2-breaking-changes.md](docs/guides/0.9.2-breaking-changes.md)
 for the complete reference. See
 [docs/guides/MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md) for
@@ -51,19 +52,11 @@ before/after examples.
   `NGX_HTTP_MD_ACTION_REJECT_502`. This change has no configuration impact.
 - After 0.9.2, all 1.x releases maintain backward compatibility for a
   minimum of 24 months.
-- **Dynconf JSON v1 migration.** Convert legacy line-format keys
-  `markdown_filter` → `filter` and `streaming_budget` → `streaming_buffer`
-  before upgrading. 0.9.2 accepts only the JSON v1 contract. The watcher
-  rejects legacy line-format files. 0.9.2 removes `memory_budget` from runtime
-  configuration. Set static `markdown_limits conversion_memory=<size>`
-  instead. See the [breaking-change reference](docs/guides/0.9.2-breaking-changes.md)
-  and [migration guide](docs/guides/MIGRATION-0.9.2.md).
-- **Dynconf precedence and limits.** Explicit server/location values mask
-  matching runtime keys and exposes them in diagnostics as `masked_keys`.
-  The watcher logs each masked key. The `streaming_buffer` default is 2 MiB
-  in 0.9.2. Pin `markdown_limits streaming_buffer=256k` to retain 0.9.1's
-  256 KiB default. `markdown_stream_threshold` and
-  `markdown_stream_flush_min` have no replacement.
+- **Runtime configuration removed.** Move dynamic settings to static directives
+  and apply them with `nginx -t` and a controlled reload or restart. See
+  [static configuration migration](docs/guides/MIGRATION-0.9.2.md#static-configuration-migration).
+  The streaming-buffer default is 2 MiB; set
+  `markdown_limits streaming_buffer=256k` to retain the old bound.
 - **Content-Encoding policy.** Malformed, unknown, and excessively deep
   encoding chains follow `markdown_error_policy`. Only `pass` forwards the
   original response. The supported `deflate` coding accepts the zlib-wrapped
@@ -72,12 +65,9 @@ before/after examples.
   (streaming, full-buffer, and the Rust chain decoder) apply the same
   sniffing decision: a valid zlib header selects zlib-wrapped, otherwise
   raw.
-- **Diagnostics JSON schema v2.** The endpoint now declares
-  `schema_version: 2`. Migrate consumers from the old `config_snapshot`,
-  `metrics_snapshot`, `dynconf_state`, `streaming_config`, and profile-oriented
-  sections to `configuration`, `runtime`, and `configuration.dynconf` as
-  described in the 0.9.2 migration guide. `masked_keys` is part of the v2
-  dynconf object.
+- **Diagnostics JSON schema v3.** The endpoint declares `schema_version: 3`.
+  Migrate consumers to the static `configuration` and `runtime` sections.
+  The dynconf object and `masked_keys` no longer exist. See the migration guide.
 
 ### Fixed
 
@@ -147,12 +137,8 @@ before/after examples.
   spans, and export paths are not built into 0.9.2. The historical ownership
   sketch remains in ADR-0006 for traceability. Use NGINX's native OTel module
   for tracing.
-- Dynconf diagnostics is read-only. Operators restore a prior valid dynconf
-  file atomically. The watcher validates it and promotes it through the normal
-  reload path. The internal last-known-good snapshot remains available for
-  failed-reload protection and diagnostics reporting.
 - Public surface inventory and source metadata/ABI drift detection gate
-  checks FFI exports, configuration directive metadata, dynconf key schemas,
+  checks FFI exports, configuration directive metadata, static configuration schemas,
   metric declarations, and reason codes against the declared inventory. The
   gate reads source metadata. Unit, integration, and E2E suites verify runtime
   behavior.

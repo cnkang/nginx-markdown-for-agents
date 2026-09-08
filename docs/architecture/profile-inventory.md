@@ -30,8 +30,11 @@ markdown_etag_policy, markdown_conditional_requests, markdown_on_wildcard,
 markdown_trust_forwarded_headers, markdown_forwarded_headers,
 markdown_large_body_threshold, markdown_streaming_engine,
 markdown_memory_budget) get excluded. This historical list predates the
-0.9.2 removal of all migration stubs. The 0.9.2 binary emits NGINX's standard
-unknown-directive error for removed names.
+0.9.2 convergence. The binary retains five reject-only migration entries:
+`markdown_dynamic_config`, `markdown_dynamic_config_path`,
+`markdown_dynconf_dry_run`, `markdown_prune_selectors`, and
+`markdown_prune_protection_selectors`. Other removed names produce the
+standard unknown-directive error.
 
 ### Core Conversion Directives
 

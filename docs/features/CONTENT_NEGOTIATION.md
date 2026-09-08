@@ -7,15 +7,12 @@ flowchart TD
     Client["Client Request"] --> Accept{"Accept Header?"}
     Accept -->|"text/markdown"| Convert["Convert to Markdown"]
     Accept -->|"text/html"| PassHTML["Pass HTML Through"]
-    Accept -->|"*/*"| Policy{"markdown_accept?"}
-    Policy -->|force| Convert
-    Policy -->|strict| PassHTML
+    Accept -->|"*/* or text/*"| PassHTML
     Accept -->|"application/json"| PassHTML
     Convert --> Response["Response with<br/>Content-Type: text/markdown"]
     PassHTML --> Response2["Response with<br/>Content-Type: text/html"]
 
     style Convert fill:#009639,color:#fff
-    style Policy fill:#f90,color:#000
 ```
 
 This module implements HTTP content negotiation to serve Markdown representations of HTML content. Clients request Markdown using the standard `Accept` header. The module then decides whether to convert the response. Eligibility rules and configuration drive that decision.

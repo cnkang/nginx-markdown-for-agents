@@ -47,28 +47,28 @@ All active directives accept the contexts recorded in the public inventory.
 The table below is the operator-facing summary. Inheritance follows normal
 NGINX `http` → `server` → `location` configuration merging.
 
-| Directive | Context | Purpose | Typical values |
-|---|---|---|---|
-| `markdown_filter` | `http, server, location` | Enable conversion | `on`, `off`, or a complex value |
-| `markdown_limits` | `http, server, location` | Set bounded resource limits | key/value entries listed below |
-| `markdown_error_policy` | `http, server, location` | Handle conversion errors | `pass`, `fail_closed`, `status <code>` |
-| `markdown_flavor` | `http, server, location` | Markdown dialect | `commonmark`, `gfm` |
-| `markdown_token_estimate` | `http, server, location` | Emit token estimates | `on`, `off` |
-| `markdown_front_matter` | `http, server, location` | Front-matter behavior | `on`, `off` |
-| `markdown_accept` | `http, server, location` | Accept negotiation policy | `strict`, `force` |
-| `markdown_auth_policy` | `http, server, location` | Authentication handling | `allow`, `deny` |
-| `markdown_auth_cookies` | `http, server, location` | Authentication cookie names | space-separated names |
-| `markdown_cache_validation` | `http, server, location` | Cache/ETag policy | `off`, `ims_only`, `full` |
-| `markdown_streaming` | `http, server, location` | Requested conversion engine | `off`, `auto`, `force` |
-| `markdown_log_verbosity` | `http, server, location` | Decision log verbosity | `error`, `warn`, `info`, `debug` |
-| `markdown_content_types` | `http, server, location` | Convertible media types | space-separated media types |
-| `markdown_trusted_proxies` | `http` | Trusted proxy CIDRs | CIDR list |
-| `markdown_metrics_shm_size` | `http` | Metrics shared-memory size | NGINX size value |
-| `markdown_metrics` | `location` | Expose the metrics endpoint | flag directive |
-| `markdown_prune_noise` | `http, server, location` | Remove configured page noise | `on`, `off` |
-| `markdown_auto_decompress` | `http, server, location` | Convert compressed upstream bodies | `on`, `off` |
-| `markdown_diagnostics` | `location` | Expose diagnostics JSON | `on`, `off` |
-| `markdown_stream_excluded_types` | `http, server, location` | Exclude types from streaming | media-type list |
+| Directive | Context | Purpose | Typical values | Default |
+|---|---|---|---| --- |
+| `markdown_filter` | `http, server, location` | Enable conversion | `on`, `off`, or a complex value | `off` |
+| `markdown_limits` | `http, server, location` | Set bounded resource limits | key/value entries listed below | `(per-key inheritance)` |
+| `markdown_error_policy` | `http, server, location` | Handle conversion errors | `pass`, `fail_closed`, `status <code>` | `pass` |
+| `markdown_flavor` | `http, server, location` | Markdown dialect | `commonmark`, `gfm` | `commonmark` |
+| `markdown_token_estimate` | `http, server, location` | Emit token estimates | `on`, `off` | `off` |
+| `markdown_front_matter` | `http, server, location` | Front-matter behavior | `on`, `off` | `off` |
+| `markdown_accept` | `http, server, location` | Accept negotiation policy | `strict`, `force` | `strict` |
+| `markdown_auth_policy` | `http, server, location` | Authentication handling | `allow`, `deny` | `deny` |
+| `markdown_auth_cookies` | `http, server, location` | Authentication cookie names | space-separated names | `built-in session*, auth*, PHPSESSID, wordpress_logged_in_* (explicit replaces)` |
+| `markdown_cache_validation` | `http, server, location` | Cache/ETag policy | `off`, `ims_only`, `full` | `ims_only` |
+| `markdown_streaming` | `http, server, location` | Requested conversion engine | `off`, `auto`, `force` | `off` |
+| `markdown_log_verbosity` | `http, server, location` | Decision log verbosity | `error`, `warn`, `info`, `debug` | `info` |
+| `markdown_content_types` | `http, server, location` | Convertible media types | space-separated media types | `text/html` |
+| `markdown_trusted_proxies` | `http` | Trusted proxy CIDRs | CIDR list | `off` |
+| `markdown_metrics_shm_size` | `http` | Metrics shared-memory size | NGINX size value | `8*pagesize` |
+| `markdown_metrics` | `location` | Expose the metrics endpoint | flag directive | `off` |
+| `markdown_prune_noise` | `http, server, location` | Remove configured page noise | `on`, `off` | `on` |
+| `markdown_auto_decompress` | `http, server, location` | Convert compressed upstream bodies | `on`, `off` | `on` |
+| `markdown_diagnostics` | `location` | Expose diagnostics JSON | `on`, `off` | `off` |
+| `markdown_stream_excluded_types` | `http, server, location` | Exclude types from streaming | media-type list | `none` |
 
 The public metric endpoint is Prometheus-only. There is no active
 `markdown_metrics_format` directive.
