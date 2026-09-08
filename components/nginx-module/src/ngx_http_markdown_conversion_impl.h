@@ -1026,8 +1026,8 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
      * Resolve the effective static conversion_memory budget once for this
      * request. A zero value means no FFI-side constraint, so Rust may use its
      * bounded full-buffer fallback; the normal NGINX default is 64 MiB from
-     * markdown_limits conversion_memory=64m. Runtime dynconf cannot replace
-     * this static public limit.
+     * markdown_limits conversion_memory=64m. This static public limit cannot
+     * be replaced at runtime.
      */
     options->memory_budget =
         ngx_http_markdown_effective_memory_budget(eff, conf);

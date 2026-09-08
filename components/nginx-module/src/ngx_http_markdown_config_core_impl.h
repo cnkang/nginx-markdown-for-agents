@@ -312,7 +312,7 @@ ngx_http_markdown_mark_static_explicit_fields(
 
 
 static void
-ngx_http_markdown_mark_dynconf_block_fields(
+ngx_http_markdown_mark_static_block_fields(
     ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev)
 {
@@ -430,7 +430,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_markdown_conf_t            *conf = child;
 
     ngx_http_markdown_mark_static_explicit_fields(conf, prev);
-    ngx_http_markdown_mark_dynconf_block_fields(conf, prev);
+    ngx_http_markdown_mark_static_block_fields(conf, prev);
 
     ngx_flag_t  max_size_set;
 
@@ -554,11 +554,11 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_markdown_log_merged_conf(cf, conf);
 
     /*
-     * Location validation index entry (0.9.2 dynconf precedence).
+     * Location validation index entry (0.9.2 static contract).
      *
      * After all merges complete and cross-key constraints are validated,
      * add this location to the global validation index.  The index is
-     * used during dynconf reload to validate streaming_buffer candidates
+     * used to validate streaming_buffer candidates
      * against per-location conversion_memory limits.
      *
      * The main configuration owns the bounded index and each merged
