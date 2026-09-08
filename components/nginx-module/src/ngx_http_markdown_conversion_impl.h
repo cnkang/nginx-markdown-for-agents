@@ -1017,9 +1017,8 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
      * Custom prune/protection selectors were removed in 0.9.2 (LTS-R009).
      * The C module no longer populates the selector pointers/lengths; built-in
      * noise reduction is driven solely by prune_noise above.  The FFI
-     * MarkdownOptions selector fields (retained until Rust task 9.3 removes
-     * them) stay at the NULL/0 defaults set by markdown_options_init(), so no
-     * selector data crosses the FFI boundary.
+     * MarkdownOptions struct carries no selector fields (96-byte ABI v3), so
+     * no selector data crosses the FFI boundary.
      */
 
     /*

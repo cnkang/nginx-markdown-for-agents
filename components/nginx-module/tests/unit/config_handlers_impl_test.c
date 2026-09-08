@@ -731,7 +731,6 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
     mcf->ops.metrics_enabled = NGX_CONF_UNSET;
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
-    mcf->stream.policy_explicit = -1;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
 }
 
@@ -1219,12 +1218,12 @@ test_conditional_and_log_verbosity_handlers(void)
 /*
  * Verify markdown_streaming off|auto|force handler (policy):
  * valid enum tokens, duplicate detection, invalid token rejection,
- * and that policy_explicit is recorded.
+.
  *
  * Semantic contract mirrored: ngx_http_markdown_streaming maps a
  * string token to the NGX_HTTP_MARKDOWN_STREAMING_* enum, rejects
  * duplicates ("is duplicate"), returns NGX_CONF_ERROR for unknown
- * tokens, and sets stream.policy_explicit on success.
+ * tokens, and sets stream.policy on success.
  *
  * Return: void.
  *
@@ -1252,8 +1251,6 @@ test_streaming_policy_handler(void)
     TEST_ASSERT(rc == NGX_CONF_OK, "off should parse");
     TEST_ASSERT(mcf.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
         "policy should be OFF");
-    TEST_ASSERT(mcf.stream.policy_explicit == 1,
-        "policy_explicit should be recorded");
 
     init_conf(&mcf);
     set_arg(&values[1], "auto");
@@ -1268,8 +1265,6 @@ test_streaming_policy_handler(void)
     TEST_ASSERT(rc == NGX_CONF_OK, "force should parse");
     TEST_ASSERT(mcf.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
         "policy should be FORCE");
-    TEST_ASSERT(mcf.stream.policy_explicit == 1,
-        "policy_explicit should be recorded for force");
 
     /* Duplicate detection: a second set on the same conf is rejected. */
     set_arg(&values[1], "auto");

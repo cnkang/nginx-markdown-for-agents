@@ -143,8 +143,8 @@ ngx_http_markdown_brotli_error_classify(int code)
  *   - streaming_buffer
  *
  * Direct conf-> reads of these fields in request-path code are
- * violations of AGENTS.md Rule 34 and will be flagged by
- * tools/harness/detect_live_conf_reads.sh.
+ * violations of AGENTS.md Rule 45 and will be flagged by the harness
+ * effective-configuration read checks (static bind-once invariant).
  */
 struct ngx_http_markdown_effective_conf_s {
     ngx_flag_t   enabled;
@@ -408,9 +408,10 @@ typedef enum {
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PRUNE        0x00100000
 /*
  * 0x00200000 (SELECTORS) and 0x00400000 (PROTECTION) were retired in 0.9.2
- * with the custom-selector removal (LTS-R009).  The bit values are left
- * unassigned rather than reused to preserve the remaining explicit-mask
- * values.
+ * with the custom-selector removal (LTS-R009); 0x01000000 (DYNCONF) and
+ * 0x02000000 (DRY_RUN) were retired with the dynconf subsystem removal
+ * (LTS-R008).  The bit values are left unassigned rather than reused to
+ * preserve the remaining explicit-mask values.
  */
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DECOMPRESS   0x00800000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DIAGNOSTICS  0x04000000
@@ -694,9 +695,11 @@ typedef struct {
      *   bit 3: error_policy   (NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY)
      *   bit 4: streaming_buffer (NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER)
      *
-     * Bit is set when a server/location block explicitly configures
-     * that field.  Propagated from parent to child via OR during merge.
-     * An explicit http-block setting does NOT set the bit.
+     * Bit is set when a server or location block explicitly configures
+     * that field, OR when an explicit http-block setting configures one of
+     * the four non-filter fields below (the filter bit is set only at
+     * server/location level).  Propagated from parent to child via OR
+     * during merge.
      */
     ngx_uint_t   static_block_mask;
     ngx_uint_t   static_explicit_mask;
@@ -762,7 +765,6 @@ typedef struct {
      */
     struct {
         ngx_uint_t    policy;              /* markdown_streaming off|auto|force */
-        ngx_flag_t    policy_explicit;     /* 1 if operator set markdown_streaming */
         ngx_array_t  *excluded_types;      /* markdown_stream_excluded_types (default: NULL) */
         size_t        budget;              /* markdown_limits streaming_buffer (default: 2m) */
     } stream;
@@ -841,7 +843,7 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
      * effective policy resolves to STREAMING_OFF (unset ≡ off ≡ bounded
      * full-buffer with conversion), NOT STREAMING_AUTO.  `auto` retains its
      * "prefer streaming" meaning only when explicitly written by an operator
-     * (recorded via stream.policy_explicit in the directive handler); the
+     * (the directive stores the resolved policy value directly); the
      * default carries no size/heuristic branching.
      *
      * Migration note: prior to 0.9.2 the unset default was STREAMING_AUTO,
@@ -851,7 +853,6 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
      */
     NGX_MD_MERGE_STREAM(policy, ngx_uint_t, -1,
                         NGX_HTTP_MARKDOWN_STREAMING_OFF);
-    NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0);
 
     if (conf->stream.excluded_types == (ngx_array_t *) -1) {
         conf->stream.excluded_types =

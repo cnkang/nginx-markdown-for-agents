@@ -27,6 +27,8 @@ struct ngx_http_markdown_conf_s {
 
 #define ngx_memzero(buf, n) memset(buf, 0, n)
 #define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
+#define ngx_min(a, b) (((a) < (b)) ? (a) : (b))
+#define ngx_strlen(s) strlen((const char *) (s))
 
 /* ── Metrics struct (mirrors production SHM layout) ───────────── */
 
@@ -237,6 +239,52 @@ test_collect_metrics_streaming(void)
 }
 #endif
 
+/* SHA-256 is implemented by hand in the accessors header (no libcrypto
+ * dependency); pin it against NIST vectors so a regression in the
+ * transform/padding is caught by the C unit suite rather than only by
+ * the Python-hashlib golden checks. */
+static void
+test_sha256_nist_vectors(void)
+{
+    static const u_char abc[] = "abc";
+    static const u_char empty[] = "";
+    static const u_char long_input[] =
+        "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    u_char  out[65];
+
+    TEST_SUBSECTION("SHA-256 NIST vectors");
+
+    /* sha256_hex writes exactly 64 hex chars without a terminator (the
+     * production caller prefixes "sha256:" itself); zero the buffer so
+     * strlen-based checks are deterministic. */
+    ngx_memzero(out, sizeof(out));
+
+    /* NIST FIPS 180-4: SHA256("abc") */
+    TEST_ASSERT(ngx_http_markdown_sha256_hex(abc, 3, out) == NGX_OK,
+                "sha256_hex handles a short input");
+    TEST_ASSERT(ngx_strlen(out) == 64, "sha256_hex emits 64 hex chars");
+    TEST_ASSERT(ngx_memcmp(out,
+        (u_char *) "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        64) == 0, "SHA-256(abc) matches NIST vector");
+
+    /* Empty-string vector. */
+    TEST_ASSERT(ngx_http_markdown_sha256_hex(empty, 0, out) == NGX_OK,
+                "sha256_hex handles an empty input");
+    TEST_ASSERT(ngx_memcmp(out,
+        (u_char *) "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        64) == 0, "SHA-256(empty) matches NIST vector");
+
+    /* 448-bit input crosses the padding block boundary. */
+    TEST_ASSERT(ngx_http_markdown_sha256_hex(long_input,
+                    sizeof(long_input) - 1, out) == NGX_OK,
+                "sha256_hex handles a padding-boundary input");
+    TEST_ASSERT(ngx_memcmp(out,
+        (u_char *) "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+        64) == 0, "SHA-256(padding boundary) matches NIST vector");
+
+    TEST_PASS("SHA-256 NIST vectors match");
+}
+
 int
 main(void)
 {
@@ -250,6 +298,7 @@ main(void)
 #ifdef MARKDOWN_STREAMING_ENABLED
     test_collect_metrics_streaming();
 #endif
+    test_sha256_nist_vectors();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

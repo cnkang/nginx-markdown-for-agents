@@ -474,16 +474,10 @@ mod tests {
 // after wildcard negotiation is removed (design §Feature Removal — Wildcard
 // negotiation removal; §14(g); Requirements LTS-R010, LTS-R023):
 //
-//   * `negotiate` takes ONLY the Accept header — the `on_wildcard` parameter
-//     is dropped.
-//   * There is NO `*/*` and NO `text/*` wildcard match branch: negotiation is
-//     strict-only, so wildcard-only Accept headers never trigger conversion.
-//
-// They are EXPECTED TO FAIL until task 10.2 drops the `on_wildcard` parameter
-// and the wildcard branches: today `negotiate` still requires the second
-// argument, so the single-argument calls below do not compile (compile
-// failure is the intended test-first "red" state). Do NOT relax these tests
-// to the current signature — task 10.2 makes them pass by changing the code.
+// Negotiation is strict-only and the wildcard matching mode was removed in
+// 0.9.2 (design §14(g), LTS-R023): `negotiate` takes ONLY the Accept header
+// and there is NO `*/*` or `text/*` wildcard branch, so wildcard-only Accept
+// headers never trigger conversion.
 #[cfg(test)]
 mod wildcard_free_tests {
     use super::*;

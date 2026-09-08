@@ -729,7 +729,6 @@ create_unset_conf(void)
     conf->ops.diagnostics_enabled = NGX_CONF_UNSET;
 
     conf->stream.policy = NGX_CONF_UNSET_UINT;
-    conf->stream.policy_explicit = -1;
     conf->stream.excluded_types = NGX_CONF_UNSET_PTR;
     conf->stream.budget = NGX_CONF_UNSET_SIZE;
 

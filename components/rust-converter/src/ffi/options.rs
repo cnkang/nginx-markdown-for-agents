@@ -323,18 +323,12 @@ mod tests {
     /// Target (post-selector-removal) `MarkdownOptions` decode contract.
     ///
     /// **Test-first** guard for task 9 (§14(h), LTS-R009 / LTS-R023). Once
-    /// the four `prune_*` selector fields are removed from
-    /// `MarkdownOptions` (task 9.3), the struct shrinks to 96 bytes and the
-    /// decoder must still read the retained tail fields (`memory_budget`,
-    /// `parse_timeout_ms`, `parser_memory_budget`, `flush_threshold`) plus
-    /// `prune_noise` at their new offsets. This test builds a decode input
-    /// with distinct non-zero retained values and asserts they round-trip,
-    /// and pins the reduced ABI size so a stale layout cannot silently pass.
-    ///
-    /// EXPECTED TO FAIL until task 9.3 removes the four `prune_*` fields
-    /// (the `size_of` assertion fails at 128 bytes today; the retained-field
-    /// decode assertions are the surviving contract). Do NOT weaken this
-    /// test to make it pass; remove the fields to satisfy it.
+    /// The four `prune_*` selector fields were removed in 0.9.2 (task 9.3,
+    /// LTS-R009 / LTS-R023); `MarkdownOptions` is 96 bytes and the decoder
+    /// reads the retained tail fields (`memory_budget`, `parse_timeout_ms`,
+    /// `parser_memory_budget`, `flush_threshold`) plus `prune_noise` at their
+    /// current offsets. This test pins the reduced ABI size so a stale layout
+    /// cannot silently pass.
     #[test]
     fn test_decode_options_reduced_no_selectors() {
         use std::mem::size_of;
