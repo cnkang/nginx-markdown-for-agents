@@ -20,8 +20,9 @@ Source: `components/rust-converter/src/decision/reason_code.rs`, exporting
 
 ## Historical ABI identity
 
-The v0.9.1 baseline identifier was `MARKDOWN_ABI_VERSION = 1`. The current
-0.9.2 bundled boundary uses ABI version 3. See
+The v0.9.1 baseline identifier was `MARKDOWN_ABI_VERSION = 1`. Early 0.9.2
+development used ABI version 2 as an intermediate step; the final 0.9.2
+release bundled boundary is **ABI version 3**. See
 [FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) for the active values.
 `markdown_abi_version()` returns the linked Rust value. NGINX checks it during
 preconfiguration and refuses directive parsing and startup on mismatch. Cargo

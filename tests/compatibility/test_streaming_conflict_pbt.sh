@@ -174,7 +174,7 @@ http {
         markdown_cache_validation ims_only;
         location / {
             markdown_cache_validation full;
-            
+
         }
     }
 }
@@ -194,7 +194,7 @@ http {
         markdown_cache_validation full;
         location / {
             markdown_streaming force;
-            
+
         }
     }
 }

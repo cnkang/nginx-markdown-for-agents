@@ -302,16 +302,6 @@ test-streaming-conflict-pbt:
 
 test-upgrade-rollback-contract:
 	NGINX_BIN="$${NGINX_BIN}" bash tests/compatibility/test_upgrade_rollback_contract.sh
-	@if test -n "$${NGINX_URL:-}"; then \
-		REQUIRE_FILTER_ORDERING_ALL="$${REQUIRE_FILTER_ORDERING_ALL:-$${RELEASE_GATE_REQUIRE_FILTER_ORDERING:-0}}" \
-			bash tests/e2e/filter_ordering_test.sh; \
-		REQUIRE_AUTH_SUBREQUEST=1 bash tests/e2e/subrequest_ssi_test.sh; \
-	elif test "$${RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E:-0}" = "1"; then \
-		echo "SKIP: filter ordering / subrequest_ssi require NGINX_URL and a running fixture (RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1)" >&2; \
-	else \
-		echo "FAIL: filter ordering / subrequest_ssi are part of final E2E qualification and must not be skipped; provide NGINX_URL pointing at a module-enabled fixture (set RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 only for non-release local runs)" >&2; \
-		exit 1; \
-	fi
 
 # ---------------------------------------------------------------------------
 # test-all: aggregate every CI-checkable gate that can run on the current

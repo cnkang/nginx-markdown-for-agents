@@ -90,7 +90,6 @@ the order shown in the example.
 | Streaming | mode, exclusions, bounded working/replay budget | `markdown_streaming`, `markdown_stream_excluded_types`, `markdown_limits streaming_buffer` |
 | Decompression | automatic mode and bounded decoder state | `markdown_auto_decompress`, `markdown_limits decompressed_size`, `markdown_limits decompression_ratio` |
 | Observability | logs, diagnostics, metrics shared memory | `markdown_log_verbosity`, `markdown_diagnostics`, `markdown_metrics_shm_size`, `markdown_metrics` |
-| Static operation | diagnostics, logging, metrics shared memory | `markdown_diagnostics`, `markdown_log_verbosity`, `markdown_metrics_shm_size`, `markdown_metrics` |
 
 ## Lifecycle
 

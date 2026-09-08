@@ -303,7 +303,6 @@ error_log /tmp/markdown-http.error;
 events { worker_connections 64; }
 http {
     markdown_filter on;
-    markdown_accept force;
     server {
         listen 8080;
         root /tmp/markdown-html;
