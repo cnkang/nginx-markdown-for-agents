@@ -7,8 +7,6 @@ Verifies ``generate_schema_artifacts.py``:
   streaming-transition, and build-info contract
 - Generates diagnostics-field-contract.json matching
   diagnostics.schema.json effective_config properties
-- Generates dynconf-precedence-report.json with the five-tier hierarchy
-  and field-specific provenance rules covering every dynconf schema key
 - The generated artifacts pass the schema-drift validator end to end
 """
 
@@ -162,79 +160,6 @@ def test_diagnostics_field_contract_matches_schema():
     }
 
 
-def test_dynconf_precedence_report_covers_all_schema_keys():
-    """Precedence report covers every dynconf schema key (minus version)."""
-    report = gen.generate_dynconf_precedence_report()
-    schema = json.loads(
-        (REPO_ROOT / "schemas" / "dynconf.schema.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    schema_keys = {
-        key for key in schema["properties"] if key != "schema_version"
-    }
-    fields = report["field_specific_provenance_rules"]["fields"]
-    assert set(fields.keys()) == schema_keys
-
-    canonical = json.loads(
-        (REPO_ROOT / "schemas" / "dynconf-precedence-v1.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert (
-        report["five_tier_precedence_hierarchy"]
-        == canonical["five_tier_precedence_hierarchy"]
-    )
-    assert report["contract_source"] == "schemas/dynconf-precedence-v1.json"
-    assert report["implementation_sources"] == [
-        "schemas/dynconf.schema.json",
-        "components/rust-converter/src/dynconf/schema.rs",
-        "components/nginx-module/src/ngx_http_markdown_dynconf_precedence.h",
-    ]
-
-
-def test_dynconf_precedence_header_drift_is_rejected():
-    """The generator must reject a changed precedence source or order."""
-    header = (
-        REPO_ROOT
-        / "components"
-        / "nginx-module"
-        / "src"
-        / "ngx_http_markdown_dynconf_precedence.h"
-    ).read_text(encoding="utf-8")
-    mutated = header.replace(
-        "1. NGINX request variable evaluation",
-        "1. Dynconf runtime override",
-        1,
-    )
-
-    contract = gen._read_json(gen.DYNCONF_PRECEDENCE_CONTRACT_PATH)
-    with pytest.raises(ValueError, match="tier 1"):
-        gen._extract_precedence_hierarchy(
-            mutated,
-            contract["five_tier_precedence_hierarchy"],
-        )
-
-
-def test_dynconf_rust_allowlist_drift_is_rejected(monkeypatch):
-    """The generator must reject keys absent from the Rust parser allowlist."""
-    rust_path = gen.DYNCONF_RUST_SCHEMA_PATH
-    rust_source = rust_path.read_text(encoding="utf-8")
-    mutated = rust_source.replace(
-        '"streaming_buffer"', '"undocumented_field"', 1
-    )
-    original_read_text = gen._read_text
-
-    def read_text(path):
-        if path == rust_path:
-            return mutated
-        return original_read_text(path)
-
-    monkeypatch.setattr(gen, "_read_text", read_text)
-    with pytest.raises(ValueError, match="Rust KNOWN_KEYS"):
-        gen.generate_dynconf_precedence_report()
-
-
 def test_generated_artifacts_pass_schema_drift_validator(tmp_path, monkeypatch):
     """End-to-end: write artifacts then validate with the drift gate."""
     artifact_dir = tmp_path / "artifacts" / "release" / "0.9.2"
@@ -263,22 +188,11 @@ def test_generated_artifacts_pass_schema_drift_validator(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         validate_schema_drift,
-        "DYNCONF_PRECEDENCE_REPORT",
-        artifact_dir / "dynconf-precedence-report.json",
-    )
-    monkeypatch.setattr(
-        validate_schema_drift,
         "RELEASE_ARTIFACTS",
         [
-            artifact_dir / "dynconf-precedence-report.json",
             artifact_dir / "metrics-registry.json",
             artifact_dir / "diagnostics-field-contract.json",
         ],
-    )
-    monkeypatch.setattr(
-        validate_schema_drift,
-        "DYNCONF_SCHEMA",
-        REPO_ROOT / "schemas" / "dynconf.schema.json",
     )
     monkeypatch.setattr(
         validate_schema_drift,
@@ -291,8 +205,34 @@ def test_generated_artifacts_pass_schema_drift_validator(tmp_path, monkeypatch):
     errors.extend(validate_schema_drift.gate_release_artifact_structure())
     errors.extend(validate_schema_drift.gate_metrics_registry())
     errors.extend(validate_schema_drift.gate_diagnostics_field_contract())
-    errors.extend(validate_schema_drift.gate_dynconf_schema())
     assert errors == [], f"Schema drift validator failed: {errors}"
+
+
+@pytest.mark.parametrize("drift", [False, True])
+def test_check_preserves_existing_artifacts(tmp_path, monkeypatch, drift):
+    """Checks detect drift without repairing it or rewriting valid files."""
+    monkeypatch.setattr(gen, "REPO_ROOT", tmp_path)
+    assert gen.main(["--version", "0.9.2"]) == 0
+    artifact_dir = tmp_path / "artifacts" / "release" / "0.9.2"
+    if drift:
+        (artifact_dir / "metrics-registry.json").write_text("{}\n")
+    before = {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in artifact_dir.iterdir()
+    }
+    assert gen.main(["--check", "--version", "0.9.2"]) == int(drift)
+    after = {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in artifact_dir.iterdir()
+    }
+    assert after == before
+
+
+def test_check_missing_artifacts_does_not_create_directory(tmp_path, monkeypatch):
+    """A missing artifact fails the check without creating output paths."""
+    monkeypatch.setattr(gen, "REPO_ROOT", tmp_path)
+    assert gen.main(["--check", "--version", "0.9.2"]) == 1
+    assert not (tmp_path / "artifacts").exists()
 
 
 @pytest.mark.parametrize("version", ["../escape", "/tmp/escape"])

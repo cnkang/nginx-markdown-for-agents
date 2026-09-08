@@ -471,7 +471,6 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
     struct FFIAcceptResult   result;
     ngx_int_t                accept_rc;
     ngx_str_t                accept_value;
-    uint8_t                  on_wildcard;
 
     if (conf == NULL) {
         ngx_http_markdown_set_accept_reason(
@@ -515,13 +514,14 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
         return 0;
     }
 
-    on_wildcard = (uint8_t)
-        ((conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD) ? 1 : 0);
-
+    /*
+     * Negotiation is strict-only (0.9.2, LTS-R010): the removed wildcard
+     * policy no longer feeds a wildcard-mode argument.  strict converts only
+     * on an explicit text/markdown match; force short-circuits above.
+     */
     markdown_negotiate_accept(
         accept_value.data,
         accept_value.len,
-        on_wildcard,
         &result);
 
     ngx_http_markdown_set_accept_reason(

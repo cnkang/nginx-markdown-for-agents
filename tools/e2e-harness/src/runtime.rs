@@ -296,7 +296,7 @@ http {{\n\
         listen 127.0.0.1:{port};\n\
         location /md/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_cache_validation full;\n\
             markdown_auth_policy allow;\n\
@@ -306,7 +306,7 @@ http {{\n\
         }}\n\
         location /md-deny/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_cache_validation full;\n\
             markdown_auth_policy deny;\n\
@@ -345,7 +345,13 @@ http {{\n\
         listen 127.0.0.1:{port};\n\
         location /md/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept strict;\n\
+            markdown_streaming off;\n\
+            proxy_pass http://fixture_backend;\n\
+        }}\n\
+        location /force/ {{\n\
+            markdown_filter on;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             proxy_pass http://fixture_backend;\n\
         }}\n\
@@ -386,7 +392,7 @@ http {{\n\
         listen 127.0.0.1:{port};\n\
         location /md/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             proxy_pass http://fixture_backend;\n\
         }}\n\
@@ -421,7 +427,7 @@ http {{\n\
         listen 127.0.0.1:{port};\n\
         location /md/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_cache_validation off;\n\
             markdown_limits conversion_memory=64m conversion_timeout=10s;\n\
@@ -461,7 +467,7 @@ http {{\n\
         listen 127.0.0.1:{port};\n\
         location /md/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_cache_validation full;\n\
             markdown_limits conversion_memory=64m conversion_timeout=10s;\n\
@@ -471,7 +477,7 @@ http {{\n\
         }}\n\
         location /md-deny/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_cache_validation full;\n\
             markdown_auth_policy deny;\n\
@@ -514,7 +520,7 @@ http {{\n\
         listen 127.0.0.1:{port};\n\
         location = /representation-proxy {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_cache_validation full;\n\
             markdown_limits conversion_memory=64m conversion_timeout=10s;\n\
@@ -530,7 +536,7 @@ http {{\n\
         }}\n\
         location = /representation-cache {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_cache_validation full;\n\
             markdown_limits conversion_memory=64m conversion_timeout=10s;\n\
@@ -544,7 +550,7 @@ http {{\n\
         }}\n\
         location = /representation-internal {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_cache_validation full;\n\
             markdown_error_policy pass;\n\
@@ -554,7 +560,7 @@ http {{\n\
         }}\n\
         location = /representation-internal-target {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_cache_validation full;\n\
             markdown_error_policy pass;\n\
@@ -563,7 +569,7 @@ http {{\n\
         }}\n\
         location = /representation-subrequest {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_cache_validation full;\n\
             markdown_error_policy pass;\n\
@@ -578,7 +584,7 @@ http {{\n\
         location = /representation-subrequest-check {{\n\
             internal;\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_cache_validation full;\n\
             markdown_error_policy pass;\n\
@@ -619,7 +625,7 @@ http {{\n\
         listen 127.0.0.1:{port};\n\
         location /chain/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_auto_decompress on;\n\
             markdown_cache_validation off;\n\
@@ -637,7 +643,7 @@ http {{\n\
         }}\n\
         location /chain-stream/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming force;\n\
             markdown_auto_decompress on;\n\
             markdown_cache_validation off;\n\
@@ -650,7 +656,7 @@ http {{\n\
         }}\n\
         location /chain-fail-closed/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_auto_decompress on;\n\
             markdown_cache_validation off;\n\
@@ -692,7 +698,7 @@ http {{\n\
         listen 127.0.0.1:{port};\n\
         location /streaming/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming force;\n\
             markdown_auto_decompress on;\n\
             markdown_cache_validation off;\n\
@@ -707,7 +713,7 @@ http {{\n\
         }}\n\
         location /cache-full/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_auto_decompress on;\n\
             markdown_cache_validation full;\n\
@@ -717,7 +723,7 @@ http {{\n\
         }}\n\
         location /non-streaming/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming off;\n\
             markdown_auto_decompress on;\n\
             markdown_cache_validation off;\n\
@@ -727,7 +733,7 @@ http {{\n\
         }}\n\
         location /auto-decompress-off/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming force;\n\
             markdown_auto_decompress off;\n\
             markdown_error_policy pass;\n\
@@ -735,7 +741,7 @@ http {{\n\
         }}\n\
         location /tight-budget/ {{\n\
             markdown_filter on;\n\
-            markdown_accept wildcard;\n\
+            markdown_accept force;\n\
             markdown_streaming force;\n\
             markdown_auto_decompress on;\n\
             markdown_cache_validation off;\n\

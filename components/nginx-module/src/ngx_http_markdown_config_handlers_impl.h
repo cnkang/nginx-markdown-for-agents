@@ -67,6 +67,120 @@ ngx_http_markdown_arg_equals(
 }
 
 /*
+ * Error-returning handler for directives removed in the 0.9.2 pre-LTS
+ * convergence (LTS-R008).
+ *
+ * The removed directive NAMES stay registered in the command table so that a
+ * configuration still referencing one causes an explicit `nginx -t` failure
+ * that names the removed directive and points at the migration path, rather
+ * than nginx's generic "unknown directive" error or a silent no-op.  This
+ * handler is wired for markdown_dynamic_config, markdown_dynamic_config_path,
+ * markdown_dynconf_dry_run, markdown_prune_selectors, and
+ * markdown_prune_protection_selectors.
+ *
+ * The message names the removed directive and includes the "removed", "no
+ * longer", "static config", and "nginx -t" migration markers so a deployer
+ * upgrading from a Dynconf/custom-selector configuration is never left
+ * guessing.  Returns NGX_CONF_ERROR unconditionally regardless of the number
+ * of arguments supplied.
+ */
+static char *
+ngx_http_markdown_removed_directive(ngx_conf_t *cf,
+    ngx_command_t *cmd, /* NOSONAR: c:S995; NGINX callback signature
+                          * requires mutable command pointer */
+    void *conf)
+{
+    (void) conf;
+
+    if (cf == NULL || cmd == NULL || cmd->name.data == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+        "markdown: directive \"%V\" was removed in 0.9.2 and is no longer "
+        "supported; migrate to static config validated by \"nginx -t\" plus "
+        "a reload (the dynamic-config and custom-selector features are "
+        "removed)",
+        &cmd->name);
+
+    return NGX_CONF_ERROR;
+}
+
+/*
+ * Configuration directive handler: markdown_accept (strict | force).
+ *
+ * The "wildcard" VALUE was removed in the 0.9.2 pre-LTS convergence
+ * (LTS-R008/LTS-R010).  The accept-negotiation enum
+ * (ngx_http_markdown_accept_enum) no longer contains a "wildcard" row, so
+ * "wildcard" is not an accepted value.  A bare rejection would emit a generic
+ * "invalid value" error with no migration guidance, so this post-handler
+ * detects the removed "wildcard" token first and emits an explicit migration
+ * message naming the directive and the removed value, then rejects it so
+ * `nginx -t` fails (LTS-R008) instead of silently ignoring it.
+ *
+ * The retained values (strict, force) are validated here and stored in
+ * accept_policy directly, mirroring ngx_conf_set_enum_slot behavior (duplicate
+ * detection + unknown-value rejection) without depending on the generic slot
+ * setter, so this implementation header stays self-contained.
+ */
+static char *
+ngx_http_markdown_accept(ngx_conf_t *cf,
+    ngx_command_t *cmd, /* NOSONAR: c:S995; NGINX callback signature
+                          * requires mutable command pointer */
+    void *conf)
+{
+    static u_char             wildcard_str[] = "wildcard";
+    static u_char             strict_str[] = "strict";
+    static u_char             force_str[] = "force";
+    ngx_http_markdown_conf_t *mcf = conf;
+    const ngx_str_t          *value;
+
+    (void) cmd;
+
+    if (mcf == NULL || !ngx_http_markdown_conf_args_ready(cf, 2)) {
+        return NGX_CONF_ERROR;
+    }
+
+    value = cf->args->elts;
+
+    if (ngx_http_markdown_arg_equals(&value[1], wildcard_str,
+                                     sizeof(wildcard_str) - 1))
+    {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "markdown: \"markdown_accept wildcard\" was removed in 0.9.2 and "
+            "is no longer supported; wildcard Accept negotiation is gone, "
+            "use \"markdown_accept strict\" (default) or, only where "
+            "intentional, \"markdown_accept force\", then validate with "
+            "\"nginx -t\"");
+        return NGX_CONF_ERROR;
+    }
+
+    if (mcf->accept_policy != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], strict_str,
+                                     sizeof(strict_str) - 1))
+    {
+        mcf->accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_STRICT;
+        return NGX_CONF_OK;
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], force_str,
+                                     sizeof(force_str) - 1))
+    {
+        mcf->accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_FORCE;
+        return NGX_CONF_OK;
+    }
+
+    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+        "markdown: invalid value \"%V\" for \"markdown_accept\"; "
+        "expected \"strict\" (default) or \"force\"",
+        &value[1]);
+    return NGX_CONF_ERROR;
+}
+
+/*
  * Resolve a size suffix character (k/K, m/M, g/G) to its multiplier.
  * Returns 0 for no suffix (bare number), or NGX_ERROR for an unrecognized
  * character so the caller can distinguish "no suffix" from "invalid
@@ -963,11 +1077,11 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
         mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
         mcf->enabled_complex = NULL;
         /*
-         * Set block bit when at server/location level (not http).
-         * http-level settings are the baseline dynconf overrides.
+         * Set the static explicit block bit (Rule 71) at server/location
+         * level (not http) so inheritance does not mask this value.
          */
         if (cf->cmd_type & (NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF)) {
-            mcf->advanced.dynconf_block_mask |=
+            mcf->advanced.static_block_mask |=
                 NGX_HTTP_MARKDOWN_BLOCK_FILTER;
         }
         return NGX_CONF_OK;
@@ -983,7 +1097,7 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
          * Set block bit when at server/location level (not http).
          */
         if (cf->cmd_type & (NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF)) {
-            mcf->advanced.dynconf_block_mask |=
+            mcf->advanced.static_block_mask |=
                 NGX_HTTP_MARKDOWN_BLOCK_FILTER;
         }
         return NGX_CONF_OK;
@@ -1018,8 +1132,9 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
 
     /*
      * Request variable evaluation always wins (tier 1).
-     * The block bit is NOT set for complex values — tier 1 overrides
-     * all other tiers including dynconf.
+     * The static explicit block bit is NOT set for complex values — a
+     * request-variable enable state overrides the static value at
+     * request time.
      */
 
     return NGX_CONF_OK;
@@ -1279,9 +1394,17 @@ ngx_http_markdown_streaming(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
      * so the cache-validation conflict check in merge_conf does not fire for
      * default configurations.
      *
-     *   off   - never stream
-     *   auto  - stream large responses, full-buffer small ones
+     *   off   - bounded full-buffer conversion (unset == off; the default
+     *           when the directive is never written, design §14(a))
+     *   auto  - prefer streaming when available and legal, with no
+     *           size/heuristic branching; takes effect only when written
+     *           explicitly
      *   force - always stream (subject to runtime hard blocks)
+     *
+     * Migration note (0.9.2): the unset default changed from auto to off
+     * (LTS-R011.2/R011.3).  Operators who relied on the old implicit
+     * streaming default must now write "markdown_streaming auto" (or
+     * "force") explicitly to opt back in.
      */
     if (mcf->stream.policy != NGX_CONF_UNSET_UINT) {
         return "is duplicate";
@@ -1650,152 +1773,6 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
     return NGX_CONF_OK;
 }
 
-
-/**
- * Custom directive handler for markdown_dynamic_config_path.
- *
- * Sets the dynconf_path field, then checks whether another location
- * has already configured a path.  If so, returns NGX_CONF_ERROR
- * to reject the configuration immediately — before nginx -t or
- * worker startup — preventing ambiguous multi-location dynconf.
- *
- * Dynconf supports only a single global instance; the operator may
- * place the directive at http, server, or location level, but only
- * one configuration object may own the global watcher.
- *
- * Duplicate detection reads from ngx_http_markdown_main_conf_t
- * (config-parse scope) rather than a file-scope static, so the flag
- * is reset correctly on reload.
- *
- * @param cf    Configuration context.
- * @param cmd   Directive definition.
- * @param conf  Target configuration struct (ngx_http_markdown_conf_t).
- * @return NGX_CONF_OK on success, NGX_CONF_ERROR on duplicate.
- */
-static char *
-ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
-    void *conf)
-{
-    ngx_str_t                      *value;
-    ngx_http_markdown_conf_t       *mcf;
-    ngx_http_markdown_main_conf_t  *mmcf;
-
-    (void) cmd;
-    (void) conf;
-
-    /* H-only dynconf directives still own the location snapshot consumed by
-     * workers.  Resolve that loc_conf explicitly instead of treating the
-     * command's main-conf offset as a location-config pointer. */
-    if (cf == NULL || !ngx_http_markdown_conf_args_ready(cf, 2)) {
-        return NGX_CONF_ERROR;
-    }
-
-    mcf = ngx_http_conf_get_module_loc_conf(
-        cf, ngx_http_markdown_filter_module);
-
-    if (mcf == NULL) {
-        return NGX_CONF_ERROR;
-    }
-
-    /* Let NGINX set the string slot first */
-    value = cf->args->elts;
-
-    if (cf->args->nelts < 2) {
-        return NGX_CONF_ERROR;
-    }
-
-    if (value[1].len == 0) {
-        return NGX_CONF_OK;
-    }
-
-    mmcf = ngx_http_conf_get_module_main_conf(
-        cf, ngx_http_markdown_filter_module);
-    if (mmcf == NULL) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "markdown: failed to get main conf");
-        return NGX_CONF_ERROR;
-    }
-
-    if (mmcf->dynconf_path_configured) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "markdown: duplicate configuration; "
-            "dynconf supports only a single global instance. "
-            "First path: \"%V\", this path: \"%V\". "
-            "Place the directive at http/server level or in only one location",
-            &mmcf->dynconf_first_path, &value[1]);
-        return NGX_CONF_ERROR;
-    }
-
-    mcf->advanced.dynconf_path = value[1];
-    mmcf->dynconf_path_configured = 1;
-    mmcf->dynconf_first_path = value[1];
-    mmcf->dynconf_owner_conf = mcf;
-
-    return NGX_CONF_OK;
-}
-
-
-/* Store an H-only dynconf flag in the default location configuration. */
-static char *
-ngx_http_markdown_dynconf_flag(ngx_conf_t *cf,
-    ngx_command_t *cmd, /* NOSONAR: c:S995; NGINX callback signature
-                          * requires mutable command pointer */
-    void *conf)
-{
-    ngx_http_markdown_conf_t  *mcf;
-    const ngx_str_t           *value;
-    ngx_flag_t                *slot;
-
-    (void) conf;
-    if (cf == NULL || !ngx_http_markdown_conf_args_ready(cf, 2)) {
-        return NGX_CONF_ERROR;
-    }
-
-    mcf = ngx_http_conf_get_module_loc_conf(
-        cf, ngx_http_markdown_filter_module);
-    if (mcf == NULL || cf->args->nelts != 2)
-    {
-        return NGX_CONF_ERROR;
-    }
-
-    value = cf->args->elts;
-    if (cmd == NULL || cmd->name.data == NULL) {
-        return NGX_CONF_ERROR;
-    }
-    if (ngx_http_markdown_arg_equals(
-            &cmd->name,
-            (const u_char *) NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG,
-            sizeof(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG) - 1))
-    {
-        slot = &mcf->advanced.dynconf_enabled;
-    } else if (ngx_http_markdown_arg_equals(
-                   &cmd->name,
-                   (const u_char *) NGX_HTTP_MARKDOWN_DIRECTIVE_DYNCONF_DRY_RUN,
-                   sizeof(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNCONF_DRY_RUN) - 1))
-    {
-        slot = &mcf->advanced.dynconf_dry_run;
-    } else {
-        return NGX_CONF_ERROR;
-    }
-    if (*slot != NGX_CONF_UNSET) {
-        return "is duplicate";
-    }
-
-    if (ngx_http_markdown_arg_equals(
-            &value[1], (const u_char *) "on", sizeof("on") - 1))
-    {
-        *slot = 1;
-        return NGX_CONF_OK;
-    }
-    if (ngx_http_markdown_arg_equals(
-            &value[1], (const u_char *) "off", sizeof("off") - 1))
-    {
-        *slot = 0;
-        return NGX_CONF_OK;
-    }
-
-    return "is not a valid flag";
-}
 
 /*
  * Configuration directive handler: markdown_stream_excluded_types

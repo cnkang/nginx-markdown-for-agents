@@ -32,8 +32,8 @@ This project draws inspiration from Cloudflare's announcement but provides a sel
 ### What are the system requirements?
 
 - **NGINX**: 1.24.0 or higher
-- **Rust**: repository builds use the pinned 1.97.1 toolchain; the public
-  source-build MSRV is 1.97 (for source builds only)
+- **Rust**: repository builds use the pinned 1.98.1 toolchain; the public
+  source-build MSRV is 1.98 (for source builds only)
 - **Operating System**: macOS or Linux (x86_64 or aarch64)
 - **Memory**: Minimum 512MB RAM per worker (more for large documents;
   a practical sizing floor for typical deployments — not a hard upper
@@ -254,7 +254,7 @@ Common causes:
    - Exact `map $http_accept` strings often miss real-world multi-value `Accept` headers
    - Use regex map rules for `Accept` matching
    - Prefer `$uri` over `$request_uri` for extension checks (query strings can break matches)
-   - If map includes `text/*`, enable `markdown_accept wildcard;`
+   - If the map intentionally selects `text/*` clients, pair that scope with `markdown_accept force;`
 4. **Response not eligible**: Must be 200 status with `text/html` content type
 5. **Size limit exceeded**: Response larger than `markdown_limits conversion_memory=...`
 

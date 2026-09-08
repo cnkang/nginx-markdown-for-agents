@@ -34,7 +34,7 @@ class NginxMarkdownModule < Formula
   # rustup helper rather than the Homebrew `rust` formula, because the crate
   # MSRV can briefly exceed Homebrew's Rust version. The helper pins the
   # architecture-specific rustup-init bytes before execution.
-  TOOLCHAIN_VERSION = "1.97.1".freeze
+  TOOLCHAIN_VERSION = "1.98.1".freeze
 
   def install
     rustup_home = "#{buildpath}/rustup"

@@ -280,9 +280,9 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r,
 }
 
 /*
- * Effective-view helpers: dynconf_impl.h owns the production versions but
- * is too heavy for this TU; mirror the production fallback semantics
- * (prefer eff, fall back to conf).
+ * Effective-view helpers: effective_conf_impl.h owns the production
+ * versions but is too heavy for this TU; mirror the production fallback
+ * semantics (prefer eff, fall back to conf).
  */
 static ngx_flag_t
 ngx_http_markdown_effective_prune_noise(

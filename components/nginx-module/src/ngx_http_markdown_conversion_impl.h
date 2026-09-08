@@ -1012,22 +1012,15 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
 
     options->prune_noise =
         ngx_http_markdown_effective_prune_noise(eff, conf) ? 1U : 0U;
-    options->prune_selectors = NULL;
-    options->prune_selector_len = 0;
-    options->prune_protection_selectors = NULL;
-    options->prune_protection_selector_len = 0;
 
-    if (conf->advanced.prune_selectors != NULL) {
-        options->prune_selectors = conf->advanced.prune_selectors->data;
-        options->prune_selector_len = conf->advanced.prune_selectors->len;
-    }
-
-    if (conf->advanced.prune_protection_selectors != NULL) {
-        options->prune_protection_selectors =
-            conf->advanced.prune_protection_selectors->data;
-        options->prune_protection_selector_len =
-            conf->advanced.prune_protection_selectors->len;
-    }
+    /*
+     * Custom prune/protection selectors were removed in 0.9.2 (LTS-R009).
+     * The C module no longer populates the selector pointers/lengths; built-in
+     * noise reduction is driven solely by prune_noise above.  The FFI
+     * MarkdownOptions selector fields (retained until Rust task 9.3 removes
+     * them) stay at the NULL/0 defaults set by markdown_options_init(), so no
+     * selector data crosses the FFI boundary.
+     */
 
     /*
      * Resolve the effective static conversion_memory budget once for this

@@ -73,7 +73,7 @@ The counters follow these conservation rules:
 
 ## Diagnostics
 
-The diagnostics handler returns the strict Schema v2 response documented in
+The diagnostics handler returns the strict Schema v3 response documented in
 [Observability Contract v2](../architecture/observability-schema-v2.md). It has
 no streaming-only top-level section. The frozen families provide runtime visibility via
 worker-local `runtime` counters, bounded `recent_decisions` entries, and the

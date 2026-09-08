@@ -2097,7 +2097,7 @@ mod tests {
     #[test]
     fn test_resident_bytes_includes_prune_config() {
         let selector = "nav-".to_owned() + &"x".repeat(4096);
-        let config = PruneConfig::from_ffi(true, Some(selector.as_str()), None);
+        let config = PruneConfig::from_selector_strings(true, Some(selector.as_str()), None);
         let config_bytes = config.resident_bytes();
         let san = StreamingSanitizer::with_prune_config(config);
 

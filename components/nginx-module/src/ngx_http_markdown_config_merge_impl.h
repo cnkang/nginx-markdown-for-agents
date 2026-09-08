@@ -33,15 +33,6 @@ ngx_http_markdown_merge_enabled(ngx_http_markdown_conf_t *conf,
 }
 
 static void
-ngx_http_markdown_merge_str_if_unset(ngx_str_t *child,
-    const ngx_str_t *parent)
-{
-    if (child->len == 0 && parent->len > 0) {
-        *child = *parent;
-    }
-}
-
-static void
 ngx_http_markdown_apply_memory_budget_override(
     ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev,
@@ -70,8 +61,17 @@ ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_value(conf->front_matter, prev->front_matter, 0);
     ngx_conf_merge_uint_value(conf->accept_policy, prev->accept_policy,
                               NGX_HTTP_MARKDOWN_ACCEPT_STRICT);
+    /*
+     * LTS-R021 (SAFETY-INVARIANT): unset auth_policy resolves to no-convert
+     * for identifiable authenticated content.  DENY is the default so private
+     * content is not transformed unexpectedly; the original HTML is still
+     * served (never refused) by the request-path gate.  Explicit
+     * "markdown_auth_policy allow" is the opt-in that converts authenticated
+     * content.
+     */
     ngx_conf_merge_uint_value(conf->policy.auth_policy,
-                              prev->policy.auth_policy, 0);
+                              prev->policy.auth_policy,
+                              NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY);
     ngx_conf_merge_value(conf->policy.generate_etag,
                          prev->policy.generate_etag, 0);
     ngx_conf_merge_uint_value(conf->policy.conditional_requests,
@@ -130,17 +130,10 @@ ngx_http_markdown_merge_advanced_values(ngx_http_markdown_conf_t *conf,
 {
     ngx_conf_merge_value(conf->advanced.prune_noise,
                          prev->advanced.prune_noise, 1);
-    ngx_conf_merge_ptr_value(conf->advanced.prune_selectors,
-                             prev->advanced.prune_selectors, NULL);
-    ngx_conf_merge_ptr_value(conf->advanced.prune_protection_selectors,
-                             prev->advanced.prune_protection_selectors,
-                             NULL);
-    ngx_conf_merge_value(conf->advanced.dynconf_enabled,
-                         prev->advanced.dynconf_enabled, 0);
-    ngx_http_markdown_merge_str_if_unset(&conf->advanced.dynconf_path,
-                                         &prev->advanced.dynconf_path);
-    ngx_conf_merge_value(conf->advanced.dynconf_dry_run,
-                         prev->advanced.dynconf_dry_run, 0);
+    /*
+     * Custom prune/protection selectors were removed in 0.9.2 (LTS-R009);
+     * only prune_noise (merged above) survives.
+     */
 }
 
 /*

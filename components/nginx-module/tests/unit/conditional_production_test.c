@@ -319,10 +319,41 @@ ngx_parse_http_time(u_char *value, size_t len)
     return (time_t) -1;
 }
 
+ngx_list_t *
+ngx_list_create(ngx_pool_t *pool, ngx_uint_t n, size_t size)
+{
+    ngx_list_t       *list;
+    ngx_list_part_t  *part;
+
+    list = ngx_pcalloc(pool, sizeof(*list));
+    if (list == NULL || n == 0 || size == 0
+        || (size_t) n > (size_t) -1 / size)
+    {
+        return NULL;
+    }
+
+    part = &list->part;
+    part->elts = ngx_pcalloc(pool, n * size);
+    if (part->elts == NULL) {
+        return NULL;
+    }
+
+    part->nelts = 0;
+    part->next = NULL;
+    list->last = part;
+    list->size = size;
+    list->nalloc = n;
+    list->pool = pool;
+    return list;
+}
+
 ngx_table_elt_t *
 ngx_list_push(ngx_list_t *list)
 {
-    ngx_list_part_t *part = &list->part;
+    /* Match real NGINX semantics (src/core/ngx_list.c): append through
+     * list->last, not the embedded part.  A stale last pointer must be
+     * visible to tests, not masked by always starting at &list->part. */
+    ngx_list_part_t *part = list->last;
     ngx_table_elt_t *elts = (ngx_table_elt_t *) part->elts;
 
     if (part->nelts < list->nalloc) {
@@ -740,6 +771,7 @@ create_header_list(void)
     list->part.elts = elts;
     list->part.nelts = 0;
     list->part.next = NULL;
+    list->last = &list->part;
     list->size = sizeof(ngx_table_elt_t);
     list->nalloc = 32;
     return list;
@@ -775,7 +807,9 @@ make_req(void)
         ngx_pcalloc(NULL, sizeof(ngx_connection_t));
     if (r->connection == NULL) return NULL;
     r->headers_in.headers = *create_header_list();
+    r->headers_in.headers.last = &r->headers_in.headers.part;
     r->headers_out.headers = *create_header_list();
+    r->headers_out.headers.last = &r->headers_out.headers.part;
     g_conditional_conf = NULL;
     return r;
 }
@@ -848,6 +882,7 @@ test_send_304_does_not_duplicate_upstream_vary(void)
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
 
     r->headers_out.trailers = *create_header_list();
+    r->headers_out.trailers.last = &r->headers_out.trailers.part;
     upstream_vary = add_header(&r->headers_out.headers, "Vary", "Accept");
     memset(&result, 0, sizeof(result));
 
@@ -876,6 +911,7 @@ test_send_304_appends_accept_to_upstream_vary(void)
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
 
     r->headers_out.trailers = *create_header_list();
+    r->headers_out.trailers.last = &r->headers_out.trailers.part;
     upstream_vary = add_header(&r->headers_out.headers,
                                "Vary", "Accept-Encoding");
     memset(&result, 0, sizeof(result));
@@ -904,6 +940,7 @@ test_send_412_success_clears_body_headers(void)
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
 
     r->headers_out.trailers = *create_header_list();
+    r->headers_out.trailers.last = &r->headers_out.trailers.part;
     add_header(&r->headers_out.headers, "Content-Length", "123");
     add_header(&r->headers_out.headers, "Accept-Ranges", "bytes");
     add_header(&r->headers_out.headers, "Trailer", "X-Checksum");
@@ -941,6 +978,7 @@ test_send_412_failure_restores_headers(void)
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
 
     r->headers_out.trailers = *create_header_list();
+    r->headers_out.trailers.last = &r->headers_out.trailers.part;
     original_etag = fill_response_headers(r);
     original_header_count = r->headers_out.headers.part.nelts;
 
@@ -1021,6 +1059,7 @@ test_send_304_etag_failure_restores_headers(void)
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
 
     r->headers_out.trailers = *create_header_list();
+    r->headers_out.trailers.last = &r->headers_out.trailers.part;
     original_etag = fill_response_headers(r);
     original_trailer = add_header(&r->headers_out.trailers,
                                   "Digest", "sha-256=upstream");
@@ -1092,6 +1131,7 @@ test_send_304_vary_failure_restores_headers(void)
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
 
     r->headers_out.trailers = *create_header_list();
+    r->headers_out.trailers.last = &r->headers_out.trailers.part;
     original_etag = fill_response_headers(r);
     original_trailer = add_header(&r->headers_out.trailers,
                                   "Digest", "sha-256=upstream");
@@ -1162,6 +1202,7 @@ test_send_304_with_etag(void)
                                   "Content-Encoding", "gzip");
     r->headers_out.content_encoding = content_encoding;
     r->headers_out.trailers = *create_header_list();
+    r->headers_out.trailers.last = &r->headers_out.trailers.part;
     trailer = add_header(&r->headers_out.trailers,
                          "Digest", "sha-256=upstream");
 
@@ -1297,6 +1338,7 @@ test_send_304_send_header_fails(void)
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
 
     r->headers_out.trailers = *create_header_list();
+    r->headers_out.trailers.last = &r->headers_out.trailers.part;
     r->headers_out.status = 200;
     r->headers_out.status_line.data = (u_char *) "OK";
     r->headers_out.status_line.len = 2;
@@ -1439,6 +1481,11 @@ test_capture_restore_conditional_headers(void)
     TEST_ASSERT(r->headers_in.if_none_match == NULL
                 && r->headers_in.if_modified_since == NULL,
         "typed validator pointers are hidden");
+    TEST_ASSERT(ngx_http_markdown_find_request_header(
+                    r, (u_char *) "If-None-Match", 13) == NULL
+                && ngx_http_markdown_find_request_header(
+                    r, (u_char *) "If-Modified-Since", 17) == NULL,
+        "captured validators are absent from the upstream header list");
 
     ngx_http_markdown_restore_conditional_request(r, &ctx);
     TEST_ASSERT(!ctx.conditional.suppressed,
@@ -1452,6 +1499,11 @@ test_capture_restore_conditional_headers(void)
     TEST_ASSERT(r->headers_in.if_none_match == inm
                 && r->headers_in.if_modified_since == ims,
         "typed validator pointers are restored");
+    TEST_ASSERT(ngx_http_markdown_find_request_header(
+                    r, (u_char *) "If-None-Match", 13) == inm
+                && ngx_http_markdown_find_request_header(
+                    r, (u_char *) "If-Modified-Since", 17) == ims,
+        "restored validators return to the request header list");
     TEST_PASS("capture and restore conditional headers");
 }
 
@@ -3349,6 +3401,65 @@ test_capture_conditional_state_paths(void)
 }
 
 static void
+test_shadow_list_last_rebind(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *appended;
+    ngx_uint_t found = 0;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) {
+        TEST_FAIL("request allocation failed");
+        return;
+    }
+    add_header(&r->headers_in.headers, "If-None-Match", "\"one\"");
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "conditional capture succeeds and installs the shadow list");
+    TEST_ASSERT(r->headers_in.headers.last == &r->headers_in.headers.part,
+                "shadow copy rebinds last to the request's embedded part");
+
+    /* Appending through the real NGINX list semantics must make the new
+     * header visible to iteration starting at headers.part. */
+    appended = ngx_list_push(&r->headers_in.headers);
+    if (appended == NULL) {
+        TEST_FAIL("header append after shadow failed");
+        return;
+    }
+    appended->key.data = (u_char *) "X-Appended";
+    appended->key.len = sizeof("X-Appended") - 1;
+    appended->value.data = (u_char *) "visible";
+    appended->value.len = sizeof("visible") - 1;
+    appended->hash = 1;
+
+    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t *headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].key.len == sizeof("X-Appended") - 1
+                && ngx_strncmp(headers[i].key.data, "X-Appended",
+                               sizeof("X-Appended") - 1) == 0)
+            {
+                found = 1;
+            }
+        }
+    }
+    TEST_ASSERT(found == 1,
+                "header appended after shadow is visible to iteration");
+
+    ngx_http_markdown_restore_conditional_request(r, &ctx);
+    TEST_ASSERT(r->headers_in.headers.last == &r->headers_in.headers.part,
+                "restore returns the original list with a valid last pointer");
+    TEST_PASS("shadow list last-pointer rebind exercised");
+}
+
+static void
 test_conditional_helper_guards(void)
 {
     ngx_http_markdown_if_none_match_measurement_t measurement;
@@ -3601,6 +3712,7 @@ main(void)
     test_collect_inm_captured_fallback_paths();
     test_collect_inm_captured_copy_and_alloc_failure();
     test_capture_conditional_state_paths();
+    test_shadow_list_last_rebind();
     test_conditional_helper_guards();
     test_handle_inm_etag_mismatch();
     test_handle_inm_with_ims_header();

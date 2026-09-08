@@ -7,7 +7,7 @@
 //!
 //! # Design
 //!
-//! - **ErrorClass**: 10 distinct error categories covering all failure modes.
+//! - **ErrorClass**: 8 distinct error categories covering all failure modes.
 //! - **ErrorPolicy**: The operator-configured handling strategy
 //!   (`pass` / `status <code>` / `fail_closed`).
 //! - **ErrorBehavior**: The concrete runtime action taken for a given error.
@@ -32,7 +32,7 @@
 use crate::decision::reason_code::ReasonCode;
 
 /// Number of error class variants.
-pub const ERROR_CLASS_COUNT: usize = 10;
+pub const ERROR_CLASS_COUNT: usize = 8;
 
 /// Error classification — categorizes all possible conversion failures.
 ///
@@ -43,6 +43,16 @@ pub const ERROR_CLASS_COUNT: usize = 10;
 ///
 /// Uses `#[repr(u8)]` for FFI compatibility and compact storage.
 /// Discriminant values are stable and must not be reordered.
+///
+/// # One-time renumber (pre-LTS 0.9.2 convergence)
+///
+/// Discriminants 6 (`InvalidDynconf`) and 7 (`DegradedSnapshot`) were retired
+/// during the pre-LTS convergence and the surviving variants were compacted to
+/// a contiguous `0..8` set (`ERROR_CLASS_COUNT == 8`): `HeaderPlanApplyError`
+/// moved 8 → 6 and `StreamingMidFlightError` moved 9 → 7. This was a one-time
+/// renumber prior to the LTS freeze; discriminants are additive-only after 1.0.
+/// The mirror `FFIErrorClass` in `ffi/abi.rs` was renumbered identically and
+/// the cross-enum static asserts enforce the pairing.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorClass {
@@ -62,14 +72,10 @@ pub enum ErrorClass {
     DecompressionError = 4,
     /// Worker inflight limit exceeded (detected by the inflight guard).
     Overload = 5,
-    /// Dynamic configuration is invalid.
-    InvalidDynconf = 6,
-    /// Running with a degraded (last-known-good) snapshot.
-    DegradedSnapshot = 7,
     /// HeaderPlan apply failed before headers were committed.
-    HeaderPlanApplyError = 8,
+    HeaderPlanApplyError = 6,
     /// Streaming conversion failed mid-flight (body partially sent).
-    StreamingMidFlightError = 9,
+    StreamingMidFlightError = 7,
 }
 
 /// All error class variants for exhaustive iteration.
@@ -82,8 +88,6 @@ pub const ALL_ERROR_CLASSES: [ErrorClass; ERROR_CLASS_COUNT] = [
     ErrorClass::FfiPanic,
     ErrorClass::DecompressionError,
     ErrorClass::Overload,
-    ErrorClass::InvalidDynconf,
-    ErrorClass::DegradedSnapshot,
     ErrorClass::HeaderPlanApplyError,
     ErrorClass::StreamingMidFlightError,
 ];
@@ -127,8 +131,6 @@ impl ErrorClass {
             ErrorClass::FfiPanic => "ffi_panic",
             ErrorClass::DecompressionError => "decompression_error",
             ErrorClass::Overload => "overload",
-            ErrorClass::InvalidDynconf => "invalid_dynconf",
-            ErrorClass::DegradedSnapshot => "degraded_snapshot",
             ErrorClass::HeaderPlanApplyError => "header_plan_apply_error",
             ErrorClass::StreamingMidFlightError => "streaming_mid_flight_error",
         }
@@ -145,10 +147,8 @@ impl ErrorClass {
             3 => Some(ErrorClass::FfiPanic),
             4 => Some(ErrorClass::DecompressionError),
             5 => Some(ErrorClass::Overload),
-            6 => Some(ErrorClass::InvalidDynconf),
-            7 => Some(ErrorClass::DegradedSnapshot),
-            8 => Some(ErrorClass::HeaderPlanApplyError),
-            9 => Some(ErrorClass::StreamingMidFlightError),
+            6 => Some(ErrorClass::HeaderPlanApplyError),
+            7 => Some(ErrorClass::StreamingMidFlightError),
             _ => None,
         }
     }
@@ -384,8 +384,6 @@ pub fn error_to_reason_code(class: ErrorClass) -> ReasonCode {
         ErrorClass::FfiPanic => ReasonCode::FfiPanic,
         ErrorClass::DecompressionError => ReasonCode::DecompressionError,
         ErrorClass::Overload => ReasonCode::Overload,
-        ErrorClass::InvalidDynconf => ReasonCode::InvalidDynconf,
-        ErrorClass::DegradedSnapshot => ReasonCode::DegradedSnapshot,
         ErrorClass::HeaderPlanApplyError => ReasonCode::HeaderPlanApplyError,
         ErrorClass::StreamingMidFlightError => ReasonCode::StreamingMidFlightError,
     }
@@ -444,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_error_class_from_discriminant_invalid() {
-        assert_eq!(ErrorClass::from_discriminant(10), None);
+        assert_eq!(ErrorClass::from_discriminant(8), None);
         assert_eq!(ErrorClass::from_discriminant(255), None);
     }
 
@@ -461,8 +459,6 @@ mod tests {
             ErrorClass::FfiPanic,
             ErrorClass::DecompressionError,
             ErrorClass::Overload,
-            ErrorClass::InvalidDynconf,
-            ErrorClass::DegradedSnapshot,
             ErrorClass::HeaderPlanApplyError,
         ];
         for class in &pre_commit {
@@ -489,8 +485,6 @@ mod tests {
             ErrorClass::FfiPanic,
             ErrorClass::DecompressionError,
             ErrorClass::Overload,
-            ErrorClass::InvalidDynconf,
-            ErrorClass::DegradedSnapshot,
             ErrorClass::HeaderPlanApplyError,
         ];
         for class in &pre_commit_classes {
@@ -513,8 +507,6 @@ mod tests {
             ErrorClass::FfiPanic,
             ErrorClass::DecompressionError,
             ErrorClass::Overload,
-            ErrorClass::InvalidDynconf,
-            ErrorClass::DegradedSnapshot,
             ErrorClass::HeaderPlanApplyError,
         ];
         for code in [429u16, 502, 503] {
@@ -541,8 +533,6 @@ mod tests {
             ErrorClass::FfiPanic,
             ErrorClass::DecompressionError,
             ErrorClass::Overload,
-            ErrorClass::InvalidDynconf,
-            ErrorClass::DegradedSnapshot,
             ErrorClass::HeaderPlanApplyError,
         ];
         for class in &pre_commit_classes {
@@ -621,14 +611,6 @@ mod tests {
         assert_eq!(
             error_to_reason_code(ErrorClass::Overload),
             ReasonCode::Overload
-        );
-        assert_eq!(
-            error_to_reason_code(ErrorClass::InvalidDynconf),
-            ReasonCode::InvalidDynconf
-        );
-        assert_eq!(
-            error_to_reason_code(ErrorClass::DegradedSnapshot),
-            ReasonCode::DegradedSnapshot
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::HeaderPlanApplyError),

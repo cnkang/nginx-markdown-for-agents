@@ -48,13 +48,13 @@ grep_space_prefix_count() {
 
 grep_underscore_prefixes() {
     local source_file="$1"
-    grep -nH -E '"markdown_metrics:|"markdown_dynamic_config_path:|"markdown_stream_types:|"markdown_content_types:|"markdown_auth_cookies:' "$source_file" || true
+    grep -nH -E '"markdown_metrics:|"markdown_stream_types:|"markdown_content_types:|"markdown_auth_cookies:' "$source_file" || true
     return 0
 }
 
 grep_underscore_prefix_count() {
     local source_file="$1"
-    grep -c -E '"markdown_metrics:|"markdown_dynamic_config_path:|"markdown_stream_types:|"markdown_content_types:|"markdown_auth_cookies:' "$source_file" || true
+    grep -c -E '"markdown_metrics:|"markdown_stream_types:|"markdown_content_types:|"markdown_auth_cookies:' "$source_file" || true
     return 0
 }
 
@@ -92,8 +92,8 @@ echo ""
 
 # --- Check 2: Underscore-separated non-canonical log prefixes ---
 # These are specific known non-canonical underscore-prefixed log messages:
-#   "markdown_metrics:", "markdown_dynamic_config_path:",
-#   "markdown_stream_types:", "markdown_content_types:", "markdown_auth_cookies:"
+#   "markdown_metrics:", "markdown_stream_types:", "markdown_content_types:",
+#   "markdown_auth_cookies:"
 # We search for these exact prefix patterns in log format strings.
 echo "--- Check 2: Underscore-separated log prefixes ---"
 UNDERSCORE_PREFIXES=""

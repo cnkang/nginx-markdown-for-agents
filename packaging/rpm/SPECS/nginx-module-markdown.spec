@@ -36,7 +36,7 @@ Features:
 - Noise pruning and token estimation
 - Conditional request support (ETag, If-Modified-Since)
 - Prometheus metrics endpoint
-- Dynamic configuration with dry-run validation
+- Static NGINX configuration with read-only diagnostics
 
 The module is installed as a dynamic module (.so) and must be explicitly
 enabled via load_module directive in nginx.conf.

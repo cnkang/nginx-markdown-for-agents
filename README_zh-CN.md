@@ -78,7 +78,7 @@ HTML 响应。如果结果不符合预期，请查看[安装故障排查指南](
 
 ## 0.9.2 配置要点
 
-0.9.2 将公共配置冻结为 25 条有效指令。请显式配置行为，使 `nginx -T`
+0.9.2 将公共配置冻结为 20 条有效指令（另保留 5 个仅拒绝的迁移名称）。请显式配置行为，使 `nginx -T`
 能展示运维人员选择的设置。
 
 ```nginx
@@ -149,13 +149,14 @@ curl -sS -D - -o /dev/null \
 
 0.9.2 是破坏性发布候选版本。升级前请阅读[发布说明](docs/releases/0.9.2-release-notes.md)。
 
-- 公共配置从 63 条指令减少到 25 条。profile、OTel、按路径指标、
-  shadow mode 和其他已移除的旧指令不再接受。迁移后运行 `nginx -t`。
-- 动态配置现在只接受 JSON schema v1 和五个运行时键。重载失败时，
-  active 与 last-known-good 快照保持不变。恢复文件时请原子替换文件。
-- Diagnostics 使用只读 JSON schema v2，并且只接受 `GET` 和 `HEAD`。
+- 0.9.2 冻结 20 条有效指令，并保留 5 个已移除名称作为仅拒绝的迁移入口。
+  profile、OTel、按路径指标、shadow mode 和其他旧指令不再是有效配置。
+  迁移后运行 `nginx -t`。
+- 运行时动态配置文件、watcher、dry-run 提升和 last-known-good 快照已移除。
+  请把需要的值迁移到静态指令，再通过验证后的 reload 或 restart 应用。
+- Diagnostics 使用只读 JSON schema v3，并且只接受 `GET` 和 `HEAD`。
   内置访问边界仅允许 loopback。Prometheus 指标使用冻结的 v1 合同。
-- 内部 C/Rust FFI ABI 升级到 v2。请同时重新构建模块和转换器。
+- 内部 C/Rust FFI ABI 升级到 v3。请同时重新构建模块和转换器。
   FFI 只供内部使用，不保证跨版本兼容。
 
 [升级指南](docs/guides/UPGRADE-TO-0.9.2.md)介绍二进制替换、配置迁移、服务
@@ -202,6 +203,9 @@ curl -sS -D - -o /dev/null \
 | 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
+| 1.28.3 | stable | ubuntu-24.04 | glibc | arm64 | dynamic-module | best-effort | No |
+| 1.28.3 | stable | ubuntu-24.04 | glibc | amd64 | dynamic-module | best-effort | No |
+| 1.28.3 | stable | any | n/a | any | source | best-effort | No |
 | 1.28.3 | legacy | linux | glibc | arm64 | dynamic-module | supported | Yes |
 | 1.28.3 | legacy | linux | musl | arm64 | dynamic-module | supported | Yes |
 | 1.28.3 | legacy | linux | glibc | amd64 | dynamic-module | supported | Yes |
@@ -224,14 +228,14 @@ curl -sS -D - -o /dev/null \
 | 1.26.3 | legacy | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
 | 1.26.3 | legacy | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
 | 1.26.3 | legacy | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.24.0 | legacy | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.24.0 | legacy | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.24.0 | legacy | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.24.0 | legacy | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.24.0 | legacy | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.24.0 | legacy | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.24.0 | legacy | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.24.0 | legacy | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
+| 1.24.0 | legacy | linux | glibc | arm64 | dynamic-module | supported | No |
+| 1.24.0 | legacy | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.24.0 | legacy | linux | glibc | amd64 | dynamic-module | supported | No |
+| 1.24.0 | legacy | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.24.0 | legacy | debian12 | glibc | arm64 | deb-package | supported | No |
+| 1.24.0 | legacy | debian12 | glibc | amd64 | deb-package | supported | No |
+| 1.24.0 | legacy | almalinux9 | glibc | arm64 | rpm-package | supported | No |
+| 1.24.0 | legacy | almalinux9 | glibc | amd64 | rpm-package | supported | No |
 <!-- END:release-matrix:support-matrix -->
 
 ## 文档导航
@@ -268,7 +272,7 @@ make harness-check
 如果 NGINX 不在 `PATH` 中，请设置 `NGINX_BIN=/absolute/path/to/nginx`。
 完整测试矩阵见[测试文档](docs/testing/README.md)。
 
-从源码构建需要 Rust 1.97.1（MSRV 1.97，由 `rust-toolchain.toml` 固定）。
+从源码构建需要 Rust 1.98.1（MSRV 1.98，由 `rust-toolchain.toml` 固定）。
 
 ## 较早版本
 

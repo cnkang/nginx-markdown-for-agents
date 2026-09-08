@@ -458,8 +458,6 @@ test_main_conf_create_and_init(void)
         "metrics_shm_size should be unset");
     TEST_ASSERT(mcf->metrics_shm_zone == NULL,
         "metrics_shm_zone should start NULL");
-    TEST_ASSERT(mcf->dynconf_owner_conf == NULL,
-        "dynconf owner config should start NULL");
 
     memset(&zone, 0, sizeof(zone));
     g_shared_zone = &zone;
@@ -608,11 +606,7 @@ test_merge_conf(void)
     parent.limits.decompression_ratio = NGX_CONF_UNSET_UINT;
     parent.limits.max_inflight = NGX_CONF_UNSET_UINT;
     parent.advanced.prune_noise = NGX_CONF_UNSET;
-    parent.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
-    parent.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
     parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
-    parent.advanced.dynconf_enabled = NGX_CONF_UNSET;
-    parent.advanced.dynconf_dry_run = NGX_CONF_UNSET;
 
     /* Override parent fields under test */
     parent.enabled = 1;
@@ -622,7 +616,7 @@ test_merge_conf(void)
     parent.flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
     parent.token_estimate = 1;
     parent.front_matter = 1;
-    parent.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD;
+    parent.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_FORCE;
     parent.policy.auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY;
     parent.policy.generate_etag = 0;
     parent.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
@@ -668,11 +662,7 @@ test_merge_conf(void)
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
-    child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
-    child.advanced.dynconf_enabled = NGX_CONF_UNSET;
-    child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
     child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
@@ -723,8 +713,6 @@ test_merge_conf(void)
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
-    child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
@@ -742,52 +730,6 @@ test_merge_conf(void)
         "static enabled source should clear complex pointer");
 
     TEST_PASS("merge_conf branches covered");
-}
-
-static void
-test_dynconf_owner_uses_merged_config(void)
-{
-    ngx_conf_t                     cf;
-    ngx_http_markdown_conf_t      *parent;
-    ngx_http_markdown_conf_t      *owner;
-    ngx_http_markdown_main_conf_t  main_conf;
-    char                          *rc;
-
-    TEST_SUBSECTION("dynconf owner uses merged config");
-
-    memset(&cf, 0, sizeof(cf));
-    cf.pool = &g_pool;
-    memset(&main_conf, 0, sizeof(main_conf));
-
-    parent = ngx_http_markdown_create_conf(&cf);
-    owner = ngx_http_markdown_create_conf(&cf);
-    TEST_ASSERT(parent != NULL && owner != NULL,
-        "dynconf merge configs should allocate");
-
-    parent->advanced.dynconf_enabled = 1;
-    parent->advanced.dynconf_dry_run = 1;
-    owner->advanced.dynconf_path.data =
-        (u_char *) "/etc/nginx/markdown-dynconf.conf";
-    owner->advanced.dynconf_path.len =
-        strlen((char *) owner->advanced.dynconf_path.data);
-    main_conf.dynconf_owner_conf = owner;
-
-    rc = ngx_http_markdown_merge_conf(&cf, parent, owner);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-        "dynconf owner merge should succeed");
-    TEST_ASSERT(ngx_http_markdown_dynconf_owner(&main_conf) == owner,
-        "worker owner lookup should return the path owner");
-    TEST_ASSERT(owner->advanced.dynconf_enabled == 1,
-        "owner should inherit dynconf enablement");
-    TEST_ASSERT(owner->advanced.dynconf_dry_run == 1,
-        "owner should inherit dynconf dry-run mode");
-    TEST_ASSERT(owner->advanced.dynconf_path.len > 0,
-        "owner should retain its configured dynconf path");
-
-    TEST_ASSERT(ngx_http_markdown_dynconf_owner(NULL) == NULL,
-        "worker owner lookup should be NULL-safe");
-
-    TEST_PASS("dynconf watcher binds to coherent merged owner config");
 }
 
 /*
@@ -1098,10 +1040,7 @@ test_merge_conf_double_unset(void)
     parent.policy.auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW;
     parent.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     parent.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    parent.advanced.dynconf_enabled = NGX_CONF_UNSET;
     parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
-    parent.advanced.dynconf_path.len = 0;
-    parent.advanced.dynconf_path.data = NULL;
 
     child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
     child.max_size = NGX_CONF_UNSET_SIZE;
@@ -1125,8 +1064,6 @@ test_merge_conf_double_unset(void)
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
-    child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
@@ -1136,8 +1073,6 @@ test_merge_conf_double_unset(void)
     child.limits.decompressed_size = NGX_CONF_UNSET_SIZE;
     child.limits.decompression_ratio = NGX_CONF_UNSET_UINT;
     child.limits.max_inflight = NGX_CONF_UNSET_UINT;
-    child.advanced.dynconf_enabled = NGX_CONF_UNSET;
-    child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
 
     rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
     TEST_ASSERT(rc == NGX_CONF_OK,
@@ -1286,8 +1221,6 @@ test_memory_budget_priority_chain(void)
         child_conf.max_size = NGX_CONF_UNSET_SIZE;
         child_conf.stream.budget = NGX_CONF_UNSET_SIZE;
         child_conf.advanced.prune_noise = NGX_CONF_UNSET;
-        child_conf.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
-        child_conf.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
         child_conf.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 
         rc = ngx_http_markdown_merge_conf(&merge_cf, &parent_conf, &child_conf);
@@ -1312,8 +1245,6 @@ test_memory_budget_priority_chain(void)
         child_conf.limits.conversion_memory = 5 * 1024 * 1024;
         child_conf.stream.budget = NGX_CONF_UNSET_SIZE;
         child_conf.advanced.prune_noise = NGX_CONF_UNSET;
-        child_conf.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
-        child_conf.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
 
         rc = ngx_http_markdown_merge_conf(&merge_cf, &parent_conf, &child_conf);
         TEST_ASSERT(rc == NGX_CONF_OK,
@@ -1361,10 +1292,6 @@ test_decompress_max_size_zero_rejected(void)
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
-    child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.dynconf_enabled = NGX_CONF_UNSET;
-    child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
 
     /* Force decompress_max_size to 0 after merge by setting explicit 0 */
     child.decompress.max_size = 0;
@@ -1414,10 +1341,6 @@ test_streaming_full_force_conflict_rejected(void)
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
-    child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.dynconf_enabled = NGX_CONF_UNSET;
-    child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
 
     /* full cache validation + explicitly forced streaming = conflict. */
     child.policy.conditional_requests =
@@ -1430,6 +1353,48 @@ test_streaming_full_force_conflict_rejected(void)
         "cache_validation full + streaming force should be rejected");
 
     printf("  \xe2\x9c\x93 full + force conflict correctly rejected\n");
+}
+
+/*
+ * A force/full conflict must fail after either directive is inherited.
+ * Exercise actual create/merge callbacks, without synthesizing merged state.
+ */
+/*
+ * Feature: pre-lts-convergence-092
+ * Property 4: Explicit-streaming + full-cache-validation conflict fails load,
+ * including inheritance-formed
+ */
+static void
+test_inherited_streaming_cache_conflicts(void)
+{
+    ngx_conf_t                  cf;
+    ngx_http_markdown_conf_t    *parent, *child;
+    char                       *rc;
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    cf.log = &g_log;
+    for (int direction = 0; direction < 2; direction++) {
+        parent = ngx_http_markdown_create_conf(&cf);
+        child = ngx_http_markdown_create_conf(&cf);
+        TEST_ASSERT(parent != NULL && child != NULL,
+            "inheritance inputs must allocate");
+        if (direction == 0) {
+            parent->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+            parent->stream.policy_explicit = 1;
+            child->policy.conditional_requests =
+                NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+        } else {
+            parent->policy.conditional_requests =
+                NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+            child->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+            child->stream.policy_explicit = 1;
+        }
+        rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+        TEST_ASSERT(rc == NGX_CONF_ERROR,
+            "inherited force/full must fail effective config validation");
+    }
+    TEST_PASS("both inheritance directions reject force/full");
 }
 
 /*
@@ -1470,10 +1435,6 @@ test_streaming_full_auto_warns_but_succeeds(void)
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
-    child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.dynconf_enabled = NGX_CONF_UNSET;
-    child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
 
     child.policy.conditional_requests =
         NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
@@ -1487,7 +1448,215 @@ test_streaming_full_auto_warns_but_succeeds(void)
     printf("  \xe2\x9c\x93 full + auto warns but merge succeeds\n");
 }
 
-static void test_dynconf_block_mask_propagates_from_parent(void);
+/*
+ * Initialize a conf struct to the all-unset sentinel state that
+ * create_conf would produce for the fields exercised by the static
+ * inheritance and block-mask regression tests.  Keeping this local
+ * avoids duplicating the long sentinel-init block in each test and
+ * ensures merge_conf inherits (rather than reads stack garbage).
+ */
+static void
+init_unset_conf(ngx_http_markdown_conf_t *c)
+{
+    memset(c, 0, sizeof(*c));
+
+    c->enabled = NGX_CONF_UNSET;
+    c->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+    c->max_size = NGX_CONF_UNSET_SIZE;
+    c->timeout = NGX_CONF_UNSET_MSEC;
+    c->on_error = NGX_CONF_UNSET_UINT;
+    c->error_status = NGX_CONF_UNSET_UINT;
+    c->flavor = NGX_CONF_UNSET_UINT;
+    c->token_estimate = NGX_CONF_UNSET;
+    c->front_matter = NGX_CONF_UNSET;
+    c->accept_policy = NGX_CONF_UNSET_UINT;
+    c->policy.auth_policy = NGX_CONF_UNSET_UINT;
+    c->policy.auth_cookies = NGX_CONF_UNSET_PTR;
+    c->policy.generate_etag = NGX_CONF_UNSET;
+    c->policy.conditional_requests = NGX_CONF_UNSET_UINT;
+    c->policy.log_verbosity = NGX_CONF_UNSET_UINT;
+    c->routing.content_types = NGX_CONF_UNSET_PTR;
+    c->routing.max_inflight = NGX_CONF_UNSET_UINT;
+    c->decompress.auto_decompress = NGX_CONF_UNSET;
+    c->decompress.max_size = NGX_CONF_UNSET_SIZE;
+    c->decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+    c->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
+    c->ops.diagnostics_enabled = NGX_CONF_UNSET;
+    c->stream.policy = NGX_CONF_UNSET_UINT;
+    c->stream.policy_explicit = -1;
+    c->stream.excluded_types = NGX_CONF_UNSET_PTR;
+    c->stream.budget = NGX_CONF_UNSET_SIZE;
+    c->limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
+    c->limits.parser_timeout = NGX_CONF_UNSET_MSEC;
+    c->limits.conversion_memory = NGX_CONF_UNSET_SIZE;
+    c->limits.parser_budget = NGX_CONF_UNSET_SIZE;
+    c->limits.streaming_buffer = NGX_CONF_UNSET_SIZE;
+    c->limits.decompressed_size = NGX_CONF_UNSET_SIZE;
+    c->limits.decompression_ratio = NGX_CONF_UNSET_UINT;
+    c->limits.max_inflight = NGX_CONF_UNSET_UINT;
+    c->advanced.prune_noise = NGX_CONF_UNSET;
+}
+
+/*
+ * LTS-R007 regression: static per-level (http -> server -> location)
+ * inheritance via markdown_limits must survive dynconf removal.
+ *
+ * Models NGINX's two-hop merge chain:
+ *   merge(http_defaults, server)   then   merge(server, location)
+ *
+ * Asserts that:
+ *   1. A limit set only at the http level flows down two hops to an
+ *      unset location (conversion_memory -> max_size bridge, timeout,
+ *      streaming budget from streaming_buffer).
+ *   2. An explicit server-level override wins over the http value and
+ *      still propagates to an unset location (mid-level override).
+ */
+static void
+test_static_per_level_inheritance_chain(void)
+{
+    ngx_conf_t                cf;
+    ngx_http_markdown_conf_t  http_conf;
+    ngx_http_markdown_conf_t  srv_conf;
+    ngx_http_markdown_conf_t  loc_conf;
+    char                     *rc;
+
+    TEST_SUBSECTION("static per-level http->server->location inheritance");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    cf.log = &g_log;
+
+    /* --- Case 1: http-only limit reaches the location two hops down. */
+    init_unset_conf(&http_conf);
+    init_unset_conf(&srv_conf);
+    init_unset_conf(&loc_conf);
+
+    http_conf.enabled = 1;
+    http_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+    http_conf.limits.conversion_memory = 64 * 1024 * 1024;
+    http_conf.limits.conversion_timeout = 30000;
+    http_conf.limits.streaming_buffer = 2 * 1024 * 1024;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &http_conf, &srv_conf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "http->server merge should succeed");
+
+    rc = ngx_http_markdown_merge_conf(&cf, &srv_conf, &loc_conf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "server->location merge should succeed");
+
+    TEST_ASSERT(loc_conf.max_size == 64 * 1024 * 1024,
+        "location inherits http conversion_memory (via max_size bridge)");
+    TEST_ASSERT(loc_conf.timeout == 30000,
+        "location inherits http conversion timeout two hops down");
+    TEST_ASSERT(loc_conf.stream.budget == 2 * 1024 * 1024,
+        "location inherits http streaming budget two hops down");
+
+    /* --- Case 2: server-level override wins and propagates to location. */
+    init_unset_conf(&http_conf);
+    init_unset_conf(&srv_conf);
+    init_unset_conf(&loc_conf);
+
+    http_conf.enabled = 1;
+    http_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+    http_conf.limits.conversion_memory = 64 * 1024 * 1024;
+
+    /* Server explicitly narrows the budget; location leaves it unset. */
+    srv_conf.limits.conversion_memory = 16 * 1024 * 1024;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &http_conf, &srv_conf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "http->server merge (server override) should succeed");
+    TEST_ASSERT(srv_conf.max_size == 16 * 1024 * 1024,
+        "explicit server conversion_memory wins over http value");
+
+    rc = ngx_http_markdown_merge_conf(&cf, &srv_conf, &loc_conf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "server->location merge (inherit override) should succeed");
+    TEST_ASSERT(loc_conf.max_size == 16 * 1024 * 1024,
+        "location inherits the server-level override, not the http value");
+
+    TEST_PASS("static per-level http->server->location inheritance covered");
+}
+
+/*
+ * LTS-R007 / Rule 71 regression: the static explicit block-mask
+ * (mark_dynconf_block_fields) must OR from parent to child and
+ * accumulate across the http -> server -> location chain.  Covers the
+ * BLOCK_ERROR_POLICY and BLOCK_STREAMING_BUFFER bits named by the task,
+ * proving the static block-mask is preserved (not a dead layer) after
+ * dynconf removal.
+ */
+static void
+test_static_block_mask_error_policy_chain(void)
+{
+    ngx_conf_t                cf;
+    ngx_http_markdown_conf_t  http_conf;
+    ngx_http_markdown_conf_t  srv_conf;
+    ngx_http_markdown_conf_t  loc_conf;
+    char                     *rc;
+
+    TEST_SUBSECTION("static block-mask error-policy + chain propagation");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    cf.log = &g_log;
+
+    init_unset_conf(&http_conf);
+    init_unset_conf(&srv_conf);
+    init_unset_conf(&loc_conf);
+
+    /* http level explicitly sets on_error -> BLOCK_ERROR_POLICY bit. */
+    http_conf.enabled = 1;
+    http_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+    http_conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+
+    /* server level explicitly sets streaming_buffer -> its own block bit. */
+    srv_conf.limits.streaming_buffer = 4 * 1024 * 1024;
+
+    /*
+     * mark_dynconf_block_fields runs on the *child* of each merge, so the
+     * http block bits are set only when http is merged against its own
+     * (empty) ancestor.  Do that first, mirroring NGINX's merge order.
+     */
+    {
+        ngx_http_markdown_conf_t ancestor;
+
+        init_unset_conf(&ancestor);
+        rc = ngx_http_markdown_merge_conf(&cf, &ancestor, &http_conf);
+        TEST_ASSERT(rc == NGX_CONF_OK, "ancestor->http merge should succeed");
+    }
+
+    rc = ngx_http_markdown_merge_conf(&cf, &http_conf, &srv_conf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "http->server merge should succeed");
+    TEST_ASSERT(
+        (http_conf.advanced.static_block_mask
+         & NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY) != 0,
+        "explicit http on_error sets BLOCK_ERROR_POLICY");
+    TEST_ASSERT(
+        (srv_conf.advanced.static_block_mask
+         & NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY) != 0,
+        "server inherits http BLOCK_ERROR_POLICY (parent->child OR)");
+    TEST_ASSERT(
+        (srv_conf.advanced.static_block_mask
+         & NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER) != 0,
+        "explicit server streaming_buffer sets BLOCK_STREAMING_BUFFER");
+
+    rc = ngx_http_markdown_merge_conf(&cf, &srv_conf, &loc_conf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "server->location merge should succeed");
+    TEST_ASSERT(
+        (loc_conf.advanced.static_block_mask
+         & NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY) != 0,
+        "location accumulates BLOCK_ERROR_POLICY two hops down");
+    TEST_ASSERT(
+        (loc_conf.advanced.static_block_mask
+         & NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER) != 0,
+        "location accumulates BLOCK_STREAMING_BUFFER from server level");
+
+    TEST_PASS("static block-mask error-policy + chain propagation covered");
+}
+
+static void test_static_block_mask_propagates_from_parent(void);
+static void test_static_per_level_inheritance_chain(void);
+static void test_static_block_mask_error_policy_chain(void);
 
 int
 main(void)
@@ -1501,8 +1670,9 @@ main(void)
     test_create_conf_defaults();
     test_merge_conf_default_cache_validation();
     test_merge_conf();
-    test_dynconf_owner_uses_merged_config();
-    test_dynconf_block_mask_propagates_from_parent();
+    test_static_block_mask_propagates_from_parent();
+    test_static_per_level_inheritance_chain();
+    test_static_block_mask_error_policy_chain();
     test_merge_conf_double_unset();
     test_stream_preserves_explicit_defaults();
     test_name_helpers_and_levels();
@@ -1513,6 +1683,7 @@ main(void)
     test_memory_budget_priority_chain();
     test_decompress_max_size_zero_rejected();
     test_streaming_full_force_conflict_rejected();
+    test_inherited_streaming_cache_conflicts();
     test_streaming_full_auto_warns_but_succeeds();
 
     printf("\n========================================\n");
@@ -1529,7 +1700,7 @@ main(void)
  * configuration.
  */
 static void
-test_dynconf_block_mask_propagates_from_parent(void)
+test_static_block_mask_propagates_from_parent(void)
 {
     ngx_conf_t                     cf;
     ngx_http_markdown_conf_t      *parent;
@@ -1568,11 +1739,11 @@ test_dynconf_block_mask_propagates_from_parent(void)
     TEST_ASSERT(rc == NGX_CONF_OK,
         "merge with explicit parent should succeed");
     TEST_ASSERT(
-        (child->advanced.dynconf_block_mask
+        (child->advanced.static_block_mask
          & NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER) != 0,
         "explicit parent streaming_buffer must block child dynamic override");
     TEST_ASSERT(
-        (child->advanced.dynconf_block_mask
+        (child->advanced.static_block_mask
          & NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE) != 0,
         "explicit parent prune_noise must block child dynamic override");
 

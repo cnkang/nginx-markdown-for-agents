@@ -331,8 +331,8 @@ Compile the module from source when you use a custom NGINX build or a platform w
 
 | Component | Minimum Version | Purpose |
 |-----------|----------------|---------|
-| **Rust Toolchain** | 1.97.1+ | Building the Rust converter (pinned baseline) |
-| **Cargo** | 1.97.1+ | Rust package manager (included with Rust) |
+| **Rust Toolchain** | 1.98.1+ | Building the Rust converter (pinned baseline) |
+| **Cargo** | 1.98.1+ | Rust package manager (included with Rust) |
 | **cbindgen** | 0.29.4 | Generating C header files from Rust |
 | **NGINX** | 1.24.0+ | Web server (source code required for module compilation) |
 | **GCC/Clang** | GCC 4.8+ or Clang 3.4+ | C compiler for NGINX module |
@@ -437,7 +437,7 @@ tar -xzf nginx-1.24.0.tar.gz
 
 ```bash
 # Check Rust version
-rustc --version  # Should be 1.97.1 or higher
+rustc --version  # Should be 1.98.1 or higher
 
 # Check Cargo version
 cargo --version
@@ -761,6 +761,8 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.30.4 | stable | linux | musl | arm64 | supported |
 | 1.30.4 | stable | linux | glibc | amd64 | supported |
 | 1.30.4 | stable | linux | musl | amd64 | supported |
+| 1.28.3 | stable | ubuntu-24.04 | glibc | arm64 | best-effort |
+| 1.28.3 | stable | ubuntu-24.04 | glibc | amd64 | best-effort |
 | 1.28.3 | legacy | linux | glibc | arm64 | supported |
 | 1.28.3 | legacy | linux | musl | arm64 | supported |
 | 1.28.3 | legacy | linux | glibc | amd64 | supported |
@@ -799,6 +801,7 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
+| 1.28.3 | stable | any | n/a | any | best-effort |
 | 1.26.3 | legacy | any | n/a | any | best-effort |
 <!-- END:release-matrix:installation-matrix -->
 
@@ -1510,7 +1513,7 @@ brew install pcre
 # Update Rust toolchain
 rustup update
 
-# Check Rust version (must be 1.97.0+)
+# Check Rust version (must be 1.98.0+)
 rustc --version
 
 # Clean and rebuild

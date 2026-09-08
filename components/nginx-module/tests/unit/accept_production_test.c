@@ -161,12 +161,10 @@ static uintptr_t g_ffi_accept_header_len;
 void
 markdown_negotiate_accept(const uint8_t *accept_header,
                           uintptr_t accept_header_len,
-                          uint8_t on_wildcard,
                           struct FFIAcceptResult *result)
 {
     g_ffi_accept_header = accept_header;
     g_ffi_accept_header_len = accept_header_len;
-    UNUSED(on_wildcard);
     result->should_convert = (uint8_t) g_ffi_should_convert;
     result->reason = (uint8_t) g_ffi_reason;
 }

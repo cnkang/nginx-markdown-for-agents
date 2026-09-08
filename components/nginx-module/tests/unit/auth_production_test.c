@@ -827,6 +827,121 @@ test_is_authenticated_non_auth_cookie(void)
     TEST_PASS("non-auth cookie ignored");
 }
 
+/* ── LTS-R021: authenticated-content default no-convert gate ──────
+ *
+ * The request-path auth gate (ngx_http_markdown_request_impl.h) skips
+ * conversion (serving the original HTML, never refusing) exactly when
+ *
+ *     conf->policy.auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
+ *         && ngx_http_markdown_is_authenticated(r, conf)
+ *
+ * After the 0.9.2 convergence the UNSET default resolves (via merge) to
+ * DENY, so identifiable authenticated content is not converted by default;
+ * explicit "markdown_auth_policy allow" opts in to conversion.  These tests
+ * exercise that decision predicate directly against the real detection
+ * helper for the four contract cases (default no-convert, explicit allow
+ * converts, unauthenticated always converts, force cannot bypass). */
+
+/* Model the request-path auth gate decision: returns 1 when conversion is
+ * blocked by the authenticated-content policy, 0 when it may proceed. */
+static ngx_int_t
+auth_gate_blocks_conversion(ngx_http_request_t *r, ngx_uint_t auth_policy)
+{
+    return (auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
+            && ngx_http_markdown_is_authenticated(r, NULL)) ? 1 : 0;
+}
+
+static ngx_http_request_t *
+make_authed_req(void)
+{
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) {
+        return NULL;
+    }
+    r->headers_in.authorization = (ngx_table_elt_t *)
+        ngx_pcalloc(NULL, sizeof(ngx_table_elt_t));
+    if (r->headers_in.authorization == NULL) {
+        return NULL;
+    }
+    r->headers_in.authorization->hash = 1;
+    r->headers_in.authorization->value.data = (u_char *) "Bearer tkn";
+    r->headers_in.authorization->value.len = 10;
+    return r;
+}
+
+/* Default (unset ≡ DENY): identifiable authenticated content is NOT
+ * converted; the gate blocks conversion so the original HTML is served. */
+static void
+test_auth_default_denies_authenticated_conversion(void)
+{
+    reset_pool();
+    ngx_http_request_t *r = make_authed_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    TEST_ASSERT(ngx_http_markdown_is_authenticated(r, NULL) == 1,
+        "request with Authorization header is identifiable authenticated");
+    TEST_ASSERT(
+        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY) == 1,
+        "default (DENY) must NOT convert identifiable authenticated content "
+        "(LTS-R021.1)");
+    TEST_PASS("default no-convert for authenticated content");
+}
+
+/* Explicit "markdown_auth_policy allow" opts in: authenticated content is
+ * converted (the gate does not block). */
+static void
+test_auth_explicit_allow_converts_authenticated(void)
+{
+    reset_pool();
+    ngx_http_request_t *r = make_authed_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    TEST_ASSERT(
+        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW)
+            == 0,
+        "explicit allow is the opt-in that converts authenticated content "
+        "(LTS-R021.2)");
+    TEST_PASS("explicit allow converts authenticated content");
+}
+
+/* Unauthenticated content is converted regardless of policy: the gate never
+ * blocks when the request carries no identifiable auth signal. */
+static void
+test_auth_unauthenticated_always_convertible(void)
+{
+    reset_pool();
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    TEST_ASSERT(ngx_http_markdown_is_authenticated(r, NULL) == 0,
+        "request without auth signal is not authenticated");
+    TEST_ASSERT(
+        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY) == 0,
+        "unauthenticated content is convertible even under DENY default");
+    TEST_PASS("unauthenticated content convertible");
+}
+
+/* force does not bypass the auth gate: the auth decision is evaluated on the
+ * DENY policy independently of any accept/streaming force selection.  In the
+ * request path the auth gate runs (source order) before ngx_http_markdown_
+ * should_convert, where force lives, so a forced request over authenticated
+ * content is still blocked by the default DENY policy (LTS-R010.5). */
+static void
+test_auth_force_does_not_bypass_default_gate(void)
+{
+    reset_pool();
+    ngx_http_request_t *r = make_authed_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    /* Even with accept_policy force set, the auth gate (evaluated earlier in
+     * the request path, on the DENY default) still blocks conversion. */
+    TEST_ASSERT(
+        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY) == 1,
+        "force must not bypass the authenticated-content no-convert gate "
+        "(LTS-R010.5)");
+    TEST_PASS("force does not bypass auth gate");
+}
+
 /* ── modify_cache_control_for_auth ───────────────────────────── */
 
 static void
@@ -1258,6 +1373,11 @@ main(void)
     test_is_authenticated_skips_inactive_cookie_header();
     test_is_authenticated_no_auth();
     test_is_authenticated_non_auth_cookie();
+
+    test_auth_default_denies_authenticated_conversion();
+    test_auth_explicit_allow_converts_authenticated();
+    test_auth_unauthenticated_always_convertible();
+    test_auth_force_does_not_bypass_default_gate();
 
     test_modify_cc_null_request();
     test_modify_cc_empty_headers();

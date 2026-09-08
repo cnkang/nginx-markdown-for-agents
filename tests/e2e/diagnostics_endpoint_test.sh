@@ -14,8 +14,8 @@
 # Test Scenario:
 #   1. Verify diagnostics endpoint is reachable (GET returns 200)
 #   2. Verify Content-Type is application/json
-#   3. Verify response body contains all 4 required sections:
-#      config_snapshot, recent_decisions, metrics_snapshot, dynconf_state
+#   3. Verify response body contains the schema-v3 sections:
+#      configuration, runtime, recent_decisions; dynconf_state is absent
 #   4. Verify config keys present
 #   5. Verify metrics keys present
 #   6. Verify JSON validity (balanced braces/brackets)
@@ -133,11 +133,11 @@ if [[ -z "$BODY" ]]; then
 else
     pass "non-empty response body received"
 
-    # Check for config_snapshot section
-    if echo "$BODY" | grep -q '"config_snapshot"'; then
-        pass "config_snapshot section present"
+    # Check for configuration section
+    if echo "$BODY" | grep -q '"configuration"'; then
+        pass "configuration section present"
     else
-        fail "config_snapshot section missing"
+        fail "configuration section missing"
     fi
 
     # Check for recent_decisions section
@@ -147,18 +147,18 @@ else
         fail "recent_decisions section missing"
     fi
 
-    # Check for metrics_snapshot section
-    if echo "$BODY" | grep -q '"metrics_snapshot"'; then
-        pass "metrics_snapshot section present"
+    # Check for runtime section
+    if echo "$BODY" | grep -q '"runtime"'; then
+        pass "runtime section present"
     else
-        fail "metrics_snapshot section missing"
+        fail "runtime section missing"
     fi
 
-    # Check for dynconf_state section
+    # The removed runtime overlay must not reappear in schema-v3 output.
     if echo "$BODY" | grep -q '"dynconf_state"'; then
-        pass "dynconf_state section present"
+        fail "removed dynconf_state section present"
     else
-        fail "dynconf_state section missing"
+        pass "removed dynconf_state section absent"
     fi
 fi
 
@@ -167,8 +167,7 @@ fi
 echo "Step 4: Checking config keys..." >&2
 
 if [[ -n "$BODY" ]]; then
-    for key in "markdown_enabled" "max_size" "decompression_budget" \
-               "parse_timeout" "diagnostics_enabled"; do
+    for key in "static_digest" "effective" "effective_sources"; do
         if echo "$BODY" | grep -q "\"$key\""; then
             pass "config key present: $key"
         else
@@ -177,13 +176,13 @@ if [[ -n "$BODY" ]]; then
     done
 fi
 
-# --- Step 5: Verify metrics keys ---
+# --- Step 5: Verify runtime metric keys ---
 
 echo "Step 5: Checking metrics keys..." >&2
 
 if [[ -n "$BODY" ]]; then
-    for key in "conversions_total" "delivery_total" "requests_total" \
-               "failopen_total"; do
+    for key in "module_metrics" "streaming_requests_total" \
+               "precommit_failopen_total" "copied_output_total"; do
         if echo "$BODY" | grep -q "\"$key\""; then
             pass "metrics key present: $key"
         else

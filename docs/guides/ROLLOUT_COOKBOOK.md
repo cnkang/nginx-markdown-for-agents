@@ -676,7 +676,9 @@ http {
 
 Keep `markdown_accept strict` (the default) during initial rollout. With `strict`, only explicit `text/markdown` in the Accept header triggers conversion. Clients sending `Accept: */*` or `Accept: text/*` receive HTML unchanged.
 
-If you later want wildcard Accept values (for example `text/*`) to trigger conversion, set `markdown_accept wildcard` and expand the `map`:
+If you later want a narrowly selected set of wildcard Accept values (for
+example `text/*`) to trigger conversion, keep the map and set
+`markdown_accept force` in that scope:
 
 ```nginx
     map $http_accept $markdown_by_accept {
@@ -691,7 +693,7 @@ If you later want wildcard Accept values (for example `text/*`) to trigger conve
 
         location / {
             markdown_filter $markdown_by_accept;
-            markdown_accept wildcard;
+            markdown_accept force;
             proxy_pass http://backend;
         }
     }
@@ -1100,8 +1102,9 @@ or a wildcard with `q=0`) produces the `skipped_accept_reject` outcome.
 
 This prevents accidental conversion of browser traffic. A standard browser
 request (`Accept: text/html, */*`) does not match the strict policy and keeps
-HTML. Use `markdown_accept wildcard` only for a scope where wildcard clients
-are intentionally meant to receive Markdown.
+HTML. Use `markdown_accept force` only for a scope where clients without an
+explicit `text/markdown` preference are intentionally meant to receive
+Markdown.
 
 #### `markdown_log_verbosity info`
 
@@ -1145,7 +1148,7 @@ Use this guidance at every observation checkpoint and whenever you need to asses
 ### Metrics to Monitor
 
 The module exposes `/markdown-metrics` as a localhost-only Prometheus text
-0.0.4 endpoint. It always emits the exact eleven families listed in the
+0.0.4 endpoint. It always emits the exact ten families listed in the
 [Prometheus Metrics Guide](prometheus-metrics.md). The `Accept` header cannot
 select a legacy JSON or human-readable representation.
 

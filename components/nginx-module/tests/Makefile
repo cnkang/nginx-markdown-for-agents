@@ -39,9 +39,6 @@ build/unit build/integration build/generated:
 #                      for dead-code elimination of unused stubs; directly include
 #                      broad production implementation headers, suppressing only
 #                      the resulting unreferenced static-function warnings.
-#   dynconf_production - dynamic config hot-reload through the Rust-backed
-#                        production parser; needs nginx_stubs, the generated
-#                        FFI header, and section GC for unused API stubs.
 build/unit/%: unit/%_test.c include/test_common.h | build/unit build/generated
 	@extra_srcs=""; \
 	extra_cflags=""; \
@@ -74,7 +71,6 @@ build/unit/%: unit/%_test.c include/test_common.h | build/unit build/generated
 	  eligibility_impl|hard_excluded_params_case|hard_excluded_types_security|status_code_excluded_security) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_core_impl) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_default_values) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-	dynconf_production) extra_cflags="-Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  effective_conf) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  accept_production|auth_production|auth_deny_security|conditional_production) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  request_bypass_production) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-parameter" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \

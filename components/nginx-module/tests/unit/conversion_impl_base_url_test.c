@@ -1722,17 +1722,24 @@ test_prepare_conversion_options_timeout_clamp(void)
 
 
 /*
- * Test: prepare_conversion_options with prune_selectors configured.
+ * Test: prepare_conversion_options never forwards custom selectors.
+ *
+ * Custom prune/protection selectors were removed in 0.9.2 (LTS-R009).  The C
+ * module no longer populates the FFI MarkdownOptions selector pointers; they
+ * must remain at the NULL/0 defaults set by markdown_options_init() while
+ * built-in noise reduction (prune_noise) is still forwarded.  The FFI struct
+ * fields themselves were removed in the ABI 3 layout (the four custom
+ * selector fields are gone from MarkdownOptions), so this test asserts the C
+ * side leaves the options at their defaults regardless of prune_noise.
  */
 static void
-test_prepare_conversion_options_prune_selectors(void)
+test_prepare_conversion_options_selectors_not_forwarded(void)
 {
     ngx_http_request_t r;
     ngx_http_markdown_conf_t conf;
     struct MarkdownOptions options;
-    ngx_str_t selectors;
 
-    TEST_SUBSECTION("prepare_conversion_options: prune_selectors set");
+    TEST_SUBSECTION("prepare_conversion_options: selectors not forwarded");
 
     init_request(&r);
     memset(&conf, 0, sizeof(conf));
@@ -1742,60 +1749,25 @@ test_prepare_conversion_options_prune_selectors(void)
     set_str(&r.headers_out.content_type, "text/html");
     r.loc_conf = &conf;
 
-    set_str(&selectors, "nav,footer,aside");
-    conf.advanced.prune_selectors = &selectors;
     conf.advanced.prune_noise = 1;
 
     TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
-                "prepare_conversion_options should succeed with prune_selectors");
-    TEST_ASSERT(options.prune_selectors != NULL, "prune_selectors should be set");
-    TEST_ASSERT(options.prune_selector_len > 0, "prune_selector_len should be > 0");
+                "prepare_conversion_options should succeed");
+    TEST_ASSERT(options.prune_noise == 1U,
+                "prune_noise should be forwarded");
+    /*
+     * The four custom-selector fields (prune_selectors, prune_selector_len,
+     * prune_protection_selectors, prune_protection_selector_len) were removed
+     * from MarkdownOptions in 0.9.2 (ABI 2 -> 3; design 14(h), LTS-R009 /
+     * LTS-R023). "Selectors not forwarded" is now enforced structurally by
+     * the fields no longer existing, so there is nothing left to assert here.
+     */
 
     if (options.base_url != NULL) {
         free((void *)(uintptr_t) options.base_url);
     }
 
-    TEST_PASS("prepare_conversion_options prune_selectors correct");
-}
-
-
-/*
- * Test: prepare_conversion_options with prune_protection_selectors configured.
- */
-static void
-test_prepare_conversion_options_prune_protection_selectors(void)
-{
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-    struct MarkdownOptions options;
-    ngx_str_t protection;
-
-    TEST_SUBSECTION("prepare_conversion_options: prune_protection_selectors set");
-
-    init_request(&r);
-    memset(&conf, 0, sizeof(conf));
-    set_str(&r.schema, "http");
-    set_str(&r.headers_in.server, "example.com");
-    set_str(&r.uri, "/page.html");
-    set_str(&r.headers_out.content_type, "text/html");
-    r.loc_conf = &conf;
-
-    set_str(&protection, "main,article");
-    conf.advanced.prune_protection_selectors = &protection;
-    conf.advanced.prune_noise = 1;
-
-    TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
-                "prepare_conversion_options should succeed with prune_protection_selectors");
-    TEST_ASSERT(options.prune_protection_selectors != NULL,
-                "prune_protection_selectors should be set");
-    TEST_ASSERT(options.prune_protection_selector_len > 0,
-                "prune_protection_selector_len should be > 0");
-
-    if (options.base_url != NULL) {
-        free((void *)(uintptr_t) options.base_url);
-    }
-
-    TEST_PASS("prepare_conversion_options prune_protection_selectors correct");
+    TEST_PASS("prepare_conversion_options selectors not forwarded");
 }
 
 
@@ -2667,8 +2639,7 @@ main(void)
     test_prepare_conversion_options_no_base_url();
     test_prepare_conversion_options_flavor_clamp();
     test_prepare_conversion_options_timeout_clamp();
-    test_prepare_conversion_options_prune_selectors();
-    test_prepare_conversion_options_prune_protection_selectors();
+    test_prepare_conversion_options_selectors_not_forwarded();
     test_prepare_conversion_options_schema_server_fallback();
     test_find_request_header_multi_part();
     test_collect_request_header_values_multi_part();

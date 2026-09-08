@@ -151,18 +151,6 @@ typedef struct {
         ngx_atomic_uint_t estimated_token_savings;
         ngx_atomic_uint_t replay_buffer_errors_total;
 
-        struct {
-            ngx_atomic_uint_t success;
-            ngx_atomic_uint_t failure_schema_version;
-            ngx_atomic_uint_t failure_unknown_key;
-            ngx_atomic_uint_t failure_duplicate_key;
-            ngx_atomic_uint_t failure_invalid_type;
-            ngx_atomic_uint_t failure_out_of_range;
-            ngx_atomic_uint_t failure_size_exceeded;
-            ngx_atomic_uint_t failure_parse_error;
-            ngx_atomic_uint_t failure_file_error;
-        } dynconf_reloads;
-
         /* Parse interrupt metrics */
         struct {
             ngx_atomic_uint_t parse_timeouts_total;
@@ -475,24 +463,6 @@ ngx_http_markdown_collect_result_snapshot(
         metrics->results.parse_interrupts.parse_budget_exceeded_total;
     snapshot->results.replay_buffer_errors_total =
         metrics->results.replay_buffer_errors_total;
-    snapshot->results.dynconf_reloads.success =
-        metrics->results.dynconf_reloads.success;
-    snapshot->results.dynconf_reloads.failure_schema_version =
-        metrics->results.dynconf_reloads.failure_schema_version;
-    snapshot->results.dynconf_reloads.failure_unknown_key =
-        metrics->results.dynconf_reloads.failure_unknown_key;
-    snapshot->results.dynconf_reloads.failure_duplicate_key =
-        metrics->results.dynconf_reloads.failure_duplicate_key;
-    snapshot->results.dynconf_reloads.failure_invalid_type =
-        metrics->results.dynconf_reloads.failure_invalid_type;
-    snapshot->results.dynconf_reloads.failure_out_of_range =
-        metrics->results.dynconf_reloads.failure_out_of_range;
-    snapshot->results.dynconf_reloads.failure_size_exceeded =
-        metrics->results.dynconf_reloads.failure_size_exceeded;
-    snapshot->results.dynconf_reloads.failure_parse_error =
-        metrics->results.dynconf_reloads.failure_parse_error;
-    snapshot->results.dynconf_reloads.failure_file_error =
-        metrics->results.dynconf_reloads.failure_file_error;
 }
 
 static void
@@ -710,25 +680,6 @@ ngx_http_markdown_metrics_to_v1(
         snapshot->decompressions.brotli_failures.truncated;
     v1->decompression.brotli_failure_io =
         snapshot->decompressions.brotli_failures.io;
-
-    /* Dynconf counters are copied without reinterpreting their failure axes. */
-    v1->dynconf_reloads.success = snapshot->results.dynconf_reloads.success;
-    v1->dynconf_reloads.failure_schema_version =
-        snapshot->results.dynconf_reloads.failure_schema_version;
-    v1->dynconf_reloads.failure_unknown_key =
-        snapshot->results.dynconf_reloads.failure_unknown_key;
-    v1->dynconf_reloads.failure_duplicate_key =
-        snapshot->results.dynconf_reloads.failure_duplicate_key;
-    v1->dynconf_reloads.failure_invalid_type =
-        snapshot->results.dynconf_reloads.failure_invalid_type;
-    v1->dynconf_reloads.failure_out_of_range =
-        snapshot->results.dynconf_reloads.failure_out_of_range;
-    v1->dynconf_reloads.failure_size_exceeded =
-        snapshot->results.dynconf_reloads.failure_size_exceeded;
-    v1->dynconf_reloads.failure_parse_error =
-        snapshot->results.dynconf_reloads.failure_parse_error;
-    v1->dynconf_reloads.failure_file_error =
-        snapshot->results.dynconf_reloads.failure_file_error;
 
     /* Build metadata is part of the public v1 response contract. */
     v1->build_info.version = (const u_char *) NGX_HTTP_MARKDOWN_PRODUCT_VERSION;

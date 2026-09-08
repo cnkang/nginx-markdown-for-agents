@@ -223,6 +223,7 @@ def test_soak_nginx_runs_in_foreground_for_reliable_cleanup(
 
     assert "daemon off;" in config
     assert f"pid {runtime_dir}/nginx.pid;" in config
+    assert f"access_log {runtime_dir}/logs/access.log;" in config
 
 
 def test_record_output_path_rejects_external_override(tmp_path: Path) -> None:
@@ -411,3 +412,68 @@ def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
     saved = json.loads(record_path.read_text(encoding="utf-8"))
     assert saved["status"] == "fail"
     assert any("worker RSS" in error for error in saved["errors"])
+
+
+@pytest.mark.parametrize("sample", [None, 65536])
+def test_last_streaming_sample_does_not_certify_run_peak(sample):
+    """A last-request estimate cannot certify both engines over a run."""
+    session = {
+        "started": 0,
+        "ended": 1800,
+        "rss_series": [],
+        "drain_delta": 0,
+        "drain_samples": [100, 100, 100],
+        "monotonic": False,
+        "peak_memory_bytes": sample,
+    }
+    manifest = {"candidate_sha": "a" * 40, "concurrency": 16}
+    record = validator._build_soak_record(manifest, 1800, [], session)
+    assert record["last_streaming_peak_estimate_bytes"] == sample
+    assert record["module_managed_peak_observed"] is False
+    assert record["per_request_peak_bytes"] is None
+    assert validator._peak_memory_issue(record, manifest) is not None
+
+
+def test_load_generator_requests_markdown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sustained load must negotiate conversion rather than HTML bypass."""
+    monkeypatch.setattr(validator, 'REPO_ROOT', tmp_path)
+    monkeypatch.setattr(validator, 'resolve_approved_executable', lambda name: '/usr/bin/ab')
+    captured = []
+
+    def run(command, **kwargs):
+        captured.extend(command)
+        return validator.subprocess.CompletedProcess(command, 0, 'Complete requests: 10\nFailed requests: 0\n', '')
+
+    monkeypatch.setattr(validator.subprocess, 'run', run)
+    result = validator.run_ab_chunk(f'http://127.0.0.1:{validator.SOAK_PORT}/small.html', 16, 1, tmp_path)
+    assert captured[captured.index('-H') + 1] == 'Accept: text/markdown'
+    assert result['completed_requests'] == 10
+
+
+def test_peak_memory_request_selects_prometheus(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The peak parser requests the representation it understands."""
+    import io
+
+    def open_metrics(request, timeout):
+        assert request.get_header('Accept') == 'text/plain'
+        assert timeout == 5
+        response = io.BytesIO(b'nginx_markdown_streaming_peak_memory_bytes 65536\n')
+        response.status = 200
+        return response
+
+    monkeypatch.setattr(validator.urllib.request, 'urlopen', open_metrics)
+    assert validator.read_module_peak_memory(f'http://127.0.0.1:{validator.SOAK_PORT}') == 65536
+
+
+@pytest.mark.parametrize('peak,passes', [(32, True), (33, False), (96, False)])
+def test_global_peak_respects_smallest_scenario_budget(peak: int, passes: bool) -> None:
+    record = {'module_managed_peak_observed': True, 'per_request_peak_bytes': peak}
+    manifest = {'corpus': [{'conversion_memory_bytes': 32}, {'conversion_memory_bytes': 96}]}
+    assert (validator._peak_memory_issue(record, manifest) is None) is passes
+
+
+@pytest.mark.parametrize('budget', [None, True, 0, -1, '32'])
+def test_peak_check_rejects_any_invalid_scenario_budget(budget: object) -> None:
+    record = {'module_managed_peak_observed': True, 'per_request_peak_bytes': 1}
+    manifest = {'corpus': [{'conversion_memory_bytes': budget}, {'conversion_memory_bytes': 96}]}
+    assert validator._peak_memory_issue(record, manifest) is not None

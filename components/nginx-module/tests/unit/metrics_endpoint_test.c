@@ -85,9 +85,6 @@ handle_metrics_request(const char *method, const char *remote_addr, const char *
              "# HELP nginx_markdown_decompression_events_total decompression events\n"
              "# TYPE nginx_markdown_decompression_events_total counter\n"
              "nginx_markdown_decompression_events_total{encoding=\"gzip\",outcome=\"success\",reason=\"ok\"} %lu\n"
-             "# HELP nginx_markdown_dynconf_reloads_total dynconf reloads\n"
-             "# TYPE nginx_markdown_dynconf_reloads_total counter\n"
-             "nginx_markdown_dynconf_reloads_total{outcome=\"success\",reason=\"ok\"} 0\n"
              "# HELP nginx_markdown_build_info build information\n"
              "# TYPE nginx_markdown_build_info gauge\n"
              "nginx_markdown_build_info{version=\"test\",nginx_version=\"test\",features=\"\"} 1\n",

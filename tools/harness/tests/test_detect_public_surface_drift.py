@@ -21,11 +21,11 @@ def test_inventory_loader_honors_explicit_path(monkeypatch) -> None:
 
     def fake_read_text(path):
         seen.append(path)
-        return '{"dynconf_keys": [], "metrics": []}'
+        return '{"metrics": []}'
 
     monkeypatch.setattr(detector, "read_text", fake_read_text)
 
-    assert detector.load_inventory(requested)["dynconf_keys"] == []
+    assert detector.load_inventory(requested)["metrics"] == []
     assert seen == [detector.os.path.realpath(requested)]
 
 
@@ -33,33 +33,18 @@ def test_inventory_loader_resolves_explicit_symlink_path(tmp_path, monkeypatch) 
     """Symlinked inventory paths must be resolved before repository reads."""
     target = tmp_path / "public-surface.json"
     link = tmp_path / "public-surface-link.json"
-    target.write_text('{"dynconf_keys": [], "metrics": []}', encoding="utf-8")
+    target.write_text('{"metrics": []}', encoding="utf-8")
     link.symlink_to(target)
     seen = []
 
     def fake_read_text(path):
         seen.append(path)
-        return '{"dynconf_keys": [], "metrics": []}'
+        return '{"metrics": []}'
 
     monkeypatch.setattr(detector, "read_text", fake_read_text)
 
-    assert detector.load_inventory(str(link))["dynconf_keys"] == []
+    assert detector.load_inventory(str(link))["metrics"] == []
     assert seen == [str(target.resolve())]
-
-
-def test_dynconf_key_drift_is_reported() -> None:
-    """Dynamic-configuration additions and removals must be reported."""
-    inventory = {"dynconf_keys": ["markdown_filter", "memory_budget"]}
-
-    drift = detector.check_dynconf_keys(
-        inventory,
-        ["markdown_filter", "streaming_budget"],
-    )
-
-    assert drift == [
-        "dynconf keys in source but not in inventory: streaming_budget",
-        "dynconf keys in inventory but not in source: memory_budget",
-    ]
 
 
 def test_metric_drift_is_reported() -> None:
@@ -130,29 +115,52 @@ def test_live_inventory_matches_all_extracted_surfaces() -> None:
     inventory = detector.load_inventory()
     live_directives = detector.extract_directive_contract_from_c()
 
-    assert len(inventory["directives"]) == 25
-    assert inventory["reject_only_directives"] == []
+    # Post-convergence target contract (pre-LTS 0.9.2): 20 active directives,
+    # 5 reject-only migration handlers, and no OTel surface.
+    assert len(inventory["directives"]) == detector.FINAL_DIRECTIVE_COUNT
+    assert len(inventory["reject_only_directives"]) == \
+        detector.FINAL_REJECT_ONLY_COUNT
     assert inventory["otel"]["directives"] == []
     assert inventory["otel"]["reject_only"] == []
     assert inventory["otel"]["status"] == "removed"
-    assert len(live_directives) == 25
+    assert "dynconf_keys" not in inventory
+
+    live_active = {
+        name: entry for name, entry in live_directives.items()
+        if entry["classification"] == "active"
+    }
+    live_reject = {
+        name: entry for name, entry in live_directives.items()
+        if entry["classification"] == "reject_only"
+    }
+    assert len(live_active) == detector.FINAL_DIRECTIVE_COUNT
+    assert len(live_reject) == detector.FINAL_REJECT_ONLY_COUNT
     assert all(
-        entry["classification"] == "active"
-        for entry in live_directives.values()
+        entry["handler"] == detector.REMOVED_DIRECTIVE_HANDLER
+        for entry in live_reject.values()
     )
 
-    assert detector.check_dynconf_keys(
-        inventory, detector.extract_dynconf_keys_from_c()
-    ) == []
-    assert detector.check_dynconf_contract(
-        inventory, detector.extract_dynconf_contract_from_c()
-    ) == []
     assert detector.check_metrics(
         inventory, detector.extract_metric_names_from_c()
     ) == []
     assert detector.check_ffi_exports(
         inventory, detector.extract_ffi_exports_from_rust()
     ) == []
+
+
+def test_live_inventory_passes_full_drift_check() -> None:
+    """The checked-in inventory must pass every source-contract comparison."""
+    inventory = detector.load_inventory()
+
+    assert detector.validate_inventory_schema(inventory) == []
+    assert detector.check_directive_contract(
+        inventory, detector.extract_directive_contract_from_c()) == []
+    assert detector.check_reason_contract(
+        inventory, detector.extract_reason_contract_from_rust()) == []
+    assert detector.check_metric_contract(
+        inventory, detector.extract_metric_contract_from_c()) == []
+    assert detector.check_ffi_contract(
+        inventory, detector.extract_ffi_contract_from_rust()) == []
 
 
 def test_ffi_contract_parser_handles_multiline_signatures(monkeypatch) -> None:
@@ -275,24 +283,43 @@ def test_ffi_contract_comparison_normalizes_legacy_formatting() -> None:
 def test_invalid_inventory_schema_reports_contract_fields() -> None:
     """Malformed inventory metadata must report all missing contract fields."""
     errors = detector.validate_inventory_schema({
-        "schema_version": "0.9.2",
-        "dynconf_keys": [],
+        "schema_version": "0.9.3",
         "metrics": [],
     })
 
     assert "inventory missing top-level keys: contract_version, directive_count, directives, ffi_abi_version, ffi_exports, otel, reason_codes, registry_count, reject_only_directives" in errors
 
 
-def test_final_inventory_rejects_migration_stubs() -> None:
-    """The frozen 0.9.2 inventory cannot retain reject-only entries."""
+def test_reject_only_migration_directives_are_required() -> None:
+    """The target contract retains the 5 removed-directive migration handlers."""
     inventory = copy.deepcopy(detector.load_inventory())
-    inventory["reject_only_directives"] = [{"name": "markdown_removed"}]
-    inventory["otel"]["reject_only"] = [{"name": "markdown_otel_removed"}]
+    # Dropping the migration directives must fail: the target contract keeps
+    # exactly FINAL_REJECT_ONLY_COUNT reject-only entries.
+    inventory["reject_only_directives"] = []
 
     errors = detector.validate_inventory_schema(inventory)
 
-    assert "final 0.9.2 inventory must contain zero reject-only directives" in errors
-    assert "final 0.9.2 inventory must contain zero reject-only OTel directives" in errors
+    assert (
+        "post-convergence inventory must contain exactly {} reject-only "
+        "migration directives".format(detector.FINAL_REJECT_ONLY_COUNT)
+        in errors
+    )
+
+
+def test_reject_only_migration_directive_shape_is_validated() -> None:
+    """Reject-only entries must be reject_only status wired to the handler."""
+    inventory = copy.deepcopy(detector.load_inventory())
+    inventory["reject_only_directives"][0]["status"] = "active"
+    inventory["reject_only_directives"][1]["handler"] = "ngx_other_handler"
+
+    errors = detector.validate_inventory_schema(inventory)
+
+    assert "reject_only_directives[0].status must be reject_only" in errors
+    assert (
+        "reject_only_directives[1].handler must be {}".format(
+            detector.REMOVED_DIRECTIVE_HANDLER)
+        in errors
+    )
 
 
 def test_removed_otel_status_is_valid_for_empty_surface() -> None:
@@ -304,16 +331,24 @@ def test_removed_otel_status_is_valid_for_empty_surface() -> None:
 
 
 def test_final_inventory_requires_frozen_public_counts() -> None:
-    """The final inventory keeps the frozen 25/11 public counts."""
+    """The target inventory keeps the post-convergence 20/10 public counts."""
     inventory = copy.deepcopy(detector.load_inventory())
     inventory["directives"] = inventory["directives"][:-1]
-    inventory["directive_count"] = 24
+    inventory["directive_count"] = detector.FINAL_DIRECTIVE_COUNT - 1
     inventory["metrics"] = inventory["metrics"][:-1]
 
     errors = detector.validate_inventory_schema(inventory)
 
-    assert "final 0.9.2 inventory must contain exactly 25 active directives" in errors
-    assert "final 0.9.2 inventory must contain exactly 11 metric families" in errors
+    assert (
+        "post-convergence inventory must contain exactly {} active "
+        "directives".format(detector.FINAL_DIRECTIVE_COUNT)
+        in errors
+    )
+    assert (
+        "post-convergence inventory must contain exactly {} metric "
+        "families".format(detector.FINAL_METRIC_COUNT)
+        in errors
+    )
 
 
 def test_directive_metadata_drift_is_reported() -> None:
@@ -383,7 +418,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ("ffi_exports", [{"name": None}], "ffi_exports[0].name"),
         ("ffi_exports", [{"name": []}], "ffi_exports[0].name"),
         ("directives", [None], "directives[0]"),
-        ("dynconf_keys", [42], "dynconf_keys[0]"),
+        ("reject_only_directives", [None], "reject_only_directives[0]"),
     ],
 )
 def test_malformed_inventory_main_is_deterministic(

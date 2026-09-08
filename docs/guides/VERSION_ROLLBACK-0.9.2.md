@@ -12,14 +12,13 @@ release. 0.9.2 is a breaking release (see
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md)), but it has no
 on-disk data migration. Rolling back the module binary restores the 0.9.1
 directive surface only after the configuration is also restored. The 0.9.2
-25-directive configuration and ABI 2 are not compatible with a 0.9.1 binary.
+20-directive configuration and ABI 3 are not compatible with a 0.9.1 binary.
 Publication and artifact availability are separate release gates.
 
 | Target | Section |
 |--------|---------|
 | 0.9.2 → 0.9.1 | [Rollback to 0.9.1](#rollback-to-091) |
 | 0.9.2 → 0.9.0 | [Rollback to 0.9.0](#rollback-to-090) |
-| Dynconf restore | [Dynconf Restore](#dynconf-restore) |
 
 ---
 
@@ -96,10 +95,13 @@ Publication and artifact availability are separate release gates.
 
 3. **Restore the matching 0.9.1 configuration:**
 
-   Restore the versioned 0.9.1 `nginx.conf` and any 0.9.1 dynamic-configuration
-   file from the same backup or release-controlled configuration bundle. Do not
-   validate a 0.9.2 configuration with the 0.9.1 binary. The 25-directive
-   surface and dynconf schema are not compatible.
+   Restore the complete versioned 0.9.1 configuration tree from the same
+   backup or release-controlled configuration bundle — `nginx.conf`, every
+   file under `conf.d/`, and every module-enablement file under
+   `modules-enabled/` (or the equivalent include directories for your
+   distribution). Do not validate a 0.9.2 configuration with the 0.9.1
+   binary. The 20-directive surface and static configuration defaults are
+   not compatible.
 
 4. **Validate configuration:**
 
@@ -163,7 +165,7 @@ Publication and artifact availability are separate release gates.
        exit 1
      fi
    fi
-   # Restore the versioned 0.9.1 nginx.conf and dynamic-configuration file here.
+   # Restore the versioned 0.9.1 nginx.conf here.
    # Locate the module directory explicitly: derive it from the active nginx
    # configuration, or set MODULES_DIR yourself when following this procedure
    # independently.
@@ -248,8 +250,8 @@ else
     exit 1
   fi
 fi
-# Restore the versioned 0.9.0 nginx.conf and dynamic-configuration file before
-# installing the 0.9.0 binary. The 0.9.1 configuration is not compatible.
+# Restore the versioned 0.9.0 nginx.conf before installing the 0.9.0 binary.
+# The 0.9.1 configuration is not compatible.
 MODULES_DIR="${MODULES_DIR:-$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')}"
 if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
   echo "ERROR: cannot locate the NGINX modules directory" >&2
@@ -267,53 +269,15 @@ their toolchain or use prebuilt 0.9.0 binaries.
 
 ---
 
-## Dynconf Restore
+## Static configuration rollback
 
-The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`.
-There is no runtime rollback API or rollback response schema. To restore a
-previous dynamic configuration, replace the watched file atomically. Atomic
-rename guarantees that every read observes either the complete old file or the
-complete new file. It does not guarantee that all workers apply the new
-snapshot at the same instant. Each worker has its own watcher cycle, so
-workers can briefly report different `config_version` values and serve
-different active snapshots while convergence is in progress.
+The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`. The
+0.9.2 runtime no longer includes the dynconf watcher or rollback file. To roll back a
+configuration change, restore the versioned static `nginx.conf` that matches the
+module binary, run `nginx -t`, and perform the normal controlled restart. Do
+not send `POST /nginx-markdown/diagnostics?action=rollback`. No runtime
+rollback API exists.
 
-The dynamic configuration path is root-owned, so run the following restore
-commands from a root shell. Prefixing individual commands with `sudo` is not
-enough: the heredoc and the temporary file redirection happen in the calling
-shell before `sudo` runs, and cannot create files in the root-owned directory.
-
-```bash
-set -eu
-path=/etc/nginx/markdown-dynamic.conf
-tmp="${path}.tmp.$$"
-umask 077
-cat > "$tmp" <<'EOF'
-{
-  "schema_version": 1,
-  "filter": "off",
-  "error_policy": "pass",
-  "streaming_buffer": 1048576
-}
-EOF
-mv -f "$tmp" "$path"
-```
-
-The watcher observes the changed modification time, parses and validates the
-complete file, then promotes it through the normal staged reload. If parsing
-or validation fails, the active snapshot and its `applied_mtime` remain at the
-last successfully applied state. Verify convergence with the read-only
-diagnostics endpoint or with request behavior from the relevant workers. If
-you need a strong synchronization boundary, perform a controlled NGINX
-reload. Do not assume that every worker has restored the new snapshot
-immediately.
-
-Do not send `POST /nginx-markdown/diagnostics?action=rollback`. The module rejects it
-with `405 Method Not Allowed`. This deliberate absence avoids restoring a
-worker-local snapshot while other NGINX workers continue serving a different
-configuration.
-
----
 
 ## Known Irreversible Changes
 
@@ -323,7 +287,8 @@ and bundled ABI changes are not reversible by swapping only the binary:
 - Diagnostics mapping fix is backward-compatible
 - C reason code constants include the 0.9.2 registry additions
 - The 0.9.2 production surface removed OTel
-- Dynconf diagnostics remains read-only. File restore is atomic and auditable
+- Runtime dynconf no longer exists. Operators restore a versioned configuration
+  and retain an auditable change record.
 - Public surface inventory is a build-time gate
 
 Restore the matching 0.9.1 configuration and binary together when rolling
@@ -340,9 +305,9 @@ When rolling back from 0.9.2 to 0.9.1:
 | `recent_decisions[].reason` | `bypass_no_transform` entry removed from diagnostics JSON |
 | C reason code constants | Decompression series (4–11) constants unavailable in `components/nginx-module/src/ngx_http_markdown_reason.c` |
 | OTel surface | Present in 0.9.1 documentation; removed from 0.9.2, so restore the old configuration before rollback |
-| Dynconf diagnostics | `POST action=rollback` is rejected; restore the watched file atomically |
+| Dynconf diagnostics | The runtime subsystem is removed; restore matching static configuration |
 | Streaming terminal diagnostics | The retired standalone decision-state model is absent; rely on the current phase/terminal latch diagnostics and shared lowercase reason registry |
-| Prometheus metric families | **Differ between the versions.** 0.9.2 exposes exactly the eleven frozen v1 families (`nginx_markdown_build_info`, `nginx_markdown_conversion_attempts_total`, `nginx_markdown_conversion_deliveries_total`, `nginx_markdown_conversion_duration_seconds`, `nginx_markdown_decompression_events_total`, `nginx_markdown_dynconf_reloads_total`, `nginx_markdown_input_bytes_total`, `nginx_markdown_output_bytes_total`, `nginx_markdown_requests_total`, `nginx_markdown_streaming_events_total`, `nginx_markdown_streaming_peak_memory_bytes`). The 0.9.1 binary re-emits the legacy surface it shipped with: per-path families (`per_path_conversions_total`, `per_path_overflow_total`, …), shadow metrics, profile/passthrough/decision families, and the debug/perf families removed in 0.9.2 (see `docs/guides/prometheus-metrics.md`). Renamed families include `conversions_total` → `conversion_attempts_total`/`conversion_deliveries_total`, `decompressions_total` → `decompression_events_total`, and `streaming_failure_total` → `streaming_events_total` labels. |
+| Prometheus metric families | **Differ between the versions.** 0.9.2 exposes exactly the ten frozen v1 families (`nginx_markdown_build_info`, `nginx_markdown_conversion_attempts_total`, `nginx_markdown_conversion_deliveries_total`, `nginx_markdown_conversion_duration_seconds`, `nginx_markdown_decompression_events_total`, `nginx_markdown_input_bytes_total`, `nginx_markdown_output_bytes_total`, `nginx_markdown_requests_total`, `nginx_markdown_streaming_events_total`, `nginx_markdown_streaming_peak_memory_bytes`). The 0.9.1 binary re-emits the legacy surface it shipped with: per-path families (`per_path_conversions_total`, `per_path_overflow_total`, …), shadow metrics, profile/passthrough/decision families, and the debug/perf families removed in 0.9.2 (see `docs/guides/prometheus-metrics.md`). Renamed families include `conversions_total` → `conversion_attempts_total`/`conversion_deliveries_total`, `decompressions_total` → `decompression_events_total`, and `streaming_failure_total` → `streaming_events_total` labels. |
 
 After rollback, validate every dashboard and alert that consumes the
 `/markdown-metrics` endpoint: 0.9.2 family names and label sets do not exist

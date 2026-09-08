@@ -218,7 +218,7 @@ fn arb_cross_boundary_html() -> impl Strategy<Value = String> {
 // ════════════════════════════════════════════════════════════════════
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(ProptestConfig::with_cases(100))]
 
     // ================================================================
     // Property 1: Streaming vs Full-Buffer Output Equivalence
@@ -281,7 +281,8 @@ proptest! {
 
     // ================================================================
     // Property 2: Chunk Split Invariance
-    // Feature: rust-streaming-engine-core
+    // Feature: pre-lts-convergence-092, Property 6: Decoding is invariant to
+    // chunk boundaries and EOF position
     // Validates: Requirements 8.1, 8.2, 13.4
     // ================================================================
     #[test]
@@ -318,7 +319,8 @@ proptest! {
 
     // ================================================================
     // Property 3: Malformed HTML No Panic
-    // Feature: rust-streaming-engine-core
+    // Feature: pre-lts-convergence-092, Property 8: Malformed, empty, or
+    // truncated input routes to a failure path and frees all buffers
     // Validates: Requirements 4.1, 4.3
     // ================================================================
     #[test]
@@ -332,7 +334,8 @@ proptest! {
 
     // ================================================================
     // Property 5: Bounded-Memory Constraint
-    // Feature: rust-streaming-engine-core
+    // Feature: pre-lts-convergence-092, Property 9: Resource budgets are
+    // enforced cumulatively across all members and chunks
     // Validates: Requirements 2.1
     // ================================================================
     #[test]
@@ -402,7 +405,8 @@ proptest! {
 
     // ================================================================
     // Property 8: Pre-Commit Fallback Correctness
-    // Feature: rust-streaming-engine-core
+    // Feature: pre-lts-convergence-092, Property 10: Pass-policy pre-commit
+    // fallback delivers the original response unchanged
     // Validates: Requirements 9.2, 9.3
     // ================================================================
     #[test]

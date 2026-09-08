@@ -10,7 +10,6 @@
  *   - decompressed_size: uses the default when unset
  *   - parser_timeout: 10000ms (10 seconds)
  *   - parser_budget: 32MB (32 * 1024 * 1024 bytes)
- *   - dynconf_dry_run: 0 (off)
  *
  * This test exercises the merge function with both parent and child at
  * their unset sentinels, confirming that the resolved defaults match
@@ -285,8 +284,6 @@ test_defaults_both_unset(void)
         "parser_timeout should start as NGX_CONF_UNSET_MSEC");
     TEST_ASSERT(child->decompress.parser_budget == NGX_CONF_UNSET_SIZE,
         "parser_budget should start as NGX_CONF_UNSET_SIZE");
-    TEST_ASSERT(child->advanced.dynconf_dry_run == NGX_CONF_UNSET,
-        "dynconf_dry_run should start as NGX_CONF_UNSET");
 
     /* Run merge with no directives configured. */
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
@@ -317,14 +314,6 @@ test_defaults_both_unset(void)
      */
     TEST_ASSERT(child->decompress.parser_budget == 32 * 1024 * 1024,
         "parser_budget should default to 32MB");
-
-    /*
-     * dynconf_dry_run: 0 (off).
-     * Normal reload behavior by default; dry-run must be explicitly
-     * enabled by operators who want validation-only mode.
-     */
-    TEST_ASSERT(child->advanced.dynconf_dry_run == 0,
-        "dynconf_dry_run should default to 0 (off)");
 
     TEST_PASS("All defaults correct");
 
@@ -447,7 +436,6 @@ test_directives_inherit_from_parent(void)
     /* Set parent values (simulates http-level config) */
     parent->limits.parser_timeout = 10000;              /* 10s */
     parent->limits.parser_budget = 32 * 1024 * 1024;   /* 32MB */
-    parent->advanced.dynconf_dry_run = 1;       /* on */
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
     TEST_ASSERT(rc == NGX_CONF_OK, "merge_conf should succeed");
@@ -457,8 +445,6 @@ test_directives_inherit_from_parent(void)
         "parser_timeout should inherit from parent (10s)");
     TEST_ASSERT(child->decompress.parser_budget == 32 * 1024 * 1024,
         "parser_budget should inherit from parent (32MB)");
-    TEST_ASSERT(child->advanced.dynconf_dry_run == 1,
-        "dynconf_dry_run should inherit from parent (on)");
 
     TEST_PASS("directives correctly inherit from parent");
 
@@ -492,12 +478,10 @@ test_directives_child_override(void)
     /* Set parent values */
     parent->limits.parser_timeout = 10000;
     parent->limits.parser_budget = 32 * 1024 * 1024;
-    parent->advanced.dynconf_dry_run = 1;
 
     /* Set child overrides */
     child->limits.parser_timeout = 5000;                  /* 5s */
     child->limits.parser_budget = 16 * 1024 * 1024;       /* 16MB */
-    child->advanced.dynconf_dry_run = 0;        /* off */
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
     TEST_ASSERT(rc == NGX_CONF_OK, "merge_conf should succeed");
@@ -507,8 +491,6 @@ test_directives_child_override(void)
         "child parser_timeout override (5s) should win");
     TEST_ASSERT(child->decompress.parser_budget == 16 * 1024 * 1024,
         "child parser_budget override (16MB) should win");
-    TEST_ASSERT(child->advanced.dynconf_dry_run == 0,
-        "child dynconf_dry_run override (off) should win");
 
     TEST_PASS("child overrides work correctly");
 
@@ -564,8 +546,6 @@ test_core_defaults_unchanged(void)
         "auto_decompress should default to on");
     TEST_ASSERT(child->policy.generate_etag == 0,
         "generate_etag should default to off (ims_only mode)");
-    TEST_ASSERT(child->advanced.dynconf_enabled == 0,
-        "dynconf_enabled should default to off");
     TEST_ASSERT(child->advanced.prune_noise == 1,
         "prune_noise should default to on");
 
@@ -575,24 +555,6 @@ test_core_defaults_unchanged(void)
     free(child);
 }
 
-
-/*
- * Test: stream threshold internalization.
- *
- * Confirms that the stream threshold is now a fixed internal constant
- * (NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT = 1 MiB) and is no longer
- * configurable via a directive.
- */
-static void
-test_stream_threshold_internalized(void)
-{
-    TEST_SUBSECTION("stream threshold internalization");
-
-    TEST_ASSERT(NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT == 1048576,
-        "internalized stream threshold must be 1 MiB (1048576)");
-
-    TEST_PASS("stream threshold is internalized at 1 MiB");
-}
 
 /*
  * Test: markdown_limits cross-key constraint is explicitness-aware.
@@ -689,7 +651,6 @@ main(void)
     test_directives_inherit_from_parent();
     test_directives_child_override();
     test_core_defaults_unchanged();
-    test_stream_threshold_internalized();
     test_limits_cross_key_explicitness_aware();
 
     printf("\n========================================\n");
@@ -699,7 +660,6 @@ main(void)
     printf("  decompressed_size   : default and explicit limit paths\n");
     printf("  parser_timeout      : 10000ms (10 seconds)\n");
     printf("  parser_budget       : 33554432 bytes (32MB)\n");
-    printf("  dynconf_dry_run     : 0 (off)\n");
     printf("\n");
 
     return 0;

@@ -122,26 +122,20 @@ ngx_http_markdown_body_filter_init(ngx_conf_t *cf) /* NOSONAR: c:S995; NGINX cal
 }
 
 /**
- * Initialize per-worker markdown resources: allocate a converter, attach the
- * shared metrics zone, and optionally start the dynamic configuration watcher.
+ * Initialize per-worker markdown resources: allocate a converter and attach
+ * the shared metrics zone.
  *
  * If the metrics shared-memory zone is unavailable or the converter cannot be
  * created, initialization fails.
  *
  * @param cycle Pointer to the nginx cycle (used for logging and to obtain the HTTP configuration).
  * @return NGX_OK on successful initialization;
- *         NGX_ERROR if the metrics shared-memory zone is missing, the converter
- *         creation fails, or the dynamic-configuration watcher cannot be
- *         started (a worker without the watcher would permanently diverge
- *         from its peers on configuration reload).
+ *         NGX_ERROR if the metrics shared-memory zone is missing or the
+ *         converter creation fails.
  */
 static ngx_int_t
 ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
 {
-    const ngx_http_conf_ctx_t              *http_ctx;
-    const ngx_http_markdown_main_conf_t    *mcf;
-    ngx_http_markdown_conf_t               *dynconf_conf;
-
     if (ngx_http_markdown_metrics_shm_zone == NULL
         || ngx_http_markdown_metrics_shm_zone->data == NULL)
     {
@@ -186,47 +180,14 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
                   "markdown: decompression support: gzip=yes, deflate=yes, brotli=no");
 #endif
 
-    /* Start dynamic config watcher if configured. */
-    http_ctx = (const ngx_http_conf_ctx_t *)
-        ngx_get_conf(cycle->conf_ctx, ngx_http_module);
-    if (http_ctx != NULL) {
-        mcf = (const ngx_http_markdown_main_conf_t *)
-            http_ctx->main_conf[
-                ngx_http_markdown_filter_module.ctx_index];
-        dynconf_conf = ngx_http_markdown_dynconf_owner(mcf);
-
-        if (dynconf_conf != NULL
-            && dynconf_conf->advanced.dynconf_enabled == 1
-            && dynconf_conf->advanced.dynconf_path.len > 0)
-        {
-            ngx_http_markdown_dynconf_watcher.validation_summary =
-                mcf->loc_validation_summary;
-
-            if (ngx_http_markdown_dynconf_start(
-                    &ngx_http_markdown_dynconf_watcher,
-                    cycle, &dynconf_conf->advanced.dynconf_path,
-                    dynconf_conf, cycle->log) != NGX_OK)
-            {
-                ngx_log_error(NGX_LOG_CRIT, cycle->log, 0,
-                              "markdown: failed to start dynconf watcher; "
-                              "refusing to start worker without hot-reload "
-                              "(worker would permanently diverge from "
-                              "peers on configuration reload)");
-                return NGX_ERROR;
-            }
-        }
-
-    }
-
     return NGX_OK;
 }
 
 /*
  * Release per-worker resources on graceful shutdown.
  *
- * Stops the dynamic config watcher, frees the Rust converter handle,
- * and clears global pointers.  Safe to call when the converter was
- * never initialized (early-exit on NULL).
+ * Frees the Rust converter handle and clears global pointers.  Safe to
+ * call when the converter was never initialized (early-exit on NULL).
  *
  * Parameters:
  *   cycle - NGINX cycle (used for logging)
@@ -234,9 +195,6 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
 static void
 ngx_http_markdown_exit_worker(ngx_cycle_t *cycle)
 {
-    ngx_http_markdown_dynconf_stop(&ngx_http_markdown_dynconf_watcher,
-                                   cycle->log);
-
     if (ngx_http_markdown_converter == NULL) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, cycle->log, 0,
                        "markdown: no converter to clean up in worker process");
