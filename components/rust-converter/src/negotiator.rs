@@ -10,23 +10,25 @@
 //! The negotiator considers only the "available" variants relevant to this
 //! module: `text/markdown` (conversion output) and `text/html` (original
 //! upstream content). Other MIME types in the Accept header are ignored for
-//! negotiation purposes but respected for wildcard matching.
+//! negotiation purposes.
 //!
 //! # Wildcard Behavior
 //!
-//! `*/*` in the Accept header is treated with its own q-value (default 1.0)
-//! for both text/markdown and text/html, unless `on_wildcard` is false (in
-//! which case `*/*` does not imply markdown preference).
+//! Negotiation is strict-only: wildcard MIME types (`*/*`, `text/*`) do NOT
+//! imply a `text/markdown` preference. Only an explicit `text/markdown` entry
+//! (with a q-value at least as high as `text/html`) triggers conversion. The
+//! wildcard-matching mode was removed in 0.9.2 (design §14(g),
+//! Requirements LTS-R010, LTS-R023).
 //!
 //! # Examples
 //!
 //! ```
 //! use nginx_markdown_converter::negotiator::{negotiate, NegotiationResult};
 //!
-//! let result = negotiate("text/markdown;q=0.9, text/html;q=0.8", true);
+//! let result = negotiate("text/markdown;q=0.9, text/html;q=0.8");
 //! assert!(matches!(result, NegotiationResult::Convert));
 //!
-//! let result = negotiate("text/html", true);
+//! let result = negotiate("text/html");
 //! assert!(matches!(result, NegotiationResult::Passthrough { .. }));
 //! ```
 
@@ -170,7 +172,11 @@ fn parse_accept_header(header: &str) -> Vec<AcceptEntry> {
 /// Determine whether to convert based on the parsed Accept entries.
 ///
 /// Returns the q-value for text/markdown and text/html (0 if absent).
-fn extract_q_values(entries: &[AcceptEntry], on_wildcard: bool) -> (u16, u16) {
+///
+/// Negotiation is strict-only: wildcard MIME types (`*/*`, `text/*`) are not
+/// matched against `text/markdown` (design §14(g), Requirements LTS-R010,
+/// LTS-R023).
+fn extract_q_values(entries: &[AcceptEntry]) -> (u16, u16) {
     let mut markdown_q: u16 = 0;
     let mut html_q: u16 = 0;
 
@@ -180,14 +186,6 @@ fn extract_q_values(entries: &[AcceptEntry], on_wildcard: bool) -> (u16, u16) {
                 markdown_q = markdown_q.max(entry.q_value);
             }
             "text/html" => {
-                html_q = html_q.max(entry.q_value);
-            }
-            "*/*" if on_wildcard => {
-                markdown_q = markdown_q.max(entry.q_value);
-                html_q = html_q.max(entry.q_value);
-            }
-            "text/*" if on_wildcard => {
-                markdown_q = markdown_q.max(entry.q_value);
                 html_q = html_q.max(entry.q_value);
             }
             _ => {}
@@ -202,8 +200,10 @@ fn extract_q_values(entries: &[AcceptEntry], on_wildcard: bool) -> (u16, u16) {
 /// # Arguments
 ///
 /// * `accept_header` - The raw Accept header value (may be empty or malformed).
-/// * `on_wildcard` - Whether `*/*` in the Accept header implies markdown
-///   preference (corresponds to `markdown_accept wildcard`).
+///
+/// Negotiation is strict-only: wildcard MIME types (`*/*`, `text/*`) never
+/// imply a `text/markdown` preference (design §14(g), Requirements LTS-R010,
+/// LTS-R023).
 ///
 /// # Returns
 ///
@@ -216,18 +216,18 @@ fn extract_q_values(entries: &[AcceptEntry], on_wildcard: bool) -> (u16, u16) {
 /// use nginx_markdown_converter::negotiator::{negotiate, NegotiationResult, PassthroughReason};
 ///
 /// // Explicit markdown preference
-/// let r = negotiate("text/markdown", true);
+/// let r = negotiate("text/markdown");
 /// assert_eq!(r, NegotiationResult::Convert);
 ///
 /// // No Accept header
-/// let r = negotiate("", true);
+/// let r = negotiate("");
 /// assert_eq!(r, NegotiationResult::Passthrough { reason: PassthroughReason::NoAcceptHeader });
 ///
 /// // Explicit reject: text/markdown;q=0
-/// let r = negotiate("text/markdown;q=0, text/html", true);
+/// let r = negotiate("text/markdown;q=0, text/html");
 /// assert_eq!(r, NegotiationResult::Passthrough { reason: PassthroughReason::ExplicitReject });
 /// ```
-pub fn negotiate(accept_header: &str, on_wildcard: bool) -> NegotiationResult {
+pub fn negotiate(accept_header: &str) -> NegotiationResult {
     // Empty or missing Accept header: passthrough.
     let trimmed = accept_header.trim();
     if trimmed.is_empty() {
@@ -251,7 +251,7 @@ pub fn negotiate(accept_header: &str, on_wildcard: bool) -> NegotiationResult {
         };
     }
 
-    let (markdown_q, html_q) = extract_q_values(&entries, on_wildcard);
+    let (markdown_q, html_q) = extract_q_values(&entries);
 
     // Explicit reject: text/markdown;q=0
     if markdown_q == 0 {
@@ -287,19 +287,19 @@ mod tests {
 
     #[test]
     fn test_explicit_markdown_preference() {
-        let r = negotiate("text/markdown", true);
+        let r = negotiate("text/markdown");
         assert_eq!(r, NegotiationResult::Convert);
     }
 
     #[test]
     fn test_markdown_higher_q() {
-        let r = negotiate("text/markdown;q=0.9, text/html;q=0.8", true);
+        let r = negotiate("text/markdown;q=0.9, text/html;q=0.8");
         assert_eq!(r, NegotiationResult::Convert);
     }
 
     #[test]
     fn test_html_higher_q() {
-        let r = negotiate("text/html;q=0.9, text/markdown;q=0.8", true);
+        let r = negotiate("text/html;q=0.9, text/markdown;q=0.8");
         assert_eq!(
             r,
             NegotiationResult::Passthrough {
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_no_accept_header() {
-        let r = negotiate("", true);
+        let r = negotiate("");
         assert_eq!(
             r,
             NegotiationResult::Passthrough {
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn test_whitespace_only_header() {
-        let r = negotiate("   ", true);
+        let r = negotiate("   ");
         assert_eq!(
             r,
             NegotiationResult::Passthrough {
@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn test_explicit_reject_q_zero() {
-        let r = negotiate("text/markdown;q=0, text/html", true);
+        let r = negotiate("text/markdown;q=0, text/html");
         assert_eq!(
             r,
             NegotiationResult::Passthrough {
@@ -342,14 +342,9 @@ mod tests {
     }
 
     #[test]
-    fn test_wildcard_on() {
-        let r = negotiate("*/*", true);
-        assert_eq!(r, NegotiationResult::Convert);
-    }
-
-    #[test]
-    fn test_wildcard_off() {
-        let r = negotiate("*/*", false);
+    fn test_all_types_wildcard_passthrough() {
+        // Strict-only negotiation: `*/*` never implies markdown preference.
+        let r = negotiate("*/*");
         assert_eq!(
             r,
             NegotiationResult::Passthrough {
@@ -359,9 +354,15 @@ mod tests {
     }
 
     #[test]
-    fn test_text_wildcard() {
-        let r = negotiate("text/*", true);
-        assert_eq!(r, NegotiationResult::Convert);
+    fn test_text_wildcard_passthrough() {
+        // Strict-only negotiation: `text/*` never implies markdown preference.
+        let r = negotiate("text/*");
+        assert_eq!(
+            r,
+            NegotiationResult::Passthrough {
+                reason: PassthroughReason::LowerQValue
+            }
+        );
     }
 
     #[test]
@@ -369,19 +370,19 @@ mod tests {
         // text/markdown without explicit q → q=1.0
         // text/html without explicit q → q=1.0
         // Equal q-values prefer markdown (the module's purpose).
-        let r = negotiate("text/html, text/markdown", true);
+        let r = negotiate("text/html, text/markdown");
         assert_eq!(r, NegotiationResult::Convert);
     }
 
     #[test]
     fn test_markdown_only_in_accept() {
-        let r = negotiate("text/markdown;q=1.0", true);
+        let r = negotiate("text/markdown;q=1.0");
         assert_eq!(r, NegotiationResult::Convert);
     }
 
     #[test]
     fn test_html_only_in_accept() {
-        let r = negotiate("text/html", true);
+        let r = negotiate("text/html");
         assert_eq!(
             r,
             NegotiationResult::Passthrough {
@@ -392,20 +393,20 @@ mod tests {
 
     #[test]
     fn test_case_insensitive_mime() {
-        let r = negotiate("Text/Markdown", true);
+        let r = negotiate("Text/Markdown");
         assert_eq!(r, NegotiationResult::Convert);
     }
 
     #[test]
     fn test_case_insensitive_q_param() {
-        let r = negotiate("text/markdown;Q=0.9, text/html;q=0.8", true);
+        let r = negotiate("text/markdown;Q=0.9, text/html;q=0.8");
         assert_eq!(r, NegotiationResult::Convert);
     }
 
     #[test]
     fn test_malformed_header_too_long() {
         let long_header = "text/markdown, ".repeat(500);
-        let r = negotiate(&long_header, true);
+        let r = negotiate(&long_header);
         // Should not panic; may convert or passthrough depending on
         // what fits in MAX_ACCEPT_ENTRIES, but must not crash.
         let _ = r;
@@ -414,13 +415,13 @@ mod tests {
     #[test]
     fn test_malformed_q_value_ignored() {
         // Invalid q-value falls back to default q=1.0
-        let r = negotiate("text/markdown;q=invalid, text/html;q=0.5", true);
+        let r = negotiate("text/markdown;q=invalid, text/html;q=0.5");
         assert_eq!(r, NegotiationResult::Convert);
     }
 
     #[test]
     fn test_q_value_boundary_zero() {
-        let r = negotiate("text/markdown;q=0.0", true);
+        let r = negotiate("text/markdown;q=0.0");
         assert_eq!(
             r,
             NegotiationResult::Passthrough {
@@ -431,23 +432,20 @@ mod tests {
 
     #[test]
     fn test_q_value_boundary_one() {
-        let r = negotiate("text/markdown;q=1.0", true);
+        let r = negotiate("text/markdown;q=1.0");
         assert_eq!(r, NegotiationResult::Convert);
     }
 
     #[test]
     fn test_q_value_three_decimal_places() {
         // q=0.123 should be preserved
-        let r = negotiate("text/markdown;q=0.123, text/html;q=0.100", true);
+        let r = negotiate("text/markdown;q=0.123, text/html;q=0.100");
         assert_eq!(r, NegotiationResult::Convert);
     }
 
     #[test]
     fn test_unrelated_mime_types_ignored() {
-        let r = negotiate(
-            "application/json;q=1.0, text/markdown;q=0.5, text/html;q=0.9",
-            true,
-        );
+        let r = negotiate("application/json;q=1.0, text/markdown;q=0.5, text/html;q=0.9");
         assert_eq!(
             r,
             NegotiationResult::Passthrough {
@@ -458,16 +456,91 @@ mod tests {
 
     #[test]
     fn test_multiple_markdown_entries_takes_highest() {
-        let r = negotiate(
-            "text/markdown;q=0.3, text/markdown;q=0.9, text/html;q=0.8",
-            true,
-        );
+        let r = negotiate("text/markdown;q=0.3, text/markdown;q=0.9, text/html;q=0.8");
         assert_eq!(r, NegotiationResult::Convert);
     }
 
     #[test]
     fn test_empty_entry_in_header() {
-        let r = negotiate("text/markdown,,text/html;q=0.5", true);
+        let r = negotiate("text/markdown,,text/html;q=0.5");
+        assert_eq!(r, NegotiationResult::Convert);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Test-first: wildcard-free negotiator (task 10.1 for task 10.2 removal).
+//
+// These tests describe the TARGET (post-removal) behavior of the negotiator
+// after wildcard negotiation is removed (design §Feature Removal — Wildcard
+// negotiation removal; §14(g); Requirements LTS-R010, LTS-R023):
+//
+//   * `negotiate` takes ONLY the Accept header — the `on_wildcard` parameter
+//     is dropped.
+//   * There is NO `*/*` and NO `text/*` wildcard match branch: negotiation is
+//     strict-only, so wildcard-only Accept headers never trigger conversion.
+//
+// They are EXPECTED TO FAIL until task 10.2 drops the `on_wildcard` parameter
+// and the wildcard branches: today `negotiate` still requires the second
+// argument, so the single-argument calls below do not compile (compile
+// failure is the intended test-first "red" state). Do NOT relax these tests
+// to the current signature — task 10.2 makes them pass by changing the code.
+#[cfg(test)]
+mod wildcard_free_tests {
+    use super::*;
+
+    /// The wildcard-free `negotiate` accepts only the Accept header; no
+    /// `on_wildcard` argument exists after removal.
+    #[test]
+    fn test_negotiate_signature_has_no_on_wildcard_param() {
+        // Single-argument call: the target signature is `negotiate(&str)`.
+        let r = negotiate("text/markdown");
+        assert_eq!(r, NegotiationResult::Convert);
+    }
+
+    /// `*/*` must NOT be treated as a markdown preference once the wildcard
+    /// branch is removed — strict negotiation passes it through.
+    #[test]
+    fn test_all_types_wildcard_is_passthrough_strict() {
+        let r = negotiate("*/*");
+        assert_eq!(
+            r,
+            NegotiationResult::Passthrough {
+                reason: PassthroughReason::LowerQValue
+            }
+        );
+    }
+
+    /// `text/*` must NOT trigger conversion once the wildcard branch is
+    /// removed — strict negotiation passes it through.
+    #[test]
+    fn test_text_subtype_wildcard_is_passthrough_strict() {
+        let r = negotiate("text/*");
+        assert_eq!(
+            r,
+            NegotiationResult::Passthrough {
+                reason: PassthroughReason::LowerQValue
+            }
+        );
+    }
+
+    /// A wildcard alongside an explicit lower-priority html entry still must
+    /// not convert via the wildcard; only explicit `text/markdown` converts.
+    #[test]
+    fn test_wildcard_with_html_does_not_convert() {
+        let r = negotiate("*/*, text/html;q=0.5");
+        assert_eq!(
+            r,
+            NegotiationResult::Passthrough {
+                reason: PassthroughReason::LowerQValue
+            }
+        );
+    }
+
+    /// Explicit `text/markdown` continues to convert under the strict-only
+    /// negotiator — removing wildcards must not regress the explicit path.
+    #[test]
+    fn test_explicit_markdown_still_converts_strict() {
+        let r = negotiate("text/markdown;q=0.9, text/html;q=0.8");
         assert_eq!(r, NegotiationResult::Convert);
     }
 }

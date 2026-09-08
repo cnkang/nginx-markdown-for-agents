@@ -38,7 +38,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `e2e-streaming-config` | cheap blocker | `make e2e-streaming-config-check` |
 | `sonar-encoding` | cheap blocker | `make sonar-encoding-check` |
 | `diagnostics-access-phase` | focused semantic | `make verify-diagnostics-access-phase-e2e` (requires `NGINX_BIN` and `NGINX_MODULE_SO`; emits `SKIP` when unavailable) |
-| `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e`, `make verify-dynconf-convergence-e2e` |
+| `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e` |
 | `release-quality` | umbrella | `make harness-check-full` |
 | `coverage-gate` | focused semantic | `make coverage-gate` |
 | `packaging-e2e` | umbrella | `dpkg-deb --info`, `rpm -qip`, `helm lint` |
@@ -61,7 +61,7 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | `release-governance` | release gates, scope governance, source-build CI | docs-tooling, harness-rules | [risk-packs/release-governance.md](risk-packs/release-governance.md) |
 | `harness-remediation` | harness rules, steering adapters, post-analysis closeout, regex-safety | docs-tooling, observability | [risk-packs/harness-remediation.md](risk-packs/harness-remediation.md) |
 | `packaging-distribution` | APT/YUM repos, Homebrew tap, Helm chart, K8s Ingress | docs-tooling, release-governance | [risk-packs/packaging-distribution.md](risk-packs/packaging-distribution.md) |
-| `dynamic-config-hot-reload` | dynamic config parser, reload lifecycle, runtime apply | nginx-protocol, observability, docs-tooling | [risk-packs/dynamic-config-hot-reload.md](risk-packs/dynamic-config-hot-reload.md) |
+| `dynamic-config-hot-reload` | **Archived** — the runtime hot-reload subsystem was removed in the 0.9.2 convergence; historical risk record only, no active triggers | static config now routes through nginx-protocol-safety, docs-tooling-drift | [risk-packs/dynamic-config-hot-reload.md](risk-packs/dynamic-config-hot-reload.md) |
 | `output-safety` | Markdown escaping, link/URL emission, injection prevention | nginx-protocol, docs-tooling | [risk-packs/output-safety.md](risk-packs/output-safety.md) |
 | `e2e-migration` | e2e-harness, scenario migration, shell-to-rust parity | docs-tooling, nginx-protocol | [risk-packs/e2e-migration.md](risk-packs/e2e-migration.md) |
 
@@ -99,6 +99,7 @@ Safety/engineering invariants always win. User-task controls scope and approach.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-19 | Kang | Retired dynamic-config routing for the 0.9.2 convergence: dropped the removed `verify-dynconf-convergence-e2e` command from the `runtime-e2e` family and marked the `dynamic-config-hot-reload` risk pack archived (no active triggers; static config routes through nginx-protocol-safety and docs-tooling-drift) |
 | 0.9.2 | 2026-08-11 | Kang | Recorded v092-gates, public-surface-drift, schema-drift, reason-codegen, and observation families |
 | 0.9.2 | 2026-08-06 | Kang | Added release-candidate-evidence, artifact-registry, release-evidence-manifest, fuzz-qualification, and soak-qualification verification families (five generic pre-freeze release gates) |
 | 0.9.2 | 2026-08-05 | Kang | Added release-matrix verification family (release-matrix-check gate) |

@@ -363,18 +363,12 @@ def _peak_memory_issue(record: dict, manifest: dict) -> str | None:
     peak = record.get("per_request_peak_bytes")
     if not isinstance(peak, int) or isinstance(peak, bool) or peak <= 0:
         return PEAK_MEMORY_MISSING_ERROR
-    ceiling = max(
-        (
-            s.get("conversion_memory_bytes", 0)
-            for s in manifest["corpus"]
-            if isinstance(s.get("conversion_memory_bytes"), int)
-            and not isinstance(s.get("conversion_memory_bytes"), bool)
-            and s.get("conversion_memory_bytes", 0) > 0
-        ),
-        default=0,
-    )
-    if not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling <= 0:
+    ceilings = [s.get("conversion_memory_bytes") for s in manifest["corpus"]]
+    if not ceilings or any(type(value) is not int or value <= 0 for value in ceilings):
         return "insufficient-data: scenario memory ceiling is missing"
+    # A global peak has no scenario attribution. It can establish all
+    # scenario limits only when it fits the smallest budget.
+    ceiling = min(ceilings)
     if peak > ceiling:
         return f"below-threshold: per-request peak {peak} > ceiling {ceiling}"
     return None
@@ -508,8 +502,9 @@ def _parse_peak_memory_metric(text: str) -> int | None:
 def read_module_peak_memory(base_url: str) -> int | None:
     """Read the bounded v1 Prometheus peak-memory gauge from local NGINX."""
     url = _validated_metrics_url(base_url)
+    request = urllib.request.Request(url, headers={"Accept": "text/plain"})
     try:
-        with urllib.request.urlopen(url, timeout=5) as response:
+        with urllib.request.urlopen(request, timeout=5) as response:
             if response.status != 200:
                 return None
             payload = response.read(METRICS_RESPONSE_MAX_BYTES + 1)
@@ -580,6 +575,8 @@ def run_ab_chunk(
                 "-c",
                 str(concurrency),
                 "-k",
+                "-H",
+                "Accept: text/markdown",
                 validated_url,
             ],
             capture_output=True,
@@ -684,6 +681,7 @@ pid {runtime_text}/nginx.pid;
 {load_line}
 events {{ }}
 http {{
+    access_log {runtime_text}/logs/access.log;
     server {{
         listen {port};
         root {root_text};
@@ -1157,8 +1155,12 @@ def _build_soak_record(
         "worker_rss_drain_delta_kb": session["drain_delta"],
         "worker_rss_drain_samples": session["drain_samples"],
         "monotonic_growth_after_drain": session["monotonic"],
-        "module_managed_peak_observed": session["peak_memory_bytes"] is not None,
-        "per_request_peak_bytes": session["peak_memory_bytes"],
+        # The exported gauge estimates only the last streaming conversion.
+        # It neither covers full-buffer requests nor retains a run-wide
+        # maximum, so a positive sample cannot certify per-request limits.
+        "module_managed_peak_observed": False,
+        "per_request_peak_bytes": None,
+        "last_streaming_peak_estimate_bytes": session["peak_memory_bytes"],
         "errors": [],
         "status": "pass",
     }

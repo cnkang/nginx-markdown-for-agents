@@ -31,6 +31,14 @@ ngx_module_t ngx_http_markdown_filter_module;
 /*
  * Stub effective-conf helpers required by conversion_impl.h.
  * These return the live conf value (eff is NULL in these tests).
+ *
+ * SIGNATURE BINDING: the production accessors live in
+ * ngx_http_markdown_effective_conf_impl.h, which is an implementation
+ * detail of the main translation unit and must NOT be included here.
+ * To keep these stubs from silently drifting from production, each stub
+ * is bound to a function-pointer variable of the production signature;
+ * if the production signature ever changes, the assignment below fails to
+ * compile and the drift is surfaced instead of hidden.
  */
 static ngx_flag_t
 ngx_http_markdown_effective_prune_noise(
@@ -56,6 +64,17 @@ ngx_http_markdown_effective_memory_budget(
 {
     return (eff != NULL) ? eff->memory_budget : conf->limits.conversion_memory;
 }
+
+/* Compile-time signature binding (see note above). */
+static ngx_flag_t (*const g_bind_effective_prune_noise)(
+    const ngx_http_markdown_effective_conf_t *,
+    const ngx_http_markdown_conf_t *) = ngx_http_markdown_effective_prune_noise;
+static size_t (*const g_bind_effective_streaming_budget)(
+    const ngx_http_markdown_effective_conf_t *,
+    const ngx_http_markdown_conf_t *) = ngx_http_markdown_effective_streaming_budget;
+static size_t (*const g_bind_effective_memory_budget)(
+    const ngx_http_markdown_effective_conf_t *,
+    const ngx_http_markdown_conf_t *) = ngx_http_markdown_effective_memory_budget;
 
 /*
  * Capturing stub for the base-URL FFI entry point.

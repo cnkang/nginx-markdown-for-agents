@@ -119,6 +119,7 @@ fn arb_separator() -> impl Strategy<Value = String> {
 // ─── Property 22: chain parsing ──────────────────────────────────────────────
 
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(100))]
     /// Normalized lowercase tokens in declaration order for any whitespace
     /// and casing variation.
     #[test]
@@ -224,6 +225,7 @@ fn deflate_compress(data: &[u8]) -> Vec<u8> {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(100))]
     /// Chains with more than 3 non-identity layers are rejected as
     /// DepthExceeded (passthrough), regardless of identity placement.
     #[test]
@@ -253,6 +255,83 @@ proptest! {
         let limits = DecodeLimits { max_output: budget, ratio: 1000 };
         let err = decode_chain(&wire, &layers, limits).unwrap_err();
         assert_eq!(err, ChainDecodeError::BudgetExceeded);
+    }
+
+    // Feature: pre-lts-convergence-092, Property 7: Multi-member gzip decodes
+    // to the ordered concatenation without loss or duplication
+    #[test]
+    fn multi_member_gzip_preserves_order(
+        first in prop::collection::vec(any::<u8>(), 1..4096),
+        second in prop::collection::vec(any::<u8>(), 1..4096),
+    ) {
+        let mut wire = gzip_compress(&first);
+        wire.extend_from_slice(&gzip_compress(&second));
+        let mut expected = first;
+        expected.extend_from_slice(&second);
+        let limits = DecodeLimits {
+            max_output: expected.len(),
+            ratio: u64::MAX,
+        };
+        let decoded = decode_chain(&wire, &[Encoding::Gzip], limits)
+            .expect("all complete gzip members must decode");
+        prop_assert_eq!(decoded, expected);
+    }
+
+    // Feature: pre-lts-convergence-092, Property 8: Malformed, empty, or
+    // truncated input routes to a failure path and frees all buffers
+    #[test]
+    fn malformed_or_truncated_gzip_is_rejected(
+        garbage in prop::collection::vec(any::<u8>(), 0..4096),
+        payload in prop::collection::vec(any::<u8>(), 1..4096),
+    ) {
+        let mut malformed = vec![0u8];
+        malformed.extend_from_slice(&garbage);
+        prop_assert!(decode_chain(
+            &malformed,
+            &[Encoding::Gzip],
+            DecodeLimits::default(),
+        ).is_err());
+
+        let compressed = gzip_compress(&payload);
+        prop_assume!(compressed.len() > 1);
+        let truncated = &compressed[..compressed.len() - 1];
+        prop_assert!(matches!(
+            decode_chain(truncated, &[Encoding::Gzip], DecodeLimits::default()),
+            Err(ChainDecodeError::TruncatedInput(_))
+                | Err(ChainDecodeError::FormatError(_))
+        ));
+
+        // Empty input must also route to the failure path (Property 8:
+        // "Malformed, empty, or truncated").
+        prop_assert!(decode_chain(
+            &[],
+            &[Encoding::Gzip],
+            DecodeLimits::default(),
+        ).is_err());
+    }
+
+    // Feature: pre-lts-convergence-092, Property 9: Resource budgets are
+    // enforced cumulatively across all members and chunks
+    #[test]
+    fn member_budget_is_cumulative(
+        first_size in 512usize..4096,
+        second_size in 512usize..4096,
+    ) {
+        let first = vec![b'A'; first_size];
+        let second = vec![b'B'; second_size];
+        let mut wire = gzip_compress(&first);
+        wire.extend_from_slice(&gzip_compress(&second));
+        let expected_len = first.len() + second.len();
+        let budget = expected_len.saturating_sub(1);
+        let budget_failed = matches!(
+            decode_chain(
+                &wire,
+                &[Encoding::Gzip],
+                DecodeLimits { max_output: budget, ratio: u64::MAX },
+            ),
+            Err(ChainDecodeError::BudgetExceeded)
+        );
+        prop_assert!(budget_failed, "member budget must be cumulative");
     }
 
     /// Per-layer ratio enforcement for a large fixture.

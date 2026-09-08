@@ -66,7 +66,10 @@ echo ""
 # hardened 412 representation transaction failure).
 # Updated 2026-09-05: 359 — decompression peak-budget rejection adds
 # +2 NGX_LOG_WARN sites for single- and multi-layer resource-limit paths.
-BASELINE_LOG_SITES=359
+# Updated 2026-09-08: 338 — Spec 62 removes the retired runtime dynconf
+# watcher and its 21 associated log sites.  The remaining count is the
+# reviewed static-convergence baseline for this checkout.
+BASELINE_LOG_SITES=338
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=0

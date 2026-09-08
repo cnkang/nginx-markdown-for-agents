@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Historical (superseded by the 0.9.2 pre-LTS convergence, LTS-R006)
 
 ## Date
 
@@ -15,6 +15,13 @@ rollback endpoint would therefore restore one worker's snapshot while other
 workers could continue serving a different configuration. The 0.9.2 work
 also needs a clear distinction between the internal last-known-good (LKG)
 snapshot used to protect failed reloads and an operator-requested restore.
+
+> **Historical note (0.9.2, LTS-R006):** the 0.9.2 pre-LTS convergence removed
+> the runtime dynamic-config subsystem that this ADR describes. 0.9.2 has no
+> watcher, no watched JSON path, and no dynconf restore path. Configuration is
+> static. Operators apply changes through a validated `nginx -t` plus a
+> controlled reload or restart. We retain this ADR for traceability of the
+> design that the convergence replaced.
 
 ## Decision
 
@@ -60,5 +67,5 @@ validation.
 - [0.9.2 Migration Guide](../../guides/MIGRATION-0.9.2.md)
 - [0.9.2 Rollback Guide](../../guides/VERSION_ROLLBACK-0.9.2.md)
 - [Dynconf file restore implementation plan](../../development/0.9.2-implementation-plan.md)
-- [Dynconf implementation](../../../components/nginx-module/src/ngx_http_markdown_dynconf_impl.h)
+- Dynconf implementation (`components/nginx-module/src/ngx_http_markdown_dynconf_impl.h`) — removed in 0.9.2 (LTS-R006) with the dynconf subsystem
 - [ADR-0015: Config V2 Breaking Migration](0015-090-config-v2-breaking-migration.md)

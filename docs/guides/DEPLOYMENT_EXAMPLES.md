@@ -359,7 +359,8 @@ http {
 #### Streaming-first — AI agent workloads
 
 Optimized for large document conversion with AI agent consumers. Aggressive
-streaming, wildcard Accept negotiation, no caching overhead.
+streaming, forced Accept negotiation (`markdown_accept force`), no caching
+overhead.
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
@@ -372,7 +373,7 @@ http {
     server {
         listen 80;
 
-        markdown_accept wildcard;
+        markdown_accept force;
         markdown_cache_validation off;
         markdown_streaming force;
         markdown_limits conversion_memory=256m conversion_timeout=30s
@@ -418,7 +419,7 @@ http {
 
         # API reference: streaming for large specs
         location /api/reference/ {
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_cache_validation off;
             markdown_streaming force;
             markdown_limits conversion_memory=256m conversion_timeout=30s

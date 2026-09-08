@@ -395,7 +395,7 @@ CONF
     info "Reading diagnostics from the loaded package module..."
     if "$curl_bin" -fsS -o "$diagnostics_file" \
         http://127.0.0.1:19999/nginx-markdown/diagnostics; then
-        if grep -Fq '"schema_version":2' "$diagnostics_file" \
+        if grep -Fq '"schema_version":3' "$diagnostics_file" \
             && grep -Fq '"diagnostics_recording":"active"' "$diagnostics_file"; then
             diagnostics_ok=1
         fi

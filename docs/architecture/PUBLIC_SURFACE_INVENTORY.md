@@ -34,9 +34,13 @@ defaults remain in the [Configuration Guide](../guides/CONFIGURATION.md).
 
 The source of truth is
 `components/nginx-module/src/ngx_http_markdown_config_directives_impl.h`.
-There are 25 `markdown_*` command-table entries: 25 active parser entries and
-0 reject-only migration entries. Removed directive names are deliberately
-absent so NGINX's standard unknown-directive error is the migration behavior.
+There are 25 `markdown_*` command-table entries: 20 active parser entries and
+5 reject-only migration entries. The command table keeps each of the five
+removed directive names with an error-returning handler
+(`ngx_http_markdown_removed_directive`) that makes `nginx -t` fail with a
+migration message (LTS-R008), so the module never silently ignores a removed
+directive. Other removed directive names are not registered and fail with the
+standard unknown-directive error.
 
 Context abbreviations below are `H` = `http`, `S` = `server`, and `L` =
 location. Unless a row says otherwise, active `H/S/L` values use the normal
@@ -56,19 +60,17 @@ value overrides it. `markdown_limits` inherits each key independently.
 | Trusted base-URL proxies | `markdown_trusted_proxies` | H | no trusted proxy. The process-wide CIDR list gates forwarded-header use and is configured only in `http`. | base-URL decision path, handler tests, Rust trusted-proxy tests, and the command-context contract test |
 | Streaming selector | `markdown_streaming` | H/S/L | auto. This is the sole processing-path selector: off, auto, or force. | streaming header/body filters; `streaming_config_contract_test.c`, `stream_e2e_test.c`, native chunked E2E |
 | Streaming controls | `markdown_stream_excluded_types` | H/S/L | explicit streaming exclusions; built-in event-stream exclusions remain enforced. | streaming routing and replay/flush paths |
-| Pruning | `markdown_prune_noise`, `markdown_prune_selectors`, `markdown_prune_protection_selectors` | H/S/L | on; built-in `nav footer aside`; empty protection list. | converter pruning path and Rust regression tests |
+| Pruning | `markdown_prune_noise` | H/S/L | on. Built-in noise reduction. 0.9.2 (LTS-R009) turned the custom `markdown_prune_selectors` and `markdown_prune_protection_selectors` directives into reject-only entries. | converter pruning path and Rust regression tests |
 | Logs and metrics | `markdown_log_verbosity` | H/S/L | info by default; metrics are Prometheus-only. | production log gating and metrics rendering |
 | Metrics endpoint | `markdown_metrics` | L | no endpoint by default. Installs the handler in the configured location. | `ngx_http_markdown_metrics_handler`; `tools/e2e/verify_metrics_endpoint_e2e.sh` and Rust E2E metrics scenario |
 | Global metrics storage | `markdown_metrics_shm_size` | H | bounded SHM allocation; global and not inherited through S/L. | SHM initialization and metrics unit/E2E tests |
-| Dynamic configuration | `markdown_dynamic_config`, `markdown_dynamic_config_path`, `markdown_dynconf_dry_run` | H | off; no path; off. One watcher per worker; requests bind one snapshot for their lifetime. | dynconf reload, snapshot, and effective-config tests |
 | Diagnostics | `markdown_diagnostics` | L | off; the built-in handler permits loopback clients only, while native NGINX access-phase directives may narrow access further. | diagnostics production/access/output tests |
 
 The streaming threshold is an internal 1 MiB heuristic. The module delivers
 converted output through pool-copied buffers. The 0.9.2 release removed
 zero-copy delivery. Neither zero-copy nor shadow comparison is a public directive.
-Dynamic configuration
-is stable and uses atomic staged promotion, request snapshot binding, and
-bounded diagnostics state.
+0.9.2 (LTS-R006) removed the dynamic-configuration overlay. The module keeps
+static per-level inheritance and the static block-mask.
 
 ### Removed OTel surface
 
@@ -79,9 +81,15 @@ ADR-0027 records the conditions required for a future 1.x reintroduction.
 
 ### Reject-only migration directives
 
-There are no reject-only migration entries in the final command table. All
-removed names are intentionally absent and therefore use NGINX's standard
-unknown-directive error at `nginx -t` time.
+There are 5 reject-only migration entries in the final command table. Each
+retains its name with an error-returning handler
+(`ngx_http_markdown_removed_directive`) so a config using it makes `nginx -t`
+fail with a migration message (LTS-R008).
+
+| Reject-only directive | Replacement / migration conclusion |
+|-----------------------|------------------------------------|
+| `markdown_dynamic_config`, `markdown_dynamic_config_path`, `markdown_dynconf_dry_run` | 0.9.2 removed dynamic configuration. Use static config validated by `nginx -t` and reload. No replacement directive. |
+| `markdown_prune_selectors`, `markdown_prune_protection_selectors` | 0.9.2 removed the custom selectors. `markdown_prune_noise` still controls built-in noise reduction. |
 
 | Migration area | Replacement / migration conclusion |
 |----------------|------------------------------------|
@@ -100,18 +108,18 @@ rollback response schema.
 
 | Top-level field | Current shape | Class |
 |-----------------|---------------|-------|
-| `schema_version` | integer constant `2` | `STABLE_FOR_1_0` |
+| `schema_version` | integer constant `3` | `STABLE_FOR_1_0` |
 | `product_version` | non-empty product version string | `STABLE_FOR_1_0` |
 | `worker` | `{pid, scope}` with `scope="worker-local"` | `STABLE_FOR_1_0` |
 | `build` | `{source_sha, nginx_version, rust_version, features}` | `STABLE_FOR_1_0` |
-| `configuration` | `{static_digest, dynconf, effective, effective_sources}`; strict additional-properties-free schema | `STABLE_FOR_1_0` |
+| `configuration` | `{static_digest, effective, effective_sources}`; strict additional-properties-free schema (0.9.2 dropped the dynconf fields) | `STABLE_FOR_1_0` |
 | `runtime` | `{inflight, pending_output, module_metrics}` worker-local non-negative counters | `STABLE_FOR_1_0` |
 | `recent_decisions` | bounded array of `{timestamp, outcome, stage, reason, error_origin, duration_ms}` | `STABLE_FOR_1_0` |
 
 The full JSON Schema is `schemas/diagnostics.schema.json`. The effective
 field/source contract artifact ships alongside the schema.
 Legacy `config_snapshot`, profile, streaming, and duplicated metrics fields are
-not part of the v2 wire schema. The endpoint accepts only GET and HEAD. HEAD computes
+not part of the v3 wire schema. The endpoint accepts only GET and HEAD. HEAD computes
 the complete body length but sends no body.
 
 ## Metrics and Reason-Code Contract
@@ -122,7 +130,8 @@ selection surfaces no longer exist.
 
 ### Prometheus families currently emitted
 
-These 11 production names are the frozen registry:
+These 10 production names are the frozen registry. 0.9.2 (LTS-R006) dropped the
+`nginx_markdown_dynconf_reloads_total` family with the dynconf subsystem:
 
 ```text
 nginx_markdown_requests_total
@@ -134,7 +143,6 @@ nginx_markdown_output_bytes_total
 nginx_markdown_streaming_peak_memory_bytes
 nginx_markdown_streaming_events_total
 nginx_markdown_decompression_events_total
-nginx_markdown_dynconf_reloads_total
 nginx_markdown_build_info
 ```
 
@@ -177,13 +185,15 @@ registry through FFI.
 18 conversion_error
 19 memory_budget_exceeded
 20 overload
-21 invalid_dynconf
-22 degraded_snapshot
-23 header_plan_apply_error
-24 streaming_mid_flight_error
-25 bypass_no_transform
-26 encoding_header_invalid
+21 header_plan_apply_error
+22 streaming_mid_flight_error
+23 bypass_no_transform
+24 encoding_header_invalid
 ```
+
+0.9.2 (LTS-R006/LTS-R023) dropped `invalid_dynconf` (former discriminant 21) and
+`degraded_snapshot` (former discriminant 22) with the dynconf subsystem and
+compacted the survivors to a contiguous 0..24 set (registry count 27 → 25).
 
 Production-path evidence includes generated reason artifacts,
 `reason_code_test.c`, `reason_code_ffi_test.c`, Prometheus renderer tests,
@@ -203,21 +213,10 @@ also required.
 
 ## Dynamic Configuration Contract
 
-The stable dynconf file schema is version `1` with these runtime keys:
-
-| Key | Meaning |
-|-----|---------|
-| `schema_version` | mandatory compatibility discriminator |
-| `filter` | on/off request conversion gate |
-| `prune_noise` | on/off pruning override |
-| `log_verbosity` | error/warn/info/debug |
-| `error_policy` | pass/fail_closed/status 429/status 503 |
-| `streaming_buffer` | runtime streaming buffer size in bytes |
-
-Unknown keys or invalid values reject the entire staged update. Successful
-reloads atomically promote a snapshot. Failed reloads preserve the active and
-last-known-good snapshots. Every request binds one effective snapshot at the
-header filter and keeps it for the request lifetime.
+The 0.9.2 public surface has no runtime dynconf file schema, watcher, staged
+snapshot, or last-known-good state. The old directive names remain in the
+reject-only migration inventory so `nginx -t` can point operators to static
+configuration and a controlled reload or restart.
 
 ## Rust/C FFI Boundary
 
@@ -231,8 +230,12 @@ the generated header, all in-repository callers, and the release notes in one
 change. No external append-only promise applies to the FFI export set.
 
 The registry below is the complete in-repository production registry, not a
-third-party SDK list. Production C callers use the dynamic-configuration,
-streaming, and encoding/hash helpers, so the registry includes them.
+third-party SDK list. Production C callers use the streaming and encoding-chain
+helpers, so the registry includes them. 0.9.2 dropped the three dynconf FFI
+exports (`markdown_dynconf_parse`, `markdown_dynconf_result_init`,
+`markdown_dynconf_result_free`) and changed the `markdown_negotiate_accept`
+signature by dropping the `on_wildcard` parameter. Together these moved the ABI
+version 2 → 3.
 
 | Group | Entrypoints |
 |-------|-------------|
@@ -244,10 +247,9 @@ streaming, and encoding/hash helpers, so the registry includes them.
 | Initialization helpers | `markdown_options_init`, `markdown_result_init`, `markdown_header_plan_init`, `markdown_decomp_result_init`, `markdown_base_url_input_init` |
 | Bounded decompression | `markdown_decompress_bounded`, `markdown_decompress_free` |
 | Error classification | `markdown_classify_error_code` |
-| Dynamic configuration | `markdown_dynconf_parse`, `markdown_dynconf_result_init`, `markdown_dynconf_result_free` |
 | Streaming conversion | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` |
 | Reason registry | `markdown_reason_code_str`, `markdown_reason_code_metric_key`, `markdown_reason_code_count` |
-| Encoding chain and hash helpers | `markdown_chain_decode_free`, `markdown_chain_decode_result_init`, `markdown_decode_encoding_chain`, `markdown_parse_encoding_chain`, `markdown_sha256_hex` |
+| Encoding chain helpers | `markdown_chain_decode_free`, `markdown_chain_decode_result_init`, `markdown_decode_encoding_chain`, `markdown_parse_encoding_chain` |
 
 Internal status does not weaken the safety contract. Struct layout, ownership,
 panic containment, result initialization, and generated-header drift remain

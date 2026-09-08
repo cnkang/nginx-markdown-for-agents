@@ -150,6 +150,7 @@ events { worker_connections 128; }
 http {
     include       mime.types;
     default_type  application/octet-stream;
+    markdown_limits max_inflight=128;
 
     server {
         listen 127.0.0.1:${PORT};
@@ -160,7 +161,7 @@ http {
             markdown_cache_validation full;
             markdown_streaming off;
             markdown_limits conversion_memory=128m conversion_timeout=10s
-                parser_timeout=10s max_inflight=32;
+                parser_timeout=10s;
         }
 
         location = /balanced/diagnostics {
@@ -168,16 +169,16 @@ http {
             markdown_cache_validation ims_only;
             markdown_streaming auto;
             markdown_limits conversion_memory=64m conversion_timeout=30s
-                parser_timeout=10s max_inflight=64;
+                parser_timeout=10s;
         }
 
         location = /streaming/diagnostics {
             markdown_diagnostics on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_cache_validation off;
             markdown_streaming force;
             markdown_limits conversion_memory=256m conversion_timeout=30s
-                parser_timeout=10s streaming_buffer=16m max_inflight=128;
+                parser_timeout=10s streaming_buffer=16m;
         }
     }
 }
@@ -203,7 +204,7 @@ http {
             markdown_streaming force;
             markdown_diagnostics on;
             markdown_limits conversion_memory=128m conversion_timeout=10s
-                parser_timeout=10s max_inflight=32;
+                parser_timeout=10s;
         }
     }
 }
@@ -278,8 +279,8 @@ import sys
 
 data = json.load(sys.stdin)
 errors = []
-if data.get("schema_version") != 2:
-    errors.append("schema_version must be 2")
+if data.get("schema_version") != 3:
+    errors.append("schema_version must be 3")
 for key in ("profile", "streaming_config", "metrics_snapshot"):
     if key in data:
         errors.append(f"legacy field {key!r} is present")
@@ -310,9 +311,8 @@ for path in /strict/diagnostics /balanced/diagnostics /streaming/diagnostics; do
     assert_diag_field "${path}" configuration.effective.error_policy pass
 done
 
-# Static (non-dynconf) settings are represented by the location-specific
-# static digest. The effective object intentionally contains only the five
-# dynconf-mutable fields asserted above.
+# Static settings are represented by the location-specific static digest.
+# The effective object contains the fields asserted above.
 assert_static_digest() {
     local path="$1" actual
     STATIC_DIGEST=""

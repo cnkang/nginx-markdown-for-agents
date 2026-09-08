@@ -43,13 +43,6 @@ static ngx_str_t ngx_http_markdown_metrics_shm_name =
     ngx_string("nginx_markdown_metrics_v9");
 static u_char ngx_http_markdown_empty_string[] = "";
 
-/* Global dynamic config watcher for this worker process.
- * active_snapshot holds the currently effective configuration;
- * staging_snapshot is used during two-phase reload;
- * last_known_good holds the previous active snapshot for diagnostics and
- * failed-reload protection. */
-static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = { 0 };
-
 static void
 ngx_http_markdown_pending_output_increment(void)
 {
@@ -255,61 +248,6 @@ ngx_http_markdown_record_decompression_failure_io(
             }                                                                       \
         }                                                                           \
     } while (0)
-
-void
-ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code)
-{
-    if (ngx_http_markdown_metrics == NULL) {
-        return;
-    }
-
-    switch (error_code) {
-    case DYNCONF_OK:
-        NGX_HTTP_MARKDOWN_METRIC_INC(results.dynconf_reloads.success);
-        break;
-    case DYNCONF_ERR_MISSING_SCHEMA_VERSION:
-    case DYNCONF_ERR_INVALID_SCHEMA_VERSION:
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            results.dynconf_reloads.failure_schema_version);
-        break;
-    case DYNCONF_ERR_UNKNOWN_KEY:
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            results.dynconf_reloads.failure_unknown_key);
-        break;
-    case DYNCONF_ERR_DUPLICATE_KEY:
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            results.dynconf_reloads.failure_duplicate_key);
-        break;
-    case DYNCONF_ERR_INVALID_TYPE:
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            results.dynconf_reloads.failure_invalid_type);
-        break;
-    case NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO:
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            results.dynconf_reloads.failure_file_error);
-        break;
-    case DYNCONF_ERR_VALUE_OUT_OF_RANGE:
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            results.dynconf_reloads.failure_out_of_range);
-        break;
-    case DYNCONF_ERR_TOO_LARGE:
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            results.dynconf_reloads.failure_size_exceeded);
-        break;
-    case DYNCONF_ERR_INVALID_JSON:
-    case DYNCONF_ERR_TOKEN_BUDGET:
-    case DYNCONF_ERR_NESTING_DEPTH:
-    case DYNCONF_ERR_INVALID_UTF8:
-    case DYNCONF_ERR_INTERNAL:
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            results.dynconf_reloads.failure_parse_error);
-        break;
-    default:
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            results.dynconf_reloads.failure_parse_error);
-        break;
-    }
-}
 
 /*
  * Increment the skip counter for the given eligibility result.

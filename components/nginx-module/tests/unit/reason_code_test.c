@@ -46,15 +46,13 @@ static const char *stub_reason_strs[] = {
     "conversion_error",              /* 18 */
     "memory_budget_exceeded",        /* 19 */
     "overload",                      /* 20 */
-    "invalid_dynconf",               /* 21 */
-    "degraded_snapshot",             /* 22 */
-    "header_plan_apply_error",       /* 23 */
-    "streaming_mid_flight_error",    /* 24 */
-    "bypass_no_transform",           /* 25 */
-    "encoding_header_invalid",        /* 26 */
+    "header_plan_apply_error",       /* 21 */
+    "streaming_mid_flight_error",    /* 22 */
+    "bypass_no_transform",           /* 23 */
+    "encoding_header_invalid",        /* 24 */
 };
 
-#define STUB_REASON_CODE_COUNT 27
+#define STUB_REASON_CODE_COUNT 25
 
 ngx_int_t
 ngx_http_markdown_get_reason_code_str(uint32_t code, ngx_str_t *out_str)
@@ -103,8 +101,6 @@ const ngx_str_t *ngx_http_markdown_reason_decompression_io_error(void);
 const ngx_str_t *ngx_http_markdown_reason_timeout(void);
 const ngx_str_t *ngx_http_markdown_reason_budget_exceeded(void);
 const ngx_str_t *ngx_http_markdown_reason_replay_error(void);
-const ngx_str_t *ngx_http_markdown_reason_invalid_dynconf(void);
-const ngx_str_t *ngx_http_markdown_reason_degraded_snapshot(void);
 const ngx_str_t *ngx_http_markdown_reason_header_plan_apply_err(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_mid_flight_err(void);
 const ngx_str_t *ngx_http_markdown_reason_overload(void);
@@ -407,10 +403,6 @@ test_additional_reason_codes(void)
           "ngx_http_markdown_reason_replay_error", "replay_error" },
         { ngx_http_markdown_reason_overload,
           "ngx_http_markdown_reason_overload", "overload" },
-        { ngx_http_markdown_reason_invalid_dynconf,
-          "ngx_http_markdown_reason_invalid_dynconf", "invalid_dynconf" },
-        { ngx_http_markdown_reason_degraded_snapshot,
-          "ngx_http_markdown_reason_degraded_snapshot", "degraded_snapshot" },
         { ngx_http_markdown_reason_header_plan_apply_err,
           "ngx_http_markdown_reason_header_plan_apply_err",
           "header_plan_apply_error" },

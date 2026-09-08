@@ -122,8 +122,8 @@ static ngx_int_t g_compile_complex_rc;
 /*
  * Test instance of main configuration for
  * ngx_http_conf_get_module_main_conf stub.
- * Must be reset before each test that exercises
- * ngx_http_markdown_set_dynconf_path.
+ * Must be reset before each test that exercises a main-conf handler
+ * (e.g. ngx_http_markdown_trusted_proxies).
  */
 static ngx_http_markdown_main_conf_t g_main_conf;
 static ngx_uint_t g_diagnostics_recording_requested;
@@ -554,9 +554,9 @@ ngx_http_conf_get_module_loc_conf(ngx_conf_t *cf, ngx_module_t module)
 
 /*
  * Returns the test instance of ngx_http_markdown_main_conf_t,
- * allowing ngx_http_markdown_set_dynconf_path to read and write
- * dynconf_path_configured / dynconf_first_path without linking
- * the full NGINX configuration infrastructure.
+ * allowing main-conf handlers (e.g. ngx_http_markdown_trusted_proxies)
+ * to read and write main-conf fields without linking the full NGINX
+ * configuration infrastructure.
  *
  * Parameters:
  *   cf     - configuration context (unused).
@@ -1632,89 +1632,6 @@ test_markdown_filter_palloc_failure(void)
 }
 
 /*
- * Verify ngx_http_markdown_set_dynconf_path: normal path,
- * empty value, duplicate rejection, and command-context lookup.
- *
- * Semantic contract mirrored: set_dynconf_path sets mcf->advanced.advanced.dynconf_path,
- * records the path in main_conf for duplicate detection, and returns
- * NGX_CONF_ERROR on duplicate or invalid inputs.
- *
- * Return: void.
- *
- * Side effects: modifies g_main_conf; asserts on mcf and mmcf fields.
- */
-static void
-test_set_dynconf_path(void)
-{
-    ngx_conf_t                 cf;
-    ngx_array_t                args;
-    ngx_str_t                  values[2];
-    ngx_command_t              cmd;
-    ngx_http_markdown_conf_t   mcf;
-    ngx_http_markdown_conf_t   duplicate_mcf;
-    const char                *rc;
-
-    TEST_SUBSECTION("set_dynconf_path handler");
-
-    memset(&g_main_conf, 0, sizeof(g_main_conf));
-    init_conf(&mcf);
-    g_module_loc_conf = &mcf;
-    setup_cf(&cf, &args, values, 2);
-    set_arg(&cmd.name, "markdown_dynamic_config_path");
-    set_arg(&values[0], "markdown_dynamic_config_path");
-    set_arg(&values[1], "/etc/nginx/dynconf.conf");
-
-    rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "valid path should parse");
-    TEST_ASSERT(mcf.advanced.dynconf_path.len == strlen("/etc/nginx/dynconf.conf"),
-                "dynconf_path stored in loc conf");
-    TEST_ASSERT(g_main_conf.dynconf_path_configured == 1,
-                "main conf marked as configured");
-    TEST_ASSERT(g_main_conf.dynconf_first_path.len > 0,
-                "first path recorded in main conf");
-    TEST_ASSERT(g_main_conf.dynconf_owner_conf == &mcf,
-                "main conf should retain the path owner config");
-
-    /* Duplicate should fail */
-    init_conf(&duplicate_mcf);
-    rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, &duplicate_mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-                "duplicate path should be rejected");
-    TEST_ASSERT(g_main_conf.dynconf_owner_conf == &mcf,
-                "duplicate path must not replace the original owner");
-
-    /* Empty value should succeed (no-op) */
-    memset(&g_main_conf, 0, sizeof(g_main_conf));
-    init_conf(&mcf);
-    set_arg(&values[1], "");
-    rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-                "empty value should return OK (no-op)");
-
-    /* The H-only command receives main-conf storage; the handler resolves
-     * the location snapshot from the configuration context. */
-    memset(&g_main_conf, 0, sizeof(g_main_conf));
-    init_conf(&mcf);
-    set_arg(&values[1], "/etc/nginx/dynconf.conf");
-    rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, NULL);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-                "handler should resolve H-only loc conf from context");
-    TEST_ASSERT(mcf.advanced.dynconf_path.len
-                    == sizeof("/etc/nginx/dynconf.conf") - 1
-                && memcmp(mcf.advanced.dynconf_path.data,
-                          "/etc/nginx/dynconf.conf",
-                          mcf.advanced.dynconf_path.len) == 0,
-                "resolved loc conf must store the configured dynconf path");
-    TEST_ASSERT(g_main_conf.dynconf_path_configured == 1,
-                "main conf must record the dynconf path as configured");
-    TEST_ASSERT(g_main_conf.dynconf_owner_conf == &mcf,
-                "main conf must record the owning location configuration");
-
-    g_module_loc_conf = NULL;
-    TEST_PASS("set_dynconf_path branches covered");
-}
-
-/*
  * Verify diagnostics directive handler: on/off, invalid value,
  * handler installation, and duplicate content handler.
  */
@@ -2025,7 +1942,6 @@ main(void)
     test_v080_stream_directive_handlers();
     test_parse_size_edge_cases();
     test_markdown_filter_palloc_failure();
-    test_set_dynconf_path();
     test_diagnostics_handler();
     test_content_types_validation();
     test_markdown_content_types_handler();

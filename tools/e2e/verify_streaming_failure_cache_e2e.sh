@@ -821,7 +821,7 @@ http {
         # 10.1: Streaming success + cache_validation ims_only
         location /t01/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_budget=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
@@ -837,7 +837,7 @@ http {
         # 10.2: Pre-commit failure + pass
         location /t02/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
             markdown_limits conversion_memory=20m parser_budget=20m streaming_buffer=64k conversion_timeout=120s;
@@ -853,7 +853,7 @@ http {
         # 10.3: Pre-commit failure + fail_closed
         location /t03/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
             markdown_limits conversion_memory=20m parser_budget=20m streaming_buffer=64k conversion_timeout=120s;
@@ -869,7 +869,7 @@ http {
         # 10.4: Post-commit failure (upstream aborts mid-stream)
         location /t04/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_budget=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
@@ -885,7 +885,7 @@ http {
         # 10.5: full validation selects the full-buffer path in auto mode
         location /t05/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation full;
             markdown_streaming auto;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_budget=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
@@ -901,7 +901,7 @@ http {
         # 10.6: cache_validation ims_only + streaming on
         location /t06/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_budget=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
@@ -917,7 +917,7 @@ http {
         # 10.7: Streaming response headers (same as t01)
         location /t07/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_budget=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
@@ -933,7 +933,7 @@ http {
         # 10.8: markdown_streaming off + cache_validation full
         location /t08/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation full;
             markdown_streaming off;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_budget=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
@@ -949,7 +949,7 @@ http {
         # 10.9a: error_policy pass (streaming pre-commit failure → fail-open)
         location /t09a/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
             markdown_limits conversion_memory=20m parser_budget=20m streaming_buffer=64k conversion_timeout=120s;
@@ -965,7 +965,7 @@ http {
         # 10.9b: error_policy fail_closed (streaming pre-commit failure → reject)
         location /t09b/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
             markdown_limits conversion_memory=20m parser_budget=20m streaming_buffer=64k conversion_timeout=120s;
@@ -983,7 +983,7 @@ http {
         # but HEAD must still skip the streaming body path entirely.
         location /t10/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_budget=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
@@ -1001,7 +1001,7 @@ http {
         # keeps this request out of the streaming path.
         location /t11/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation full;
             markdown_streaming auto;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_budget=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
@@ -1023,7 +1023,7 @@ http {
         # when streaming has failed before conversion can commit.
         location /t12/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
             markdown_limits conversion_memory=20m parser_budget=20m streaming_buffer=64k conversion_timeout=120s;
@@ -1041,7 +1041,7 @@ http {
         # 10.13: no-cache="public" quoted directive not treated as bare public
         location /t13/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_budget=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;

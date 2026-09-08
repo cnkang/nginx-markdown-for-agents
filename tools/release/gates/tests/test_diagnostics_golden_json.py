@@ -1,15 +1,19 @@
 """
 Property 29: Diagnostics golden JSON + static_digest determinism.
 
-For each dynconf state (disabled, no_file, invalid_without_lkg, active,
-lkg_preserved), verify diagnostics JSON matches the golden shape with
-per-state nullability. Verify static_digest is deterministic: identical
-merged location config always yields the same SHA-256. Verify lkg_digest
-equals active_digest in active and lkg_preserved states. Verify HEAD
-returns the complete JSON body with exact Content-Length and no body.
-Verify last_error <= 512 UTF-8 bytes with no paths/secrets/raw config.
+Verify diagnostics JSON matches the golden shape: the ``configuration``
+object carries exactly ``static_digest``, ``effective``, and
+``effective_sources``, and ``effective`` / ``effective_sources`` each carry
+the five retained static fields.  Verify static_digest is deterministic:
+identical merged location config always yields the same SHA-256.  Verify
+HEAD returns the complete JSON body with exact Content-Length and no body.
 
-**Validates: Requirements 4.1, 4.2, 4.3, 4.12**
+Schema v3 removed the dynconf diagnostic state block (the dynamic-
+configuration hot-reload feature was removed; the endpoint is retained), so
+the per-dynconf-state golden shapes, the lkg/active digest equality
+invariant, and the dynconf ``last_error`` redaction contract no longer apply.
+
+**Validates: Requirements 4.1, 4.2, 4.3**
 """
 
 import hashlib
@@ -52,83 +56,11 @@ DIAGNOSTICS_SOURCE = (
 #
 # Generic diagnostics document generators shared with
 # test_diagnostics_schema_conformance.py live in diagnostics_strategy_helpers.
-# Only the redaction-specific scaffolding (forbidden patterns and the error
-# message strategies) stays here because it belongs to the golden-JSON
-# redaction contract.
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from diagnostics_strategy_helpers import (  # noqa: E402
-    _dynconf_disabled,
-    _dynconf_no_file,
-    _dynconf_invalid_without_lkg,
-    _dynconf_active,
-    _dynconf_lkg_preserved,
     _valid_diagnostics,
 )
-
-# --- Forbidden content patterns for last_error ---
-
-_PATH_PATTERNS = [
-    re.compile(r"/[a-z]+(/[a-z_.\-]+){2,}", re.IGNORECASE),
-    re.compile(r"[A-Z]:\\", re.IGNORECASE),
-    re.compile(r"\.(conf|json|toml|yaml|yml)$", re.MULTILINE),
-]
-_SECRET_PATTERNS = [
-    re.compile(r"(password|secret|token|key)\s*[:=]", re.IGNORECASE),
-]
-
-# Raw error text (possibly unsafe) is pushed through the production redactor
-# before it may appear in diagnostics output.
-_raw_error_msg = st.text(
-    alphabet=st.characters(blacklist_categories=("Cs",)),
-    min_size=1,
-    max_size=600,
-)
-
-
-def redact_last_error(error_text):
-    """Python port of the production last_error redaction contract.
-
-    Requirement 4.12 guarantees diagnostics last_error never leaks filesystem
-    paths, Windows drive notation, config filenames, or secret assignments,
-    and stays within the schema's 512 UTF-8 byte limit.  Scrub each forbidden
-    pattern and clamp the result so it always satisfies the contract.
-    """
-    redacted = error_text
-    patterns = _PATH_PATTERNS + _SECRET_PATTERNS
-    for _ in range(len(patterns) + 2):
-        for pattern in patterns:
-            redacted = pattern.sub("<redacted>", redacted)
-        encoded = redacted.encode("utf-8")
-        if len(encoded) <= 512:
-            return redacted
-        # A truncation boundary can split a path/filename pattern, leaving
-        # a newly-formed forbidden suffix (for example a config filename
-        # ending in ".conf").  Clamp only after substitutions, then repeat
-        # the scrub so replacements can never push the final value above the
-        # byte limit.
-        redacted = encoded[:512].decode("utf-8", errors="ignore")
-    # Reaching this point means repeated scrubbing and clamping could not
-    # prove a bounded safe value.  Use a fixed redacted value rather than
-    # making one more substitution on a possibly truncated token.
-    return "<redacted>"
-
-
-def _redact_error_for_test(error_text):
-    """Redact error text through the Python model used by this test suite.
-
-    The model checks the golden JSON shape and the fixture's expected
-    redaction behavior; it is intentionally not presented as a line-for-line
-    implementation of the production C redactor.
-    """
-    return redact_last_error(error_text)
-
-
-# --- Dynconf states referenced by the golden-shape tests ---
-
-DYNCONF_STATES = ["disabled", "no_file", "invalid_without_lkg", "active",
-                  "lkg_preserved"]
-
 
 
 # --- Helpers ---
@@ -136,53 +68,6 @@ DYNCONF_STATES = ["disabled", "no_file", "invalid_without_lkg", "active",
 def _validate(doc):
     """Validate against the published schema."""
     jsonschema.validate(doc, SCHEMA, cls=VALIDATOR_CLASS)
-
-
-def _make_doc_with_dynconf(dynconf):
-    """Build a minimal valid document with the given dynconf state."""
-    return {
-        "schema_version": 2,
-        "product_version": "0.9.2",
-        "worker": {"pid": 1234, "scope": "worker-local"},
-        "build": {
-            "build_kind": "release",
-            "source_sha": "a" * 40,
-            "nginx_version": "1.27.0",
-            "rust_version": "1.91.0",
-            "feature_manifest_digest": "sha256:" + "c" * 64,
-            "features": ["streaming"],
-        },
-        "configuration": {
-            "static_digest": "sha256:" + "b" * 64,
-            "dynconf": dynconf,
-            "effective": {
-                "filter": "on",
-                "prune_noise": "off",
-                "log_verbosity": "info",
-                "error_policy": "pass",
-                "streaming_buffer": 2097152,
-            },
-            "effective_sources": {
-                "filter": "static",
-                "prune_noise": "static",
-                "log_verbosity": "static",
-                "error_policy": "static",
-                "streaming_buffer": "static",
-            },
-        },
-        "runtime": {
-            "diagnostics_recording": "active",
-            "inflight": 0,
-            "pending_output": 0,
-            "module_metrics": {
-                "streaming_requests_total": 0,
-                "precommit_failopen_total": 0,
-                "copied_output_total": 0,
-                "diagnostics_recording_state": 1,
-            },
-        },
-        "recent_decisions": [],
-    }
 
 
 def _compute_static_digest(manifest_dict: dict) -> str:
@@ -194,11 +79,9 @@ def _compute_static_digest(manifest_dict: dict) -> str:
     """
     canonical_keys = {
         "accept", "auth_cookies", "auth_policy", "auto_decompress",
-        "cache_validation", "content_types", "diagnostics", "dynamic_config",
-        "dynamic_config_path", "dynconf_dry_run", "error_policy", "filter",
+        "cache_validation", "content_types", "diagnostics", "error_policy", "filter",
         "flavor", "front_matter", "limits", "log_verbosity", "metrics",
-        "metrics_shm_size", "prune_noise", "prune_protection_selectors",
-        "prune_selectors", "stream_excluded_types", "streaming",
+        "metrics_shm_size", "prune_noise", "stream_excluded_types", "streaming",
         "token_estimate", "trusted_proxies",
     }
     ordered = {"schema_version": "static_config_manifest_v1"}
@@ -226,7 +109,7 @@ def _static_config_manifest(draw):
         "auth_cookies": {"value": draw(st.sampled_from(
             [[], ["session_*"]])), "explicit": draw(st.booleans())},
         "auth_policy": {"value": draw(st.sampled_from(
-            ["transparent", "strip_cookies"])), "explicit": draw(st.booleans())},
+            ["allow", "deny"])), "explicit": draw(st.booleans())},
         "auto_decompress": {"value": draw(st.sampled_from(
             ["on", "off"])), "explicit": draw(st.booleans())},
         "cache_validation": {"value": draw(st.sampled_from(
@@ -235,13 +118,6 @@ def _static_config_manifest(draw):
             [["text/html"], ["text/html", "application/xhtml+xml"]]
         )), "explicit": draw(st.booleans())},
         "diagnostics": {"value": draw(st.sampled_from(
-            ["on", "off"])), "explicit": draw(st.booleans())},
-        "dynamic_config": {"value": draw(st.sampled_from(
-            ["on", "off"])), "explicit": draw(st.booleans())},
-        "dynamic_config_path": {"value": draw(st.sampled_from(
-            ["/etc/nginx/dynconf.json", "/opt/nginx/dynconf.json"]
-        )), "explicit": draw(st.booleans())},
-        "dynconf_dry_run": {"value": draw(st.sampled_from(
             ["on", "off"])), "explicit": draw(st.booleans())},
         "error_policy": {"value": draw(st.sampled_from(
             ["pass", "fail_closed", "status 429", "status 503"]
@@ -266,10 +142,6 @@ def _static_config_manifest(draw):
             [1048576, 2097152])), "explicit": draw(st.booleans())},
         "prune_noise": {"value": draw(st.sampled_from(
             ["on", "off"])), "explicit": draw(st.booleans())},
-        "prune_protection_selectors": {"value": draw(st.sampled_from(
-            [[], [".important"]])), "explicit": draw(st.booleans())},
-        "prune_selectors": {"value": draw(st.sampled_from(
-            [[], ["nav", "footer", ".sidebar"]])), "explicit": draw(st.booleans())},
         "stream_excluded_types": {"value": draw(st.sampled_from(
             [[], ["text/event-stream"]])), "explicit": draw(st.booleans())},
         "streaming": {"value": draw(st.sampled_from(
@@ -286,10 +158,10 @@ def _static_config_manifest(draw):
 # ==========================================================================
 
 
-class TestGoldenShapePerState:
+class TestGoldenShape:
     """
-    Property 29a: For each dynconf state, verify diagnostics JSON matches
-    the golden shape (per-state nullability contract).
+    Property 29a: verify diagnostics JSON matches the golden shape after
+    the dynconf state block removal.
     """
 
     @settings(max_examples=100)
@@ -298,82 +170,25 @@ class TestGoldenShapePerState:
         """Every generated golden document passes the published schema."""
         _validate(doc)
 
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_disabled())
-    def test_disabled_golden_shape(self, dynconf):
-        """disabled: all six fields null, state always present."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["state"] == "disabled"
-        assert dynconf["generation"] is None
-        assert dynconf["source_digest"] is None
-        assert dynconf["active_digest"] is None
-        assert dynconf["lkg_digest"] is None
-        assert dynconf["last_success"] is None
-        assert dynconf["last_error"] is None
+    @settings(max_examples=100)
+    @given(doc=_valid_diagnostics())
+    def test_configuration_has_exactly_three_keys(self, doc):
+        """configuration has exactly static_digest, effective, effective_sources."""
+        configuration = doc["configuration"]
+        assert set(configuration.keys()) == {
+            "static_digest", "effective", "effective_sources",
+        }
 
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_no_file())
-    def test_no_file_golden_shape(self, dynconf):
-        """no_file: all fields null."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["state"] == "no_file"
-        assert dynconf["generation"] is None
-        assert dynconf["source_digest"] is None
-        assert dynconf["active_digest"] is None
-        assert dynconf["lkg_digest"] is None
-        assert dynconf["last_success"] is None
-        assert dynconf["last_error"] is None
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_invalid_without_lkg())
-    def test_invalid_without_lkg_golden_shape(self, dynconf):
-        """invalid_without_lkg: all null except last_error."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["state"] == "invalid_without_lkg"
-        assert dynconf["generation"] is None
-        assert dynconf["source_digest"] is None
-        assert dynconf["active_digest"] is None
-        assert dynconf["lkg_digest"] is None
-        assert dynconf["last_success"] is None
-        assert dynconf["last_error"] is not None
-        assert len(dynconf["last_error"]) >= 1
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_active())
-    def test_active_golden_shape(self, dynconf):
-        """active: generation>=1, digests, last_success non-null; error null."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["state"] == "active"
-        assert dynconf["generation"] >= 1
-        assert dynconf["source_digest"] is not None
-        assert dynconf["active_digest"] is not None
-        assert dynconf["lkg_digest"] is not None
-        assert dynconf["last_success"] is not None
-        assert dynconf["last_error"] is None
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_lkg_preserved())
-    def test_lkg_preserved_golden_shape(self, dynconf):
-        """lkg_preserved: all non-null including last_error."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["state"] == "lkg_preserved"
-        assert dynconf["generation"] >= 1
-        assert dynconf["source_digest"] is not None
-        assert dynconf["active_digest"] is not None
-        assert dynconf["lkg_digest"] is not None
-        assert dynconf["last_success"] is not None
-        assert dynconf["last_error"] is not None
-        assert len(dynconf["last_error"]) >= 1
+    @settings(max_examples=100)
+    @given(doc=_valid_diagnostics())
+    def test_no_dynconf_block(self, doc):
+        """configuration.dynconf is absent after the v3 removal."""
+        assert "dynconf" not in doc["configuration"]
 
     @settings(max_examples=100)
     @given(doc=_valid_diagnostics())
     def test_effective_has_exactly_five_keys(self, doc):
-        """effective object has exactly the 5 dynconf-mutable keys."""
+        """effective object has exactly the 5 retained static keys."""
         effective = doc["configuration"]["effective"]
         expected = {"filter", "prune_noise", "log_verbosity",
                     "error_policy", "streaming_buffer"}
@@ -382,21 +197,11 @@ class TestGoldenShapePerState:
     @settings(max_examples=100)
     @given(doc=_valid_diagnostics())
     def test_effective_sources_has_exactly_five_keys(self, doc):
-        """effective_sources object has exactly the 5 dynconf-mutable keys."""
+        """effective_sources object has exactly the 5 retained static keys."""
         sources = doc["configuration"]["effective_sources"]
         expected = {"filter", "prune_noise", "log_verbosity",
                     "error_policy", "streaming_buffer"}
         assert set(sources.keys()) == expected
-
-    @settings(max_examples=100)
-    @given(doc=_valid_diagnostics())
-    def test_dynconf_always_present_as_object(self, doc):
-        """configuration.dynconf is always present as a non-null dict."""
-        dynconf = doc["configuration"]["dynconf"]
-        assert dynconf is not None
-        assert isinstance(dynconf, dict)
-        assert "state" in dynconf
-        assert dynconf["state"] in DYNCONF_STATES
 
 
 class TestStaticDigestDeterminism:
@@ -469,121 +274,6 @@ class TestStaticDigestDeterminism:
         """Digest is formatted as sha256:<64 lowercase hex chars>."""
         digest = _compute_static_digest(manifest)
         assert re.match(r"^sha256:[0-9a-f]{64}$", digest)
-
-
-class TestLkgDigestEqualsActiveDigest:
-    """
-    Property 29c: lkg_digest equals active_digest in active and
-    lkg_preserved states (the served snapshot IS the LKG).
-    """
-
-    @settings(max_examples=100)
-    @given(dynconf=_dynconf_active())
-    def test_active_lkg_equals_active(self, dynconf):
-        """In active state: lkg_digest == active_digest."""
-        assert dynconf["lkg_digest"] == dynconf["active_digest"]
-
-    @settings(max_examples=100)
-    @given(dynconf=_dynconf_lkg_preserved())
-    def test_lkg_preserved_lkg_equals_active(self, dynconf):
-        """In lkg_preserved state: lkg_digest == active_digest."""
-        assert dynconf["lkg_digest"] == dynconf["active_digest"]
-
-    @settings(max_examples=50)
-    @given(doc=_valid_diagnostics())
-    def test_lkg_invariant_holds_in_all_generated_docs(self, doc):
-        """
-        For any generated diagnostics doc, if state is active or
-        lkg_preserved, then lkg_digest == active_digest.
-        """
-        dynconf = doc["configuration"]["dynconf"]
-        if dynconf["state"] in ("active", "lkg_preserved"):
-            assert dynconf["lkg_digest"] == dynconf["active_digest"]
-
-
-def _iter_schema_nodes(node):
-    """Yield every mapping node in a nested JSON schema."""
-    if isinstance(node, dict):
-        yield node
-        for value in node.values():
-            yield from _iter_schema_nodes(value)
-    elif isinstance(node, list):
-        for value in node:
-            yield from _iter_schema_nodes(value)
-
-
-class TestLastErrorBounds:
-    """
-    Property 29d: last_error <= 512 UTF-8 bytes with no paths, secrets,
-    or raw configuration content.
-    """
-
-    def test_schema_declares_utf8_byte_limit(self):
-        """The published schema must expose the byte, not only char, bound."""
-        found = [
-            node for node in _iter_schema_nodes(SCHEMA)
-            if node.get("type") == "string"
-            and "maxLength" in node
-            and node.get("x-maxUtf8Bytes") is not None
-        ]
-        assert len(found) == 2
-        assert all(item["x-maxUtf8Bytes"] == 512 for item in found)
-
-    @settings(max_examples=100)
-    @given(doc=_valid_diagnostics())
-    def test_last_error_within_512_bytes(self, doc):
-        """last_error is null or <= 512 UTF-8 bytes."""
-        last_error = doc["configuration"]["dynconf"]["last_error"]
-        if last_error is not None:
-            assert len(last_error.encode("utf-8")) <= 512
-
-    @settings(max_examples=100)
-    @given(error_text=_raw_error_msg)
-    def test_error_no_file_paths(self, error_text):
-        """Check redacted output, or document the unbound model fallback."""
-        redacted = _redact_error_for_test(error_text)
-        for pattern in _PATH_PATTERNS:
-            assert not pattern.search(redacted)
-
-    @settings(max_examples=100)
-    @given(error_text=_raw_error_msg)
-    def test_error_no_secrets(self, error_text):
-        """Check redacted output, or document the unbound model fallback."""
-        redacted = _redact_error_for_test(error_text)
-        for pattern in _SECRET_PATTERNS:
-            assert not pattern.search(redacted)
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_invalid_without_lkg())
-    def test_invalid_without_lkg_error_bounded(self, dynconf):
-        """invalid_without_lkg last_error is non-null and <= 512 bytes."""
-        assert dynconf["last_error"] is not None
-        assert len(dynconf["last_error"].encode("utf-8")) <= 512
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_lkg_preserved())
-    def test_lkg_preserved_error_bounded(self, dynconf):
-        """lkg_preserved last_error is non-null and <= 512 bytes."""
-        assert dynconf["last_error"] is not None
-        assert len(dynconf["last_error"].encode("utf-8")) <= 512
-
-    def test_truncation_boundary_keeps_redaction_effective(self):
-        """Redaction runs before the 512-byte truncation, so a config
-        filename that straddles the truncation boundary is still scrubbed
-        (the full filename is visible to the redactor before the clamp)."""
-        # Build an error whose tail crosses the 512-byte boundary with a
-        # config filename: the redactor must scrub the complete filename
-        # before truncation, leaving no path fragment in the output.
-        prefix = "x" * 504
-        error_text = prefix + " /etc/nginx/nginx.conf"
-        redacted = redact_last_error(error_text)
-        assert len(error_text.encode("utf-8")) > 512
-        assert len(redacted.encode("utf-8")) == 512
-        assert redacted == prefix + " <redact"
-        for pattern in _PATH_PATTERNS:
-            assert not pattern.search(redacted), (
-                f"path fragment survived truncation: {redacted!r}"
-            )
 
 
 class TestHeadResponseBehavior:

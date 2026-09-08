@@ -374,9 +374,9 @@ jobs:
         run: make harness-security-checks
 
       - name: Run harness detector unit tests
-        # The detector single tests (test_detect_*, test_dynconf_reload_rollback)
-        # verify the detectors themselves; without this step a detector change
-        # can break its own tests without CI noticing.
+        # The detector single tests (test_detect_*) verify the detectors
+        # themselves; without this step a detector change can break its own
+        # tests without CI noticing.
         run: make test-harness
 
   header-sync:
@@ -721,10 +721,18 @@ jobs:
           REQUIRE_FILTER_ORDERING_ALL=1 REQUIRE_AUTH_SUBREQUEST=1 \
             ./tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh
 
-      - name: Run dynamic configuration convergence E2E
+      - name: Run compatibility contract suites
+        # The removed-directive / upgrade-rollback contract tests require a
+        # module-enabled NGINX binary; reuse the one built by the IMS step.
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
-        run: ./tools/e2e/verify_dynconf_convergence_e2e.sh
+        run: |
+          set -euo pipefail
+          bash tests/compatibility/test_error_policy_values.sh
+          bash tests/compatibility/test_removed_directives.sh
+          bash tests/compatibility/test_removed_directives_pbt.sh
+          bash tests/compatibility/test_streaming_conflict_pbt.sh
+          bash tests/compatibility/test_upgrade_rollback_contract.sh
 
       - name: Remove retained IMS build artifacts
         if: always()

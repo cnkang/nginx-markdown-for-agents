@@ -38,7 +38,7 @@
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3
 
 #define NGX_HTTP_MARKDOWN_ACCEPT_STRICT    0
-#define NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD  1
+/* slot 1 (wildcard) removed in 0.9.2 (LTS-R010); FORCE keeps value 2 */
 #define NGX_HTTP_MARKDOWN_ACCEPT_FORCE     2
 
 #define NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT         0
@@ -143,6 +143,7 @@ typedef struct {
 
 typedef struct {
     ngx_table_elt_t  *authorization;
+    ngx_table_elt_t  *cookie;
 } ngx_http_headers_in_t;
 
 struct ngx_http_request_s {
@@ -358,9 +359,6 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
 #define NGX_HTTP_MARKDOWN_FILTER_MODULE_H
 
 /* Constants needed by diagnostics.c streaming_config formatter */
-#ifndef NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT
-#define NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT  (1024 * 1024)
-#endif
 #ifndef NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED
 #define NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED  16384
 #endif
@@ -373,15 +371,6 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
 #endif
 
 #include "../src/ngx_http_markdown_diagnostics.c"
-
-/*
- * Override hook for the dynconf-state stub.  When NULL (default) the stub
- * returns the canonical ACTIVE snapshot used by the existing tests.  When
- * non-NULL, the stub copies *g_dynconf_override into *out so tests can drive
- * ngx_http_markdown_diag_render_dynconf through every state branch
- * (ACTIVE/LKG_PRESERVED/INVALID_NO_LKG/disabled) via build_json.
- */
-static const ngx_http_markdown_diag_dynconf_t *g_dynconf_override;
 
 void
 ngx_http_markdown_diagnostics_collect_metrics(
@@ -401,38 +390,6 @@ ngx_http_markdown_diagnostics_collect_metrics(
     out->streaming_requests_total = 9;
     out->precommit_failopen_total = 0;
     out->copied_output_total = 1;
-}
-
-void
-ngx_http_markdown_diagnostics_get_dynconf_state(
-    ngx_http_markdown_diag_dynconf_t *out)
-{
-    static const char digest[] =
-        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-    memset(out, 0, sizeof(*out));
-
-    if (g_dynconf_override != NULL) {
-        *out = *g_dynconf_override;
-        return;
-    }
-
-    out->state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE;
-    snprintf((char *) out->source_digest, sizeof(out->source_digest), "%s",
-             digest);
-    snprintf((char *) out->active_digest, sizeof(out->active_digest), "%s",
-             digest);
-    snprintf((char *) out->lkg_digest, sizeof(out->lkg_digest), "%s",
-             digest);
-    out->generation = 1;
-    out->has_last_success = 1;
-    out->last_success = 1700000000;
-    out->active_mtime = 100;
-    out->config_version = 3;
-    out->last_known_good_mtime = 90;
-    out->lkg_valid = 1;
-    out->masked_fields = NGX_HTTP_MARKDOWN_DIAG_MASK_FILTER
-                        | NGX_HTTP_MARKDOWN_DIAG_MASK_ERROR_POLICY;
 }
 
 void
@@ -493,7 +450,6 @@ reset_test_state(void)
     g_discard_rc = NGX_OK;
     g_list_push_fail = 0;
     g_alloc_fail_after = -1;
-    g_dynconf_override = NULL;
     g_effective_streaming_buffer = 2 * 1024 * 1024;
     ngx_current_msec = 1000;
     memset(&ngx_http_markdown_g_diag_state, 0,
@@ -717,6 +673,11 @@ test_access_and_json_builder(void)
     ngx_buf_t b;
     ngx_int_t rc;
     const char *json;
+    static u_char authorization_value[] = "Bearer test-secret";
+    static u_char cookie_value[] = "session=test-cookie";
+    static u_char query_value[] = "redirect=https%3A%2F%2Fuser:pass@example.test";
+    ngx_table_elt_t authorization;
+    ngx_table_elt_t cookie;
 
     TEST_SUBSECTION("diagnostics access and JSON builder");
 
@@ -724,6 +685,16 @@ test_access_and_json_builder(void)
     init_request(&r, &c, &conf, &addr);
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
     conf.stream.policy_explicit = 1;
+    memset(&authorization, 0, sizeof(authorization));
+    authorization.value.data = authorization_value;
+    authorization.value.len = sizeof(authorization_value) - 1;
+    memset(&cookie, 0, sizeof(cookie));
+    cookie.value.data = cookie_value;
+    cookie.value.len = sizeof(cookie_value) - 1;
+    r.headers_in.authorization = &authorization;
+    r.headers_in.cookie = &cookie;
+    r.args.data = query_value;
+    r.args.len = sizeof(query_value) - 1;
 
     rc = ngx_http_markdown_diagnostics_init(
         &ngx_http_markdown_g_diag_state, r.pool, 2);
@@ -745,14 +716,12 @@ test_access_and_json_builder(void)
     TEST_ASSERT(b.pos != NULL && b.last > b.pos, "buffer should be populated");
     TEST_ASSERT((size_t) (b.end - b.start)
                 == NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE
-                   + (6 * (sizeof(((ngx_http_markdown_diag_dynconf_t *) 0)
-                               ->last_error) - 1))
                    + NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE,
                 "JSON buffer should account for recorded decisions");
 
     json = (const char *) b.pos;
-    TEST_ASSERT(strstr(json, "\"schema_version\":2") != NULL,
-                "JSON should expose diagnostics schema v2");
+    TEST_ASSERT(strstr(json, "\"schema_version\":3") != NULL,
+                "JSON should expose diagnostics schema v3");
     TEST_ASSERT(strstr(json, "\"worker\":{\"pid\":1234") != NULL,
                 "JSON should expose worker identity");
     TEST_ASSERT(strstr(json, "\"build_kind\":\"development\"") != NULL,
@@ -772,9 +741,21 @@ test_access_and_json_builder(void)
                 "JSON should expose active diagnostics recording");
     TEST_ASSERT(strstr(json, "\"configuration\":") != NULL,
                 "JSON should include configuration");
-    TEST_ASSERT(strstr(json, "\"masked_keys\":[\"filter\",\"error_policy\"]")
+    TEST_ASSERT(strstr(json,
+                       "\"configuration\":{\"static_digest\":\"sha256:"
+                       "0123456789abcdef0123456789abcdef"
+                       "0123456789abcdef0123456789abcdef\",\"effective\":{")
                 != NULL,
-                "JSON should report dynconf keys masked by static config");
+                "effective values must remain nested in configuration");
+    TEST_ASSERT(strstr(json,
+                       "\"effective\":{\"filter\":\"on\","
+                       "\"prune_noise\":\"on\"") != NULL
+                && strstr(json, "\"effective_sources\":{") != NULL
+                && strstr(json, "\"runtime\":") != NULL,
+                "configuration sections must be emitted in order");
+    TEST_ASSERT(strstr(json, "\"dynconf\"") == NULL
+                && strstr(json, "\"masked_keys\"") == NULL,
+                "JSON must not expose the removed dynconf configuration block");
     TEST_ASSERT(strstr(json, "\"static_digest\":\"sha256:") != NULL,
                 "JSON should include a static configuration digest");
     TEST_ASSERT(strstr(json, "\"recent_decisions\"") != NULL,
@@ -791,6 +772,10 @@ test_access_and_json_builder(void)
                 "JSON should not expose removed compatibility fields");
     TEST_ASSERT(strstr(json, "\"reason\":\"converted\"") != NULL,
                 "JSON should include the canonical reason string");
+    TEST_ASSERT(strstr(json, "Bearer test-secret") == NULL
+                && strstr(json, "session=test-cookie") == NULL
+                && strstr(json, "user:pass@example.test") == NULL,
+                "JSON must redact auth headers, cookies, and credentialed URLs");
 
     TEST_PASS("Access and JSON builder covered");
 }
@@ -841,134 +826,6 @@ test_json_preserves_unified_error_policy(void)
     }
 
     TEST_PASS("Every unified error policy is preserved in diagnostics JSON");
-}
-
-
-/*
- * Drive ngx_http_markdown_diag_render_dynconf (extracted from build_json to
- * satisfy Rule 17 / S3776 cognitive-complexity limit) through every dynconf
- * state branch.  Regression coverage for the refactor: the byte layout for
- * each branch must match the pre-extraction output.
- */
-static void
-test_json_dynconf_state_branches(void)
-{
-    static const char digest[] =
-        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    ngx_http_markdown_diag_dynconf_t dynconf;
-    ngx_http_request_t       r;
-    ngx_connection_t         c;
-    ngx_http_markdown_conf_t conf;
-    struct sockaddr_in       addr;
-    ngx_buf_t                b;
-    ngx_int_t                rc;
-    const char              *json;
-
-    TEST_SUBSECTION("diagnostics render_dynconf state branches");
-
-    reset_test_state();
-    init_request(&r, &c, &conf, &addr);
-
-    /* ACTIVE: lkg_digest present, last_success present, no last_error. */
-    memset(&dynconf, 0, sizeof(dynconf));
-    dynconf.state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE;
-    snprintf((char *) dynconf.source_digest, sizeof(dynconf.source_digest),
-             "%s", digest);
-    snprintf((char *) dynconf.active_digest, sizeof(dynconf.active_digest),
-             "%s", digest);
-    snprintf((char *) dynconf.lkg_digest, sizeof(dynconf.lkg_digest),
-             "%s", digest);
-    dynconf.generation = 7;
-    dynconf.has_last_success = 1;
-    dynconf.last_success = 1700000000;
-    dynconf.lkg_valid = 1;
-    g_dynconf_override = &dynconf;
-
-    memset(&b, 0, sizeof(b));
-    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
-    TEST_ASSERT(rc == NGX_OK, "ACTIVE branch build should succeed");
-    json = (const char *) b.pos;
-    TEST_ASSERT(strstr(json, "\"generation\":7") != NULL,
-                "ACTIVE branch should render generation");
-    TEST_ASSERT(strstr(json, "\"lkg_digest\":\"sha256:") != NULL,
-                "ACTIVE branch should render lkg_digest string");
-    TEST_ASSERT(strstr(json, "\"last_success\":\"") != NULL,
-                "ACTIVE branch should render last_success timestamp");
-    TEST_ASSERT(strstr(json, "\"last_error\":null") != NULL,
-                "ACTIVE branch should render last_error null");
-
-    /* LKG_PRESERVED with last_error: lkg_digest present + last_error string. */
-    memset(&dynconf, 0, sizeof(dynconf));
-    dynconf.state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED;
-    snprintf((char *) dynconf.source_digest, sizeof(dynconf.source_digest),
-             "%s", digest);
-    snprintf((char *) dynconf.active_digest, sizeof(dynconf.active_digest),
-             "%s", digest);
-    snprintf((char *) dynconf.lkg_digest, sizeof(dynconf.lkg_digest),
-             "%s", digest);
-    dynconf.generation = 9;
-    dynconf.lkg_valid = 1;
-    memcpy(dynconf.last_error, "boom", 4);
-    dynconf.last_error_len = 4;
-    g_dynconf_override = &dynconf;
-
-    memset(&b, 0, sizeof(b));
-    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
-    TEST_ASSERT(rc == NGX_OK, "LKG_PRESERVED branch build should succeed");
-    json = (const char *) b.pos;
-    TEST_ASSERT(strstr(json, "\"generation\":9") != NULL,
-                "LKG_PRESERVED branch should render generation");
-    TEST_ASSERT(strstr(json, "\"last_error\":\"boom\"") != NULL,
-                "LKG_PRESERVED branch should render last_error string");
-
-    /* INVALID_NO_LKG with last_error: all-null fields + last_error string. */
-    memset(&dynconf, 0, sizeof(dynconf));
-    dynconf.state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG;
-    memcpy(dynconf.last_error, "parse failed", 12);
-    dynconf.last_error_len = 12;
-    g_dynconf_override = &dynconf;
-
-    memset(&b, 0, sizeof(b));
-    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
-    TEST_ASSERT(rc == NGX_OK, "INVALID_NO_LKG branch build should succeed");
-    json = (const char *) b.pos;
-    TEST_ASSERT(strstr(json, "\"generation\":null") != NULL
-                && strstr(json, "\"source_digest\":null") != NULL
-                && strstr(json, "\"lkg_digest\":null") != NULL,
-                "INVALID_NO_LKG branch should render null digest fields");
-    TEST_ASSERT(strstr(json, "\"last_error\":\"parse failed\"") != NULL,
-                "INVALID_NO_LKG branch should render last_error string");
-
-    /* Invalid UTF-8 must be escaped as byte values so the JSON remains
-     * valid. */
-    dynconf.last_error[0] = 'b';
-    dynconf.last_error[1] = 'a';
-    dynconf.last_error[2] = 'd';
-    dynconf.last_error[3] = 0xc3;
-    dynconf.last_error[4] = '(';
-    dynconf.last_error_len = 5;
-    memset(&b, 0, sizeof(b));
-    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
-    TEST_ASSERT(rc == NGX_OK, "invalid UTF-8 diagnostics build should succeed");
-    json = (const char *) b.pos;
-    TEST_ASSERT(strstr(json, "\"last_error\":\"bad\\u00c3(\"") != NULL,
-                "invalid UTF-8 should be escaped in diagnostics JSON");
-
-    /* Disabled/other: every field null including last_error. */
-    memset(&dynconf, 0, sizeof(dynconf));
-    dynconf.state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_DISABLED;
-    g_dynconf_override = &dynconf;
-
-    memset(&b, 0, sizeof(b));
-    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
-    TEST_ASSERT(rc == NGX_OK, "DISABLED branch build should succeed");
-    json = (const char *) b.pos;
-    TEST_ASSERT(strstr(json, "\"generation\":null") != NULL
-                && strstr(json, "\"last_error\":null") != NULL,
-                "DISABLED branch should render all-null dynconf fields");
-
-    g_dynconf_override = NULL;
-    TEST_PASS("render_dynconf covers every state branch");
 }
 
 
@@ -1065,8 +922,6 @@ test_json_buffer_scales_with_ring_count(void)
     TEST_ASSERT(rc == NGX_OK, "large diagnostics JSON should succeed");
 
     expected_size = NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE
-                    + (6 * (sizeof(((ngx_http_markdown_diag_dynconf_t *) 0)
-                                ->last_error) - 1))
                     + (150 * NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE);
     TEST_ASSERT((size_t) (b.end - b.start) == expected_size,
                 "JSON buffer should scale with recorded decisions");
@@ -1222,9 +1077,8 @@ test_handler_get_head_and_denials(void)
                 && g_last_output_chain->buf != NULL,
                 "405 response should send a body");
     TEST_ASSERT(g_last_output_chain->buf->last - g_last_output_chain->buf->pos
-                == (off_t) (sizeof("Method Not Allowed. Use GET or HEAD; "
-                                  "rollback is available through the "
-                                  "dynamic-config file watcher.\n") - 1),
+                == (off_t) (sizeof("Method Not Allowed. Use GET or HEAD.\n")
+                            - 1),
                 "405 body should have the expected length");
 
     reset_test_state();
@@ -1349,7 +1203,6 @@ main(void)
     test_decision_path_records_once_with_explicit_duration();
     test_access_and_json_builder();
     test_json_preserves_unified_error_policy();
-    test_json_dynconf_state_branches();
     test_json_preserves_effective_streaming_buffer();
     test_diagnostics_has_no_removed_profile_surface();
     test_json_buffer_scales_with_ring_count();

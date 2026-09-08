@@ -19,7 +19,7 @@
     ]
   },
   "contract_source": "schemas/metrics-v1.registry.json",
-  "description": "Canonical Prometheus metrics family, label, and histogram contract. Histogram bucket_count and max_histogram_buckets count only explicit finite buckets; Prometheus emits the +Inf bucket implicitly and it is not included in either count.",
+  "description": "Canonical Prometheus metrics family, label, and histogram contract. Histogram bucket_count and max_histogram_buckets count only explicit finite buckets; Prometheus emits the +Inf bucket implicitly and it is not included in either count. schema_version 2 (0.9.2, LTS-R006/LTS-R023): the nginx_markdown_dynconf_reloads_total family was removed, an incompatible contract change explicitly versioned (design \u00a714(d)) rather than masqueraded as the frozen v1 content. The v1 in the file name/$id/title denotes the Prometheus text-format wire contract identity, distinct from this content schema_version.",
   "families": [
     {
       "labels": [
@@ -186,33 +186,6 @@
     {
       "labels": [
         {
-          "name": "outcome",
-          "values": [
-            "failure",
-            "success"
-          ]
-        },
-        {
-          "name": "reason",
-          "values": [
-            "duplicate_key",
-            "file_error",
-            "invalid_type",
-            "ok",
-            "out_of_range",
-            "parse_error",
-            "schema_version",
-            "size_exceeded",
-            "unknown_key"
-          ]
-        }
-      ],
-      "name": "nginx_markdown_dynconf_reloads_total",
-      "type": "counter"
-    },
-    {
-      "labels": [
-        {
           "description": "Runtime-determined value rendered from module build identity; not a closed allowlist.",
           "dynamic": true,
           "name": "features",
@@ -241,6 +214,6 @@
   "implementation_sources": [
     "components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h"
   ],
-  "schema_version": 1,
+  "schema_version": 2,
   "title": "nginx-markdown-for-agents Metrics v1 Contract"
 }

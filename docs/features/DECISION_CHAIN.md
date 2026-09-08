@@ -164,7 +164,7 @@ When conversion fails (either `failed_open` or `failed_closed`), the module reco
 | `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Decompression](../features/DECOMPRESSION.md)) |
 | `replay_error` | Fail-open replay buffer init/append failure |
 | `overload` | Inflight guard rejected the request |
-| `invalid_dynconf` / `degraded_snapshot` / `header_plan_apply_error` | Dynamic configuration or header-plan errors |
+| `header_plan_apply_error` | Header-plan preparation or application failed before headers were sent |
 | `streaming_mid_flight_error` | Streaming conversion mid-flight error |
 
 ## Request States
@@ -188,16 +188,16 @@ Operators can determine request state counts from metrics and logs:
 
 ## Reason Code Reference
 
-The registry declares the complete set of 27 reason codes in
+The registry declares the complete set of 25 reason codes in
 `components/rust-converter/reason_registry.toml`. The generator projects it
 into `reason_code.rs`, C metadata, diagnostics lookup, and release artifacts.
-The projections mirror [Observability Schema v2](../architecture/observability-schema-v2.md).
+The projections mirror [Observability Schema v3](../architecture/observability-schema-v2.md).
 All `as_str()` values are lowercase snake_case. The table below maps the
 high-level decision outcomes described in this document to their reason codes.
 The size gate is an eligibility decision: it emits `not_eligible` (request
 state SKIPPED) and never produces a conversion-failure reason. The full
-registry (including decompression, dynconf, and canonical
-streaming outcome codes) lives in the schema document. Streaming
+registry (including decompression and canonical streaming outcome codes) lives
+in the schema document. Streaming
 implementation events are not registry entries.
 
 | Decision Outcome | Reason Code | Request State | Description |
@@ -235,7 +235,6 @@ implementation events are not registry entries.
 | `budget_exceeded` | Parser memory exceeded `markdown_limits parser_budget=` (default 32m) |
 | `memory_budget_exceeded` | `markdown_limits conversion_memory=` exceeded while buffering an unknown-size body, or another conversion working-set memory limit; the module records category `resource_limit` and increments `failures_resource_limit` |
 | `overload` | Inflight guard rejected the request |
-| `invalid_dynconf` / `degraded_snapshot` | Dynamic configuration error / degraded snapshot |
 | `header_plan_apply_error` | Header plan apply error |
 | `streaming_mid_flight_error` | Streaming conversion mid-flight error |
 | Delivery vs Decision counter separation | `failopen_count` (delivery) increments only after downstream `NGX_OK`; decision counter increments on decision regardless of downstream status |
@@ -262,7 +261,7 @@ strings. The `markdown_reason_code_str()` FFI accessor surfaces them to C. C-sid
 canonical reason data comes from generated discriminant and metadata macros.
 The accessor converts each discriminant into the canonical lowercase string.
 Streaming transitions remain a separate bounded event surface. See
-[Observability Schema v2](../architecture/observability-schema-v2.md)
+[Observability Schema v3](../architecture/observability-schema-v2.md)
 for the full registry and FFI accessor list.
 
 ## Related Documentation
@@ -271,7 +270,7 @@ for the full registry and FFI accessor list.
 - [Rollback Guide](../guides/OPERATIONAL_ROLLBACK.md) — how to disable or narrow conversion scope
 - [Configuration Guide](../guides/CONFIGURATION.md) — directive reference and configuration examples
 - [Content Negotiation](CONTENT_NEGOTIATION.md) — Accept header parsing and wildcard behavior
-- [Observability Schema v2](../architecture/observability-schema-v2.md) — authoritative reason code registry, metric families, label whitelist
+- [Observability Schema v3](../architecture/observability-schema-v2.md) — authoritative reason code registry, metric families, label whitelist
 - [Operations Guide](../guides/OPERATIONS.md) — monitoring and troubleshooting
 
 ## Document Updates

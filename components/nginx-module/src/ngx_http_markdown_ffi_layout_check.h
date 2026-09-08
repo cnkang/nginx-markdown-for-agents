@@ -55,7 +55,15 @@ _Static_assert(sizeof(size_t) == 8,
     "FFI layout checks require 64-bit size_t (LP64)");
 
 /* ----------------------------------------------------------------
- * MarkdownOptions layout (128 bytes on LP64).
+ * MarkdownOptions layout (96 bytes on LP64).
+ *
+ * The four custom-selector fields (prune_selectors, prune_selector_len,
+ * prune_protection_selectors, prune_protection_selector_len, formerly at
+ * offsets 64/72/80/88) were removed in 0.9.2 with custom-selector support
+ * (design §14(h); Requirements LTS-R009, LTS-R023). Removing the two
+ * pointers and two usize lengths shrinks the struct from 128 to 96 bytes
+ * and shifts every retained tail field (memory_budget onward) down by
+ * 32 bytes.
  *
  * Fields:
  *   flavor                         : u32           offset   0
@@ -71,20 +79,16 @@ _Static_assert(sizeof(size_t) == 8,
  *   streaming_budget               : u64           offset  48
  *   prune_noise                    : u32           offset  56
  *   (padding)                                      offset  60..63
- *   prune_selectors                : *const u8     offset  64
- *   prune_selector_len             : usize         offset  72
- *   prune_protection_selectors     : *const u8     offset  80
- *   prune_protection_selector_len  : usize         offset  88
- *   memory_budget                  : u64           offset  96
- *   parse_timeout_ms               : u32           offset 104
- *   (padding)                                      offset 108..111
- *   parser_memory_budget           : u64           offset 112
- *   flush_threshold                 : u32           offset 120
- *   (padding)                                      offset 124..127
- * Total: 128 bytes, align 8
+ *   memory_budget                  : u64           offset  64
+ *   parse_timeout_ms               : u32           offset  72
+ *   (padding)                                      offset  76..79
+ *   parser_memory_budget           : u64           offset  80
+ *   flush_threshold                : u32           offset  88
+ *   (padding)                                      offset  92..95
+ * Total: 96 bytes, align 8
  * ---------------------------------------------------------------- */
-_Static_assert(sizeof(MarkdownOptions) == 128,
-    "MarkdownOptions size must match Rust (128 bytes on 64-bit)");
+_Static_assert(sizeof(MarkdownOptions) == 96,
+    "MarkdownOptions size must match Rust (96 bytes on 64-bit)");
 _Static_assert(offsetof(MarkdownOptions, flavor) == 0,
     "MarkdownOptions.flavor offset must be 0");
 _Static_assert(offsetof(MarkdownOptions, timeout_ms) == 4,
@@ -107,22 +111,14 @@ _Static_assert(offsetof(MarkdownOptions, streaming_budget) == 48,
     "MarkdownOptions.streaming_budget offset must be 48");
 _Static_assert(offsetof(MarkdownOptions, prune_noise) == 56,
     "MarkdownOptions.prune_noise offset must be 56");
-_Static_assert(offsetof(MarkdownOptions, prune_selectors) == 64,
-    "MarkdownOptions.prune_selectors offset must be 64");
-_Static_assert(offsetof(MarkdownOptions, prune_selector_len) == 72,
-    "MarkdownOptions.prune_selector_len offset must be 72");
-_Static_assert(offsetof(MarkdownOptions, prune_protection_selectors) == 80,
-    "MarkdownOptions.prune_protection_selectors offset must be 80");
-_Static_assert(offsetof(MarkdownOptions, prune_protection_selector_len) == 88,
-    "MarkdownOptions.prune_protection_selector_len offset must be 88");
-_Static_assert(offsetof(MarkdownOptions, memory_budget) == 96,
-    "MarkdownOptions.memory_budget offset must be 96");
-_Static_assert(offsetof(MarkdownOptions, parse_timeout_ms) == 104,
-    "MarkdownOptions.parse_timeout_ms offset must be 104");
-_Static_assert(offsetof(MarkdownOptions, parser_memory_budget) == 112,
-    "MarkdownOptions.parser_memory_budget offset must be 112");
-_Static_assert(offsetof(MarkdownOptions, flush_threshold) == 120,
-    "MarkdownOptions.flush_threshold offset must be 120");
+_Static_assert(offsetof(MarkdownOptions, memory_budget) == 64,
+    "MarkdownOptions.memory_budget offset must be 64");
+_Static_assert(offsetof(MarkdownOptions, parse_timeout_ms) == 72,
+    "MarkdownOptions.parse_timeout_ms offset must be 72");
+_Static_assert(offsetof(MarkdownOptions, parser_memory_budget) == 80,
+    "MarkdownOptions.parser_memory_budget offset must be 80");
+_Static_assert(offsetof(MarkdownOptions, flush_threshold) == 88,
+    "MarkdownOptions.flush_threshold offset must be 88");
 
 /* ----------------------------------------------------------------
  * MarkdownResult layout (64 bytes on LP64).
@@ -273,48 +269,15 @@ _Static_assert(offsetof(FFIDecompResult, output_len) == 8,
 _Static_assert(offsetof(FFIDecompResult, error_category) == 16,
     "FFIDecompResult.error_category offset must be 16");
 
-/* ----------------------------------------------------------------
- * FFIDynconfResult layout (72 bytes on LP64).
- *   error_code         : u32        offset  0, size 4
- *   error_message      : *const u8  offset  8, size 8
- *   error_message_len  : usize      offset 16, size 8
- *   source_digest      : *const u8  offset 24, size 8
- *   source_digest_len  : usize      offset 32, size 8
- *   active_digest      : *const u8  offset 40, size 8
- *   active_digest_len  : usize      offset 48, size 8
- *   filter             : u8         offset 56, size 1
- *   prune_noise        : u8         offset 57, size 1
- *   log_verbosity      : u8         offset 58, size 1
- *   error_policy       : u8         offset 59, size 1
- *   streaming_buffer   : u64        offset 64, size 8
- * Total: 72 bytes, align 8
- * ---------------------------------------------------------------- */
-_Static_assert(sizeof(FFIDynconfResult) == 72,
-    "FFIDynconfResult size must match Rust (72 bytes on 64-bit)");
-_Static_assert(offsetof(FFIDynconfResult, error_code) == 0,
-    "FFIDynconfResult.error_code offset must be 0");
-_Static_assert(offsetof(FFIDynconfResult, error_message) == 8,
-    "FFIDynconfResult.error_message offset must be 8");
-_Static_assert(offsetof(FFIDynconfResult, error_message_len) == 16,
-    "FFIDynconfResult.error_message_len offset must be 16");
-_Static_assert(offsetof(FFIDynconfResult, source_digest) == 24,
-    "FFIDynconfResult.source_digest offset must be 24");
-_Static_assert(offsetof(FFIDynconfResult, source_digest_len) == 32,
-    "FFIDynconfResult.source_digest_len offset must be 32");
-_Static_assert(offsetof(FFIDynconfResult, active_digest) == 40,
-    "FFIDynconfResult.active_digest offset must be 40");
-_Static_assert(offsetof(FFIDynconfResult, active_digest_len) == 48,
-    "FFIDynconfResult.active_digest_len offset must be 48");
-_Static_assert(offsetof(FFIDynconfResult, filter) == 56,
-    "FFIDynconfResult.filter offset must be 56");
-_Static_assert(offsetof(FFIDynconfResult, prune_noise) == 57,
-    "FFIDynconfResult.prune_noise offset must be 57");
-_Static_assert(offsetof(FFIDynconfResult, log_verbosity) == 58,
-    "FFIDynconfResult.log_verbosity offset must be 58");
-_Static_assert(offsetof(FFIDynconfResult, error_policy) == 59,
-    "FFIDynconfResult.error_policy offset must be 59");
-_Static_assert(offsetof(FFIDynconfResult, streaming_buffer) == 64,
-    "FFIDynconfResult.streaming_buffer offset must be 64");
+/*
+ * FFIDynconfResult (formerly 72 bytes on LP64) was removed in 0.9.2 along
+ * with the dynamic-configuration subsystem and its three FFI exports
+ * (design §14(b); Requirements LTS-R006, LTS-R023). The struct no longer
+ * exists in the generated header, so its layout _Static_assert block is
+ * gone. This removal shrinks the exported symbol set and the struct layout
+ * inventory, which is reflected in MARKDOWN_ABI_VERSION 3 and the
+ * regenerated header/symbol-set/layout fingerprints.
+ */
 
 /* ----------------------------------------------------------------
  * FFIEncodingChainResult layout (12 bytes on LP64).

@@ -55,11 +55,11 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 
 ### Key Metrics to Monitor
 
-The endpoint emits exactly the eleven bounded Prometheus families defined in
+The endpoint emits exactly the ten bounded Prometheus families defined in
 the [Prometheus Metrics Guide](prometheus-metrics.md). Monitor the labeled
 request outcomes, conversion attempts and successful deliveries, the duration
-histogram, byte counters, streaming/decompression/dynconf
-events, and `build_info`. The diagnostics endpoint (`markdown_diagnostics`)
+histogram, byte counters, streaming and decompression events, and
+`build_info`. The diagnostics endpoint (`markdown_diagnostics`)
 additionally exposes the per-worker in-flight counter. Do not derive
 dashboards from removed JSON fields or legacy family names.
 
@@ -325,7 +325,7 @@ tail -100 /var/log/nginx/error.log | grep markdown
 - Enable filter: `markdown_filter on;`
 - Verify client sends `Accept: text/markdown`
 - For map-based config, use regex for `Accept` matching and prefer `$uri` for extension checks
-- Enable wildcard support when required: `markdown_accept wildcard;`
+- Enable unconditional conversion only for an intentional scope: `markdown_accept force;`
 - Check backend returns 200 with `Content-Type: text/html`
 - Increase size limit if needed: `markdown_limits conversion_memory=20m;`
 
@@ -470,8 +470,8 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 | Module Version | Rust Version | Status |
 |----------------|--------------|--------|
-| 0.9.1+ | 1.97.1+ | Supported (edition 2024) |
-| 0.9.1+ | < 1.97.1 | Not supported for source builds |
+| 0.9.1+ | 1.98.1+ | Supported (edition 2024) |
+| 0.9.1+ | < 1.98.1 | Not supported for source builds |
 
 ---
 
@@ -483,7 +483,8 @@ curl -H "Accept: text/markdown" http://localhost/test
   and allow a graceful reload to create the new shared-memory layout. The
   frozen v1 metrics surface exposes bounded request and conversion counters.
 - The streaming path (`markdown_streaming off|auto|force`) controls runtime
-  selection. `auto` uses an internal bounded heuristic. There is no
+  selection. `auto` selects the streaming engine after the hard eligibility
+  and cache gates, independent of response size. There is no
   operator-facing response-size threshold.
 - `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add its proxy range in the `http` context. For example, use `markdown_trusted_proxies 10.0.0.0/8;`. Forwarded headers remain ignored for direct peers outside the configured CIDRs. Trusted proxies keep base URLs correct. Configure them explicitly. This restores the previous behavior.
 
@@ -956,9 +957,9 @@ The table below maps each reason code to its internal enum, error category, requ
 |---|---|---|---|
 | `disabled` | NOT_ENABLED | Module disabled by configuration for this scope | Expected for scopes where you have not enabled conversion. If unexpected, check `markdown_filter` in the relevant `location`/`server` block. |
 | `not_eligible` | SKIPPED | Request not eligible (method not GET/HEAD, non-200/206 status, Range request, non-`text/html` Content-Type, exceeds `markdown_limits conversion_memory=`, or auth policy denies) | The individual failing check is in the structured log metadata. Most are expected (POST/PUT/DELETE, non-HTML, partial content). If an HTML GET page triggers this, check the failing check field in the log. |
-| `skipped_accept` | SKIPPED | `Accept` header present but does not request Markdown | Expected for normal browser traffic. If an AI agent triggers this, verify the client sends `Accept: text/markdown`. Check `markdown_accept` if using `*/*`. |
-| `skipped_no_accept` | SKIPPED | No `Accept` header and `markdown_accept` is `strict` | Expected when clients omit `Accept`. Relax `markdown_accept` to `wildcard` if you want to convert such traffic. |
-| `skipped_accept_reject` | SKIPPED | `Accept` explicitly rejects Markdown (`text/markdown;q=0` or wildcard with `q=0`) | Expected when a client signals it does not want Markdown. No action needed. |
+| `skipped_accept` | SKIPPED | `Accept` header present but does not request Markdown under `markdown_accept strict` | Expected for normal browser traffic. If an AI agent triggers this, verify the client sends `Accept: text/markdown` or use a narrowly scoped `markdown_accept force`. |
+| `skipped_no_accept` | SKIPPED | No `Accept` header and `markdown_accept` is `strict` | Expected when clients omit `Accept`. Use `markdown_accept force` only when that traffic is intentionally eligible. |
+| `skipped_accept_reject` | SKIPPED | `Accept` explicitly rejects Markdown (`text/markdown;q=0` or wildcard with `q=0`) under strict negotiation | Expected when a client signals it does not want Markdown. No action needed. |
 | `skipped_conditional` | SKIPPED | Conditional request matched (If-None-Match / If-Modified-Since) → 304 Not Modified | Expected for conditional revalidation. No action needed. |
 | `bypass_no_transform` | SKIPPED | `no-transform` Cache-Control directive present | Expected when upstream forbids transformation. No action needed. |
 | `converted` | CONVERTED | All checks passed, conversion succeeded | No action needed — this is the success path. |
@@ -1344,7 +1345,6 @@ tail -f /var/log/nginx/error.log | grep "markdown:"
 | `nginx_markdown_streaming_peak_memory_bytes` | Gauge | Peak streaming working-memory high-water mark |
 | `nginx_markdown_streaming_events_total` | Counter | Bounded streaming transitions |
 | `nginx_markdown_decompression_events_total` | Counter | Bounded decompression events |
-| `nginx_markdown_dynconf_reloads_total` | Counter | Dynamic-configuration reload outcomes |
 | `nginx_markdown_build_info` | Gauge | Build identity; value is always `1` |
 
 The authoritative labels, values, histogram boundaries, and help text are in

@@ -109,8 +109,8 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 31 | nginx-idioms | After merge: verify compile, diff --check, function count, no duplicates |
 | 32 | security-cwe | ssize_t→size_t needs non-negative check; overflow guard on addition |
 | 33 | security-cwe | Canonicalize Python paths before containment; allowlist CLI executables |
-| 34 | dynconf-snapshot | Read mutable fields through effective_conf; snapshot race elimination; bind once at header_filter entry |
-| 35 | dynconf-snapshot | dynconf_enabled gate; applied_mtime after successful reload; unknown keys → NGX_ERROR; startup apply |
+| 34 | dynconf-snapshot | RETIRED (0.9.2 convergence): governed the removed runtime hot-reload snapshot; superseded by the static Rule 45. Number kept for traceability; historical text in dynconf-snapshot.md |
+| 35 | dynconf-snapshot | RETIRED (0.9.2 convergence): governed the removed runtime reload isolation/retry/startup-apply contract; no active gate. Number kept for traceability; historical text in dynconf-snapshot.md |
 | 36 | harness-routing | Route recurring tooling fixes to focused security family |
 | 37 | e2e-runner | Rust-first E2E; no new Python e2e files; parity entries required |
 | 38 | streaming-backpressure | Replay buffer init/append failure → precommit_error; failopen_completed flag; delivery after downstream NGX_OK or NGX_DONE; uniform across ALL fail-open paths (streaming, buffered, buffer-init/append, header filter) |
@@ -120,7 +120,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 42 | c-safety | volatile only for single-threaded compiler barriers; direct aggregate __atomic_* usage is forbidden |
 | 43 | memory-budget | Resizable buffer backing store (ctx->buffer.data) uses ngx_alloc/ngx_free exclusively; fixed-size pool-lifetime decompression workspaces may use ngx_pnalloc/ngx_pfree |
 | 44 | encoding-charset | Gzip/deflate/Brotli preserves codec and member lifecycle in full-buffer and streaming paths; truncation is rejected; budgets remain cumulative |
-| 45 | dynconf-snapshot | effective_conf NULL-safe access; cross-TU field visibility in shared headers; sentinel value consistency |
+| 45 | dynconf-snapshot | CURRENT (static): effective_conf NULL-safe access; cross-TU field visibility in shared headers; sentinel value consistency (retained static binding after the 0.9.2 runtime-reload removal) |
 | 46 | ffi-crosslang | FFI operations must validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage |
 | 47 | streaming-backpressure | Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return |
 | 48 | security-static-analysis | CodeQL remains primary SAST; supplemental gates stay focused and locally runnable; scope workflow secrets narrowly; runnable examples preserve runtime and credential transport safety |
@@ -146,7 +146,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 68 | security-cwe | Access control before method handling in HTTP handlers: handlers that reject unsupported methods (405 `NGX_HTTP_NOT_ALLOWED` or `*_method_not_allowed()` helper) must evaluate access control **before** the method-rejection branch; a denied request must not receive 405, an `Allow` header, or any handler-behavior signal; the access check must appear earlier in source order than any `NGX_HTTP_NOT_ALLOWED` assignment; handlers without a 405 path are exempt; `python3 tools/harness/detect_access_before_method.py` — advisory local gate (`--strict` promotes findings to violations; blocking harness-tooling CI check via `make harness-security-checks` for selected `harness_tooling` paths) |
 | 69 | nginx-idioms | Representation-change metadata-surface completeness: every representation-change path (fullcov commit, stream commit, 304, HEAD representation) must clear ALL upstream metadata surfaces in the same function — Trailer declaration implies `ngx_http_markdown_clear_trailers()`; mirror pairs (`last_modified_time`/`last_modified`, `content_type_lowcase`/`content_type_hash`) strip together or explicitly invalidate; reuse shared helpers; `python3 tools/harness/detect_representation_metadata_clearing.py` — blocking harness gate |
 | 70 | build-safety | Scratch/temporary file hygiene: one-off analysis scripts, PR drafts, editor/system junk must never enter commits; root-level `*.py`/`*.sh` forbidden except documented external contracts (`build.sh` ClusterFuzzLite entrypoint); test sources named `parse_*_test.*`/`test_*` exempt; `python3 tools/harness/detect_scratch_files.py` — blocking harness gate, `--staged` mode wired into `.pre-commit-config.yaml` |
-| 71 | dynconf-snapshot | Static explicit settings block dynamic overrides and propagate to child levels; block masks must follow the configuration tree so unset fields remain dynamic |
+| 71 | dynconf-snapshot | CURRENT (static): explicit static settings mark a block-mask that propagates to child levels; block masks follow the configuration tree so unset fields stay open at more specific levels |
 | 72 | streaming-backpressure | Header-chain NGX_AGAIN publishes commit latches, defers success-only delivery metrics, and resumes body output without retrying the header chain |
 | FUZZ-001..007 | fuzz-infrastructure | Fuzz target determinism, corpus/repo tracking, ClusterFuzzLite workflows, guided fuzz smoke, batch/prune pairing, and gitignore hygiene (see fuzz-infrastructure.md) |
 
@@ -277,9 +277,11 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Hardcoded HTTP status in reject paths: return conf->error_status instead of NGX_HTTP_BAD_GATEWAY; `bash tools/harness/detect_hardcoded_http_status.sh` — advisory [59]
 - Representation-change metadata completeness: Trailer declaration invalidation implies `ngx_http_markdown_clear_trailers()` in the same function; mirror pairs (`last_modified_time`/`last_modified`, `content_type_lowcase`/`content_type_hash`) strip together or explicitly invalidate via `ngx_http_markdown_invalidate_headers`; reuse shared helpers on every representation path (fullcov, stream commit, 304, HEAD); `python3 tools/harness/detect_representation_metadata_clearing.py` — blocking harness gate [69]
 
-**Dynamic Configuration & Snapshots** (C, T)
+**Static Configuration & Effective View** (C, T)
 
-- Explicit static fields set `dynconf_block_mask` and propagate to child levels; dynamic snapshots cannot override blocked fields, while unset fields remain dynamic [71]
+- Explicit static fields set the block-mask and propagate to child levels; the mask follows the configuration tree so unset fields stay open at more specific levels [71]
+- Request-path reads go through the `effective_conf` view (NULL-safe with a documented `conf->` fallback); cross-TU fields live in shared headers; sentinels stay consistent [45]
+- (The 0.9.2 convergence retired the runtime hot-reload overlay; Rules 34/35 are historical only. See docs/harness/rules/dynconf-snapshot.md.)
 
 **HTML Sanitizer & Output Safety** (C, R, D)
 - Void elements self-closing; skip-mode name-aware [5]
@@ -501,7 +503,7 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - Release gates 0.8.x: `make release-gates-check-08x` (canonical 0.8.x patch-line entry, `release-gates-check-080` is the compatible original name)
 - Release gates 0.9.2: `make release-gates-check-092` (consolidated 0.9.x regression/compatibility checks, blocking performance evidence for baselines 091 and 092, public-surface drift, schema drift, reason-codegen, version consistency, release matrix, and candidate-bound evidence)
 - Public-surface changes: `make public-surface-drift-check` (FFI/exported-symbol inventory drift vs checked-in public-surface-inventory.json)
-- Schema changes: `make schema-drift-check` (projects the canonical `schemas/metrics-v1.registry.json` and `schemas/dynconf-precedence-v1.json` contracts plus the diagnostics schema into versioned artifacts, then validates them against the renderer and dynconf implementations; override the artifact line with `SCHEMA_RELEASE_VERSION=MAJOR.MINOR.PATCH`, wired into release-gates-check-092 and CI release-092-contract-gates)
+- Schema changes: `make schema-drift-check` (projects the canonical `schemas/metrics-v1.registry.json` contract plus the diagnostics schema into versioned artifacts, then validates them against the renderer; the 0.9.2 convergence removed the dynconf precedence schema; override the artifact line with `SCHEMA_RELEASE_VERSION=MAJOR.MINOR.PATCH`, wired into release-gates-check-092 and CI release-092-contract-gates)
 - Reason-code changes: `make reason-codegen-check` (reason registry vs generated code, error classification coverage)
 - Release matrix changes: `make release-matrix-check` (canonical docs/releases/release-matrix.json vs the checked-in schema; ABI/feature digest binding, fail-closed on aliases)
 - Observation workflows: `.github/workflows/nightly-observation.yml` and
@@ -630,6 +632,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-05 | Kang | 0.9.2 convergence harness sync (dynconf removal): retired Rules 34 and 35 (removed runtime hot-reload snapshot/reload contract) keeping their numbers for traceability, relabeled Rules 45 and 71 as the retained CURRENT static effective_conf/block-mask rules, renamed the checklist section to "Static Configuration & Effective View"; updated the schema-drift verification line (dynconf precedence schema removed); dynconf-snapshot.md domain rules and the dynamic-config-hot-reload risk pack archived with historical-vs-current wording; routing manifest dropped the removed verify-dynconf-convergence-e2e command and archived the risk-pack routing. Historical Document Updates rows are left unchanged as history |
 | 0.9.2 | 2026-09-04 | Kang | Pre-freeze review closeout: added Rule 72 index and checklist synchronization for header-chain NGX_AGAIN commit-latch semantics, plus the [68] access-before-method C Safety checklist bullet |
 | 0.9.2 | 2026-08-22 | Kang | Extended Rule 61 with clause 10, the durable measurement ref: an immutable annotated `refs/tags/perf-baseline/<baseline-stem>` anchors every measurement commit, a commit an existing ref already reaches gets no redundant ref, and archival `verbatim_import` packs get no exemption; `detect_baseline_hand_edit.py` gained `repo_commit_anchored()` and the `harness-tooling` CI job gained a fail-closed provenance preparation step; naming and lifecycle policy documented in `perf/baselines/README.md` |
 | 0.9.2 | 2026-08-21 | Kang | Recent-Git remediation closeout (2026-08-14..21 window, 266 commits): added Rule 69 representation-change metadata-surface completeness (nginx-idioms) with blocking detector detect_representation_metadata_clearing.py + 11 fixture tests, fixed two unpaired content_type mirror clears in diagnostics.c; extended Rule 61 with the evidence binding lifecycle (baselines are finalizer output, never hand-edited) with detect_baseline_hand_edit.py full-audit + --changed modes + 11 tests; added Rule 70 scratch/temporary file hygiene (build-safety) with detect_scratch_files.py (tracked + --staged) + 8 tests and removed six accidentally tracked scratch files; strengthened Rule 13 with workflow env-var liveness detector detect_workflow_env_liveness.py + 11 tests (MATRIX_ARCH-class step-local env bugs); strengthened Rules 11/18 with the $?-inside-negated-conditional trap as detect_shell_hygiene.sh pattern (f) + fixture test; strengthened Rule 14 with the detector adversarial-fixture meta-rule; Rule 63 write-time enforcement via docs-style-changed pre-commit hook; P2 lizard/SonarCloud complexity mapping documented in complexity.md; all new gates wired into `make harness-security-checks`/`make test-harness` and `.pre-commit-config.yaml`; index rows + checklist sync throughout |

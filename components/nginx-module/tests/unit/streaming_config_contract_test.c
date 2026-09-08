@@ -555,12 +555,13 @@ static ngx_pool_t g_pool;
 static ngx_command_t *
 find_directive(const char *name)
 {
-    ngx_command_t *cmd;
     size_t         len;
 
     len = strlen(name);
 
-    for (cmd = ngx_http_markdown_filter_commands; cmd->name.len != 0; cmd++) {
+    for (ngx_command_t *cmd = ngx_http_markdown_filter_commands;
+         cmd->name.len != 0;
+         cmd++) {
         if (cmd->name.len == len
             && ngx_strncmp(cmd->name.data, name, len) == 0)
         {
@@ -602,11 +603,10 @@ test_dynconf_directives_support_published_contexts(void)
         "markdown_dynconf_dry_run"
     };
     ngx_command_t     *cmd;
-    size_t             i;
 
     TEST_SUBSECTION("dynconf directives enforce the published HTTP-only context");
 
-    for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         cmd = find_directive(names[i]);
         TEST_ASSERT(cmd != NULL,
             "dynconf directive should be registered");
@@ -855,8 +855,9 @@ test_default_inheritance(void)
     init_conf(&child);
     merge_stream_config(&child, &parent);
 
-    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_AUTO,
-        "default streaming policy should be auto");
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
+        "default streaming policy should be off "
+        "(unset == bounded full-buffer, LTS-R011.2)");
     TEST_ASSERT(child.stream.excluded_types == NULL,
         "default excluded_types should be NULL");
 
@@ -887,6 +888,70 @@ test_default_inheritance(void)
         "STREAMING_FORCE must be 2");
 
     TEST_PASS("5.3 Default inheritance works correctly");
+}
+
+/* ================================================================
+ * LTS-R011 — Unset markdown_streaming resolves to the bounded
+ * Full_Buffer engine (behavior change from prior `auto`).
+ *
+ * Design: §Engine Selection & Config Model; §14(a).
+ *
+ * Regression guard for task 14: an operator who never writes
+ * markdown_streaming must resolve, after merge/inheritance, to the
+ * bounded full-buffer ENGINE (policy == STREAMING_OFF), NOT to
+ * auto/streaming.  Conversion enablement is gated by markdown_filter,
+ * not by the streaming policy, so the full-buffer path still converts.
+ *
+ * TEST-FIRST (task 14.1): this test is EXPECTED TO FAIL today because
+ * the directive default is still STREAMING_AUTO (merge fallback in
+ * ngx_http_markdown_merge_stream_values).  Task 14.2 flips the default
+ * to STREAMING_OFF (unset ≡ off ≡ bounded full-buffer with conversion),
+ * at which point this test passes.  Do NOT change the default here.
+ * ================================================================ */
+static void
+test_unset_streaming_resolves_to_full_buffer(void)
+{
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+
+    TEST_SUBSECTION("LTS-R011: unset markdown_streaming resolves to full-buffer");
+
+    /*
+     * Both levels leave markdown_streaming unset — the common "never
+     * configured the directive" case.  After merge, the effective
+     * engine policy must be the bounded Full_Buffer engine.
+     */
+    init_conf(&parent);
+    init_conf(&child);
+    merge_stream_config(&child, &parent);
+
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
+        "unset markdown_streaming must resolve to full-buffer "
+        "(STREAMING_OFF), not auto/streaming (LTS-R011.2)");
+    TEST_ASSERT(child.stream.policy != NGX_HTTP_MARKDOWN_STREAMING_AUTO,
+        "unset markdown_streaming must NOT resolve to auto (LTS-R011.3)");
+
+    /*
+     * Conversion is gated by markdown_filter, NOT by the streaming
+     * policy.  Enabling markdown_filter keeps conversion on regardless
+     * of the (full-buffer) engine selection: the full-buffer path is
+     * the conversion path.
+     */
+    init_conf(&parent);
+    init_conf(&child);
+    child.enabled = 1;
+    child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+    merge_stream_config(&child, &parent);
+
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
+        "unset streaming still resolves to full-buffer when "
+        "markdown_filter is enabled");
+    TEST_ASSERT(child.enabled == 1
+            && child.enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC,
+        "markdown_filter conversion enablement is independent of the "
+        "streaming policy (full-buffer engine still converts)");
+
+    TEST_PASS("LTS-R011 unset streaming resolves to bounded full-buffer");
 }
 
 /* ================================================================
@@ -1088,22 +1153,6 @@ test_hard_exclusions_with_parameters(void)
 }
 
 
-/* ================================================================
- * Threshold is now internalized as a fixed 1 MiB constant (0.9.2).
- * This test validates the constant value.
- * ================================================================ */
-static void
-test_stream_threshold_defaults_and_override(void)
-{
-    TEST_SUBSECTION("stream threshold internalized (0.9.2)");
-
-    TEST_ASSERT(NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT == 1048576,
-        "internalized stream threshold must be 1 MiB");
-
-    TEST_PASS("threshold internalization verified");
-}
-
-
 int
 main(void)
 {
@@ -1122,11 +1171,11 @@ main(void)
     test_streaming_zero_copy_rejects_invalid_value();
     test_allocation_failure();
     test_default_inheritance();
+    test_unset_streaming_resolves_to_full_buffer();
     test_reserved_directive_rejected();
     test_hard_exclusions_always_present();
     test_reserved_directive_absent_from_inventory();
     test_hard_exclusions_with_parameters();
-    test_stream_threshold_defaults_and_override();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

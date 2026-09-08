@@ -294,7 +294,7 @@ http {
         location / {
             root html;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_cache_validation full;
             markdown_log_verbosity info;
         }
@@ -302,7 +302,7 @@ http {
         location /proxy/ {
             proxy_pass http://127.0.0.1:$((PORT + 1))/;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_cache_validation full;
             markdown_log_verbosity info;
         }

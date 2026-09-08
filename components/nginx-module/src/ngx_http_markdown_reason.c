@@ -53,8 +53,6 @@ static ngx_str_t  reason_str_failed_closed;
 static ngx_str_t  reason_str_conversion_error;
 static ngx_str_t  reason_str_memory_budget_exceeded;
 static ngx_str_t  reason_str_overload;
-static ngx_str_t  reason_str_invalid_dynconf;
-static ngx_str_t  reason_str_degraded_snapshot;
 static ngx_str_t  reason_str_header_plan_apply_err;
 static ngx_str_t  reason_str_streaming_mid_flight_err;
 static ngx_str_t  reason_str_ffi_panic;
@@ -117,10 +115,6 @@ ngx_http_markdown_reason_init_strs(void)
         &reason_str_memory_budget_exceeded);
     ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_OVERLOAD,
         &reason_str_overload);
-    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_INVALID_DYNCONF,
-        &reason_str_invalid_dynconf);
-    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_DEGRADED_SNAPSHOT,
-        &reason_str_degraded_snapshot);
     ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_HEADER_PLAN_APPLY_ERROR,
         &reason_str_header_plan_apply_err);
     ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_STREAMING_MID_FLIGHT_ERROR,
@@ -201,10 +195,10 @@ ngx_http_markdown_reason_from_eligibility(
  * Map error category enum to failure reason code string (via Rust FFI).
  *
  * This maps the coarse three-category enum to reason codes. For fine-grained
- * error classification (InvalidDynconf,
- * DegradedSnapshot, HeaderPlanApplyError, etc.), callers should classify raw
- * converter codes with `markdown_classify_error_code()` and log the canonical
- * reason selected by the owning runtime path.
+ * error classification (HeaderPlanApplyError, StreamingMidFlightError, etc.),
+ * callers should classify raw converter codes with
+ * `markdown_classify_error_code()` and log the canonical reason selected by
+ * the owning runtime path.
  *
  * The ERROR_SYSTEM → ffi_panic mapping is a simplification: not all
  * system-category errors are FFI panics, but this coarse enum does not
@@ -463,20 +457,6 @@ ngx_http_markdown_reason_overload(void)
 {
     ngx_http_markdown_reason_init_strs();
     return &reason_str_overload;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_invalid_dynconf(void)
-{
-    ngx_http_markdown_reason_init_strs();
-    return &reason_str_invalid_dynconf;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_degraded_snapshot(void)
-{
-    ngx_http_markdown_reason_init_strs();
-    return &reason_str_degraded_snapshot;
 }
 
 const ngx_str_t *

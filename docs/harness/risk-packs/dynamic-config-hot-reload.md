@@ -1,72 +1,60 @@
 # Dynamic Config Hot-Reload Pack
 
-Use this pack when runtime configuration parsing, reload scheduling, reload
-retry state, or worker lifecycle integration changes.
+> **ARCHIVED.** The 0.9.2 convergence removed the dynamic-configuration
+> (runtime hot-reload) subsystem: the external runtime file, the reload timer,
+> the observed-versus-applied modification-time retry state, and the runtime
+> snapshot that a reload could swap. This pack stays as a historical record of
+> the pre-0.9.2 risk surface. It has no active triggers or source paths.
+>
+> This pack does not cover the retained static configuration model (the
+> per-level merge, the `effective_conf` view that the module binds once at
+> header-filter entry, and the static block-mask). Static configuration
+> changes route through `nginx-protocol-safety` and `docs-tooling-drift`.
+> Rules 45 and 71 in
+> [../rules/dynconf-snapshot.md](../rules/dynconf-snapshot.md) document the
+> retained static binding.
 
-## Triggers
+## Historical scope
 
-- touched `ngx_http_markdown_dynconf_impl.h`, reload timer/lifecycle code,
-  request-time dynamic config apply code, or config directive handlers
-- touched operator examples or configuration docs for runtime reload behavior
-- keywords like `dynconf`, `dynamic config`, `hot reload`, `reload_pending`, or
-  `config reload`
+There are no active triggers or source paths for this pack. The entries below
+describe the risks behind the removed runtime-reload behavior. They are not
+requirements of the 0.9.2 production contract. A future runtime-reload feature
+must define its own routing entry and rules as part of its own review.
 
-## Risks
+## Historical risks (pre-0.9.2, no longer enforced)
 
-- Failed reload clears retry state and silently leaves workers stale
-- Global dynconf snapshot leaks into locations with dynconf_enabled=0
-- Unknown config key silently ignored instead of failing atomically
-- Blocking file I/O runs in the worker request path
-- Parser misses the final config line when the file has no trailing newline
-- Size/budget directives use raw integer parsers instead of NGINX size parsers
-- Dynamic path buffers are not NUL-terminated before file-system calls
-- Runtime-applied values diverge from normal directive parsing semantics
+- A failed reload cleared retry state and silently left workers on stale
+  configuration.
+- The global runtime view leaked into locations that had the feature off.
+- An unknown key was silently ignored instead of failing the whole file
+  atomically.
+- Blocking file I/O ran in the worker request path.
+- The parser missed the final line of a file that had no trailing newline.
+- Size and budget values used raw integer parsers instead of the NGINX size
+  parsers, diverging from normal directive semantics.
+- Runtime path buffers reached file-system calls without NUL termination.
 
-## Common Supporting Packs
+## Historical sync points (pre-0.9.2, no longer enforced)
 
-- `nginx-protocol-safety` when runtime config changes request eligibility or
-  response behavior
-- `observability-metrics` when the module logs or counts reload success/failure
-- `docs-tooling-drift` when configuration docs or examples change
-
-## Sync Points
-
-- Normal directive parsing and dynamic config parsing must share equivalent
+- Normal directive parsing and runtime parsing once had to share equivalent
   bounds, units, accepted values, and error behavior.
-- `reload_pending` or equivalent retry latches must remain set after failed
-  reloads and clear only after a successful apply.
-- `applied_mtime` must update only after a successful reload
-  (RELOAD_APPLIED or RELOAD_NO_CHANGE).  When `last_mtime !=
-  applied_mtime`, the timer handler must retry the reload on the next
-  poll cycle.
-- Unknown config keys must cause `NGX_ERROR` (atomic reload rejection)
-  rather than silent `NGX_DECLINED` (ignore).  The module rejects the
-  entire file on any unrecognized key.
-- Worker timer setup and cleanup must match NGINX lifecycle ownership rules.
-- File paths used by reload code must stay bounded, sanitized, and
-  NUL-terminated before file-system APIs receive them.
-- Runtime reload tests must include final-line-without-newline, parse failure,
-  retry, and successful apply cases.
-- **dynconf_enabled isolation**: `build_effective_conf` must receive NULL
-  snapshot when `conf->dynconf_enabled` is false.  `bind_request_snapshot`
-  must not allocate `ctx->dynconf_snapshot` for non-dynconf locations.
-  Detection script: `tools/harness/detect_live_conf_reads.sh`.
-- **effective_conf**: request-path code must read dynconf-mutable fields
-  (`enabled`, `enabled_source`, `prune_noise`, `log_verbosity`,
-  `streaming_budget`, `error_policy`) through
-  `ngx_http_markdown_effective_*()` helpers via `ctx->effective_conf`,
-  not directly from live `conf->`.  Detection script:
-  `tools/harness/detect_live_conf_reads.sh`.
-- **CWE-190**: size-value parsing via `ngx_parse_size()` must go through
-  `ngx_http_markdown_dynconf_parse_size_safe()` (parse→validate→safe-cast).
-  Direct `(size_t)` casts of `ssize_t` results without non-negative guards
-  are forbidden in new request-path code.  Detection script:
-  `tools/harness/detect_cwe190_casts.sh`.
-- **CWE-22**: Python tooling scripts that accept file paths from CLI
-  arguments must pass them through `validate_read_path()` before `open()`.
-  Detection script: `tools/harness/detect_cwe22_paths.py`.
+- A retry latch once had to stay set after a failed reload and clear only after
+  a successful apply.
+- The confirmed-applied modification time once updated only after a successful
+  reload, and the timer retried while the observed and confirmed values
+  diverged.
+- Unknown keys once triggered atomic rejection of the whole file.
+- Worker timer setup and cleanup once had to follow NGINX lifecycle ownership.
+- Runtime path buffers once had to stay bounded and sanitized and to carry a
+  NUL terminator before file-system APIs received them.
+- Runtime tests once had to cover the final-line-without-newline, parse
+  failure, retry, and successful-apply cases.
 
-## Minimum Verification
+## Historical minimum verification (pre-0.9.2)
+
+The commands below were the minimum verification set when the runtime-reload
+behavior was live. They document what the archived pack used to require, not
+the current release requirements.
 
 ```bash
 make harness-check
@@ -75,18 +63,17 @@ make test-nginx-unit
 make docs-check
 ```
 
-For changes that affect request-time reload behavior, also run the relevant
-integration or E2E target before broader release-quality checks.
-
 ## Canonical References
 
-- [../../guides/CONFIGURATION.md](../../guides/CONFIGURATION.md)
+- [../rules/dynconf-snapshot.md](../rules/dynconf-snapshot.md) — Rules 45 and 71
+  document the retained static configuration binding and block-mask.
 - [../../../AGENTS.md](../../../AGENTS.md)
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-19 | Kang | Marked pack archived (dynamic-config runtime hot-reload subsystem removed in the 0.9.2 convergence); rewrote entries as historical record; pointed static config to nginx-protocol-safety, docs-tooling-drift, and Rules 45/71 |
 | 0.6.2 | 2026-05-07 | Kang | Added effective_conf, CWE-190, CWE-22 sync points and harness-security-checks |
 | 0.6.2 | 2026-05-07 | Kang | Added dynconf_enabled isolation, applied_mtime retry contract, unknown-key atomic rejection risks and sync points; startup apply of existing dynconf file |
 | 0.6.0 | 2026-05-03 | Codex | Initial pack from two-week branch scan |

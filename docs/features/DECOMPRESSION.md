@@ -154,8 +154,8 @@ classifies the error and before it handles fail-open or fail-closed responses.
 This makes event totals independent of whether the original body is ultimately
 delivered. The module records successful streaming decompressions when
 finalization succeeds, so a decoder that spans body chunks counts exactly once.
-The renderer also exposes the frozen request, conversion, streaming, dynconf,
-and build families described in [`prometheus-metrics.md`](../guides/prometheus-metrics.md).
+The renderer also exposes the frozen request, conversion, streaming, and build
+families described in [`prometheus-metrics.md`](../guides/prometheus-metrics.md).
 
 ## Verification
 

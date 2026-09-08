@@ -8,16 +8,22 @@ from tools.release.gates.compute_abi_fingerprints import (
 
 
 def test_symbol_hash_covers_every_ffi_export() -> None:
-    """The hashed export set must cover all current Rust FFI modules."""
+    """The hashed export set must cover all current Rust FFI modules.
+
+    The three ``markdown_dynconf_*`` exports and their module were removed in
+    0.9.2 (ABI 2 -> 3; design §14(b), LTS-R006/LTS-R023); together with the
+    other Phase B export-surface removals this leaves 35 measured export
+    names scanned from ``exports.rs`` and ``streaming.rs``.
+    """
     names = symbol_export_names()
 
-    assert len(names) == 39
+    assert len(names) == 35
+    assert {"markdown_convert", "markdown_abi_version"} <= names
     assert {
-        "markdown_sha256_hex",
         "markdown_dynconf_parse",
         "markdown_dynconf_result_init",
         "markdown_dynconf_result_free",
-    } <= names
+    }.isdisjoint(names)
 
 
 def test_header_hash_pattern_matches_generated_literal() -> None:

@@ -1756,7 +1756,7 @@ test_cleanup_does_not_free_shared_temporary_buffer(void)
  * - policy=force with no exclusions routes to streaming
  * - NULL content-type data does not trigger exclusions
  * - if_modified_since_only conditional mode keeps streaming
- * - auto with small content-length routes to full-buffer
+ * - auto with small content-length routes to streaming
  * - auto without content-length routes to streaming
  * Covers: ngx_http_markdown_select_processing_path
  */
@@ -1858,10 +1858,10 @@ test_select_processing_path(void)
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
     r.headers_out.content_length_n = 10;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
-        "auto with small content-length should route full-buffer");
-    TEST_ASSERT(selection.reason == NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD,
-        "auto with small content-length should preserve below_threshold reason");
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
+        "auto with small content-length should prefer streaming");
+    TEST_ASSERT(selection.reason == NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE,
+        "auto with small content-length should report eligible");
 
     r.headers_out.content_length_n = -1;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
@@ -1879,6 +1879,66 @@ test_select_processing_path(void)
         "auto without CL should route streaming");
 
     TEST_PASS("path-selection branches covered");
+}
+
+/*
+ * Feature: pre-lts-convergence-092
+ * Property 1: Engine default is Full_Buffer when streaming is unset/off
+ * Property 2: Auto prefers streaming and does not branch on response size
+ * Property 3: Auto under full cache-validation never selects streaming
+ * Property 5: Engine selection is deterministic and total
+ *
+ * Exercise the production selector across sizes and all policy/cache pairs.
+ * The expected table is independent of content length. Invalid or unset
+ * policies use the bounded default; force retains the runtime safety blocks.
+ */
+static void
+test_selection_size_independence(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t              pool;
+    ngx_connection_t        conn;
+    ngx_log_t               log;
+    ngx_event_t             read_event;
+    ngx_http_markdown_path_selection_t first, repeated;
+    ngx_uint_t              expected;
+
+    TEST_SUBSECTION("deterministic selection across size and policy matrix");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
+    r.headers_out.status = 200;
+    r.method = 0;
+
+    for (ngx_uint_t policy = 0; policy < 4; policy++) {
+        for (ngx_uint_t cache = 0; cache < 3; cache++) {
+            conf.stream.policy = policy;
+            conf.policy.conditional_requests = cache;
+            expected = NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+            if ((policy == NGX_HTTP_MARKDOWN_STREAMING_AUTO
+                 || policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE)
+                && cache != NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT)
+            {
+                expected = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+            }
+            for (int sample = 0; sample < 200; sample++) {
+                r.headers_out.content_length_n =
+                    (sample == 0) ? -1 : (off_t) (sample - 1) * 65537;
+                first = ngx_http_markdown_select_processing_path(
+                    &r, &conf, NULL);
+                repeated = ngx_http_markdown_select_processing_path(
+                    &r, &conf, NULL);
+                TEST_ASSERT(first.path == expected,
+                    "size must not alter the policy/cache decision");
+                TEST_ASSERT(first.path == repeated.path
+                            && first.reason == repeated.reason,
+                    "identical inputs must produce identical decisions");
+            }
+        }
+    }
+    TEST_PASS("2400 size/policy/cache combinations are deterministic");
 }
 
 /*
@@ -7236,6 +7296,7 @@ main(void)
     test_cleanup_paths();
     test_cleanup_does_not_free_shared_temporary_buffer();
     test_select_processing_path();
+    test_selection_size_independence();
     test_update_headers_paths();
     test_send_output_and_resume_paths();
     test_send_output_error_and_deferred_paths();

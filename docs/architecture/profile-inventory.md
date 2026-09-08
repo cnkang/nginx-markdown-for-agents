@@ -4,7 +4,7 @@
 |-------|-------|
 | Version | 0.9.1 (historical input) |
 | Feature | Retired profile bundles |
-| Status | Archive; not an active 0.9.2 contract |
+| Status | Archive. Not an active 0.9.2 contract |
 | Created | 2026-06-28 |
 
 ---
@@ -39,7 +39,7 @@ unknown-directive error for removed names.
 |-----------|---------|---------|-------|
 | `markdown_filter` | off | http, server, location | on\|off\|$variable |
 | `markdown_accept` | strict | http, server, location | strict\|wildcard\|force (Config V2) |
-| `markdown_flavor` | commonmark | http, server, location | commonmark\|gfm; mdx/org-mode are rejected in v0.9.1 |
+| `markdown_flavor` | commonmark | http, server, location | commonmark\|gfm. mdx/org-mode are rejected in v0.9.1 |
 | `markdown_token_estimate` | off | http, server, location | on\|off |
 | `markdown_front_matter` | off | http, server, location | on\|off |
 | `markdown_buffer_chunked` | on | http, server, location | on\|off |
@@ -75,7 +75,7 @@ Maps to two struct fields:
 
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
-| `markdown_streaming` | auto | http, server, location | off\|auto\|force; sole processing-path selector |
+| `markdown_streaming` | auto | http, server, location | off\|auto\|force. Sole processing-path selector |
 | `markdown_stream_threshold` | 1m | http, server, location | Minimum size for streaming candidacy |
 | `markdown_stream_precommit_buffer` | 256k | http, server, location | Replay buffer size |
 | `markdown_stream_flush_min` | 16k | http, server, location | Min batch before flush |
@@ -137,22 +137,22 @@ Reject-only OTel names (not active profile fields):
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
 | `markdown_prune_noise` | on | http, server, location | on\|off |
-| `markdown_prune_selectors` | built-in (nav footer aside) | http, server, location | Tag names |
-| `markdown_prune_protection_selectors` | (empty) | http, server, location | Protected tags |
+The 0.9.2 convergence removed the custom selector directives. The module
+controls built-in noise reduction with `markdown_prune_noise`. The command
+table keeps the removed names as reject-only migration entries.
 
-### Dynamic Config
+### Runtime configuration
 
-| Directive | Default | Context | Notes |
-|-----------|---------|---------|-------|
-| `markdown_dynamic_config` | off | http, server, location | on\|off |
-| `markdown_dynamic_config_path` | (none) | http, server, location | Path |
-| `markdown_dynconf_dry_run` | off | http, server, location | on\|off |
+The 0.9.2 contract has no runtime configuration watcher or dynconf fields.
+The command table keeps the removed directive names only as reject-only
+migration entries so `nginx -t` reports an actionable error. All effective values come
+from static NGINX configuration and the request filter variable.
 
 ### LLM / Token Estimation
 
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
-| `markdown_token_estimate` | off | http, server, location | on\|off; emits `X-Markdown-Tokens` (decimal integer token count) |
+| `markdown_token_estimate` | off | http, server, location | on\|off. Emits `X-Markdown-Tokens` (decimal integer token count) |
 
 the release removed `markdown_llm_provider` and `markdown_chars_per_token` in
 0.9.2: token estimation uses a fixed deterministic heuristic with a
@@ -194,7 +194,7 @@ profile):
 - `trusted_proxies` — security boundary, always explicit (CIDR trust model)
 - `metrics_*`, `otel_*` — observability plumbing
 - `prune_*` — content surgery, site-specific
-- `dynconf_*` — operational plumbing
+- runtime dynconf fields — removed in 0.9.2. No profile storage remains
 - `llm_provider`, `chars_per_token` — historical estimation tuning (directives
   removed in 0.9.2. The final 1.0 compatibility freeze governs the retained
   FFI fields)
@@ -223,7 +223,7 @@ merge_conf(cf, parent, child):
      c. merge_core_ptr_values   — arrays, thresholds, max_inflight
   4. merge_stream_values(child, parent)     — NGX_MD_MERGE_STREAM macro
   5. Set *_explicit flags from saved pre-merge state
-  6. merge_advanced_values(child, parent)   — prune, memory_budget, dynconf
+  6. merge_advanced_values(child, parent)   — prune and static block-mask
   7. apply_memory_budget_override           — budget → max_size when not explicit
   8. Resolve decompress.max_size default    — inherits max_size if still unset
   9. Validate decompress.max_size ≠ 0 when auto_decompress
@@ -238,25 +238,24 @@ default applies.
 ### 3.2 Effective-Config View (request time)
 
 Implemented in `ngx_http_markdown_build_effective_conf()` at
-`ngx_http_markdown_dynconf_impl.h`:
+`ngx_http_markdown_effective_conf_impl.h`:
 
 ```
-build_effective_conf(eff, snapshot, conf):
-  if snapshot != NULL && snapshot.valid:
-    read dynconf-mutable fields from snapshot
-  else:
-    read dynconf-mutable fields from live conf
+build_effective_conf(eff, conf):
+  read the merged static fields from the location configuration
+  preserve request-variable provenance for the filter enable expression
 ```
 
-Dynconf-mutable fields (the only fields in the effective-conf view today):
+The effective view exposes these retained fields:
 - `enabled` / `enabled_source` (the `filter` field)
 - `prune_noise`
 - `log_verbosity`
 - `error_policy`
 - `streaming_buffer` (the `streaming_budget` storage field when the build enables streaming)
 
-`memory_budget` is a static safety limit in 0.9.2 and is not a dynconf
-override. This list is the source used by the request-lifecycle documentation.
+All of these values are static after configuration merge. `memory_budget` is a
+static safety limit. This list is the source used by the request-lifecycle
+documentation.
 
 ### 3.3 Profile Integration Point (not implemented — feature removed)
 

@@ -123,6 +123,81 @@ test_abi_tuple_handshake(void)
 }
 
 
+/*
+ * Startup-rejection contract (task 11.3; Requirements LTS-R023;
+ * design 14(b), Error Handling).
+ *
+ * The 4-tuple handshake is the gate the NGINX module evaluates during
+ * preconfiguration before it trusts a linked Rust archive. This test
+ * proves an old or otherwise mismatched binary is REJECTED at that gate
+ * and can never silently load:
+ *
+ *   - The previous incompatible ABI (version 2) carrying the CURRENT
+ *     header/symbol-set/layout fingerprints is rejected. This is the
+ *     concrete "old binary" case: a stale library reporting the current
+ *     hashes but the prior ABI number must not pass.
+ *   - A mismatch in EACH of the four legs, taken independently, is
+ *     rejected, so a single stale leg is sufficient to fail the gate.
+ *
+ * MARKDOWN_ABI_VERSION is 3 for this release; the immediately prior
+ * incompatible ABI was 2 (design 14(b)(h): dynconf export removal and
+ * MarkdownOptions selector-field removal).
+ */
+static void
+test_abi_old_binary_startup_rejection(void)
+{
+    const uint32_t old_abi_version = MARKDOWN_ABI_VERSION - 1; /* = 2 */
+
+    /* Sanity: this release is ABI 3, so the "old" ABI under test is 2. */
+    TEST_ASSERT(MARKDOWN_ABI_VERSION == 3,
+        "this release must be ABI version 3");
+    TEST_ASSERT(old_abi_version == 2,
+        "the prior incompatible ABI under test must be version 2");
+
+    /* Baseline: the current 4-tuple is accepted (gate opens for a match). */
+    TEST_ASSERT(ngx_http_markdown_ffi_abi_tuple_matches(
+        MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH,
+        MARKDOWN_SYMBOL_SET_HASH, MARKDOWN_LAYOUT_FINGERPRINT),
+        "current 4-tuple must be accepted at startup");
+
+    /*
+     * Old binary: prior ABI (2) reporting the CURRENT hashes must be
+     * rejected. Proves the ABI leg alone blocks a stale library and it
+     * never silently loads.
+     */
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_tuple_matches(
+        old_abi_version, MARKDOWN_HEADER_HASH,
+        MARKDOWN_SYMBOL_SET_HASH, MARKDOWN_LAYOUT_FINGERPRINT),
+        "old ABI 2 with current hashes must be rejected at startup");
+
+    /* Each leg independently mismatched must be rejected. */
+
+    /* Wrong ABI only (distinct wrong value, not merely a bit flip). */
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_tuple_matches(
+        old_abi_version, MARKDOWN_HEADER_HASH,
+        MARKDOWN_SYMBOL_SET_HASH, MARKDOWN_LAYOUT_FINGERPRINT),
+        "wrong ABI leg alone must reject the handshake");
+
+    /* Wrong header hash only. */
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_tuple_matches(
+        MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH + 1,
+        MARKDOWN_SYMBOL_SET_HASH, MARKDOWN_LAYOUT_FINGERPRINT),
+        "wrong header-hash leg alone must reject the handshake");
+
+    /* Wrong symbol-set hash only. */
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_tuple_matches(
+        MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH,
+        MARKDOWN_SYMBOL_SET_HASH + 1, MARKDOWN_LAYOUT_FINGERPRINT),
+        "wrong symbol-set-hash leg alone must reject the handshake");
+
+    /* Wrong layout fingerprint only. */
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_tuple_matches(
+        MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH,
+        MARKDOWN_SYMBOL_SET_HASH, MARKDOWN_LAYOUT_FINGERPRINT + 1),
+        "wrong layout-fingerprint leg alone must reject the handshake");
+}
+
+
 static void
 test_markdown_options_field_access(void)
 {
@@ -140,13 +215,16 @@ test_markdown_options_field_access(void)
     opts.base_url_len = 0;
     opts.streaming_budget = 0;
     opts.prune_noise = 0;
-    opts.prune_selectors = NULL;
-    opts.prune_selector_len = 0;
-    opts.prune_protection_selectors = NULL;
-    opts.prune_protection_selector_len = 0;
+    /*
+     * The four custom-selector fields (prune_selectors, prune_selector_len,
+     * prune_protection_selectors, prune_protection_selector_len) were removed
+     * from MarkdownOptions in 0.9.2 (ABI 2 -> 3; design 14(h), LTS-R009 /
+     * LTS-R023), shrinking the struct from 128 to 96 bytes.
+     */
     opts.memory_budget = 0;
     opts.parse_timeout_ms = 0;
     opts.parser_memory_budget = 0;
+    opts.flush_threshold = 0;
 
     TEST_ASSERT(opts.flavor == 0, "flavor must be 0 after init");
     TEST_ASSERT(opts.timeout_ms == 5000, "timeout_ms must be 5000");
@@ -198,6 +276,7 @@ main(void)
     test_error_codes_compile();
     test_abi_version_alignment();
     test_abi_tuple_handshake();
+    test_abi_old_binary_startup_rejection();
     test_markdown_options_field_access();
     test_ffi_header_entry_field_access();
     test_ffi_header_plan_field_access();

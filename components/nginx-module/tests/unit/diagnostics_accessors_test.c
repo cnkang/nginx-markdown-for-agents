@@ -4,7 +4,6 @@
  * Validates the diagnostics accessor functions that bridge the
  * diagnostics compilation unit with module-internal state:
  *   - collect_metrics (reads SHM metrics zone)
- *   - get_dynconf_state (reads dynconf watcher)
  *
  * Coverage targets:
  *   ngx_http_markdown_diagnostics_accessors_impl.h
@@ -25,11 +24,6 @@ struct ngx_http_markdown_conf_s {
 
 #define NGX_OK         0
 #define NGX_ERROR     -1
-#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED       0
-#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE    1
-#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE 2
-#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR     3
-#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL 5
 
 #define ngx_memzero(buf, n) memset(buf, 0, n)
 #define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
@@ -87,41 +81,6 @@ typedef struct {
 /* Global metrics pointer (mirrors production) */
 static ngx_http_markdown_metrics_t  g_metrics_data;
 static ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
-
-/* ── Dynconf watcher struct (mirrors production) ──────────────── */
-
-typedef struct {
-    time_t      last_mtime;
-    time_t      applied_mtime;
-} ngx_http_markdown_dynconf_file_state_t;
-
-typedef struct {
-    u_char      source_digest[72];
-    u_char      active_digest[72];
-    u_char      lkg_digest[72];
-    ngx_uint_t  generation;
-    ngx_flag_t  lkg_valid;
-    time_t      lkg_mtime;
-} ngx_http_markdown_dynconf_digest_state_t;
-
-typedef struct {
-    ngx_uint_t  version;
-    ngx_uint_t  last_result;
-    time_t      last_success;
-    u_char      last_error[513];
-    size_t      last_error_len;
-    ngx_uint_t  last_masked_fields;
-} ngx_http_markdown_dynconf_diagnostic_state_t;
-
-typedef struct {
-    ngx_flag_t  active;
-    ngx_http_markdown_dynconf_file_state_t file_state;
-    ngx_http_markdown_dynconf_digest_state_t digest_state;
-    ngx_http_markdown_conf_t *conf;
-    ngx_http_markdown_dynconf_diagnostic_state_t diagnostic_state;
-} ngx_http_markdown_dynconf_watcher_t;
-
-static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
 
 /* ── Inflight overload stub ────────────────────────────────────── */
 
@@ -278,79 +237,6 @@ test_collect_metrics_streaming(void)
 }
 #endif
 
-static void
-test_get_dynconf_state_null_output(void)
-{
-    TEST_SUBSECTION("get_dynconf_state with NULL output");
-
-    /* Should not crash */
-    ngx_http_markdown_diagnostics_get_dynconf_state(NULL);
-
-    TEST_PASS("NULL output is no-op");
-}
-
-static void
-test_get_dynconf_state_inactive(void)
-{
-    ngx_http_markdown_diag_dynconf_t out;
-
-    TEST_SUBSECTION("get_dynconf_state when inactive");
-
-    memset(&ngx_http_markdown_dynconf_watcher, 0,
-           sizeof(ngx_http_markdown_dynconf_watcher));
-    ngx_http_markdown_dynconf_watcher.active = 0;
-    memset(&out, 0xFF, sizeof(out));
-
-    ngx_http_markdown_diagnostics_get_dynconf_state(&out);
-
-    TEST_ASSERT(out.active_mtime == 0, "active_mtime should be 0");
-    TEST_ASSERT(out.config_version == 0, "config_version should be 0");
-    TEST_ASSERT(out.last_known_good_mtime == 0, "lkg_mtime should be 0");
-    TEST_ASSERT(out.lkg_valid == 0, "lkg_valid should be 0");
-
-    TEST_PASS("Inactive watcher zeroes all fields");
-}
-
-static void
-test_get_dynconf_state_active(void)
-{
-    ngx_http_markdown_diag_dynconf_t out;
-
-    TEST_SUBSECTION("get_dynconf_state when active");
-
-    memset(&ngx_http_markdown_dynconf_watcher, 0,
-           sizeof(ngx_http_markdown_dynconf_watcher));
-    ngx_http_markdown_dynconf_watcher.active = 1;
-    ngx_http_markdown_dynconf_watcher.file_state.applied_mtime = 1700000000;
-    ngx_http_markdown_dynconf_watcher.diagnostic_state.version = 5;
-    ngx_http_markdown_dynconf_watcher.diagnostic_state.last_masked_fields = 0x15;
-    /*
-     * Regression (CMOD-4): last_mtime is the most recently *observed* file
-     * mtime (updated even on a rejected reload); lkg_mtime is the mtime of
-     * the previous successfully-applied config.  They are deliberately
-     * different here so the test fails if the accessor reads last_mtime
-     * instead of lkg_mtime.
-     */
-    ngx_http_markdown_dynconf_watcher.file_state.last_mtime = 1699999000;
-    ngx_http_markdown_dynconf_watcher.digest_state.lkg_mtime = 1699998000;
-    ngx_http_markdown_dynconf_watcher.digest_state.lkg_valid = 1;
-
-    ngx_http_markdown_diagnostics_get_dynconf_state(&out);
-
-    TEST_ASSERT(out.active_mtime == 1700000000,
-                "active_mtime should match");
-    TEST_ASSERT(out.config_version == 5,
-                "config_version should be 5");
-    TEST_ASSERT(out.last_known_good_mtime == 1699998000,
-                "lkg_mtime should reflect the LKG config mtime, "
-                "not last_mtime");
-    TEST_ASSERT(out.lkg_valid == 1, "lkg_valid should be 1");
-    TEST_ASSERT(out.masked_fields == 0x15,
-                "masked_fields should reflect the last applied snapshot");
-
-    TEST_PASS("Active watcher state collected correctly");
-}
-
 int
 main(void)
 {
@@ -364,9 +250,6 @@ main(void)
 #ifdef MARKDOWN_STREAMING_ENABLED
     test_collect_metrics_streaming();
 #endif
-    test_get_dynconf_state_null_output();
-    test_get_dynconf_state_inactive();
-    test_get_dynconf_state_active();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

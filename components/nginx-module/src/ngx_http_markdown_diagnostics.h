@@ -74,13 +74,6 @@ struct ngx_cycle_s;
 #define NGX_HTTP_MARKDOWN_DIAG_RECORDING_ACTIVE    1
 #define NGX_HTTP_MARKDOWN_DIAG_RECORDING_DEGRADED  2
 
-/* Dynconf fields reported when a candidate key is masked by static config. */
-#define NGX_HTTP_MARKDOWN_DIAG_MASK_FILTER            (1U << 0)
-#define NGX_HTTP_MARKDOWN_DIAG_MASK_PRUNE_NOISE       (1U << 1)
-#define NGX_HTTP_MARKDOWN_DIAG_MASK_LOG_VERBOSITY     (1U << 2)
-#define NGX_HTTP_MARKDOWN_DIAG_MASK_ERROR_POLICY      (1U << 3)
-#define NGX_HTTP_MARKDOWN_DIAG_MASK_STREAMING_BUFFER  (1U << 4)
-
 
 /*
  * Single decision record stored in the ring buffer.
@@ -202,7 +195,7 @@ void ngx_http_markdown_diagnostics_record_reason_at_stage(
 /*
  * HTTP content handler for the diagnostics endpoint.
  *
- * Responds with the Diagnostics Schema v2 JSON document containing the
+ * Responds with the Diagnostics Schema v3 JSON document containing the
  * worker-local runtime state, shared-memory aggregate metrics, build identity,
  * configuration snapshot, and recent decision ring buffer.
  *
@@ -363,50 +356,6 @@ typedef struct {
 void ngx_http_markdown_diagnostics_collect_metrics(
     ngx_http_markdown_diag_metrics_t *out);
 
-
-/*
- * Dynconf state snapshot for the diagnostics endpoint.
- *
- * Contains the watcher state needed by the diagnostics JSON
- * response.  Populated by ngx_http_markdown_diagnostics_get_dynconf_state().
- */
-typedef struct {
-#define NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN  72
-    ngx_uint_t  state;
-    ngx_uint_t  generation;
-    u_char      source_digest[NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN];
-    u_char      active_digest[NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN];
-    u_char      lkg_digest[NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN];
-    time_t      last_success;
-    ngx_flag_t  has_last_success;
-    u_char      last_error[513];
-    size_t      last_error_len;
-    time_t      active_mtime;
-    ngx_uint_t  config_version;
-    time_t      last_known_good_mtime;
-    ngx_flag_t  lkg_valid;
-    ngx_uint_t  masked_fields;
-} ngx_http_markdown_diag_dynconf_t;
-
-#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_DISABLED          0
-#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_NO_FILE           1
-#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG    2
-#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE            3
-#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED     4
-
-
-/*
- * Get the current dynconf watcher state for the diagnostics endpoint.
- *
- * Reads the global dynconf watcher and populates the output
- * struct with current state values.  If dynconf is not active,
- * all fields are zeroed.
- *
- * Parameters:
- *   out - Output struct to populate
- */
-void ngx_http_markdown_diagnostics_get_dynconf_state(
-    ngx_http_markdown_diag_dynconf_t *out);
 
 typedef struct {
     ngx_flag_t  filter;

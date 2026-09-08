@@ -1,4 +1,6 @@
-# Observability Contract v2 (Internal)
+# Observability Contract v3 (Internal)
+
+Existing references use this filename as a compatibility link.
 
 **Status**: repository-internal model for 0.9.2
 
@@ -6,7 +8,7 @@ This document records the ownership boundaries for the frozen observability
 surfaces. It is not an external Rust SDK or an additional wire-schema source.
 The 0.9.0 compatibility contract documented `schema_version 1` in
 [observability-schema-v1.md](observability-schema-v1.md). The 0.9.2
-diagnostics endpoint below intentionally emits schema_version: 2 and the
+diagnostics endpoint below intentionally emits schema_version: 3 and the
 breaking-release migration guide defines the consumer transition.
 
 The authoritative production surfaces are:
@@ -24,17 +26,16 @@ Changes to these surfaces and their tests/documentation must remain
 synchronized. Internal Rust helpers must not add undocumented operator fields,
 metric families, labels, or configuration directives.
 
-## Diagnostics Schema v2
+## Diagnostics Schema v3
 
 The NGINX C renderer is the single implementation of the live diagnostics
 endpoint. The response has exactly these seven top-level fields:
 
-- `schema_version`: integer constant `2`
+- `schema_version`: integer constant `3`
 - `product_version`
 - `worker`: `pid` and `scope="worker-local"`
 - `build`: source SHA, NGINX/Rust versions, and feature list
-- `configuration`: static digest, Dynconf state, effective values, and
-  per-field sources
+- `configuration`: static digest, effective values, and per-field sources
 - `runtime`: worker-local `inflight` and `pending_output`, plus the bounded
   `module_metrics` counters used by local performance evidence collection
 - `recent_decisions`: bounded worker-local decision entries
@@ -60,7 +61,7 @@ Native NGINX access/auth directives can further restrict access, but they
 cannot broaden the built-in loopback boundary.
 
 Legacy `config_snapshot`, profile, streaming, duplicated metrics, and
-rollback-mutation fields are not part of v2.
+rollback-mutation fields are not part of v3.
 
 The optional `runtime.module_metrics` object is a structured evidence bridge,
 not a second public metrics surface. When present, it carries exact integer
@@ -70,7 +71,7 @@ than inferring these values from unrelated Prometheus labels.
 
 ## Prometheus Metrics v1
 
-The endpoint emits Prometheus text format 0.0.4 and exactly these eleven
+The endpoint emits Prometheus text format 0.0.4 and exactly these ten
 families:
 
 ```text
@@ -83,7 +84,6 @@ nginx_markdown_output_bytes_total
 nginx_markdown_streaming_events_total
 nginx_markdown_streaming_peak_memory_bytes
 nginx_markdown_decompression_events_total
-nginx_markdown_dynconf_reloads_total
 nginx_markdown_build_info
 ```
 

@@ -327,19 +327,13 @@ The handler is loopback-only by default and denies external peers before
 rendering. Standard NGINX `allow`/`deny` directives may add restrictions but
 cannot broaden that boundary.
 
-### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf_impl.h`)
-`markdown_dynconf_dry_run on` validates a new configuration file during the
-dynconf reload cycle
-without replacing the active snapshot. Validation results use bounded
-categorical error reasons. On successful reload, the
-module preserves the previous active snapshot as last-known-good (LKG) for diagnostics
-and failed-reload protection. There is no worker-local runtime restore API.
-Operators restore a prior valid file atomically and let the normal watcher
-validate and apply it. Atomic rename prevents partial-file reads, but each
-worker has its own watcher cycle and may briefly expose a different
-`config_version`. Diagnostics or request behavior verifies convergence. A
-controlled NGINX reload is the strong synchronization boundary.
-`applied_mtime` updates only after successful application (Rule 35).
+### Static configuration and reload boundary
+
+The 0.9.2 convergence removed the runtime dynconf watcher, dry-run path, and
+last-known-good snapshot. The reject-only directive entries remain solely to
+give `nginx -t` an actionable migration error. NGINX validates configuration
+changes before the normal reload or restart boundary. The request path then
+reads the merged static configuration directly.
 
 ### Reason Code FFI Accessor (registry projections + FFI)
 The declarative `reason_registry.toml` defines the reason codes. The generated
@@ -374,12 +368,12 @@ surface before the 1.0 LTS compatibility freeze:
   conversion_memory, parser_budget, streaming_buffer, decompressed_size,
   decompression_ratio, and max_inflight replace the former standalone
   limit directives.
-- **Metrics freeze**: The production endpoint emits the eleven-family v1
+- **Metrics freeze**: The production endpoint emits the ten-family v1
   contract (see [observability-schema-v2.md](observability-schema-v2.md)).
   Legacy multi-format, per-path, shadow, and debug families no longer exist.
 - **Streaming threshold**: The streaming auto-route threshold stays fixed
   internally at 1 MiB and is not operator-configurable.
-- **ABI and FFI**: The bundled Rust/C boundary is at ABI version 2.
+- **ABI and FFI**: The bundled Rust/C boundary is at ABI version 3.
 
 The sections below describe subsystems and prior release lines. Where they
 describe directives that no longer exist in 0.9.2, treat the behavior as

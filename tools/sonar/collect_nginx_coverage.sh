@@ -256,9 +256,6 @@ http {
     keepalive_timeout  5;
     gzip_http_version 1.0;
     markdown_trusted_proxies 127.0.0.1/32 ::1/128;
-    markdown_dynamic_config on;
-    markdown_dynamic_config_path ${RUNTIME}/conf/markdown-dynconf.conf;
-
     # ── Primary server: full feature set ────────────────────────────
     server {
         listen 127.0.0.1:${PORT};
@@ -274,7 +271,7 @@ http {
         location / {
             root html;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_cache_validation full;
             markdown_log_verbosity debug;
             markdown_token_estimate on;
@@ -390,7 +387,7 @@ http {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
             markdown_limits conversion_memory=1m parser_budget=1m streaming_buffer=64k;
@@ -401,7 +398,7 @@ http {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming force;
             markdown_cache_validation off;
             markdown_error_policy pass;
@@ -414,7 +411,7 @@ http {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=64k conversion_memory=1m parser_budget=1m;
@@ -427,7 +424,7 @@ http {
         location /proxy-fake-gzip {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/fake-gzip/;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
         }
@@ -437,7 +434,7 @@ http {
         location /proxy-fake-br {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/fake-br/;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
         }
@@ -447,7 +444,7 @@ http {
         location /proxy-fake-deflate {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/fake-deflate/;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
         }
@@ -611,7 +608,7 @@ http {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=10m conversion_memory=10m parser_budget=10m;
@@ -1476,6 +1473,13 @@ sleep 2
 # reuse the same streaming-enabled binary via NGINX_BIN env var,
 # avoiding redundant rebuilds inside each sub-script.
 REUSE_NGINX_BIN="${RUNTIME}/sbin/nginx"
+
+# Build the migrated Rust harness after the checkout's source changes so the
+# wrapper scenarios cannot reuse a stale target/debug binary.  The wrappers
+# intentionally keep their backward-compatible entry points and prefer that
+# binary when it exists.
+echo "==> Building migrated Rust E2E harness"
+cargo build --manifest-path "${WORKSPACE_ROOT}/tools/e2e-harness/Cargo.toml" --quiet
 
 run_wrapper_with_nginx_bin_fallback() {
   local label="$1"

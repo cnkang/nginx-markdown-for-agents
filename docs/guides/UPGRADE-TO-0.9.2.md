@@ -3,9 +3,10 @@
 ## Overview
 
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
-0.9.2 is a **breaking release**. The release reduces the configuration surface from
-63 directives to 25, and configurations using any removed directive fail
-`nginx -t` with `unknown directive` until migrated. Review
+0.9.2 is a **breaking release**. The release freezes 20 active directives and
+retains five removed names as reject-only migration entries. Those entries fail
+`nginx -t` with an explicit migration message until migrated. Older names that
+are no longer registered fail with `unknown directive`. Review
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) and
 [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) before upgrading. If you are running
 0.9.0, complete [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following
@@ -150,14 +151,15 @@ sudo install -m 0755 ngx_http_markdown_filter_module.so \
 
 ### 5. Migrate the configuration
 
-0.9.2 is a breaking configuration release (25-directive surface, dynconf
-file format frozen at JSON schema v1). Before validating or restarting
+0.9.2 is a breaking configuration release (20 active directives plus five
+reject-only migration entries). Before validating or restarting
 NGINX, apply the 0.9.2 migration:
 
 ```bash
 # Apply the 0.9.2 directive changes documented in MIGRATION-0.9.2.md:
-# removed profile/OTel directives, consolidated markdown_limits keys,
-# dynconf migration from legacy line format to JSON schema v1.
+# removed profile/OTel directives and consolidated markdown_limits keys.
+# The runtime dynconf file/watcher was removed; move its values to static
+# directives and validate with nginx -t before a controlled reload.
 # (The markdown_streaming_engine -> markdown_streaming rename happened in
 # 0.9.1, not 0.9.2; 0.9.2 removed markdown_stream_threshold and
 # markdown_streaming_zero_copy.)
@@ -455,20 +457,28 @@ elif ! pgrep -x nginx >/dev/null 2>&1; then
 fi
 PROBE_PATH="/known-convertible-page"   # adjust to your verified fixture
 PROBE_BODY="$(mktemp)"
+PROBE_HEADERS="$(mktemp)"
 if ! curl -fsS --max-time 10 -H 'Accept: text/markdown' \
+        -D "${PROBE_HEADERS}" \
         -o "${PROBE_BODY}" "http://localhost${PROBE_PATH}"; then
   echo "ERROR: post-start check failed (probe request); keeping ${MODULE_BACKUP} for rollback" >&2
-  rm -f "${PROBE_BODY}"
+  rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
+  exit 1
+fi
+if ! grep -qi '^Content-Type: text/markdown' "${PROBE_HEADERS}"; then
+  echo "ERROR: post-start check failed (probe response is not text/markdown); keeping ${MODULE_BACKUP} for rollback" >&2
+  echo "  Inspect the probe response and verify ${PROBE_PATH} converts before removing the backup." >&2
+  rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
   exit 1
 fi
 if ! grep -q '^# ' "${PROBE_BODY}" \
     && ! head -c 1 "${PROBE_BODY}" | grep -q '[*-`]'; then
   echo "ERROR: post-start check failed (response is not Markdown); keeping ${MODULE_BACKUP} for rollback" >&2
   echo "  Inspect the probe response and verify ${PROBE_PATH} converts before removing the backup." >&2
-  rm -f "${PROBE_BODY}"
+  rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
   exit 1
 fi
-rm -f "${PROBE_BODY}"
+rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
 # Discard the backup only when THIS run created it; a pre-existing backup
 # left by an earlier upgrade stays until that upgrade's cleanup removes it.
 if [[ "${MODULE_BACKUP_OWNED}" -eq 1 ]]; then

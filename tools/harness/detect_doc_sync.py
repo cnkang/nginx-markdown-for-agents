@@ -405,7 +405,20 @@ def _directive_registry(content: str) -> tuple[list[str], list[str]]:
         flags=re.DOTALL,
     )
     names = [name for name, _ in entries]
-    rejected = [name for name, body in entries if "ngx_http_markdown_reject_" in body]
+    # Reject-only migration directives keep their name registered but bind an
+    # error-returning handler that always fails `nginx -t`. 0.9.2 (LTS-R008)
+    # routes every removed directive through ngx_http_markdown_removed_directive;
+    # ngx_http_markdown_reject_ is the pre-0.9.2 handler-naming convention kept
+    # for backward compatibility with older command tables.
+    reject_handlers = (
+        "ngx_http_markdown_removed_directive",
+        "ngx_http_markdown_reject_",
+    )
+    rejected = [
+        name
+        for name, body in entries
+        if any(handler in body for handler in reject_handlers)
+    ]
     return names, rejected
 
 

@@ -22,7 +22,7 @@ runtime semantics from canonical docs. They answer four practical questions:
 | [security-static-supply-chain.md](security-static-supply-chain.md) | actionlint, shellcheck, gitleaks, Semgrep, cargo-deny, Trivy/SBOM/Scorecard | `AGENTS.md`, `docs/harness/rules/security-static-analysis.md` |
 | [harness-remediation.md](harness-remediation.md) | recent Git analysis, harness rules, steering adapters, remediation closeout | `AGENTS.md`, `docs/harness/core.md` |
 | [packaging-distribution.md](packaging-distribution.md) | APT/YUM repos, Homebrew tap, Helm chart, K8s Ingress | `AGENTS.md`, `docs/guides/INSTALLATION.md` |
-| [dynamic-config-hot-reload.md](dynamic-config-hot-reload.md) | dynamic config parsing, reload retry, runtime apply | `AGENTS.md`, `docs/guides/CONFIGURATION.md` |
+| [dynamic-config-hot-reload.md](dynamic-config-hot-reload.md) | **Archived** — runtime hot-reload subsystem removed in the 0.9.2 convergence; historical risk record only, no active triggers; retained static config routes through nginx-protocol-safety and docs-tooling-drift | `docs/harness/rules/dynconf-snapshot.md` (Rules 45/71) |
 | [e2e-migration.md](e2e-migration.md) | Rust harness E2E migration, wrapper parity, reuse mode | `AGENTS.md`, `docs/testing/E2E_TESTS.md` |
 | [output-safety.md](output-safety.md) | Markdown output escaping, link emission, content-injection prevention | `AGENTS.md`, `docs/harness/rules/html-sanitizer.md` |
 | [otel-integration.md](otel-integration.md) | **Archived** — OTel subsystem removed in 0.9.2; historical risk record only, no active triggers; reintroduction is governed by ADR-0027 | `docs/architecture/ADR/0027-otel-removal-reintroduction-conditions.md` |
@@ -31,6 +31,7 @@ runtime semantics from canonical docs. They answer four practical questions:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-19 | Kang | Marked dynamic-config-hot-reload as archived (runtime hot-reload subsystem removed in the 0.9.2 convergence); retained static config routes through nginx-protocol-safety, docs-tooling-drift, and Rules 45/71 |
 | 0.9.2 | 2026-08-08 | Kang | Marked otel-integration as archived (OTel subsystem removed in 0.9.2, superseded surface ADR-0027); added e2e-migration and output-safety rows |
 | 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency verification families |
 | 0.8.2 | 2026-06-13 | Codex | Added security-static-supply-chain pack for supplemental static security and supply-chain visibility gates |

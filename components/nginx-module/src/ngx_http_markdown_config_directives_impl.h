@@ -32,7 +32,6 @@
 static ngx_conf_enum_t
     ngx_http_markdown_accept_enum[] = {
     { ngx_string("strict"),    NGX_HTTP_MARKDOWN_ACCEPT_STRICT },
-    { ngx_string("wildcard"),  NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD },
     { ngx_string("force"),     NGX_HTTP_MARKDOWN_ACCEPT_FORCE },
     { ngx_null_string, 0 }
 };
@@ -183,24 +182,26 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_accept strict|wildcard|force   (Config V2, 0.9.0)
+     * markdown_accept strict|force   (Config V2, 0.9.0; wildcard removed 0.9.2)
      *
-     * Accept-header negotiation policy. Replaces the removed
-     * markdown_on_wildcard on|off directive.
+     * Accept-header negotiation policy.
      *   strict   - convert only on an explicit text/markdown match (default)
-     *   wildcard - also convert on wildcard Accept (equivalent to the old
-     *              "markdown_on_wildcard on")
      *   force    - convert regardless of the Accept header (dangerous)
      * Public default: strict
      * Context: http, server, location
      *
+     * The "wildcard" value was removed in 0.9.2 (LTS-R008/LTS-R010): it is no
+     * longer part of ngx_http_markdown_accept_enum, and the
+     * ngx_http_markdown_accept wrapper rejects it with an explicit migration
+     * message so `nginx -t` fails rather than silently ignoring it.
+     *
      * Example:
-     *   markdown_accept wildcard;
+     *   markdown_accept strict;
      */
     {
         ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_ACCEPT),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_enum_slot,
+        ngx_http_markdown_accept,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, accept_policy),
         &ngx_http_markdown_accept_enum
@@ -211,14 +212,16 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_auth_policy allow|deny
      *
-     * Policy for converting authenticated requests:
-     * - allow: Convert authenticated requests (default)
-     * - deny: Skip conversion for authenticated requests
-     * Default: allow
+     * Policy for converting identifiable authenticated requests (LTS-R021):
+     * - allow: Explicit opt-in; convert authenticated requests
+     * - deny:  Do not convert authenticated requests (still serve the
+     *          original HTML; never refuse)
+     * Default: deny (unset resolves to no-convert for authenticated content)
+     * Public default: deny
      * Context: http, server, location
      *
      * Example:
-     *   markdown_auth_policy deny;
+     *   markdown_auth_policy allow;
      */
     {
         ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_AUTH_POLICY),
@@ -281,10 +284,16 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Sole streaming processing-path policy.
      *
-     *   off   - never stream
-     *   auto  - stream large responses, full-buffer small ones (default)
+     *   off   - bounded full-buffer conversion (default; unset == off)
+     *   auto  - prefer streaming (no size/heuristic branching); explicit only
      *   force - always stream (subject to runtime hard blocks)
-     * Public default: auto
+     * Public default: off
+     *
+     * Migration note (0.9.2): the unset default changed from auto to off.
+     * Unset markdown_streaming now resolves to bounded full-buffer (design
+     * §14(a), LTS-R011.2).  auto retains "prefer streaming" meaning only when
+     * written explicitly; operators who relied on the old implicit streaming
+     * default must now write "markdown_streaming auto" (or "force").
      *
      * Conflict (config conflict): markdown_cache_validation full + force => error;
      * full + auto => warning (runtime blocks streaming, falls back to
@@ -465,50 +474,49 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_prune_selectors <string>
+     * markdown_prune_selectors <string>   (REMOVED in 0.9.2, LTS-R008/R009)
      *
-     * Space-separated tag names for regions to prune.
-     * Replaces built-in defaults when set.
-     * Built-in defaults: nav footer aside
-     *
-     * Public default: nav footer aside
-     * Default: built-in defaults
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_prune_selectors "nav footer aside sidebar";
+     * Custom prune selectors were removed in 0.9.2.  The directive name stays
+     * registered so a configuration still using it fails `nginx -t` with an
+     * explicit migration message instead of being silently ignored.  Built-in
+     * noise reduction remains controlled by markdown_prune_noise.
+     * The advanced.prune_selectors config field/decode path was removed in
+     * 0.9.2 (LTS-R009), so the offset is 0: ngx_http_markdown_removed_directive
+     * ignores conf/offset and always fails nginx -t (LTS-R008).
      */
     {
         ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_SELECTORS),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_str_slot,
+            |NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, advanced.prune_selectors),
+        0,
         NULL
     },
+    /* Context above preserves the pre-removal http/server/location surface;
+     * only NGX_CONF_ANY (arg count) + the error handler remain so any usage
+     * reaches ngx_http_markdown_removed_directive, which ignores conf/offset
+     * and always fails nginx -t (LTS-R008). */
 
     /*
      * markdown_prune_protection_selectors <string>
+     *                                     (REMOVED in 0.9.2, LTS-R008/R009)
      *
-     * Space-separated tag names for regions to protect
-     * from pruning. Protection wins over prune: an element
-     * matching both is kept.
-     *
-     * Public default: empty
-     * Default: empty (no protection)
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_prune_protection_selectors "nav";
+     * Custom protection selectors were removed in 0.9.2.  The directive name
+     * stays registered so a configuration still using it fails `nginx -t`
+     * with an explicit migration message instead of being silently ignored.
+     * The advanced.prune_protection_selectors config field/decode path was
+     * removed in 0.9.2 (LTS-R009), so the offset is 0:
+     * ngx_http_markdown_removed_directive ignores conf/offset and always
+     * fails nginx -t (LTS-R008).
      */
     {
         ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_PROTECTION_SELECTORS),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_str_slot,
+            |NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, advanced.prune_protection_selectors),
+        0,
         NULL
     },
 
@@ -545,69 +553,54 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_dynamic_config on|off
+     * markdown_dynamic_config on|off   (REMOVED in 0.9.2, LTS-R008)
      *
-     * Enable runtime configuration hot-reload without NGINX restart.
-     * Watches the file specified by markdown_dynamic_config_path for
-     * changes and atomically swaps the active configuration.
-     *
-     * Default: off
-     * Context: http
-     *
-     * Example:
-     *   markdown_dynamic_config on;
-     *   markdown_dynamic_config_path /etc/nginx/markdown_dynamic.conf;
+     * The dynamic-config hot-reload subsystem was removed in 0.9.2.  The
+     * directive name stays registered so a configuration still using it fails
+     * `nginx -t` with an explicit migration message instead of being silently
+     * ignored.  Migrate to static config validated by `nginx -t` + reload.
+     * The error handler ignores the configuration offset and always fails.
      */
     {
         ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG),
-        NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG,
-        ngx_http_markdown_dynconf_flag,
+        NGX_HTTP_MAIN_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, advanced.dynconf_enabled),
+        0,
         NULL
     },
 
     /*
-     * markdown_dynamic_config_path <path>
+     * markdown_dynamic_config_path <path>   (REMOVED in 0.9.2, LTS-R008)
      *
-     * Path to the dynamic configuration file to watch for changes.
-     * Only effective when markdown_dynamic_config is on.
-     *
-     * Default: (none)
-     * Context: http
-     *
-     * Example:
-     *   markdown_dynamic_config_path /etc/nginx/markdown_dynamic.conf;
+     * Removed alongside markdown_dynamic_config.  The directive name stays
+     * registered so a configuration still using it fails `nginx -t` with an
+     * explicit migration message instead of being silently ignored.
+     * The error handler ignores the configuration offset and always fails.
      */
     {
         ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG_PATH),
-        NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
-        ngx_http_markdown_set_dynconf_path,
+        NGX_HTTP_MAIN_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, advanced.dynconf_path),
+        0,
         NULL
     },
 
     /*
-     * markdown_dynconf_dry_run on|off
+     * markdown_dynconf_dry_run on|off   (REMOVED in 0.9.2, LTS-R008)
      *
-     * Enable dry-run mode for dynamic configuration validation.
-     * When enabled, configuration changes are validated but NOT
-     * applied to the active snapshot.  This allows operators to
-     * verify a new dynconf file without affecting live traffic.
-     *
-     * Default: off
-     * Context: http
-     *
-     * Example:
-     *   markdown_dynconf_dry_run on;
+     * Removed alongside the dynamic-config subsystem.  The directive name
+     * stays registered so a configuration still using it fails `nginx -t`
+     * with an explicit migration message instead of being silently ignored.
+     * The error handler ignores the configuration offset and always fails.
      */
     {
         ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNCONF_DRY_RUN),
-        NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG,
-        ngx_http_markdown_dynconf_flag,
+        NGX_HTTP_MAIN_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, advanced.dynconf_dry_run),
+        0,
         NULL
     },
 
@@ -616,7 +609,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Enable or disable the runtime diagnostics endpoint
      * (/nginx-markdown/diagnostics).  When enabled, the endpoint
-     * exposes the Diagnostics Schema v2 fields: worker/build identity,
+     * exposes the Diagnostics Schema v3 fields: worker/build identity,
      * configuration, runtime counters, and recent decisions.
      *
      * Access control: the diagnostics content handler runs in the

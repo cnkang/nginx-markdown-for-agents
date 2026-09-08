@@ -358,7 +358,7 @@ ngx_http_markdown_streaming_cleanup(void *data);
  *
  * Evaluates markdown_streaming and applies the selection rules (policy, HEAD,
  * 304 status, conditional_requests policy, content-type
- * exclusions, and auto-mode content-length threshold).
+ * exclusions). Auto prefers streaming regardless of response size.
  *
  * r    - current HTTP request
  * conf - location configuration
@@ -623,11 +623,9 @@ ngx_http_markdown_log_conditional_streaming(
  * 6. Content-Type is text/event-stream -> PATH_FULLBUFFER
  * 7. stream_excluded_types exclusion match -> PATH_FULLBUFFER
  * 8. policy == force -> PATH_STREAMING
- * 9. policy == auto + CL >= NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT -> PATH_STREAMING
- * 10. policy == auto + chunked -> PATH_STREAMING
- * 11. policy == auto + CL < NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT -> PATH_FULLBUFFER
+ * 9. policy == auto -> PATH_STREAMING, independent of content length
  *
- * Default (no markdown_streaming directive): auto mode.
+ * Default (no markdown_streaming directive): bounded full-buffer mode.
  */
 static ngx_http_markdown_path_selection_t
 ngx_http_markdown_select_processing_path(
@@ -645,7 +643,9 @@ ngx_http_markdown_select_processing_path(
 
     policy = conf->stream.policy;
 
-    if (policy == NGX_HTTP_MARKDOWN_STREAMING_OFF) {
+    if (policy != NGX_HTTP_MARKDOWN_STREAMING_AUTO
+        && policy != NGX_HTTP_MARKDOWN_STREAMING_FORCE)
+    {
         return ngx_http_markdown_path_selection(
             NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
             NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
@@ -727,20 +727,7 @@ ngx_http_markdown_select_processing_path(
             NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE);
     }
 
-    /* Rules 9-11: policy == auto */
-    if (r->headers_out.content_length_n >= 0
-        && (size_t) r->headers_out.content_length_n
-           < NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT)
-    {
-        /* CL < 1 MiB fixed threshold: use full-buffer */
-        ngx_http_markdown_log_event(
-            r, conf, eff, "eligibility", "streaming_auto_fullbuffer");
-        return ngx_http_markdown_path_selection(
-            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
-            NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD);
-    }
-
-    /* auto + CL >= NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT or chunked (no CL) */
+    /* Auto prefers streaming after safety checks, regardless of size. */
     ngx_http_markdown_log_event(
         r, conf, eff, "eligibility", "streaming_auto_streaming");
     return ngx_http_markdown_path_selection(

@@ -1,181 +1,137 @@
 ---
 domain: dynconf-snapshot
 rules: [34, 35, 45, 71]
+status: partially-retired
 paths:
-  - "components/nginx-module/src/dynconf/**"
-  - "components/nginx-module/src/config/**"
+  - "components/nginx-module/src/ngx_http_markdown_effective_conf_impl.h"
+  - "components/nginx-module/src/ngx_http_markdown_config_core_impl.h"
   - "components/nginx-module/src/ngx_http_markdown_filter_module.h"
 ---
 
-## Dynconf Snapshot Isolation
+## Static Configuration Binding (formerly Dynconf Snapshot Isolation)
 
-### 34. Request-path code must read dynconf-mutable fields through effective_conf, not live conf
-Historical issues: P0 request-level consistency gap (snapshot bound but not consumed),
-P0 snapshot race (active_snapshot read twice in header_filter).
-
-Required:
-- In request-path code (body filter, conversion, logging, limits, streaming),
-  dynconf-mutable fields (`enabled`, `enabled_source`, `prune_noise`,
-  `log_verbosity`, `markdown_limits`) must be read through
-  `ctx->effective_conf` via the `ngx_http_markdown_effective_*()` helpers,
-  not directly from `conf->`.
-- Direct `conf->` reads of mutable fields are only allowed in:
-  - Configuration/initialization/merge code (`config_core_impl.h`,
-    `config_handlers_impl.h`)
-  - Dynconf snapshot construction/apply helpers (`dynconf_impl.h`)
-  - `static_config_manifest_v1` serializer helpers, which intentionally read
-    the compiled configuration to produce the immutable static identity digest
-    (the detector allowlists only their exact function names)
-  - Fallback paths where `eff` is NULL (early header filter, allocation
-    failure) — these must carry a comment explaining why
-    `eff` is unavailable.
-- When adding a new dynconf-mutable field, the developer must update the following in
-  the same changeset:
-  1. `ngx_http_markdown_dynconf_snapshot_t` — add the field
-  2. `ngx_http_markdown_effective_conf_t` — add the field
-  3. `ngx_http_markdown_dynconf_snapshot_from_conf()` — copy the field
-  4. `ngx_http_markdown_dynconf_apply_snapshot()` — apply the field
-  5. `ngx_http_markdown_build_effective_conf()` — populate from snapshot or conf
-  6. A new `ngx_http_markdown_effective_<field>()` helper function
-  7. All request-path reads of the field — switch to the helper
-  8. At least one regression test proving snapshot consistency
-
-Snapshot race elimination (v0.6.2):
-- In `ngx_http_markdown_header_filter()`, the global
-  `ngx_http_markdown_dynconf_watcher.active_snapshot` must be read exactly
-  once, at function entry, into a function-lifetime `snap_copy` variable.
-  The module derives `early_eff` from that `snap_copy` once via
-  `ngx_http_markdown_build_effective_conf()`, also at function entry.
-- Both `snap_copy` and `early_eff` must have function-lifetime scope (not
-  block scope), so they remain valid through ctx binding.
-- When binding the snapshot and effective view into the request context,
-  copy directly from the function-level variables:
-  `*ctx->dynconf_snapshot = snap_copy` and `*ctx->effective_conf = early_eff`.
-  Do NOT re-read `ngx_http_markdown_dynconf_watcher.active_snapshot` or
-  re-invoke `ngx_http_markdown_build_effective_conf()` — either creates a
-  race window where a concurrent timer reload can swap the global snapshot
-  between the initial capture and the ctx bind, causing the request to see
-  inconsistent configuration.
-- The binding must run via
-  `ngx_http_markdown_bind_request_snapshot()`, which encapsulates the
-  allocation + copy + degraded-mode logging in one place.
-- `ngx_http_markdown_handle_ctx_alloc_failure()` must accept an `eff`
-  parameter and pass it to `log_decision_with_category()`.  Passing NULL
-  causes the log path to fall back to live conf, violating the effective-conf
-  model.  The caller in `header_filter` passes `&early_eff`.
-
-dynconf_path_configured lifecycle (v0.6.2):
-- The `dynconf_path_configured` flag must live in
-  `ngx_http_markdown_main_conf_t` (config-parse scope), not as a
-  file-scope static variable.  A file-scope static survives across
-  NGINX reloads, leaving stale state that prevents re-configuration.
-- `ngx_http_markdown_set_dynconf_path()` reads and writes the flag through
-  `ngx_http_conf_get_module_main_conf()`, providing per-reload isolation.
-
-Verification:
-- `tools/harness/detect_live_conf_reads.sh components/nginx-module/src/`
-- `make harness-security-checks`
+> **Convergence note (0.9.2).** The 0.9.2 convergence dropped the
+> dynamic-configuration (runtime hot-reload) subsystem. The runtime snapshot,
+> the reload timer, and the mtime-retry state no longer exist. Only the
+> **static** per-level configuration model remains. The merge step computes
+> each field once at configuration time. The module binds one `effective_conf`
+> view at header-filter entry. Explicit static settings mark a block-mask that
+> propagates down the configuration tree.
+>
+> This file keeps rule numbers **34/35/45/71** for traceability. Rules **34**
+> and **35** described the retired runtime-reload behavior. Both rules now read
+> **RETIRED** and hold only a historical record. Rules **45** and **71**
+> describe the retained **static** binding and block-mask and stay **CURRENT**.
 
 ---
 
-### 35. Dynconf snapshot isolation and reload retry contract
+### 34. [RETIRED — historical] Request path read runtime-mutable fields through a bound snapshot
 
-Required:
-- When a location has `dynconf_enabled=0`, `header_filter` must pass NULL
-  snapshot to `ngx_http_markdown_build_effective_conf()`, and
-  `ngx_http_markdown_bind_request_snapshot()` must not allocate
-  `ctx->dynconf_snapshot`.  The global snapshot must never influence
-  non-dynconf locations.
-- `ngx_http_markdown_dynconf_watcher_t` must maintain separate
-  `last_mtime` (observed) and `applied_mtime` (confirmed after
-  successful reload).  `applied_mtime` must update only after
-  reload returns one of the outcomes in the complete update set below.
-  `applied_mtime` is also updated to `last_mtime` on
-  `RELOAD_DRY_RUN_OK` / `RELOAD_DRY_RUN_FAIL` to suppress repeated
-  re-validation of the same file content. The complete update set is exactly
-  `{RELOAD_APPLIED, RELOAD_NO_CHANGE, RELOAD_DRY_RUN_OK,
-  RELOAD_DRY_RUN_FAIL}`. It must remain unchanged for exactly
-  `{RELOAD_INVALID_FILE, RELOAD_IO_ERROR}` so the timer retries the reload on
-  the next poll cycle.
-- When `last_mtime != applied_mtime`, the timer handler must retry
-  the reload on the next poll cycle, regardless of whether
-  `dynconf_check()` detects a new mtime change.
-- Unknown dynconf keys must cause `NGX_ERROR` (atomic reload
-  rejection), not `NGX_DECLINED` (silent ignore).  The module must
-  reject the entire file when it encounters any unrecognized key.
-- `dynconf_start` must parse and apply the existing dynconf file
-  immediately at startup if it exists.  If the initial parse fails,
-  `applied_mtime` must be set to 0 so the timer retries on the
-  next poll cycle.  This ensures runtime overrides persist across
-  NGINX restart/reload.
-- `harness-check-full` must include `harness-security-checks`.
+> **RETIRED in 0.9.2.** This rule governed the retired runtime hot-reload
+> overlay, the snapshot that a reload timer could swap. No such overlay exists
+> in the current release, so the snapshot-race and snapshot-consumption
+> requirements below no longer apply. The static **Rule 45** replaces it: the
+> module binds the `effective_conf` view once and reads merged fields through
+> the `ngx_http_markdown_effective_*()` helpers. The paragraphs below stay only
+> so the history reads clearly. Do not treat them as current requirements.
 
-Verification:
-- `tools/harness/detect_live_conf_reads.sh` — checks dynconf_enabled
-  gate on build_effective_conf, applied_mtime guard, and retry logic.
-- `make test-nginx-unit` — effective_conf_test includes
-  test_dynconf_snapshot_not_consumed_when_dynconf_disabled,
-  dynconf_production_test includes
-  test_start_applies_existing_file_on_startup and
-  test_start_invalid_file_leaves_applied_mtime_zero.
-- `make harness-check-full` — now includes harness-security-checks.
+Historical record (pre-0.9.2, the module no longer enforces this):
+- Request-path code once read runtime-mutable fields through a per-request
+  snapshot that a reload timer could swap. The main historical hazards were a
+  request-level consistency gap (the code bound a snapshot but never consumed
+  it) and a race where the header filter read the global active snapshot twice.
+- The historical mitigation captured the global snapshot exactly once at
+  header-filter entry into a function-lifetime variable, derived the effective
+  view from that single capture, and bound both into the request context
+  without a second read of the global snapshot.
+- Adding a runtime-mutable field once meant updating the snapshot struct, the
+  apply helper, the build-effective-view helper, an accessor, every
+  request-path read, and a snapshot-consistency test.
+
+Current status: the current release drops the runtime snapshot, the reload
+timer, and the retry state. Static Rule 45 replaces the request-path read
+contract.
 
 ---
 
-### 45. Effective configuration NULL-safe access and cross-TU visibility
-Historical issues: d91dd419, 7e1227a9, 31e017d9, 327bfe99, 4b97d0a7.
+### 35. [RETIRED — historical] Runtime reload isolation and retry contract
 
-Required:
-- When request-path code reads `ctx->effective_conf` fields (for example
-  `markdown_limits`), the implementation must handle the case where
-  `effective_conf` is NULL.  This can occur in early header_filter paths
-  before snapshot binding, or after allocation failure.  A NULL `effective_conf`
-  must fall back to `conf->` with an explicit comment documenting why `eff` is
-  unavailable, consistent with Rule 34's fallback allowance.
-- When a configuration field spans multiple translation units
-  (for example `effective_body_buffer_limit` used in both `filter_module.c`
-  and `streaming_impl.h`), the field declaration and accessor must be in a
-  shared header (`filter_module.h`), not in a source file.  A field declared
-  `static` in one `.c` file is invisible to other translation units, causing
-  either link errors or silent use of stale/zero defaults.
-- When using `NGX_CONF_UNSET_SIZE` as a sentinel for "use default", ensure
-  the code uses the sentinel value `(size_t)-1` consistently.  Do not mix
-  `NGX_CONF_UNSET_SIZE` (which is `(size_t)-1` for size fields) with literal
-  `(size_t)-1` in some places and `NGX_CONF_UNSET_SIZE` in others — pick one
-  form and use it uniformly within the effective_conf helper chain.
-- The eligibility check for streaming must guard against `effective_conf`
-  being NULL before dereferencing its `markdown_limits`
-  fields.  When `eff` is NULL, the eligibility function must return the
-  non-streaming (full-buffer) path, not dereference NULL.
+> **RETIRED in 0.9.2.** This rule governed the retired runtime reload path: the
+> per-location enable gate, the observed-versus-applied modification-time
+> tracking, the atomic rejection of unknown keys, and the startup re-apply of
+> an external file. The current release contains none of that machinery. The
+> paragraphs below hold only a historical record.
 
-Verification:
-- `bash tools/harness/detect_live_conf_reads.sh components/nginx-module/src/`
-  — run the guard-aware detector for effective-conf access, early snapshot
-  binding, and allocation-failure paths. Do not rely on a comment-blind grep.
-- `make test-nginx-unit` — the effective-conf and dynconf tests exercise the
-  NULL fallback, early binding, allocation-failure behavior, and the
-  non-NULL/NULL `markdown_limits` eligibility paths.
+Historical record (pre-0.9.2, the module no longer enforces this):
+- A per-location enable flag once decided whether the global runtime view
+  reached a location. Locations with the feature off saw no runtime view.
+- The reload watcher once tracked an observed modification time apart from a
+  confirmed-applied modification time. It advanced the confirmed value only
+  after specific reload outcomes and retried on the next poll cycle while the
+  two values differed.
+- Unknown keys in the external file once triggered atomic rejection of the
+  whole file rather than a silent skip. Startup once re-applied an existing
+  external file so runtime overrides survived a restart.
+
+Current status: the module now reads configuration once at load time through
+the normal directive path. No external runtime file, reload watcher, or retry
+state remains.
 
 ---
 
-### 71. Static explicit settings block dynamic overrides and propagate to child levels
+### 45. [CURRENT — static] Effective-configuration NULL-safe access and cross-TU visibility
 
-Historical context: the dynconf precedence question (whether an http-level
-explicit setting locks the field for every location) resolves as follows.
+> **CURRENT.** This rule describes the retained static binding. The module
+> builds the `effective_conf` view once from the merged static configuration
+> and binds it at header-filter entry. Nothing swaps the view at runtime.
+
+Required:
+- When request-path code reads `ctx->effective_conf` fields (for example the
+  merged `markdown_limits`), the code must handle a NULL `effective_conf`. A
+  NULL view can appear on early header-filter paths before the module binds the
+  view, or after an allocation failure. A NULL `effective_conf` must fall back
+  to `conf->` with an explicit comment that states why the view is missing.
+- When a configuration field spans multiple translation units (for example a
+  buffer-limit field that both `filter_module.c` and the streaming impl use),
+  the field declaration and accessor must live in a shared header
+  (`filter_module.h`) rather than a source file. A field with `static` linkage
+  in one `.c` file stays invisible to other translation units. That invisible
+  field causes either a link error or the silent use of a stale or zero
+  default.
+- When a helper uses `NGX_CONF_UNSET_SIZE` as the "use default" sentinel, the
+  code must use that sentinel value uniformly. Do not mix `NGX_CONF_UNSET_SIZE`
+  with a literal `(size_t)-1` across the effective-view helper chain. Pick one
+  form and keep it uniform.
+- The streaming eligibility check must guard `effective_conf` against NULL
+  before it dereferences the merged limit fields. When the view is NULL, the
+  eligibility function must return the non-streaming (full-buffer) path rather
+  than dereference NULL.
+
+Verification:
+- `make test-nginx-unit` — the effective-conf tests cover the NULL fallback,
+  early binding, allocation-failure behavior, and the non-NULL and NULL
+  eligibility paths.
+
+---
+
+### 71. [CURRENT — static] Static explicit settings block overrides and propagate to child levels
+
+> **CURRENT.** This rule describes the retained static block-mask. It states a
+> configuration-merge invariant that stands on its own, apart from the retired
+> runtime overlay.
 
 Required:
 
-- A directive set explicitly in static configuration marks its field in
-  `dynconf_block_mask`.  The mask propagates down the configuration tree:
-  an explicit http-level setting blocks the dynamic override of that field
-  in every child location, because locations inherit the http block's
-  explicit configuration.
-- The dynconf API rejects a mutation of a field whose block bit is set.
-  Static explicit settings win over dynamic configuration at every level.
-- A field left unset in static configuration stays dynamic.  The dynamic
-  snapshot applies to it at the location that owns the request.
+- An explicit directive in static configuration marks its field in the
+  block-mask. The mask propagates down the configuration tree. An explicit
+  http-level setting therefore blocks the field in every child location,
+  because locations inherit the explicit configuration of the http block.
+- A field that static configuration leaves unset stays open at child levels, so
+  a more specific location may set it explicitly.
+- The merged `effective_conf` view carries the block-mask for diagnostics so
+  operators can see which fields an explicit ancestor setting pinned.
 
 Verification:
 
-- `make test-nginx-unit` — the dynconf production tests assert the block
-  mask propagation from an explicit http-level setting.
+- `make test-nginx-unit` — the configuration tests assert that the block-mask
+  propagates from an explicit http-level setting to child locations.

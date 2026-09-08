@@ -2432,6 +2432,70 @@ mod tests {
         );
     }
 
+    /// Feature: pre-lts-convergence-092, Property 12: Complete-success holds
+    /// iff all three integrity judgments hold, and all views agree.
+    /// Feature: pre-lts-convergence-092, Property 13: Late decompression-member
+    /// failure is classified incomplete even after emitted output and
+    /// terminators.
+    ///
+    /// Validates: Requirements LTS-R019.1, LTS-R019.2, LTS-R019.4 —
+    /// Markdown closure ("markdown_closed") is independent of, and never
+    /// upgraded to, complete-success.
+    ///
+    /// `safe_finish` is the post-commit closure path invoked after a feed
+    /// call has already committed output and then failed (e.g. a late
+    /// decompression-member / unsupported-content failure). Closing all open
+    /// Markdown constructs is the `markdown_closed` judgment only; it must not
+    /// be conflated with `input_fully_converted` or with complete-success.
+    ///
+    /// This test proves that after a post-commit error, `safe_finish`:
+    ///   * succeeds at closing open constructs (markdown_closed can be true),
+    ///   * returns *only* closure bytes (a `Vec<u8>`), never a
+    ///     `StreamingResult` — the only type that carries a complete-success
+    ///     conversion outcome, and
+    ///   * discards the uncommitted output of the failed feed rather than
+    ///     replaying/reprocessing it.
+    ///
+    /// The complete-success classification (the iff over the three
+    /// independent judgments transport_complete / markdown_closed /
+    /// input_fully_converted) lives on the C/caller side; the Rust converter
+    /// exposes closure and completion as two separate, non-derived methods
+    /// (`safe_finish` vs `finalize`) so a late failure can never be recorded
+    /// as complete content here.
+    #[test]
+    fn test_safe_finish_closure_is_not_complete_success() {
+        let mut conv = make_converter();
+
+        // Commit real output, then fail after commit with unsupported content.
+        let output = conv
+            .feed_chunk(b"<h1>Title</h1><p>Committed body</p>")
+            .unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        let failed = conv.feed_chunk(b"<p>lost body</p><svg><rect/></svg>");
+        assert!(failed.is_err(), "expected a post-commit failure");
+        assert_eq!(
+            failed.unwrap_err().code(),
+            8,
+            "expected PostCommitError (code 8) after committed output"
+        );
+
+        // markdown_closed: closure succeeds and yields only closure bytes.
+        // The return type is Vec<u8> (closure bytes), NOT StreamingResult —
+        // safe_finish cannot construct a complete-success result. This is a
+        // compile-time-enforced separation: closure != complete-success.
+        let closing: Vec<u8> = conv.safe_finish().expect("safe_finish should succeed");
+        let closing_text = String::from_utf8(closing).expect("valid utf8");
+
+        // input_fully_converted is independent: the uncommitted bytes of the
+        // failed feed are discarded, never replayed into the closure output.
+        assert!(
+            !closing_text.contains("lost body"),
+            "safe_finish reprocessed/leaked the failed feed's uncommitted input: {closing_text:?}"
+        );
+    }
+
     /// Validates: Requirements 3.2, 4.5 — Commit state transition only happens
     /// once non-empty output is produced. Empty output does NOT trigger PostCommit.
     #[test]
@@ -3889,7 +3953,7 @@ mod tests {
     fn test_parser_budget_boundary_includes_option_storage() {
         let options = ConversionOptions {
             base_url: Some("https://example.test/".to_owned() + &"u".repeat(8192)),
-            prune_config: crate::converter::pruning::PruneConfig::from_ffi(
+            prune_config: crate::converter::pruning::PruneConfig::from_selector_strings(
                 true,
                 Some(&("selector-".to_owned() + &"x".repeat(4096))),
                 None,
