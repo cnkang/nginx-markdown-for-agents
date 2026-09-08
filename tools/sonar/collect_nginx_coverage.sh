@@ -798,17 +798,6 @@ HTML
 cp "${RUNTIME}/html/streaming/table.html" "${RUNTIME}/html/streaming-large-budget/table.html"
 cp "${RUNTIME}/html/streaming/table.html" "${RUNTIME}/html/streaming-on-error-reject/table.html"
 
-cat > "${RUNTIME}/conf/markdown-dynconf.conf" <<'EOF'
-{
-  "schema_version": 1,
-  "filter": "on",
-  "prune_noise": "on",
-  "log_verbosity": "debug",
-  "error_policy": "pass",
-  "streaming_buffer": 65536
-}
-EOF
-
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${RUNTIME}/sbin/nginx" -p "${RUNTIME}" -c conf/nginx.conf
 sleep 1
@@ -836,20 +825,6 @@ curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/large.html" -o /dev/n
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   -H 'traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01' \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  otel traceparent request: HTTP %{http_code}\n"
-
-# Dynconf watcher/reload path.
-cat > "${RUNTIME}/conf/markdown-dynconf.conf" <<'EOF'
-{
-  "schema_version": 1,
-  "filter": "on",
-  "prune_noise": "off",
-  "log_verbosity": "info",
-  "error_policy": "pass",
-  "streaming_buffer": 131072
-}
-EOF
-sleep 2
-curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  dynconf reload trigger: HTTP %{http_code}\n"
 
 # ── Auth detection scenarios (Req 2) ────────────────────────────────
 
