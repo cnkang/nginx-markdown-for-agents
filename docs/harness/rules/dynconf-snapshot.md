@@ -110,7 +110,14 @@ Required:
 Verification:
 - `make test-nginx-unit` — the effective-conf tests cover the NULL fallback,
   early binding, allocation-failure behavior, and the non-NULL and NULL
-  eligibility paths.
+  eligibility paths. `effective_conf_test.c` builds the effective view from
+  the merged static configuration and asserts the by-value projection through
+  `ngx_http_markdown_effective_*()` accessors.
+- Cross-TU visibility of the effective-conf struct and its accessors is
+  enforced by the committed-header/ABI drift gates (`make
+  release-gates-check-092`); the header is generated and pinned by
+  cbindgen + `normalize_cbindgen_header.py`, so any field moved out of
+  `filter_module.h` breaks the ABI fingerprint check.
 
 ---
 

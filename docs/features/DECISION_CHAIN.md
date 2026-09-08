@@ -26,7 +26,7 @@ codes or Prometheus label values. The logger emits them in the bounded
 The single source of truth for the reason code list is
 `components/rust-converter/reason_registry.toml`. The Rust, C, diagnostics, and
 the generator consume that registry. The generator creates release projections
-and mirrors them in [Observability Schema v2](../architecture/observability-schema-v2.md).
+and mirrors them in [Observability Schema v3](../architecture/observability-schema-v2.md).
 This document describes the check order, what each check evaluates, and how the
 module determines outcomes.
 Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md).
@@ -191,7 +191,10 @@ Operators can determine request state counts from metrics and logs:
 The registry declares the complete set of 25 reason codes in
 `components/rust-converter/reason_registry.toml`. The generator projects it
 into `reason_code.rs`, C metadata, diagnostics lookup, and release artifacts.
-The projections mirror [Observability Schema v3](../architecture/observability-schema-v2.md).
+The projections mirror the
+[Observability Schema v3](../architecture/observability-schema-v2.md)
+description (the diagnostics schema document is `schema_version 3` on the
+wire; its repository filename keeps the historical v2 label).
 All `as_str()` values are lowercase snake_case. The table below maps the
 high-level decision outcomes described in this document to their reason codes.
 The size gate is an eligibility decision: it emits `not_eligible` (request

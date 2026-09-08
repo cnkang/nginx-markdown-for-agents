@@ -47,9 +47,7 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "noise": { "type": "boolean" },
-            "selectors": { "type": "string" },
-            "protectionSelectors": { "type": "string" }
+            "noise": { "type": "boolean" }
           }
         },
         "contentTypes": { "type": "array", "items": { "type": "string" } },

@@ -10,8 +10,8 @@
 #       without a preceding non-negative guard (< 0 check)
 #   (b) (uint32_t)/(uint8_t)/(uInt)/(int) applied to a value of
 #       size_t/ngx_uint_t/ssize_t type without an upper-bound guard
-#   (c) Direct ngx_parse_size() result cast to (size_t) instead of
-#       using the size-safe parse wrapper
+#   (c) Direct NGINX ngx_parse_size() result cast to (size_t) instead of
+#       using the module's overflow-safe wrapper (ngx_http_markdown_parse_size)
 #
 # Usage: bash tools/harness/detect_cwe190_casts.sh [directory]
 #   directory defaults to components/nginx-module/src
@@ -134,7 +134,7 @@ while IFS= read -r match; do
         ctx_start=1
     fi
     ctx_end=$((line + 10))
-    if sed -n "${ctx_start},${ctx_end}p" "$file" 2>/dev/null | grep -q 'parse_size_safe'; then
+    if sed -n "${ctx_start},${ctx_end}p" "$file" 2>/dev/null | grep -q 'ngx_http_markdown_parse_size'; then
         echo "  WARNING ${file}:${line} — ngx_parse_size used; safe wrapper exists nearby, verify this callsite uses it" >&2
         warnings=$((warnings + 1))
     else
@@ -143,15 +143,15 @@ while IFS= read -r match; do
             impl_start=1
         fi
         if sed -n "${impl_start},${line}p" "$file" 2>/dev/null \
-            | grep -qE 'parse_size_safe[[:space:]]*\('; then
-            echo "  OK      ${file}:${line} — ngx_parse_size inside parse_size_safe implementation" >&2
+            | grep -qE 'ngx_http_markdown_parse_size[[:space:]]*\('; then
+            echo "  OK      ${file}:${line} — ngx_parse_size inside ngx_http_markdown_parse_size implementation" >&2
         else
-            echo "  ERROR   ${file}:${line} — ngx_parse_size without parse_size_safe wrapper" >&2
+            echo "  ERROR   ${file}:${line} — ngx_parse_size without ngx_http_markdown_parse_size wrapper" >&2
             errors=$((errors + 1))
         fi
     fi
     parse_size_hits=$((parse_size_hits + 1))
-done < <(grep -rnE 'ngx_parse_size.*\(size_t|\(size_t.*ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':[[:space:]]*/\*|:[[:space:]]*\*|:[[:space:]]*//' || true)
+done < <(grep -rnE '\bngx_parse_size\b.*\(size_t|\(size_t.*\bngx_parse_size\b' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':[[:space:]]*/\\*|:[[:space:]]*\\*|:[[:space:]]*//' || true)
 
 if [[ "$parse_size_hits" -eq 0 ]]; then
     echo "$NONE_FOUND_MSG" >&2

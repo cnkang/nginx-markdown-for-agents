@@ -166,8 +166,16 @@ CONFIG
         echo "FAIL: old-release dynconf directive was accepted" >&2
         return 1
     fi
-    if ! grep -Eiq 'markdown_dynamic_config|removed|migrat|static config' "${output}"; then
-        echo "FAIL: migration failure did not include actionable guidance" >&2
+    # The rejection must BOTH name the removed directive AND carry a
+    # migration signal.  A generic unknown-directive error alone (which
+    # merely echoes the directive name) is not actionable guidance.
+    if ! grep -Eiq 'markdown_dynamic_config' "${output}"; then
+        echo "FAIL: migration failure did not name markdown_dynamic_config" >&2
+        cat "${output}" >&2
+        return 1
+    fi
+    if ! grep -Eiq 'removed|migrat|no longer|static config' "${output}"; then
+        echo "FAIL: migration failure lacked an actionable migration signal" >&2
         cat "${output}" >&2
         return 1
     fi
@@ -207,8 +215,51 @@ INVALID
     return 0
 }
 
+run_valid_rollback() {
+    local active="${TMPDIR_BASE}/active.conf"
+    local candidate="${TMPDIR_BASE}/candidate.conf"
+    local before="${TMPDIR_BASE}/active.before"
+    local output="${TMPDIR_BASE}/candidate.log"
+
+    write_common_config "${active}"
+    cp "${active}" "${before}"
+    if ! "${NGINX_BIN}" -t -p "${TMPDIR_BASE}" -c "${active}" \
+        >"${TMPDIR_BASE}/active.log" 2>&1; then
+        echo "FAIL: active configuration failed nginx -t" >&2
+        cat "${TMPDIR_BASE}/active.log" >&2
+        return 1
+    fi
+
+    # A valid candidate (a changed markdown_limits value) must pass
+    # nginx -t and, after the promotion decision, replace the active file.
+    cp "${active}" "${candidate}"
+    cat >> "${candidate}" <<'VALID'
+    markdown_limits conversion_timeout=8s streaming_buffer=1m;
+VALID
+    if ! "${NGINX_BIN}" -t -p "${TMPDIR_BASE}" -c "${candidate}" \
+        >"${output}" 2>&1; then
+        echo "FAIL: valid rollback candidate failed nginx -t" >&2
+        cat "${output}" >&2
+        return 1
+    fi
+    cp "${candidate}" "${active}"
+    if cmp -s "${active}" "${before}"; then
+        echo "FAIL: promoted candidate did not replace the active configuration" >&2
+        return 1
+    fi
+    if ! "${NGINX_BIN}" -t -p "${TMPDIR_BASE}" -c "${active}" \
+        >"${TMPDIR_BASE}/activelog2" 2>&1; then
+        echo "FAIL: promoted active configuration fails nginx -t" >&2
+        cat "${TMPDIR_BASE}/activelog2" >&2
+        return 1
+    fi
+    echo "PASS: validated candidate promoted only after nginx -t succeeded"
+    return 0
+}
+
 resolve_nginx_bin
 TMPDIR_BASE="$(mktemp -d "${TMPDIR:-/tmp}/nginx-upgrade-rollback.XXXXXX")"
 run_old_release_migration
 run_failed_rollback
+run_valid_rollback
 echo "Upgrade/rollback contract checks passed (binary=${NGINX_BIN})"

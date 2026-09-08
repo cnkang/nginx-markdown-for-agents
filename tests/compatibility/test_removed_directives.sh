@@ -68,7 +68,7 @@ TRUSTED_NGINX_PATHS=(
 # Matching the migration signal (not only the directive name) prevents an
 # unrelated syntax error that happens to mention the directive from counting
 # as a valid migration rejection.
-MIGRATION_MARKERS='removed|migrat|no longer|static config|nginx -t'
+MIGRATION_MARKERS='removed|migrat|no longer|static config'
 
 TESTS_RUN=0
 TESTS_PASSED=0
