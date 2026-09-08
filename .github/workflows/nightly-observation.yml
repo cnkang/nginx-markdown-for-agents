@@ -33,7 +33,7 @@ jobs:
           python3 tools/release/matrix/generate_release_contract_matrix.py --check
           python3 tools/release/gates/validate_release_matrix_schema.py
           python3 tools/release/matrix/validate_auto_update_policy.py
-          python3 tools/release/gates/validate_pre_lts_status.py --git-head
+          python3 tools/release/gates/validate_pre_lts_status.py
           git rev-parse --verify HEAD
         shell: bash
 

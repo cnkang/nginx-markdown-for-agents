@@ -2,7 +2,7 @@
   "branch": "dev/wip-0.9.2rc7",
   "candidate": {
     "authorization": "not-granted",
-    "source_sha": "efa75a4ef5edbcbf069890dc1c8d3ab895cbfc41",
+    "source_sha": "836d788df4be20acab868f5e467d1764fd66d557",
     "working_tree": "clean"
   },
   "captured_at": "2026-09-08T10:00:00Z",
