@@ -11,7 +11,7 @@ All sub-specs map their test plans to this matrix. Combined coverage must addres
 | Platform | Ubuntu (primary), macOS (secondary) |
 | NGINX Version | 1.24.x (LTS), 1.26.x (stable), 1.27.x (mainline) |
 | Response Size Tier | Small ([0, 10KB)), Medium ([10KB, 1MB)), Large ([1MB, 64MB)), Extra-Large ([64MB, ∞)) — half-open disjoint boundaries: exactly 10KB maps to Medium, exactly 1MB maps to Large, exactly 64MB maps to Extra-Large |
-| Conversion Engine | full-buffer, streaming |
+| Conversion Engine | full-buffer, streaming — the engine column records the **initial** engine selected for the request; a streaming request that falls back to full-buffer is classified under the fallback path, not double-counted as a full-buffer conversion |
 | Conversion Path | convert (successful conversion), skip (ineligible skip), fallback (pre-commit conversion fallback to full-buffer), fail-open (pre-commit fail-open serving the original HTML), fail-closed (controlled reject before headers), post-commit failure (stream terminated after headers) |
 
 ## Coverage Mapping Template
