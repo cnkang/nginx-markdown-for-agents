@@ -127,15 +127,15 @@ def _active_rustup_toolchain() -> str | None:
     2. a `rust-toolchain.toml` / `rust-toolchain` file found from the
        current working directory upward (directory-scoped override);
     3. the `default_toolchain` recorded in ``~/.rustup/settings.toml``.
-    Returns None when none is available.  A bare channel (e.g. ``1.97.1``)
+    Returns None when none is available.  A bare channel (e.g. ``1.98.1``)
     is expanded to its host-triple toolchain name when that toolchain is
-    installed (``1.97.1-aarch64-apple-darwin``), matching Rustup's own
+    installed (``1.98.1-aarch64-apple-darwin``), matching Rustup's own
     installed-toolchain naming.
     """
     env_toolchain = os.environ.get("RUSTUP_TOOLCHAIN")
     if env_toolchain:
         # Match the directory-override and settings.toml branches: a bare
-        # channel (e.g. "1.97.1") is expanded to its installed host-triple
+        # channel (e.g. "1.98.1") is expanded to its installed host-triple
         # toolchain name so the dispatcher resolves against the same
         # concrete toolchain Rustup would select.
         return _expand_toolchain_name(env_toolchain)
