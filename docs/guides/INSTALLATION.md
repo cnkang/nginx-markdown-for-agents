@@ -339,15 +339,17 @@ Compile the module from source when you use a custom NGINX build or a platform w
 | **Make** | 3.81+ | Build automation |
 | **PCRE** | 8.0+ | Regular expression library (NGINX dependency) |
 | **zlib** | 1.2.0+ | gzip/deflate support and NGINX dependency |
-| **libbrotlidec** | 1.0.9+ | Optional: Brotli streaming decompression |
+| **libbrotlidec** | 1.0.9+ | Brotli decoder library (required for the C-side streaming Brotli path. The Rust converter always includes Brotli decoding) |
 | **OpenSSL** | 1.0.2+ | SSL/TLS support (optional, for HTTPS) |
 
 **Development Headers Required:**
 - PCRE development headers (`pcre-devel` or `libpcre3-dev`)
 - zlib development headers (`zlib-devel` or `zlib1g-dev`)
 - Brotli decoder development headers (`brotli-devel` or `libbrotli-dev`) —
-  required only for `NGX_MARKDOWN_BROTLI_STREAMING=on`. `auto` falls back to
-  the Rust bounded full-buffer decoder when they are unavailable
+  required for the C-side streaming Brotli path (`NGX_MARKDOWN_BROTLI_STREAMING=on`).
+  The Rust converter always includes Brotli decoding, so a build without the
+  C-side library still supports the Brotli encoding through the bounded
+  full-buffer decoder. The capability gate reports the actual build state
 - OpenSSL development headers (`openssl-devel` or `libssl-dev`) — optional
 
 ### Platform-Specific Prerequisites
@@ -710,11 +712,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.30.4 | glibc | x86_64 | Full |
 | 1.30.4 | musl | aarch64 | Full |
 | 1.30.4 | musl | x86_64 | Full |
-| 1.31.4 | glibc | aarch64 | Full |
-| 1.31.4 | glibc | x86_64 | Full |
-| 1.31.4 | musl | aarch64 | Full |
-| 1.31.4 | musl | x86_64 | Full |
-
+| 1.31.5 | glibc | aarch64 | Full |
+| 1.31.5 | glibc | x86_64 | Full |
+| 1.31.5 | musl | aarch64 | Full |
+| 1.31.5 | musl | x86_64 | Full |
 <!-- END AUTO-GENERATED MATRIX -->
 
 <!-- BEGIN:release-matrix:installation-matrix -->
@@ -725,8 +726,8 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.4 | mainline | debian12 | glibc | arm64 | supported |
-| 1.31.4 | mainline | debian12 | glibc | amd64 | supported |
+| 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | best-effort |
+| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | best-effort |
 | 1.30.4 | stable | debian12 | glibc | arm64 | supported |
 | 1.30.4 | stable | debian12 | glibc | amd64 | supported |
 | 1.28.3 | legacy | debian12 | glibc | arm64 | supported |
@@ -740,10 +741,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.4 | mainline | debian12 | glibc | arm64 | supported |
-| 1.31.4 | mainline | debian12 | glibc | amd64 | supported |
-| 1.31.4 | mainline | alpine3.24 | musl | arm64 | supported |
-| 1.31.4 | mainline | alpine3.24 | musl | amd64 | supported |
+| 1.31.5 | mainline | debian12 | glibc | arm64 | best-effort |
+| 1.31.5 | mainline | debian12 | glibc | amd64 | best-effort |
+| 1.31.5 | mainline | alpine3.24 | musl | arm64 | best-effort |
+| 1.31.5 | mainline | alpine3.24 | musl | amd64 | best-effort |
 | 1.26.3 | legacy | debian12 | glibc | arm64 | supported |
 | 1.26.3 | legacy | debian12 | glibc | amd64 | supported |
 | 1.26.3 | legacy | alpine3.20 | musl | arm64 | supported |
@@ -753,28 +754,28 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.4 | mainline | linux | glibc | arm64 | supported |
-| 1.31.4 | mainline | linux | musl | arm64 | supported |
-| 1.31.4 | mainline | linux | glibc | amd64 | supported |
-| 1.31.4 | mainline | linux | musl | amd64 | supported |
+| 1.31.5 | mainline | linux | glibc | arm64 | best-effort |
+| 1.31.5 | mainline | linux | musl | arm64 | best-effort |
+| 1.31.5 | mainline | linux | glibc | amd64 | best-effort |
+| 1.31.5 | mainline | linux | musl | amd64 | best-effort |
 | 1.30.4 | stable | linux | glibc | arm64 | supported |
 | 1.30.4 | stable | linux | musl | arm64 | supported |
 | 1.30.4 | stable | linux | glibc | amd64 | supported |
 | 1.30.4 | stable | linux | musl | amd64 | supported |
-| 1.28.3 | stable | ubuntu-24.04 | glibc | arm64 | best-effort |
-| 1.28.3 | stable | ubuntu-24.04 | glibc | amd64 | best-effort |
-| 1.28.3 | legacy | linux | glibc | arm64 | supported |
-| 1.28.3 | legacy | linux | musl | arm64 | supported |
-| 1.28.3 | legacy | linux | glibc | amd64 | supported |
-| 1.28.3 | legacy | linux | musl | amd64 | supported |
-| 1.26.3 | legacy | linux | glibc | arm64 | supported |
-| 1.26.3 | legacy | linux | musl | arm64 | supported |
-| 1.26.3 | legacy | linux | glibc | amd64 | supported |
-| 1.26.3 | legacy | linux | musl | amd64 | supported |
-| 1.24.0 | legacy | linux | glibc | arm64 | supported |
-| 1.24.0 | legacy | linux | musl | arm64 | supported |
-| 1.24.0 | legacy | linux | glibc | amd64 | supported |
-| 1.24.0 | legacy | linux | musl | amd64 | supported |
+| 1.28.3 | stable | linux | glibc | arm64 | supported |
+| 1.28.3 | stable | linux | musl | arm64 | supported |
+| 1.28.3 | stable | linux | glibc | amd64 | supported |
+| 1.28.3 | stable | linux | musl | amd64 | supported |
+| 1.26.3 | stable | linux | glibc | arm64 | supported |
+| 1.26.3 | stable | linux | musl | arm64 | supported |
+| 1.26.3 | stable | linux | glibc | amd64 | supported |
+| 1.26.3 | stable | linux | musl | amd64 | supported |
+| 1.24.0 | legacy | ubuntu-24.04 | glibc | arm64 | best-effort |
+| 1.24.0 | legacy | ubuntu-24.04 | glibc | amd64 | best-effort |
+| 1.24.0 | stable | linux | glibc | arm64 | supported |
+| 1.24.0 | stable | linux | musl | arm64 | supported |
+| 1.24.0 | stable | linux | glibc | amd64 | supported |
+| 1.24.0 | stable | linux | musl | amd64 | supported |
 
 ### homebrew-formula
 
@@ -786,8 +787,8 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.4 | mainline | almalinux9 | glibc | arm64 | supported |
-| 1.31.4 | mainline | almalinux9 | glibc | amd64 | supported |
+| 1.31.5 | mainline | almalinux9 | glibc | arm64 | best-effort |
+| 1.31.5 | mainline | almalinux9 | glibc | amd64 | best-effort |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | supported |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | supported |
 | 1.28.3 | legacy | almalinux9 | glibc | arm64 | supported |

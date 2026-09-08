@@ -33,14 +33,14 @@ Builds the official NGINX-based Docker example from source and validates
 runtime Markdown negotiation behavior.
 
 Examples:
-  $(basename "$0") --nginx-tag 1.31.4 --expected-nginx-version 1.31.4 \
-    --image-reference nginx:1.31.4 --image-digest sha256:DIGEST \
+  $(basename "$0") --nginx-tag 1.31.5 --expected-nginx-version 1.31.5 \
+    --image-reference nginx:1.31.5 --image-digest sha256:DIGEST \
     --module-sha FULL_40_HEX_COMMIT_SHA
-  $(basename "$0") --skip-build --expected-nginx-version 1.31.4 \
-    --image-reference nginx:1.31.4 --image-digest sha256:DIGEST \
+  $(basename "$0") --skip-build --expected-nginx-version 1.31.5 \
+    --image-reference nginx:1.31.5 --image-digest sha256:DIGEST \
     --module-sha FULL_40_HEX_COMMIT_SHA \
-    --image-name nginx-markdown-official-check:1.31.4-debian12-glibc-amd64
-  $(basename "$0") --nginx-tag 1.31.4 --expected-nginx-version 1.31.4 \
+    --image-name nginx-markdown-official-check:1.31.5-debian12-glibc-amd64
+  $(basename "$0") --nginx-tag 1.31.5 --expected-nginx-version 1.31.5 \
     --image-digest sha256:DIGEST \
     --module-sha FULL_40_HEX_COMMIT_SHA --artifact-dir /tmp/official-nginx-docker/row
 
