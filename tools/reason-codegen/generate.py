@@ -63,7 +63,7 @@ RUST_ALL_LOOP = "        for rc in &ALL {"
 REASON_KEY_RE = re.compile(r"^[a-z](?:[a-z0-9]|_(?=[a-z0-9]))*$")
 VALID_STAGES = frozenset({
     "eligibility", "decompression", "parsing", "conversion",
-    "precommit", "postcommit", "delivery", "dynconf",
+    "precommit", "postcommit", "delivery",
 })
 VALID_ERROR_ORIGINS = frozenset({
     "allocation", "downstream", "invariant", "format", "truncated",

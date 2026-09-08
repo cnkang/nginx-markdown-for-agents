@@ -99,8 +99,6 @@ def _matches_ffi_path(path: str) -> bool:
     normalized = path.replace("\\", "/").casefold()
     if "/src/ffi/" in normalized:
         return _is_source_file(normalized.split("/src/ffi/", 1)[1])
-    if normalized.endswith("/src/dynconf/ffi.rs"):
-        return True
     return _source_file_matches(
         normalized,
         lambda filename: "_ffi" in filename and _is_source_file(filename),

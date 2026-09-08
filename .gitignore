@@ -190,7 +190,6 @@ artifacts/release/0.9.2/*
 !artifacts/release/0.9.2/official-build-feature-manifest.json
 !artifacts/release/0.9.2/metrics-registry.json
 !artifacts/release/0.9.2/diagnostics-field-contract.json
-!artifacts/release/0.9.2/dynconf-precedence-report.json
 !artifacts/release/0.9.2/pre-lts-status.json
 
 # Perf harness build cache (rustup toolchain, NGINX binary, module .so)
