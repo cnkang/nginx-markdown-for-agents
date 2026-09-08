@@ -523,6 +523,12 @@ def _supported_dynamic_entry(entry: dict) -> dict | None:
     normalized = normalize_compatibility_entry(entry, require_fields=False)
     if normalized.get("artifact_type") != "dynamic-module":
         return _source_only_entry(normalized)
+    # The updater manages only the generic linux dynamic-module rows.
+    # Distribution-specific rows (for example ubuntu-24.04) share the same
+    # (version, libc, arch) identity and must stay out of the generated set
+    # or they collide with the linux rows during merge.
+    if normalized.get("os") != "linux":
+        return None
     tier = normalized.get("support_tier")
     if tier is not None and tier not in ("supported", "best-effort"):
         return None
@@ -537,6 +543,7 @@ def _supported_dynamic_entry(entry: dict) -> dict | None:
         "os_type": os_type,
         "arch": arch,
         "support_tier": "full" if tier != "best-effort" else "best-effort",
+        "nginx_channel": normalized.get("nginx_channel", classify_version(version)),
     }
 
 
@@ -1205,8 +1212,14 @@ def _canonical_dynamic_entry(
         entry.pop("release_blocking", None)
         entry.pop("owner_workflow", None)
         entry.pop("managed_by", None)
+        entry.pop("target", None)
         entry["nginx_version"] = version
+        entry["nginx_channel"] = classify_version(version)
         entry["libc"] = libc
+        entry["arch"] = arch
+        entry["test_level"] = "smoke-test"
+        entry["release_blocking"] = False
+        entry["owner_workflow"] = ".github/workflows/release-packages.yml"
         if entry.get("support_tier") is None:
             # Existing rows that predate the tier vocabulary default to
             # full support (the canonical generated tier).
@@ -1228,10 +1241,14 @@ def _canonical_dynamic_entry(
         target = f"{normalized_arch}-unknown-linux-{target_env}"
     generated = {
         "nginx_version": version,
+        "nginx_channel": classify_version(version),
         "os": "linux",
         "libc": libc,
-        "target": target,
+        "arch": arch,
         "artifact_type": "dynamic-module",
+        "test_level": "smoke-test",
+        "release_blocking": False,
+        "owner_workflow": ".github/workflows/release-packages.yml",
         "support_tier": normalized.get("support_tier", SUPPORT_TIER),
         "feature_manifest_digest": _feature_manifest_digest(),
         "abi_version": _frozen_abi_version(),
@@ -1288,6 +1305,20 @@ def _rebind_stale_dynamic_rows(other_entries: list) -> None:
             entry["abi_version"] = _frozen_abi_version()
 
 
+def _is_generated_dynamic_row(entry: object) -> bool:
+    """Return whether one row is a generated linux dynamic-module row.
+
+    Distribution-specific dynamic-module rows (for example ubuntu-24.04)
+    share the same (version, libc, arch) identity as the generated linux
+    rows and must never be treated as generated or dropped by the updater.
+    """
+    return (
+        isinstance(entry, dict)
+        and entry.get("artifact_type") == "dynamic-module"
+        and entry.get("os") == "linux"
+    )
+
+
 def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
     """Replace generated dynamic-module rows while preserving other artifacts.
 
@@ -1304,13 +1335,10 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         entry
         for entry in merged
         if isinstance(entry, dict)
-        and entry.get("artifact_type", "dynamic-module") == "dynamic-module"
+        and _matrix_entry_identity(entry)[1] in OS_TYPES
     ]
     existing_dynamic = [
-        entry
-        for entry in entries
-        if isinstance(entry, dict)
-        and entry.get("artifact_type") == "dynamic-module"
+        entry for entry in entries if _is_generated_dynamic_row(entry)
     ]
     _assert_unique_identities(existing_dynamic, "existing dynamic")
     _assert_unique_identities(merged_dynamic, "generated dynamic")
@@ -1331,8 +1359,7 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
     other_entries = [
         entry
         for entry in entries
-        if not isinstance(entry, dict)
-        or entry.get("artifact_type") != "dynamic-module"
+        if not _is_generated_dynamic_row(entry)
         or _matrix_entry_identity(entry) not in generated_keys
     ]
     # Stale supported/candidate rows survive (hand-maintained compatibility
