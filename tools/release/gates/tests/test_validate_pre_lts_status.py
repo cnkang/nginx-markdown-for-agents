@@ -94,3 +94,35 @@ def test_external_observation_cannot_be_reported_as_pass() -> None:
     )
     errors = validator.validate_report(report, SCHEMA)
     assert any("external observation cannot be PASS" in error for error in errors)
+
+
+def test_git_head_mismatch_is_rejected(monkeypatch) -> None:
+    report = _valid_report()
+    report["candidate"]["source_sha"] = "b" * 40
+    monkeypatch.setattr(validator, "git_head_sha", lambda: "a" * 40)
+    errors = validator.validate_report(report, SCHEMA, git_head=True)
+    assert any("stale-digest: candidate.source_sha" in error for error in errors)
+
+
+def test_git_head_match_passes(monkeypatch) -> None:
+    report = _valid_report()
+    monkeypatch.setattr(validator, "git_head_sha", lambda: "a" * 40)
+    assert validator.validate_report(report, SCHEMA, git_head=True) == []
+
+
+def test_git_head_off_skips_identity_check(monkeypatch) -> None:
+    report = _valid_report()
+    report["candidate"]["source_sha"] = "b" * 40
+    monkeypatch.setattr(validator, "git_head_sha", lambda: "a" * 40)
+    assert validator.validate_report(report, SCHEMA, git_head=False) == []
+
+
+def test_git_head_resolution_failure_is_fail_closed(monkeypatch) -> None:
+    report = _valid_report()
+
+    def _boom() -> str:
+        raise ValueError("stale-digest: cannot resolve git HEAD: boom")
+
+    monkeypatch.setattr(validator, "git_head_sha", _boom)
+    errors = validator.validate_report(report, SCHEMA, git_head=True)
+    assert any("cannot resolve git HEAD" in error for error in errors)

@@ -6,12 +6,18 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import subprocess
 import sys
 from typing import Any
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO_ROOT / "tools"))
+for _p in (str(REPO_ROOT), str(REPO_ROOT / "tools")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 from lib.path_validation import validate_read_path  # noqa: E402
+from tools.lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 
 SCHEMA_PATH = REPO_ROOT / "schemas" / "pre-lts-status.schema.json"
 DEFAULT_REPORT = (
@@ -82,7 +88,58 @@ def _observation_status_errors(statuses: dict[str, Any]) -> list[str]:
     return []
 
 
-def semantic_errors(report: dict[str, Any]) -> list[str]:
+def git_head_sha() -> str:
+    """Return the current git HEAD SHA or raise ValueError."""
+    git = resolve_approved_executable("git")
+    if git is None:
+        raise ValueError(
+            "stale-digest: cannot resolve git HEAD: approved git executable "
+            "not found"
+        )
+    try:
+        proc = subprocess.run(
+            [git, "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f"stale-digest: cannot resolve git HEAD: {exc}") from exc
+    if proc.returncode != 0:
+        raise ValueError(
+            f"stale-digest: cannot resolve git HEAD: {proc.stderr.strip()}"
+        )
+    return proc.stdout.strip()
+
+
+def _candidate_identity_errors(
+    report: dict[str, Any], git_head: bool
+) -> list[str]:
+    """Reject candidate identity drift when the report claims a frozen SHA."""
+    candidate = report.get("candidate")
+    if not isinstance(candidate, dict):
+        return ["candidate must be an object"]
+    source_sha = candidate.get("source_sha")
+    if not isinstance(source_sha, str) or len(source_sha) != 40:
+        return ["candidate.source_sha must be a 40-character SHA"]
+    if not git_head:
+        return []
+    try:
+        head = git_head_sha()
+    except ValueError as exc:
+        return [str(exc)]
+    if source_sha != head:
+        return [
+            f"stale-digest: candidate.source_sha {source_sha} != git HEAD {head}"
+        ]
+    return []
+
+
+def semantic_errors(
+    report: dict[str, Any], git_head: bool = False
+) -> list[str]:
     """Reject vocabulary drift and PASS records with unresolved conditions."""
     statuses = report.get("statuses")
     if not isinstance(statuses, dict):
@@ -94,21 +151,33 @@ def semantic_errors(report: dict[str, Any]) -> list[str]:
         if isinstance(record, dict)
         for error in _status_record_errors(name, record)
     ]
-    return errors + _observation_status_errors(statuses)
+    return (
+        errors
+        + _observation_status_errors(statuses)
+        + _candidate_identity_errors(report, git_head)
+    )
 
 
-def validate_report(report: dict[str, Any], schema: dict[str, Any]) -> list[str]:
-    return _schema_errors(report, schema) + semantic_errors(report)
+def validate_report(
+    report: dict[str, Any], schema: dict[str, Any], git_head: bool = False
+) -> list[str]:
+    return _schema_errors(report, schema) + semantic_errors(report, git_head)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("report", nargs="?", type=pathlib.Path, default=DEFAULT_REPORT)
+    parser.add_argument(
+        "--git-head",
+        action="store_true",
+        help="fail closed when candidate.source_sha differs from "
+        "`git rev-parse HEAD`",
+    )
     args = parser.parse_args(argv)
     try:
         report = _load(args.report)
         schema = _load(SCHEMA_PATH)
-        errors = validate_report(report, schema)
+        errors = validate_report(report, schema, git_head=args.git_head)
     except ValueError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
