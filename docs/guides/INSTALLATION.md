@@ -691,6 +691,31 @@ The minimum supported NGINX version is **1.24.0**. Older versions are out of sco
 
 If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [Manual Source Build](#6-secondary-manual-source-build) instructions. They compile the module for your version.
 
+<!-- BEGIN AUTO-GENERATED MATRIX -->
+| NGINX Version | OS Type | Architecture | Support Tier |
+|---------------|---------|--------------|--------------|
+| 1.31.5 | musl | arm64 | Best-Effort |
+| 1.31.5 | musl | amd64 | Best-Effort |
+| 1.31.5 | glibc | arm64 | Best-Effort |
+| 1.31.5 | glibc | amd64 | Best-Effort |
+| 1.30.4 | musl | arm64 | Supported |
+| 1.30.4 | musl | amd64 | Supported |
+| 1.30.4 | glibc | arm64 | Supported |
+| 1.30.4 | glibc | amd64 | Supported |
+| 1.28.3 | musl | arm64 | Supported |
+| 1.28.3 | musl | amd64 | Supported |
+| 1.28.3 | glibc | arm64 | Supported |
+| 1.28.3 | glibc | amd64 | Supported |
+| 1.26.3 | musl | arm64 | Supported |
+| 1.26.3 | musl | amd64 | Supported |
+| 1.26.3 | glibc | arm64 | Supported |
+| 1.26.3 | glibc | amd64 | Supported |
+| 1.24.0 | musl | arm64 | Supported |
+| 1.24.0 | musl | amd64 | Supported |
+| 1.24.0 | glibc | arm64 | Supported |
+| 1.24.0 | glibc | amd64 | Supported |
+<!-- END AUTO-GENERATED MATRIX -->
+
 <!-- BEGIN:release-matrix:installation-matrix -->
 
 ## Available Packages by Platform

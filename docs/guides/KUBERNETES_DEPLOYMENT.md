@@ -177,6 +177,14 @@ docker build -f examples/kubernetes/Dockerfile.ingress \
 
 For plain NGINX (non-Ingress deployment):
 
+> **Note:** `Dockerfile.ingress` contains Ingress-specific steps — it
+> switches to `USER 101` and injects a `load_module` snippet into
+> `/etc/nginx/modules/`, which the Ingress Controller auto-loads. A plain
+> NGINX image does not auto-load that directory, so after building with
+> the plain `nginx:<version>` base image you must add the `load_module`
+> line to your own `nginx.conf` (or mount the snippet into a directory
+> your configuration includes). The build itself is otherwise identical.
+
 ```bash
 docker build -f examples/kubernetes/Dockerfile.ingress \
   --build-arg NGINX_VERSION=1.26.3 \

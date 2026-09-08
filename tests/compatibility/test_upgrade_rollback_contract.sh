@@ -232,10 +232,19 @@ run_valid_rollback() {
 
     # A valid candidate (a changed markdown_limits value) must pass
     # nginx -t and, after the promotion decision, replace the active file.
+    # markdown_limits is http-context-only, so the override goes inside
+    # the http block, not after the closing brace.
     cp "${active}" "${candidate}"
-    cat >> "${candidate}" <<'VALID'
-    markdown_limits conversion_timeout=8s streaming_buffer=1m;
-VALID
+    python3 - "${candidate}" <<'PY'
+import sys
+p = sys.argv[1]
+src = open(p).read()
+src = src.replace(
+    "    markdown_filter on;\n",
+    "    markdown_filter on;\n    markdown_limits conversion_timeout=8s streaming_buffer=1m;\n",
+    1)
+open(p, "w").write(src)
+PY
     if ! "${NGINX_BIN}" -t -p "${TMPDIR_BASE}" -c "${candidate}" \
         >"${output}" 2>&1; then
         echo "FAIL: valid rollback candidate failed nginx -t" >&2
