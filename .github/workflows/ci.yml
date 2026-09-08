@@ -503,6 +503,12 @@ jobs:
       - name: 0.9.2 streaming lifecycle unit test
         run: make -C components/nginx-module/tests unit-streaming_impl
 
+      - name: 0.9.2 build capability check
+        # Fail closed when a promised engine or encoding is missing from the
+        # source build (LTS-R013); the capability gate is part of `make build`
+        # and must also run on the main CI path.
+        run: make capability-check
+
       - name: 0.9.2 public-surface drift check
         run: make public-surface-drift-check
 
