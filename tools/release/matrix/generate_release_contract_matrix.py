@@ -45,6 +45,14 @@ SOURCE_ENTRY_REQUIRED = (
     "abi_version",
 )
 
+ENTRY_METADATA_KEYS = (
+    "verification_state",
+    "support_stage",
+    "date",
+    "source",
+    "provenance",
+)
+
 ARCH_NAMES = {
     "amd64": "x86_64",
     "arm64": "aarch64",
@@ -156,6 +164,9 @@ def project_entry(entry: dict[str, Any]) -> dict[str, Any]:
     for key in ("image_ref", "image_digest"):
         if key in entry:
             projected[key] = entry[key]
+    for key in ENTRY_METADATA_KEYS:
+        if key in entry:
+            projected[key] = entry[key]
     return projected
 
 
@@ -199,7 +210,7 @@ def build_projection(source: dict[str, Any]) -> dict[str, Any]:
     if len(identities) != len(projected_entries):
         raise ValueError("policy matrix projects to duplicate release-contract rows")
 
-    return {
+    projection = {
         "schema_version": 1,
         "generated_from": {
             "path": SOURCE_MATRIX_RELATIVE_PATH,
@@ -207,6 +218,9 @@ def build_projection(source: dict[str, Any]) -> dict[str, Any]:
         },
         "entries": projected_entries,
     }
+    if "policy_exclusions" in source:
+        projection["policy_exclusions"] = source["policy_exclusions"]
+    return projection
 
 
 def load_source() -> dict[str, Any]:

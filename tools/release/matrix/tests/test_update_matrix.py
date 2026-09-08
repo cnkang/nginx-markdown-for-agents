@@ -547,6 +547,39 @@ def test_property3_matrix_cross_product_completeness(versions):
             ) in seen, f"Missing entry for ({v}, {os_type}, {arch})"
 
 
+def test_newly_discovered_versions_are_pending_best_effort():
+    """Auto-discovery must not silently promote a new NGINX release."""
+    entries = um.compute_matrix(
+        ["1.31.4"], ["glibc", "musl"], ["x86_64", "aarch64"]
+    )
+    diff = um.MatrixDiff(
+        added_versions=["1.31.4"], removed_versions=[], has_changes=True
+    )
+
+    marked = um._mark_new_versions_pending(entries, diff)
+
+    assert len(marked) == len(entries)
+    assert all(entry["support_tier"] == "best-effort" for entry in marked)
+    assert all(entry["verification_state"] == "pending" for entry in marked)
+    assert all(entry["support_stage"] == "best-effort" for entry in marked)
+    assert all(entry["source"] == "nginx.org" for entry in marked)
+
+
+def test_existing_versions_keep_their_reviewed_tier():
+    """The pending downgrade applies only to versions in the diff."""
+    entries = um.compute_matrix(
+        ["1.30.4"], ["glibc"], ["x86_64"]
+    )
+    diff = um.MatrixDiff(
+        added_versions=[], removed_versions=[], has_changes=False
+    )
+
+    marked = um._mark_new_versions_pending(entries, diff)
+
+    assert marked == entries
+    assert marked[0]["support_tier"] == "full"
+
+
 # ---------------------------------------------------------------------------
 # Property 4 — Matrix Diff Precision
 # ---------------------------------------------------------------------------

@@ -45,6 +45,11 @@ CANONICAL_ENTRY_KEYS = [
     "artifact_type",
     "feature_manifest_digest",
     "abi_version",
+    "verification_state",
+    "support_stage",
+    "date",
+    "source",
+    "provenance",
 ]
 
 # Optional metadata for container-backed release rows. These fields do not
@@ -99,6 +104,7 @@ COMPATIBILITY_TOP_LEVEL_KEYS = frozenset(
         "support_tiers",
         "tier_mapping",
         "generated_from",
+        "policy_exclusions",
     }
 )
 
@@ -151,6 +157,7 @@ def normalize_document(doc: Dict[str, Any]) -> Dict[str, Any]:
             "support_tiers",
             "tier_mapping",
             "generated_from",
+            "policy_exclusions",
         }
     )
     if unknown:
@@ -183,6 +190,7 @@ def normalize_document(doc: Dict[str, Any]) -> Dict[str, Any]:
         "support_tiers",
         "tier_mapping",
         "generated_from",
+        "policy_exclusions",
     ):
         if metadata_key in doc:
             normalized[metadata_key] = doc[metadata_key]
@@ -375,6 +383,7 @@ def normalize_compatibility_document(doc: Dict[str, Any]) -> Dict[str, Any]:
         "support_tiers",
         "tier_mapping",
         "generated_from",
+        "policy_exclusions",
     ):
         if metadata_key in doc:
             normalized[metadata_key] = doc[metadata_key]
@@ -388,6 +397,10 @@ def load_and_normalize(path: str) -> Dict[str, Any]:
         with open(validated, encoding="utf-8") as handle:
             doc = json.load(handle)
         return normalize_document(doc)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise MatrixNormalizationError(
+            f"cannot read matrix file {path}: {exc}"
+        ) from exc
     except ValueError as exc:
         # validate_read_path rejects traversal and unsafe components with
         # ValueError; MatrixNormalizationError is itself a ValueError, so
@@ -396,10 +409,6 @@ def load_and_normalize(path: str) -> Dict[str, Any]:
         # traceback.
         raise MatrixNormalizationError(
             f"cannot normalize matrix file {path}: {exc}"
-        ) from exc
-    except (OSError, json.JSONDecodeError) as exc:
-        raise MatrixNormalizationError(
-            f"cannot read matrix file {path}: {exc}"
         ) from exc
 
 

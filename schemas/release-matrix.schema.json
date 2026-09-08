@@ -27,6 +27,16 @@
         }
       }
     },
+    "policy_exclusions": {
+      "type": "object",
+      "required": ["nginx_versions_below", "operating_systems", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "nginx_versions_below": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$"},
+        "operating_systems": {"type": "array", "items": {"type": "string"}},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
     "entries": {
       "type": "array",
       "description": "Canonical release matrix rows.",
@@ -109,6 +119,26 @@
           "type": "integer",
           "minimum": 1,
           "description": "Final frozen FFI ABI version."
+        },
+        "verification_state": {
+          "type": "string",
+          "enum": ["verified", "pending"]
+        },
+        "support_stage": {
+          "type": "string",
+          "enum": ["primary", "best-effort", "experimental", "container", "compat-floor", "excluded"]
+        },
+        "date": {"type": "string", "format": "date"},
+        "source": {"type": "string", "minLength": 1},
+        "provenance": {
+          "type": "object",
+          "required": ["kind", "reference"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"type": "string", "enum": ["nginx.org", "ubuntu-default-repo", "ppa", "self-compiled", "container", "homebrew", "other"]},
+            "reference": {"type": "string", "minLength": 1},
+            "notes": {"type": "string"}
+          }
         },
         "support_tier": {
           "type": "string",
