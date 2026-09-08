@@ -47,6 +47,8 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["state", "evidence", "conditions"],
+      "if": { "properties": { "state": { "const": "PASS" } }, "required": ["state"] },
+      "then": { "properties": { "conditions": { "maxItems": 0 } } },
       "properties": {
         "state": {
           "enum": [

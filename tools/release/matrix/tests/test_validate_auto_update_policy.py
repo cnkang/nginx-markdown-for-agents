@@ -24,6 +24,13 @@ def test_no_new_versions_is_a_clean_noop() -> None:
     assert validate_policy(_matrix(_entry(support_tier="supported")), {}) == []
 
 
+def test_added_version_without_matrix_rows_is_rejected() -> None:
+    violations = validate_policy(
+        _matrix(_entry()), {"added_versions": ["1.32.0", "1.33.0"]}
+    )
+    assert violations == ["added version 1.33.0 has no matrix entries"]
+
+
 def test_new_version_pending_best_effort_is_accepted() -> None:
     diff = {"added_versions": ["1.32.0"]}
     assert validate_policy(_matrix(_entry()), diff) == []

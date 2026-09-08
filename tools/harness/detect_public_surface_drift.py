@@ -217,6 +217,10 @@ def _validate_reject_only_migration(inventory):
             errors.append(
                 "reject_only_directives[{}].status must be reject_only".format(
                     index))
+        if entry.get("classification") != "reject_only":
+            errors.append(
+                "reject_only_directives[{}].classification must be reject_only".format(
+                    index))
         if entry.get("handler") != REMOVED_DIRECTIVE_HANDLER:
             errors.append(
                 "reject_only_directives[{}].handler must be {}".format(

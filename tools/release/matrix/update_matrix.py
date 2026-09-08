@@ -1374,6 +1374,8 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         )
     )
     data["entries"] = dynamic_entries + other_entries
+    for entry in data["entries"]:
+        entry["nginx_channel"] = classify_version(entry["nginx_version"])
     data.pop("updated_at", None)
     data.pop("matrix", None)
 
@@ -1422,7 +1424,11 @@ def _run_write_mode(
         return 1
 
     # Generate new doc content (restores matrix on SystemExit)
-    new_doc_content = _write_doc_with_rollback(effective_merged, matrix_backup)
+    doc_entries = (
+        _matrix_entry_list(data, MATRIX_PATH)
+        if _is_canonical_document(data) else effective_merged
+    )
+    new_doc_content = _write_doc_with_rollback(doc_entries, matrix_backup)
 
     # Write doc atomically (restores matrix on failure)
     result = _atomic_doc_write(new_doc_content, matrix_backup)
