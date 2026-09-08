@@ -843,10 +843,16 @@ test_is_authenticated_non_auth_cookie(void)
  * converts, unauthenticated always converts, force cannot bypass). */
 
 /* Model the request-path auth gate decision: returns 1 when conversion is
- * blocked by the authenticated-content policy, 0 when it may proceed. */
+ * blocked by the authenticated-content policy, 0 when it may proceed.
+ * Mirrors the production order in ngx_http_markdown_request_impl.h: the
+ * auth gate runs before any accept/streaming force selection, so
+ * accept_policy is accepted for signature fidelity but cannot bypass the
+ * gate (LTS-R010.5). */
 static ngx_int_t
-auth_gate_blocks_conversion(ngx_http_request_t *r, ngx_uint_t auth_policy)
+auth_gate_blocks_conversion(ngx_http_request_t *r, ngx_uint_t auth_policy,
+    ngx_uint_t accept_policy)
 {
+    (void) accept_policy;
     return (auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
             && ngx_http_markdown_is_authenticated(r, NULL)) ? 1 : 0;
 }
@@ -881,7 +887,8 @@ test_auth_default_denies_authenticated_conversion(void)
     TEST_ASSERT(ngx_http_markdown_is_authenticated(r, NULL) == 1,
         "request with Authorization header is identifiable authenticated");
     TEST_ASSERT(
-        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY) == 1,
+        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY,
+            NGX_HTTP_MARKDOWN_ACCEPT_STRICT) == 1,
         "default (DENY) must NOT convert identifiable authenticated content "
         "(LTS-R021.1)");
     TEST_PASS("default no-convert for authenticated content");
@@ -897,7 +904,8 @@ test_auth_explicit_allow_converts_authenticated(void)
     if (r == NULL) { TEST_FAIL("alloc failed"); return; }
 
     TEST_ASSERT(
-        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW)
+        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW,
+            NGX_HTTP_MARKDOWN_ACCEPT_STRICT)
             == 0,
         "explicit allow is the opt-in that converts authenticated content "
         "(LTS-R021.2)");
@@ -916,7 +924,8 @@ test_auth_unauthenticated_always_convertible(void)
     TEST_ASSERT(ngx_http_markdown_is_authenticated(r, NULL) == 0,
         "request without auth signal is not authenticated");
     TEST_ASSERT(
-        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY) == 0,
+        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY,
+            NGX_HTTP_MARKDOWN_ACCEPT_STRICT) == 0,
         "unauthenticated content is convertible even under DENY default");
     TEST_PASS("unauthenticated content convertible");
 }
@@ -936,7 +945,8 @@ test_auth_force_does_not_bypass_default_gate(void)
     /* Even with accept_policy force set, the auth gate (evaluated earlier in
      * the request path, on the DENY default) still blocks conversion. */
     TEST_ASSERT(
-        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY) == 1,
+        auth_gate_blocks_conversion(r, NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY,
+            NGX_HTTP_MARKDOWN_ACCEPT_FORCE) == 1,
         "force must not bypass the authenticated-content no-convert gate "
         "(LTS-R010.5)");
     TEST_PASS("force does not bypass auth gate");

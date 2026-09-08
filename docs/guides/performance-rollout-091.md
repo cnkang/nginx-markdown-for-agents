@@ -337,7 +337,9 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
    # never restart with a broken module in place.
    sudo nginx -t || {
      echo "ERROR: nginx -t failed after module replacement; restoring the previous module" >&2
-     sudo cp -a "$MODULE_BACKUP" \
+     sudo install -m 0755 "$MODULE_BACKUP" \
+       "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged"
+     sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" \
        "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
      if ! sudo nginx -t; then
        echo "ERROR: restored module also fails validation; do not start NGINX. $MODULE_BACKUP is preserved — recover manually." >&2
