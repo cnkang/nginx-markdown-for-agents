@@ -1384,9 +1384,12 @@ release-matrix-check:
 
 # pre-lts-status-check: Validate the six release-level statuses without
 # promoting pending, blocked, fixture, or external-observation work to PASS.
-# --git-head fails closed when candidate.source_sha drifts from git HEAD.
+# The candidate.source_sha records the frozen candidate; during development
+# HEAD advances past it, so this routine check validates schema and
+# vocabulary only.  Freeze flows call the validator with --git-head to fail
+# closed when the recorded SHA drifts from the frozen HEAD.
 pre-lts-status-check:
-	python3 tools/release/gates/validate_pre_lts_status.py --git-head
+	python3 tools/release/gates/validate_pre_lts_status.py
 
 # release-candidate-evidence-check: Pre-freeze release candidate evidence gate.
 # Validates release-candidate evidence against the v1 schema.
