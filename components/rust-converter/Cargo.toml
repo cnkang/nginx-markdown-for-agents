@@ -2,7 +2,7 @@
 name = "nginx-markdown-converter"
 version = "0.9.2"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.98"
 authors = ["NGINX Markdown for Agents Contributors"]
 description = "Rust-based HTML to Markdown conversion engine for NGINX"
 license = "BSD-2-Clause"
