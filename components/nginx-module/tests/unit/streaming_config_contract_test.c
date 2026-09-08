@@ -791,7 +791,7 @@ test_allocation_failure(void)
     ngx_str_t                values[2];
     ngx_command_t             cmd;
     ngx_http_markdown_conf_t mcf;
-    char                    *rc;
+    const char              *rc;
 
     TEST_SUBSECTION("5.2c Allocation failure paths");
 
@@ -827,7 +827,7 @@ merge_stream_config(ngx_http_markdown_conf_t *child,
 static int
 command_table_contains(const char *name)
 {
-    for (ngx_command_t *cmd = ngx_http_markdown_filter_commands;
+    for (const ngx_command_t *cmd = ngx_http_markdown_filter_commands;
          cmd->name.len != 0;
          cmd++)
     {
