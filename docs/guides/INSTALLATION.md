@@ -691,33 +691,6 @@ The minimum supported NGINX version is **1.24.0**. Older versions are out of sco
 
 If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [Manual Source Build](#6-secondary-manual-source-build) instructions. They compile the module for your version.
 
-### Platform Compatibility Matrix
-
-<!-- BEGIN AUTO-GENERATED MATRIX -->
-| NGINX Version | OS Type | Architecture | Support Tier |
-|---------------|---------|--------------|--------------|
-| 1.24.0 | glibc | aarch64 | Full |
-| 1.24.0 | glibc | x86_64 | Full |
-| 1.24.0 | musl | aarch64 | Full |
-| 1.24.0 | musl | x86_64 | Full |
-| 1.26.3 | glibc | aarch64 | Full |
-| 1.26.3 | glibc | x86_64 | Full |
-| 1.26.3 | musl | aarch64 | Full |
-| 1.26.3 | musl | x86_64 | Full |
-| 1.28.3 | glibc | aarch64 | Full |
-| 1.28.3 | glibc | x86_64 | Full |
-| 1.28.3 | musl | aarch64 | Full |
-| 1.28.3 | musl | x86_64 | Full |
-| 1.30.4 | glibc | aarch64 | Full |
-| 1.30.4 | glibc | x86_64 | Full |
-| 1.30.4 | musl | aarch64 | Full |
-| 1.30.4 | musl | x86_64 | Full |
-| 1.31.5 | glibc | aarch64 | Full |
-| 1.31.5 | glibc | x86_64 | Full |
-| 1.31.5 | musl | aarch64 | Full |
-| 1.31.5 | musl | x86_64 | Full |
-<!-- END AUTO-GENERATED MATRIX -->
-
 <!-- BEGIN:release-matrix:installation-matrix -->
 
 ## Available Packages by Platform
