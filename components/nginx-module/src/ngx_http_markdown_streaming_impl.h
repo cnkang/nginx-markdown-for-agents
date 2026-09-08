@@ -643,6 +643,9 @@ ngx_http_markdown_select_processing_path(
 
     policy = conf->stream.policy;
 
+    /* Everything that is neither auto nor force resolves to bounded
+     * full-buffer: explicit off, unset (merged default off), and any
+     * out-of-range value all fail closed to the conversion path. */
     if (policy != NGX_HTTP_MARKDOWN_STREAMING_AUTO
         && policy != NGX_HTTP_MARKDOWN_STREAMING_FORCE)
     {

@@ -1390,9 +1390,7 @@ ngx_http_markdown_streaming(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     /*
      * markdown_streaming (Config V2, 0.9.0) is the sole processing-path
-     * selector. policy_explicit records that an operator set this directive
-     * so the cache-validation conflict check in merge_conf does not fire for
-     * default configurations.
+     * selector; the resolved value is stored directly in stream.policy.
      *
      *   off   - bounded full-buffer conversion (unset == off; the default
      *           when the directive is never written, design §14(a))
@@ -1431,8 +1429,6 @@ ngx_http_markdown_streaming(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                            &value[1], &cmd->name);
         return NGX_CONF_ERROR;
     }
-
-    mcf->stream.policy_explicit = 1;
 
     return NGX_CONF_OK;
 }

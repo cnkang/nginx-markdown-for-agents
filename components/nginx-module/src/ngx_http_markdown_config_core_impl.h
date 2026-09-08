@@ -383,7 +383,6 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
 
     /* Streaming configuration. */
     conf->stream.policy = NGX_CONF_UNSET_UINT;
-    conf->stream.policy_explicit = -1;
     conf->stream.excluded_types = NGX_CONF_UNSET_PTR;
     conf->stream.budget = NGX_CONF_UNSET_SIZE;
 
@@ -1027,7 +1026,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
             (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF)
             ? "off" : "force";
     } else {
-        streaming_policy_str = "off (default)";
+        streaming_policy_str = "auto";
     }
 #endif
 

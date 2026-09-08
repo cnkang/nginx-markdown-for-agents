@@ -9,8 +9,8 @@
  * configuration projection. The former runtime overlay and its snapshot
  * capture, JSON reload, and two-phase apply paths were removed.
  * The request path continues to read all mutable configuration through a
- * single pool-owned effective view bound once at header_filter time
- * (bind-once invariant, AGENTS.md Rules 34/35/45), so a request never
+ * single by-value effective view bound once at header_filter time
+ * (bind-once invariant, AGENTS.md Rules 45 and 71), so a request never
  * reads live conf-> fields directly.
  *
  * The block-mask bit constants, provenance constants,

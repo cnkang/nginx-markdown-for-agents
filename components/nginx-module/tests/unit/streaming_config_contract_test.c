@@ -658,7 +658,6 @@ init_conf(ngx_http_markdown_conf_t *mcf)
 
     /* Stream configuration fields. */
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
-    mcf->stream.policy_explicit = -1;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
     mcf->stream.budget = NGX_CONF_UNSET_SIZE;
 
@@ -902,11 +901,8 @@ test_default_inheritance(void)
  * auto/streaming.  Conversion enablement is gated by markdown_filter,
  * not by the streaming policy, so the full-buffer path still converts.
  *
- * TEST-FIRST (task 14.1): this test is EXPECTED TO FAIL today because
- * the directive default is still STREAMING_AUTO (merge fallback in
- * ngx_http_markdown_merge_stream_values).  Task 14.2 flips the default
- * to STREAMING_OFF (unset ≡ off ≡ bounded full-buffer with conversion),
- * at which point this test passes.  Do NOT change the default here.
+ * The default flip to STREAMING_OFF landed in the 0.9.2 convergence;
+ * the assertion below is the standing contract.
  * ================================================================ */
 static void
 test_unset_streaming_resolves_to_full_buffer(void)

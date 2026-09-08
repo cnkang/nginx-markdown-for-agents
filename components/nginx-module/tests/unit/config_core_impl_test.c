@@ -594,7 +594,6 @@ test_merge_conf(void)
     parent.routing.max_inflight = NGX_CONF_UNSET_UINT;
     parent.ops.diagnostics_enabled = NGX_CONF_UNSET;
     parent.stream.policy = NGX_CONF_UNSET_UINT;
-    parent.stream.policy_explicit = -1;
     parent.stream.excluded_types = NGX_CONF_UNSET_PTR;
     parent.stream.budget = NGX_CONF_UNSET_SIZE;
     parent.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
@@ -658,7 +657,6 @@ test_merge_conf(void)
     child.routing.max_inflight = NGX_CONF_UNSET_UINT;
     child.ops.diagnostics_enabled = NGX_CONF_UNSET;
     child.stream.policy = NGX_CONF_UNSET_UINT;
-    child.stream.policy_explicit = -1;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
@@ -1306,7 +1304,7 @@ test_decompress_max_size_zero_rejected(void)
 /*
  * Verify the streaming/cache-validation conflict in merge_conf:
  *   markdown_cache_validation full + markdown_streaming force => error.
- * Gated on policy_explicit so default configs are unaffected.
+ * The conflict fires only when force is written explicitly.
  */
 static void
 test_streaming_full_force_conflict_rejected(void)
@@ -1346,7 +1344,6 @@ test_streaming_full_force_conflict_rejected(void)
     child.policy.conditional_requests =
         NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     child.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
-    child.stream.policy_explicit = 1;
 
     rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
@@ -1381,14 +1378,12 @@ test_inherited_streaming_cache_conflicts(void)
             "inheritance inputs must allocate");
         if (direction == 0) {
             parent->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
-            parent->stream.policy_explicit = 1;
             child->policy.conditional_requests =
                 NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
         } else {
             parent->policy.conditional_requests =
                 NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
             child->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
-            child->stream.policy_explicit = 1;
         }
         rc = ngx_http_markdown_merge_conf(&cf, parent, child);
         TEST_ASSERT(rc == NGX_CONF_ERROR,
@@ -1439,7 +1434,6 @@ test_streaming_full_auto_warns_but_succeeds(void)
     child.policy.conditional_requests =
         NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     child.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
-    child.stream.policy_explicit = 1;
 
     rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
     TEST_ASSERT(rc == NGX_CONF_OK,
@@ -1483,7 +1477,6 @@ init_unset_conf(ngx_http_markdown_conf_t *c)
     c->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     c->ops.diagnostics_enabled = NGX_CONF_UNSET;
     c->stream.policy = NGX_CONF_UNSET_UINT;
-    c->stream.policy_explicit = -1;
     c->stream.excluded_types = NGX_CONF_UNSET_PTR;
     c->stream.budget = NGX_CONF_UNSET_SIZE;
     c->limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
@@ -1579,7 +1572,7 @@ test_static_per_level_inheritance_chain(void)
 
 /*
  * LTS-R007 / Rule 71 regression: the static explicit block-mask
- * (mark_dynconf_block_fields) must OR from parent to child and
+ * (mark_static_block_fields) must OR from parent to child and
  * accumulate across the http -> server -> location chain.  Covers the
  * BLOCK_ERROR_POLICY and BLOCK_STREAMING_BUFFER bits named by the task,
  * proving the static block-mask is preserved (not a dead layer) after
@@ -1613,7 +1606,7 @@ test_static_block_mask_error_policy_chain(void)
     srv_conf.limits.streaming_buffer = 4 * 1024 * 1024;
 
     /*
-     * mark_dynconf_block_fields runs on the *child* of each merge, so the
+     * mark_static_block_fields runs on the *child* of each merge, so the
      * http block bits are set only when http is merged against its own
      * (empty) ancestor.  Do that first, mirroring NGINX's merge order.
      */
