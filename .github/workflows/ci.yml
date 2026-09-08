@@ -729,11 +729,14 @@ jobs:
 
       - name: Run compatibility contract suites
         # The removed-directive / upgrade-rollback contract tests require a
-        # module-enabled NGINX binary; reuse the one built by the IMS step.
+        # module-enabled binary in the shared canonical allowlist location.
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
         run: |
           set -euo pipefail
+          mkdir -p build
+          cp -- "${NGINX_BIN}" build/nginx
+          export NGINX_BIN="${PWD}/build/nginx"
           bash tests/compatibility/test_error_policy_values.sh
           bash tests/compatibility/test_removed_directives.sh
           bash tests/compatibility/test_removed_directives_pbt.sh

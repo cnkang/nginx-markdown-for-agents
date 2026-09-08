@@ -3,7 +3,7 @@
   "entries": [
     {
       "nginx_version": "1.24.0",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "almalinux9",
       "libc": "glibc",
       "arch": "amd64",
@@ -25,7 +25,7 @@
     },
     {
       "nginx_version": "1.24.0",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "almalinux9",
       "libc": "glibc",
       "arch": "arm64",
@@ -47,7 +47,7 @@
     },
     {
       "nginx_version": "1.24.0",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "debian12",
       "libc": "glibc",
       "arch": "amd64",
@@ -69,7 +69,7 @@
     },
     {
       "nginx_version": "1.24.0",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "debian12",
       "libc": "glibc",
       "arch": "arm64",
@@ -179,7 +179,7 @@
     },
     {
       "nginx_version": "1.24.0",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "ubuntu-24.04",
       "libc": "glibc",
       "arch": "amd64",
@@ -202,7 +202,7 @@
     },
     {
       "nginx_version": "1.24.0",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "ubuntu-24.04",
       "libc": "glibc",
       "arch": "arm64",
@@ -225,7 +225,7 @@
     },
     {
       "nginx_version": "1.26.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "almalinux9",
       "libc": "glibc",
       "arch": "amd64",
@@ -247,7 +247,7 @@
     },
     {
       "nginx_version": "1.26.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "almalinux9",
       "libc": "glibc",
       "arch": "arm64",
@@ -269,7 +269,7 @@
     },
     {
       "nginx_version": "1.26.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "alpine3.20",
       "libc": "musl",
       "arch": "amd64",
@@ -293,7 +293,7 @@
     },
     {
       "nginx_version": "1.26.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "alpine3.20",
       "libc": "musl",
       "arch": "arm64",
@@ -317,7 +317,7 @@
     },
     {
       "nginx_version": "1.26.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "any",
       "libc": "n/a",
       "arch": "any",
@@ -339,7 +339,7 @@
     },
     {
       "nginx_version": "1.26.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "debian12",
       "libc": "glibc",
       "arch": "amd64",
@@ -361,7 +361,7 @@
     },
     {
       "nginx_version": "1.26.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "debian12",
       "libc": "glibc",
       "arch": "amd64",
@@ -385,7 +385,7 @@
     },
     {
       "nginx_version": "1.26.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "debian12",
       "libc": "glibc",
       "arch": "arm64",
@@ -407,7 +407,7 @@
     },
     {
       "nginx_version": "1.26.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "debian12",
       "libc": "glibc",
       "arch": "arm64",
@@ -519,7 +519,7 @@
     },
     {
       "nginx_version": "1.26.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "macos",
       "libc": "darwin",
       "arch": "arm64",
@@ -541,7 +541,7 @@
     },
     {
       "nginx_version": "1.28.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "almalinux9",
       "libc": "glibc",
       "arch": "amd64",
@@ -563,7 +563,7 @@
     },
     {
       "nginx_version": "1.28.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "almalinux9",
       "libc": "glibc",
       "arch": "arm64",
@@ -608,7 +608,7 @@
     },
     {
       "nginx_version": "1.28.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "debian12",
       "libc": "glibc",
       "arch": "amd64",
@@ -630,7 +630,7 @@
     },
     {
       "nginx_version": "1.28.3",
-      "nginx_channel": "legacy",
+      "nginx_channel": "stable",
       "os": "debian12",
       "libc": "glibc",
       "arch": "arm64",
