@@ -380,14 +380,15 @@ sudo cp "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
 # ACTIVE module, not the staged one).
 sudo cp objs/ngx_http_markdown_filter_module.so \
     "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new"
-STAGED_CONF="$(mktemp "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX.conf")"
-trap 'rm -f "$STAGED_CONF"' EXIT
-{
-    echo "load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;"
-    echo "events { worker_connections 64; }"
-    echo "http { server { listen 127.0.0.1:19999; location / { return 200 ok; } } }"
-} > "$STAGED_CONF"
-sudo nginx -t -c "$STAGED_CONF"
+STAGED_ROOT="$("$(command -v mktemp)" -d "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX")"
+trap 'rm -rf "$STAGED_ROOT"' EXIT
+# Validate the ACTIVE migrated configuration tree against the staged
+# module: copy the live config dir and rewrite its load_module entry to
+# reference the staged .so, then run nginx -t against that copy.
+sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
+sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]].*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
+    "${STAGED_ROOT}/nginx.conf"
+sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
 MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
 MODULE_BACKUP_OWNED=0
 if [[ -e "${MODULE_BACKUP}" ]]; then

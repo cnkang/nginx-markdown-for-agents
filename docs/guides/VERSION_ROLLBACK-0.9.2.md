@@ -302,16 +302,18 @@ if [[ -z "${CONFIG_DIR}" || "${CONFIG_DIR}" == / \
 fi
 # Swap the configuration tree atomically, keeping the current tree for
 # rollback of this rollback.
+# Preserve the live 0.9.1 module BEFORE touching the configuration so a
+# failure at any later step can restore the exact pre-rollback binary.
+sudo cp -a -- "$MODULES_DIR/ngx_http_markdown_filter_module.so" \
+    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" && \
+sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" \
+    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak"
 sudo cp -a -- "${CONFIG_090}" "${CONFIG_DIR}.restore-0.9.0"
 sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.pre-0.9.0"
 if ! sudo mv -- "${CONFIG_DIR}.restore-0.9.0" "${CONFIG_DIR}"; then
   sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}"
   exit 1
 fi
-# Preserve the live 0.9.1 module before replacing it so the nginx -t
-# failure branch can restore the exact pre-rollback binary.
-sudo cp -a -- "$MODULES_DIR/ngx_http_markdown_filter_module.so" \
-    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak"
 sudo cp -a -- "${MODULE_090}" \
     "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" && \
 sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \

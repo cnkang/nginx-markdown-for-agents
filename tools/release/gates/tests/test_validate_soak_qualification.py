@@ -435,10 +435,14 @@ def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
     assert any("worker RSS" in error for error in saved["errors"])
 
 
-@pytest.mark.parametrize("sample", [None, 65536])
+@pytest.mark.parametrize("sample", [None, 0, 65536])
 def test_run_peak_gauge_semantics(sample):
     """The gauge is a run-wide high-water mark: a positive sample certifies
     an observed peak, while None/zero means no conversion completed."""
+    if sample == 0:
+        # Zero, like None, is missing evidence (production treats
+        # peak <= 0 as unobserved).
+        sample = None
     session = {
         "started": 0,
         "ended": 1800,

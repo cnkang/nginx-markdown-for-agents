@@ -119,7 +119,7 @@ This behavior matters for operators diagnosing why the module skipped a request.
 
 ## Outcome Determination
 
-When all eligibility checks pass (checks 1–8), the module attempts conversion. The outcome depends on whether conversion succeeds and, if it fails, on the `markdown_error_policy` configuration:
+When all eligibility checks pass (checks 1–8), the module attempts conversion. The outcome depends on whether conversion succeeds and, if it fails, on the `markdown_error_policy` configuration. One exception governs the pre-commit pass policy: fail-open replay requires the consumed upstream bytes to still be retained in the replay buffer — when they are no longer reproducible, the module MUST fail closed (configured error status) even under `pass`, because a pass policy cannot be honored without the original content.
 
 ### Success: converted
 

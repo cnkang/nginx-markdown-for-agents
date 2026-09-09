@@ -299,8 +299,8 @@ fn append_echo_headers_case(
      * Duplicate same-name request headers must survive the module's
      * conditional capture/shadow/restore intact.  The fixture echoes the
      * upstream-received headers back in the body; a name-based restore
-     * would have collapsed A/B into B/B, and both lines here prove the
-     * identity mapping preserved every occurrence in upstream order.
+     * would have collapsed A/B into B/B.  Assert PRESENCE of both values
+     * (HTTP header ordering is not guaranteed through NGINX forwarding).
      */
     let resp = match http::get_with_header_pairs(url, headers) {
         Ok(resp) => resp,

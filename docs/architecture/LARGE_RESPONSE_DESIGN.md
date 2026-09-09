@@ -234,9 +234,11 @@ Finalized --> [*]       (result returned)
 Error --> [*]
 ```
 
-### FFI Functions
+### FFI Functions (historical)
 
-The build exports these functions only when you enable the `incremental` feature:
+The 0.8.x incremental build exported these functions only when the
+`incremental` feature was enabled; they are REMOVED in 0.9.2 and are
+retained below for historical reference only:
 
 | FFI Function | Purpose |
 |-------------|---------|
