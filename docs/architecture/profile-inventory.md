@@ -257,8 +257,11 @@ The effective view exposes these retained fields:
 - `streaming_buffer` (the `streaming_budget` storage field when the build enables streaming)
 
 All of these values are static after configuration merge. `memory_budget` is a
-static safety limit. This list is the source used by the request-lifecycle
-documentation.
+static safety limit. `enabled` is static when `markdown_filter` uses a plain
+`on`/`off` value; when the directive carries request-variable provenance
+(`enabled_complex`), the effective value is resolved per request while the
+merged static fields above stay fixed. This list is the source used by the
+request-lifecycle documentation.
 
 ### 3.3 Profile Integration Point (not implemented — feature removed)
 

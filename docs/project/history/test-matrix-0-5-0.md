@@ -52,7 +52,11 @@ conversion engines x 6 conversion paths = 288 tuples.  Six of them — the
 Extra-Large full-buffer convert tuples (TM-037, TM-085, TM-133, TM-181,
 TM-229, TM-277) — hit the size-limit rejection path by design: the module
 rejects inputs at or above the conversion ceiling, so this document excludes
-them from the required set, leaving 282 required tuples.  The fallback and fail-open
+them from the required set.  A further 24 full-buffer/fallback tuples are
+unreachable: fallback is a streaming-to-full-buffer transition, so a request
+whose initial engine is full-buffer can never take the fallback path.  Those
+24 tuples are Not-Applicable for the same reason the Extra-Large convert rows
+are excluded, leaving 258 required tuples.  The fallback and fail-open
 paths are separate coverage obligations: each carries its own reason code
 and output, so no tuple may cover both at once. A streaming-to-full-buffer
 fallback does not count an already counted full-buffer conversion again.

@@ -463,8 +463,14 @@ else
 fi
 # Optional log corroboration (requires markdown_log_verbosity info or
 # debug, and an error-log level that includes info): the probe must show
-# its own path in a disabled decision entry.
-tail -50 /var/log/nginx/error.log | grep "markdown:" | grep "reason=disabled" | grep "${PROBE_PATH}"
+# its own path in a disabled decision entry.  Guarded so a missing
+# matching entry does not fail the procedure under set -e.
+if tail -50 /var/log/nginx/error.log 2>/dev/null \
+    | grep "markdown:" | grep "reason=disabled" | grep -q "${PROBE_PATH}"; then
+  echo "OK: decision log corroborates the disabled probe"
+else
+  echo "INFO: decision-log corroboration not found (log level may be too low); counter check above is authoritative" >&2
+fi
 ```
 
 For Method C (restoring fail-open), trigger a known conversion failure first and
