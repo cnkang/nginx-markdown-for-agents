@@ -258,9 +258,9 @@ The effective view exposes these retained fields:
 
 All of these values are static after configuration merge. `memory_budget` is a
 static safety limit. `enabled` is static when `markdown_filter` uses a plain
-`on`/`off` value; when the directive carries request-variable provenance
-(`enabled_complex`), the effective value is resolved per request while the
-merged static fields above stay fixed. This list is the source used by the
+`on`/`off` value. When the directive carries request-variable provenance
+(`enabled_complex`), the module resolves the effective value per request while
+the merged static fields above stay fixed. This list is the source used by the
 request-lifecycle documentation.
 
 ### 3.3 Profile Integration Point (not implemented — feature removed)

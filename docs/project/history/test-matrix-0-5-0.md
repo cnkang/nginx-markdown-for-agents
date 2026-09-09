@@ -54,9 +54,9 @@ TM-229, TM-277) — hit the size-limit rejection path by design: the module
 rejects inputs at or above the conversion ceiling, so this document excludes
 them from the required set.  A further 24 full-buffer/fallback tuples are
 unreachable: fallback is a streaming-to-full-buffer transition, so a request
-whose initial engine is full-buffer can never take the fallback path.  Those
-24 tuples are Not-Applicable for the same reason the Extra-Large convert rows
-are excluded, leaving 258 required tuples.  The fallback and fail-open
+whose initial engine is full-buffer can never take the fallback path.  This
+document excludes those 24 tuples for the same reason it excludes the
+Extra-Large convert rows, leaving 258 required tuples.  The fallback and fail-open
 paths are separate coverage obligations: each carries its own reason code
 and output, so no tuple may cover both at once. A streaming-to-full-buffer
 fallback does not count an already counted full-buffer conversion again.

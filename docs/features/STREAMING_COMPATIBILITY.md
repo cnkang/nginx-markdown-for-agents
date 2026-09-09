@@ -99,7 +99,7 @@ Use **streaming** when:
 
 Use **auto** to prefer streaming for eligible responses. The module selects
 the processing path from the policy and hard compatibility constraints, not
-a response-size heuristic. The 0.9.2 default is `off` (bounded full-buffer);
+a response-size heuristic. The 0.9.2 default is `off` (bounded full-buffer).
 `auto` must be written explicitly to opt in.
 
 ## Related Documentation
