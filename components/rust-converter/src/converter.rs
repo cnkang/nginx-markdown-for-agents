@@ -292,17 +292,14 @@ pub struct ConversionContext {
     working_set_bytes: usize,
     /// High-water mark of `working_set_bytes` across the whole conversion.
     ///
-    /// Exported through the FFI as `MarkdownResult.peak_memory_estimate` so
-    /// the NGINX module can publish a per-conversion peak that covers both
-    /// full-buffer and streaming paths (a positive sample then certifies a
-    /// per-request peak for the soak qualification gate).
+    /// Exported through the FFI as `MarkdownResult.peak_memory_estimate`.
+    /// This is the peak of the converter-tracked working set (retained
+    /// output capacity plus transient scratch), NOT a total conversion
+    /// memory peak: parser/DOM allocations and process RSS are not
+    /// included.  A positive sample certifies a per-request peak for the
+    /// soak qualification gate across both full-buffer and streaming
+    /// paths.
     peak_working_set_bytes: usize,
-    /// High-water mark of the output buffer capacity currently charged to
-    /// the working set.  Nested list-item rendering charges only the
-    /// DELTA over this value (see format_list_item_with_context), so the
-    /// retained output allocation is charged exactly once while growth
-    /// from reallocation is still accounted for.
-    reserved_output_capacity: usize,
 }
 
 /// Fallible Markdown output writer bound to one conversion budget.
@@ -460,7 +457,6 @@ impl ConversionContext {
             output_budget: DEFAULT_FULL_BUFFER_OUTPUT_BUDGET,
             working_set_bytes: 0,
             peak_working_set_bytes: 0,
-            reserved_output_capacity: 0,
         }
     }
 

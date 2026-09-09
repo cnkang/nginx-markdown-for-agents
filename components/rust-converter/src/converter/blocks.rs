@@ -600,22 +600,18 @@ impl MarkdownConverter {
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
         let output_capacity = output.capacity();
-        let mut charge_delta = 0;
         if let Some(context) = ctx.as_deref_mut() {
-            // Charge the retained output capacity by the DELTA over what
-            // an outer frame already reserved.  Nested list items re-enter
-            // this function through render_list_item_content /
-            // handle_list_with_context while the outer charge is still
-            // active; re-reserving the full capacity would double-count
-            // it, but the output buffer may have grown since the outer
-            // frame reserved (its format step can reallocate), so the
-            // growth must still be charged.  Each frame releases exactly
-            // its own delta on exit.
-            if output_capacity > context.reserved_output_capacity {
-                charge_delta = output_capacity - context.reserved_output_capacity;
-                context.reserve_working_set(charge_delta)?;
-                context.reserved_output_capacity = output_capacity;
-            }
+            // Charge this frame's retained output capacity.  Nested list
+            // items re-enter this function through
+            // render_list_item_content / handle_list_with_context with a
+            // DIFFERENT output String (the inner item_output buffer), so
+            // each live output allocation is charged independently and
+            // released when its frame exits.  Sequential calls on the
+            // same output never overlap, so per-frame reserve/release
+            // cannot double-count.  Growth of the buffer during the
+            // frame (format step reallocation) is bounded by
+            // check_output_budget below.
+            context.reserve_working_set(output_capacity)?;
         }
 
         let result = (|| {
@@ -635,14 +631,10 @@ impl MarkdownConverter {
             Ok(())
         })();
 
-        // Release exactly this frame's delta and roll the reserved
-        // high-water back, so the outer frame's charge stays intact and
-        // the counter never goes negative.
-        if charge_delta > 0
-            && let Some(context) = ctx
-        {
-            context.release_working_set(charge_delta);
-            context.reserved_output_capacity -= charge_delta;
+        // Release exactly this frame's charge on exit, including error
+        // paths (the closure result is propagated after release).
+        if let Some(context) = ctx {
+            context.release_working_set(output_capacity);
         }
         result
     }
