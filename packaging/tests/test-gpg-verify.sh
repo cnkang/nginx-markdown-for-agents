@@ -103,8 +103,8 @@ esac
 
 check_prerequisites
 
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+RPM_DIR=$(mktemp -d)
+trap 'rm -rf "$RPM_DIR"' EXIT
 
 # Run gpg against an isolated, empty home so the temporary keyring below is
 # actually used. On hosts where GnuPG enables use-keyboxd, the

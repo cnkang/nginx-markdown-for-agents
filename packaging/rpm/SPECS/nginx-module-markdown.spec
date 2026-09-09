@@ -175,7 +175,7 @@ fi
 - v0.9.0: Breaking — Config V2, profile system, error policy consolidation,
   inflight guard, metrics consolidation, reason code lowercase
 
-* Tue Jun 10 2026 Kang - 0.8.0-nginx1.26.3.1
+* Wed Jun 10 2026 Kang - 0.8.0-nginx1.26.3.1
 - v0.8.0: True streaming contract, fallback state machine, streaming
   observability, streaming security enforcement, release matrix source of
   truth, streaming configuration directives

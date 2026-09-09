@@ -453,6 +453,30 @@ fn scenario_response(
     if path == "/md/html" {
         return md_html_response(state, method, headers);
     }
+    if path.ends_with("/echo-headers") {
+        /*
+         * Echo the request headers back so E2E scenarios can observe
+         * what the NGINX module forwarded upstream after capture,
+         * suppression, shadow, and restore.  Any location prefix
+         * (/md/, /md-deny/, ...) reaches this branch so scenarios can
+         * exercise different module policies against the same echo.
+         */
+        use axum::body::Body;
+        use axum::http::Response;
+        let mut lines: Vec<String> = Vec::new();
+        for (name, value) in headers.iter() {
+            lines.push(format!("{}: {}", name.as_str(), value.to_str().unwrap_or("?")));
+        }
+        let mut sorted = lines;
+        sorted.sort();
+        return Response::builder()
+            .status(200)
+            .header("Content-Type", "text/plain")
+            .body(Body::from(
+                format!("--- headers ---\n{}\n", sorted.join("\n")),
+            ))
+            .unwrap();
+    }
     if path == "/force/html" {
         return html_response(
             method,

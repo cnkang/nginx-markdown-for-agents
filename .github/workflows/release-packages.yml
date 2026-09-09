@@ -37,7 +37,7 @@
 #     environment to the exact 40-character SHA approved by the release owner.
 #     Tag releases ALWAYS run the signing job; no repository variable needed.
 #
-# GPG Signing Policy (0.8.x release line):
+# GPG Signing Policy (0.9.x / pre-1.0 release line):
 #   Tag releases: signing is MANDATORY. The integrity-signing job always runs
 #   for tag pushes and the publish job requires signing to succeed. If GPG
 #   secrets are missing, the pipeline fails early with a clear preflight error.
@@ -666,7 +666,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # Package Job: Generate .deb/.rpm via nFPM (matrix)
   # Consumes the compiled .so from the build job and produces distribution
-  # packages following 0.8.x release package naming and layout conventions.
+  # packages following 0.9.x release package naming and layout conventions.
   # ─────────────────────────────────────────────────────────────────────────────
   package:
     name: Package - nginx-${{ matrix.nginx_version }} - ${{ matrix.arch }}
@@ -752,7 +752,7 @@ jobs:
               ;;
           esac
 
-          # Artifact filenames per 0.8.x release package naming and layout conventions
+          # Artifact filenames per 0.9.x release package naming and layout conventions
           RPM_NGINX_EVR="1:${NGINX_VERSION}"
           DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
           RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
