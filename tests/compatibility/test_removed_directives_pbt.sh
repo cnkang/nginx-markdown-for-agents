@@ -281,7 +281,8 @@ PRNG_RESULT=0
 PRNG_PICK=""
 
 prng_seed() {
-  PRNG_STATE=$(( $1 & 0x7fffffff ))
+  local seed="$1"
+  PRNG_STATE=$(( seed & 0x7fffffff ))
   return 0
 }
 

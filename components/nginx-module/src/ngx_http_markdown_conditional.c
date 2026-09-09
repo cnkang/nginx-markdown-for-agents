@@ -281,7 +281,7 @@ ngx_http_markdown_conditional_header_is_captured(
  */
 static ngx_int_t
 ngx_http_markdown_shadow_captured_conditional_headers(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx)
 {
     ngx_http_markdown_conditional_side_table_t  *table;
     ngx_list_t                                  *source;
@@ -324,7 +324,7 @@ ngx_http_markdown_shadow_captured_conditional_headers(
          part != NULL;
          part = part->next)
     {
-        ngx_table_elt_t  *headers;
+        const ngx_table_elt_t  *headers;
 
         headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
@@ -374,7 +374,9 @@ ngx_http_markdown_restore_shadowed_conditional_headers(
     ngx_http_request_t *r)
 {
     ngx_http_markdown_conditional_side_table_t  *table;
-    ngx_list_part_t                            *tail, *last, *appended;
+    ngx_list_part_t                            *tail;
+    ngx_list_part_t                            *last;
+    ngx_list_part_t                            *appended;
     ngx_uint_t                                  capacity;
 
     if (r == NULL) {

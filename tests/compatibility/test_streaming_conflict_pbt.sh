@@ -281,7 +281,8 @@ EOF
 }
 
 variant_expected_failure() {
-    case "$1" in
+    local variant="$1"
+    case "$variant" in
         0|1) return 0 ;;
         *) return 1 ;;
     esac

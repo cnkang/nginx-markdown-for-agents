@@ -86,7 +86,7 @@ ngx_http_markdown_diagnostics_collect_metrics(
 static uint32_t
 ngx_http_markdown_sha256_ror(uint32_t value, ngx_uint_t bits)
 {
-    return (uint32_t) ((value >> bits) | (value << (32 - bits)));
+    return (value >> bits) | (value << (32 - bits));
 }
 
 
@@ -112,7 +112,16 @@ ngx_http_markdown_sha256_transform(uint32_t state[8], const u_char block[64])
         0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U
     };
     uint32_t w[64];
-    uint32_t a, b, c, d, e, f, g, h, t1, t2;
+    uint32_t a;
+    uint32_t b;
+    uint32_t c;
+    uint32_t d;
+    uint32_t e;
+    uint32_t f;
+    uint32_t g;
+    uint32_t h;
+    uint32_t t1;
+    uint32_t t2;
     ngx_uint_t i;
 
     for (i = 0; i < 16; i++) {
@@ -229,7 +238,6 @@ ngx_http_markdown_sha256_hex(const u_char *data, size_t len, u_char out[64])
     static const u_char hex[] = "0123456789abcdef";
     ngx_http_markdown_sha256_t ctx;
     u_char digest[32];
-    ngx_uint_t i;
 
     if (data == NULL && len != 0) {
         return NGX_ERROR;
@@ -237,7 +245,7 @@ ngx_http_markdown_sha256_hex(const u_char *data, size_t len, u_char out[64])
     ngx_http_markdown_sha256_init(&ctx);
     ngx_http_markdown_sha256_update(&ctx, data, len);
     ngx_http_markdown_sha256_final(&ctx, digest);
-    for (i = 0; i < sizeof(digest); i++) {
+    for (ngx_uint_t i = 0; i < sizeof(digest); i++) {
         out[i * 2] = hex[digest[i] >> 4];
         out[i * 2 + 1] = hex[digest[i] & 0x0f];
     }
