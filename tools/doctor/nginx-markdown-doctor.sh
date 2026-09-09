@@ -375,6 +375,8 @@ check_config_valid() {
 ${load_module_line}
 daemon off;
 worker_processes 1;
+error_log ${TMPDIR:-/tmp}/doctor-nginx-error.log;
+pid ${TMPDIR:-/tmp}/doctor-nginx.pid;
 events { worker_connections 64; }
 http {
 ${markdown_directive}

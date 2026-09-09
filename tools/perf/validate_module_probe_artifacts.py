@@ -104,8 +104,13 @@ def _artifact_file(
     """Resolve one fixed-name probe file without following an escape."""
     filename = f"{scenario}.{suffix}"
     try:
+        # Resolve the probe directory against the SAME resolved root used
+        # by _resolve_repo_relative: a symlinked root prefix would make
+        # probe_dir.relative_to(root) raise ValueError before the
+        # containment check runs.
+        resolved_root = root.resolve()
         path = _resolve_repo_relative(
-            probe_dir.relative_to(root) / filename,
+            probe_dir.resolve().relative_to(resolved_root) / filename,
             root,
             purpose=f"{scenario} {suffix} artifact",
         )

@@ -124,8 +124,13 @@ STANDARD_RE = re.compile(r"_(?:iso|rfc|utf|ascii|unicode)_\d+(?:_\d+)*$", re.IGN
 EXAMPLE_RE = re.compile(r"^example_\d+$")
 
 # Exempt: explicit semantic tokens that explain the trailing digits.
+# Semantic tokens match only as complete underscore-delimited segments (or
+# at the start/end of a name): a bare substring such as "adr" inside
+# render_quadrant_1 or "spec" inside test_specific_helper_2 must NOT
+# qualify, otherwise every helper with an accidental substring is exempted.
 SEMANTIC_TOKEN_RE = re.compile(
-    r"(version|spec|adr|release|schema|changelog|v\d)", re.IGNORECASE,
+    r"(?:^|_)(version|spec|adr|release|schema|changelog|v\d)(?:_|$)",
+    re.IGNORECASE,
 )
 
 

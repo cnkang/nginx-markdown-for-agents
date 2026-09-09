@@ -294,46 +294,67 @@ def test_missing_per_request_peak_is_insufficient_data() -> None:
         validator.validate_soak_outcome(record, manifest)
 
 
-def test_real_mode_records_insufficient_peak_as_failure(
+def test_real_mode_missing_peak_is_failure(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Real mode must write fail, not pass, without module peak evidence."""
+    """Real mode must FAIL when the module-managed per-request peak was
+    not observed: the gauge is a run-wide high-water mark covering both
+    streaming and full-buffer conversions, so its absence means no
+    conversion completed."""
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     record_path = (
         tmp_path / "artifacts" / "release" / "0.9.2" / "soak-record.json"
     )
-    runtime_dir = tmp_path / "runtime"
-
-    class FakeNginx:
-        def terminate(self) -> None:
-            pass
-
-        def wait(self, timeout: int) -> None:
-            pass
 
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(validator, "load_manifest", lambda path: manifest)
     monkeypatch.setattr(validator, "handle_missing_nginx", lambda args, data: None)
     monkeypatch.setattr(
         validator,
-        "prepare_runtime",
-        lambda base_url, data, module_so: (runtime_dir, {"small": "small.html"}, FakeNginx()),
+        "_run_soak_session",
+        lambda base_url, data, module_so: {
+            "started": 0,
+            "ended": 1800,
+            "rss_series": [[0.0, 100.0], [1.0, 101.0], [2.0, 102.0]],
+            "scenario_metrics": {
+                "small": [
+                    {
+                        "completed_requests": 100,
+                        "failed_requests": 0,
+                        "error_rate": 0.0,
+                        "p50_ms": 1.0,
+                        "p99_ms": 2.0,
+                        "rps": 10.0,
+                    }
+                ],
+                "medium": [
+                    {
+                        "completed_requests": 100,
+                        "failed_requests": 0,
+                        "error_rate": 0.0,
+                        "p50_ms": 1.0,
+                        "p99_ms": 2.0,
+                        "rps": 10.0,
+                    }
+                ],
+                "large": [
+                    {
+                        "completed_requests": 100,
+                        "failed_requests": 0,
+                        "error_rate": 0.0,
+                        "p50_ms": 1.0,
+                        "p99_ms": 2.0,
+                        "rps": 10.0,
+                    }
+                ],
+            },
+            "drain_delta": 0,
+            "monotonic": False,
+            "drain_samples": [100, 100, 100],
+            "peak_memory_bytes": None,
+            "ready_error": None,
+        },
     )
-    monkeypatch.setattr(validator, "wait_for_ready", lambda url: True)
-    monkeypatch.setattr(validator, "find_worker_pid", lambda path: -1)
-    monkeypatch.setattr(
-        validator,
-        "run_load_loop",
-        lambda corpus, worker_pid, duration, started, concurrency, runtime: (
-            [], {}
-        ),
-    )
-    monkeypatch.setattr(
-        validator,
-        "measure_drain",
-        lambda worker_pid: (0, False, [100, 100, 100]),
-    )
-    monkeypatch.setattr(validator, "read_module_peak_memory", lambda base_url: None)
 
     args = type(
         "Args",
@@ -415,8 +436,9 @@ def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
 
 
 @pytest.mark.parametrize("sample", [None, 65536])
-def test_last_streaming_sample_does_not_certify_run_peak(sample):
-    """A last-request estimate cannot certify both engines over a run."""
+def test_run_peak_gauge_semantics(sample):
+    """The gauge is a run-wide high-water mark: a positive sample certifies
+    an observed peak, while None/zero means no conversion completed."""
     session = {
         "started": 0,
         "ended": 1800,
@@ -426,12 +448,25 @@ def test_last_streaming_sample_does_not_certify_run_peak(sample):
         "monotonic": False,
         "peak_memory_bytes": sample,
     }
-    manifest = {"candidate_sha": "a" * 40, "concurrency": 16}
+    manifest = {
+        "candidate_sha": "a" * 40,
+        "concurrency": 16,
+        "corpus": [],
+    }
     record = validator._build_soak_record(manifest, 1800, [], session)
     assert record["last_streaming_peak_estimate_bytes"] == sample
-    assert record["module_managed_peak_observed"] is False
-    assert record["per_request_peak_bytes"] is None
-    assert validator._peak_memory_issue(record, manifest) is not None
+    if sample is None:
+        assert record["module_managed_peak_observed"] is False
+        assert record["per_request_peak_bytes"] is None
+        assert validator._peak_memory_issue(record, manifest) is not None
+    else:
+        assert record["module_managed_peak_observed"] is True
+        assert record["per_request_peak_bytes"] == sample
+        # Positive sample with no corpus ceilings -> missing-ceiling issue,
+        # not missing-observation.
+        assert validator._peak_memory_issue(record, manifest) == (
+            "insufficient-data: scenario memory ceiling is missing"
+        )
 
 
 def test_load_generator_requests_markdown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -477,3 +512,28 @@ def test_peak_check_rejects_any_invalid_scenario_budget(budget: object) -> None:
     record = {'module_managed_peak_observed': True, 'per_request_peak_bytes': 1}
     manifest = {'corpus': [{'conversion_memory_bytes': budget}, {'conversion_memory_bytes': 96}]}
     assert validator._peak_memory_issue(record, manifest) is not None
+
+
+def test_soak_failures_missing_peak_is_blocking() -> None:
+    """A missing module-managed peak is a blocking failure; an observed
+    peak above the ceiling stays blocking."""
+    record = {
+        "per_scenario": [{"error_rate": 0.0}],
+        "monotonic_growth_after_drain": False,
+        "rss_time_series": [[0.0, 100.0], [1.0, 101.0], [2.0, 102.0]],
+        "worker_rss_drain_delta_kb": 0,
+        "worker_rss_drain_samples": [100, 100, 100],
+        "module_managed_peak_observed": False,
+        "per_request_peak_bytes": None,
+    }
+    manifest = {
+        "duration_minutes": 30,
+        "corpus": [{"conversion_memory_bytes": 32}],
+    }
+    failures = validator._soak_failures(record, manifest, 1800, None)
+    assert any("insufficient-data" in f for f in failures)
+
+    record["module_managed_peak_observed"] = True
+    record["per_request_peak_bytes"] = 2**40
+    failures = validator._soak_failures(record, manifest, 1800, None)
+    assert any("below-threshold" in f for f in failures)

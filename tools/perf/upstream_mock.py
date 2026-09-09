@@ -84,7 +84,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # pylint: disable=invalid-name
         """Handle GET requests dynamically serving corpus files."""
         parsed = urlparse(self.path)
-        query = parse_qs(parsed.query)
+        query = parse_qs(parsed.query, keep_blank_values=True)
         path_str = parsed.path.lstrip("/")
 
         file_path = self._resolve_and_verify_path(path_str)
