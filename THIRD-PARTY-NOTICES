@@ -172,7 +172,7 @@ they are not distributed with the converter binary unless stated otherwise.
 
 --------------------------------------------------------------------------------
 
-11. flate2 1.1.9
+11. flate2 1.1.10
     https://github.com/rust-lang/flate2-rs
     License: MIT OR Apache-2.0
     Copyright (c) 2014 Alex Crichton
