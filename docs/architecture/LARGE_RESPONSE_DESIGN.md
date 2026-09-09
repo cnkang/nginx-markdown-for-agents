@@ -200,7 +200,12 @@ default = []
 incremental = []
 ```
 
-The `incremental` feature is off by default. When disabled, the module exports no incremental-only symbols and the legacy `markdown_convert()` ABI remains unchanged.
+The `incremental` feature is off by default. The 0.9.2 release removed the incremental exports entirely: no `markdown_incremental_*` symbols are built or exported. legacy `markdown_convert()` ABI remains unchanged.
+
+> **Historical note**: the Rust `IncrementalConverter` interface and the
+> incremental FFI API sections below describe the REMOVED 0.8.x design and
+> are retained for historical reference only. They are not part of the
+> 0.9.2 build and must not be used as an API contract.
 
 ### Rust Interface
 

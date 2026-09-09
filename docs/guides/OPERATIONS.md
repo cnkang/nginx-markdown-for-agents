@@ -59,7 +59,7 @@ The endpoint emits exactly the ten bounded Prometheus families defined in
 the [Prometheus Metrics Guide](prometheus-metrics.md). Monitor the labeled
 request outcomes, conversion attempts and successful deliveries, the duration
 histogram, byte counters, streaming and decompression events, the
-`nginx_markdown_streaming_peak_memory_bytes` streaming memory gauge, and
+`nginx_markdown_streaming_peak_memory_bytes` run-wide conversion peak-memory gauge (streaming + full-buffer), and
 `build_info`. The diagnostics endpoint (`markdown_diagnostics`)
 additionally exposes the per-worker in-flight counter. Do not derive
 dashboards from removed JSON fields or legacy family names.
@@ -147,7 +147,7 @@ Configure alerts based on these thresholds:
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
 | Failure rate | > 10% for 5 minutes | Page on-call engineer |
-| System error rate (nginx_markdown_requests_total{reason="ffi_panic"}) | > 1% for 5 minutes | Page on-call engineer |
+| System error rate (nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}) | > 1% for 5 minutes | Page on-call engineer |
 | Conversion time (p95) | > 500ms for 10 minutes | Page on-call engineer |
 | Module crash | Worker restart detected | Page on-call engineer |
 
@@ -1343,7 +1343,7 @@ tail -f /var/log/nginx/error.log | grep "markdown:"
 | `nginx_markdown_conversion_duration_seconds` | Histogram | Conversion duration by engine |
 | `nginx_markdown_input_bytes_total` | Counter | Input bytes read for conversion |
 | `nginx_markdown_output_bytes_total` | Counter | Converted bytes delivered downstream |
-| `nginx_markdown_streaming_peak_memory_bytes` | Gauge | Peak streaming working-memory high-water mark |
+| `nginx_markdown_streaming_peak_memory_bytes` | Gauge | Run-wide conversion peak working-memory high-water mark (streaming + full-buffer) |
 | `nginx_markdown_streaming_events_total` | Counter | Bounded streaming transitions |
 | `nginx_markdown_decompression_events_total` | Counter | Bounded decompression events |
 | `nginx_markdown_build_info` | Gauge | Build identity; value is always `1` |

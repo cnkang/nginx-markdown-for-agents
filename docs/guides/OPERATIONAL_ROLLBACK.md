@@ -588,10 +588,14 @@ if [ -z "$after" ]; then
 fi
 # Capture disabled-request signal separately without changing the conversion metric comparison
 # Trigger a unique request first so the disabled signal is guaranteed to be
-# emitted by this verification, not by unrelated traffic.
+# emitted by this verification, not by unrelated traffic.  Use a FIXED path
+# covered by the affected markdown_filter scope (a timestamp-based path may
+# fall outside the location that disables conversion) and include the Host
+# header so the request reaches that scope.
 curl -fsS -o /dev/null \
   -H "Accept: text/markdown" \
-  "http://localhost/rollback-probe-$(date +%s)"
+  -H "Host: ${ROLLBACK_HOST:-localhost}" \
+  "http://localhost/rollback-probe"
 sleep 1
 disabled=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
   http://localhost/markdown-metrics | \
