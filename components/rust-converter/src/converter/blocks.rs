@@ -599,21 +599,6 @@ impl MarkdownConverter {
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
-        let output_capacity = output.capacity();
-        if let Some(context) = ctx.as_deref_mut() {
-            // Charge this frame's retained output capacity.  Nested list
-            // items re-enter this function through
-            // render_list_item_content / handle_list_with_context with a
-            // DIFFERENT output String (the inner item_output buffer), so
-            // each live output allocation is charged independently and
-            // released when its frame exits.  Sequential calls on the
-            // same output never overlap, so per-frame reserve/release
-            // cannot double-count.  Growth of the buffer during the
-            // frame (format step reallocation) is bounded by
-            // check_output_budget below.
-            context.reserve_working_set(output_capacity)?;
-        }
-
         let result = (|| {
             let (item_output, _) =
                 self.render_list_item_content(node, output, depth, ordered, &mut ctx)?;
@@ -630,12 +615,6 @@ impl MarkdownConverter {
             }
             Ok(())
         })();
-
-        // Release exactly this frame's charge on exit, including error
-        // paths (the closure result is propagated after release).
-        if let Some(context) = ctx {
-            context.release_working_set(output_capacity);
-        }
         result
     }
 
