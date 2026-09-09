@@ -1223,6 +1223,9 @@ mod tests {
     /// Validates: Requirements 1.7 — safe finish closes open structures.
     ///
     /// Feeds enough HTML to commit output, then calls safe_finish to
+    /// complete the remaining Markdown.  The body only exercises the
+    /// POST_COMMIT_SAFE_FINISH path and UTF-8 closing bytes; the Property
+    /// 12/13 attribution above is historical and kept for traceability.
     /// verify that open Markdown structures are gracefully closed and
     /// the return code is POST_COMMIT_SAFE_FINISH (3).
     #[test]

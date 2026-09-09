@@ -40,7 +40,7 @@ All 0.4.0 sub-specs must follow these conventions for any new operator-facing su
 | `markdown_flavor`                      | Markdown output flavor               |
 | `markdown_token_estimate`              | Token estimation metadata            |
 | `markdown_front_matter`               | YAML front matter injection          |
-| `markdown_accept`                     | Accept negotiation (strict/wildcard) |
+| `markdown_accept`                     | Accept negotiation (strict/force) |
 | `markdown_auth_policy`                 | Auth-based eligibility policy        |
 | `markdown_auth_cookies`                | Cookie forwarding for auth           |
 | `markdown_etag`                        | ETag generation                      |

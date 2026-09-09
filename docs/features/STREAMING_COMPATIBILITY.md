@@ -97,9 +97,10 @@ Use **streaming** when:
 - You accept that post-commit errors that cannot finish safely truncate the
   response (safe-finish failures complete the remaining Markdown)
 
-Use **auto** (default) to prefer streaming for eligible responses. The
-module selects the processing path from the policy and hard compatibility
-constraints, not a response-size heuristic.
+Use **auto** to prefer streaming for eligible responses. The module selects
+the processing path from the policy and hard compatibility constraints, not
+a response-size heuristic. The 0.9.2 default is `off` (bounded full-buffer);
+`auto` must be written explicitly to opt in.
 
 ## Related Documentation
 

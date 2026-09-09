@@ -1372,7 +1372,7 @@ are real, not table-escaped):
 
 ```bash
 # Decision-log failure outcomes
-grep -E "outcome=(failed_open|failed_closed|aborted)" /var/log/nginx/error.log | tail -20
+grep "markdown:" /var/log/nginx/error.log | grep -E "outcome=(failed_open|failed_closed|aborted)" | tail -20
 
 # Response Content-Type check
 curl -sD - -H "Accept: text/markdown" http://localhost/your-path/ | grep Content-Type

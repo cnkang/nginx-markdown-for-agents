@@ -70,7 +70,8 @@ own objects. Do not copy provenance into every scenario record:
    (`make release-gates-check-092`) must reject any baseline policy that is
    missing any required provenance field, rather than skipping it silently.
    Archival `verbatim_import` packs are exempt from the fields clause 9
-   leaves as imported; every other provenance field is still required.
+   leaves as imported (`source_run` and `source_artifact_sha256`); every
+   other provenance field is still required.
 5. **Raw artifact binding.** For `verbatim_run` baselines, the gate
    recomputes the SHA-256 of the raw artifact file and verifies it matches
    `source_artifact_sha256`; the finalized report (minus `baseline_policy`)

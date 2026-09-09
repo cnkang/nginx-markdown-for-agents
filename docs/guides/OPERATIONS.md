@@ -58,7 +58,8 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 The endpoint emits exactly the ten bounded Prometheus families defined in
 the [Prometheus Metrics Guide](prometheus-metrics.md). Monitor the labeled
 request outcomes, conversion attempts and successful deliveries, the duration
-histogram, byte counters, streaming and decompression events, and
+histogram, byte counters, streaming and decompression events, the
+`nginx_markdown_streaming_peak_memory_bytes` streaming memory gauge, and
 `build_info`. The diagnostics endpoint (`markdown_diagnostics`)
 additionally exposes the per-worker in-flight counter. Do not derive
 dashboards from removed JSON fields or legacy family names.
