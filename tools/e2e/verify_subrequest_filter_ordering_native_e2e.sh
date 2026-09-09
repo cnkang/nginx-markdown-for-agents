@@ -234,7 +234,7 @@ http {
             proxy_cache_key "\$uri|\$args|\$http_accept_encoding";
             add_header X-Cache-Status \$upstream_cache_status always;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming off;
         }
 
@@ -244,7 +244,7 @@ http {
             add_header X-Upstream-Content-Encoding \$upstream_http_content_encoding always;
             gunzip on;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming off;
         }
 
@@ -263,7 +263,7 @@ http {
             types { }
             default_type text/html;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming off;
         }
 
@@ -271,7 +271,7 @@ http {
             internal;
             default_type text/html;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming off;
             try_files /auth-check.html =404;
         }
@@ -280,7 +280,7 @@ http {
             auth_request /auth-check;
             default_type text/html;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming off;
             try_files /auth-protected/protected.html =404;
         }
@@ -308,7 +308,7 @@ http {
         location @error_markdown {
             default_type text/html;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming off;
             root html;
             try_files /error-markdown.html =404;
@@ -317,7 +317,7 @@ http {
         location @named_markdown {
             default_type text/html;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming off;
             root html;
             try_files /named-markdown.html =404;
@@ -326,7 +326,7 @@ http {
         location = /internal-target {
             default_type text/html;
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming off;
             root html;
             try_files /internal-target.html =404;

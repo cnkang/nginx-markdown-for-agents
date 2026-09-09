@@ -63,7 +63,7 @@ RUST_ALL_LOOP = "        for rc in &ALL {"
 REASON_KEY_RE = re.compile(r"^[a-z](?:[a-z0-9]|_(?=[a-z0-9]))*$")
 VALID_STAGES = frozenset({
     "eligibility", "decompression", "parsing", "conversion",
-    "precommit", "postcommit", "delivery", "dynconf",
+    "precommit", "postcommit", "delivery",
 })
 VALID_ERROR_ORIGINS = frozenset({
     "allocation", "downstream", "invariant", "format", "truncated",
@@ -280,8 +280,6 @@ METRIC_FAMILIES = {
         "memory_budget_exceeded",
         "header_plan_apply_error",
         "streaming_mid_flight_error",
-        "invalid_dynconf",
-        "degraded_snapshot",
         "encoding_header_invalid",
     ],
     "markdown_failed_open_total": ["failed_open"],
@@ -322,8 +320,6 @@ LOG_CALLSITES = {
     "conversion_error": "body_filter: conversion error",
     "memory_budget_exceeded": "body_filter: memory budget exceeded",
     "overload": "header_filter: inflight guard overload",
-    "invalid_dynconf": "header_filter: invalid dynconf",
-    "degraded_snapshot": "header_filter: degraded dynconf snapshot",
     "header_plan_apply_error": "header_filter: header plan apply error",
     "streaming_mid_flight_error": "body_filter: streaming mid-flight error",
     "bypass_no_transform": "header_filter: no-transform bypass",

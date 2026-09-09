@@ -176,7 +176,7 @@ remove_module_package() {
     esac
     # Propagate the package-manager exit status: an unconditional
     # `return 0` here would mask a failed module removal and let the
-    # lifecycle continue as if the package were gone (P1-8).
+    # lifecycle continue as if the package were gone.
     return "$?"
 }
 
@@ -342,7 +342,7 @@ CONF
 
     cat > "$negative_conf" <<CONF
 pid ${smoke_prefix}/negative.pid;
-error_log ${negative_log} notice;
+error_log ${smoke_prefix}/negative-error.log notice;
 daemon off;
 worker_processes 1;
 events { worker_connections 64; }
@@ -395,7 +395,7 @@ CONF
     info "Reading diagnostics from the loaded package module..."
     if "$curl_bin" -fsS -o "$diagnostics_file" \
         http://127.0.0.1:19999/nginx-markdown/diagnostics; then
-        if grep -Fq '"schema_version":2' "$diagnostics_file" \
+        if grep -Fq '"schema_version":3' "$diagnostics_file" \
             && grep -Fq '"diagnostics_recording":"active"' "$diagnostics_file"; then
             diagnostics_ok=1
         fi

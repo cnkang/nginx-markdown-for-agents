@@ -1,9 +1,10 @@
 # Configuration Reference (0.9.2)
 
-This is the frozen configuration reference. The command table has 25
-active `markdown_*` directives. Resource limits use one `markdown_limits`
-directive with bounded key/value entries. Dynamic configuration has its own
-five-key JSON overlay.
+This is the frozen configuration reference. The command table has 20
+active `markdown_*` directives plus five retained reject-only migration
+entries. Resource limits use one `markdown_limits`
+directive with bounded key/value entries. Configuration is static in 0.9.2.
+Validate changes with `nginx -t` before a controlled reload.
 
 ## Minimal configuration
 
@@ -46,33 +47,28 @@ All active directives accept the contexts recorded in the public inventory.
 The table below is the operator-facing summary. Inheritance follows normal
 NGINX `http` → `server` → `location` configuration merging.
 
-| Directive | Context | Purpose | Typical values |
-|---|---|---|---|
-| `markdown_filter` | `http, server, location` | Enable conversion | `on`, `off`, or a complex value |
-| `markdown_limits` | `http, server, location` | Set bounded resource limits | key/value entries listed below |
-| `markdown_error_policy` | `http, server, location` | Handle conversion errors | `pass`, `fail_closed`, `status <code>` |
-| `markdown_flavor` | `http, server, location` | Markdown dialect | `commonmark`, `gfm` |
-| `markdown_token_estimate` | `http, server, location` | Emit token estimates | `on`, `off` |
-| `markdown_front_matter` | `http, server, location` | Front-matter behavior | `on`, `off` |
-| `markdown_accept` | `http, server, location` | Accept negotiation policy | `strict`, `wildcard`, `force` |
-| `markdown_auth_policy` | `http, server, location` | Authentication handling | `allow`, `deny` |
-| `markdown_auth_cookies` | `http, server, location` | Authentication cookie names | space-separated names |
-| `markdown_cache_validation` | `http, server, location` | Cache/ETag policy | `off`, `ims_only`, `full` |
-| `markdown_streaming` | `http, server, location` | Requested conversion engine | `off`, `auto`, `force` |
-| `markdown_log_verbosity` | `http, server, location` | Decision log verbosity | `error`, `warn`, `info`, `debug` |
-| `markdown_content_types` | `http, server, location` | Convertible media types | space-separated media types |
-| `markdown_trusted_proxies` | `http` | Trusted proxy CIDRs | CIDR list |
-| `markdown_metrics_shm_size` | `http` | Metrics shared-memory size | NGINX size value |
-| `markdown_metrics` | `location` | Expose the metrics endpoint | flag directive |
-| `markdown_prune_noise` | `http, server, location` | Remove configured page noise | `on`, `off` |
-| `markdown_prune_selectors` | `http, server, location` | Noise selectors | selector list |
-| `markdown_prune_protection_selectors` | `http, server, location` | Protected selectors | selector list |
-| `markdown_auto_decompress` | `http, server, location` | Convert compressed upstream bodies | `on`, `off` |
-| `markdown_dynamic_config` | `http` | Enable the dynconf watcher | `on`, `off` |
-| `markdown_dynamic_config_path` | `http` | Watched dynconf JSON path | filesystem path |
-| `markdown_dynconf_dry_run` | `http` | Validate without promotion | `on`, `off` |
-| `markdown_diagnostics` | `location` | Expose diagnostics JSON | `on`, `off` |
-| `markdown_stream_excluded_types` | `http, server, location` | Exclude types from streaming | media-type list |
+| Directive | Context | Purpose | Typical values | Default |
+|---|---|---|---| --- |
+| `markdown_filter` | `http, server, location` | Enable conversion | `on`, `off`, or a complex value | `off` |
+| `markdown_limits` | `http, server, location` | Set bounded resource limits | key/value entries listed below | `(per-key inheritance)` |
+| `markdown_error_policy` | `http, server, location` | Handle conversion errors | `pass`, `fail_closed`, `status <code>` | `pass` |
+| `markdown_flavor` | `http, server, location` | Markdown dialect | `commonmark`, `gfm` | `commonmark` |
+| `markdown_token_estimate` | `http, server, location` | Emit token estimates | `on`, `off` | `off` |
+| `markdown_front_matter` | `http, server, location` | Front-matter behavior | `on`, `off` | `off` |
+| `markdown_accept` | `http, server, location` | Accept negotiation policy | `strict`, `force` | `strict` |
+| `markdown_auth_policy` | `http, server, location` | Authentication handling | `allow`, `deny` | `deny` |
+| `markdown_auth_cookies` | `http, server, location` | Authentication cookie names | space-separated names | `built-in session*, auth*, PHPSESSID, wordpress_logged_in_* (explicit replaces)` |
+| `markdown_cache_validation` | `http, server, location` | Cache/ETag policy | `off`, `ims_only`, `full` | `ims_only` |
+| `markdown_streaming` | `http, server, location` | Requested conversion engine | `off`, `auto`, `force` | `off` |
+| `markdown_log_verbosity` | `http, server, location` | Decision log verbosity | `error`, `warn`, `info`, `debug` | `info` |
+| `markdown_content_types` | `http, server, location` | Convertible media types | space-separated media types | `text/html` |
+| `markdown_trusted_proxies` | `http` | Trusted proxy CIDRs | CIDR list | `off` |
+| `markdown_metrics_shm_size` | `http` | Metrics shared-memory size | NGINX size value | `8*pagesize` |
+| `markdown_metrics` | `location` | Expose the metrics endpoint | flag directive | `off` |
+| `markdown_prune_noise` | `http, server, location` | Remove configured page noise | `on`, `off` | `on` |
+| `markdown_auto_decompress` | `http, server, location` | Convert compressed upstream bodies | `on`, `off` | `on` |
+| `markdown_diagnostics` | `location` | Expose diagnostics JSON | `on`, `off` | `off` |
+| `markdown_stream_excluded_types` | `http, server, location` | Exclude types from streaming | media-type list | `none` |
 
 The public metric endpoint is Prometheus-only. There is no active
 `markdown_metrics_format` directive.
@@ -80,8 +76,7 @@ The public metric endpoint is Prometheus-only. There is no active
 ## Resource limits
 
 `markdown_limits` accepts each key at most once. Unknown keys, zero values,
-overflow, and malformed entries fail `nginx -t` or the atomic dynconf
-validation path.
+overflow, and malformed entries fail `nginx -t` before a reload.
 
 The frozen single-key fragment is also valid: `markdown_limits
 streaming_buffer=2m`.
@@ -90,20 +85,26 @@ streaming_buffer=2m`.
 |---|---|
 | `conversion_timeout` | Wall-clock limit for conversion |
 | `parser_timeout` | Cooperative parser deadline |
-| `conversion_memory` | Full-buffer input admission and generated-output bound; transient scratch allocations are also charged against this budget so conversion aborts with a controlled error instead of growing peak memory past it |
+| `conversion_memory` | Full-buffer input admission and generated-output bound. Transient scratch allocations also count against this budget, so conversion aborts with a controlled error instead of growing peak memory past it |
 | `parser_budget` | Rust parser modeled working-set ceiling |
 | `streaming_buffer` | Per-request streaming working-set and replay budget |
 | `decompressed_size` | Cumulative decompressed output bound |
 | `decompression_ratio` | Maximum decompressed/input ratio |
 | `max_inflight` | Per-worker concurrent conversion bound |
 
-Example:
+Example (the `max_inflight` key is valid only in `http`):
 
 ```nginx
-markdown_limits conversion_timeout=10s parser_timeout=5s
-    conversion_memory=64m parser_budget=32m streaming_buffer=2m
-    decompressed_size=10m decompression_ratio=100 max_inflight=64;
+http {
+    markdown_limits conversion_timeout=10s parser_timeout=5s
+        conversion_memory=64m parser_budget=32m streaming_buffer=2m
+        decompressed_size=10m decompression_ratio=100 max_inflight=64;
+}
 ```
+
+`max_inflight` is a worker-wide concurrent-conversion bound and must be set
+in the `http` context. The other `markdown_limits` keys inherit through
+`http`, `server`, and `location` levels.
 
 `parser_timeout` is a cooperative parser-work allowance, not a preemptive
 wall-clock interrupt. The converter checks it at parser and traversal
@@ -133,13 +134,22 @@ should set `markdown_limits streaming_buffer=256k` to retain that behavior.
 
 ## Streaming policy
 
-The requested policy is `markdown_streaming off | auto | force`.
+The requested policy is `markdown_streaming off | auto | force`. The default
+is `off`: when you never write the directive, the module runs the bounded
+full-buffer engine (unset means the same as `off`).
 
-- `off` selects bounded full-buffer conversion.
-- `auto` applies a bounded internal response-shape heuristic.
+- `off` selects bounded full-buffer conversion. This token is the default.
+- `auto` prefers streaming and does not branch on response size. Write it
+  explicitly to opt in.
 - `force` requests streaming after hard eligibility and cache gates.
 
-The heuristic threshold is internal and is intentionally not a directive.
+Migration note (0.9.2): the unset default changed from `auto` to `off`.
+Earlier versions preferred streaming for large or chunked responses when the
+directive was unset. Operators who relied on that implicit streaming must now
+write `markdown_streaming auto` (or `force`) to opt back in. The
+`markdown_filter` directive controls conversion, not this policy, so the
+full-buffer default still converts.
+
 Streaming is still blocked by full cache validation, excluded content types,
 unsupported encodings, and build-time feature boundaries. For compressed
 responses, conversion requires `markdown_auto_decompress on`. Brotli
@@ -181,9 +191,8 @@ forwarded lists as a whole.
 
 `markdown_flavor` accepts only `commonmark` and `gfm`. `markdown_token_estimate`
 adds bounded token-estimate output. `markdown_front_matter` controls supported
-front-matter handling. `markdown_prune_noise`, `markdown_prune_selectors`, and
-`markdown_prune_protection_selectors` control bounded DOM-noise pruning. A
-protected selector wins over a matching removal selector.
+front-matter handling. `markdown_prune_noise` enables the built-in bounded
+DOM-noise rules.
 
 ## Metrics and diagnostics
 
@@ -199,56 +208,21 @@ location = /markdown-metrics {
 }
 ```
 
-Scrape with `Accept: text/plain; version=0.0.4`. The endpoint emits exactly
-the eleven frozen Prometheus families documented in
+Scrape with an `Accept` header carrying the `text/plain` media type and the
+`version=0.0.4` parameter. The endpoint emits exactly
+the ten frozen Prometheus families documented in
 [`prometheus-metrics.md`](prometheus-metrics.md). `markdown_diagnostics` is a
 read-only JSON endpoint for effective configuration, provenance, decisions,
 and bounded runtime state. Its built-in access boundary is loopback-only.
 Native NGINX `allow`/`deny` or authentication directives may narrow that
 boundary but cannot broaden it. It accepts only `GET` and `HEAD`.
 
-## Dynamic configuration (dynconf)
+## Runtime configuration changes
 
-Enable the watcher and point it at a JSON file:
-
-```nginx
-http {
-    markdown_dynamic_config on;
-    markdown_dynamic_config_path /etc/nginx/markdown-dynconf.json;
-    markdown_dynconf_dry_run off;
-}
-```
-
-The file must contain `"schema_version": 1` and may contain only these five
-runtime keys:
-
-| Key | Values |
-|---|---|
-| `filter` | `on`, `off` |
-| `prune_noise` | `on`, `off` |
-| `log_verbosity` | `error`, `warn`, `info`, `debug` |
-| `error_policy` | `pass`, `fail_closed`, `status 429`, `status 503` |
-| `streaming_buffer` | 64 KiB through 1 GiB |
-
-Example:
-
-```json
-{
-  "schema_version": 1,
-  "filter": "on",
-  "prune_noise": "off",
-  "log_verbosity": "info",
-  "error_policy": "pass",
-  "streaming_buffer": 2097152
-}
-```
-
-Unknown keys, duplicate keys, invalid types, and out-of-range values reject
-the entire file. A failed reload leaves the active and last-known-good
-snapshots unchanged. A request binds one effective snapshot at header-filter
-entry, so a timer reload cannot change that request midway through its body.
-Structural directives and static-only limit keys still require `nginx -s
-reload`.
+The 0.9.2 contract is static. The runtime no longer has dynconf files,
+watchers, dry-run promotion, or last-known-good snapshots. Change the NGINX
+configuration, validate it with `nginx -t`, and reload it with
+`nginx -s reload`.
 
 ## Reload and rollback
 
@@ -280,15 +254,16 @@ mapping rows below cover only removals that appeared after that table
 `markdown_parse_timeout`, `markdown_parser_budget`,
 `markdown_stream_threshold`, `markdown_stream_precommit_buffer`,
 `markdown_stream_flush_min`).  `nginx -t` rejects removed directives
-with NGINX's standard "unknown directive" error.  The migration-guide
-pointer in the error message exists only for the 0.9.0 and 0.9.1
-removals.
+with either the explicit 0.9.2 migration message for the five retained
+reject-only names or NGINX's standard "unknown directive" error for names no
+longer registered. The migration-guide pointer in the error message exists
+only for the 0.9.0 and 0.9.1 removals.
 
 ## Removed directives
 
 `markdown_streaming_auto_threshold` — REMOVED. Use the explicit
-`markdown_streaming off | auto | force` policy. The selection threshold is
-an internal heuristic and has no replacement directive. Use
+`markdown_streaming off | auto | force` policy. Auto prefers streaming at
+any response size after eligibility checks. Use
 `markdown_limits streaming_buffer=` only to bound the streaming working set and
 pre-commit replay memory. This setting does not select the upstream chunk size.
 
@@ -301,14 +276,30 @@ pre-commit replay memory. This setting does not select the upstream chunk size.
 `markdown_parser_budget` — REMOVED. Use the
 `markdown_limits parser_budget=` key instead.
 
-`markdown_stream_threshold` — REMOVED. No replacement. The threshold is an
-internal 1 MiB routing rule.
+`markdown_stream_threshold` — REMOVED. No replacement. Engine selection
+does not use a response-size threshold.
 
 `markdown_stream_precommit_buffer` — REMOVED. Use the
 `markdown_limits streaming_buffer=` key instead.
 
 `markdown_stream_flush_min` — REMOVED. No replacement. Flushing uses an
 internal heuristic.
+
+`markdown_prune_selectors` — REMOVED. Use the built-in `markdown_prune_noise`
+rules. Custom selector lists are no longer part of the public contract.
+
+`markdown_prune_protection_selectors` — REMOVED. Use the built-in
+`markdown_prune_noise` rules. Custom protection selectors are no longer
+supported.
+
+`markdown_dynamic_config` — REMOVED. Use validated static configuration and a
+normal NGINX reload.
+
+`markdown_dynamic_config_path` — REMOVED. Runtime configuration files are no
+longer watched.
+
+`markdown_dynconf_dry_run` — REMOVED. Validate candidate static configuration
+with `nginx -t` before reloading.
 
 For the complete 0.9.2 before/after removal table, see
 [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md#removed-active-directives--beforeafter).

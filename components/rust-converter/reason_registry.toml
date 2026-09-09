@@ -29,9 +29,31 @@ generator = "tools/reason-codegen/generate.py"
 
 # Taxonomy dimensions (reference)
 # Outcome (5): converted, skipped, failed_open, failed_closed, aborted
-# Stage (8): eligibility, decompression, parsing, conversion, precommit, postcommit, delivery, dynconf
+# Stage (7 active): eligibility, decompression, parsing, conversion, precommit,
+# postcommit, delivery. The `dynconf` stage is historical only: it is retained
+# in the generator's VALID_STAGES set for traceability, but no active reason
+# code uses it after the pre-LTS 0.9.2 convergence removed the dynconf
+# subsystem (see the one-time renumber note below).
 # ErrorOrigin (8 + sentinel): allocation, downstream, invariant, format,
 # truncated, timeout, memory_budget, internal, with `none` for non-errors.
+#
+# --- One-time discriminant renumber (pre-LTS 0.9.2 convergence, §14(c)) ---
+# The pre-LTS convergence retired two dynconf reason codes and compacted the
+# survivors to a contiguous 0..24 set (REASON_CODE_COUNT == 25). This is a
+# deliberate, one-time compaction recorded here for traceability; discriminants
+# are frozen for the LTS line from this baseline forward — do NOT renumber
+# again. Add new reasons at the end with the next free discriminant.
+#
+# Retired reason codes (removed; their numeric slots were reassigned during
+# the one-time compaction below):
+#   - discriminant 21  invalid_dynconf    (stage: dynconf) — retired
+#   - discriminant 22  degraded_snapshot  (stage: dynconf) — retired
+#
+# Renumbered survivors (old -> new discriminant):
+#   - header_plan_apply_error     23 -> 21
+#   - streaming_mid_flight_error  24 -> 22
+#   - bypass_no_transform         25 -> 23
+#   - encoding_header_invalid     26 -> 24
 
 # --- Success ---
 
@@ -244,30 +266,17 @@ operator_visible = true
 outcome = "skipped"
 default_origin = "allocation"
 
-# --- Dynconf failures ---
-
-[[reasons]]
-discriminant = 21
-key = "invalid_dynconf"
-default_stage = "dynconf"
-allowed_origins = ["format"]
-operator_visible = true
-outcome = "failed_closed"
-default_origin = "format"
-
-[[reasons]]
-discriminant = 22
-key = "degraded_snapshot"
-default_stage = "dynconf"
-allowed_origins = ["internal"]
-operator_visible = true
-outcome = "failed_closed"
-default_origin = "internal"
+# --- Retired dynconf failures (0.9.2 convergence) ---
+# Discriminants 21 (invalid_dynconf) and 22 (degraded_snapshot) were retired
+# during the pre-LTS convergence when the dynconf subsystem was removed. The
+# entries are intentionally absent here; their numeric slots were reassigned
+# to surviving reasons during the one-time compaction. See the one-time
+# renumber note in [metadata] above for full traceability.
 
 # --- Precommit failures (continued) ---
 
 [[reasons]]
-discriminant = 23
+discriminant = 21
 key = "header_plan_apply_error"
 default_stage = "precommit"
 allowed_origins = ["invariant", "allocation"]
@@ -278,7 +287,7 @@ default_origin = "invariant"
 # --- Delivery failures (continued) ---
 
 [[reasons]]
-discriminant = 24
+discriminant = 22
 key = "streaming_mid_flight_error"
 default_stage = "delivery"
 allowed_origins = ["internal", "downstream", "allocation", "invariant"]
@@ -289,7 +298,7 @@ default_origin = "internal"
 # --- Skip: eligibility (continued) ---
 
 [[reasons]]
-discriminant = 25
+discriminant = 23
 key = "bypass_no_transform"
 default_stage = "eligibility"
 allowed_origins = []
@@ -304,7 +313,7 @@ default_origin = "none"
 # (which covers resource limits).
 
 [[reasons]]
-discriminant = 26
+discriminant = 24
 key = "encoding_header_invalid"
 default_stage = "decompression"
 allowed_origins = ["format"]

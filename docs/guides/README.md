@@ -26,7 +26,7 @@ Use these documents when you need decisions and procedures you can act on direct
 | [CONFIGURATION.md](CONFIGURATION.md) | Directive reference, defaults, and configuration behavior |
 | [OPERATIONS.md](OPERATIONS.md) | Monitoring, troubleshooting, and operational runbooks |
 | [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) | Source builds, development workflows, and local verification |
-| [DYNAMIC_CONFIG.md](DYNAMIC_CONFIG.md) | Dynamic configuration (dynconf) overlay and restore |
+| [DYNAMIC_CONFIG.md](DYNAMIC_CONFIG.md) | Historical dynconf overlay and restore contract (removed in 0.9.2) |
 | [KUBERNETES_DEPLOYMENT.md](KUBERNETES_DEPLOYMENT.md) | Kubernetes and Ingress Controller deployment |
 | [ROLLOUT_COOKBOOK.md](ROLLOUT_COOKBOOK.md) | Controlled enablement and staged rollout |
 | [ROLLOUT_COOKBOOK.md](ROLLOUT_COOKBOOK.md#streaming-focused-rollout) | Rollout guide incl. streaming-focused supplement |

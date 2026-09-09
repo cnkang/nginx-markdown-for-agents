@@ -14,7 +14,7 @@ request
   -> preaccess: capture and suppress Markdown conditional validators
   -> content handler, proxy, or cache obtains the source response
   -> header filter: method/status/type/Accept/cache gates
-  -> bind one effective dynconf snapshot
+  -> bind one effective static configuration view
   -> select passthrough, full-buffer, or streaming
   -> body filter: bounded input and conversion
   -> commit headers before converted body
@@ -35,12 +35,12 @@ the module restores the captured headers before source delivery.
 
 The header filter rejects ineligible methods, statuses, ranges, content types,
 authentication cases, and `Accept` values before selecting a conversion path.
-It also captures the active dynamic-configuration snapshot once and builds the
-request's effective view. Later timer reloads cannot change that request's
-policy midway through processing.
+It builds the request's effective view from the already merged static
+configuration. There is no runtime watcher or timer reload that can change a
+request's policy midway through processing.
 
 The effective view includes `enabled` (the `filter` field), `prune_noise`,
-`log_verbosity`, `error_policy`, and `streaming_buffer` as runtime-overridable
+`log_verbosity`, `error_policy`, and `streaming_buffer` as merged static
 fields. `conversion_memory`, `parser_budget`, `decompressed_size`,
 `decompression_ratio`, `conversion_timeout`, `parser_timeout`, and
 `max_inflight` remain static NGINX configuration constraints owned by the
@@ -121,5 +121,5 @@ record at their own bounded event points.
 
 Use diagnostics JSON to inspect the effective configuration and provenance.
 Use the Prometheus endpoint with `Accept: text/plain; version=0.0.4` to inspect
-the eleven frozen metric families. The schema, renderer, reason-code,
+the ten frozen metric families. The schema, renderer, reason-code,
 and conservation gates are the authoritative compatibility checks.

@@ -74,6 +74,8 @@ fn arb_chunk_splits(n: usize) -> BoxedStrategy<Vec<usize>> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
 
+    // Feature: pre-lts-convergence-092, Property 6: Decoding is invariant to
+    // chunk boundaries and EOF position
     #[test]
     fn prop_chunk_split_invariance((html, split_a, split_b) in arb_streaming_html().prop_flat_map(|html| {
         let n = html.len();

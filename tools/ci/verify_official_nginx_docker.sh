@@ -33,14 +33,14 @@ Builds the official NGINX-based Docker example from source and validates
 runtime Markdown negotiation behavior.
 
 Examples:
-  $(basename "$0") --nginx-tag 1.31.4 --expected-nginx-version 1.31.4 \
-    --image-reference nginx:1.31.4 --image-digest sha256:DIGEST \
+  $(basename "$0") --nginx-tag 1.31.5 --expected-nginx-version 1.31.5 \
+    --image-reference nginx:1.31.5 --image-digest sha256:DIGEST \
     --module-sha FULL_40_HEX_COMMIT_SHA
-  $(basename "$0") --skip-build --expected-nginx-version 1.31.4 \
-    --image-reference nginx:1.31.4 --image-digest sha256:DIGEST \
+  $(basename "$0") --skip-build --expected-nginx-version 1.31.5 \
+    --image-reference nginx:1.31.5 --image-digest sha256:DIGEST \
     --module-sha FULL_40_HEX_COMMIT_SHA \
-    --image-name nginx-markdown-official-check:1.31.4-debian12-glibc-amd64
-  $(basename "$0") --nginx-tag 1.31.4 --expected-nginx-version 1.31.4 \
+    --image-name nginx-markdown-official-check:1.31.5-debian12-glibc-amd64
+  $(basename "$0") --nginx-tag 1.31.5 --expected-nginx-version 1.31.5 \
     --image-digest sha256:DIGEST \
     --module-sha FULL_40_HEX_COMMIT_SHA --artifact-dir /tmp/official-nginx-docker/row
 
@@ -456,13 +456,6 @@ docker run -d \
   -p "127.0.0.1:${PORT}:8080" \
   "${IMAGE_NAME}" >/dev/null
 
-echo "==> Verifying container runs as a non-root user"
-runtime_uid="$(docker exec "${CONTAINER_NAME}" id -u)"
-[[ "${runtime_uid}" != "0" ]] || {
-  echo "Container must not run as root" >&2
-  exit 1
-}
-
 echo "==> Waiting for nginx to become ready"
 ready=0
 for _ in $(seq 1 30); do
@@ -471,10 +464,19 @@ for _ in $(seq 1 30); do
     ready=1
     break
   fi
+  # Retry while the container runtime finishes creating the container, so
+  # a not-yet-running container does not fail the exec below.
   sleep 1
 done
 [[ "${ready}" -eq 1 ]] || {
   echo "Container did not become ready on port ${PORT}" >&2
+  exit 1
+}
+
+echo "==> Verifying container runs as a non-root user"
+runtime_uid="$(docker exec "${CONTAINER_NAME}" id -u)"
+[[ "${runtime_uid}" != "0" ]] || {
+  echo "Container must not run as root" >&2
   exit 1
 }
 

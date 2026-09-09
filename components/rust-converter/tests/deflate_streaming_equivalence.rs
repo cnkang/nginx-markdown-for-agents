@@ -131,6 +131,8 @@ fn arb_budget() -> impl Strategy<Value = usize> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(200))]
 
+    // Feature: pre-lts-convergence-092, Property 6: Decoding is invariant to
+    // chunk boundaries and EOF position
     /// **Validates: Requirements 4.8, 4.9**
     ///
     /// Property 6: For any valid zlib-wrapped deflate payload, verify that incremental

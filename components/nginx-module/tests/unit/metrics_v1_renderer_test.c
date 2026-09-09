@@ -101,7 +101,6 @@ test_renderer_emits_frozen_families(void)
     snapshot.streaming_peak_memory_bytes = 13;
     snapshot.streaming_events.resume_failure = 14;
     snapshot.decompression.gzip_failure_format = 15;
-    snapshot.dynconf_reloads.failure_file_error = 16;
     snapshot.build_info.version = (const u_char *) "0.9.2";
     snapshot.build_info.nginx_version_text = (const u_char *) "1.26.3";
     snapshot.build_info.features = (const u_char *) "streaming";

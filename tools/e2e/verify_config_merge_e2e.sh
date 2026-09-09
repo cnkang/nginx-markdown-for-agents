@@ -6,7 +6,7 @@ set -euo pipefail
 # Validates critical config-merge paths:
 #  1) http-level markdown_error_policy pass + location-level override fail_closed
 #  2) markdown_filter off location disables conversion despite Accept header
-#  3) markdown_accept wildcard at server + strict at location
+#  3) markdown_accept force at server + strict at location
 #  4) markdown_cache_validation off at server + full at location (location wins)
 #  5) markdown_cache_validation off at server + ims_only at location
 #  6) markdown_flavor override at location level
@@ -115,7 +115,7 @@ Options:
 Checks:
   1) http-level error_policy pass + location-level fail_closed override
   2) markdown_filter off disables conversion
-  3) markdown_accept wildcard at server + strict at location
+  3) markdown_accept force at server + strict at location
   4) cache_validation off at server + full at location
   5) cache_validation off at server + ims_only at location
   6) markdown_flavor override at location
@@ -358,7 +358,7 @@ http {
         server_name localhost;
 
         # server-level settings
-        markdown_accept wildcard;
+        markdown_accept force;
         markdown_cache_validation off;
 
         # Case 1: location overrides error_policy to fail_closed

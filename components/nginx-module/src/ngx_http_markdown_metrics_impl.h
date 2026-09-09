@@ -151,18 +151,6 @@ typedef struct {
         ngx_atomic_uint_t estimated_token_savings;
         ngx_atomic_uint_t replay_buffer_errors_total;
 
-        struct {
-            ngx_atomic_uint_t success;
-            ngx_atomic_uint_t failure_schema_version;
-            ngx_atomic_uint_t failure_unknown_key;
-            ngx_atomic_uint_t failure_duplicate_key;
-            ngx_atomic_uint_t failure_invalid_type;
-            ngx_atomic_uint_t failure_out_of_range;
-            ngx_atomic_uint_t failure_size_exceeded;
-            ngx_atomic_uint_t failure_parse_error;
-            ngx_atomic_uint_t failure_file_error;
-        } dynconf_reloads;
-
         /* Parse interrupt metrics */
         struct {
             ngx_atomic_uint_t parse_timeouts_total;
@@ -475,24 +463,6 @@ ngx_http_markdown_collect_result_snapshot(
         metrics->results.parse_interrupts.parse_budget_exceeded_total;
     snapshot->results.replay_buffer_errors_total =
         metrics->results.replay_buffer_errors_total;
-    snapshot->results.dynconf_reloads.success =
-        metrics->results.dynconf_reloads.success;
-    snapshot->results.dynconf_reloads.failure_schema_version =
-        metrics->results.dynconf_reloads.failure_schema_version;
-    snapshot->results.dynconf_reloads.failure_unknown_key =
-        metrics->results.dynconf_reloads.failure_unknown_key;
-    snapshot->results.dynconf_reloads.failure_duplicate_key =
-        metrics->results.dynconf_reloads.failure_duplicate_key;
-    snapshot->results.dynconf_reloads.failure_invalid_type =
-        metrics->results.dynconf_reloads.failure_invalid_type;
-    snapshot->results.dynconf_reloads.failure_out_of_range =
-        metrics->results.dynconf_reloads.failure_out_of_range;
-    snapshot->results.dynconf_reloads.failure_size_exceeded =
-        metrics->results.dynconf_reloads.failure_size_exceeded;
-    snapshot->results.dynconf_reloads.failure_parse_error =
-        metrics->results.dynconf_reloads.failure_parse_error;
-    snapshot->results.dynconf_reloads.failure_file_error =
-        metrics->results.dynconf_reloads.failure_file_error;
 }
 
 static void
@@ -711,25 +681,6 @@ ngx_http_markdown_metrics_to_v1(
     v1->decompression.brotli_failure_io =
         snapshot->decompressions.brotli_failures.io;
 
-    /* Dynconf counters are copied without reinterpreting their failure axes. */
-    v1->dynconf_reloads.success = snapshot->results.dynconf_reloads.success;
-    v1->dynconf_reloads.failure_schema_version =
-        snapshot->results.dynconf_reloads.failure_schema_version;
-    v1->dynconf_reloads.failure_unknown_key =
-        snapshot->results.dynconf_reloads.failure_unknown_key;
-    v1->dynconf_reloads.failure_duplicate_key =
-        snapshot->results.dynconf_reloads.failure_duplicate_key;
-    v1->dynconf_reloads.failure_invalid_type =
-        snapshot->results.dynconf_reloads.failure_invalid_type;
-    v1->dynconf_reloads.failure_out_of_range =
-        snapshot->results.dynconf_reloads.failure_out_of_range;
-    v1->dynconf_reloads.failure_size_exceeded =
-        snapshot->results.dynconf_reloads.failure_size_exceeded;
-    v1->dynconf_reloads.failure_parse_error =
-        snapshot->results.dynconf_reloads.failure_parse_error;
-    v1->dynconf_reloads.failure_file_error =
-        snapshot->results.dynconf_reloads.failure_file_error;
-
     /* Build metadata is part of the public v1 response contract. */
     v1->build_info.version = (const u_char *) NGX_HTTP_MARKDOWN_PRODUCT_VERSION;
     v1->build_info.nginx_version_text = (const u_char *) NGINX_VERSION;
@@ -767,7 +718,10 @@ ngx_http_markdown_metrics_check_access(ngx_http_request_t *r)
     if (r->connection->sockaddr->sa_family == AF_INET) {
         const struct sockaddr_in *sin =
             (const struct sockaddr_in *) r->connection->sockaddr;
-        if (ntohl(sin->sin_addr.s_addr) != INADDR_LOOPBACK) {
+        /* Accept the whole 127.0.0.0/8 loopback range, not only
+         * 127.0.0.1: any address in the range is a local peer. */
+        if ((ntohl(sin->sin_addr.s_addr) & 0xff000000U)
+            != 0x7f000000U) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                          "markdown: access denied from non-localhost IPv4 address");
             return NGX_HTTP_FORBIDDEN;
@@ -777,11 +731,31 @@ ngx_http_markdown_metrics_check_access(ngx_http_request_t *r)
     else if (r->connection->sockaddr->sa_family == AF_INET6) {
         const struct sockaddr_in6 *sin6 =
             (const struct sockaddr_in6 *) r->connection->sockaddr;
-        if (!IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
-            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                         "markdown: access denied from non-localhost IPv6 address");
-            return NGX_HTTP_FORBIDDEN;
+        /* Accept ::1 and IPv4-mapped IPv6 addresses whose embedded
+         * IPv4 address is in 127.0.0.0/8 (e.g. ::ffff:127.0.0.1). */
+        if (IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
+            return NGX_OK;
         }
+        if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
+            uint32_t  v4;
+            v4 = ((uint32_t) sin6->sin6_addr.s6_addr[12] << 24)
+                 | ((uint32_t) sin6->sin6_addr.s6_addr[13] << 16)
+                 | ((uint32_t) sin6->sin6_addr.s6_addr[14] << 8)
+                 | (uint32_t) sin6->sin6_addr.s6_addr[15];
+            /* The bytes are assembled in host order above (byte 12 is the
+             * most significant octet of the embedded IPv4 address), so the
+             * /8 comparison uses the value directly.  Applying ntohl()
+             * here would byte-swap the already host-order value again on
+             * little-endian hosts and deny legitimate v4-mapped loopback
+             * peers.  The AF_INET branch above differs: sin_addr.s_addr is
+             * stored in network byte order, so ntohl() is required there. */
+            if ((v4 & 0xff000000U) == 0x7f000000U) {
+                return NGX_OK;
+            }
+        }
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown: access denied from non-localhost IPv6 address");
+        return NGX_HTTP_FORBIDDEN;
     }
 #endif
     else {

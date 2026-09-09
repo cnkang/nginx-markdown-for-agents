@@ -10,14 +10,11 @@
  *
  * Context-negative cases verified:
  *   - markdown_trusted_proxies: must fail in server and location
- *   - markdown_dynamic_config: H-only
- *   - markdown_dynamic_config_path: H-only
- *   - markdown_dynconf_dry_run: H-only
  *   - markdown_metrics: must fail in http and server
  *   - markdown_metrics_shm_size: must fail in server and location
  *
- * The command table is the executable context contract: dynconf is H-only
- * and diagnostics is L-only.
+ * The command table is the executable context contract: removed migration
+ * entries are H-only and diagnostics is L-only.
  *
  * **Validates: Requirements 2.6, 13.3, 15.1, 15.10**
  */
@@ -781,9 +778,9 @@ test_context_negative_verified(void)
 }
 
 /* ================================================================
- * Test 2: Positive context verification for ALL 25 retained
+ * Test 2: Positive context verification for ALL 20 retained
  *
- * Every retained directive must have the correct positive context
+ * Every retained active directive must have the correct positive context
  * bits set in the command table.
  * ================================================================ */
 typedef struct {
@@ -794,7 +791,7 @@ typedef struct {
 } positive_context_t;
 
 static const positive_context_t positive_cases[] = {
-    /* H/S/L directives (18 entries) */
+    /* H/S/L directives (16 entries) */
     { "markdown_filter",                      1, 1, 1 },
     { "markdown_flavor",                      1, 1, 1 },
     { "markdown_accept",                      1, 1, 1 },
@@ -810,16 +807,10 @@ static const positive_context_t positive_cases[] = {
     { "markdown_streaming",                   1, 1, 1 },
     { "markdown_stream_excluded_types",       1, 1, 1 },
     { "markdown_prune_noise",                 1, 1, 1 },
-    { "markdown_prune_selectors",             1, 1, 1 },
-    { "markdown_prune_protection_selectors",  1, 1, 1 },
     { "markdown_log_verbosity",               1, 1, 1 },
     /* H-only (impl actual) */
     { "markdown_trusted_proxies",             1, 0, 0 },
     { "markdown_metrics_shm_size",            1, 0, 0 },
-    /* Dynconf: http-only */
-    { "markdown_dynamic_config",              1, 0, 0 },
-    { "markdown_dynamic_config_path",         1, 0, 0 },
-    { "markdown_dynconf_dry_run",             1, 0, 0 },
     /* L-only (impl actual for metrics) */
     { "markdown_metrics",                     0, 0, 1 },
     /* Diagnostics: location-only */
@@ -836,10 +827,10 @@ test_positive_context_all(void)
     ngx_command_t *cmd;
     char           msg[256];
 
-    TEST_SECTION("Context-Positive: All 25 retained directives");
+    TEST_SECTION("Context-Positive: All 20 retained directives");
 
-    TEST_ASSERT(POSITIVE_COUNT == 25,
-        "positive context table must have exactly 25 entries");
+    TEST_ASSERT(POSITIVE_COUNT == 20,
+        "positive context table must have exactly 20 entries");
 
     for (i = 0; i < POSITIVE_COUNT; i++) {
         cmd = find_directive(positive_cases[i].name);
@@ -884,7 +875,7 @@ test_positive_context_all(void)
         }
     }
 
-    TEST_PASS("All 25 directives have expected positive context flags");
+    TEST_PASS("All 20 retained directives have expected positive context flags");
 }
 
 /* ================================================================
@@ -914,8 +905,8 @@ test_duplicate_rejection(void)
     cf.pool = &pool;
 
     /* Set up args: directive name + "on" */
-    args[0].data = (u_char *) "markdown_dynamic_config";
-    args[0].len = strlen("markdown_dynamic_config");
+    args[0].data = (u_char *) "markdown_prune_noise";
+    args[0].len = strlen("markdown_prune_noise");
     args[1].data = (u_char *) "on";
     args[1].len = 2;
 
@@ -925,24 +916,6 @@ test_duplicate_rejection(void)
     args_array.nalloc = 2;
     args_array.pool = &pool;
     cf.args = &args_array;
-
-    cmd = find_directive("markdown_dynamic_config");
-    TEST_ASSERT(cmd != NULL, "markdown_dynamic_config must exist");
-
-    /* First set: should succeed */
-    conf.advanced.dynconf_enabled = NGX_CONF_UNSET;
-    rc = ngx_conf_set_flag_slot(&cf, cmd, &conf);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-        "first set of dynconf_enabled should succeed");
-    TEST_ASSERT(conf.advanced.dynconf_enabled == 1,
-        "dynconf_enabled should be 1 after set");
-
-    /* Second set: should fail as duplicate */
-    rc = ngx_conf_set_flag_slot(&cf, cmd, &conf);
-    TEST_ASSERT(rc != NGX_CONF_OK && rc != NGX_CONF_ERROR,
-        "duplicate set of dynconf_enabled should return 'is duplicate'");
-    TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
-        "duplicate error message must be 'is duplicate'");
 
     /* Verify markdown_prune_noise duplicate rejection */
     cmd = find_directive("markdown_prune_noise");
@@ -989,12 +962,11 @@ test_trusted_proxies_http_only(void)
 }
 
 /* ================================================================
- * Test 5: Req 15.10 — dynconf directives context enforcement
+ * Test 5: Req 15.10 — removed directive context enforcement
  *
- * Requirement 15.10 states dynconf SHALL only be accepted in http.
- * The implementation enforces this http-only surface: each dynconf
- * directive allows the http context and rejects both server and
- * location contexts, as verified by the assertions below.
+ * Removed directives remain registered as HTTP-only migration entries. They
+ * reject every use through the error handler, and the command context keeps
+ * the old HTTP-only boundary for deterministic migration diagnostics.
  * ================================================================ */
 static void
 test_dynconf_context_finding(void)
@@ -1007,14 +979,14 @@ test_dynconf_context_finding(void)
     ngx_command_t *cmd;
     size_t         i;
 
-    TEST_SECTION("Req 15.10: Dynconf context verification");
+    TEST_SECTION("Req 15.10: Removed directive context verification");
 
     for (i = 0; i < 3; i++) {
         cmd = find_directive(dynconf_names[i]);
         TEST_ASSERT(cmd != NULL,
             "dynconf directive must be registered");
 
-        /* Dynconf is an http-only control surface. */
+        /* Removed entries are an http-only migration surface. */
         TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
             "dynconf directive must allow http context");
         TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) == 0,
@@ -1023,7 +995,7 @@ test_dynconf_context_finding(void)
             "dynconf directive must reject location context");
     }
 
-    TEST_PASS("Dynconf directives are http-only");
+    TEST_PASS("Removed directives are http-only migration entries");
 }
 
 /* ================================================================
@@ -1120,7 +1092,7 @@ main(void)
 
     printf("\n=== All context-negative property tests passed ===\n");
     printf("\nSUMMARY: context contract is enforced: "
-        "dynconf H-only, diagnostics L-only.\n");
+        "removed entries H-only, diagnostics L-only.\n");
 
     return 0;
 }

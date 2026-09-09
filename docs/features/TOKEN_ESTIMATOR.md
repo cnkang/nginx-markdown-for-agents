@@ -109,6 +109,11 @@ println!("Markdown will use approximately {} tokens", tokens);
   disappeared in 0.9.2)
 - When `markdown_token_estimate off;`, the module computes no estimate and emits no header
   (zero conversion overhead)
+- The module emits the header only for **full-buffer** conversions when
+  `markdown_token_estimate on;`: the estimator needs the complete output
+  length, which a streaming response does not know up front. Streaming
+  responses never carry `X-Markdown-Tokens` (see
+  [Streaming Compatibility](STREAMING_COMPATIBILITY.md#token-estimation))
 
 ## Test Coverage
 
@@ -175,6 +180,7 @@ the estimator is a fixed, deterministic heuristic by design (0.9.2 cleanup).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Reworded the X-Markdown-Tokens emission condition to active voice; no behavior change |
 | 0.9.2 | 2026-08-05 | Agent | Fixed deterministic heuristic (no provider brands), quantified error margin table, explicit no-BPE-tokenizer statement, X-Markdown-Tokens integration section, provider profiles marked permanently out of scope |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

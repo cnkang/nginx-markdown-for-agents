@@ -5,6 +5,11 @@ Uses hypothesis to generate arbitrary module states and verify that
 diagnostics JSON documents validate against the published schema at
 schemas/diagnostics.schema.json.
 
+Schema v3 removed the dynconf diagnostic state block: the dynamic-
+configuration hot-reload feature was removed and the ``configuration``
+object now carries only ``static_digest``, ``effective``, and
+``effective_sources``.  The diagnostics endpoint itself is retained.
+
 Validates: Requirements 4.3
 """
 
@@ -52,17 +57,11 @@ def _invalid(doc):
 # Generic diagnostics document generators are shared with
 # test_diagnostics_golden_json.py through diagnostics_strategy_helpers so
 # the two suites use one canonical strategy set instead of drifting
-# copies.  The digest, datetime, error, masked-key, dynconf, effective-
-# config, effective-sources, decision-entry, and valid-diagnostics
-# strategies all live there.
+# copies.  The digest, datetime, effective-config, effective-sources,
+# decision-entry, and valid-diagnostics strategies all live there.
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from diagnostics_strategy_helpers import (  # noqa: E402
-    _dynconf_disabled,
-    _dynconf_no_file,
-    _dynconf_invalid_without_lkg,
-    _dynconf_active,
-    _dynconf_lkg_preserved,
     _effective_config,
     _effective_sources,
     _valid_diagnostics,
@@ -106,6 +105,7 @@ class TestTopLevelStructure:
             "profile",
             "streaming_config",
             "streaming_metrics",
+            "dynconf",
             "dynconf_state",
         ]),
     )
@@ -115,101 +115,34 @@ class TestTopLevelStructure:
         _invalid(doc)
 
 
-class TestDynconfStateDiscrimination:
-    """Verify dynconf state discriminated correctly for each state value."""
+class TestConfigurationStructure:
+    """Verify the configuration object has exactly the retained fields."""
+
+    @settings(max_examples=100)
+    @given(doc=_valid_diagnostics())
+    def test_configuration_has_exactly_three_keys(self, doc):
+        """configuration has exactly static_digest, effective, effective_sources."""
+        configuration = doc["configuration"]
+        assert set(configuration.keys()) == {
+            "static_digest",
+            "effective",
+            "effective_sources",
+        }
 
     @settings(max_examples=50)
     @given(doc=_valid_diagnostics())
-    def test_dynconf_always_present_never_null(self, doc):
-        """configuration.dynconf is always a non-null object."""
-        dynconf = doc["configuration"]["dynconf"]
-        assert dynconf is not None
-        assert isinstance(dynconf, dict)
-        assert "state" in dynconf
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_disabled())
-    def test_disabled_state_all_null(self, dynconf):
-        """disabled: all six fields null."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["generation"] is None
-        assert dynconf["source_digest"] is None
-        assert dynconf["active_digest"] is None
-        assert dynconf["lkg_digest"] is None
-        assert dynconf["last_success"] is None
-        assert dynconf["last_error"] is None
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_no_file())
-    def test_no_file_state_all_null(self, dynconf):
-        """no_file: all fields null (no valid snapshot)."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["generation"] is None
-        assert dynconf["source_digest"] is None
-        assert dynconf["active_digest"] is None
-        assert dynconf["lkg_digest"] is None
-        assert dynconf["last_success"] is None
-        assert dynconf["last_error"] is None
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_invalid_without_lkg())
-    def test_invalid_without_lkg_nulls_except_error(self, dynconf):
-        """invalid_without_lkg: all null except last_error."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["generation"] is None
-        assert dynconf["source_digest"] is None
-        assert dynconf["active_digest"] is None
-        assert dynconf["lkg_digest"] is None
-        assert dynconf["last_success"] is None
-        assert dynconf["last_error"] is not None
-        assert len(dynconf["last_error"]) >= 1
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_active())
-    def test_active_state_non_null_fields(self, dynconf):
-        """active: generation, digests, last_success non-null; last_error null."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["generation"] is not None
-        assert dynconf["generation"] >= 1
-        assert dynconf["source_digest"] is not None
-        assert dynconf["active_digest"] is not None
-        assert dynconf["lkg_digest"] is not None
-        assert dynconf["last_success"] is not None
-        assert dynconf["last_error"] is None
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_lkg_preserved())
-    def test_lkg_preserved_all_non_null(self, dynconf):
-        """lkg_preserved: all fields non-null including last_error."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["generation"] is not None
-        assert dynconf["generation"] >= 1
-        assert dynconf["source_digest"] is not None
-        assert dynconf["active_digest"] is not None
-        assert dynconf["lkg_digest"] is not None
-        assert dynconf["last_success"] is not None
-        assert dynconf["last_error"] is not None
-        assert len(dynconf["last_error"]) >= 1
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_active())
-    def test_active_non_null_rejected_when_null(self, dynconf):
-        """Schema rejects active state when generation is null."""
-        dynconf["generation"] = None
-        doc = _make_doc_with_dynconf(dynconf)
-        _invalid(doc)
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_disabled())
-    def test_disabled_rejected_with_non_null_generation(self, dynconf):
-        """Schema rejects disabled state when generation is non-null."""
-        dynconf["generation"] = 5
-        doc = _make_doc_with_dynconf(dynconf)
+    def test_dynconf_block_rejected(self, doc):
+        """A reintroduced dynconf block is rejected by the schema."""
+        doc["configuration"]["dynconf"] = {
+            "state": "disabled",
+            "generation": None,
+            "source_digest": None,
+            "active_digest": None,
+            "lkg_digest": None,
+            "last_success": None,
+            "last_error": None,
+            "masked_keys": [],
+        }
         _invalid(doc)
 
 
@@ -343,50 +276,6 @@ class TestStreamingBufferBounds:
         _invalid(doc)
 
 
-class TestNullFieldsWithoutSnapshot:
-    """Verify null fields when no valid snapshot exists."""
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_no_file())
-    def test_no_file_all_snapshot_fields_null(self, dynconf):
-        """no_file state: generation, all digests, last_success are null."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["generation"] is None
-        assert dynconf["source_digest"] is None
-        assert dynconf["active_digest"] is None
-        assert dynconf["lkg_digest"] is None
-        assert dynconf["last_success"] is None
-
-    @settings(max_examples=50)
-    @given(dynconf=_dynconf_invalid_without_lkg())
-    def test_invalid_without_lkg_all_snapshot_fields_null(self, dynconf):
-        """invalid_without_lkg state: generation, all digests, last_success null."""
-        doc = _make_doc_with_dynconf(dynconf)
-        _validate(doc)
-        assert dynconf["generation"] is None
-        assert dynconf["source_digest"] is None
-        assert dynconf["active_digest"] is None
-        assert dynconf["lkg_digest"] is None
-        assert dynconf["last_success"] is None
-
-    @settings(max_examples=30)
-    @given(dynconf=_dynconf_no_file())
-    def test_no_file_rejects_non_null_generation(self, dynconf):
-        """Schema rejects no_file with non-null generation."""
-        dynconf["generation"] = 1
-        doc = _make_doc_with_dynconf(dynconf)
-        _invalid(doc)
-
-    @settings(max_examples=30)
-    @given(dynconf=_dynconf_invalid_without_lkg())
-    def test_invalid_without_lkg_rejects_non_null_digest(self, dynconf):
-        """Schema rejects invalid_without_lkg with non-null active_digest."""
-        dynconf["active_digest"] = "sha256:" + "a" * 64
-        doc = _make_doc_with_dynconf(dynconf)
-        _invalid(doc)
-
-
 # ==========================================================================
 # Helper functions for building minimal valid documents
 # ==========================================================================
@@ -413,45 +302,10 @@ def _static_sources():
     }
 
 
-def _make_doc_with_dynconf(dynconf):
-    """Build a minimal valid document with the given dynconf state."""
-    return {
-        "schema_version": 2,
-        "product_version": "0.9.2",
-        "worker": {"pid": 1234, "scope": "worker-local"},
-        "build": {
-            "build_kind": "release",
-            "source_sha": "a" * 40,
-            "nginx_version": "1.27.0",
-            "rust_version": "1.91.0",
-            "feature_manifest_digest": "sha256:" + "c" * 64,
-            "features": ["streaming"],
-        },
-        "configuration": {
-            "static_digest": "sha256:" + "b" * 64,
-            "dynconf": dynconf,
-            "effective": _base_effective(),
-            "effective_sources": _static_sources(),
-        },
-        "runtime": {
-            "diagnostics_recording": "active",
-            "inflight": 0,
-            "pending_output": 0,
-            "module_metrics": {
-                "streaming_requests_total": 0,
-                "precommit_failopen_total": 0,
-                "copied_output_total": 0,
-                "diagnostics_recording_state": 1,
-            },
-        },
-        "recent_decisions": [],
-    }
-
-
 def _make_doc_with_config(effective, sources):
     """Build a minimal valid document with the given effective/sources."""
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "product_version": "0.9.2",
         "worker": {"pid": 1234, "scope": "worker-local"},
         "build": {
@@ -464,16 +318,6 @@ def _make_doc_with_config(effective, sources):
         },
         "configuration": {
             "static_digest": "sha256:" + "b" * 64,
-            "dynconf": {
-                "state": "disabled",
-                "generation": None,
-                "source_digest": None,
-                "active_digest": None,
-                "lkg_digest": None,
-                "last_success": None,
-                "last_error": None,
-                "masked_keys": [],
-            },
             "effective": effective,
             "effective_sources": sources,
         },

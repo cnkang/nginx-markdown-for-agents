@@ -30,7 +30,10 @@ from tools.lib.path_validation import validate_read_path  # noqa: E402
 from tools.lib.reason_code import REASON_C_ACCESSOR_ALIASES  # noqa: E402
 
 EXPECTED_VERSION = "0.9.2"
-EXPECTED_REASON_CODE_COUNT = 27
+# The pre-LTS convergence retired invalid_dynconf and degraded_snapshot and
+# compacted the survivors (23->21 .. 26->24), leaving 25 canonical reason
+# codes (see reason_registry.toml "One-time discriminant renumber").
+EXPECTED_REASON_CODE_COUNT = 25
 CHANGELOG_FILENAME = "CHANGELOG.md"
 REASON_CODE_RELATIVE_PATH = "components/rust-converter/src/decision/reason_code.rs"
 REASON_C_RELATIVE_PATH = "components/nginx-module/src/ngx_http_markdown_reason.c"

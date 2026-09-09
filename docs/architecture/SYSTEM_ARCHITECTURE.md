@@ -242,13 +242,11 @@ and backpressure handling. Rust owns conversion logic and exposes both
 full-buffer and streaming FFI entrypoints.
 
 ### Processing-Path Selection and Defaults
-`markdown_streaming` defaults to `auto`. In auto mode, known small
-responses remain on the full-buffer path while large or chunked responses can
-enter the streaming path. The module fixes the threshold internally at 1 MiB. It is
-not a directive. The v0.6.x
+`markdown_streaming` defaults to `off`. Unset and `off` select bounded
+full-buffer conversion. Explicit `auto` prefers streaming after safety checks,
+regardless of response size. The v0.6.x
 `markdown_streaming_auto_threshold` directive and the v0.9.2-removed
-`markdown_stream_threshold` directive have no replacement. The internal
-threshold is not operator-configurable.
+`markdown_stream_threshold` directive have no replacement.
 
 ### Streaming Body Filter
 The streaming body filter consumes upstream buffers incrementally and emits
@@ -327,19 +325,13 @@ The handler is loopback-only by default and denies external peers before
 rendering. Standard NGINX `allow`/`deny` directives may add restrictions but
 cannot broaden that boundary.
 
-### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf_impl.h`)
-`markdown_dynconf_dry_run on` validates a new configuration file during the
-dynconf reload cycle
-without replacing the active snapshot. Validation results use bounded
-categorical error reasons. On successful reload, the
-module preserves the previous active snapshot as last-known-good (LKG) for diagnostics
-and failed-reload protection. There is no worker-local runtime restore API.
-Operators restore a prior valid file atomically and let the normal watcher
-validate and apply it. Atomic rename prevents partial-file reads, but each
-worker has its own watcher cycle and may briefly expose a different
-`config_version`. Diagnostics or request behavior verifies convergence. A
-controlled NGINX reload is the strong synchronization boundary.
-`applied_mtime` updates only after successful application (Rule 35).
+### Static configuration and reload boundary
+
+The 0.9.2 convergence removed the runtime dynconf watcher, dry-run path, and
+last-known-good snapshot. The reject-only directive entries remain solely to
+give `nginx -t` an actionable migration error. NGINX validates configuration
+changes before the normal reload or restart boundary. The request path then
+reads the merged static configuration directly.
 
 ### Reason Code FFI Accessor (registry projections + FFI)
 The declarative `reason_registry.toml` defines the reason codes. The generated
@@ -366,20 +358,22 @@ v0.9.2 is the final pre-1.0 breaking release. It consolidates the public
 surface before the 1.0 LTS compatibility freeze:
 
 - **Directive consolidation**: The configuration surface shrinks from 63
-  directives to 25. The project removed all reject-only migration stubs and
+  directives to 20 active directives and five reject-only migration entries.
+  The latter retain actionable migration errors for the three dynconf names
+  and two custom-selector names. The project removed
   the `markdown_streaming_zero_copy`, per-path metrics, shadow comparison,
-  profile, and OTel directives. Removed names fail `nginx -t`
+  profile, and OTel directives. Other removed names fail `nginx -t`
   with the standard `unknown directive` error.
 - **`markdown_limits` keys**: conversion_timeout, parser_timeout,
   conversion_memory, parser_budget, streaming_buffer, decompressed_size,
   decompression_ratio, and max_inflight replace the former standalone
   limit directives.
-- **Metrics freeze**: The production endpoint emits the eleven-family v1
+- **Metrics freeze**: The production endpoint emits the ten-family v1
   contract (see [observability-schema-v2.md](observability-schema-v2.md)).
   Legacy multi-format, per-path, shadow, and debug families no longer exist.
-- **Streaming threshold**: The streaming auto-route threshold stays fixed
-  internally at 1 MiB and is not operator-configurable.
-- **ABI and FFI**: The bundled Rust/C boundary is at ABI version 2.
+- **Streaming default**: Unset and `off` use bounded full-buffer conversion.
+  Explicit `auto` prefers streaming after safety checks without a size threshold.
+- **ABI and FFI**: The bundled Rust/C boundary is at ABI version 3.
 
 The sections below describe subsystems and prior release lines. Where they
 describe directives that no longer exist in 0.9.2, treat the behavior as

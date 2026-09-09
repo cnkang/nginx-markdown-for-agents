@@ -121,7 +121,7 @@ Before building the custom image, ensure the following tools are available:
 |------|---------|-----------------|
 | Docker or Podman | Container image build | Docker 20.10+ / Podman 4.0+ |
 | Docker Buildx (optional) | Multi-platform builds | Bundled with Docker 20.10+ |
-| Rust toolchain | Compiles the Rust converter component | Rust 1.97.0 (MSRV 1.97) |
+| Rust toolchain | Compiles the Rust converter component | Rust 1.98.1 (MSRV 1.98) |
 | NGINX source | Module compilation target | Must match Ingress Controller NGINX version |
 | Git | Clone module source | Any recent version |
 
@@ -156,14 +156,13 @@ docker build -f examples/kubernetes/Dockerfile.ingress \
 
 #### Custom NGINX Version
 
-Override the NGINX version to match your Ingress Controller:
-
-```bash
-docker build -f examples/kubernetes/Dockerfile.ingress \
-  --build-arg NGINX_VERSION=1.24.0 \
-  --build-arg MODULE_SHA="$(git rev-parse HEAD)" \
-  -t my-ingress:nginx-1.24 .
-```
+Override the NGINX version **and** the base image together. The module must
+use a build compiled against the exact NGINX build shipped in the base
+image, or the load fails with an ABI mismatch. The F5 Ingress Controller
+image pins its own NGINX build, so a custom NGINX version requires the
+plain NGINX base image (see the plain-NGINX example below). The
+`NGINX_INGRESS_IMAGE` argument then selects the matching `nginx:<version>`
+image instead of the Ingress Controller image.
 
 #### Custom Ingress Controller Image
 
@@ -177,6 +176,14 @@ docker build -f examples/kubernetes/Dockerfile.ingress \
 ```
 
 For plain NGINX (non-Ingress deployment):
+
+> **Note:** `Dockerfile.ingress` contains Ingress-specific steps — it
+> switches to `USER 101` and injects a `load_module` snippet into
+> `/etc/nginx/modules/`, which the Ingress Controller auto-loads. A plain
+> NGINX image does not auto-load that directory, so after building with
+> the plain `nginx:<version>` base image you must add the `load_module`
+> line to your own `nginx.conf` (or mount the snippet into a directory
+> your configuration includes). The build itself is otherwise identical.
 
 ```bash
 docker build -f examples/kubernetes/Dockerfile.ingress \
@@ -317,7 +324,7 @@ the module-build stage.
 
 **Symptom:** Build fails with Rust compiler errors.
 
-**Cause:** Source builds require Rust 1.97.0 or newer (MSRV 1.97).
+**Cause:** Source builds require Rust 1.98.0 or newer (MSRV 1.98).
 Network issues during `rustup` installation can also cause failures.
 
 **Solution:**

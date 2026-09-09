@@ -78,10 +78,11 @@ DIFF_PATH = MATRIX_PATH.parent / "matrix-diff.json"
 # ---------------------------------------------------------------------------
 # Scraping / version constants
 # ---------------------------------------------------------------------------
+NGINX_ORG = "nginx.org"
 NGINX_DOWNLOAD_URL = "https://nginx.org/en/download.html"
 REPO_SLUG = os.environ.get("GITHUB_REPOSITORY", "cnkang/nginx-markdown-for-agents")
 GITHUB_API_ACCEPT = "application/vnd.github+json"
-NGINX_DOWNLOAD_ALLOWED_HOSTS = {"nginx.org"}
+NGINX_DOWNLOAD_ALLOWED_HOSTS = {NGINX_ORG}
 GITHUB_RELEASE_ALLOWED_HOSTS = {"api.github.com"}
 
 # Supported platform combinations
@@ -515,14 +516,22 @@ def _supported_dynamic_entry(entry: dict) -> dict | None:
     artifact types are ignored.  Canonical generated rows carry no
     ``support_tier`` (projection happens here), so the optional path keeps
     them eligible instead of dropping them for a missing tier field.
+    Best-effort/pending rows (newly discovered versions awaiting manual
+    verification, see ``_mark_new_versions_pending``) are projected with
+    their tier preserved so the auto-diff sees them; only unknown tiers are
+    dropped.
     """
     normalized = normalize_compatibility_entry(entry, require_fields=False)
     if normalized.get("artifact_type") != "dynamic-module":
         return _source_only_entry(normalized)
-    if (
-        normalized.get("support_tier") is not None
-        and normalized.get("support_tier") != "supported"
-    ):
+    # The updater manages only the generic linux dynamic-module rows.
+    # Distribution-specific rows (for example ubuntu-24.04) share the same
+    # (version, libc, arch) identity and must stay out of the generated set
+    # or they collide with the linux rows during merge.
+    if normalized.get("os") != "linux":
+        return None
+    tier = normalized.get("support_tier")
+    if tier is not None and tier not in ("supported", "best-effort"):
         return None
     try:
         version, os_type, arch = _matrix_entry_identity(normalized)
@@ -534,7 +543,8 @@ def _supported_dynamic_entry(entry: dict) -> dict | None:
         "nginx": version,
         "os_type": os_type,
         "arch": arch,
-        "support_tier": "full",
+        "support_tier": "full" if tier != "best-effort" else "best-effort",
+        "nginx_channel": normalized.get("nginx_channel", classify_version(version)),
     }
 
 
@@ -1122,6 +1132,43 @@ def _added_version_track_map(diff: MatrixDiff) -> dict[str, str]:
     return {_version_track(version): version for version in diff.added_versions}
 
 
+def _mark_new_versions_pending(
+    entries: list[dict], diff: MatrixDiff
+) -> list[dict]:
+    """Keep newly discovered NGINX versions out of automatic support.
+
+    The updater may discover a release before this repository has run the
+    required platform and artifact checks.  Preserve the generated row, but
+    bind it to an explicit pending/best-effort state until a maintainer
+    records verification evidence.  Existing rows keep their reviewed tier.
+    """
+    pending_versions = set(diff.added_versions)
+    if not pending_versions:
+        return entries
+
+    marked: list[dict] = []
+    recorded_date = datetime.now(timezone.utc).date().isoformat()
+    for entry in entries:
+        candidate = dict(entry)
+        try:
+            version = _matrix_entry_identity(entry)[0]
+        except (TypeError, ValueError):
+            marked.append(candidate)
+            continue
+        if version in pending_versions:
+            candidate["support_tier"] = "best-effort"
+            candidate["verification_state"] = "pending"
+            candidate["support_stage"] = "best-effort"
+            candidate["date"] = recorded_date
+            candidate["source"] = NGINX_ORG
+            candidate["provenance"] = {
+                "kind": NGINX_ORG,
+                "reference": NGINX_DOWNLOAD_URL,
+            }
+        marked.append(candidate)
+    return marked
+
+
 def _update_entry_version_for_track(entry: dict, track_map: dict[str, str]) -> None:
     """Update legacy and canonical nginx version keys when their track advances."""
     for key in ("nginx_version", "nginx"):
@@ -1166,8 +1213,14 @@ def _canonical_dynamic_entry(
         entry.pop("release_blocking", None)
         entry.pop("owner_workflow", None)
         entry.pop("managed_by", None)
+        entry.pop("target", None)
         entry["nginx_version"] = version
+        entry["nginx_channel"] = classify_version(version)
         entry["libc"] = libc
+        entry["arch"] = arch
+        entry["test_level"] = "smoke-test"
+        entry["release_blocking"] = False
+        entry["owner_workflow"] = ".github/workflows/release-packages.yml"
         if entry.get("support_tier") is None:
             # Existing rows that predate the tier vocabulary default to
             # full support (the canonical generated tier).
@@ -1182,21 +1235,28 @@ def _canonical_dynamic_entry(
     target_env = {"glibc": "gnu", "musl": "musl"}.get(libc)
     if target_env is None:
         raise ValueError(f"unsupported libc for target construction: {libc}")
-    target = normalized.get("target")
-    if not target or "-unknown-" not in target:
+    if not normalized.get("target") or "-unknown-" not in normalized["target"]:
         # A bare arch value (for example "aarch64" via the arch alias)
         # is not a canonical target triple; construct the full triple.
-        target = f"{normalized_arch}-unknown-linux-{target_env}"
-    return {
+        normalized["target"] = f"{normalized_arch}-unknown-linux-{target_env}"
+    generated = {
         "nginx_version": version,
+        "nginx_channel": classify_version(version),
         "os": "linux",
         "libc": libc,
-        "target": target,
+        "arch": arch,
         "artifact_type": "dynamic-module",
-        "support_tier": SUPPORT_TIER,
+        "test_level": "smoke-test",
+        "release_blocking": False,
+        "owner_workflow": ".github/workflows/release-packages.yml",
+        "support_tier": normalized.get("support_tier", SUPPORT_TIER),
         "feature_manifest_digest": _feature_manifest_digest(),
         "abi_version": _frozen_abi_version(),
     }
+    for key in ("verification_state", "support_stage", "date", "source", "provenance"):
+        if key in normalized:
+            generated[key] = normalized[key]
+    return generated
 
 
 def _feature_manifest_digest() -> str:
@@ -1245,6 +1305,20 @@ def _rebind_stale_dynamic_rows(other_entries: list) -> None:
             entry["abi_version"] = _frozen_abi_version()
 
 
+def _is_generated_dynamic_row(entry: object) -> bool:
+    """Return whether one row is a generated linux dynamic-module row.
+
+    Distribution-specific dynamic-module rows (for example ubuntu-24.04)
+    share the same (version, libc, arch) identity as the generated linux
+    rows and must never be treated as generated or dropped by the updater.
+    """
+    return (
+        isinstance(entry, dict)
+        and entry.get("artifact_type") == "dynamic-module"
+        and entry.get("os") == "linux"
+    )
+
+
 def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
     """Replace generated dynamic-module rows while preserving other artifacts.
 
@@ -1261,13 +1335,10 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         entry
         for entry in merged
         if isinstance(entry, dict)
-        and entry.get("artifact_type", "dynamic-module") == "dynamic-module"
+        and _matrix_entry_identity(entry)[1] in OS_TYPES
     ]
     existing_dynamic = [
-        entry
-        for entry in entries
-        if isinstance(entry, dict)
-        and entry.get("artifact_type") == "dynamic-module"
+        entry for entry in entries if _is_generated_dynamic_row(entry)
     ]
     _assert_unique_identities(existing_dynamic, "existing dynamic")
     _assert_unique_identities(merged_dynamic, "generated dynamic")
@@ -1288,8 +1359,7 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
     other_entries = [
         entry
         for entry in entries
-        if not isinstance(entry, dict)
-        or entry.get("artifact_type") != "dynamic-module"
+        if not _is_generated_dynamic_row(entry)
         or _matrix_entry_identity(entry) not in generated_keys
     ]
     # Stale supported/candidate rows survive (hand-maintained compatibility
@@ -1304,6 +1374,13 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         )
     )
     data["entries"] = dynamic_entries + other_entries
+    for entry in data["entries"]:
+        if _is_generated_dynamic_row(entry):
+            try:
+                version = _matrix_entry_identity(entry)[0]
+            except (TypeError, ValueError):
+                continue
+            entry["nginx_channel"] = classify_version(version)
     data.pop("updated_at", None)
     data.pop("matrix", None)
 
@@ -1327,14 +1404,16 @@ def _run_write_mode(
     except OSError:
         matrix_backup = None
 
+    effective_merged = _mark_new_versions_pending(merged, diff)
+
     try:
         if _is_canonical_document(data):
-            _replace_canonical_dynamic_entries(data, merged)
+            _replace_canonical_dynamic_entries(data, effective_merged)
         else:
             data["updated_at"] = datetime.now(timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             )
-            data["matrix"] = merged
+            data["matrix"] = effective_merged
 
             # Update entries with the new version numbers if they exist
             _update_entries_for_added_versions(data, diff)
@@ -1350,7 +1429,19 @@ def _run_write_mode(
         return 1
 
     # Generate new doc content (restores matrix on SystemExit)
-    new_doc_content = _write_doc_with_rollback(merged, matrix_backup)
+    if _is_canonical_document(data):
+        try:
+            doc_entries = _matrix_entry_list(data, MATRIX_PATH)
+        except SystemExit:
+            _restore_matrix_backup(matrix_backup)
+            raise
+        except (TypeError, ValueError, OSError) as exc:
+            _restore_matrix_backup(matrix_backup)
+            print(f"Error reading canonical matrix: {exc}", file=sys.stderr)
+            return 1
+    else:
+        doc_entries = effective_merged
+    new_doc_content = _write_doc_with_rollback(doc_entries, matrix_backup)
 
     # Write doc atomically (restores matrix on failure)
     result = _atomic_doc_write(new_doc_content, matrix_backup)

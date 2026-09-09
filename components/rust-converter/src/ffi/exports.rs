@@ -277,13 +277,12 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
 /// prefers `text/markdown` over `text/html`, using RFC 9110 §12.5.1
 /// q-value comparison.
 ///
-/// # Parameters
-///
-/// - `on_wildcard`: Controls wildcard (all-types MIME) handling.
-///   - `0` (NEGOTIATE_WILDCARD_STRICT): wildcards do NOT match text/markdown;
-///     only explicit `text/markdown` triggers conversion.
-///   - `1` (NEGOTIATE_WILDCARD_ALLOW): wildcards match text/markdown,
-///     so a wildcard Accept header will trigger conversion.
+/// Negotiation is strict-only: wildcard MIME types (the fully-generic
+/// wildcard and `text / *`) never
+/// imply a `text/markdown` preference. Only an explicit `text/markdown` entry
+/// (with a q-value at least as high as `text/html`) triggers conversion. The
+/// wildcard mode was removed in 0.9.2 (design §14(g); Requirements LTS-R010,
+/// LTS-R023).
 ///
 /// # Safety
 ///
@@ -297,7 +296,6 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
 pub unsafe extern "C" fn markdown_negotiate_accept(
     accept_header: *const u8,
     accept_header_len: usize,
-    on_wildcard: u8,
     result: *mut FFIAcceptResult,
 ) {
     if result.is_null() {
@@ -325,10 +323,8 @@ pub unsafe extern "C" fn markdown_negotiate_accept(
             }
         };
 
-        let wildcard = on_wildcard != 0;
-
         use crate::negotiator::{NegotiationResult, PassthroughReason, negotiate};
-        match negotiate(header_str, wildcard) {
+        match negotiate(header_str) {
             NegotiationResult::Convert => {
                 result_ref.should_convert = 1;
                 result_ref.reason = NEGOTIATE_REASON_CONVERT;
@@ -1617,10 +1613,6 @@ mod tests {
         assert_eq!(opts.base_url_len, 0);
         assert_eq!(opts.streaming_budget, 0);
         assert_eq!(opts.prune_noise, 0);
-        assert!(opts.prune_selectors.is_null());
-        assert_eq!(opts.prune_selector_len, 0);
-        assert!(opts.prune_protection_selectors.is_null());
-        assert_eq!(opts.prune_protection_selector_len, 0);
         assert_eq!(opts.memory_budget, 0);
         assert_eq!(opts.parse_timeout_ms, 0);
         assert_eq!(opts.parser_memory_budget, 0);

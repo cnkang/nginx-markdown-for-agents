@@ -20,10 +20,9 @@ CONTRACT_PATH = ROOT / "docs/knowledge-base/config-contract.md"
 README_PATH = ROOT / "docs/knowledge-base/README.md"
 LIMIT_REGISTRY_PATH = ROOT / "tools/release/gates/validate_config_directives.py"
 METRIC_KEY_FIELD = "metric family"
-ALLOWED_VALUES_FIELD = "allowed values"
 README_FROZEN_SECTION_RE = re.compile(r"^## Key Numbers\b", re.M)
 README_FROZEN_ROW_RE = re.compile(
-    r"^\|\s*(?:Active directives|Removed directives|Dynconf keys|"
+    r"^\|\s*(?:Active directives|Removed directives|"
     r"Metric families|Reason codes|FFI exports|MSRV / toolchain|OTel|Profiles)\s*\|",
     re.M,
 )
@@ -165,7 +164,6 @@ def _parse_contract_tables(
 ) -> tuple[list[dict[str, str]], ...]:
     patterns = (
         re.compile(r"^## Active Directives \("),
-        re.compile(r"^## Dynconf Keys \("),
         re.compile(r"^## Metric Families \("),
         re.compile(r"^## Reason Codes \("),
         re.compile(r"^## markdown_limits Keys$"),
@@ -203,68 +201,6 @@ def _validate_directives(
         errors.append(
             f"directives: table has {len(directive_rows)} rows, inventory has "
             f"{inventory['directive_count']}"
-        )
-
-
-def _validate_dynconf(
-    errors: list[str],
-    inventory: dict,
-    dynconf_rows: list[dict[str, str]],
-    contract_text: str,
-) -> None:
-    expected_dynconf = {
-        item["name"]: {
-            "type": _clean(item["type"]),
-            ALLOWED_VALUES_FIELD: _clean(item["allowed_values"]),
-            "default": _clean(item["default"]),
-            "inheritance": _clean(item["inheritance"]),
-        }
-        for item in inventory["dynconf_keys"]
-    }
-    actual_dynconf = {
-        row["key"].strip("`"): {
-            "type": _clean(row["type"]),
-            ALLOWED_VALUES_FIELD: _clean(row[ALLOWED_VALUES_FIELD]),
-            "default": _clean(row["default"]),
-            "inheritance": _clean(row["inheritance"]),
-        }
-        for row in dynconf_rows
-    }
-    for key, expected in expected_dynconf.items():
-        actual = actual_dynconf.get(key)
-        if actual is None:
-            continue
-        if not expected[ALLOWED_VALUES_FIELD] and "size" not in actual[ALLOWED_VALUES_FIELD]:
-            errors.append(f"dynconf {key}: size range is not documented")
-        elif not expected[ALLOWED_VALUES_FIELD]:
-            expected[ALLOWED_VALUES_FIELD] = actual[ALLOWED_VALUES_FIELD]
-    _compare_maps(
-        errors,
-        "dynconf",
-        expected_dynconf,
-        actual_dynconf,
-        ("type", ALLOWED_VALUES_FIELD, "default", "inheritance"),
-    )
-    dynamic_count = sum(1 for item in inventory["dynconf_keys"] if item["dynamic"])
-    if len(dynconf_rows) != len(inventory["dynconf_keys"]):
-        errors.append(
-            f"dynconf: table has {len(dynconf_rows)} rows, inventory has "
-            f"{len(inventory['dynconf_keys'])}"
-        )
-    heading = (
-        f"## Dynconf Keys ({dynamic_count} runtime-mutable + "
-        "schema_version metadata)"
-    )
-    if heading not in contract_text:
-        errors.append("dynconf: heading must distinguish runtime-mutable keys from schema metadata")
-    expected_count = f"{dynamic_count} runtime-mutable keys"
-    if (
-        expected_count not in contract_text
-        or "required `schema_version` metadata" not in contract_text
-    ):
-        errors.append(
-            "dynconf: contract must describe the dynamic runtime-mutable "
-            "count plus schema metadata"
         )
 
 
@@ -373,7 +309,6 @@ def validate_contract(
     try:
         (
             directive_rows,
-            dynconf_rows,
             metric_rows,
             reason_rows,
             limit_rows,
@@ -383,7 +318,6 @@ def validate_contract(
 
     _validate_directives(errors, inventory, directive_rows)
 
-    _validate_dynconf(errors, inventory, dynconf_rows, contract_text)
     _validate_readme(errors, readme_text)
 
     _validate_metrics(errors, inventory, metric_rows)

@@ -6,7 +6,7 @@ This page is an implementation reference for the merged
 
 ## Configuration shape
 
-The public command registry is frozen at 25 directives. Resource controls are
+The public command registry is frozen at 20 directives. Resource controls are
 one directive with eight independently inherited keys. The old standalone
 budget directives are not part of the live command table.
 
@@ -90,7 +90,6 @@ the order shown in the example.
 | Streaming | mode, exclusions, bounded working/replay budget | `markdown_streaming`, `markdown_stream_excluded_types`, `markdown_limits streaming_buffer` |
 | Decompression | automatic mode and bounded decoder state | `markdown_auto_decompress`, `markdown_limits decompressed_size`, `markdown_limits decompression_ratio` |
 | Observability | logs, diagnostics, metrics shared memory | `markdown_log_verbosity`, `markdown_diagnostics`, `markdown_metrics_shm_size`, `markdown_metrics` |
-| Dynamic config | watcher, path, dry-run | `markdown_dynamic_config`, `markdown_dynamic_config_path`, `markdown_dynconf_dry_run` |
 
 ## Lifecycle
 
@@ -100,9 +99,8 @@ the order shown in the example.
    incompatible contexts.
 3. `ngx_http_markdown_merge_conf` applies per-key inheritance and defaults,
    validates cross-key limits, then derives internal runtime fields.
-4. Request processing reads the effective merged configuration. Dynamic config
-   applies only its five frozen keys (`filter`, `prune_noise`, `log_verbosity`,
-   `error_policy`, and `streaming_buffer`).
+4. Request processing reads the effective merged configuration. Runtime changes
+   require a validated NGINX configuration and a controlled reload or restart.
 
 ## Related checks
 
@@ -117,5 +115,6 @@ documentation synchronized.
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-09-07 | Align the implementation reference with the frozen 20-directive command table and static configuration contract. |
 | 0.9.2 | 2026-08-24 | Documented zero-deadline handling for conversion_timeout=0 beside an explicit parser_timeout, with the explicitness-aware clamp/fail cross-key behavior. |
 | 0.9.2 | 2026-08-04 | Align implementation reference with the frozen 25-directive command table and eight-key `markdown_limits` contract. |

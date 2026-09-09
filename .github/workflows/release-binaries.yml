@@ -240,13 +240,20 @@ jobs:
       - name: Download Artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
+          pattern: ngx_http_markdown_filter_module-*
           path: artifacts
+          merge-multiple: true
 
       - name: Download SHA256SUMS
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: binary-checksums
-          path: release-assets
+          path: artifacts
+
+      - name: Verify tarball checksums in place
+        run: |
+          (cd artifacts && sha256sum --check SHA256SUMS)
+        shell: bash
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -335,8 +342,8 @@ jobs:
           name: release-binaries
           path: |
             artifacts/**/*.tar.gz
+            artifacts/SHA256SUMS
             artifacts/nginx-version-groups.json
             artifacts/nginx-version-groups.md
-            release-assets/SHA256SUMS
           if-no-files-found: error
           retention-days: 5

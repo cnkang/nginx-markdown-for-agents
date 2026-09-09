@@ -27,6 +27,16 @@
         }
       }
     },
+    "policy_exclusions": {
+      "type": "object",
+      "required": ["nginx_versions_below", "operating_systems", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "nginx_versions_below": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$"},
+        "operating_systems": {"type": "array", "items": {"type": "string"}},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
     "entries": {
       "type": "array",
       "description": "Canonical release matrix rows.",
@@ -58,8 +68,18 @@
     }
   ],
   "$defs": {
+    "support_consistency": {
+      "not": {
+        "required": ["support_stage", "support_tier"],
+        "properties": {
+          "support_stage": { "const": "excluded" },
+          "support_tier": { "const": "full" }
+        }
+      }
+    },
     "entry": {
       "type": "object",
+      "allOf": [{ "$ref": "#/$defs/support_consistency" }],
       "description": "A single release matrix row using canonical keys.",
       "required": [
         "nginx_version",
@@ -110,6 +130,27 @@
           "minimum": 1,
           "description": "Final frozen FFI ABI version."
         },
+        "verification_state": {
+          "type": "string",
+          "enum": ["verified", "pending"]
+        },
+        "support_stage": {
+          "type": "string",
+          "description": "Platform qualification stage consumed by support-policy validation and release documentation. support_tier controls artifact completeness; excluded stages cannot claim full support. Both fields must agree.",
+          "enum": ["primary", "best-effort", "experimental", "container", "compat-floor", "excluded"]
+        },
+        "date": {"type": "string", "format": "date"},
+        "source": {"type": "string", "minLength": 1},
+        "provenance": {
+          "type": "object",
+          "required": ["kind", "reference"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"type": "string", "enum": ["nginx.org", "ubuntu-default-repo", "ppa", "self-compiled", "container", "homebrew", "other"]},
+            "reference": {"type": "string", "minLength": 1},
+            "notes": {"type": "string"}
+          }
+        },
         "support_tier": {
           "type": "string",
           "enum": ["full", "supported", "experimental", "best-effort", "source_only", "deprecated", "archived"],
@@ -129,6 +170,7 @@
     },
     "legacy_entry": {
       "type": "object",
+      "allOf": [{ "$ref": "#/$defs/support_consistency" }],
       "description": "A legacy-format matrix row using either the full canonical key set or the full legacy alias set. Mixing canonical and legacy keys in a single row is not allowed. Normalization maps nginx->nginx_version, os_type->os, arch->target.",
       "oneOf": [
         {
@@ -202,6 +244,11 @@
           "type": "integer",
           "minimum": 1
         },
+        "verification_state": { "$ref": "#/$defs/entry/properties/verification_state" },
+        "support_stage": { "$ref": "#/$defs/entry/properties/support_stage" },
+        "date": { "$ref": "#/$defs/entry/properties/date" },
+        "source": { "$ref": "#/$defs/entry/properties/source" },
+        "provenance": { "$ref": "#/$defs/entry/properties/provenance" },
         "support_tier": {
           "type": "string",
           "enum": ["full", "supported", "experimental", "best-effort", "source_only", "deprecated", "archived"],

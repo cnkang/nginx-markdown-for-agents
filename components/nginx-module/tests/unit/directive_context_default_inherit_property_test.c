@@ -3,10 +3,9 @@
  *
  * Property 3: Directive context, default, and inheritance contract.
  *
- * For each of the 25 retained active directives, verifies:
+ * For each of the 20 retained active directives, verifies:
  *   1. Context acceptance: command table flags include correct context bits
  *      (H/S/L for most, H-only for trusted_proxies/metrics_shm_size/
- *       dynamic_config/dynamic_config_path/dynconf_dry_run,
  *       L-only for metrics/diagnostics)
  *   2. Default values: when unset, the merge function produces the
  *      documented default
@@ -605,7 +604,7 @@ typedef struct {
 } context_contract_t;
 
 static const context_contract_t context_contracts[] = {
-    /* H/S/L directives (18 entries) */
+    /* H/S/L directives (16 entries) */
     { "markdown_filter",                      1, 1, 1 },
     { "markdown_flavor",                      1, 1, 1 },
     { "markdown_accept",                      1, 1, 1 },
@@ -621,15 +620,10 @@ static const context_contract_t context_contracts[] = {
     { "markdown_streaming",                   1, 1, 1 },
     { "markdown_stream_excluded_types",       1, 1, 1 },
     { "markdown_prune_noise",                 1, 1, 1 },
-    { "markdown_prune_selectors",             1, 1, 1 },
-    { "markdown_prune_protection_selectors",  1, 1, 1 },
     { "markdown_log_verbosity",               1, 1, 1 },
-    /* H-only directives (5 entries) */
+    /* H-only directives (2 entries) */
     { "markdown_trusted_proxies",             1, 0, 0 },
     { "markdown_metrics_shm_size",            1, 0, 0 },
-    { "markdown_dynamic_config",              1, 0, 0 },
-    { "markdown_dynamic_config_path",         1, 0, 0 },
-    { "markdown_dynconf_dry_run",             1, 0, 0 },
     /* L-only directives (2 entries) */
     { "markdown_metrics",                     0, 0, 1 },
     { "markdown_diagnostics",                 0, 0, 1 },
@@ -649,8 +643,8 @@ test_context_acceptance_property(void)
 
     TEST_SECTION("Property 3.1: Context acceptance");
 
-    TEST_ASSERT(CONTEXT_COUNT == 25,
-        "directive context contract table must have exactly 25 entries");
+    TEST_ASSERT(CONTEXT_COUNT == 20,
+        "directive context contract table must have exactly 20 entries");
 
     for (i = 0; i < CONTEXT_COUNT; i++) {
         cmd = find_directive(context_contracts[i].name);
@@ -692,7 +686,7 @@ test_context_acceptance_property(void)
         }
     }
 
-    TEST_PASS("All 25 directives have correct context flags");
+    TEST_PASS("All 20 retained directives have correct context flags");
 }
 
 /* ================================================================
@@ -735,7 +729,6 @@ create_unset_conf(void)
     conf->ops.diagnostics_enabled = NGX_CONF_UNSET;
 
     conf->stream.policy = NGX_CONF_UNSET_UINT;
-    conf->stream.policy_explicit = -1;
     conf->stream.excluded_types = NGX_CONF_UNSET_PTR;
     conf->stream.budget = NGX_CONF_UNSET_SIZE;
 
@@ -749,12 +742,7 @@ create_unset_conf(void)
     conf->limits.max_inflight = NGX_CONF_UNSET_UINT;
 
     conf->advanced.prune_noise = NGX_CONF_UNSET;
-    conf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
-    conf->advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    conf->advanced.dynconf_enabled = NGX_CONF_UNSET;
-    conf->advanced.dynconf_path.len = 0;
-    conf->advanced.dynconf_path.data = NULL;
-    conf->advanced.dynconf_dry_run = NGX_CONF_UNSET;
+    /* Custom selectors and runtime dynconf fields were removed in 0.9.2. */
 
     return conf;
 }
@@ -809,9 +797,12 @@ test_default_values_property(void)
         == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE,
         "markdown_cache_validation default resolves via conditional");
 
-    /* markdown_auth_policy: default allow (0) */
-    TEST_ASSERT(child->policy.auth_policy == 0,
-        "markdown_auth_policy default should be allow (0)");
+    /* markdown_auth_policy: default deny (1) — LTS-R021 flipped the unset
+     * default to no-convert for identifiable authenticated content; explicit
+     * "markdown_auth_policy allow" is the opt-in that converts. */
+    TEST_ASSERT(child->policy.auth_policy
+        == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY,
+        "markdown_auth_policy default should be deny/no-convert (1)");
 
     /* markdown_auth_cookies: default none (NULL) */
     TEST_ASSERT(child->policy.auth_cookies == NULL,
@@ -821,9 +812,13 @@ test_default_values_property(void)
     TEST_ASSERT(child->routing.content_types == NULL,
         "markdown_content_types default should be NULL");
 
-    /* markdown_streaming: default auto (via stream merge) */
-    TEST_ASSERT(child->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_AUTO,
-        "markdown_streaming default should be auto");
+    /*
+     * markdown_streaming: default off (via stream merge).  Unset now resolves
+     * to the bounded full-buffer engine (unset == off), a 0.9.2 behavior
+     * change from the prior auto default (LTS-R011.2, design §14(a)).
+     */
+    TEST_ASSERT(child->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
+        "markdown_streaming default should be off");
 
     /* markdown_stream_excluded_types: default NULL */
     TEST_ASSERT(child->stream.excluded_types == NULL,
@@ -833,29 +828,16 @@ test_default_values_property(void)
     TEST_ASSERT(child->advanced.prune_noise == 1,
         "markdown_prune_noise default should be on");
 
-    /* markdown_prune_selectors: default NULL (built-in nav/footer/aside) */
-    TEST_ASSERT(child->advanced.prune_selectors == NULL,
-        "markdown_prune_selectors default should be NULL");
-
-    /* markdown_prune_protection_selectors: default NULL */
-    TEST_ASSERT(child->advanced.prune_protection_selectors == NULL,
-        "markdown_prune_protection_selectors default should be NULL");
+    /*
+     * markdown_prune_selectors / markdown_prune_protection_selectors were
+     * removed in 0.9.2 (LTS-R009); the directive names remain registered with
+     * an error-returning handler but no config field backs them, so there are
+     * no default values to assert here.
+     */
 
     /* markdown_log_verbosity: default info */
     TEST_ASSERT(child->policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_INFO,
         "markdown_log_verbosity default should be info");
-
-    /* markdown_dynamic_config: default off (0) */
-    TEST_ASSERT(child->advanced.dynconf_enabled == 0,
-        "markdown_dynamic_config default should be off");
-
-    /* markdown_dynamic_config_path: default empty */
-    TEST_ASSERT(child->advanced.dynconf_path.len == 0,
-        "markdown_dynamic_config_path default should be empty");
-
-    /* markdown_dynconf_dry_run: default off (0) */
-    TEST_ASSERT(child->advanced.dynconf_dry_run == 0,
-        "markdown_dynconf_dry_run default should be off");
 
     /* markdown_diagnostics: default off (0) */
     TEST_ASSERT(child->ops.diagnostics_enabled == 0,
@@ -990,26 +972,6 @@ test_inheritance_property(void)
     free(parent);
     free(child);
 
-    /* --- Test: child inherits dynconf_enabled from parent --- */
-    parent = create_unset_conf();
-    child = create_unset_conf();
-    parent->advanced.dynconf_enabled = 1;
-    run_merge(child, parent);
-    TEST_ASSERT(child->advanced.dynconf_enabled == 1,
-        "child should inherit dynconf_enabled=on from parent");
-    free(parent);
-    free(child);
-
-    /* --- Test: child inherits dynconf_dry_run from parent --- */
-    parent = create_unset_conf();
-    child = create_unset_conf();
-    parent->advanced.dynconf_dry_run = 1;
-    run_merge(child, parent);
-    TEST_ASSERT(child->advanced.dynconf_dry_run == 1,
-        "child should inherit dynconf_dry_run=on from parent");
-    free(parent);
-    free(child);
-
     /* --- Test: child inherits diagnostics_enabled from parent --- */
     parent = create_unset_conf();
     child = create_unset_conf();
@@ -1110,10 +1072,10 @@ test_trusted_proxies_http_only(void)
 }
 
 /* ================================================================
- * 5. Requirement 15.10: dynconf directives context verification
+ * 5. Requirement 15.10: removed directive context verification
  *
- * Requirement 15.10 specifies that dynconf directives are accepted only
- * in the http context.  Verify the command-table bits directly.
+ * Removed directives remain HTTP-only migration entries. Verify the
+ * command-table bits directly.
  * ================================================================ */
 static void
 test_dynconf_context(void)
@@ -1126,20 +1088,20 @@ test_dynconf_context(void)
     ngx_command_t *cmd;
     size_t         i;
 
-    TEST_SECTION("Property 3.5: Dynconf directives context");
+    TEST_SECTION("Property 3.5: Removed directive context");
 
     for (i = 0; i < 3; i++) {
         cmd = find_directive(dynconf_names[i]);
-        TEST_ASSERT(cmd != NULL, "dynconf directive must be registered");
+        TEST_ASSERT(cmd != NULL, "removed directive must be registered");
         TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
-            "dynconf directive must allow http context");
+            "removed directive must allow http context");
     }
 
-    TEST_PASS("Dynconf directives have expected context flags");
+    TEST_PASS("Removed directives have expected context flags");
 }
 
 /* ================================================================
- * 6. Command table count = exactly 25
+ * 6. Command table count = exactly 25 (20 active + 5 reject-only)
  * ================================================================ */
 static void
 test_command_table_count(void)

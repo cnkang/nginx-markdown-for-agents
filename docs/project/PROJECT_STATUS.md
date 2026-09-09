@@ -11,13 +11,13 @@ track that harness rather than private local steering files.
 ## Current Assessment
 
 As of the **current release line (0.9.2)**, the project includes a
-streaming-default conversion model with full-buffer fallback,
+bounded full-buffer conversion by default (`markdown_streaming off`),
+with explicit streaming opt-in,
 Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, unified decompression budget via
 markdown_limits (conversion_memory, parser_budget, decompressed_size, conversion_timeout, parser_timeout), read-only runtime diagnostics endpoint,
-dynconf dry-run and last-known-good failed-reload protection with atomic file
-restore, DEB/RPM packaging pipeline, Kubernetes
+static configuration with validated reload/restore procedures, DEB/RPM packaging pipeline, Kubernetes
 deployment examples, FFI ABI layout verification, CI supply-chain hardening,
 supplemental static security checks, report-oriented supply-chain visibility, and a
 repo-owned harness for agent workflow governance. The project has
@@ -30,9 +30,9 @@ operations, architecture, and contributor-facing harness maintenance.
 
 **Status:** Development release line. 0.9.1 is the latest released patch.
 0.9.2 is the current development line. 0.9.2 is the final pre-1.0 breaking
-release, with the public configuration surface reduced from 63 directives to
-25, retired profile/conflict FFI snapshots removed, and the bundled FFI ABI at
-version 2. Development version metadata is
+release, with the public configuration surface reduced to 20 active directives
+plus five reject-only migration entries, retired profile/conflict FFI snapshots
+removed, and the bundled FFI ABI at version 3. Development version metadata is
 0.9.2. The release tag, GitHub Release, package assets, and checksums remain
 pending until the blocking gates pass.
 
@@ -41,17 +41,17 @@ pending until the blocking gates pass.
 - **OTel removal**: The experimental OTel directives and implementation are
   absent from the 0.9.2 production surface. ADR-0027 records conditions for a
   possible future redesign.
-- **Metrics freeze**: The eleven-family v1 contract replaces the production
+- **Metrics freeze**: The ten-family v1 contract replaces the production
   metrics endpoint (`requests_total`, `conversion_attempts_total`,
   `conversion_deliveries_total`, `conversion_duration_seconds`,
   `input_bytes_total`, `output_bytes_total`,
   `streaming_events_total`, `streaming_peak_memory_bytes`,
-  `decompression_events_total`, `dynconf_reloads_total`, `build_info`).
+  `decompression_events_total`, `build_info`).
   This replaces the legacy multi-format, per-path, shadow, and debug families.
-- **Directive removal (38 total) and ABI 2**: The release removes 19 reject-only
-  migration stubs plus 14 active directives and 5 standalone limit directives.
-  The public surface drops from 63 directives to 25, and the bundled Rust/C
-  FFI ABI moves to version 2.
+- **Directive convergence and ABI 3**: The release freezes 20 active directives
+  and retains five removed names as reject-only migration entries. The runtime
+  dynconf subsystem and custom selectors are gone, and the bundled Rust/C FFI
+  ABI moves to version 3.
 - **Release-gates-check-092**: Additive on 091, adds public-surface drift
   check, version consistency gate (0.9.2), and reason-code registry
   completeness gate.
@@ -219,9 +219,10 @@ The 0.9.x release line is the current maintained line. The current
 development version is 0.9.2. 0.9.1 remains the latest released patch until
 the 0.9.2 release tag and release gates are complete. It is a
 breaking surface-freeze release that consolidates the configuration surface
-to the 25-directive contract (removing profile presets and per-path metrics),
-freezes the observability surface (eleven v1 metric families, reason registry,
-diagnostics JSON v1), advances the bundled FFI boundary to ABI 2, and moves
+to the 20-directive active contract (removing profile presets, dynconf, custom
+selectors, and per-path metrics), freezes the observability surface (ten v1
+metric families, reason registry, diagnostics JSON v2), advances the bundled
+FFI boundary to ABI 3, and moves
 the musl dynamic-module build before publication, on top of the 0.9.1
 streaming-decompression and zero-copy foundation.
 
@@ -258,7 +259,7 @@ details.
 
 The following limitations appear in the documentation:
 
-1. **Streaming Is Default**: Streaming is the default policy, with
+1. **Full-Buffer Default**: Unset and `off` select bounded full-buffer conversion, with
    `markdown_streaming off|auto|force`. `off` explicitly selects full-buffer
    conversion and ineligible or failed streaming requests follow fallback
    policy.
@@ -343,7 +344,7 @@ View the latest CI status: [GitHub Actions](https://github.com/cnkang/nginx-mark
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and aarch64)
 - NGINX 1.24.0 and later
-- Rust 1.97.1 is the repository's pinned build toolchain. Rust 1.97 is the
+- Rust 1.98.1 is the repository's pinned build toolchain. Rust 1.98 is the
   public source-build MSRV
 
 ### Docker Support
@@ -361,62 +362,30 @@ See `examples/docker/` for Docker build examples.
 
 | Tier | Count |
 |------|-------|
-| supported | 48 |
+| supported | 36 |
 | experimental | 1 |
-| best-effort | 1 |
+| best-effort | 16 |
 
 ### Release-Blocking Entries
 
 | Entry | Workflow |
 |-------|----------|
-| 1.24.0 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.24.0 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.24.0 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.24.0 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.24.0 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.24.0 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.24.0 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
-| 1.24.0 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
-| 1.26.3 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.26.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.26.3 debian12 glibc amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
-| 1.26.3 alpine3.20 musl amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
-| 1.26.3 debian12 glibc arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
-| 1.26.3 alpine3.20 musl arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
-| 1.26.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.26.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.26.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.26.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
-| 1.28.3 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.28.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.28.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.28.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.28.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.28.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.26.3 alpine3.20 musl amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 alpine3.20 musl arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.26.3 debian12 glibc amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.26.3 debian12 glibc arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
 | 1.28.3 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
-| 1.30.4 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.30.4 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.30.4 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.30.4 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.30.4 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.30.4 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.28.3 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.28.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
-| 1.31.4 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.31.4 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.31.4 debian12 glibc amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
-| 1.31.4 alpine3.24 musl amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
-| 1.31.4 debian12 glibc arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
-| 1.31.4 alpine3.24 musl arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
-| 1.31.4 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.31.4 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.31.4 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.31.4 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.31.4 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
-| 1.31.4 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
+| 1.30.4 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.30.4 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 <!-- END:release-matrix:status-matrix -->
 
 ## Summary
@@ -424,8 +393,8 @@ See `examples/docker/` for Docker build examples.
 **NGINX Markdown for Agents** is on the 0.9.x line: 0.9.2 is the current
 development line and 0.9.1 is the latest released patch. The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
-streaming-default conversion model, bounded-memory processing, a full-buffer
-fallback, and a repo-owned validation harness. Release readiness remains tied
+bounded full-buffer default, explicit streaming opt-in, bounded-memory
+processing, and a repo-owned validation harness. Release readiness remains tied
 to the current release matrix and the evidence-producing gates described in
 the active release documentation.
 

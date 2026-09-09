@@ -1,7 +1,7 @@
 #ifndef NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H
 #define NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H
 
-#include "ngx_http_markdown_dynconf_precedence.h"
+#include "ngx_http_markdown_effective_conf_impl.h"
 #include "ngx_http_markdown_config_merge_impl.h"
 
 /*
@@ -73,8 +73,8 @@ ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data)
  * Allocate and zero-initialize the main-level configuration structure.
  *
  * Called once during configuration parsing to create the process-wide
- * shared state for metrics SHM zone settings and dynconf duplicate
- * detection.
+ * shared state for metrics SHM zone settings and the location-validation
+ * summary.
  *
  * Parameters:
  *   cf - NGINX configuration context (provides the memory pool)
@@ -94,10 +94,6 @@ ngx_http_markdown_create_main_conf(ngx_conf_t *cf)
 
     conf->metrics_shm_size = NGX_CONF_UNSET_SIZE;
     conf->metrics_shm_zone = NULL;
-    conf->dynconf_path_configured = 0;
-    conf->dynconf_first_path.data = NULL;
-    conf->dynconf_first_path.len = 0;
-    conf->dynconf_owner_conf = NULL;
     conf->loc_validation_summary = ngx_pcalloc(
         cf->pool, sizeof(ngx_http_markdown_loc_validation_summary_t));
     if (conf->loc_validation_summary == NULL) {
@@ -162,8 +158,18 @@ static char *
 ngx_http_markdown_check_streaming_cache_conflict(ngx_conf_t *cf,
     const ngx_http_markdown_conf_t *conf)
 {
-    if (!conf->stream.policy_explicit
-        || conf->policy.conditional_requests
+    /* Validate effective values after inheritance, including build limits. */
+#ifndef MARKDOWN_STREAMING_ENABLED
+    if (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"markdown_streaming force\" requires a module built with "
+            "streaming support; rebuild with streaming enabled or use "
+            "\"markdown_streaming off|auto\"");
+        return NGX_CONF_ERROR;
+    }
+#endif
+
+    if (conf->policy.conditional_requests
            != NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT)
     {
         return NGX_CONF_OK;
@@ -227,7 +233,7 @@ ngx_http_markdown_update_loc_validation(
     ngx_http_markdown_loc_validation_update(
         main_conf->loc_validation_summary,
         conf->limits.conversion_memory,
-        conf->advanced.dynconf_block_mask);
+        conf->advanced.static_block_mask);
 }
 
 static void
@@ -282,22 +288,14 @@ ngx_http_markdown_mark_static_explicit_fields(
     if (conf->advanced.prune_noise != NGX_CONF_UNSET) {
         mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PRUNE;
     }
-    if (conf->advanced.prune_selectors != NGX_CONF_UNSET_PTR) {
-        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_SELECTORS;
-    }
-    if (conf->advanced.prune_protection_selectors != NGX_CONF_UNSET_PTR) {
-        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PROTECTION;
-    }
+    /*
+     * Custom prune/protection selectors were removed in 0.9.2 (LTS-R009);
+     * there is no longer a config field to mark explicit.  Built-in noise
+     * reduction remains tracked via NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PRUNE
+     * above.
+     */
     if (conf->decompress.auto_decompress != NGX_CONF_UNSET) {
         mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DECOMPRESS;
-    }
-    if (conf->advanced.dynconf_enabled != NGX_CONF_UNSET
-        || conf->advanced.dynconf_path.data != NULL)
-    {
-        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DYNCONF;
-    }
-    if (conf->advanced.dynconf_dry_run != NGX_CONF_UNSET) {
-        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DRY_RUN;
     }
     if (conf->ops.diagnostics_enabled != NGX_CONF_UNSET) {
         mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DIAGNOSTICS;
@@ -314,27 +312,27 @@ ngx_http_markdown_mark_static_explicit_fields(
 
 
 static void
-ngx_http_markdown_mark_dynconf_block_fields(
+ngx_http_markdown_mark_static_block_fields(
     ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev)
 {
     if (conf->advanced.prune_noise != NGX_CONF_UNSET) {
-        conf->advanced.dynconf_block_mask |=
+        conf->advanced.static_block_mask |=
             NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE;
     }
     if (conf->policy.log_verbosity != NGX_CONF_UNSET_UINT) {
-        conf->advanced.dynconf_block_mask |=
+        conf->advanced.static_block_mask |=
             NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY;
     }
     if (conf->on_error != NGX_CONF_UNSET_UINT) {
-        conf->advanced.dynconf_block_mask |=
+        conf->advanced.static_block_mask |=
             NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY;
     }
     if (conf->limits.streaming_buffer != NGX_CONF_UNSET_SIZE) {
-        conf->advanced.dynconf_block_mask |=
+        conf->advanced.static_block_mask |=
             NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER;
     }
-    conf->advanced.dynconf_block_mask |= prev->advanced.dynconf_block_mask;
+    conf->advanced.static_block_mask |= prev->advanced.static_block_mask;
 }
 
 
@@ -385,7 +383,6 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
 
     /* Streaming configuration. */
     conf->stream.policy = NGX_CONF_UNSET_UINT;
-    conf->stream.policy_explicit = -1;
     conf->stream.excluded_types = NGX_CONF_UNSET_PTR;
     conf->stream.budget = NGX_CONF_UNSET_SIZE;
 
@@ -405,15 +402,9 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->limits.streaming_buffer_explicit = 0;
 
     conf->advanced.prune_noise = NGX_CONF_UNSET;
-    conf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
-    conf->advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    conf->advanced.dynconf_enabled = NGX_CONF_UNSET;
-    conf->advanced.dynconf_path.len = 0;
-    conf->advanced.dynconf_path.data = NULL;
-    conf->advanced.dynconf_dry_run = NGX_CONF_UNSET;
-
-    /* 0.9.2 dynconf precedence model: block mask starts at 0 (no fields blocked) */
-    conf->advanced.dynconf_block_mask = 0;
+    /* Custom prune/protection selector fields removed in 0.9.2 (LTS-R009). */
+    /* Static block mask starts at 0 (no fields blocked). */
+    conf->advanced.static_block_mask = 0;
     conf->advanced.static_explicit_mask = 0;
 
     return conf;
@@ -438,7 +429,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_markdown_conf_t            *conf = child;
 
     ngx_http_markdown_mark_static_explicit_fields(conf, prev);
-    ngx_http_markdown_mark_dynconf_block_fields(conf, prev);
+    ngx_http_markdown_mark_static_block_fields(conf, prev);
 
     ngx_flag_t  max_size_set;
 
@@ -562,11 +553,11 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_markdown_log_merged_conf(cf, conf);
 
     /*
-     * Location validation index entry (0.9.2 dynconf precedence).
+     * Location validation index entry (0.9.2 static contract).
      *
      * After all merges complete and cross-key constraints are validated,
      * add this location to the global validation index.  The index is
-     * used during dynconf reload to validate streaming_buffer candidates
+     * used to validate streaming_buffer candidates
      * against per-location conversion_memory limits.
      *
      * The main configuration owns the bounded index and each merged
@@ -575,7 +566,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * recorded but marked not-applicable for the constraint check.
      *
      * The loc_validation_update() call below uses the finalized
-     * conf->limits.conversion_memory and conf->advanced.dynconf_block_mask.
+     * conf->limits.conversion_memory and conf->advanced.static_block_mask.
      */
 
     ngx_http_markdown_update_loc_validation(cf, conf);
@@ -969,7 +960,7 @@ ngx_http_markdown_is_enabled(ngx_http_request_t *r,
     /* Read enabled_source and enabled from effective view when available,
      * falling back to live conf when eff is NULL.  Inline reads here
      * (rather than calling effective_* helpers) to avoid a dependency
-     * on dynconf_impl.h from config_core_impl.h. */
+     * on effective_conf_impl.h from config_core_impl.h. */
     effective_source = (eff != NULL)
         ? eff->enabled_source
         : conf->enabled_source;
@@ -1035,7 +1026,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
             (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF)
             ? "off" : "force";
     } else {
-        streaming_policy_str = "auto (default)";
+        streaming_policy_str = "auto";
     }
 #endif
 

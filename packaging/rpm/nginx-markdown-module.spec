@@ -40,8 +40,8 @@ make install DESTDIR=%{buildroot}
 %{_libdir}/nginx/modules/ngx_http_markdown_filter_module.so
 
 %changelog
-* Wed May 06 2026 cnkang <liukang@noreply.github.com> - 0.6.1-1
+* Wed May 06 2026 Kang - 0.6.1-1
 - v0.6.1: harness Rules 27-31, output-safety risk pack, dynconf two-phase reload
 
-* Sat May 02 2026 cnkang <liukang@noreply.github.com> - 0.6.0-1
+* Sat May 02 2026 Kang - 0.6.0-1
 - Initial RPM package for v0.6.0

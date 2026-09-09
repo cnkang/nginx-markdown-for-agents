@@ -1059,7 +1059,11 @@ mod tests {
         let selectors = "nav-".to_owned() + &"s".repeat(4096);
         let options = ConversionOptions {
             base_url: Some(base_url.clone()),
-            prune_config: pruning::PruneConfig::from_ffi(true, Some(selectors.as_str()), None),
+            prune_config: pruning::PruneConfig::from_selector_strings(
+                true,
+                Some(selectors.as_str()),
+                None,
+            ),
             ..ConversionOptions::default()
         };
 

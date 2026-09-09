@@ -108,8 +108,7 @@ EXPECTED_H_SOURCES = [
     "ngx_http_markdown_diagnostics_accessors_impl.h",
     "ngx_http_markdown_directive_names.h",
     "ngx_http_markdown_durable_bypass.h",
-    "ngx_http_markdown_dynconf_impl.h",
-    "ngx_http_markdown_dynconf_precedence.h",
+    "ngx_http_markdown_effective_conf_impl.h",
     "ngx_http_markdown_exports.h",
     "ngx_http_markdown_ffi_layout_check.h",
     "ngx_http_markdown_filter_chain_impl.h",
@@ -155,12 +154,7 @@ CURRENT_DIRECTIVES = [
     "markdown_metrics_shm_size",
     "markdown_metrics",
     "markdown_prune_noise",
-    "markdown_prune_selectors",
-    "markdown_prune_protection_selectors",
     "markdown_auto_decompress",
-    "markdown_dynamic_config",
-    "markdown_dynamic_config_path",
-    "markdown_dynconf_dry_run",
     "markdown_diagnostics",
     "markdown_stream_excluded_types",
 ]
@@ -241,29 +235,9 @@ DIRECTIVE_MERGE_CONTRACTS: dict[str, tuple[str, str]] = {
         r"conf->advanced\.prune_noise",
         r"ngx_conf_merge_value\(\s*conf->advanced\.prune_noise",
     ),
-    "markdown_prune_selectors": (
-        r"conf->advanced\.prune_selectors",
-        r"ngx_conf_merge_ptr_value\(\s*conf->advanced\.prune_selectors",
-    ),
-    "markdown_prune_protection_selectors": (
-        r"conf->advanced\.prune_protection_selectors",
-        r"ngx_conf_merge_ptr_value\(\s*conf->advanced\.prune_protection_selectors",
-    ),
     "markdown_auto_decompress": (
         r"conf->decompress\.auto_decompress",
         r"ngx_conf_merge_value\(\s*conf->decompress\.auto_decompress",
-    ),
-    "markdown_dynamic_config": (
-        r"conf->advanced\.dynconf_enabled",
-        r"ngx_conf_merge_value\(\s*conf->advanced\.dynconf_enabled",
-    ),
-    "markdown_dynamic_config_path": (
-        r"ngx_http_markdown_merge_str_if_unset\s*\(",
-        r"ngx_http_markdown_merge_str_if_unset\s*\(",
-    ),
-    "markdown_dynconf_dry_run": (
-        r"conf->advanced\.dynconf_dry_run",
-        r"ngx_conf_merge_value\(\s*conf->advanced\.dynconf_dry_run",
     ),
     "markdown_diagnostics": (
         r"conf->ops\.diagnostics_enabled",
@@ -318,6 +292,26 @@ REMOVED_DIRECTIVES = [
         "name": "markdown_stream_flush_min",
         "doc_heading": "markdown_stream_flush_min",
     },
+    {
+        "name": "markdown_prune_selectors",
+        "doc_heading": "markdown_prune_selectors",
+    },
+    {
+        "name": "markdown_prune_protection_selectors",
+        "doc_heading": "markdown_prune_protection_selectors",
+    },
+    {
+        "name": "markdown_dynamic_config",
+        "doc_heading": "markdown_dynamic_config",
+    },
+    {
+        "name": "markdown_dynamic_config_path",
+        "doc_heading": "markdown_dynamic_config_path",
+    },
+    {
+        "name": "markdown_dynconf_dry_run",
+        "doc_heading": "markdown_dynconf_dry_run",
+    },
 ]
 
 REMOVED_CONSTANTS = [
@@ -355,8 +349,31 @@ class ValidationResult:
         return any(s == "FAIL" for s, _, _ in self.results)
 
 
+def _enclosing_initializer(source: str, pos: int) -> str | None:
+    """Return the text of the C initializer block enclosing ``pos``.
+
+    Scans backward from ``pos`` for the opening ``{`` of the enclosing
+    brace block and forward for its matching close, so the caller can
+    inspect exactly one command-table entry instead of a fixed-width
+    window that may bleed into the neighbouring entry.
+    """
+    open_pos = source.rfind("{", 0, pos)
+    if open_pos < 0:
+        return None
+    depth = 0
+    for i in range(open_pos, len(source)):
+        ch = source[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return source[open_pos : i + 1]
+    return None
+
+
 def read_safe(path: Path) -> str:
-    """Read a file only if it resolves within PROJECT_ROOT; return \'\' otherwise."""
+    """Read a file only if it resolves within PROJECT_ROOT; return '' otherwise."""
     resolved = path.resolve()
     try:
         resolved.relative_to(PROJECT_ROOT.resolve())
@@ -409,15 +426,27 @@ def check_directive_not_in_source(
         if macro_names
         else None
     )
-    if re.search(literal_pattern, source) or (
-        macro_pattern is not None and re.search(macro_pattern, source)
-    ):
-        result.fail(
-            check_id,
-            "removed directive still present in config_directives_impl.h",
-        )
-    else:
+    match = re.search(literal_pattern, source)
+    if match is None and macro_pattern is not None:
+        match = re.search(macro_pattern, source)
+    if match is None:
         result.pass_(check_id, "removed directive absent from command array")
+        return
+
+    # 0.9.2 keeps the five convergence removals in the command table so
+    # nginx -t can emit an explicit migration error.  They are removed from
+    # the active contract because their command entry uses the rejecting
+    # handler rather than a configuration setter.  Inspect only the
+    # enclosing initializer block of the matched directive, not a fixed
+    # window that can bleed into the neighbouring command entry.
+    block = _enclosing_initializer(source, match.start())
+    if block is not None and "ngx_http_markdown_removed_directive" in block:
+        result.pass_(check_id, "removed directive retained with rejecting handler")
+        return
+    result.fail(
+        check_id,
+        "removed directive still present as an active command entry",
+    )
 
 
 def check_directive_in_docs(

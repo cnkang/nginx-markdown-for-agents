@@ -10,8 +10,8 @@
 #       without a preceding non-negative guard (< 0 check)
 #   (b) (uint32_t)/(uint8_t)/(uInt)/(int) applied to a value of
 #       size_t/ngx_uint_t/ssize_t type without an upper-bound guard
-#   (c) Direct ngx_parse_size() result cast to (size_t) instead of
-#       using ngx_http_markdown_dynconf_parse_size_safe()
+#   (c) Direct NGINX ngx_parse_size() result cast to (size_t) instead of
+#       using the module's overflow-safe wrapper (ngx_http_markdown_parse_size)
 #
 # Usage: bash tools/harness/detect_cwe190_casts.sh [directory]
 #   directory defaults to components/nginx-module/src
@@ -65,7 +65,6 @@ echo "" >&2
 # The regex_pattern is matched against the source line content.
 readonly GUARDED_CAST_ALLOWLIST=(
     $'ngx_http_markdown_config_handlers_impl.h\traw>NGX_MAX_SIZE_T_VALUE.*value=.size_t.raw\traw>NGX_MAX_SIZE_T_VALUE before value=(size_t)raw'
-    $'ngx_http_markdown_dynconf_impl.h\t.size_t.parsed.>.*max_size_t.*out=.size_t.parsed\t(size_t)parsed>max_size_t before *out=(size_t)parsed'
 )
 
 # ── Known safe cast patterns (file:pattern → safety reason) ──
@@ -83,8 +82,6 @@ readonly SAFE_CAST_ALLOWLIST=(
     # ── NGX_ERROR sentinel returns (not data casts) ──
     $'ngx_http_markdown_config_handlers_impl.h\treturn.*size_t.*NGX_ERROR\tNGX_ERROR sentinel return (not a data cast)'
     $'ngx_http_markdown_config_handlers_impl.h\t==.*size_t.*NGX_ERROR\tNGX_ERROR sentinel comparison (not a data cast)'
-    $'ngx_http_markdown_dynconf_impl.h\treturn.*size_t.*NGX_ERROR\tNGX_ERROR sentinel return (not a data cast)'
-    $'ngx_http_markdown_dynconf_impl.h\t==.*size_t.*NGX_ERROR\tNGX_ERROR sentinel comparison (not a data cast)'
     $'ngx_http_markdown_decompression.c\t==.*size_t.*NGX_ERROR\tNGX_ERROR sentinel comparison (not a data cast)'
     $'ngx_http_markdown_header_plan.c\t==.*size_t.*NGX_ERROR\tNGX_ERROR sentinel comparison (not a data cast)'
     # ── UINT_MAX clamp guards (the cast IS the guard) ──
@@ -122,7 +119,7 @@ readonly SAFE_CAST_ALLOWLIST=(
 echo "--- Pattern (c): direct ngx_parse_size() + (size_t) cast ---" >&2
 
 # Search for ngx_parse_size followed eventually by (size_t) cast
-# without ngx_http_markdown_dynconf_parse_size_safe in between.
+# without the size-safe parse wrapper in between.
 parse_size_hits=0
 while IFS= read -r match; do
     if [[ -z "$match" ]]; then
@@ -137,7 +134,7 @@ while IFS= read -r match; do
         ctx_start=1
     fi
     ctx_end=$((line + 10))
-    if sed -n "${ctx_start},${ctx_end}p" "$file" 2>/dev/null | grep -q 'dynconf_parse_size_safe'; then
+    if sed -n "${ctx_start},${ctx_end}p" "$file" 2>/dev/null | grep -q 'ngx_http_markdown_parse_size'; then
         echo "  WARNING ${file}:${line} — ngx_parse_size used; safe wrapper exists nearby, verify this callsite uses it" >&2
         warnings=$((warnings + 1))
     else
@@ -146,15 +143,15 @@ while IFS= read -r match; do
             impl_start=1
         fi
         if sed -n "${impl_start},${line}p" "$file" 2>/dev/null \
-            | grep -qE 'ngx_http_markdown_dynconf_parse_size_safe[[:space:]]*\('; then
-            echo "  OK      ${file}:${line} — ngx_parse_size inside dynconf_parse_size_safe implementation" >&2
+            | grep -qE 'ngx_http_markdown_parse_size[[:space:]]*\('; then
+            echo "  OK      ${file}:${line} — ngx_parse_size inside ngx_http_markdown_parse_size implementation" >&2
         else
-            echo "  ERROR   ${file}:${line} — ngx_parse_size without dynconf_parse_size_safe wrapper" >&2
+            echo "  ERROR   ${file}:${line} — ngx_parse_size without ngx_http_markdown_parse_size wrapper" >&2
             errors=$((errors + 1))
         fi
     fi
     parse_size_hits=$((parse_size_hits + 1))
-done < <(grep -rnE 'ngx_parse_size.*\(size_t|\(size_t.*ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':[[:space:]]*/\*|:[[:space:]]*\*|:[[:space:]]*//' || true)
+done < <(grep -rnE '\bngx_parse_size\b.*\(size_t|\(size_t.*\bngx_parse_size\b' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':[[:space:]]*/\*|:[[:space:]]*\*|:[[:space:]]*//' || true)
 
 if [[ "$parse_size_hits" -eq 0 ]]; then
     echo "$NONE_FOUND_MSG" >&2

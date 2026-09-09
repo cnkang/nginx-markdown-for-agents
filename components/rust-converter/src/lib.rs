@@ -42,7 +42,6 @@ pub mod conditional;
 pub mod converter;
 pub mod decision;
 pub mod decompress;
-pub mod dynconf;
 pub mod encoding;
 pub mod error;
 pub mod etag_generator;

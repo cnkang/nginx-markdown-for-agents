@@ -165,6 +165,10 @@ if [[ -z "${NGINX_BIN:-}" ]]; then
 else
   echo "==> Reusing NGINX binary (${NGINX_BIN})"
   NGINX_EXECUTABLE="${NGINX_BIN}"
+  markdown_copy_runtime_conf_from_nginx_bin "${NGINX_BIN}" "${RUNTIME}" || {
+    echo "FAIL: reusable NGINX binary has no adjacent mime.types" >&2
+    exit 1
+  }
 fi
 
 echo "==> Writing HTTP/2 fixture configuration"
@@ -196,7 +200,7 @@ http {
 
         location / {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming off;
             root ${RUNTIME}/conf;
             index index.html;
@@ -205,7 +209,7 @@ http {
 
         location /streaming/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept force;
             markdown_streaming auto;
             root ${RUNTIME}/conf;
             index index.html;

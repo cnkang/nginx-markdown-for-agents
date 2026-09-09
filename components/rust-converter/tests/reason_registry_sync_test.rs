@@ -104,7 +104,7 @@ fn test_log_callsites_are_unique() {
 #[test]
 fn test_reason_code_count_consistency() {
     assert_eq!(ALL.len(), REASON_CODE_COUNT);
-    assert_eq!(ALL.len(), 27);
+    assert_eq!(ALL.len(), 25);
 }
 
 /// All reason code strings are valid as normalized label values

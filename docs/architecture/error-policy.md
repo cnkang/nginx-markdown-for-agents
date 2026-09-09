@@ -19,9 +19,8 @@ markdown_error_policy fail_closed;     # Return 502, never leak original content
 Allowed status codes: `429`, `503` (`502` is the `fail_closed` default. Use `fail_closed` instead of `status 502`).
 
 > This section is the single source of truth for `markdown_error_policy`
-> values and their semantics. Configuration reference tables
-> (CONFIGURATION.md, dynconf JSON docs) must mirror or link here rather
-> than redefine the value set.
+> values and their semantics. Configuration reference tables must mirror or
+> link here rather than redefine the value set.
 
 ## Error Classes
 
@@ -33,8 +32,6 @@ Allowed status codes: `429`, `503` (`502` is the `fail_closed` default. Use `fai
 | `ffi_panic` | pre-commit | Yes | Rust FFI panic caught |
 | `decompression_error` | pre-commit | Yes | Decompression failed |
 | `overload` | pre-commit | Yes | Inflight limit exceeded |
-| `invalid_dynconf` | pre-commit | Yes | Dynamic config invalid |
-| `degraded_snapshot` | pre-commit | No | Telemetry-only state: the last-known-good snapshot continues processing the request; no separate status or pass-through behavior is selected |
 | `header_plan_apply_error` | pre-commit | Yes | HeaderPlan prepare/apply failed before headers were sent |
 | `streaming_mid_flight_error` | post-commit | **No** | Streaming failed mid-body |
 
@@ -103,4 +100,4 @@ decision structs, and export got removed before the v1 ABI freeze.
 - **Config V2**: Directive syntax (see [MIGRATION-0.9.0.md](../guides/MIGRATION-0.9.0.md)).
 - **HeaderPlan**: Pre-commit/post-commit boundary (see [header mutation inventory](header-mutation-inventory.md)).
 - **Worker Inflight Guard**: Overload detection.
-- **Reason Code Registry**: See [Observability Schema v2](observability-schema-v2.md).
+- **Reason Code Registry**: See [Observability Schema v3](observability-schema-v2.md).

@@ -185,32 +185,15 @@ flowchart LR
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_metrics.c`, `components/nginx-module/src/ngx_http_markdown_config_core_impl.h` |
 | Practical note | Configure it in `http`; too small a region fails configuration or metrics initialization rather than silently growing. |
 
-### `markdown_dynamic_config`
+### Removed runtime dynconf directives
 
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Enables atomic runtime reloads for the supported dynconf-mutable fields |
-| Lifecycle impact | Worker startup, reload timer, and effective request configuration binding |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_dynconf_impl.h`, `components/nginx-module/src/ngx_http_markdown_diagnostics_accessors_impl.h` |
-| Practical note | A malformed or unknown-key update is rejected atomically; the last-known-good snapshot remains active. |
-
-### `markdown_dynamic_config_path`
-
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Selects the bounded file path watched for dynamic configuration |
-| Lifecycle impact | Worker startup/reload file I/O and snapshot update |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h`, `components/nginx-module/src/ngx_http_markdown_dynconf_impl.h` |
-| Practical note | Keep the path local to the deployment and ensure the NGINX worker can read it. |
-
-### `markdown_dynconf_dry_run`
-
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Validates a dynamic configuration update without applying it |
-| Lifecycle impact | Reload validation path and diagnostics state; active effective values remain unchanged on dry-run |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_dynconf_impl.h` |
-| Practical note | Use it as a preflight before enabling an update; inspect validation diagnostics before switching it off. |
+The 0.9.2 convergence removed `markdown_dynamic_config`,
+`markdown_dynamic_config_path`, and `markdown_dynconf_dry_run`. The names remain
+reject-only migration entries so `nginx -t` identifies stale configurations.
+There is no runtime watcher, dynconf snapshot, or dynconf metrics family in the
+current request lifecycle. Use the static directives in
+[`CONFIGURATION.md`](../guides/CONFIGURATION.md) and apply changes through a
+validated reload or restart.
 
 ### `markdown_diagnostics`
 

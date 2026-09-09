@@ -717,6 +717,10 @@ else
   NGINX_EXECUTABLE="${RUNTIME}/sbin/nginx"
 fi
 
+python3 "${WORKSPACE_ROOT}/tools/release/gates/verify_build_capabilities.py" \
+  --source-root "${WORKSPACE_ROOT}" \
+  --write "${RAW_DIR}/capabilities.json"
+
 mkdir -p "${RUNTIME}/conf" "${RUNTIME}/logs"
 
 echo "==> Starting chunked upstream on 127.0.0.1:${UPSTREAM_PORT}"
@@ -743,7 +747,7 @@ http {
 
         location /buffered/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_streaming off;
             markdown_cache_validation full;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
@@ -768,7 +772,7 @@ http {
         # than the separate decompression-ratio rejection path.
         location /streaming/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
                 parser_budget=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
@@ -786,7 +790,7 @@ http {
 
         location /streaming-zero-copy/ {
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
                 parser_budget=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
@@ -806,7 +810,7 @@ http {
             # This route intentionally exercises the bounded working/replay
             # budget and must preserve the compressed fail-open contract.
             markdown_filter on;
-            markdown_accept wildcard;
+            markdown_accept strict;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
                 parser_budget=${MARKDOWN_MAX_SIZE} conversion_timeout=120s

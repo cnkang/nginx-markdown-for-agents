@@ -37,7 +37,6 @@ VALID_STAGES = frozenset([
     "precommit",
     "postcommit",
     "delivery",
-    "dynconf",
 ])
 
 VALID_ERROR_ORIGINS = frozenset([

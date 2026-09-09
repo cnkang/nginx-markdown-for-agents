@@ -90,14 +90,42 @@ impl PruneConfig {
         }
     }
 
-    /// Create a PruneConfig from FFI option fields.
+    /// Create a PruneConfig from the sole retained FFI option field.
     ///
-    /// When `prune_noise` is false, returns a disabled config.
-    /// When `prune_noise` is true and `selectors_str` is Some, parses the
-    /// space-separated selector string. When `selectors_str` is None, uses
-    /// default selectors.
+    /// When `prune_noise` is false, returns a disabled config. When
+    /// `prune_noise` is true, returns [`Self::default_enabled`] with the
+    /// built-in noise-region selector set and no protection selectors.
+    ///
+    /// The custom-selector `prune_*` fields were removed from
+    /// `MarkdownOptions` in 0.9.2 (design §14(h); Requirements LTS-R009,
+    /// LTS-R023), so the FFI path can no longer supply per-request
+    /// selectors; the built-in default set is the only runtime option.
+    /// Callers that still need to build a config from explicit selector
+    /// strings (test coverage for the underlying parsing) use
+    /// [`Self::from_selector_strings`].
     #[allow(dead_code)]
-    pub(crate) fn from_ffi(
+    pub(crate) fn from_ffi(prune_noise: bool) -> Self {
+        if prune_noise {
+            Self::default_enabled()
+        } else {
+            Self::disabled()
+        }
+    }
+
+    /// Build a PruneConfig from space-separated selector strings.
+    ///
+    /// When `prune_noise` is false, returns a disabled config. When it is
+    /// true and `selectors_str` is a non-empty string, the space-separated
+    /// tag names replace the default selector set; otherwise the built-in
+    /// defaults are used. A non-empty `protection_selectors_str` supplies
+    /// protection selectors (protection wins over prune).
+    ///
+    /// This retains the selector-parsing logic that formerly backed
+    /// `from_ffi`. It is used by unit tests exercising custom-selector
+    /// behavior and resident-byte accounting; the runtime FFI path uses
+    /// [`Self::from_ffi`] with the built-in default set only.
+    #[cfg(test)]
+    pub(crate) fn from_selector_strings(
         prune_noise: bool,
         selectors_str: Option<&str>,
         protection_selectors_str: Option<&str>,
@@ -274,7 +302,7 @@ mod tests {
 
     #[test]
     fn config_custom_selectors() {
-        let config = PruneConfig::from_ffi(true, Some("sidebar ad-slot"), None);
+        let config = PruneConfig::from_selector_strings(true, Some("sidebar ad-slot"), None);
         assert_eq!(
             should_prune_with_config("sidebar", &config),
             PruneDecision::SkipSubtree
@@ -291,7 +319,8 @@ mod tests {
 
     #[test]
     fn config_protection_overrides_prune() {
-        let config = PruneConfig::from_ffi(true, Some("nav footer aside"), Some("footer"));
+        let config =
+            PruneConfig::from_selector_strings(true, Some("nav footer aside"), Some("footer"));
         assert_eq!(
             should_prune_with_config("nav", &config),
             PruneDecision::SkipSubtree
@@ -303,8 +332,8 @@ mod tests {
     }
 
     #[test]
-    fn config_from_ffi_disabled() {
-        let config = PruneConfig::from_ffi(false, Some("nav footer"), None);
+    fn config_from_selector_strings_disabled() {
+        let config = PruneConfig::from_selector_strings(false, Some("nav footer"), None);
         assert!(!config.enabled);
         assert_eq!(
             should_prune_with_config("nav", &config),
@@ -313,11 +342,39 @@ mod tests {
     }
 
     #[test]
+    fn config_from_ffi_uses_default_selectors_when_enabled() {
+        // The reduced FFI path (post 0.9.2 selector removal) can only
+        // enable/disable pruning; it always uses the built-in default set.
+        let enabled = PruneConfig::from_ffi(true);
+        assert!(enabled.enabled);
+        // Default noise regions are pruned; always-protected structural
+        // elements (main/article) are still traversed.
+        assert_eq!(
+            should_prune_with_config("nav", &enabled),
+            PruneDecision::SkipSubtree
+        );
+        assert_eq!(
+            should_prune_with_config("main", &enabled),
+            PruneDecision::Traverse
+        );
+
+        let disabled = PruneConfig::from_ffi(false);
+        assert!(!disabled.enabled);
+        assert_eq!(
+            should_prune_with_config("nav", &disabled),
+            PruneDecision::Traverse
+        );
+    }
+
+    #[test]
     fn resident_bytes_counts_selector_storage() {
         let selector = "selector-".to_owned() + &"x".repeat(4096);
         let protection = "protected-".to_owned() + &"y".repeat(2048);
-        let config =
-            PruneConfig::from_ffi(true, Some(selector.as_str()), Some(protection.as_str()));
+        let config = PruneConfig::from_selector_strings(
+            true,
+            Some(selector.as_str()),
+            Some(protection.as_str()),
+        );
 
         let expected = config
             .selectors
@@ -350,7 +407,7 @@ mod tests {
 
     #[test]
     fn always_protected_main_and_article() {
-        let config = PruneConfig::from_ffi(true, Some("main article nav"), None);
+        let config = PruneConfig::from_selector_strings(true, Some("main article nav"), None);
         assert_eq!(
             should_prune_with_config("main", &config),
             PruneDecision::Traverse

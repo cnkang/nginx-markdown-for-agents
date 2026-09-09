@@ -3,9 +3,10 @@
 ## Overview
 
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
-0.9.2 is a **breaking release**. The release reduces the configuration surface from
-63 directives to 25, and configurations using any removed directive fail
-`nginx -t` with `unknown directive` until migrated. Review
+0.9.2 is a **breaking release**. The release freezes 20 active directives and
+retains five removed names as reject-only migration entries. Those entries fail
+`nginx -t` with an explicit migration message until migrated. Older names that
+are no longer registered fail with `unknown directive`. Review
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) and
 [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) before upgrading. If you are running
 0.9.0, complete [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following
@@ -125,6 +126,10 @@ if [[ ! -f "${MODULE_PATH}" ]]; then
   exit 1
 fi
 if [[ -e "${MODULE_BACKUP}" ]]; then
+  if ! sudo -n cmp -s -- "${MODULE_BACKUP}" "${MODULE_PATH}"; then
+    echo "ERROR: existing backup differs from the installed module or cannot be read; inspect it before upgrading" >&2
+    exit 1
+  fi
   echo "Preserving existing module backup: ${MODULE_BACKUP}"
 else
   sudo cp -a "${MODULE_PATH}" "${MODULE_BACKUP}"
@@ -150,14 +155,15 @@ sudo install -m 0755 ngx_http_markdown_filter_module.so \
 
 ### 5. Migrate the configuration
 
-0.9.2 is a breaking configuration release (25-directive surface, dynconf
-file format frozen at JSON schema v1). Before validating or restarting
+0.9.2 is a breaking configuration release (20 active directives plus five
+reject-only migration entries). Before validating or restarting
 NGINX, apply the 0.9.2 migration:
 
 ```bash
 # Apply the 0.9.2 directive changes documented in MIGRATION-0.9.2.md:
-# removed profile/OTel directives, consolidated markdown_limits keys,
-# dynconf migration from legacy line format to JSON schema v1.
+# removed profile/OTel directives and consolidated markdown_limits keys.
+# The runtime dynconf file/watcher was removed; move its values to static
+# directives and validate with nginx -t before a controlled reload.
 # (The markdown_streaming_engine -> markdown_streaming rename happened in
 # 0.9.1, not 0.9.2; 0.9.2 removed markdown_stream_threshold and
 # markdown_streaming_zero_copy.)
@@ -272,7 +278,12 @@ sudo nginx -t || {
       sudo rm -rf "${NGINX_CONF_DIR}/${CONFIG_DIR}"
     fi
   done
-  sudo nginx -t && echo "INFO: previous module and configuration restored and verified." >&2
+  if sudo nginx -t; then
+    echo "INFO: previous module and configuration restored and verified." >&2
+  else
+    echo "ERROR: restored module and configuration still fail validation; do not start NGINX. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}." >&2
+    exit 1
+  fi
   # The rollback left NGINX stopped; restart it on the restored, validated
   # pair using the ownership decision recorded before the stop.
   if [[ "$systemd_managed" -eq 1 ]]; then
@@ -317,8 +328,8 @@ git checkout --detach "${RELEASE_TAG}"
 ### 2. Update Rust toolchain
 
 ```bash
-rustup toolchain install 1.97.1
-rustup default 1.97.1
+rustup toolchain install 1.98.1
+rustup default 1.98.1
 ```
 
 ### 3. Build the Rust converter
@@ -359,6 +370,23 @@ fi
 sudo cp objs/ngx_http_markdown_filter_module.so \
     "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new"
 sudo nginx -t
+# Back up the running module BEFORE stopping NGINX so a failed
+# validation or start can always restore the pre-upgrade binary.
+MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
+MODULE_BACKUP_OWNED=0
+if [[ -e "${MODULE_BACKUP}" ]]; then
+    if ! sudo -n cmp -s -- "${MODULE_BACKUP}" \
+        "${MODULES_DIR}/ngx_http_markdown_filter_module.so"; then
+        echo "ERROR: existing backup differs from the installed module or cannot be read; inspect it before upgrading" >&2
+        exit 1
+    fi
+    echo "Preserving existing pre-upgrade module backup: ${MODULE_BACKUP}"
+else
+    sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
+        "${MODULE_BACKUP}.staged"
+    sudo mv -f "${MODULE_BACKUP}.staged" "${MODULE_BACKUP}"
+    MODULE_BACKUP_OWNED=1
+fi
 # Record the service-manager ownership decision BEFORE stopping: after
 # a successful stop, is-active is false even on systemd-managed hosts.
 systemd_managed=0
@@ -390,22 +418,21 @@ else
         echo "INFO: no running NGINX master found; skipping 'nginx -s quit'"
     fi
 fi
-# Back up the running module BEFORE the swap so a failed validation can
-# restore the pre-upgrade binary; back it up first, then replace.
-MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
-if [[ -e "${MODULE_BACKUP}" ]]; then
-    echo "Preserving existing pre-upgrade module backup: ${MODULE_BACKUP}"
-else
-    sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
-        "${MODULE_BACKUP}.staged"
-    sudo mv -f "${MODULE_BACKUP}.staged" "${MODULE_BACKUP}"
-fi
 sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
     "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
 if ! sudo nginx -t; then
   echo "ERROR: nginx -t failed after module swap; restoring previous module..." >&2
-  sudo mv -f "${MODULE_BACKUP}" "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
-  sudo nginx -t && echo "INFO: previous module restored and configuration verified." >&2
+  # Stage the backup beside the live module, then swap atomically with
+  # mv -f so a torn in-place copy can never leave a half-written .so.
+  sudo cp -a "${MODULE_BACKUP}" \
+      "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged"
+  sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" \
+      "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+  if ! sudo nginx -t; then
+    echo "ERROR: restored module also fails validation; do not start NGINX. ${MODULE_BACKUP} is preserved — restore manually from it and your configuration backup." >&2
+    exit 1
+  fi
+  echo "INFO: previous module restored and configuration verified." >&2
   # The rollback left NGINX stopped; restart it on the restored, validated
   # pair using the ownership decision recorded before the stop.
   if [[ "$systemd_managed" -eq 1 ]]; then
@@ -415,11 +442,65 @@ if ! sudo nginx -t; then
   fi
   exit 1
 fi
-rm -f "${MODULE_BACKUP}" 2>/dev/null || sudo rm -f "${MODULE_BACKUP}"
+# Start a fresh master with the new module and validate it before
+# discarding the pre-upgrade backup: a failed start or an unhealthy
+# post-start check must leave ${MODULE_BACKUP} available for rollback.
 if [[ "$systemd_managed" -eq 1 ]]; then
     sudo systemctl start nginx
 else
     sudo nginx
+fi
+# Post-start verification: the new master must be serving and converting
+# before the backup is removed.  Probe a fixed, known-convertible fixture
+# (a path already verified to return text/html upstream and convert to
+# Markdown) and require the converted representation, not just any
+# response: a 404 or an unconverted pass-through would prove nothing.
+sleep 1
+if [[ "$systemd_managed" -eq 1 ]]; then
+    if ! systemctl is-active --quiet nginx; then
+      echo "ERROR: nginx service inactive after start; keeping ${MODULE_BACKUP} for rollback" >&2
+      exit 1
+    fi
+elif ! pgrep -x nginx >/dev/null 2>&1; then
+  echo "ERROR: NGINX master not running after start; keeping ${MODULE_BACKUP} for rollback" >&2
+  exit 1
+fi
+PROBE_PATH="/known-convertible-page"   # adjust to your verified fixture
+# A fixed string that appears in the converted Markdown of that fixture.
+# The post-start check greps for it with -Fq so a response that merely
+# starts with a Markdown-ish character cannot pass.
+PROBE_MARKER="Kubernetes module test"   # adjust to your fixture's heading
+PROBE_BODY="$(mktemp)"
+PROBE_HEADERS="$(mktemp)"
+if ! curl -fsS --max-time 10 -H 'Accept: text/markdown' \
+        -D "${PROBE_HEADERS}" \
+        -o "${PROBE_BODY}" "http://localhost${PROBE_PATH}"; then
+  echo "ERROR: post-start check failed (probe request); keeping ${MODULE_BACKUP} for rollback" >&2
+  rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
+  exit 1
+fi
+if ! grep -qi '^Content-Type: text/markdown' "${PROBE_HEADERS}"; then
+  echo "ERROR: post-start check failed (probe response is not text/markdown); keeping ${MODULE_BACKUP} for rollback" >&2
+  echo "  Inspect the probe response and verify ${PROBE_PATH} converts before removing the backup." >&2
+  rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
+  exit 1
+fi
+if ! grep -Fq "${PROBE_MARKER}" "${PROBE_BODY}"; then
+  echo "ERROR: post-start check failed (converted body lacks the fixture marker); keeping ${MODULE_BACKUP} for rollback" >&2
+  echo "  Inspect the probe response and verify ${PROBE_PATH} converts before removing the backup." >&2
+  rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
+  exit 1
+fi
+rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
+# Discard the backup only when THIS run created it; a pre-existing backup
+# left by an earlier upgrade stays until that upgrade's cleanup removes it.
+if [[ "${MODULE_BACKUP_OWNED}" -eq 1 ]]; then
+  if ! sudo -n rm -f -- "${MODULE_BACKUP}"; then
+    echo "ERROR: backup cleanup failed; remove the verified backup with administrator access" >&2
+    exit 1
+  fi
+else
+  echo "INFO: keeping pre-existing ${MODULE_BACKUP} (not created by this run)"
 fi
 ```
 
@@ -535,5 +616,6 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Source-build restore copies the backup (never consumes it), the post-start check prefers systemctl is-active on systemd hosts, and backup removal waits for a known-convertible fixture to return Markdown |
 | 0.9.2 | 2026-08-15 | Kang | Added Step 5 migrate-the-configuration before restart |
 | 0.9.2 | 2026-07-30 | Kang | Initial upgrade guide for 0.9.2 |

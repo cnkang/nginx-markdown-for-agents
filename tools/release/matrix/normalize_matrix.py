@@ -45,6 +45,11 @@ CANONICAL_ENTRY_KEYS = [
     "artifact_type",
     "feature_manifest_digest",
     "abi_version",
+    "verification_state",
+    "support_stage",
+    "date",
+    "source",
+    "provenance",
 ]
 
 # Optional metadata for container-backed release rows. These fields do not
@@ -99,6 +104,7 @@ COMPATIBILITY_TOP_LEVEL_KEYS = frozenset(
         "support_tiers",
         "tier_mapping",
         "generated_from",
+        "policy_exclusions",
     }
 )
 
@@ -151,6 +157,7 @@ def normalize_document(doc: Dict[str, Any]) -> Dict[str, Any]:
             "support_tiers",
             "tier_mapping",
             "generated_from",
+            "policy_exclusions",
         }
     )
     if unknown:
@@ -183,6 +190,7 @@ def normalize_document(doc: Dict[str, Any]) -> Dict[str, Any]:
         "support_tiers",
         "tier_mapping",
         "generated_from",
+        "policy_exclusions",
     ):
         if metadata_key in doc:
             normalized[metadata_key] = doc[metadata_key]
@@ -375,6 +383,7 @@ def normalize_compatibility_document(doc: Dict[str, Any]) -> Dict[str, Any]:
         "support_tiers",
         "tier_mapping",
         "generated_from",
+        "policy_exclusions",
     ):
         if metadata_key in doc:
             normalized[metadata_key] = doc[metadata_key]
@@ -383,14 +392,23 @@ def normalize_compatibility_document(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_and_normalize(path: str) -> Dict[str, Any]:
     """Load and normalize a matrix, raising on fail-closed errors."""
-    validated = validate_read_path(path, purpose="release-matrix normalization")
     try:
+        validated = validate_read_path(path, purpose="release-matrix normalization")
         with open(validated, encoding="utf-8") as handle:
             doc = json.load(handle)
         return normalize_document(doc)
     except (OSError, json.JSONDecodeError) as exc:
         raise MatrixNormalizationError(
             f"cannot read matrix file {path}: {exc}"
+        ) from exc
+    except ValueError as exc:
+        # validate_read_path rejects traversal and unsafe components with
+        # ValueError; MatrixNormalizationError is itself a ValueError, so
+        # this also re-raises normalization failures unchanged while the
+        # CLI's error contract stays a clean one-line message, not a
+        # traceback.
+        raise MatrixNormalizationError(
+            f"cannot normalize matrix file {path}: {exc}"
         ) from exc
 
 

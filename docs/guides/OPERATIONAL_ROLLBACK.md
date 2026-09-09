@@ -422,14 +422,55 @@ Any observation checkpoint result that does not meet the "safe to continue" crit
 
 After applying any rollback method, verify that the change took effect. Run these checks in order.
 
-### 1. Check Logs for `disabled`
+### 1. Verify Conversion Is Disabled (Counter Delta First)
 
-After disabling conversion (Methods A and B), the decision log should show `disabled` for affected traffic:
+After disabling conversion (Methods A and B), verify the disablement with a
+counter delta across a probe request. A log entry alone is not proof, because
+the module emits `disabled` decision-log entries only at
+`markdown_log_verbosity` info (or debug):
 
 ```bash
-# Watch for new disabled entries after reload
-grep "markdown:" /var/log/nginx/error.log | \
-  grep "outcome=skipped" | grep "reason=disabled" | tail -10
+# Disabled decisions appear only when markdown_log_verbosity is info
+# (or debug).  Confirm the level, then verify by delta: request a
+# known-convertible path before and after the reload and require the
+# conversion counters to stay flat across the probe, instead of trusting
+# that a log entry alone proves the disablement.
+nginx -T 2>/dev/null | grep markdown_log_verbosity   # expect: info (or debug)
+
+# Use a fixed, known-convertible fixture (a path your site has already
+# verified to return text/html and convert to Markdown).  A freshly
+# generated URL could 404, and a 404 never reaches the conversion chain,
+# so a flat counter delta would prove nothing.
+PROBE_PATH="/known-convertible-page"   # adjust to your verified fixture
+BASE=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
+  grep -E 'nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)') \
+  || { echo "FAIL: could not read BASE metrics snapshot"; exit 1; }
+test -n "$BASE" || { echo "FAIL: BASE metrics snapshot is empty"; exit 1; }
+curl -fsS -o /dev/null -H 'Accept: text/markdown' \
+  "http://localhost${PROBE_PATH}" \
+  || { echo "FAIL: probe request to ${PROBE_PATH} failed"; exit 1; }
+AFTER=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
+  grep -E 'nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)') \
+  || { echo "FAIL: could not read AFTER metrics snapshot"; exit 1; }
+test -n "$AFTER" || { echo "FAIL: AFTER metrics snapshot is empty"; exit 1; }
+if [ "$BASE" = "$AFTER" ]; then
+  echo "OK: conversion counters flat across the probe (conversion disabled)"
+else
+  echo "FAIL: conversion counters moved across the probe" >&2
+  exit 1
+fi
+# Optional log corroboration (requires markdown_log_verbosity info or
+# debug, and an error-log level that includes info): the probe must show
+# its own path in a disabled decision entry.  Guarded so a missing
+# matching entry does not fail the procedure under set -e.
+if tail -50 /var/log/nginx/error.log 2>/dev/null \
+    | grep "markdown:" | grep "reason=disabled" | grep -q "${PROBE_PATH}"; then
+  echo "OK: decision log corroborates the disabled probe"
+else
+  echo "INFO: decision-log corroboration not found (log level may be too low); counter check above is authoritative" >&2
+fi
 ```
 
 For Method C (restoring fail-open), trigger a known conversion failure first and
@@ -603,6 +644,7 @@ connections drain or close (see the reload semantics above).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Disablement probe uses a fixed known-convertible fixture, fail-closed curl for both metric snapshots, and rejects empty snapshots before the counter comparison |
 | 0.9.2 | 2026-08-15 | Kang | Reload semantics distinguish new workers from keep-alive connections; Accept header on metric curls |
 | 0.9.2 | 2026-08-15 | Hermes | Use current metric names in the pre-rollback metric check |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire the large-response threshold directive) |

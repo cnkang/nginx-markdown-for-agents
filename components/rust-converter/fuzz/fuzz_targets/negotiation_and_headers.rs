@@ -84,11 +84,6 @@ fn derive_config_flags(data: &[u8], offset: usize) -> (bool, bool, bool, bool, b
     } else {
         0xFF
     };
-    let byte1 = if offset + 1 < data.len() {
-        data[offset + 1]
-    } else {
-        0xFF
-    };
 
     let enabled = (byte0 & 0x01) != 0;
     let eligible = (byte0 & 0x02) != 0;
@@ -96,8 +91,7 @@ fn derive_config_flags(data: &[u8], offset: usize) -> (bool, bool, bool, bool, b
     let decompression_ok = (byte0 & 0x08) != 0;
     let parse_timed_out = (byte0 & 0x10) != 0;
     let parse_budget_exceeded = (byte0 & 0x20) != 0;
-    let _on_wildcard = (byte1 & 0x01) != 0;
-    // byte1 bits 1-7 and bytes 2-3 reserved for future config
+    // byte0 bits 6-7 and offset+1..offset+3 reserved for future config
 
     (
         enabled,
@@ -107,15 +101,6 @@ fn derive_config_flags(data: &[u8], offset: usize) -> (bool, bool, bool, bool, b
         parse_timed_out,
         parse_budget_exceeded,
     )
-}
-
-/// Derive the `on_wildcard` flag from config bytes.
-fn derive_on_wildcard(data: &[u8], offset: usize) -> bool {
-    if offset + 1 < data.len() {
-        (data[offset + 1] & 0x01) != 0
-    } else {
-        true // default: wildcards enabled
-    }
 }
 
 /// Derive whether an ETag is present from config bytes.
@@ -132,7 +117,6 @@ fn derive_has_etag(data: &[u8], offset: usize) -> bool {
 struct PipelineInputs<'a> {
     accept: &'a str,
     content_type: &'a str,
-    on_wildcard: bool,
     has_etag: bool,
     enabled: bool,
     eligible: bool,
@@ -153,8 +137,8 @@ fn run_pipeline(
     nginx_markdown_converter::decision::Decision,
     HeaderPlan,
 ) {
-    // Step 1: Content negotiation
-    let negotiation_result = negotiate(inputs.accept, inputs.on_wildcard);
+    // Step 1: Content negotiation (strict-only; wildcards do not convert)
+    let negotiation_result = negotiate(inputs.accept);
 
     // Step 2: Build decision context from negotiation result + config flags
     let accept_prefers_markdown = matches!(negotiation_result, NegotiationResult::Convert);
@@ -192,14 +176,12 @@ fuzz_target!(|data: &[u8]| {
         parse_timed_out,
         parse_budget_exceeded,
     ) = derive_config_flags(data, 98);
-    let on_wildcard = derive_on_wildcard(data, 98);
     let has_etag = derive_has_etag(data, 98);
     let _user_agent = safe_slice_to_str(data, 102, 166);
 
     let inputs = PipelineInputs {
         accept,
         content_type,
-        on_wildcard,
         has_etag,
         enabled,
         eligible,

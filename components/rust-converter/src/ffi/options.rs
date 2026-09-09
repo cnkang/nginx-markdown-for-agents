@@ -70,10 +70,6 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) streaming_budget: u64,
     #[allow(dead_code)]
     pub(crate) prune_noise: bool,
-    #[allow(dead_code)]
-    pub(crate) prune_selectors: Option<&'a str>,
-    #[allow(dead_code)]
-    pub(crate) prune_protection_selectors: Option<&'a str>,
     /// Unified memory budget (bytes). The full-buffer path applies it to
     /// generated Markdown output, and the true streaming path combines it
     /// with `streaming_budget` as the lower non-zero working-set cap.
@@ -197,10 +193,6 @@ fn optional_utf8<'a>(
 ///     estimate_tokens: 0,
 ///     streaming_budget: 0,
 ///     prune_noise: 1,
-///     prune_selectors: std::ptr::null(),
-///     prune_selector_len: 0,
-///     prune_protection_selectors: std::ptr::null(),
-///     prune_protection_selector_len: 0,
 ///     memory_budget: 0,
 ///     parse_timeout_ms: 0,
 ///     parser_memory_budget: 0,
@@ -242,16 +234,6 @@ pub(crate) fn decode_options(
     };
 
     let prune_noise = options.prune_noise != 0;
-    let prune_selectors = optional_utf8(
-        options.prune_selectors,
-        options.prune_selector_len,
-        "prune_selectors",
-    )?;
-    let prune_protection_selectors = optional_utf8(
-        options.prune_protection_selectors,
-        options.prune_protection_selector_len,
-        "prune_protection_selectors",
-    )?;
 
     /* Token estimation uses the fixed deterministic built-in ratio. */
     let raw_cpt = DEFAULT_CHARS_PER_TOKEN;
@@ -270,8 +252,6 @@ pub(crate) fn decode_options(
         estimate_tokens: options.estimate_tokens != 0,
         streaming_budget: options.streaming_budget,
         prune_noise,
-        prune_selectors,
-        prune_protection_selectors,
         memory_budget: options.memory_budget,
         chars_per_token: raw_cpt,
         effective_chars_per_token: clamp_chars_per_token(raw_cpt),
@@ -285,11 +265,7 @@ pub(crate) fn decode_options(
             preserve_tables: true,
             base_url,
             resolve_relative_urls,
-            prune_config: crate::converter::pruning::PruneConfig::from_ffi(
-                prune_noise,
-                prune_selectors,
-                prune_protection_selectors,
-            ),
+            prune_config: crate::converter::pruning::PruneConfig::from_ffi(prune_noise),
         },
     })
 }
@@ -314,10 +290,6 @@ mod tests {
             base_url_len: 0,
             streaming_budget: 0,
             prune_noise: 0,
-            prune_selectors: ptr::null(),
-            prune_selector_len: 0,
-            prune_protection_selectors: ptr::null(),
-            prune_protection_selector_len: 0,
             memory_budget: 0,
             parse_timeout_ms: 0,
             parser_memory_budget: 0,
@@ -346,5 +318,37 @@ mod tests {
         assert_eq!(clamp_chars_per_token(0.0), 4.0);
         assert_eq!(clamp_chars_per_token(0.1), 1.0);
         assert_eq!(clamp_chars_per_token(150.0), 100.0);
+    }
+
+    /// Target (post-selector-removal) `MarkdownOptions` decode contract.
+    ///
+    /// **Test-first** guard for task 9 (§14(h), LTS-R009 / LTS-R023). Once
+    /// The four `prune_*` selector fields were removed in 0.9.2 (task 9.3,
+    /// LTS-R009 / LTS-R023); `MarkdownOptions` is 96 bytes and the decoder
+    /// reads the retained tail fields (`memory_budget`, `parse_timeout_ms`,
+    /// `parser_memory_budget`, `flush_threshold`) plus `prune_noise` at their
+    /// current offsets. This test pins the reduced ABI size so a stale layout
+    /// cannot silently pass.
+    #[test]
+    fn test_decode_options_reduced_no_selectors() {
+        use std::mem::size_of;
+        use std::time::Duration;
+
+        // Reduced ABI size: the four selector slots (32 bytes) are gone.
+        assert_eq!(size_of::<MarkdownOptions>(), 96);
+
+        // Retained fields must still decode after the selectors are removed.
+        let mut options = test_options();
+        options.prune_noise = 1;
+        options.memory_budget = 4096;
+        options.parse_timeout_ms = 250;
+        options.parser_memory_budget = 8192;
+
+        let decoded = decode_options(&options).unwrap();
+
+        assert!(decoded.prune_noise);
+        assert_eq!(decoded.memory_budget, 4096);
+        assert_eq!(decoded.parse_timeout, Duration::from_millis(250));
+        assert_eq!(decoded.parser_memory_budget, 8192);
     }
 }

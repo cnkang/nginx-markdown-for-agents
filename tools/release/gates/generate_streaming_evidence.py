@@ -352,6 +352,17 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+    if not summary.get("pass", False):
+        print(
+            "FAIL: streaming parity verification did not pass "
+            f"(unknown_difference_count="
+            f"{summary.get('unknown_difference_count', 0)}, "
+            f"error_parity_mismatch_count="
+            f"{summary.get('error_parity_mismatch_count', 0)}); "
+            f"summary written to {output}",
+            file=sys.stderr,
+        )
+        return 1
     print(f"PASS: generated streaming evidence at {output}")
     return 0
 

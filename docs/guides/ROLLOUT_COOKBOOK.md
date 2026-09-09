@@ -393,7 +393,8 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
 - Failure rate exceeding 5% of conversion attempts over any 1-hour window
 - Latency spikes correlated with peak traffic periods
 - Client reports of unexpected content
-- One path failing significantly more than others: `grep "outcome=failed_open\|outcome=failed_closed" \| grep -oP 'uri=\K[^ ]+' \| sort \| uniq -c`
+- One path failing significantly more than others: `grep "markdown:" /var/log/nginx/error.log | grep -E "outcome=(failed_open|failed_closed|aborted)" | grep -oP 'uri=\K[^ ]+' | sort | uniq -c`
+
 ---
 
 ### Stage 4: Production — Broader Scope
@@ -464,7 +465,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 
 # Path-specific failure check
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "outcome=failed_open\|outcome=failed_closed" | \
+  grep -E "outcome=(failed_open|failed_closed|aborted)" | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c
 
 # Verify no internal system-failure categories
@@ -675,7 +676,9 @@ http {
 
 Keep `markdown_accept strict` (the default) during initial rollout. With `strict`, only explicit `text/markdown` in the Accept header triggers conversion. Clients sending `Accept: */*` or `Accept: text/*` receive HTML unchanged.
 
-If you later want wildcard Accept values (for example `text/*`) to trigger conversion, set `markdown_accept wildcard` and expand the `map`:
+If you later want a narrowly selected set of wildcard Accept values (for
+example `text/*`) to trigger conversion, keep the map and set
+`markdown_accept force` in that scope:
 
 ```nginx
     map $http_accept $markdown_by_accept {
@@ -690,7 +693,7 @@ If you later want wildcard Accept values (for example `text/*`) to trigger conve
 
         location / {
             markdown_filter $markdown_by_accept;
-            markdown_accept wildcard;
+            markdown_accept force;
             proxy_pass http://backend;
         }
     }
@@ -1099,8 +1102,9 @@ or a wildcard with `q=0`) produces the `skipped_accept_reject` outcome.
 
 This prevents accidental conversion of browser traffic. A standard browser
 request (`Accept: text/html, */*`) does not match the strict policy and keeps
-HTML. Use `markdown_accept wildcard` only for a scope where wildcard clients
-are intentionally meant to receive Markdown.
+HTML. Use `markdown_accept force` only for a scope where clients without an
+explicit `text/markdown` preference are intentionally meant to receive
+Markdown.
 
 #### `markdown_log_verbosity info`
 
@@ -1144,7 +1148,7 @@ Use this guidance at every observation checkpoint and whenever you need to asses
 ### Metrics to Monitor
 
 The module exposes `/markdown-metrics` as a localhost-only Prometheus text
-0.0.4 endpoint. It always emits the exact eleven families listed in the
+0.0.4 endpoint. It always emits the exact ten families listed in the
 [Prometheus Metrics Guide](prometheus-metrics.md). The `Accept` header cannot
 select a legacy JSON or human-readable representation.
 
@@ -1355,13 +1359,27 @@ Stop expanding rollout scope and investigate if any of the following occur:
 
 | Trigger | What It Means | How to Detect |
 |---------|---------------|---------------|
-| Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep -E "reason=(failed_open|failed_closed)" /var/log/nginx/error.log \| tail -20` or watch the failed `requests_total` series |
+| Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | Decision-log failure outcomes (see command below; the `reason` field carries the underlying cause, not the outcome), or watch the failed `requests_total` series |
 | Repeated internal failure reasons | Internal failure categories appear repeatedly, for example `memory_budget_exceeded` or `ffi_panic` — check the decision logs | Inspect the `category=` field in decision log entries and the NGINX logs; these categories do not appear as `requests_total` reason labels |
 | Conversion latency exceeding `markdown_limits` | Conversions are taking too long — may indicate large pages, resource contention, or converter performance issues | Check latency buckets; look for conversions in the highest `le` bucket or timeouts in logs |
 | Upstream error rate increase | The module may be causing upstream issues (unlikely but possible with decompression or buffering interactions) | Compare upstream 5xx rates before and after enablement |
-| Unexpected `Content-Type` in responses | Converted responses have wrong Content-Type, or non-HTML responses are being processed | `curl -sD - -H "Accept: text/markdown" http://localhost/your-path/ \| grep Content-Type` |
-| One path failing significantly more than others | Path-specific issue — the HTML structure on that path may not convert cleanly | Per-URI failure check: `grep "outcome=failed_open\|outcome=failed_closed" \| grep -oP 'uri=\K[^ ]+' \| sort \| uniq -c` |
+| Unexpected `Content-Type` in responses | Converted responses have wrong Content-Type, or non-HTML responses are being processed | `curl -sD - -H "Accept: text/markdown" http://localhost/your-path/` and inspect the response headers (see command below) |
+| One path failing significantly more than others | Path-specific issue — the HTML structure on that path may not convert cleanly | Per-URI failure check (see command below) |
 | `not_eligible` or `disabled` for paths you expect to convert | Upstream responses changed — content type is no longer `text/html` or response size exceeds `markdown_limits` | Check skip reason distribution filtered by URI |
+
+The commands below are written as executable shell (the pipe characters
+are real, not table-escaped):
+
+```bash
+# Decision-log failure outcomes
+grep "markdown:" /var/log/nginx/error.log | grep -E "outcome=(failed_open|failed_closed|aborted)" | tail -20
+
+# Response Content-Type check
+curl -sD - -H "Accept: text/markdown" http://localhost/your-path/ | grep Content-Type
+
+# Per-URI failure check
+grep "markdown:" /var/log/nginx/error.log | grep -E "outcome=(failed_open|failed_closed|aborted)" | grep -oP 'uri=\K[^ ]+' | sort | uniq -c
+```
 
 When a trigger fires:
 
@@ -1555,6 +1573,7 @@ for the incident.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Per-URI failure check now reads the error log directly (grep markdown: before the outcome/URI filters) |
 | 0.9.2 | 2026-08-15 | Kang | Failure-rate formulas split conversion-attempt vs request based; error-policy pass scoped to pre-commit |
 | 0.9.2 | 2026-08-15 | Hermes | Update failure reason values and point internal-failure triggers to decision logs |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire the large-response threshold directive) |

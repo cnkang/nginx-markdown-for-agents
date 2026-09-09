@@ -140,10 +140,10 @@ def parse_log_fields(entry: str) -> dict[str, str]:
 
 
 def test_registry_has_current_contract_shape():
-    """The active 0.9.2 registry has one contiguous 27-entry projection."""
+    """The active 0.9.2 registry has one contiguous 25-entry projection."""
 
     discriminants = [reason["discriminant"] for reason in REASONS]
-    assert len(REASONS) == 27
+    assert len(REASONS) == 25
     assert discriminants == list(range(len(REASONS)))
     assert len(REASONS_BY_KEY) == len(REASONS)
     assert REGISTRY["metadata"]["schema_version"] == 1

@@ -541,8 +541,8 @@ check_rust_linkage() {
 
 # Check 7: Rust toolchain version
 # The repository pins an exact compiler toolchain (rust-toolchain.toml
-# channel 1.97.1) and separately declares the MSRV floor (Cargo.toml
-# rust-version 1.97). This check verifies the active rustc satisfies the
+# channel 1.98.1) and separately declares the MSRV floor (Cargo.toml
+# rust-version 1.98). This check verifies the active rustc satisfies the
 # MSRV and that a repository checkout pins the exact contract toolchain.
 _rust_msrv_ok() {
     local rustc_version="$1"
@@ -610,8 +610,8 @@ _rust_toolchain_details() {
 }
 
 check_rust_toolchain() {
-    local msrv_floor="1.97"          # Cargo.toml rust-version (MSRV floor)
-    local expected_msrv="1.97.1"     # rust-toolchain.toml channel (exact pin)
+    local msrv_floor="1.98"          # Cargo.toml rust-version (MSRV floor)
+    local expected_msrv="1.98.1"     # rust-toolchain.toml channel (exact pin)
 
     if ! command -v rustc >/dev/null 2>&1; then
         emit_check "rust_toolchain" "skip" "rustc not available (install Rust via rustup)" \
