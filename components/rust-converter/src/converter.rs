@@ -325,18 +325,12 @@ impl<'a> BudgetedMarkdownWriter<'a> {
         // Fast path: the current capacity already covers the required length.
         // Do NOT grow geometrically on every call — that would double the
         // buffer on each small push and balloon a small output toward the
-        // budget ceiling.
+        // budget ceiling.  Peak accounting is NOT updated here: the
+        // retained capacity was recorded when the writer was created
+        // (budgeted_writer) and after every growth, so per-push bookkeeping
+        // would only add hot-path overhead.
         let current_capacity = self.output.capacity();
         if required_len <= current_capacity {
-            // Record the combined peak even without growth: a small
-            // conversion may never trigger a reserve, and the exported
-            // peak must be nonzero for the soak qualification gate to
-            // accept the observation as conversion evidence.
-            let combined = current_capacity
-                .saturating_add(self.ctx.working_set_bytes);
-            if combined > self.ctx.peak_working_set_bytes {
-                self.ctx.peak_working_set_bytes = combined;
-            }
             return Ok(());
         }
 
@@ -375,6 +369,7 @@ impl<'a> BudgetedMarkdownWriter<'a> {
                         ))
                     })?;
             }
+            self.record_peak();
             return Ok(());
         }
 
@@ -395,10 +390,16 @@ impl<'a> BudgetedMarkdownWriter<'a> {
                     ))
                 })?;
         }
-        // The retained output capacity is now live; record the combined
-        // peak (output capacity + transient scratch) so the exported
-        // peak_memory_estimate reflects the full converter-tracked
-        // working set, not just the scratch component.
+        self.record_peak();
+        Ok(())
+    }
+
+    /// Record the combined peak (retained output capacity + transient
+    /// scratch) so the exported peak_memory_estimate reflects the full
+    /// converter-tracked working set, not just the scratch component.
+    /// Called after every capacity growth and when the writer is created,
+    /// never on the per-push fast path.
+    fn record_peak(&mut self) {
         let combined = self
             .output
             .capacity()
@@ -406,7 +407,6 @@ impl<'a> BudgetedMarkdownWriter<'a> {
         if combined > self.ctx.peak_working_set_bytes {
             self.ctx.peak_working_set_bytes = combined;
         }
-        Ok(())
     }
 
     fn remaining(&self) -> usize {

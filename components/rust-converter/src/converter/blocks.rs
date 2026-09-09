@@ -599,6 +599,15 @@ impl MarkdownConverter {
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
+        // The outer output stays live while item_output is built and
+        // formatted; charge its capacity for the whole frame so
+        // try_reserve's budget check (item_output.capacity() +
+        // working_set_bytes) accounts for BOTH live buffers and a deeply
+        // nested list cannot exceed the budget unnoticed.
+        let outer_capacity = output.capacity();
+        if let Some(context) = ctx.as_deref_mut() {
+            context.reserve_working_set(outer_capacity)?;
+        }
         let result = (|| {
             let (item_output, _) =
                 self.render_list_item_content(node, output, depth, ordered, &mut ctx)?;
@@ -615,6 +624,9 @@ impl MarkdownConverter {
             }
             Ok(())
         })();
+        if let Some(context) = ctx {
+            context.release_working_set(outer_capacity);
+        }
         result
     }
 
