@@ -600,18 +600,21 @@ impl MarkdownConverter {
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
         let output_capacity = output.capacity();
-        let mut output_charge_active = false;
+        let mut charge_delta = 0;
         if let Some(context) = ctx.as_deref_mut() {
-            // Reserve the retained output capacity exactly once per
-            // conversion.  Nested list items re-enter this function
-            // through render_list_item_content / handle_list_with_context
-            // while the outer charge is still active; re-reserving the
-            // same capacity would double-count it and spuriously fail
-            // the budget for deeply nested lists.
-            if !context.output_charge_active {
-                context.reserve_working_set(output_capacity)?;
-                context.output_charge_active = true;
-                output_charge_active = true;
+            // Charge the retained output capacity by the DELTA over what
+            // an outer frame already reserved.  Nested list items re-enter
+            // this function through render_list_item_content /
+            // handle_list_with_context while the outer charge is still
+            // active; re-reserving the full capacity would double-count
+            // it, but the output buffer may have grown since the outer
+            // frame reserved (its format step can reallocate), so the
+            // growth must still be charged.  Each frame releases exactly
+            // its own delta on exit.
+            if output_capacity > context.reserved_output_capacity {
+                charge_delta = output_capacity - context.reserved_output_capacity;
+                context.reserve_working_set(charge_delta)?;
+                context.reserved_output_capacity = output_capacity;
             }
         }
 
@@ -632,17 +635,14 @@ impl MarkdownConverter {
             Ok(())
         })();
 
-        // Release the output-capacity charge whenever THIS frame reserved
-        // it.  output_charge_released only records that format_list_item
-        // ran; the item charge is reserved/released independently inside
-        // format_list_item_with_context, so it must not suppress the
-        // output-capacity release here (otherwise the charge leaks into
-        // working_set_bytes for the rest of the conversion).
-        if output_charge_active
+        // Release exactly this frame's delta and roll the reserved
+        // high-water back, so the outer frame's charge stays intact and
+        // the counter never goes negative.
+        if charge_delta > 0
             && let Some(context) = ctx
         {
-            context.release_working_set(output_capacity);
-            context.output_charge_active = false;
+            context.release_working_set(charge_delta);
+            context.reserved_output_capacity -= charge_delta;
         }
         result
     }

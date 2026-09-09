@@ -353,6 +353,17 @@ check_config_valid() {
     local tmp_error_log="${tmp_conf%.conf}.error.log"
     local tmp_pid="${tmp_conf%.conf}.pid"
 
+    # TMPDIR is user-controlled: a value containing nginx-config metacharacters
+    # (semicolon, quote, whitespace) would inject directives into the heredoc
+    # below.  Reject it up front instead of emitting a config that nginx -t
+    # would misparse or that could alter the test's behavior.
+    if [[ "$tmp_conf" == *[!A-Za-z0-9_./-]* ]]; then
+        rm -f "$tmp_conf"
+        emit_check "config_valid" "fail" \
+            "TMPDIR contains characters unsafe for nginx config"
+        return
+    fi
+
     # cleanup helper called at every return path — RETURN trap
     # leaks to caller on bash 3.2 (macOS default), so use explicit helper.
     _check_config_valid_cleanup() { rm -f "$tmp_conf" "$tmp_error_log" "$tmp_pid"; }
