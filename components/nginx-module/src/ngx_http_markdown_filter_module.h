@@ -1332,6 +1332,15 @@ typedef struct {
              * bypasses Rust and continues directly downstream. */
             ngx_flag_t                    failopen_active;
 
+            /* One-shot per-invocation marker: the fail-open entry point
+             * (ensure_handle / pre-commit error handler) already
+             * forwarded the CURRENT input chain downstream.  body_filter
+             * consumes it so the next invocation routes future input
+             * through continue_failopen_input instead of dropping it
+             * (a non-terminal fail-open delivery must not truncate the
+             * response). */
+            ngx_flag_t                    failopen_chain_forwarded;
+
             /* Fail-open mode selected and future input could not be
              * retained behind pending output (budget/allocation).
              * After pending output drains, abort without a clean last_buf;

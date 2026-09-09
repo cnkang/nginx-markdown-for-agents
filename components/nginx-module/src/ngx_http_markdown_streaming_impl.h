@@ -4193,7 +4193,15 @@ ngx_http_markdown_streaming_failopen_passthrough(
              * fail closed directly instead. */
             return NGX_ERROR;
         }
-        return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, cloned);
+        rc = ngx_http_markdown_streaming_send_failopen_chain(r, ctx, cloned);
+        if (rc == NGX_OK || rc == NGX_DONE) {
+            /* The CURRENT input chain was forwarded downstream.  Mark it
+             * so body_filter consumes this chain without re-forwarding,
+             * while future input chains (failopen_active) continue via
+             * continue_failopen_input instead of being dropped. */
+            ctx->streaming.completion.failopen_chain_forwarded = 1;
+        }
+        return rc;
     }
 
     /*
@@ -4235,6 +4243,22 @@ ngx_http_markdown_streaming_failopen_passthrough(
     }
 
     return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, head);
+}
+
+/*
+ * Mark that the CURRENT input chain was forwarded downstream by a
+ * fail-open entry point.  body_filter consumes this marker so the same
+ * chain is not re-forwarded, while future input chains (failopen_active)
+ * continue through continue_failopen_input instead of being dropped by
+ * the failopen_completed latch.
+ */
+static void
+ngx_http_markdown_streaming_failopen_mark_chain_forwarded(
+    ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx != NULL) {
+        ctx->streaming.completion.failopen_chain_forwarded = 1;
+    }
 }
 
 
@@ -5436,8 +5460,23 @@ ngx_http_markdown_streaming_body_filter(
      * terminal buffer) has therefore already been forwarded
      * downstream — falling through to the generic passthrough below
      * would resubmit the same `in` chain a second time.
+     *
+     * failopen_chain_forwarded is a per-invocation marker: it is set
+     * only when THIS call's input chain was the one delivered.  A
+     * later invocation with a NEW input chain must NOT be swallowed by
+     * the failopen_completed latch — it routes through
+     * continue_failopen_input so a non-terminal fail-open delivery
+     * does not truncate the response.
      */
     if (ctx->failopen_completed) {
+        if (ctx->streaming.completion.failopen_chain_forwarded) {
+            ctx->streaming.completion.failopen_chain_forwarded = 0;
+            return NGX_OK;
+        }
+        if (ctx->streaming.completion.failopen_active) {
+            return ngx_http_markdown_streaming_continue_failopen_input(
+                r, ctx, in);
+        }
         return NGX_OK;
     }
 
@@ -5468,6 +5507,9 @@ ngx_http_markdown_streaming_body_filter(
      * rather than the local variable, so re-entries also skip.
      */
     if (ctx->failopen_completed) {
+        if (ctx->streaming.completion.failopen_chain_forwarded) {
+            ctx->streaming.completion.failopen_chain_forwarded = 0;
+        }
         return NGX_OK;
     }
 

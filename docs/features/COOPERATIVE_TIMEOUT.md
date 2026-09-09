@@ -12,7 +12,7 @@ flowchart TD
     Done -->|no| Check
     Fail --> OnError{"markdown_error_policy?"}
     OnError -->|pass| FailOpen["Return Original HTML"]
-    OnError -->|fail_closed| FailClosed["Return the configured error status (default 502) Error"]
+    OnError -->|fail_closed| FailClosed["Return the configured error status (default 502)"]
 
     style Success fill:#090,color:#fff
     style FailOpen fill:#f90,color:#000
