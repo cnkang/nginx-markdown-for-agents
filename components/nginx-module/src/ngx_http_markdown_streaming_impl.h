@@ -4594,6 +4594,22 @@ ngx_http_markdown_streaming_continue_failopen_input(
         }
     }
 
+    /* Clone the chain links into request-pool memory before handing off:
+     * body-filter input links are transient (owned by the filter chain
+     * invocation), and send_failopen_chain stores the chain as
+     * pending_output on NGX_AGAIN, which outlives this invocation.  The
+     * underlying ngx_buf_t is shared (stable within the request), matching
+     * the clone semantics of failopen_passthrough. */
+    {
+        ngx_chain_t  *cloned;
+
+        cloned = ngx_http_markdown_streaming_clone_chain_links(r, input_chain);
+        if (cloned == NULL && input_chain != NULL) {
+            return NGX_ERROR;
+        }
+        input_chain = cloned;
+    }
+
     rc = ngx_http_markdown_streaming_send_failopen_chain(
         r, ctx, input_chain);
     if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
