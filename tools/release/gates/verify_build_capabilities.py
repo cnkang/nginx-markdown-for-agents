@@ -135,6 +135,8 @@ def _resolve_write_target(path: pathlib.Path) -> pathlib.Path:
     allowed_roots = (
         pathlib.Path.cwd().resolve(),
         pathlib.Path(tempfile.gettempdir()).resolve(),
+        pathlib.Path("/tmp").resolve(),
+        pathlib.Path("/var/tmp").resolve(),
     )
     if not any(
         resolved == root or resolved.is_relative_to(root)
