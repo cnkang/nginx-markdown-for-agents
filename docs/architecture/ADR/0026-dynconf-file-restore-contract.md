@@ -25,6 +25,13 @@ snapshot used to protect failed reloads and an operator-requested restore.
 
 ## Decision
 
+> **Historical (0.9.2, LTS-R006):** the Decision and Consequences sections
+> below describe the removed runtime dynamic-config subsystem. They are
+> retained for traceability only; the 0.9.2 convergence removed the watcher,
+> the watched JSON path, the LKG snapshot, and the restore path. The current
+> behavior is static configuration validated by `nginx -t` plus a controlled
+> reload or restart.
+
 Keep the diagnostics endpoint read-only: the endpoint accepts only `GET` and `HEAD`.
 No rollback action or rollback response schema gets exposed. Operators
 restore a previous dynamic configuration by writing a complete valid file to a
