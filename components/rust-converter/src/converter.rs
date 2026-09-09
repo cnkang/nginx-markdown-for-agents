@@ -386,6 +386,17 @@ impl<'a> BudgetedMarkdownWriter<'a> {
                     ))
                 })?;
         }
+        // The retained output capacity is now live; record the combined
+        // peak (output capacity + transient scratch) so the exported
+        // peak_memory_estimate reflects the full converter-tracked
+        // working set, not just the scratch component.
+        let combined = self
+            .output
+            .capacity()
+            .saturating_add(self.ctx.working_set_bytes);
+        if combined > self.ctx.peak_working_set_bytes {
+            self.ctx.peak_working_set_bytes = combined;
+        }
         Ok(())
     }
 
