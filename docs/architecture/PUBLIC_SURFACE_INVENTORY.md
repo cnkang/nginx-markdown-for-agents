@@ -263,8 +263,10 @@ stay binding regardless.
 The public surface is ready to freeze only when all of the following are true:
 
 - every active directive is either stable or explicitly experimental,
-- removed directives are absent from the command table and use the standard
-  NGINX unknown-directive migration behavior,
+- removed directives are either absent from the command table (standard
+  NGINX unknown-directive behavior) or retained as one of the five
+  reject-only migration entries handled by
+  `ngx_http_markdown_removed_directive` (LTS-R008),
 - the diagnostics endpoint and its documentation describe the same wire JSON,
 - the module rejects diagnostics mutation methods and no undocumented rollback API
   or response schema exists. The endpoint exposes read-only state only.

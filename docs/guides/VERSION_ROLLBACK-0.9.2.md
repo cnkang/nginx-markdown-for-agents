@@ -288,11 +288,37 @@ if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
   echo "ERROR: cannot locate the NGINX modules directory" >&2
   exit 1
 fi
-sudo cp /path/to/ngx_http_markdown_filter_module.so.0.9.0 \
+# The 0.9.0 module binary and configuration tree must be supplied by the
+# operator (e.g. from a backup of the pre-0.9.1 deployment).  Point these
+# variables at those artifacts; the script refuses to guess.
+MODULE_090="${MODULE_090:?set the path to the 0.9.0 module .so}"
+CONFIG_090="${CONFIG_090:?set the path to the versioned 0.9.0 configuration directory}"
+CONFIG_FILE="$(nginx -V 2>&1 | sed -n 's/.*--conf-path=\([^ ]*\).*/\1/p')"
+CONFIG_DIR="${CONFIG_FILE%/nginx.conf}"
+if [[ -z "${CONFIG_DIR}" || "${CONFIG_DIR}" == / \
+    || ! -f "${CONFIG_090}/nginx.conf" ]]; then
+  echo "ERROR: confirm the 0.9.0 configuration backup and active NGINX paths" >&2
+  exit 1
+fi
+# Swap the configuration tree atomically, keeping the current tree for
+# rollback of this rollback.
+sudo cp -a -- "${CONFIG_090}" "${CONFIG_DIR}.restore-0.9.0"
+sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.pre-0.9.0"
+if ! sudo mv -- "${CONFIG_DIR}.restore-0.9.0" "${CONFIG_DIR}"; then
+  sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}"
+  exit 1
+fi
+sudo cp -a -- "${MODULE_090}" \
     "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" && \
 sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \
     "$MODULES_DIR/ngx_http_markdown_filter_module.so"
-sudo nginx -t && sudo nginx
+if ! sudo nginx -t; then
+  echo "ERROR: 0.9.0 module fails nginx -t; restoring the 0.9.1 tree and module" >&2
+  sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed"
+  sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}"
+  exit 1
+fi
+sudo nginx
 ```
 
 **Warning:** 0.9.0 uses Rust 1.91 baseline. Source builders must downgrade

@@ -40,8 +40,8 @@ After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
 | reason `streaming_mid_flight_error` | 24 | 22 |
 | reason `bypass_no_transform` | 25 | 23 |
 | reason `encoding_header_invalid` | 26 | 24 |
-| ErrorClass / FFIErrorClass | 8 | 6 |
-| ErrorClass / FFIErrorClass | 9 | 7 |
+| ErrorClass / FFIErrorClass `HeaderPlanApplyError` | 8 | 6 |
+| ErrorClass / FFIErrorClass `StreamingMidFlightError` | 9 | 7 |
 
 Consumers that persist reason integers must resolve the stored meaning through
 the string `metric_key` before adopting the new registry. Do not reinterpret
