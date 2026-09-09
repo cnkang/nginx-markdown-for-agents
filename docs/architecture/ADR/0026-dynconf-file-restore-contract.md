@@ -2,7 +2,7 @@
 
 ## Status
 
-Historical (superseded by the 0.9.2 pre-LTS convergence, LTS-R006)
+Superseded (removed in 0.9.2)
 
 ## Date
 

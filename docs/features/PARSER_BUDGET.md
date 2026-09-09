@@ -199,8 +199,10 @@ check. If elapsed time exceeds both deadlines at the same checkpoint, the
 converter reports the parser timeout (`ERROR_PARSE_TIMEOUT`). This is
 call-order precedence, not a minimum or an "earlier of" calculation. When
 operators leave `conversion_timeout` unset, the NGINX merge fills the
-30-second default, so the overall deadline stays active. Only an explicit
-nonzero `parser_timeout` adds the parser checkpoints. (An explicit
+30-second default, so the overall deadline stays active. The effective
+merged default of 10 seconds enables parser checkpoints when configuration
+is omitted; only an explicit nonzero `parser_timeout` adds the parser
+checkpoints. (An explicit
 `conversion_timeout=0` fails config validation. The handler rejects zero.
 Operators cannot disable the deadline through configuration.)
 

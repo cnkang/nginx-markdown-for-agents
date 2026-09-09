@@ -27,7 +27,7 @@ The release delivers harness consolidation, documentation corrections, and
 release-gate hardening on top of the v0.9.1 baseline. It also completes the
 final pre-v1 public-surface reset: the release removes retired directives and
 unused profile/conflict FFI snapshots, and advances the bundled internal ABI to
-version 2. These are intentional pre-v1 compatibility changes, not a claim of
+version 3. These are intentional pre-v1 compatibility changes, not a claim of
 ABI or configuration stability across 0.9.1 and 0.9.2.
 
 ### Scope
@@ -35,8 +35,8 @@ ABI or configuration stability across 0.9.1 and 0.9.2.
 - OTel ADR-0006 factual correction (the historical proposal selected OTLP
   HTTP/JSON, not protobuf). OTel tracing is not built into the 0.9.2 product.
   No request-pool or worker-owned exporter state is part of the release.
-- Dynconf diagnostics remains read-only, operators restore a previous valid
-  file atomically and rely on LKG protection for invalid reloads.
+- Dynconf is removed in 0.9.2: configuration is static, and operators
+  restore a previous valid static configuration file atomically.
 - Release-gates-check-092 target with public-surface drift, version
   consistency, and reason-code registry completeness gates.
 - Retired generic 0.5.0 and 0.9.0/0.9.1 release-chain validators. Focused

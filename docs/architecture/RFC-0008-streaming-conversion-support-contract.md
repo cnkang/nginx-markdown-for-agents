@@ -120,7 +120,7 @@ markdown_streaming auto;
 | `auto` | The module selects full-buffer or true streaming based on response type, size, transfer mode, feature combination, and risk assessment. |
 | `force` | Prefer true streaming. If the response does not meet streaming preconditions, fallback semantics apply — the module does not silently pretend it is streaming. |
 
-**Default**: `auto`
+**Default (0.9.2 contract)**: unset and `off` select bounded full-buffer conversion; `auto` is an explicit mode. The historical 0.8.0 `auto` default is superseded.
 
 ### 2.2 Automatic Streaming Heuristic (active 0.9.2 contract)
 

@@ -170,10 +170,11 @@ NGINX, apply the 0.9.2 migration:
 # See docs/guides/MIGRATION-0.9.2.md for the complete mapping.
 ```
 
-Validate the migrated configuration with the currently loaded (old) module
-as a pre-flight: the staged 0.9.2 module is not yet swapped in, so this
-`nginx -t` exercises the migrated configuration syntax against the binary
-that is still running:
+Validate the migrated configuration with the staged 0.9.2 module BEFORE
+stopping NGINX: back up the running module first (see the source-build
+sequence below), then run `nginx -t` against the staged binary so the
+migrated syntax is checked against the 0.9.2 module, not the still-loaded
+0.9.1 one:
 
 ```bash
 sudo nginx -t
@@ -367,11 +368,26 @@ fi
 # A plain `nginx -s reload` does NOT load a replaced module (see the
 # package upgrade note above), so the same stop/swap/start procedure
 # applies to source builds.
+# Back up the active NGINX configuration tree and the running module
+# BEFORE stopping NGINX so a failed validation or start can always
+# restore the pre-upgrade state.
+sudo cp -a "${NGINX_CONF_DIR}" "${CONFIG_BACKUP_DIR}/"
+sudo cp "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
+    "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
+# Apply MIGRATION-0.9.2.md to the active configuration, then stage the
+# rebuilt module and validate it with a temporary config that explicitly
+# references the staged binary (a plain `nginx -t` would still load the
+# ACTIVE module, not the staged one).
 sudo cp objs/ngx_http_markdown_filter_module.so \
     "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new"
-sudo nginx -t
-# Back up the running module BEFORE stopping NGINX so a failed
-# validation or start can always restore the pre-upgrade binary.
+STAGED_CONF="$(mktemp "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX.conf")"
+trap 'rm -f "$STAGED_CONF"' EXIT
+{
+    echo "load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;"
+    echo "events { worker_connections 64; }"
+    echo "http { server { listen 127.0.0.1:19999; location / { return 200 ok; } } }"
+} > "$STAGED_CONF"
+sudo nginx -t -c "$STAGED_CONF"
 MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
 MODULE_BACKUP_OWNED=0
 if [[ -e "${MODULE_BACKUP}" ]]; then
