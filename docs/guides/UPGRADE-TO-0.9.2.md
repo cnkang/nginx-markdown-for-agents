@@ -172,12 +172,13 @@ NGINX, apply the 0.9.2 migration:
 
 Validate the migrated configuration with the staged 0.9.2 module BEFORE
 stopping NGINX: back up the running module first (see the source-build
-sequence below), then run `nginx -t` against the staged binary so the
-migrated syntax is checked against the 0.9.2 module, not the still-loaded
-0.9.1 one:
+sequence below), then run `nginx -t` against a temporary configuration
+whose `load_module` entry points to the staged `.so` — a plain
+`sudo nginx -t` would still load the ACTIVE (0.9.1) module, so it cannot
+prove the migrated syntax is valid under the 0.9.2 binary:
 
 ```bash
-sudo nginx -t
+sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
 ```
 
 A 0.9.1 configuration fails `nginx -t` under the 0.9.2 binary (removed
@@ -372,8 +373,6 @@ fi
 # BEFORE stopping NGINX so a failed validation or start can always
 # restore the pre-upgrade state.
 sudo cp -a "${NGINX_CONF_DIR}" "${CONFIG_BACKUP_DIR}/"
-sudo cp "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
-    "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
 # Apply MIGRATION-0.9.2.md to the active configuration, then stage the
 # rebuilt module and validate it with a temporary config that explicitly
 # references the staged binary (a plain `nginx -t` would still load the
@@ -386,8 +385,17 @@ trap 'rm -rf "$STAGED_ROOT"' EXIT
 # module: copy the live config dir and rewrite its load_module entry to
 # reference the staged .so, then run nginx -t against that copy.
 sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
-sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]].*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
+# Rewrite ONLY the Markdown module's load_module entry (other modules'
+# load_module lines must be preserved untouched), then verify exactly one
+# staged entry exists — a missing or duplicated Markdown entry means the
+# rewrite did not target the right line and validation would be meaningless.
+sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]]\+.*ngx_http_markdown_filter_module\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
     "${STAGED_ROOT}/nginx.conf"
+staged_loads="$(grep -c 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}/nginx.conf" || true)"
+if [[ "${staged_loads}" -ne 1 ]]; then
+    echo "ERROR: expected exactly one Markdown load_module entry in the staged config, found ${staged_loads}" >&2
+    exit 1
+fi
 sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
 MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
 MODULE_BACKUP_OWNED=0

@@ -129,7 +129,7 @@ EXAMPLE_RE = re.compile(r"^example_\d+$")
 # render_quadrant_1 or "spec" inside test_specific_helper_2 must NOT
 # qualify, otherwise every helper with an accidental substring is exempted.
 SEMANTIC_TOKEN_RE = re.compile(
-    r"(?:^|_)(version|spec|adr|release|schema|changelog|v\d)(?:_|$)",
+    r"(?:^|_)(version|spec|adr|release|schema|changelog|v\d+)(?:_|$)",
     re.IGNORECASE,
 )
 

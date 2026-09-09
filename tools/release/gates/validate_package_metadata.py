@@ -1136,6 +1136,11 @@ def _extract_matrix_entry_versions(
     """Extract valid NGINX versions from release matrix entries."""
     versions: set[str] = set()
     for entry in entries:
+        if not isinstance(entry, dict):
+            raise RuntimeError(
+                "Malformed release matrix: entries must be objects, "
+                f"got {type(entry).__name__}"
+            )
         version = version_from_entry(entry)
         if version is not None:
             versions.add(version)
@@ -1158,6 +1163,13 @@ def _extract_matrix_versions() -> set[str]:
             f"Malformed release matrix at {RELEASE_MATRIX}: "
             f"top-level JSON value is {type(data).__name__}, expected object"
         )
+    for key in ("entries", "matrix"):
+        value = data.get(key, [])
+        if not isinstance(value, list):
+            raise RuntimeError(
+                f"Malformed release matrix at {RELEASE_MATRIX}: "
+                f"{key} must be a list, got {type(value).__name__}"
+            )
     versions.update(
         _extract_matrix_entry_versions(
             data.get("entries", []),
