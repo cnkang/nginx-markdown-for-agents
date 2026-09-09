@@ -129,22 +129,27 @@ def _resolve_write_target(path: pathlib.Path) -> pathlib.Path:
     """
     if path.is_symlink():
         raise ValueError(f"refusing symlink path: {path}")
-    resolved = path.resolve()
-    if resolved.exists() and not resolved.is_file():
+    target = path.resolve()
+    if target.exists() and not target.is_file():
         raise ValueError(f"write target is not a regular file: {path}")
-    allowed_roots = (
-        pathlib.Path.cwd().resolve(),
-        pathlib.Path(tempfile.gettempdir()).resolve(),
-        pathlib.Path("/tmp").resolve(),
-        pathlib.Path("/var/tmp").resolve(),
-    )
+    allowed_roots = {pathlib.Path.cwd().resolve()}
+    allowed_roots.add(pathlib.Path(tempfile.gettempdir()).resolve())
+    # The E2E smoke scripts stage capability reports under the platform
+    # temp dir; on macOS /tmp is a symlink to /private/tmp, so include
+    # the resolved aliases of the conventional temp locations.
+    for alias in (os.environ.get("TMPDIR"), os.sep + "tmp", os.sep + "var" + os.sep + "tmp"):
+        if not alias:
+            continue
+        alias_root = pathlib.Path(alias).resolve()
+        if alias_root.is_dir():
+            allowed_roots.add(alias_root)
     if not any(
-        resolved == root or resolved.is_relative_to(root)
+        target == root or target.is_relative_to(root)
         for root in allowed_roots
     ):
         raise ValueError(
             f"write target escapes allowed roots: {path}")
-    return resolved
+    return target
 
 
 def validate(report: dict[str, Any]) -> list[str]:
@@ -194,9 +199,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.write is not None:
             write_target = _resolve_write_target(args.write)
             write_target.parent.mkdir(parents=True, exist_ok=True)
-            write_target.write_text(
-                json.dumps(report, indent=2) + "\n", encoding="utf-8"
-            )
+            with write_target.open("w", encoding="utf-8") as handle:
+                handle.write(json.dumps(report, indent=2) + "\n")
         errors = validate(report)
     except (OSError, ValueError) as exc:
         print(f"CAPABILITY_CHECK_FAILED: {exc}", file=sys.stderr)
