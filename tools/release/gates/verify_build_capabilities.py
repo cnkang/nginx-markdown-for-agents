@@ -142,9 +142,8 @@ def _allowed_write_roots() -> set[pathlib.Path]:
     # roots are only allowlisted for the *containment check* below; the
     # actual write goes through validate_write_path_within_root after
     # symlink and regular-file rejection, so the public temp dirs are
-    # never written directly.  # NOSONAR S5443 (defensive allowlist, not
-    # a direct write to a public temp dir)
-    for alias in (os.environ.get("TMPDIR"), pathlib.Path(os.sep) / "tmp",
+    # never written directly.
+    for alias in (os.environ.get("TMPDIR"), pathlib.Path(os.sep) / "tmp",  # NOSONAR S5443 (containment allowlist; write is re-validated)
                   pathlib.Path(os.sep) / "var" / "tmp"):
         if not alias:
             continue
