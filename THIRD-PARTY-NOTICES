@@ -182,7 +182,7 @@ they are not distributed with the converter binary unless stated otherwise.
 
 --------------------------------------------------------------------------------
 
-12. brotli 8.0.4 (Rust crate)
+12. brotli 9.0.0 (Rust crate)
     https://github.com/dropbox/rust-brotli
     License: BSD-3-Clause OR MIT
     Copyright (c) 2016 Dropbox, Inc.
