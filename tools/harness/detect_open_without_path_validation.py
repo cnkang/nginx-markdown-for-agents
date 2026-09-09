@@ -69,6 +69,13 @@ FILE_SCOPED_VALIDATORS: dict[str, set[str]] = {
     # regular file before returning the path.
     "tools/c-extract/extract_c_function.py": {"resolve_source_path"},
     "tools/harness/state_store.py": {"validate_user_local_state_path"},
+    # The capability gate resolves CLI-supplied paths: the input must be
+    # a regular file (symlinks rejected) and the write target must stay
+    # inside the repository root or a platform temp root.
+    "tools/release/gates/verify_build_capabilities.py": {
+        "_resolve_regular_file",
+        "_resolve_write_target",
+    },
 }
 
 # Trusted fixture names that pytest provides — paths derived from
