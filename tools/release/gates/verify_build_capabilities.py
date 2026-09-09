@@ -138,7 +138,12 @@ def _allowed_write_roots() -> set[pathlib.Path]:
     roots.add(pathlib.Path(tempfile.gettempdir()).resolve())
     # The E2E smoke scripts stage capability reports under the platform
     # temp dir; on macOS /tmp is a symlink to /private/tmp, so include
-    # the resolved aliases of the conventional temp locations.
+    # the resolved aliases of the conventional temp locations.  These
+    # roots are only allowlisted for the *containment check* below; the
+    # actual write goes through validate_write_path_within_root after
+    # symlink and regular-file rejection, so the public temp dirs are
+    # never written directly.  # NOSONAR S5443 (defensive allowlist, not
+    # a direct write to a public temp dir)
     for alias in (os.environ.get("TMPDIR"), pathlib.Path(os.sep) / "tmp",
                   pathlib.Path(os.sep) / "var" / "tmp"):
         if not alias:
