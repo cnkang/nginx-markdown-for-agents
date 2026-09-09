@@ -136,7 +136,11 @@ def _allowed_write_roots() -> set[pathlib.Path]:
     """
     roots = {pathlib.Path.cwd().resolve()}
     roots.add(pathlib.Path(tempfile.gettempdir()).resolve())
-    for alias in (os.environ.get("TMPDIR"), os.sep + "tmp", os.sep + "var" + os.sep + "tmp"):
+    # The E2E smoke scripts stage capability reports under the platform
+    # temp dir; on macOS /tmp is a symlink to /private/tmp, so include
+    # the resolved aliases of the conventional temp locations.
+    for alias in (os.environ.get("TMPDIR"), pathlib.Path(os.sep) / "tmp",
+                  pathlib.Path(os.sep) / "var" / "tmp"):
         if not alias:
             continue
         alias_root = pathlib.Path(alias).resolve()
