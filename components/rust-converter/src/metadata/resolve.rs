@@ -113,7 +113,9 @@ impl MetadataExtractor {
     /// Return the directory prefix used for relative-path resolution.
     ///
     /// For `https://example.com/dir/page`, returns `https://example.com/dir`.
-    /// Trailing slashes are stripped before the last path segment is removed.
+    /// URLs ending in "/" preserve their directory prefix (early return);
+    /// the trailing-slash removal and last-segment handling below applies
+    /// only to other URLs.
     /// If the URL has no path after the authority, the full URL is returned.
     ///
     /// # Arguments

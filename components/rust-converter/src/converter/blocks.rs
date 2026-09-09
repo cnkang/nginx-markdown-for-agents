@@ -554,7 +554,6 @@ impl MarkdownConverter {
         depth: usize,
         ordered: bool,
         ctx: &mut Option<&mut ConversionContext>,
-        output_charge_released: &mut bool,
     ) -> Result<(), ConversionError> {
         let Some(context) = ctx.as_deref_mut() else {
             let result = self.format_list_item_lines(output, &item_output, depth, ordered, ctx);
@@ -571,10 +570,7 @@ impl MarkdownConverter {
         context.check_output_budget(projected_len)?;
 
         let item_capacity = item_output.capacity();
-        let output_capacity = output.capacity();
         context.reserve_working_set(item_capacity)?;
-        context.release_working_set(output_capacity);
-        *output_charge_released = true;
 
         let format_result = self.format_list_item_lines(output, &item_output, depth, ordered, ctx);
         drop(item_output);
@@ -606,11 +602,19 @@ impl MarkdownConverter {
         let output_capacity = output.capacity();
         let mut output_charge_active = false;
         if let Some(context) = ctx.as_deref_mut() {
-            context.reserve_working_set(output_capacity)?;
-            output_charge_active = true;
+            // Reserve the retained output capacity exactly once per
+            // conversion.  Nested list items re-enter this function
+            // through render_list_item_content / handle_list_with_context
+            // while the outer charge is still active; re-reserving the
+            // same capacity would double-count it and spuriously fail
+            // the budget for deeply nested lists.
+            if !context.output_charge_active {
+                context.reserve_working_set(output_capacity)?;
+                context.output_charge_active = true;
+                output_charge_active = true;
+            }
         }
 
-        let mut output_charge_released = false;
         let result = (|| {
             let (item_output, _) =
                 self.render_list_item_content(node, output, depth, ordered, &mut ctx)?;
@@ -620,7 +624,6 @@ impl MarkdownConverter {
                 depth,
                 ordered,
                 &mut ctx,
-                &mut output_charge_released,
             )?;
 
             if let Some(context) = ctx.as_deref_mut() {
@@ -629,11 +632,17 @@ impl MarkdownConverter {
             Ok(())
         })();
 
+        // Release the output-capacity charge whenever THIS frame reserved
+        // it.  output_charge_released only records that format_list_item
+        // ran; the item charge is reserved/released independently inside
+        // format_list_item_with_context, so it must not suppress the
+        // output-capacity release here (otherwise the charge leaks into
+        // working_set_bytes for the rest of the conversion).
         if output_charge_active
-            && !output_charge_released
             && let Some(context) = ctx
         {
             context.release_working_set(output_capacity);
+            context.output_charge_active = false;
         }
         result
     }
