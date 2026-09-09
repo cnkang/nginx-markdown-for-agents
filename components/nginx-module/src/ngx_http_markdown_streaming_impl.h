@@ -5034,10 +5034,18 @@ ngx_http_markdown_streaming_handle_consumed_again(
         rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
             r, ctx, conf, cl->next, &enqueue_error);
         if (rc != NGX_OK) {
-            if (ctx->streaming.pending_output != NULL
-                && ctx->streaming.commit_state
-                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+            if ((ctx->stream_sm.headers_committed
+                 || ctx->streaming.commit_state
+                    == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+                && ctx->streaming.pending_output != NULL)
             {
+                /* The header block was already mutated and accepted
+                 * (queued by the write filter) — this is a post-commit
+                 * enqueue failure, so precommit_error() would re-enter
+                 * pre-commit handling, duplicate counters/logs, or select
+                 * fail-open against committed Markdown-contract headers.
+                 * Route through the post-commit error handler instead
+                 * (mirrors enqueue_with_pending_header's guard). */
                 return ngx_http_markdown_streaming_defer_postcommit_error(
                     r, ctx, enqueue_error, cl->next);
             }

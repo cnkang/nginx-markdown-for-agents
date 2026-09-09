@@ -297,13 +297,12 @@ pub struct ConversionContext {
     /// full-buffer and streaming paths (a positive sample then certifies a
     /// per-request peak for the soak qualification gate).
     peak_working_set_bytes: usize,
-    /// Whether the output buffer's capacity is currently charged to the
-    /// working set.  Nested list-item rendering must reserve the output
-    /// capacity only ONCE per conversion: an inner item reached through
-    /// `render_list_item_content` / `handle_list_with_context` would
-    /// otherwise double-charge the same retained output allocation and
-    /// spuriously fail the budget for deeply nested lists.
-    output_charge_active: bool,
+    /// High-water mark of the output buffer capacity currently charged to
+    /// the working set.  Nested list-item rendering charges only the
+    /// DELTA over this value (see format_list_item_with_context), so the
+    /// retained output allocation is charged exactly once while growth
+    /// from reallocation is still accounted for.
+    reserved_output_capacity: usize,
 }
 
 /// Fallible Markdown output writer bound to one conversion budget.
@@ -461,7 +460,7 @@ impl ConversionContext {
             output_budget: DEFAULT_FULL_BUFFER_OUTPUT_BUDGET,
             working_set_bytes: 0,
             peak_working_set_bytes: 0,
-            output_charge_active: false,
+            reserved_output_capacity: 0,
         }
     }
 

@@ -321,27 +321,31 @@ fn append_echo_headers_case(
         200,
     ));
     let body = resp.body.clone();
-    let has_a = body.lines().any(|l| l == "x-test: A");
-    let has_b = body.lines().any(|l| l == "x-test: B");
+    let count_a = body.lines().filter(|l| *l == "x-test: A").count();
+    let count_b = body.lines().filter(|l| *l == "x-test: B").count();
     assertions.push(AssertionResult {
         name: "case11_duplicate_header_a_preserved".to_string(),
-        passed: has_a,
-        expected: "x-test: A present in upstream echo".to_string(),
-        actual: if has_a {
-            "present".to_string()
+        passed: count_a == 1,
+        expected: "exactly one x-test: A line in upstream echo".to_string(),
+        actual: if count_a == 1 {
+            "present exactly once".to_string()
         } else {
-            "MISSING (restore collapsed the duplicate?)".to_string()
+            format!(
+                "count={count_a} (restore collapsed or duplicated the entry?)"
+            )
         },
         message: None,
     });
     assertions.push(AssertionResult {
         name: "case11_duplicate_header_b_preserved".to_string(),
-        passed: has_b,
-        expected: "x-test: B present in upstream echo".to_string(),
-        actual: if has_b {
-            "present".to_string()
+        passed: count_b == 1,
+        expected: "exactly one x-test: B line in upstream echo".to_string(),
+        actual: if count_b == 1 {
+            "present exactly once".to_string()
         } else {
-            "MISSING (restore collapsed the duplicate?)".to_string()
+            format!(
+                "count={count_b} (restore collapsed or duplicated the entry?)"
+            )
         },
         message: None,
     });

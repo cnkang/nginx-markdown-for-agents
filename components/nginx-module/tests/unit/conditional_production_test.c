@@ -3904,6 +3904,16 @@ test_shadow_restore_invalidate_second_duplicate(void)
     add_header(&r->headers_in.headers, "X-Test", "B");
     memset(&ctx, 0, sizeof(ctx));
 
+    /* Retain pointers to BOTH original entries so the test can assert
+     * the second one stays invalidated (hash == 0) after restore, not
+     * merely that the live count dropped. */
+    ngx_table_elt_t *orig_first = find_nth_named_header(
+        &r->headers_in.headers, "X-Test", 1);
+    ngx_table_elt_t *orig_second = find_nth_named_header(
+        &r->headers_in.headers, "X-Test", 2);
+    TEST_ASSERT(orig_first != NULL && orig_second != NULL,
+                "both original X-Test entries locatable before capture");
+
     TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
                     == NGX_OK,
                 "conditional capture succeeds with duplicate headers");
@@ -3924,6 +3934,12 @@ test_shadow_restore_invalidate_second_duplicate(void)
                     && ngx_strncmp(first->value.data, (u_char *) "A", 1) == 0,
                     "first duplicate keeps A");
     }
+    /* The invalidated second entry must NOT be re-activated by restore:
+     * its hash stays 0 and it is not spliced back into the live list. */
+    TEST_ASSERT(orig_second->hash == 0,
+                "second original entry stays invalidated (hash == 0)");
+    TEST_ASSERT(orig_first->hash != 0,
+                "first original entry remains live (hash != 0)");
     TEST_PASS("second-duplicate invalidation lands on second original only");
     g_list_grow = 0;
 }
