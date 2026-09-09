@@ -88,7 +88,10 @@ while IFS= read -r line; do
     # Anchor @ extraction to the action-name token: owner/repo@ref
     # (first @ after the uses: keyword), never last-@ anywhere in the line.
     ref="${content#*uses:}"
-    ref="${ref#*[[:space:]]}"
+    # Strip ALL leading whitespace after the uses: keyword (a single
+    # ${ref#*[[:space:]]} removes only up to the first space, leaving
+    # extra spaces in the action token).
+    ref="${ref#"${ref%%[![:space:]]*}"}"
     ref="${ref%%[[:space:]]*}"          # action token = owner/repo@ref
     action="${ref%%@*}"
     ref="${ref#*@}"                     # ref = first @ after action name

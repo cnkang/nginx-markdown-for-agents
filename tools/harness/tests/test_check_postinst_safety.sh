@@ -121,7 +121,7 @@ else
 fi
 
 # Self-referencing PATH is not unconditional, so gate should report missing
-if printf '%s\n' "${OUTPUT}" | grep -qi "VIOLATION"; then
+if printf '%s\n' "${OUTPUT}" | grep -qE "^\[VIOLATION\]"; then
     pass "Fixture 2: VIOLATION reported for self-referencing PATH"
 else
     fail "Fixture 2: no VIOLATION reported"

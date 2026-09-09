@@ -3,7 +3,7 @@
 
 Validates 0.9.2-specific deliverables:
   - Version consistency (all version sources = 0.9.2)
-  - Reason code registry completeness (27 codes, including encoding_header_invalid)
+  - Reason code registry completeness (25 codes, including encoding_header_invalid)
   - Public surface inventory exists and is parseable
 
 Provides the current 0.9.2-specific contract checks. Focused 0.7.0/0.8.0

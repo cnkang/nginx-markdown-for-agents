@@ -760,9 +760,16 @@ def validate_nfpm_deb_dependency_contract(
             ],
         )
 
-    versions = sorted(
-        set(_extract_matrix_versions() if nginx_versions is None else nginx_versions)
-    )
+    try:
+        versions = sorted(
+            set(_extract_matrix_versions() if nginx_versions is None else nginx_versions)
+        )
+    except RuntimeError as exc:
+        # A malformed release matrix must not crash the whole gate run:
+        # record the standard validation failure and let main continue
+        # with the remaining validators, exiting through the usual FAIL
+        # path.
+        return False, [f"release matrix unreadable: {exc}"]
     if not versions:
         return False, ["no release-blocking NGINX versions found in release matrix"]
 
@@ -1146,6 +1153,11 @@ def _extract_matrix_versions() -> set[str]:
         raise RuntimeError(
             f"Malformed release matrix at {RELEASE_MATRIX}: {exc}"
         ) from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"Malformed release matrix at {RELEASE_MATRIX}: "
+            f"top-level JSON value is {type(data).__name__}, expected object"
+        )
     versions.update(
         _extract_matrix_entry_versions(
             data.get("entries", []),

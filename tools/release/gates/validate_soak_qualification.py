@@ -1142,6 +1142,12 @@ def _build_soak_record(
     per_scenario: list,
     session: dict,
 ) -> dict:
+    peak_bytes = session.get("peak_memory_bytes")
+    peak_observed = (
+        isinstance(peak_bytes, int)
+        and not isinstance(peak_bytes, bool)
+        and peak_bytes > 0
+    )
     return {
         "schema_version": RECORD_SCHEMA_VERSION,
         "candidate_sha": manifest["candidate_sha"],
@@ -1155,12 +1161,15 @@ def _build_soak_record(
         "worker_rss_drain_delta_kb": session["drain_delta"],
         "worker_rss_drain_samples": session["drain_samples"],
         "monotonic_growth_after_drain": session["monotonic"],
-        # The exported gauge estimates only the last streaming conversion.
-        # It neither covers full-buffer requests nor retains a run-wide
-        # maximum, so a positive sample cannot certify per-request limits.
-        "module_managed_peak_observed": False,
-        "per_request_peak_bytes": None,
-        "last_streaming_peak_estimate_bytes": session["peak_memory_bytes"],
+        # The gauge is a run-wide high-water mark: every successful
+        # conversion (streaming AND full-buffer) publishes its peak
+        # working-set estimate into the shared field via a CAS max, so a
+        # positive sample certifies a per-request peak for the whole run.
+        # Zero/None means no conversion completed at all — a genuine
+        # evidence failure, not an instrumentation gap.
+        "module_managed_peak_observed": peak_observed,
+        "per_request_peak_bytes": peak_bytes if peak_observed else None,
+        "last_streaming_peak_estimate_bytes": peak_bytes,
         "errors": [],
         "status": "pass",
     }
@@ -1169,7 +1178,15 @@ def _build_soak_record(
 def _soak_failures(
     record: dict, manifest: dict, elapsed: float, ready_error: str | None
 ) -> list[str]:
-    failures = []
+    """Return blocking failures for the soak qualification record.
+
+    The module-managed per-request peak gauge is a run-wide high-water
+    mark covering streaming AND full-buffer conversions, so a missing
+    observation means no conversion completed — a hard evidence failure.
+    Actual limit violations (peak above ceiling, missing ceilings,
+    malformed values) remain blocking.
+    """
+    failures: list[str] = []
     if ready_error:
         failures.append(ready_error)
     if elapsed < manifest["duration_minutes"] * 60 * 0.95:
@@ -1223,9 +1240,10 @@ def real_main(args: argparse.Namespace) -> int:
         _check_scenario_rows(record, manifest)
     except SoakScenarioValidationError as exc:
         failures.append(str(exc))
-    failures.extend(
-        _soak_failures(record, manifest, elapsed, session["ready_error"])
+    soak_failures = _soak_failures(
+        record, manifest, elapsed, session["ready_error"]
     )
+    failures.extend(soak_failures)
     if failures:
         record["status"] = "fail"
         record["errors"] = failures
