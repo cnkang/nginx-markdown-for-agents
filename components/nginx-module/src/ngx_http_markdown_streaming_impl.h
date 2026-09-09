@@ -1753,8 +1753,17 @@ ngx_http_markdown_streaming_resume_failure(
     }
     /* For a pending abort, category metrics were recorded before the
      * terminal send.  The definitive downstream failure is therefore
-     * recorded below without reclassifying the original error. */
-    ngx_http_markdown_streaming_record_postcommit_failure(r, ctx, conf);
+     * recorded below without reclassifying the original error.
+     *
+     * A pending FAIL-OPEN delivery is not a conversion failure: the
+     * request already failed open to the original HTML, and the resume
+     * failure is a downstream transport error.  Recording failed_closed
+     * here would misclassify the request as a conversion failure, so
+     * skip the request-level failure record for fail-open deliveries
+     * (with or without data) and let the downstream error propagate. */
+    if (!pending.failopen) {
+        ngx_http_markdown_streaming_record_postcommit_failure(r, ctx, conf);
+    }
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
     return downstream_rc;
 }
@@ -3617,8 +3626,27 @@ ngx_http_markdown_streaming_record_finalize_stats(
         ctx->streaming.output.bytes);
 
     if (ngx_http_markdown_metrics != NULL) {
-        ngx_http_markdown_metrics->streaming.last_peak_memory_bytes =
-            (ngx_atomic_t) peak_memory_bytes;
+        /*
+         * High-water mark semantics: the gauge reflects the largest
+         * conversion working-set estimate observed since process start
+         * (streaming AND full-buffer conversions), so monitoring and the
+         * soak qualification gate can read a run-wide peak rather than
+         * only the most recent streaming sample.
+         */
+        for (;;) {
+            ngx_atomic_t  observed;
+
+            observed = ngx_http_markdown_metrics->streaming.last_peak_memory_bytes;
+            if (observed >= (ngx_atomic_t) peak_memory_bytes) {
+                break;
+            }
+            if (ngx_atomic_cmp_set(
+                    &ngx_http_markdown_metrics->streaming.last_peak_memory_bytes,
+                    observed, (ngx_atomic_t) peak_memory_bytes))
+            {
+                break;
+            }
+        }
     }
 }
 
@@ -4961,9 +4989,10 @@ ngx_http_markdown_streaming_handle_consumed_again(
         return NGX_AGAIN;
     }
 
-    /* CONSUMED: advance pos so NGINX releases the busy buffer. */
-    cl->buf->pos = cl->buf->last;
-
+    /* CONSUMED: advance pos so NGINX releases the busy buffer.  This
+     * happens only AFTER the remainder enqueue succeeds: on enqueue
+     * failure the current buffer must stay unconsumed so the pre-commit
+     * error policy can fail open with the original content intact. */
     if (cl->next != NULL) {
         uint32_t  enqueue_error = ERROR_SUCCESS;
 
@@ -4977,9 +5006,29 @@ ngx_http_markdown_streaming_handle_consumed_again(
                 return ngx_http_markdown_streaming_defer_postcommit_error(
                     r, ctx, enqueue_error, cl->next);
             }
+
+            /*
+             * Pre-commit enqueue failure: route through the single
+             * pre-commit error policy handler so fail-open/fail-closed
+             * semantics, reason codes, and metrics are applied uniformly
+             * (the previous code returned NGX_ERROR directly, bypassing
+             * the policy).  The current buffer is still unconsumed, so a
+             * fail-open passthrough forwards the original content.
+             */
+            rc = ngx_http_markdown_streaming_precommit_error(
+                r, ctx, conf, enqueue_error);
+            if (rc == NGX_DECLINED && !ctx->eligible) {
+                rc = ngx_http_markdown_streaming_failopen_passthrough(
+                    r, ctx, cl);
+                if (rc == NGX_OK || rc == NGX_DONE) {
+                    ctx->failopen_completed = 1;
+                }
+            }
             return rc;
         }
     }
+
+    cl->buf->pos = cl->buf->last;
 
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
     return NGX_AGAIN;
@@ -5135,7 +5184,7 @@ ngx_http_markdown_streaming_finalize_on_last_buf(
          */
         rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, in);
-        if (rc == NGX_OK) {
+        if (rc == NGX_OK || rc == NGX_DONE) {
             ctx->failopen_completed = 1;
         }
     }

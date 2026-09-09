@@ -84,6 +84,8 @@ static ngx_int_t ngx_http_markdown_next_cache_control_token(
     const u_char **token_start, const u_char **token_end);
 static ngx_flag_t ngx_http_markdown_cache_control_token_is_public(
     const u_char *token_start, const u_char *token_end);
+static ngx_flag_t ngx_http_markdown_cache_control_token_is_private(
+    const u_char *token_start, const u_char *token_end);
 static ngx_flag_t ngx_http_markdown_token_equals_ignore_case(
     const u_char *left, const u_char *right, size_t len);
 static ngx_flag_t ngx_http_markdown_is_cache_control_header(
@@ -192,6 +194,7 @@ ngx_http_markdown_prepare_strip_public_value(ngx_http_request_t *r,
     const u_char   *token_end = NULL;
     u_char         *dst;
     ngx_flag_t      wrote_token;
+    ngx_flag_t      private_present;
     ngx_int_t       rc;
 
     if (r == NULL || source == NULL || prepared == NULL
@@ -223,6 +226,7 @@ ngx_http_markdown_prepare_strip_public_value(ngx_http_request_t *r,
     end = p + source->len;
     dst = new_value;
     wrote_token = 0;
+    private_present = 0;
 
     for (/* void */; /* void */; /* void */) {
         rc = ngx_http_markdown_next_cache_control_token(
@@ -246,6 +250,12 @@ ngx_http_markdown_prepare_strip_public_value(ngx_http_request_t *r,
             continue;
         }
 
+        if (ngx_http_markdown_cache_control_token_is_private(
+                token_start, token_end))
+        {
+            private_present = 1;
+        }
+
         if (wrote_token) {
             *dst++ = ',';
             *dst++ = ' ';
@@ -255,13 +265,18 @@ ngx_http_markdown_prepare_strip_public_value(ngx_http_request_t *r,
         wrote_token = 1;
     }
 
-    if (wrote_token) {
-        *dst++ = ',';
-        *dst++ = ' ';
+    /* Append the private directive only when the rewritten value does not
+     * already carry one: a source value such as "public, private" must
+     * not become "private, private". */
+    if (!private_present) {
+        if (wrote_token) {
+            *dst++ = ',';
+            *dst++ = ' ';
+        }
+        dst = ngx_cpymem(dst,
+                         ngx_http_markdown_cc_private,
+                         sizeof(ngx_http_markdown_cc_private) - 1);
     }
-    dst = ngx_cpymem(dst,
-                     ngx_http_markdown_cc_private,
-                     sizeof(ngx_http_markdown_cc_private) - 1);
 
     prepared->data = new_value;
     prepared->len = (size_t) (dst - new_value);
@@ -606,6 +621,21 @@ ngx_http_markdown_cache_control_token_is_public(const u_char *token_start,
     return ngx_http_markdown_token_equals_ignore_case(
         token_start, ngx_http_markdown_cc_public,
         sizeof(ngx_http_markdown_cc_public) - 1);
+}
+
+static ngx_flag_t
+ngx_http_markdown_cache_control_token_is_private(const u_char *token_start,
+                                                 const u_char *token_end)
+{
+    if ((size_t) (token_end - token_start)
+        != sizeof(ngx_http_markdown_cc_private) - 1)
+    {
+        return 0;
+    }
+
+    return ngx_http_markdown_token_equals_ignore_case(
+        token_start, ngx_http_markdown_cc_private,
+        sizeof(ngx_http_markdown_cc_private) - 1);
 }
 
 /*
