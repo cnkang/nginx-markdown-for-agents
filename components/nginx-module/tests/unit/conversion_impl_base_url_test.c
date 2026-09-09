@@ -432,6 +432,20 @@ typedef struct ngx_log_s ngx_log_t;
 typedef struct ngx_pool_s ngx_pool_t;
 typedef struct ngx_http_variable_value_s ngx_http_variable_value_t;
 typedef ngx_uint_t ngx_atomic_uint_t;
+
+typedef int ngx_atomic_t;
+
+static ngx_inline ngx_atomic_uint_t
+ngx_atomic_cmp_set(ngx_atomic_t *lock, ngx_atomic_t old,
+    ngx_atomic_t set)
+{
+    if (*(volatile ngx_atomic_t *) lock == old) {
+        *lock = set;
+        return 1;
+    }
+    return 0;
+}
+
 typedef struct ngx_time_s ngx_time_t;
 
 struct ngx_list_part_s {

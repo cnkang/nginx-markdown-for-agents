@@ -1609,13 +1609,10 @@ encoding_policy:
          */
         if (*rc == NGX_AGAIN) {
             ctx->headers_forwarded = 1;
-            ctx->fullbuffer.failopen_delivery_pending = 1;
             return 1;
         }
         if (*rc == NGX_OK || *rc == NGX_DONE) {
             ctx->headers_forwarded = 1;
-            ngx_http_markdown_metric_inc_failopen(
-                ctx->effective_conf, conf);
         }
         return 1;
     }

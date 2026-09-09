@@ -3017,6 +3017,69 @@ test_has_no_transform_in_comma_separated_list(void)
 }
 
 /*
+ * Regression test: no-transform inside a quoted-string value must NOT be
+ * detected (commas inside quoted strings are data, not directive
+ * delimiters — RFC 9111).  The old comma-splitting scanner falsely
+ * matched "example=\"a,no-transform,b\"".
+ */
+static void
+test_has_no_transform_quoted_string_comma(void)
+{
+    g_pool_offset = 0;
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    add_header(&r->headers_out.headers, "Cache-Control",
+        "example=\"a,no-transform,b\"");
+
+    ngx_flag_t result = ngx_http_markdown_has_no_transform(r);
+    TEST_ASSERT(result == 0,
+        "no-transform inside quoted string is not a directive");
+    TEST_PASS("quoted-string comma does not split directives");
+}
+
+/*
+ * Regression test: no-transform as the first token of a quoted string
+ * must not be detected either.
+ */
+static void
+test_has_no_transform_quoted_string_leading(void)
+{
+    g_pool_offset = 0;
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    add_header(&r->headers_out.headers, "Cache-Control",
+        "example=\"no-transform,b\"");
+
+    ngx_flag_t result = ngx_http_markdown_has_no_transform(r);
+    TEST_ASSERT(result == 0,
+        "no-transform at quoted-string start is not a directive");
+    TEST_PASS("quoted-string leading no-transform ignored");
+}
+
+/*
+ * Regression test: an escaped quote inside a quoted string must not
+ * terminate the string early, so a later real no-transform directive is
+ * still found.
+ */
+static void
+test_has_no_transform_quoted_escape_then_real(void)
+{
+    g_pool_offset = 0;
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    add_header(&r->headers_out.headers, "Cache-Control",
+        "example=\"a\\\",no-transform,b\", no-transform");
+
+    ngx_flag_t result = ngx_http_markdown_has_no_transform(r);
+    TEST_ASSERT(result == 1,
+        "real no-transform after escaped-quote quoted string detected");
+    TEST_PASS("escaped quote does not break quoted-string skipping");
+}
+
+/*
  * Regression test: has_no_transform returns 0 when no-transform
  * is absent.
  */
@@ -3590,6 +3653,281 @@ test_shadow_list_last_rebind(void)
     check_shadow_list_restore(40, 40);
 }
 
+/*
+ * Count live (hash != 0) entries with the given name in a header list.
+ */
+static ngx_uint_t
+count_named_headers(ngx_list_t *list, const char *name)
+{
+    ngx_uint_t  count = 0;
+    size_t      name_len = strlen(name);
+
+    for (ngx_list_part_t *part = &list->part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers = part->elts;
+
+        if (headers == NULL && part->nelts != 0) {
+            return 0;
+        }
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash != 0
+                && headers[i].key.len == name_len
+                && ngx_strncmp(headers[i].key.data, (u_char *) name,
+                               name_len) == 0)
+            {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+/*
+ * Find the Nth live entry with the given name (1-based) in a header list.
+ */
+static ngx_table_elt_t *
+find_nth_named_header(ngx_list_t *list, const char *name, ngx_uint_t nth)
+{
+    ngx_uint_t  seen = 0;
+    size_t      name_len = strlen(name);
+
+    for (ngx_list_part_t *part = &list->part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers = part->elts;
+
+        if (headers == NULL && part->nelts != 0) {
+            return NULL;
+        }
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash != 0
+                && headers[i].key.len == name_len
+                && ngx_strncmp(headers[i].key.data, (u_char *) name,
+                               name_len) == 0)
+            {
+                seen++;
+                if (seen == nth) {
+                    return &headers[i];
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+/*
+ * Duplicate same-name request headers must survive shadow capture and
+ * restore with their exact per-entry values (regression for the
+ * name-based reconciliation bug: X-Test: A + X-Test: B used to collapse
+ * into B/B, deterministically losing A).
+ */
+static void
+test_shadow_restore_duplicate_headers_keep_values(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *first;
+    ngx_table_elt_t *second;
+
+    g_pool_offset = 0;
+    g_list_grow = 1;
+    r = make_req();
+    if (r == NULL) {
+        TEST_FAIL("request allocation failed");
+        return;
+    }
+    add_header(&r->headers_in.headers, "If-None-Match", "\"one\"");
+    first = add_header(&r->headers_in.headers, "X-Test", "A");
+    second = add_header(&r->headers_in.headers, "X-Test", "B");
+    TEST_ASSERT(first != NULL && second != NULL && first != second,
+                "duplicate X-Test entries created");
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "conditional capture succeeds with duplicate headers");
+
+    ngx_http_markdown_restore_conditional_request(r, &ctx);
+
+    TEST_ASSERT(count_named_headers(&r->headers_in.headers, "X-Test") == 2,
+                "both duplicate X-Test entries survive restore");
+    first = find_nth_named_header(&r->headers_in.headers, "X-Test", 1);
+    second = find_nth_named_header(&r->headers_in.headers, "X-Test", 2);
+    TEST_ASSERT(first != NULL && second != NULL,
+                "both duplicate X-Test entries locatable after restore");
+    TEST_ASSERT(first->value.len == 1
+                && ngx_strncmp(first->value.data, (u_char *) "A", 1) == 0,
+                "first duplicate keeps value A");
+    TEST_ASSERT(second->value.len == 1
+                && ngx_strncmp(second->value.data, (u_char *) "B", 1) == 0,
+                "second duplicate keeps value B");
+    TEST_PASS("duplicate header values preserved across shadow restore");
+    g_list_grow = 0;
+}
+
+/*
+ * Modifying only the SECOND duplicate in the shadow list must reconcile
+ * onto the second original entry, not the first.
+ */
+static void
+test_shadow_restore_modify_second_duplicate(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *shadow_second;
+
+    g_pool_offset = 0;
+    g_list_grow = 1;
+    r = make_req();
+    if (r == NULL) {
+        TEST_FAIL("request allocation failed");
+        return;
+    }
+    add_header(&r->headers_in.headers, "If-None-Match", "\"one\"");
+    add_header(&r->headers_in.headers, "X-Test", "A");
+    add_header(&r->headers_in.headers, "X-Test", "B");
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "conditional capture succeeds with duplicate headers");
+
+    /* Locate the SECOND shadow entry and mutate it. */
+    shadow_second = find_nth_named_header(&r->headers_in.headers, "X-Test", 2);
+    TEST_ASSERT(shadow_second != NULL, "second shadow X-Test locatable");
+    shadow_second->value.data = (u_char *) "B2";
+    shadow_second->value.len = 2;
+
+    ngx_http_markdown_restore_conditional_request(r, &ctx);
+
+    TEST_ASSERT(count_named_headers(&r->headers_in.headers, "X-Test") == 2,
+                "both duplicate X-Test entries survive restore");
+    {
+        ngx_table_elt_t *first = find_nth_named_header(
+            &r->headers_in.headers, "X-Test", 1);
+        ngx_table_elt_t *second = find_nth_named_header(
+            &r->headers_in.headers, "X-Test", 2);
+        TEST_ASSERT(first != NULL && second != NULL,
+                    "both duplicates locatable after restore");
+        TEST_ASSERT(first->value.len == 1
+                    && ngx_strncmp(first->value.data, (u_char *) "A", 1) == 0,
+                    "first duplicate unchanged (A)");
+        TEST_ASSERT(second->value.len == 2
+                    && ngx_strncmp(second->value.data, (u_char *) "B2", 2) == 0,
+                    "second duplicate carries B2");
+    }
+    TEST_PASS("second-duplicate mutation reconciles onto second original");
+    g_list_grow = 0;
+}
+
+/*
+ * A same-name header appended AFTER capture must be spliced back into the
+ * restored list after the originals, preserving A/B/C order.
+ */
+static void
+test_shadow_restore_append_same_name(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *appended;
+
+    g_pool_offset = 0;
+    g_list_grow = 1;
+    r = make_req();
+    if (r == NULL) {
+        TEST_FAIL("request allocation failed");
+        return;
+    }
+    add_header(&r->headers_in.headers, "If-None-Match", "\"one\"");
+    add_header(&r->headers_in.headers, "X-Test", "A");
+    add_header(&r->headers_in.headers, "X-Test", "B");
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "conditional capture succeeds with duplicate headers");
+
+    /* Append a same-name header to the shadow list (downstream module). */
+    appended = add_header(&r->headers_in.headers, "X-Test", "C");
+    TEST_ASSERT(appended != NULL, "same-name append after capture succeeds");
+
+    ngx_http_markdown_restore_conditional_request(r, &ctx);
+
+    TEST_ASSERT(count_named_headers(&r->headers_in.headers, "X-Test") == 3,
+                "all three X-Test entries survive restore");
+    {
+        ngx_table_elt_t *first = find_nth_named_header(
+            &r->headers_in.headers, "X-Test", 1);
+        ngx_table_elt_t *second = find_nth_named_header(
+            &r->headers_in.headers, "X-Test", 2);
+        ngx_table_elt_t *third = find_nth_named_header(
+            &r->headers_in.headers, "X-Test", 3);
+        TEST_ASSERT(first != NULL && second != NULL && third != NULL,
+                    "all three X-Test entries locatable after restore");
+        TEST_ASSERT(first->value.len == 1
+                    && ngx_strncmp(first->value.data, (u_char *) "A", 1) == 0,
+                    "first duplicate keeps A");
+        TEST_ASSERT(second->value.len == 1
+                    && ngx_strncmp(second->value.data, (u_char *) "B", 1) == 0,
+                    "second duplicate keeps B");
+        TEST_ASSERT(third->value.len == 1
+                    && ngx_strncmp(third->value.data, (u_char *) "C", 1) == 0,
+                    "appended entry keeps C");
+    }
+    TEST_PASS("same-name appended header spliced after originals");
+    g_list_grow = 0;
+}
+
+/*
+ * Invalidating only the SECOND duplicate in the shadow list must zero the
+ * hash of the second original entry only.
+ */
+static void
+test_shadow_restore_invalidate_second_duplicate(void)
+{
+    ngx_http_request_t *r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *shadow_second;
+
+    g_pool_offset = 0;
+    g_list_grow = 1;
+    r = make_req();
+    if (r == NULL) {
+        TEST_FAIL("request allocation failed");
+        return;
+    }
+    add_header(&r->headers_in.headers, "If-None-Match", "\"one\"");
+    add_header(&r->headers_in.headers, "X-Test", "A");
+    add_header(&r->headers_in.headers, "X-Test", "B");
+    memset(&ctx, 0, sizeof(ctx));
+
+    TEST_ASSERT(ngx_http_markdown_capture_conditional_request(r, &ctx)
+                    == NGX_OK,
+                "conditional capture succeeds with duplicate headers");
+
+    shadow_second = find_nth_named_header(&r->headers_in.headers, "X-Test", 2);
+    TEST_ASSERT(shadow_second != NULL, "second shadow X-Test locatable");
+    shadow_second->hash = 0;
+
+    ngx_http_markdown_restore_conditional_request(r, &ctx);
+
+    TEST_ASSERT(count_named_headers(&r->headers_in.headers, "X-Test") == 1,
+                "only the first duplicate remains live after invalidation");
+    {
+        ngx_table_elt_t *first = find_nth_named_header(
+            &r->headers_in.headers, "X-Test", 1);
+        TEST_ASSERT(first != NULL, "first duplicate still live");
+        TEST_ASSERT(first->value.len == 1
+                    && ngx_strncmp(first->value.data, (u_char *) "A", 1) == 0,
+                    "first duplicate keeps A");
+    }
+    TEST_PASS("second-duplicate invalidation lands on second original only");
+    g_list_grow = 0;
+}
+
 static void
 test_conditional_helper_guards(void)
 {
@@ -3845,6 +4183,10 @@ main(void)
     test_capture_conditional_state_paths();
     test_shadow_list_last_rebind();
     test_shadow_restore_preserves_existing_header_modifications();
+    test_shadow_restore_duplicate_headers_keep_values();
+    test_shadow_restore_modify_second_duplicate();
+    test_shadow_restore_append_same_name();
+    test_shadow_restore_invalidate_second_duplicate();
     test_conditional_helper_guards();
     test_handle_inm_etag_mismatch();
     test_handle_inm_with_ims_header();
@@ -3863,6 +4205,9 @@ main(void)
     test_handle_bypass_range_request();
     test_handle_bypass_no_transform();
     test_has_no_transform_in_comma_separated_list();
+    test_has_no_transform_quoted_string_comma();
+    test_has_no_transform_quoted_string_leading();
+    test_has_no_transform_quoted_escape_then_real();
     test_has_no_transform_absent();
     test_has_no_transform_no_cache_control();
     test_conditional_cache_validation_modes();

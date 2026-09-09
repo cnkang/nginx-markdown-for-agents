@@ -1073,6 +1073,7 @@ ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
     static u_char  hdr_repr_digest[] = "Repr-Digest";
     static u_char  hdr_token_count[] = "X-Markdown-Tokens";
     static u_char  hdr_trailer[] = "Trailer";
+    static u_char  hdr_content_location[] = "Content-Location";
 
     ngx_http_markdown_invalidate_headers(r,
         hdr_content_md5, sizeof(hdr_content_md5) - 1, 0, NULL);
@@ -1093,6 +1094,12 @@ ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
      * header must not be forwarded. */
     ngx_http_markdown_invalidate_headers(r,
         hdr_trailer, sizeof(hdr_trailer) - 1, 0, NULL);
+    /* Content-Location: the source HTML representation's location is
+     * stale once the body is converted to Markdown; a client resolving
+     * it would fetch the original HTML.  Clear it so the converted
+     * response never advertises the source representation. */
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_location, sizeof(hdr_content_location) - 1, 0, NULL);
     /* Clear the actual trailer entries too: headers_out.trailers is an
      * independent list that HTTP/2/3 and chunked encodings emit without
      * an HTTP/1.1 Trailer declaration.  Suppress them so the Markdown
@@ -1339,6 +1346,7 @@ ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
     static u_char  hdr_repr_digest[] = "Repr-Digest";
     static u_char  hdr_token_count[] = "X-Markdown-Tokens";
     static u_char  hdr_trailer[] = "Trailer";
+    static u_char  hdr_content_location[] = "Content-Location";
     static u_char  hdr_content_length[] = "Content-Length";
     static u_char  hdr_etag[] = "ETag";
     ngx_http_markdown_header_snapshot_t  snapshot;
@@ -1371,6 +1379,11 @@ ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
         hdr_token_count, sizeof(hdr_token_count) - 1, 0, NULL);
     ngx_http_markdown_invalidate_headers(r,
         hdr_trailer, sizeof(hdr_trailer) - 1, 0, NULL);
+    /* Content-Location: the source HTML representation's location is
+     * stale once the representation is converted to Markdown; clear it
+     * so the HEAD response never advertises the source representation. */
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_location, sizeof(hdr_content_location) - 1, 0, NULL);
     /* Content-Type / Content-Encoding: the Markdown representation
      * replaces the upstream HTML one.  Apply both through the shared
      * representation helpers so stale header-list entries are deleted
