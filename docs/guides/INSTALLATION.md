@@ -1636,7 +1636,7 @@ sudo tail -50 /var/log/nginx/error.log
 
 3. Use fail-open strategy:
    ```nginx
-   markdown_error_policy pass;  # Return original HTML on timeout (pre-commit / full-buffer only; post-commit streaming timeouts terminate the response)
+   markdown_error_policy pass;  # Return original HTML on timeout (pre-commit / full-buffer only; post-commit streaming timeouts terminate the response).  Pre-commit pass also fails closed when the replay buffer can no longer reproduce the consumed upstream bytes.
    ```
 
 ---

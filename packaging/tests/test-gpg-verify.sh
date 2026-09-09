@@ -110,7 +110,7 @@ trap 'rm -rf "$RPM_DIR"' EXIT
 # actually used. On hosts where GnuPG enables use-keyboxd, the
 # --keyring/--no-default-keyring options are silently ignored and a bare
 # invocation would import into the user's real key store.
-GNUPGHOME="${TMPDIR}/gnupg"
+GNUPGHOME="${RPM_DIR}/gnupg"
 export GNUPGHOME
 mkdir -m 700 -p "$GNUPGHOME"
 
@@ -118,7 +118,7 @@ mkdir -m 700 -p "$GNUPGHOME"
 
 echo "Step 1: Downloading GPG key..." >&2
 
-KEY_FILE="${TMPDIR}/signing-key.asc"
+KEY_FILE="${RPM_DIR}/signing-key.asc"
 
 if [[ "$GPG_KEY_URL" == file://* ]]; then
     if cp "${GPG_KEY_URL#file://}" "$KEY_FILE" 2>/dev/null; then
@@ -137,7 +137,7 @@ else
 fi
 
 # Import key into temporary keyring
-KEYRING="${TMPDIR}/keyring.gpg"
+KEYRING="${RPM_DIR}/keyring.gpg"
 
 if [[ -f "$KEY_FILE" ]] && [ -s "$KEY_FILE" ]; then
     GPG_IMPORT=$(gpg --no-default-keyring --keyring "$KEYRING" \
@@ -191,8 +191,8 @@ if [[ "$MODE" = "apt" ]] || [ "$MODE" = "both" ]; then
     APT_RELEASE_GPG_URL="${REPO_BASE_URL}/dists/stable/Release.gpg"
     APT_INRELEASE_URL="${REPO_BASE_URL}/dists/stable/InRelease"
 
-    RELEASE_FILE="${TMPDIR}/Release"
-    RELEASE_GPG="${TMPDIR}/Release.gpg"
+    RELEASE_FILE="${RPM_DIR}/Release"
+    RELEASE_GPG="${RPM_DIR}/Release.gpg"
 
     # Try to download Release and Release.gpg
     if curl -sf -o "$RELEASE_FILE" "$APT_RELEASE_URL" 2>/dev/null; then
@@ -221,7 +221,7 @@ if [[ "$MODE" = "apt" ]] || [ "$MODE" = "both" ]; then
     fi
 
     # Check InRelease (combined signed file)
-    INRELEASE_FILE="${TMPDIR}/InRelease"
+    INRELEASE_FILE="${RPM_DIR}/InRelease"
     if curl -sf -o "$INRELEASE_FILE" "$APT_INRELEASE_URL" 2>/dev/null; then
         VERIFY_IR=$(gpg --no-default-keyring --keyring "$KEYRING" \
             --verify "$INRELEASE_FILE" 2>&1) || true
@@ -246,8 +246,8 @@ if [[ "$MODE" = "yum" ]] || [ "$MODE" = "both" ]; then
     YUM_REPOMD_URL="${REPO_BASE_URL}/rpm/repodata/repomd.xml"
     YUM_REPOMD_ASC_URL="${REPO_BASE_URL}/rpm/repodata/repomd.xml.asc"
 
-    REPOMD_FILE="${TMPDIR}/repomd.xml"
-    REPOMD_ASC="${TMPDIR}/repomd.xml.asc"
+    REPOMD_FILE="${RPM_DIR}/repomd.xml"
+    REPOMD_ASC="${RPM_DIR}/repomd.xml.asc"
 
     if curl -sf -o "$REPOMD_FILE" "$YUM_REPOMD_URL" 2>/dev/null; then
         pass "YUM repomd.xml downloaded"
@@ -290,7 +290,7 @@ if [[ "$MODE" = "yum" ]] || [ "$MODE" = "both" ]; then
                     fail "RPM package signature check: $(basename "$rpm_file")"
                     echo "$RPM_SIG" >&2
                 fi
-        done < <(find "${TMPDIR}" -type f -name "*.rpm" -print0 2>/dev/null)
+        done < <(find "${RPM_DIR}" -type f -name "*.rpm" -print0 2>/dev/null)
         if [[ "$rpm_files_found" -eq 0 ]]; then
             pass "no local .rpm files to verify (expected in CI)"
         fi

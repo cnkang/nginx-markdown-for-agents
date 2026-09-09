@@ -346,10 +346,16 @@ check_config_valid() {
         emit_check "config_valid" "fail" "could not create temp config file"
         return
     }
+    # Unique per-invocation log/PID paths derived from the already-created
+    # tmp_conf name: the mktemp'd base is guaranteed unique and collision-free,
+    # and deriving keeps macOS/GNU behavior identical (avoids mktemp -u which
+    # is GNU-only and doesn't reserve the name).
+    local tmp_error_log="${tmp_conf%.conf}.error.log"
+    local tmp_pid="${tmp_conf%.conf}.pid"
 
     # cleanup helper called at every return path — RETURN trap
     # leaks to caller on bash 3.2 (macOS default), so use explicit helper.
-    _check_config_valid_cleanup() { rm -f "$tmp_conf"; }
+    _check_config_valid_cleanup() { rm -f "$tmp_conf" "$tmp_error_log" "$tmp_pid"; }
 
     # Write a config that loads the markdown module if found,
     # and includes a stable directive so the test validates that
@@ -375,8 +381,8 @@ check_config_valid() {
 ${load_module_line}
 daemon off;
 worker_processes 1;
-error_log ${TMPDIR:-/tmp}/doctor-nginx-error.log;
-pid ${TMPDIR:-/tmp}/doctor-nginx.pid;
+error_log ${tmp_error_log};
+pid ${tmp_pid};
 events { worker_connections 64; }
 http {
 ${markdown_directive}
