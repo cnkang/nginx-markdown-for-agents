@@ -446,18 +446,29 @@ fi
 sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
     "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
 if ! sudo nginx -t; then
-  echo "ERROR: nginx -t failed after module swap; restoring previous module..." >&2
+  echo "ERROR: nginx -t failed after module swap; restoring previous module and configuration..." >&2
   # Stage the backup beside the live module, then swap atomically with
   # mv -f so a torn in-place copy can never leave a half-written .so.
   sudo cp -a "${MODULE_BACKUP}" \
       "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged"
   sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" \
       "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+  # The active configuration tree was migrated by MIGRATION-0.9.2.md
+  # before the swap; the old module may not accept the migrated
+  # directives, so restore the backed-up 0.9.1 tree alongside the old
+  # module before re-validating.
+  sudo cp -a "${CONFIG_BACKUP_DIR}/nginx.conf" "${NGINX_CONF_DIR}/nginx.conf"
+  for CONFIG_DIR in "${NGINX_CONF_DIR}/conf.d" "${NGINX_CONF_DIR}/modules-enabled"; do
+    if [[ -d "${CONFIG_BACKUP_DIR}/$(basename "${CONFIG_DIR}")" ]]; then
+      sudo rm -rf "${CONFIG_DIR}"
+      sudo cp -a "${CONFIG_BACKUP_DIR}/$(basename "${CONFIG_DIR}")" "${CONFIG_DIR}"
+    fi
+  done
   if ! sudo nginx -t; then
-    echo "ERROR: restored module also fails validation; do not start NGINX. ${MODULE_BACKUP} is preserved — restore manually from it and your configuration backup." >&2
+    echo "ERROR: restored module and configuration also fail validation; do not start NGINX. ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR} are preserved — restore manually from them." >&2
     exit 1
   fi
-  echo "INFO: previous module restored and configuration verified." >&2
+  echo "INFO: previous module and configuration restored and verified." >&2
   # The rollback left NGINX stopped; restart it on the restored, validated
   # pair using the ownership decision recorded before the stop.
   if [[ "$systemd_managed" -eq 1 ]]; then

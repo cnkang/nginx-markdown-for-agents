@@ -147,7 +147,7 @@ Configure alerts based on these thresholds:
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
 | Failure rate | > 10% for 5 minutes | Page on-call engineer |
-| System error rate (nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}) | > 1% for 5 minutes | Page on-call engineer |
+| System error rate (rate(nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}[5m]) / rate(nginx_markdown_requests_total[5m])) | > 1% for 5 minutes | Page on-call engineer |
 | Conversion time (p95) | > 500ms for 10 minutes | Page on-call engineer |
 | Module crash | Worker restart detected | Page on-call engineer |
 
