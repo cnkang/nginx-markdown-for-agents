@@ -102,6 +102,37 @@ def _load_report(path: pathlib.Path) -> dict[str, Any]:
     return value
 
 
+def _resolve_regular_file(path: pathlib.Path) -> pathlib.Path:
+    """Resolve a CLI-supplied input path, rejecting symlinks and non-files.
+
+    The gate runs in agentic CI contexts where CLI arguments may come from
+    an untrusted caller; a resolved regular-file check prevents path
+    injection through symlink or directory tricks.
+    """
+    if path.is_symlink():
+        raise ValueError(f"refusing symlink path: {path}")
+    resolved = path.resolve()
+    if not resolved.is_file():
+        raise ValueError(f"capability report is not a regular file: {path}")
+    return resolved
+
+
+def _resolve_write_target(path: pathlib.Path) -> pathlib.Path:
+    """Resolve a CLI-supplied write target inside the repository root."""
+    if path.is_symlink():
+        raise ValueError(f"refusing symlink path: {path}")
+    resolved = path.resolve()
+    if resolved.exists() and not resolved.is_file():
+        raise ValueError(f"write target is not a regular file: {path}")
+    root = pathlib.Path.cwd().resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(
+            f"write target escapes repository root: {path}") from exc
+    return resolved
+
+
 def validate(report: dict[str, Any]) -> list[str]:
     """Return explicit missing-capability errors; an empty list means pass."""
     errors: list[str] = []
@@ -144,11 +175,14 @@ def main(argv: list[str] | None = None) -> int:
         report = (
             _source_capabilities(args.source_root.resolve(), args.features)
             if args.source_root is not None
-            else _load_report(args.capabilities)
+            else _load_report(_resolve_regular_file(args.capabilities))
         )
         if args.write is not None:
-            args.write.parent.mkdir(parents=True, exist_ok=True)
-            args.write.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            write_target = _resolve_write_target(args.write)
+            write_target.parent.mkdir(parents=True, exist_ok=True)
+            write_target.write_text(
+                json.dumps(report, indent=2) + "\n", encoding="utf-8"
+            )
         errors = validate(report)
     except (OSError, ValueError) as exc:
         print(f"CAPABILITY_CHECK_FAILED: {exc}", file=sys.stderr)
