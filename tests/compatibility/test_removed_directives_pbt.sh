@@ -500,13 +500,13 @@ write_generated_config() {
     if [[ "${placement}" == "location" ]]; then
       printf '%s%s\n' "${indent}" "${directive_line}"
     fi
-    echo "            return 200 'ok';"
+    echo "            empty_gif;"
     echo '        }'
     # Randomized innocuous extra locations so the removed line is surrounded by
     # varied, valid config rather than always appearing in isolation.
     for (( i = 0; i < extra_locations; i++ )); do
       printf '        location /extra%d/ {\n' "${i}"
-      echo "            return 200 'x';"
+      echo "            empty_gif;"
       echo '        }'
     done
     echo '    }'
@@ -621,7 +621,7 @@ http {
     server {
         listen 127.0.0.1:19998;
         location / {
-            return 200 'ok';
+            empty_gif;
         }
     }
 }
