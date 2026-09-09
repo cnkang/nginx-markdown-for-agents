@@ -36,7 +36,8 @@ ABI or configuration stability across 0.9.1 and 0.9.2.
   HTTP/JSON, not protobuf). OTel tracing is not built into the 0.9.2 product.
   No request-pool or worker-owned exporter state is part of the release.
 - Dynconf is removed in 0.9.2: configuration is static, and operators
-  restore a previous valid static configuration file atomically.
+  restore the backed-up, versioned configuration tree atomically
+  (not a single static configuration file).
 - Release-gates-check-092 target with public-surface drift, version
   consistency, and reason-code registry completeness gates.
 - Retired generic 0.5.0 and 0.9.0/0.9.1 release-chain validators. Focused

@@ -5049,10 +5049,9 @@ ngx_http_markdown_streaming_handle_consumed_again(
         rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
             r, ctx, conf, cl->next, &enqueue_error);
         if (rc != NGX_OK) {
-            if ((ctx->stream_sm.headers_committed
-                 || ctx->streaming.commit_state
-                    == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
-                && ctx->streaming.pending_output != NULL)
+            if (ctx->stream_sm.headers_committed
+                || ctx->streaming.commit_state
+                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
             {
                 /* The header block was already mutated and accepted
                  * (queued by the write filter) — this is a post-commit
@@ -5060,9 +5059,18 @@ ngx_http_markdown_streaming_handle_consumed_again(
                  * pre-commit handling, duplicate counters/logs, or select
                  * fail-open against committed Markdown-contract headers.
                  * Route through the post-commit error handler instead
-                 * (mirrors enqueue_with_pending_header's guard). */
+                 * (mirrors enqueue_with_pending_header's guard; the
+                 * committed state applies whether the backpressure came
+                 * from pending_output or pending_header_output).
+                 *
+                 * Pass the FULL chain (cl, not cl->next): the current
+                 * buffer was already consumed by Rust (CONSUMED
+                 * disposition) but its pos was not advanced because the
+                 * remainder enqueue failed, so it must be abandoned
+                 * together with the remainder to avoid re-submitting
+                 * already-consumed bytes on the next body-filter call. */
                 return ngx_http_markdown_streaming_defer_postcommit_error(
-                    r, ctx, enqueue_error, cl->next);
+                    r, ctx, enqueue_error, cl);
             }
 
             /*
@@ -5170,6 +5178,11 @@ ngx_http_markdown_streaming_process_chain(
         }
 
         if (ctx->failopen_completed) {
+            /* Fail-open already forwarded the original response
+             * (including any terminal buffer) downstream.  Stop
+             * processing successor links: the current chain was
+             * delivered, and continuing would replay already-forwarded
+             * bytes or double-advance shared buffers. */
             return NGX_OK;
         }
 

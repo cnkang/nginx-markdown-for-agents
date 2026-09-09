@@ -592,7 +592,7 @@ fi
 # covered by the affected markdown_filter scope (a timestamp-based path may
 # fall outside the location that disables conversion) and include the Host
 # header so the request reaches that scope.
-curl -fsS -o /dev/null \
+curl -sS -o /dev/null \
   -H "Accept: text/markdown" \
   -H "Host: ${ROLLBACK_HOST:-localhost}" \
   "http://localhost/rollback-probe"
