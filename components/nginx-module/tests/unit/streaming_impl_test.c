@@ -5467,6 +5467,9 @@ test_failopen_init_failure_latches_mode(void)
         "fail-open continuation must not duplicate failure metrics");
     TEST_ASSERT(metrics.results.failopen_count == 1,
         "fail-open delivery must count after pending output drains");
+    TEST_ASSERT(ctx.streaming.completion.failopen_chain_forwarded == 0,
+        "no residual fail-open chain marker may survive the continuation "
+        "(a stale marker would swallow the next body-filter chain)");
 
     TEST_PASS("init-failure init-failure failopen_active latch covered");
 }
