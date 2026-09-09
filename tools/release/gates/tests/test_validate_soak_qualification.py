@@ -439,10 +439,6 @@ def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
 def test_run_peak_gauge_semantics(sample):
     """The gauge is a run-wide high-water mark: a positive sample certifies
     an observed peak, while None/zero means no conversion completed."""
-    if sample == 0:
-        # Zero, like None, is missing evidence (production treats
-        # peak <= 0 as unobserved).
-        sample = None
     session = {
         "started": 0,
         "ended": 1800,
@@ -459,7 +455,10 @@ def test_run_peak_gauge_semantics(sample):
     }
     record = validator._build_soak_record(manifest, 1800, [], session)
     assert record["last_streaming_peak_estimate_bytes"] == sample
-    if sample is None:
+    if sample is None or sample == 0:
+        # Zero, like None, is missing evidence: production treats
+        # peak <= 0 as unobserved, so the record must carry the zero
+        # gauge through unchanged and mark the peak unobserved.
         assert record["module_managed_peak_observed"] is False
         assert record["per_request_peak_bytes"] is None
         assert validator._peak_memory_issue(record, manifest) is not None
