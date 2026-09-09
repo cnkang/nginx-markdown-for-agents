@@ -64,10 +64,10 @@ NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
 LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
 
-.PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
+.PHONY: all build rust-lib rust-lib-debug copy-headers check-headers capability-check \
         install \
         test test-rust rust-fmt-check rust-clippy-check test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
-        test-nginx-integration test-e2e test-e2e-canonical test-e2e-rust test-e2e-contract-scripts test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
+        test-nginx-integration test-e2e test-e2e-canonical test-e2e-rust test-e2e-contract-scripts test-streaming-conflict-pbt test-upgrade-rollback-contract test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-all-e2e test-all-coverage \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
@@ -78,7 +78,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         complexity-check \
         docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline decompression-metric-contract-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-092-canonical release-gates-check-092 release-gates-check-all release-gates-check-strict \
         release-pytest-check test-nginx-integration-c \
-        release-matrix-check \
+        release-matrix-check pre-lts-status-check \
         streaming-evidence-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
         test-rust-fuzz-qualification test-e2e-rust-soak \
@@ -95,14 +95,14 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
         verify-auth-cache-e2e verify-status-codes-e2e \
         verify-subrequest-filter-ordering-native-e2e verify-non-streaming-module-e2e \
-        verify-diagnostics-access-phase-e2e verify-dynconf-convergence-e2e \
+        verify-diagnostics-access-phase-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
         clean help
 
 all: build
 
-build: rust-lib copy-headers
+build: rust-lib copy-headers capability-check
 	@echo "Build complete for $(RUST_TARGET)"
 	@echo "Rust library: $(RUST_LIB)"
 
@@ -129,6 +129,9 @@ copy-headers:
 
 check-headers:
 	@cmp -s $(RUST_HEADER) $(NGINX_HEADER) && echo "Headers are in sync" || (echo "Header mismatch: run 'make copy-headers'" && exit 1)
+
+capability-check:
+	@python3 tools/release/gates/verify_build_capabilities.py --source-root . --features "$(RUST_RELEASE_FEATURES)"
 
 install:
 	@test -f "$(MODULE_SO)" || { echo "FAIL: $(MODULE_SO) not found" >&2; exit 1; }
@@ -277,8 +280,13 @@ test-e2e-contract-scripts:
 		*) ;; \
 	esac; \
 	if test -z "$${NGINX_BIN:-}"; then echo "ERROR: set NGINX_BIN or install a module-enabled nginx" >&2; exit 2; fi; \
-	NGINX_BIN="$${NGINX_BIN}" bash tests/compatibility/test_error_policy_values.sh
-	@if test -n "$${NGINX_URL:-}"; then \
+	set -e; \
+	NGINX_BIN="$${NGINX_BIN}" bash tests/compatibility/test_error_policy_values.sh; \
+	NGINX_BIN="$${NGINX_BIN}" bash tests/compatibility/test_removed_directives.sh; \
+	NGINX_BIN="$${NGINX_BIN}" bash tests/compatibility/test_removed_directives_pbt.sh; \
+	NGINX_BIN="$${NGINX_BIN}" bash tests/compatibility/test_streaming_conflict_pbt.sh; \
+	NGINX_BIN="$${NGINX_BIN}" bash tests/compatibility/test_upgrade_rollback_contract.sh; \
+	if test -n "$${NGINX_URL:-}"; then \
 		REQUIRE_FILTER_ORDERING_ALL="$${REQUIRE_FILTER_ORDERING_ALL:-$${RELEASE_GATE_REQUIRE_FILTER_ORDERING:-0}}" \
 			bash tests/e2e/filter_ordering_test.sh; \
 		REQUIRE_AUTH_SUBREQUEST=1 bash tests/e2e/subrequest_ssi_test.sh; \
@@ -288,6 +296,12 @@ test-e2e-contract-scripts:
 		echo "FAIL: filter ordering / subrequest_ssi are part of final E2E qualification and must not be skipped; provide NGINX_URL pointing at a module-enabled fixture (set RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 only for non-release local runs)" >&2; \
 		exit 1; \
 	fi
+
+test-streaming-conflict-pbt:
+	NGINX_BIN="$${NGINX_BIN}" bash tests/compatibility/test_streaming_conflict_pbt.sh $(E2E_ARGS)
+
+test-upgrade-rollback-contract:
+	NGINX_BIN="$${NGINX_BIN}" bash tests/compatibility/test_upgrade_rollback_contract.sh
 
 # ---------------------------------------------------------------------------
 # test-all: aggregate every CI-checkable gate that can run on the current
@@ -325,7 +339,8 @@ TEST_ALL_CORE := \
 	release-gates-check \
 	release-gates-check-070-strict \
 	release-pytest-check \
-	release-matrix-check \
+        release-matrix-check \
+        capability-check \
 	test-corpus-determinism \
 	complexity-check \
 	workflow-context-check \
@@ -346,6 +361,12 @@ test-all:
 # Native E2E suite — the runtime-regressions + brotli-build-matrix jobs
 # from ci.yml.  Requires NGINX_BIN (a module-enabled binary) or an
 # NGINX_URL fixture; fails with guidance when neither is provided.
+#
+# Two targets manage their own NGINX lifecycle (real-NGINX IMS,
+# filter-ordering qualification) and cannot
+# attach to an external NGINX_URL fixture, so they are skipped with an
+# explicit SKIP=1 when only NGINX_URL is supplied.  NGINX_BIN runs keep
+# every scenario.
 test-all-e2e:
 	@test -n "$(NGINX_BIN)" -o -n "$(NGINX_URL)" || { \
 		echo "FAIL: test-all-e2e requires NGINX_BIN (module-enabled nginx) or NGINX_URL (running fixture)" >&2; \
@@ -362,9 +383,15 @@ test-all-e2e:
 	$(MAKE) verify-large-e2e
 	$(MAKE) verify-brotli-streaming-e2e
 	$(MAKE) verify-http2-alpn-e2e
-	$(MAKE) verify-real-nginx-ims-e2e
-	$(MAKE) verify-subrequest-filter-ordering-native-e2e
-	$(MAKE) verify-dynconf-convergence-e2e
+	@test -n "$(NGINX_BIN)" || { \
+		echo "SKIP: real-NGINX IMS / filter-ordering manage their own NGINX (NGINX_BIN-only; skipped in NGINX_URL fixture mode)" >&2; \
+		true; \
+	}
+	@if test -n "$(NGINX_BIN)"; then \
+		set -e; \
+		$(MAKE) verify-real-nginx-ims-e2e; \
+		$(MAKE) verify-subrequest-filter-ordering-native-e2e; \
+	fi
 	$(MAKE) verify-non-streaming-module-e2e
 	@echo "=== test-all-e2e: ALL E2E SCENARIOS PASSED ==="
 
@@ -446,6 +473,7 @@ docs-check-base:
 	python3 tools/render_release_matrix_docs.py --check
 	python3 tools/release/matrix/validate_workflow_matrix_consumers.py
 	python3 tools/release/gates/validate_release_matrix_schema.py
+	$(MAKE) pre-lts-status-check
 
 docs-check: docs-check-base
 	python3 tools/harness/check_harness_sync.py
@@ -495,17 +523,8 @@ public-surface-drift-check:
 	python3 tools/release/gates/compute_abi_fingerprints.py
 
 schema-drift-check:
-	python3 tools/release/gates/generate_schema_artifacts.py --version "$(SCHEMA_RELEASE_VERSION)"
+	python3 tools/release/gates/generate_schema_artifacts.py --check --version "$(SCHEMA_RELEASE_VERSION)"
 	python3 tools/release/gates/validate_schema_drift.py --version "$(SCHEMA_RELEASE_VERSION)"
-	# The generator rewrites the three schema artifacts in place; verify the
-	# committed copies match what the generator produces, otherwise drift in
-	# the committed artifacts would never be detected (the validator only
-	# checks the freshly generated content).
-	@git diff --exit-code -- \
-		artifacts/release/$(SCHEMA_RELEASE_VERSION)/metrics-registry.json \
-		artifacts/release/$(SCHEMA_RELEASE_VERSION)/diagnostics-field-contract.json \
-		artifacts/release/$(SCHEMA_RELEASE_VERSION)/dynconf-precedence-report.json \
-		|| { echo "ERROR: schema artifacts are stale or modified; regenerate and commit them"; exit 1; }
 
 harness-check-full:
 	$(MAKE) docs-check-base
@@ -557,7 +576,6 @@ harness-security-checks:
 	python3 tools/harness/check_removed_directive_registry.py
 	bash tools/harness/detect_cwe190_casts.sh
 	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/ --strict
-	bash tools/harness/detect_live_conf_reads.sh
 	bash tools/harness/detect_ffi_fat_pointer_transfer.sh
 	bash tools/harness/detect_shell_hygiene.sh tools/
 	PYTHONPATH=. python3 tools/harness/detect_const_correctness.py components/nginx-module/src
@@ -639,8 +657,6 @@ test-harness:
 	bash tools/harness/tests/test_detect_e2e_streaming_config.sh
 	bash tools/harness/tests/test_filter_ordering_strict_mode.sh
 	bash tools/harness/tests/test_detect_regex_safety.sh
-	bash tools/harness/tests/test_dynconf_reload_rollback.sh
-	bash tools/harness/tests/test_detect_live_conf_reads.sh
 	bash tools/harness/tests/test_detect_ngx_again_call_sites.sh
 	bash tools/harness/tests/test_detect_uninitialized_stack_struct.sh
 	bash tools/harness/tests/test_detect_decompression_budget.sh
@@ -1265,7 +1281,7 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 	fi
 	EVIDENCE_GATE_BENCHMARK_REPORT="$(CANDIDATE_BENCHMARK_REPORT)" \
 		$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
-	@echo "  [3/8] Public surface and dynconf schema drift checks"
+	@echo "  [3/8] Public surface and schema drift checks"
 	$(MAKE) public-surface-drift-check
 	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=0.9.2
 	@echo "  [4/8] Version consistency (0.9.2)"
@@ -1355,6 +1371,15 @@ release-matrix-check:
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	PYTHONPATH=. python3 -m pytest tools/release/matrix/tests/test_validate_release_matrix.py -q --tb=short
 	@echo "  Release Matrix Source/Projection Check: PASSED"
+
+# pre-lts-status-check: Validate the six release-level statuses without
+# promoting pending, blocked, fixture, or external-observation work to PASS.
+# The candidate.source_sha records the frozen candidate; during development
+# HEAD advances past it, so this routine check validates schema and
+# vocabulary only.  Freeze flows call the validator with --git-head to fail
+# closed when the recorded SHA drifts from the frozen HEAD.
+pre-lts-status-check:
+	python3 tools/release/gates/validate_pre_lts_status.py
 
 # release-candidate-evidence-check: Pre-freeze release candidate evidence gate.
 # Validates release-candidate evidence against the v1 schema.
@@ -1530,8 +1555,11 @@ verify-conditional-requests-e2e:
 # script manages its own NGINX lifecycle and cannot attach to an external
 # one.
 verify-real-nginx-ims-e2e:
-	@if test -z "$(NGINX_BIN)"; then \
-		echo "SKIP: real-NGINX IMS validation requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
+	@if test "$(SKIP)" = "1"; then \
+		echo "SKIP: real-NGINX IMS validation skipped explicitly (SKIP=1)" >&2; \
+	elif test -z "$(NGINX_BIN)"; then \
+		echo "FAIL: real-NGINX IMS validation requires NGINX_BIN (NGINX_URL fixture mode not supported); set SKIP=1 to skip explicitly" >&2; \
+		exit 1; \
 	else \
 		NGINX_BIN="$(NGINX_BIN)" bash tools/ci/verify_real_nginx_ims.sh --port 18088; \
 	fi
@@ -1540,8 +1568,11 @@ verify-real-nginx-ims-e2e:
 # real module-enabled NGINX — mirrors the "Run native SSI and filter-ordering
 # qualification" step of the CI runtime-regressions job.
 verify-subrequest-filter-ordering-native-e2e:
-	@if test -z "$(NGINX_BIN)"; then \
-		echo "SKIP: filter-ordering native E2E requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
+	@if test "$(SKIP)" = "1"; then \
+		echo "SKIP: filter-ordering native E2E skipped explicitly (SKIP=1)" >&2; \
+	elif test -z "$(NGINX_BIN)"; then \
+		echo "FAIL: filter-ordering native E2E requires NGINX_BIN (NGINX_URL fixture mode not supported); set SKIP=1 to skip explicitly" >&2; \
+		exit 1; \
 	else \
 		REQUIRE_FILTER_ORDERING_ALL=1 REQUIRE_AUTH_SUBREQUEST=1 \
 			bash tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18099; \
@@ -1566,13 +1597,6 @@ verify-status-codes-e2e:
 
 verify-diagnostics-access-phase-e2e:
 	./tools/e2e/verify_diagnostics_access_phase_e2e.sh
-
-verify-dynconf-convergence-e2e:
-	@if test -z "$(NGINX_BIN)"; then \
-		echo "SKIP: dynamic-config convergence E2E requires NGINX_BIN (NGINX_URL fixture mode not supported)" >&2; \
-	else \
-		bash tools/e2e/verify_dynconf_convergence_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18103; \
-	fi
 
 # ── Coverage targets ────────────────────────────────────────────────
 # Generate lcov reports consumed by SonarCloud.  Output lands in
@@ -1651,6 +1675,7 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  build                    - Build Rust library + sync header"
+	@echo "  capability-check         - Fail closed when a promised engine or encoding is missing"
 	@echo "  test                     - Fast smoke tests"
 	@echo "  rust-fmt-check           - Check Rust and corpus-tool formatting"
 	@echo "  rust-clippy-check        - Run Clippy for Rust and corpus-tool crates"
@@ -1673,7 +1698,6 @@ help:
 	@echo "  verify-auth-cache-e2e       - Run auth/cache interaction e2e tests"
 	@echo "  verify-status-codes-e2e     - Run upstream status-code passthrough e2e tests"
 	@echo "  verify-diagnostics-access-phase-e2e - Verify native NGINX access-phase restricts diagnostics/metrics handlers"
-	@echo "  verify-dynconf-convergence-e2e - Verify dynamic configuration convergence across workers"
 	@echo "  test-all                 - Run build + rust + unit tests"
 	@echo "  sonar-compile-db         - Generate compile_commands.json for SonarQube for VS Code C/C++ analysis"
 	@echo "  test-benchmark           - Run corpus benchmark and produce Unified Report"

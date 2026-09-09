@@ -586,8 +586,10 @@ generate_nginx_conf() {
         markdown_streaming off;"
       ;;
     balanced)
-      profile_directives="
-        markdown_streaming auto;"
+      # Leave engine selection unset so this profile exercises the product
+      # default: bounded full-buffer conversion.  Explicit `auto` is reserved
+      # for scenarios that intentionally measure the streaming preference.
+      profile_directives=""
       ;;
     *)
       log "warning: unknown profile '$profile', using balanced"
@@ -617,6 +619,9 @@ http {
 
     access_log off;
 
+    # max_inflight is worker-wide and is valid only in the http context.
+    markdown_limits max_inflight=64;
+
     upstream backend {
         server 127.0.0.1:$UPSTREAM_PORT;
     }
@@ -637,7 +642,7 @@ http {
             # conversion and backpressure rather than ratio rejection.
             markdown_limits conversion_memory=64m parser_budget=64m
                 conversion_timeout=2s parser_timeout=2s streaming_buffer=16m
-                decompression_ratio=2000 max_inflight=64;
+                decompression_ratio=2000;
             $profile_directives
         }
 

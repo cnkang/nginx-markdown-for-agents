@@ -124,27 +124,16 @@ ngx_http_markdown_brotli_error_classify(int code)
     }
 }
 
-/* C-side reload classification for file-system failures. */
-#define NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO 254
-
-/*
- * Forward declaration for dynconf snapshot type.
- * Full definition is in ngx_http_markdown_dynconf_impl.h.
- */
-typedef struct ngx_http_markdown_dynconf_snapshot_s
-    ngx_http_markdown_dynconf_snapshot_t;
-
 /*
  * Effective configuration view for per-request consistency.
  *
- * Constructed once at header_filter time from the dynconf snapshot (if
- * dynconf is enabled and the snapshot is valid) or from the live static
- * conf otherwise.  All request-lifetime code reads mutable fields through
- * this view rather than directly from ngx_http_markdown_conf_t, so that
- * a mid-request dynconf reload cannot change behaviour for in-flight
- * requests.
+ * Constructed once at header_filter time from the live static (merged and
+ * inherited) configuration.  All request-lifetime code reads mutable
+ * fields through this view rather than directly from
+ * ngx_http_markdown_conf_t, so a configuration reload cannot change
+ * behaviour for in-flight requests (bind-once invariant).
  *
- * Dynconf-mutable fields that MUST be read through this struct
+ * Fields that MUST be read through this struct
  * (via ngx_http_markdown_effective_*() helpers) in all request-path
  * code (body filter, conversion, logging, budget, streaming):
  *   - filter (represented by enabled)
@@ -154,8 +143,8 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s
  *   - streaming_buffer
  *
  * Direct conf-> reads of these fields in request-path code are
- * violations of AGENTS.md Rule 34 and will be flagged by
- * tools/harness/detect_live_conf_reads.sh.
+ * violations of AGENTS.md Rule 45 and will be flagged by the harness
+ * effective-configuration read checks (static bind-once invariant).
  */
 struct ngx_http_markdown_effective_conf_s {
     ngx_flag_t   enabled;
@@ -172,9 +161,9 @@ struct ngx_http_markdown_effective_conf_s {
     /*
      * Per-field provenance after precedence resolution (0.9.2).
      *
-     * Records the source of each dynconf-mutable field's effective
-     * value: 0=static, 1=dynconf, 2=request_variable.
-     * Only filter may be request_variable; others are static|dynconf.
+     * Records the source of each field's effective value:
+     * 0=static, 1=request_variable.  Only filter may be
+     * request_variable; every other field is static.
      */
     ngx_uint_t   filter_provenance;
     ngx_uint_t   prune_noise_provenance;
@@ -182,7 +171,7 @@ struct ngx_http_markdown_effective_conf_s {
     ngx_uint_t   error_policy_provenance;
     ngx_uint_t   streaming_buffer_provenance;
     /*
-     * Copy of the location's dynconf block mask for diagnostics.
+     * Copy of the location's static explicit block mask for diagnostics.
      */
     ngx_uint_t   block_mask;
 };
@@ -417,31 +406,36 @@ typedef enum {
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_LOG           0x00040000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_CONTENT      0x00080000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PRUNE        0x00100000
-#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_SELECTORS    0x00200000
-#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PROTECTION   0x00400000
+/*
+ * 0x00200000 (SELECTORS) and 0x00400000 (PROTECTION) were retired in 0.9.2
+ * with the custom-selector removal (LTS-R009); 0x01000000 (DYNCONF) and
+ * 0x02000000 (DRY_RUN) were retired with the dynconf subsystem removal
+ * (LTS-R008).  The bit values are left unassigned rather than reused to
+ * preserve the remaining explicit-mask values.
+ */
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DECOMPRESS   0x00800000
-#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DYNCONF      0x01000000
-#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DRY_RUN      0x02000000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DIAGNOSTICS  0x04000000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_EXCLUDED     0x08000000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_METRICS       0x10000000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_ERROR_POLICY  0x20000000
 
 /*
- * Dynconf block mask bits are part of the shared configuration contract.
- * The precedence header repeats these definitions only as a standalone
- * fallback for translation units that do not include this public header.
+ * Static explicit block-mask bits (AGENTS.md Rule 71).
+ *
+ * Each bit marks a field that a server or location block set explicitly;
+ * the config merge propagates the bit parent to child via OR so a child's
+ * explicit value is not silently masked during inheritance.  These are
+ * part of the shared configuration contract and are consumed through the
+ * ngx_http_markdown_field_blocked() primitive.
  */
 #define NGX_HTTP_MARKDOWN_BLOCK_FILTER           (1 << 0)
 #define NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE      (1 << 1)
 #define NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY    (1 << 2)
 #define NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY     (1 << 3)
 #define NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER (1 << 4)
-#define NGX_HTTP_MARKDOWN_DYNCONF_FIELD_COUNT    5
 
 #define NGX_HTTP_MARKDOWN_PROVENANCE_STATIC           0
-#define NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF          1
-#define NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE 2
+#define NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE 1
 
 /*
  * Configuration constants for on_error / error_policy directive.
@@ -450,13 +444,12 @@ typedef enum {
  *   conf->on_error          = NGX_HTTP_MARKDOWN_ON_ERROR_PASS (0)
  *                             or NGX_HTTP_MARKDOWN_ON_ERROR_REJECT (1)
  *   conf->error_status      = actual HTTP status code for the reject
- *                             branch (default 502; 429/503 via dynconf)
+ *                             branch (default 502; 429/503 selectable)
  *
  * The effective configuration carries the same two-value encoding in
- * eff->error_policy (either the static conf value or the dynconf
- * snapshot value).  Dynconf status variants (429/503) select REJECT
- * and pair it with the corresponding error_status; there is no third
- * policy value.
+ * eff->error_policy (projected from the static conf value).  Status
+ * variants (429/503) select REJECT and pair it with the corresponding
+ * error_status; there is no third policy value.
  */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0  /* fail-open: return original HTML */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return error status */
@@ -474,12 +467,13 @@ typedef enum {
  * Configuration constants for markdown_accept directive.
  *
  *   strict   - convert only on an explicit text/markdown Accept match
- *   wildcard - additionally convert on wildcard Accept (star/slash-star,
- *              text/star)
  *   force    - convert regardless of the Accept header (dangerous)
+ *
+ * The "wildcard" value (1) was removed in 0.9.2 (LTS-R010): negotiation is
+ * strict-only.  The numeric slot 1 is intentionally left unused so STRICT (0)
+ * and FORCE (2) keep their stable enum values.
  */
 #define NGX_HTTP_MARKDOWN_ACCEPT_STRICT    0  /* explicit text/markdown only */
-#define NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD  1  /* also wildcard Accept */
 #define NGX_HTTP_MARKDOWN_ACCEPT_FORCE     2  /* convert regardless of Accept */
 
 /*
@@ -489,15 +483,6 @@ typedef enum {
  * parse time (must be 1..65535) — there is no "unlimited" sentinel.
  */
 #define NGX_HTTP_MARKDOWN_MAX_INFLIGHT_DEFAULT  64
-
-/*
- * Default streaming threshold (1 MiB) — fixed internal constant.
- * Responses with Content-Length >= this threshold use streaming mode
- * in auto mode.  Previously operator-configurable; now internalized
- * as a non-configurable heuristic.
- */
-#define NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT \
-    (1024 * 1024)
 
 /*
  * Default streaming budget for the stream.budget field.
@@ -562,10 +547,16 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_FLAVOR_GFM         1  /* GitHub Flavored Markdown */
 
 /*
- * Configuration constants for auth_policy directive
+ * Configuration constants for auth_policy directive (LTS-R021).
+ *
+ * DENY is the default: an unset markdown_auth_policy resolves to no-convert
+ * for identifiable authenticated content (see ngx_http_markdown_config_merge).
+ * When not converting, the original HTML is still served (never refused).
+ * ALLOW is the explicit opt-in ("markdown_auth_policy allow") that converts
+ * authenticated content.
  */
-#define NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW  0  /* Allow conversion of authenticated requests */
-#define NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY   1  /* Deny conversion of authenticated requests */
+#define NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW  0  /* Explicit opt-in: convert authenticated requests */
+#define NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY   1  /* Default (unset): do not convert authenticated requests */
 
 /*
  * Configuration constants for conditional_requests directive
@@ -635,7 +626,9 @@ _Static_assert(MARKDOWN_FORMAT_BROTLI == MARKDOWN_FORMAT_DEFLATE + 1,
  * - token_estimate: NGX_CONF_UNSET (off by default)
  * - front_matter: NGX_CONF_UNSET (off by default)
  * - accept_policy: NGX_CONF_UNSET_UINT (strict by default)
- * - auth_policy: NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW
+ * - auth_policy: NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY (unset default:
+ *   identifiable authenticated content is not converted; explicit
+ *   "markdown_auth_policy allow" opts in to conversion — LTS-R021)
  * - auth_cookies: NULL (no patterns configured)
  * - generate_etag: 0 (off by default — ims_only mode)
  * - conditional_requests: NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE
@@ -643,7 +636,6 @@ _Static_assert(MARKDOWN_FORMAT_BROTLI == MARKDOWN_FORMAT_DEFLATE + 1,
  * - stream_excluded_types: NULL (no exclusions by default)
  * - auto_decompress: 1 (on by default)
  * - ops.diagnostics_enabled: 0 (off by default)
- * - advanced.dynconf_dry_run: 0 (off by default)
  *
  * Unified limits defaults (0.9.2 frozen contract; merged via the
  * NGX_HTTP_MARKDOWN_LIMITS_*_DEFAULT macros):
@@ -665,18 +657,19 @@ _Static_assert(MARKDOWN_FORMAT_BROTLI == MARKDOWN_FORMAT_DEFLATE + 1,
  *   NGX_HTTP_MARKDOWN_LIMITS_MAX_INFLIGHT_DEFAULT (64)
  *
  * Streaming configuration defaults:
- * - stream.policy: auto
+ * - stream.policy: off  (unset == off == bounded full-buffer with
+ *   conversion; changed from auto in 0.9.2, design §14(a), LTS-R011.2)
  * - stream.excluded_types: NULL
  */
 /* sonarcloud-c:S1820: intentionally exceeded; fields are already logically
  * grouped via the ops sub-struct and #ifdef-gated streaming section.  Further
- * grouping (auth, content, pruning, llm, dynconf, response) would require
+ * grouping (auth, content, pruning, llm, response) would require
  * updating 160+ call sites across 15 files (offsetof directives, merge logic,
  * eligibility checks, conversion paths, tests) for no semantic benefit and
  * significant regression risk.  The field count reflects NGINX module
  * configuration breadth, not poor structure design. */
 typedef struct {
-    ngx_uint_t   auth_policy;          /* markdown_auth_policy allow|deny (default: allow) */
+    ngx_uint_t   auth_policy;          /* markdown_auth_policy allow|deny (default: deny/no-convert) */
     ngx_array_t *auth_cookies;         /* markdown_auth_cookies patterns (default: NULL) */
     ngx_flag_t   generate_etag;        /* markdown_cache_validation (etag component) */
     ngx_uint_t   conditional_requests; /* markdown_cache_validation (conditional component) */
@@ -685,30 +678,34 @@ typedef struct {
 
 typedef struct {
     ngx_flag_t   prune_noise;               /* markdown_prune_noise on|off (default: on) */
-    ngx_str_t   *prune_selectors;           /* markdown_prune_selectors (default: built-in list) */
-    ngx_str_t   *prune_protection_selectors; /* markdown_prune_protection_selectors (default: empty) */
-    ngx_flag_t   dynconf_enabled;           /* markdown_dynamic_config on|off (default: off) */
-    ngx_str_t    dynconf_path;              /* markdown_dynamic_config_path (default: empty) */
-    ngx_flag_t   dynconf_dry_run;           /* markdown_dynconf_dry_run on|off (default: off) */
     /*
-     * Per-field dynconf block mask (0.9.2 precedence model).
+     * Custom prune/protection selectors were removed in 0.9.2 (LTS-R009).
+     * Built-in noise reduction is now controlled solely by prune_noise and is
+     * guarded by the fixed regression corpus.  The markdown_prune_selectors /
+     * markdown_prune_protection_selectors directive names remain registered
+     * with an error-returning handler (LTS-R008); no config field backs them.
+     */
+    /*
+     * Static explicit block mask (AGENTS.md Rule 71).
      *
-     * One bit per dynconf-mutable field:
+     * One bit per field whose per-level inheritance is protected:
      *   bit 0: filter         (NGX_HTTP_MARKDOWN_BLOCK_FILTER)
      *   bit 1: prune_noise    (NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE)
      *   bit 2: log_verbosity  (NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY)
      *   bit 3: error_policy   (NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY)
      *   bit 4: streaming_buffer (NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER)
      *
-     * Bit is set when a server/location block explicitly configures
-     * that field.  Propagated from parent to child via OR during merge.
-     * An explicit http-block setting does NOT set the bit.
+     * Bit is set when a server or location block explicitly configures
+     * that field, OR when an explicit http-block setting configures one of
+     * the four non-filter fields below (the filter bit is set only at
+     * server/location level).  Propagated from parent to child via OR
+     * during merge.
      */
-    ngx_uint_t   dynconf_block_mask;
+    ngx_uint_t   static_block_mask;
     ngx_uint_t   static_explicit_mask;
 } ngx_http_markdown_advanced_cfg_t;
 
-/* Configuration fields consumed by request processing and dynamic snapshots. */
+/* Configuration fields consumed by request processing and static snapshots. */
 typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
@@ -720,7 +717,7 @@ typedef struct {
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
     ngx_flag_t   token_estimate;       /* markdown_token_estimate on|off (default: off) */
     ngx_flag_t   front_matter;         /* markdown_front_matter on|off (default: off) */
-    ngx_uint_t   accept_policy;        /* markdown_accept strict|wildcard|force (default: strict) */
+    ngx_uint_t   accept_policy;        /* markdown_accept strict|force (default: strict) */
     ngx_http_markdown_policy_cfg_t policy;
 
     struct {
@@ -768,7 +765,6 @@ typedef struct {
      */
     struct {
         ngx_uint_t    policy;              /* markdown_streaming off|auto|force */
-        ngx_flag_t    policy_explicit;     /* 1 if operator set markdown_streaming */
         ngx_array_t  *excluded_types;      /* markdown_stream_excluded_types (default: NULL) */
         size_t        budget;              /* markdown_limits streaming_buffer (default: 2m) */
     } stream;
@@ -841,9 +837,22 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
         }                                                                    \
     } while (0)
 
+    /*
+     * Default engine = bounded Full_Buffer (LTS-R011.2, design §14(a)).
+     * When markdown_streaming is unset (never written at any level), the
+     * effective policy resolves to STREAMING_OFF (unset ≡ off ≡ bounded
+     * full-buffer with conversion), NOT STREAMING_AUTO.  `auto` retains its
+     * "prefer streaming" meaning only when explicitly written by an operator
+     * (the directive stores the resolved policy value directly); the
+     * default carries no size/heuristic branching.
+     *
+     * Migration note: prior to 0.9.2 the unset default was STREAMING_AUTO,
+     * which preferred streaming for large/chunked responses.  Operators who
+     * relied on that implicit streaming behavior must now write
+     * "markdown_streaming auto" (or "force") explicitly to opt back in.
+     */
     NGX_MD_MERGE_STREAM(policy, ngx_uint_t, -1,
-                        NGX_HTTP_MARKDOWN_STREAMING_AUTO);
-    NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0);
+                        NGX_HTTP_MARKDOWN_STREAMING_OFF);
 
     if (conf->stream.excluded_types == (ngx_array_t *) -1) {
         conf->stream.excluded_types =
@@ -862,11 +871,6 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
  *
  * Holds process-wide shared state that is initialized once during
  * configuration parsing and then reused by all worker processes.
- *
- * The dynconf fields track the unique markdown_dynamic_config_path
- * directive and the location configuration that owns it.  The owner
- * pointer lets worker startup bind the single global watcher to an
- * http, server, or location configuration after inheritance merges.
  */
 /* Forward declaration of the Rust-owned opaque trusted-proxy CIDR set
  * (defined by cbindgen in markdown_converter.h, included after this header
@@ -877,10 +881,6 @@ struct MarkdownTrustedProxies;
 typedef struct {
     ngx_shm_zone_t *metrics_shm_zone;  /* Shared-memory zone for cross-worker metrics */
     size_t          metrics_shm_size;  /* Configured metrics SHM size (default: 8 pages) */
-    ngx_flag_t      dynconf_path_configured; /* 1 after first markdown_dynamic_config_path directive */
-    ngx_str_t       dynconf_first_path;      /* Path value from the first directive (for diagnostics) */
-    /* Merged config that owns the unique dynconf path. */
-    ngx_http_markdown_conf_t *dynconf_owner_conf;
     ngx_http_markdown_loc_validation_summary_t *loc_validation_summary;
     /*
      * http-only trusted-proxy CIDR set for forwarded-header trust.
@@ -898,14 +898,6 @@ typedef struct {
     ngx_atomic_uint_t brotli_workspace_limit;
 #endif
 } ngx_http_markdown_main_conf_t;
-
-/* Return the merged config selected to own the per-worker dynconf watcher. */
-static ngx_inline ngx_http_markdown_conf_t *
-ngx_http_markdown_dynconf_owner(
-    const ngx_http_markdown_main_conf_t *main_conf)
-{
-    return main_conf != NULL ? main_conf->dynconf_owner_conf : NULL;
-}
 
 /*
  * Response buffer structure
@@ -1072,22 +1064,16 @@ typedef struct {
     /* Processing path selection (full-buffer or streaming). */
     ngx_uint_t                   processing_path;
 
-    /* Copy of the active dynconf snapshot into request pool at header_filter
-     * time.  NULL if dynconf is not enabled or pool allocation failed.
-     * Prefer reading through effective_conf below rather than dereferencing
-     * this directly. */
-    ngx_http_markdown_dynconf_snapshot_t *dynconf_snapshot;
-
     /* Effective configuration view built at header_filter time.
-     * Provides request-consistent values for all dynconf-mutable fields.
+     * Provides request-consistent values for all mutable fields.
      * All body/conversion/logging/budget code should read mutable fields
      * through this view instead of directly from ngx_http_markdown_conf_t.
      *
      * Stored inline (by value) in the context so that no pool allocation
-     * is needed: a request whose snapshot allocation failed must still
-     * bind the header-time view, otherwise the body phase would fall
-     * back to static live-conf values and observe a different
-     * configuration than the header phase (bind-once violation). */
+     * is needed; the header-time view is copied here once and the body
+     * phase reuses it, otherwise the body phase would fall back to static
+     * live-conf values and observe a different configuration than the
+     * header phase (bind-once violation). */
     ngx_http_markdown_effective_conf_t  effective_conf_storage;
     ngx_http_markdown_effective_conf_t *effective_conf;
 
@@ -1634,18 +1620,6 @@ typedef struct {
         ngx_atomic_t  replay_buffer_errors_total;
 
         struct {
-            ngx_atomic_t  success;
-            ngx_atomic_t  failure_schema_version;
-            ngx_atomic_t  failure_unknown_key;
-            ngx_atomic_t  failure_duplicate_key;
-            ngx_atomic_t  failure_invalid_type;
-            ngx_atomic_t  failure_out_of_range;
-            ngx_atomic_t  failure_size_exceeded;
-            ngx_atomic_t  failure_parse_error;
-            ngx_atomic_t  failure_file_error;
-        } dynconf_reloads;
-
-        struct {
             ngx_atomic_t  parse_timeouts_total;
             ngx_atomic_t  parse_budget_exceeded_total;
         } parse_interrupts;
@@ -1664,9 +1638,6 @@ typedef struct {
     } perf;
 
 } ngx_http_markdown_metrics_t;
-
-/* Called by the production dynconf watcher after each reload attempt. */
-void ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code);
 
 /*
  * Cross-translation-unit metric ownership helpers used by postcommit output.

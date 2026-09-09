@@ -12,7 +12,7 @@
 #include "markdown_converter.h"
 #include "ngx_http_markdown_ffi_layout_check.h"
 #include "ngx_http_markdown_diagnostics.h"
-#include "ngx_http_markdown_dynconf_impl.h"
+#include "ngx_http_markdown_effective_conf_impl.h"
 #include "ngx_http_markdown_module_state_impl.h"
 #include "ngx_http_markdown_postcommit_metrics_impl.h"
 #include "ngx_http_markdown_filter_chain_impl.h"

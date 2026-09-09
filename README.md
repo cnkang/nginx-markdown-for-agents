@@ -83,7 +83,8 @@ when the result differs.
 
 ## 0.9.2 configuration essentials
 
-0.9.2 freezes the public configuration at 25 active directives. Configure the
+0.9.2 freezes the public configuration at 20 active directives (plus five
+retained reject-only migration names). Configure the
 behavior explicitly so `nginx -T` shows the settings that operators selected.
 
 ```nginx
@@ -160,16 +161,17 @@ eligibility checks still apply.
 0.9.2 is a breaking release candidate. Read the
 [release notes](docs/releases/0.9.2-release-notes.md) before upgrading.
 
-- 0.9.2 reduces the public surface from 63 directives to 25. Profiles, OTel,
-  per-path metrics, shadow mode, and other removed legacy directives are no
-  longer accepted. Run `nginx -t` after migration.
-- Dynamic configuration now accepts JSON schema v1 with five runtime keys.
-  A failed reload keeps the active and last-known-good snapshots unchanged.
-  Restore a file by atomically replacing it.
-- Diagnostics uses read-only JSON schema v2 and accepts only `GET` and `HEAD`.
+- 0.9.2 freezes 20 active directives and retains five removed names as
+  reject-only migration entries. Profiles, OTel, per-path metrics, shadow
+  mode, and other removed legacy directives are no longer active. Run
+  `nginx -t` after migration.
+- The convergence removed runtime dynamic configuration files, watchers,
+  dry-run promotion, and last-known-good snapshots. Move desired values to static
+  directives and apply them through a validated reload or restart.
+- Diagnostics uses read-only JSON schema v3 and accepts only `GET` and `HEAD`.
   Its built-in access boundary is loopback-only. Prometheus metrics use the
   frozen v1 contract.
-- The internal C/Rust FFI ABI advances to v2. Rebuild the module and converter
+- The internal C/Rust FFI ABI advances to v3. Rebuild the module and converter
   together. The FFI is an internal surface and has no cross-version guarantee.
 
 Use the [upgrade guide](docs/guides/UPGRADE-TO-0.9.2.md) for binary replacement,
@@ -200,56 +202,59 @@ installation-specific details.
 
 | NGINX | Channel | OS | libc | Arch | Artifact | Tier | Blocking |
 |-------|---------|-----|------|------|----------|------|----------|
-| 1.31.4 | mainline | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.31.4 | mainline | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.31.4 | mainline | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.31.4 | mainline | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.31.4 | mainline | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.31.4 | mainline | debian12 | glibc | arm64 | docker-image | supported | Yes |
-| 1.31.4 | mainline | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.31.4 | mainline | debian12 | glibc | amd64 | docker-image | supported | Yes |
-| 1.31.4 | mainline | alpine3.24 | musl | arm64 | docker-image | supported | Yes |
-| 1.31.4 | mainline | alpine3.24 | musl | amd64 | docker-image | supported | Yes |
-| 1.31.4 | mainline | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.31.4 | mainline | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
+| 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | No |
+| 1.31.5 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | No |
+| 1.31.5 | mainline | linux | musl | arm64 | dynamic-module | best-effort | No |
+| 1.31.5 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | No |
+| 1.31.5 | mainline | linux | musl | amd64 | dynamic-module | best-effort | No |
+| 1.31.5 | mainline | debian12 | glibc | arm64 | docker-image | best-effort | No |
+| 1.31.5 | mainline | debian12 | glibc | amd64 | docker-image | best-effort | No |
+| 1.31.5 | mainline | alpine3.24 | musl | arm64 | docker-image | best-effort | No |
+| 1.31.5 | mainline | alpine3.24 | musl | amd64 | docker-image | best-effort | No |
+| 1.31.5 | mainline | almalinux9 | glibc | arm64 | rpm-package | best-effort | No |
+| 1.31.5 | mainline | almalinux9 | glibc | amd64 | rpm-package | best-effort | No |
+| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | No |
+| 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
+| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
+| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | No |
 | 1.30.4 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
 | 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.28.3 | legacy | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.28.3 | legacy | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.28.3 | legacy | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.28.3 | legacy | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.28.3 | legacy | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.28.3 | legacy | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.28.3 | legacy | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.28.3 | legacy | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.26.3 | legacy | macos | darwin | arm64 | homebrew-formula | experimental | No |
-| 1.26.3 | legacy | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.26.3 | legacy | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.26.3 | legacy | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.26.3 | legacy | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.26.3 | legacy | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.26.3 | legacy | debian12 | glibc | arm64 | docker-image | supported | Yes |
-| 1.26.3 | legacy | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.26.3 | legacy | debian12 | glibc | amd64 | docker-image | supported | Yes |
-| 1.26.3 | legacy | any | n/a | any | source | best-effort | No |
-| 1.26.3 | legacy | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
-| 1.26.3 | legacy | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
-| 1.26.3 | legacy | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.26.3 | legacy | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.24.0 | legacy | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.24.0 | legacy | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.24.0 | legacy | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.24.0 | legacy | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.24.0 | legacy | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.24.0 | legacy | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.24.0 | legacy | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.24.0 | legacy | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
+| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
+| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
+| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.28.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.28.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.28.3 | stable | any | n/a | any | source | best-effort | No |
+| 1.28.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.28.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
+| 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | No |
+| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
+| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
+| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | Yes |
+| 1.26.3 | stable | any | n/a | any | source | best-effort | No |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | dynamic-module | best-effort | No |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | dynamic-module | best-effort | No |
+| 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
+| 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
+| 1.24.0 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.24.0 | stable | debian12 | glibc | arm64 | deb-package | supported | No |
+| 1.24.0 | stable | debian12 | glibc | amd64 | deb-package | supported | No |
+| 1.24.0 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | No |
+| 1.24.0 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | No |
 <!-- END:release-matrix:support-matrix -->
 
 ## Documentation
@@ -286,7 +291,7 @@ Runtime integration and native E2E checks require a real NGINX binary. Set
 `NGINX_BIN=/absolute/path/to/nginx` when NGINX is not on `PATH`. See the
 [testing documentation](docs/testing/README.md) for the full test matrix.
 
-Building from source requires Rust 1.97.1 (MSRV 1.97, pinned in
+Building from source requires Rust 1.98.1 (MSRV 1.98, pinned in
 `rust-toolchain.toml`).
 
 ## Earlier releases

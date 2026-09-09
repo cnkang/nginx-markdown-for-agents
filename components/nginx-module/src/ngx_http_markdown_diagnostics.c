@@ -6,7 +6,6 @@
  *   - Worker-local configuration snapshot (current directive values)
  *   - Worker-local recent decisions ring buffer (last N decisions)
  *   - Shared-memory metrics snapshot (current aggregate counters)
- *   - Worker-local dynamic configuration state (mtime, version, LKG)
  *
  * The endpoint is gated by the markdown_diagnostics directive (on/off),
  * loopback-only peer validation, and native NGINX access-phase directives
@@ -101,11 +100,6 @@ static ngx_int_t ngx_http_markdown_diag_json_string_byte(
     size_t *consumed);
 static ngx_int_t ngx_http_markdown_diag_json_control(
     u_char **pos, const u_char *last, u_char value);
-static ngx_int_t ngx_http_markdown_diag_masked_keys(
-    u_char **pos, const u_char *last, ngx_uint_t mask);
-static ngx_int_t ngx_http_markdown_diag_render_dynconf(
-    u_char **pos, u_char *last,
-    const ngx_http_markdown_diag_dynconf_t *dynconf);
 static ngx_int_t ngx_http_markdown_diag_render_features(
     u_char **pos, u_char *last);
 static const char *ngx_http_markdown_diag_outcome(ngx_int_t code);
@@ -473,8 +467,7 @@ static ngx_int_t
 ngx_http_markdown_diagnostics_method_not_allowed(ngx_http_request_t *r)
 {
     static u_char body[] =
-        "Method Not Allowed. Use GET or HEAD; rollback is available through "
-        "the dynamic-config file watcher.\n";
+        "Method Not Allowed. Use GET or HEAD.\n";
     ngx_table_elt_t  *allow_hdr;
     ngx_buf_t    *b;
     ngx_chain_t   out;
@@ -805,29 +798,10 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
  *   NGX_OK on success, NGX_ERROR on failure
  */
 /*
- * Diagnostics v2 is deliberately rendered in one bounded pass.  The
+ * Diagnostics v3 is deliberately rendered in one bounded pass.  The
  * endpoint is a strict machine-readable contract: no compatibility fields
- * are emitted and every string is either a closed enum or copied through the
- * bounded dynconf error buffer.
+ * are emitted and every string is a closed enum.
  */
-
-static const char *
-ngx_http_markdown_diag_dynconf_state_name(ngx_uint_t state)
-{
-    switch (state) {
-    case NGX_HTTP_MARKDOWN_DIAG_DYNCONF_NO_FILE:
-        return "no_file";
-    case NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG:
-        return "invalid_without_lkg";
-    case NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE:
-        return "active";
-    case NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED:
-        return "lkg_preserved";
-    default:
-        return "disabled";
-    }
-}
-
 
 static const char *
 ngx_http_markdown_diag_bool(ngx_flag_t value)
@@ -871,14 +845,10 @@ ngx_http_markdown_diag_error_name(ngx_uint_t policy, ngx_uint_t status)
 static const char *
 ngx_http_markdown_diag_source_name(ngx_uint_t source)
 {
-    switch (source) {
-    case NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF:
-        return "dynconf";
-    case NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE:
+    if (source == NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE) {
         return "request_variable";
-    default:
-        return "static";
     }
+    return "static";
 }
 
 
@@ -1141,54 +1111,6 @@ ngx_http_markdown_diag_json_string(
 }
 
 
-static ngx_int_t
-ngx_http_markdown_diag_masked_keys(
-    u_char **pos, const u_char *last, ngx_uint_t mask)
-{
-    static const struct {
-        ngx_uint_t bit;
-        const char *name;
-    } fields[] = {
-        { NGX_HTTP_MARKDOWN_DIAG_MASK_FILTER, "filter" },
-        { NGX_HTTP_MARKDOWN_DIAG_MASK_PRUNE_NOISE, "prune_noise" },
-        { NGX_HTTP_MARKDOWN_DIAG_MASK_LOG_VERBOSITY, "log_verbosity" },
-        { NGX_HTTP_MARKDOWN_DIAG_MASK_ERROR_POLICY, "error_policy" },
-        { NGX_HTTP_MARKDOWN_DIAG_MASK_STREAMING_BUFFER, "streaming_buffer" }
-    };
-    ngx_flag_t emitted;
-
-    if (pos == NULL || *pos == NULL || last == NULL || *pos > last) {
-        return NGX_ERROR;
-    }
-
-    if (ngx_http_markdown_diag_json_put_byte(pos, last, '[') != NGX_OK) {
-        return NGX_ERROR;
-    }
-
-    emitted = 0;
-    for (ngx_uint_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
-        if ((mask & fields[i].bit) == 0) {
-            continue;
-        }
-        if (emitted
-            && ngx_http_markdown_diag_json_put_byte(
-                   pos, last, ',') != NGX_OK)
-        {
-            return NGX_ERROR;
-        }
-        if (ngx_http_markdown_diag_json_string(
-                pos, last, (const u_char *) fields[i].name,
-                strlen(fields[i].name)) != NGX_OK)
-        {
-            return NGX_ERROR;
-        }
-        emitted = 1;
-    }
-
-    return ngx_http_markdown_diag_json_put_byte(pos, last, ']');
-}
-
-
 /*
  * Reason metadata is now generated from reason_registry.toml by
  * tools/reason-codegen/generate.py into markdown_reason_meta.h.
@@ -1325,83 +1247,6 @@ ngx_http_markdown_diagnostics_fmt_decisions(
 }
 
 
-/**
- * Renders dynamic-configuration state fields as a JSON fragment.
- *
- * @param pos     Current output position, updated after rendering.
- * @param last    End of the output buffer.
- * @param dynconf Dynamic-configuration state and metadata to render.
- * @return NGX_OK on success, or NGX_ERROR for invalid output arguments or
- *         failed string rendering.
- */
-static ngx_int_t
-ngx_http_markdown_diag_render_dynconf(
-    u_char **pos, u_char *last,
-    const ngx_http_markdown_diag_dynconf_t *dynconf)
-{
-    if (pos == NULL || *pos == NULL || last == NULL || dynconf == NULL
-        || *pos > last)
-    {
-        return NGX_ERROR;
-    }
-
-    if (dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE
-        || dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED)
-    {
-        *pos = ngx_slprintf(*pos, last,
-            "\"generation\":%ui,\"source_digest\":\"%s\","
-            "\"active_digest\":\"%s\",\"lkg_digest\":",
-            dynconf->generation, dynconf->source_digest,
-            dynconf->active_digest);
-        if (dynconf->lkg_valid && dynconf->lkg_digest[0] != '\0') {
-            *pos = ngx_slprintf(*pos, last, "\"%s\"", dynconf->lkg_digest);
-        } else {
-            *pos = ngx_slprintf(*pos, last, "null");
-        }
-        *pos = ngx_slprintf(*pos, last, ",\"last_success\":");
-        if (dynconf->has_last_success) {
-            *pos = ngx_slprintf(*pos, last, "\"");
-            *pos = ngx_http_markdown_diag_time(*pos, last,
-                (ngx_msec_t) dynconf->last_success);
-            *pos = ngx_slprintf(*pos, last, "\"");
-        } else {
-            *pos = ngx_slprintf(*pos, last, "null");
-        }
-        *pos = ngx_slprintf(*pos, last, ",\"last_error\":");
-        if (dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED
-            && dynconf->last_error_len > 0)
-        {
-            if (ngx_http_markdown_diag_json_string(
-                    pos, last, dynconf->last_error,
-                    dynconf->last_error_len) != NGX_OK)
-            {
-                return NGX_ERROR;
-            }
-        } else {
-            *pos = ngx_slprintf(*pos, last, "null");
-        }
-        return NGX_OK;
-    }
-
-    if (dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG
-        && dynconf->last_error_len > 0)
-    {
-        *pos = ngx_slprintf(*pos, last,
-            "\"generation\":null,\"source_digest\":null,"
-            "\"active_digest\":null,\"lkg_digest\":null,"
-            "\"last_success\":null,\"last_error\":");
-        return ngx_http_markdown_diag_json_string(
-            pos, last, dynconf->last_error, dynconf->last_error_len);
-    }
-
-    *pos = ngx_slprintf(*pos, last,
-        "\"generation\":null,\"source_digest\":null,"
-        "\"active_digest\":null,\"lkg_digest\":null,"
-        "\"last_success\":null,\"last_error\":null");
-    return NGX_OK;
-}
-
-
 static ngx_int_t
 ngx_http_markdown_diag_render_features(u_char **pos, u_char *last)
 {
@@ -1441,7 +1286,7 @@ ngx_http_markdown_diag_render_features(u_char **pos, u_char *last)
 }
 
 /**
- * Builds the version 2 diagnostics JSON document for the current worker.
+ * Builds the version 3 diagnostics JSON document for the current worker.
  *
  * @param r Request whose pool and connection are used to build and log the
  *          diagnostics response.
@@ -1454,7 +1299,6 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
 {
     const ngx_http_markdown_conf_t  *conf;
     const ngx_http_markdown_diag_state_t  *state;
-    ngx_http_markdown_diag_dynconf_t dynconf;
     ngx_http_markdown_diag_effective_t effective;
     ngx_http_markdown_diag_metrics_t metrics;
     u_char                         *buf;
@@ -1463,7 +1307,6 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     size_t                          buf_size;
     size_t                          streaming_buffer;
     u_char                          static_digest[72];
-    const char                     *dynconf_state;
     const char                     *recording_state_name;
     ngx_uint_t                      recording_state;
 
@@ -1482,11 +1325,10 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     p = buf;
     last = buf + buf_size;
 
-    /* Snapshot all configuration surfaces. dynconf is global-process,
-     * effective is per-location with source attribution, and static_digest
-     * fingerprints the compiled-in defaults + dynconf file fingerprint. */
+    /* Snapshot configuration surfaces: effective is per-location with source
+     * attribution, and static_digest fingerprints the merged/inherited
+     * configuration. */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-    ngx_http_markdown_diagnostics_get_dynconf_state(&dynconf);
     ngx_http_markdown_diagnostics_get_effective(conf, &effective);
     ngx_http_markdown_diagnostics_collect_metrics(&metrics);
     if (ngx_http_markdown_diagnostics_get_static_digest(
@@ -1504,9 +1346,8 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     streaming_buffer = effective.streaming_buffer;
 
     /* Header: schema, version, worker identity, build info, features */
-    dynconf_state = ngx_http_markdown_diag_dynconf_state_name(dynconf.state);
     p = ngx_slprintf(p, last,
-        "{\"schema_version\":2,\"product_version\":\"%s\","
+        "{\"schema_version\":3,\"product_version\":\"%s\","
         "\"worker\":{\"pid\":%P,\"scope\":\"worker-local\"},"
         "\"build\":{\"build_kind\":\"%s\","
         "\"source_sha\":\"%s\","
@@ -1521,30 +1362,16 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    /* Configuration block: static digest + dynconf state, keys, masked */
+    /* Configuration block: static digest of the merged/inherited config. */
     p = ngx_slprintf(p, last,
-        "]},\"configuration\":{\"static_digest\":\"%s\","
-        "\"dynconf\":{\"state\":\"%s\",",
-        static_digest, dynconf_state);
-
-    if (ngx_http_markdown_diag_render_dynconf(&p, last, &dynconf)
-        != NGX_OK)
-    {
-        return NGX_ERROR;
-    }
-
-    p = ngx_slprintf(p, last, ",\"masked_keys\":");
-    if (ngx_http_markdown_diag_masked_keys(
-            &p, last, dynconf.masked_fields) != NGX_OK)
-    {
-        return NGX_ERROR;
-    }
+        "]},\"configuration\":{\"static_digest\":\"%s\"",
+        static_digest);
 
     /* Effective section: resolved values + per-field source provenance.
      * Each effective value is paired with its source so operators can
-     * trace which config layer (default, dynconf, location) won. */
+     * trace which config layer (default or location) won. */
     p = ngx_slprintf(p, last,
-        "},\"effective\":{\"filter\":\"%s\","
+        ",\"effective\":{\"filter\":\"%s\","
         "\"prune_noise\":\"%s\",\"log_verbosity\":\"%s\","
         "\"error_policy\":\"%s\",\"streaming_buffer\":%uz},"
         "\"effective_sources\":{\"filter\":\"%s\","
@@ -1583,7 +1410,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     p = ngx_slprintf(p, last, "]}\n");
     if (p >= last) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown: diagnostics v2 JSON truncated");
+            "markdown: diagnostics v3 JSON truncated");
         return NGX_ERROR;
     }
 
@@ -1622,8 +1449,6 @@ ngx_http_markdown_diagnostics_json_size(
     }
 
     return NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE
-           + (6 * (sizeof(((ngx_http_markdown_diag_dynconf_t *) 0)
-                       ->last_error) - 1))
            + ((size_t) decision_count
               * NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE);
 }

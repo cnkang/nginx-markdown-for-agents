@@ -15,7 +15,7 @@
  * NOT be included from any other .c file or used as a standalone
  * compilation unit.
  *
- * Family list (frozen, exactly 11):
+ * Family list (exactly 10; dynconf_reloads removed in 0.9.2, LTS-R006):
  *   1. nginx_markdown_requests_total (counter)
  *   2. nginx_markdown_conversion_attempts_total (counter)
  *   3. nginx_markdown_conversion_deliveries_total (counter)
@@ -25,8 +25,7 @@
  *   7. nginx_markdown_streaming_peak_memory_bytes (gauge)
  *   8. nginx_markdown_streaming_events_total (counter)
  *   9. nginx_markdown_decompression_events_total (counter)
- *  10. nginx_markdown_dynconf_reloads_total (counter)
- *  11. nginx_markdown_build_info (gauge)
+ *  10. nginx_markdown_build_info (gauge)
  *
  * No per-path labels. No URI labels. No JSON format. No multi-format.
  * All label sets are bounded and enumerable.
@@ -115,18 +114,6 @@ typedef struct {
         ngx_atomic_uint_t brotli_failure_truncated;
         ngx_atomic_uint_t brotli_failure_io;
     } decompression;
-
-    struct {
-        ngx_atomic_uint_t success;
-        ngx_atomic_uint_t failure_schema_version;
-        ngx_atomic_uint_t failure_unknown_key;
-        ngx_atomic_uint_t failure_duplicate_key;
-        ngx_atomic_uint_t failure_invalid_type;
-        ngx_atomic_uint_t failure_out_of_range;
-        ngx_atomic_uint_t failure_size_exceeded;
-        ngx_atomic_uint_t failure_parse_error;
-        ngx_atomic_uint_t failure_file_error;
-    } dynconf_reloads;
 
     struct {
         const u_char  *version;
@@ -478,42 +465,6 @@ ngx_http_markdown_metrics_v1_render_families_10_to_11(
         ? snapshot->build_info.nginx_version_text : (const u_char *) "unknown";
     features = snapshot->build_info.features != NULL
         ? snapshot->build_info.features : (const u_char *) "unknown";
-
-    p = ngx_slprintf(p, end,
-        "# HELP nginx_markdown_dynconf_reloads_total "
-        "Dynconf reload attempts by outcome.\n"
-        "# TYPE nginx_markdown_dynconf_reloads_total counter\n"
-        "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"success\",reason=\"ok\"} %uA\n"
-        "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\",reason=\"schema_version\"} %uA\n"
-        "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\",reason=\"unknown_key\"} %uA\n"
-        "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\",reason=\"duplicate_key\"} %uA\n"
-        "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\",reason=\"invalid_type\"} %uA\n"
-        "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\",reason=\"out_of_range\"} %uA\n"
-        "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\",reason=\"size_exceeded\"} %uA\n"
-        "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\",reason=\"parse_error\"} %uA\n"
-        "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\",reason=\"file_error\"} %uA\n"
-        "\n",
-        snapshot->dynconf_reloads.success,
-        snapshot->dynconf_reloads.failure_schema_version,
-        snapshot->dynconf_reloads.failure_unknown_key,
-        snapshot->dynconf_reloads.failure_duplicate_key,
-        snapshot->dynconf_reloads.failure_invalid_type,
-        snapshot->dynconf_reloads.failure_out_of_range,
-        snapshot->dynconf_reloads.failure_size_exceeded,
-        snapshot->dynconf_reloads.failure_parse_error,
-        snapshot->dynconf_reloads.failure_file_error);
-    if (p >= end) {
-        return NULL;
-    }
 
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_build_info "

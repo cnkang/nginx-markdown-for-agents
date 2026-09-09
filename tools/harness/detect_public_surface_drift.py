@@ -2,10 +2,17 @@
 """Fail closed when the declared public-surface contract drifts from source.
 
 The inventory is intentionally more than a list of names.  The gate checks
-the directive command contract, metric metadata, reason-code registry, FFI
-signatures/ABI, and dynconf policy fields.  Source parsing is deliberately
-small and deterministic because this gate also runs in a clean release
-checkout without a compiler or an external schema package.
+the directive command contract, metric metadata, reason-code registry, and
+FFI signatures/ABI.  Source parsing is deliberately small and deterministic
+because this gate also runs in a clean release checkout without a compiler
+or an external schema package.
+
+The pre-LTS 0.9.2 convergence removed the dynamic-configuration (dynconf)
+subsystem: the dynconf source files, schemas, and the ``dynconf_keys``
+inventory group no longer exist, so this gate no longer validates a dynconf
+contract.  The five removed directives (three dynconf directives plus the two
+custom-selector directives) are retained as reject-only migration handlers
+that fail ``nginx -t`` with migration guidance.
 """
 
 from __future__ import print_function
@@ -27,27 +34,43 @@ DIRECTIVES_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_h
 DIRECTIVE_NAMES_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_directive_names.h")
 REASON_CODE_PATH = os.path.join(ROOT, "components", "rust-converter", "src", "decision", "reason_code.rs")
 REASON_C_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_reason.c")
-DYNCONF_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_dynconf_impl.h")
 METRICS_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_metrics_v1_renderer.h")
+# The dynconf FFI module (src/dynconf/ffi.rs) was removed in the pre-LTS 0.9.2
+# convergence; only the retained FFI exports and the reason-code module remain.
 FFI_PATHS = (
     os.path.join(ROOT, "components", "rust-converter", "src", "ffi", "exports.rs"),
     os.path.join(ROOT, "components", "rust-converter", "src", "ffi", "streaming.rs"),
-    os.path.join(ROOT, "components", "rust-converter", "src", "dynconf", "ffi.rs"),
     REASON_CODE_PATH,
 )
 FFI_HEADER_PATH = os.path.join(ROOT, "components", "rust-converter", "include", "markdown_converter.h")
 COMMAND_REGISTRY_ERROR = "ngx_command_t registry is missing or unterminated"
 MIGRATION_PREFIX = "Migration:"
-FINAL_DIRECTIVE_COUNT = 25
-FINAL_METRIC_COUNT = 11
+# Post-convergence target contract (pre-LTS 0.9.2): the dynconf subsystem and
+# the two custom-selector directives were removed. Five directives are retained
+# as reject-only migration handlers, leaving 20 active directives and 10 metric
+# families. See docs/harness/public-surface-inventory.json (schema_version
+# 0.9.3).
+INVENTORY_SCHEMA_VERSION = "0.9.3"
+FINAL_DIRECTIVE_COUNT = 20
+FINAL_METRIC_COUNT = 10
+# The removed directives are retained with an error-returning handler so any
+# usage fails nginx -t with migration guidance (LTS-R008).
+REMOVED_DIRECTIVE_HANDLER = "ngx_http_markdown_removed_directive"
+FINAL_REJECT_ONLY_COUNT = 5
+
+# The five convergence removals retained as reject-only migration entries
+# (LTS-R008/R009): three dynconf directives and two custom-selector
+# directives.  The inventory must contain exactly these names.
+REJECT_ONLY_NAMES = frozenset({
+    "markdown_dynamic_config",
+    "markdown_dynamic_config_path",
+    "markdown_dynconf_dry_run",
+    "markdown_prune_selectors",
+    "markdown_prune_protection_selectors",
+})
 
 DIRECTIVE_RE = re.compile(r'ngx_string\("(markdown_[^"\\]+)"\)')
 REASON_CODE_RE = re.compile(r'^\s+(\w+)\s*=\s*(\d+)\s*,', re.MULTILINE)
-DYNCONF_KEY_RE = re.compile(r'static\s+u_char\s+\w+_key\[\]\s*=\s*"([^"]+)"')
-DYNCONF_KEYS = (
-    "schema_version", "filter", "prune_noise", "log_verbosity",
-    "error_policy", "streaming_buffer",
-)
 METRIC_NAME_RE = re.compile(r'\b(nginx_markdown_[a-z0-9_]+)\b')
 FFI_FN_RE = re.compile(
     r'pub\s+(unsafe\s+)?extern\s+"C"\s+fn\s+(markdown_\w+)\s*'
@@ -56,7 +79,7 @@ FFI_FN_RE = re.compile(
 
 REQUIRED_TOP_LEVEL = {
     "schema_version", "contract_version", "ffi_abi_version", "directives",
-    "directive_count", "reject_only_directives", "otel", "dynconf_keys", "metrics",
+    "directive_count", "reject_only_directives", "otel", "metrics",
     "reason_codes", "ffi_exports", "registry_count",
 }
 DIRECTIVE_FIELDS = {
@@ -72,10 +95,6 @@ REJECT_FIELDS = {
 METRIC_FIELDS = {"name", "type", "labels", "order", "bounded_cardinality"}
 REASON_FIELDS = {
     "discriminant", "name", "string", "metric_key", "c_accessor",
-}
-DYNCONF_FIELDS = {
-    "name", "type", "allowed_values", "default", "inheritance", "dynamic",
-    "unknown_key", "required", "duplicate",
 }
 FFI_FIELDS = {
     "name", "signature", "params", "return_type", "safety", "abi_version",
@@ -147,8 +166,10 @@ def _validate_inventory_header(inventory):
     if missing:
         errors.append("inventory missing top-level keys: {}".format(
             ", ".join(missing)))
-    if inventory.get("schema_version") != "0.9.2":
-        errors.append("inventory schema_version must be 0.9.2")
+    if inventory.get("schema_version") != INVENTORY_SCHEMA_VERSION:
+        errors.append(
+            "inventory schema_version must be {}".format(
+                INVENTORY_SCHEMA_VERSION))
     if inventory.get("contract_version") != "1":
         errors.append("inventory contract_version must be 1")
     if not isinstance(inventory.get("ffi_abi_version"), int):
@@ -157,24 +178,94 @@ def _validate_inventory_header(inventory):
         errors.append("inventory registry_count must be an integer")
     if not isinstance(inventory.get("directive_count"), int):
         errors.append("inventory directive_count must be an integer")
-    elif isinstance(inventory.get("directives"), list) and inventory.get(
+    if isinstance(inventory.get("directives"), list) and inventory.get(
             "directive_count") != len(inventory["directives"]):
         errors.append(
             "inventory directive_count must equal active directive entries")
-    elif inventory.get("directive_count") != FINAL_DIRECTIVE_COUNT:
+    if inventory.get("directive_count") != FINAL_DIRECTIVE_COUNT:
         errors.append(
-            "final 0.9.2 inventory must contain exactly 25 active directives")
+            "post-convergence inventory must contain exactly {} active "
+            "directives".format(FINAL_DIRECTIVE_COUNT))
     metrics = inventory.get("metrics")
     if isinstance(metrics, list) and len(metrics) != FINAL_METRIC_COUNT:
         errors.append(
-            "final 0.9.2 inventory must contain exactly 11 metric families")
-    if inventory.get("reject_only_directives") != []:
-        errors.append(
-            "final 0.9.2 inventory must contain zero reject-only directives")
+            "post-convergence inventory must contain exactly {} metric "
+            "families".format(FINAL_METRIC_COUNT))
+    errors.extend(_validate_reject_only_migration(inventory))
     otel = inventory.get("otel")
     if isinstance(otel, dict) and otel.get("reject_only") != []:
         errors.append(
-            "final 0.9.2 inventory must contain zero reject-only OTel directives")
+            "post-convergence inventory must contain zero reject-only OTel "
+            "directives")
+    return errors
+
+
+def _validate_reject_only_migration(inventory):
+    """Validate the retained reject-only migration directives.
+
+    The pre-LTS 0.9.2 convergence removed five directives (three dynconf
+    directives and two custom-selector directives) but retains their names in
+    the command registry behind an error-returning handler so any usage fails
+    ``nginx -t`` with migration guidance (LTS-R008). Require exactly those five
+    reject-only entries, each wired to the removed-directive handler, instead of
+    the pre-convergence zero-reject-only contract.
+    """
+    errors = []
+    reject_only = inventory.get("reject_only_directives")
+    if not isinstance(reject_only, list):
+        errors.append("reject_only_directives must be an array")
+        return errors
+    if len(reject_only) != FINAL_REJECT_ONLY_COUNT:
+        errors.append(
+            "post-convergence inventory must contain exactly {} reject-only "
+            "migration directives".format(FINAL_REJECT_ONLY_COUNT))
+    errors.extend(_check_reject_only_names(reject_only))
+    for index, entry in enumerate(reject_only):
+        if not isinstance(entry, dict):
+            errors.append(
+                "reject_only_directives[{}] must be an object".format(index))
+            continue
+        errors.extend(_check_reject_only_entry(entry, index))
+    return errors
+
+
+def _check_reject_only_names(reject_only):
+    """Return errors for missing or unexpected reject-only directive names."""
+    errors = []
+    names = {entry.get("name") for entry in reject_only
+             if isinstance(entry, dict)}
+    missing = sorted(REJECT_ONLY_NAMES - names)
+    if missing:
+        errors.append(
+            "reject_only_directives missing required names: {}".format(
+                ", ".join(missing)))
+    extra = sorted(names - REJECT_ONLY_NAMES)
+    if extra:
+        errors.append(
+            "reject_only_directives contains unexpected names: {}".format(
+                ", ".join(extra)))
+    return errors
+
+
+def _check_reject_only_entry(entry, index):
+    """Return errors for one reject-only directive entry's fields."""
+    errors = []
+    if entry.get("status") != "reject_only":
+        errors.append(
+            "reject_only_directives[{}].status must be reject_only".format(
+                index))
+    if entry.get("classification") != "reject_only":
+        errors.append(
+            "reject_only_directives[{}].classification must be reject_only".format(
+                index))
+    if entry.get("handler") != REMOVED_DIRECTIVE_HANDLER:
+        errors.append(
+            "reject_only_directives[{}].handler must be {}".format(
+                index, REMOVED_DIRECTIVE_HANDLER))
+    if not isinstance(entry.get("migration_target"), str):
+        errors.append(
+            "reject_only_directives[{}].migration_target must be a "
+            "string".format(index))
     return errors
 
 
@@ -249,13 +340,6 @@ def _validate_otel_schema(inventory):
         errors.extend(_validate_otel_group(key, otel.get(key)))
     if otel.get("status") not in ("experimental", "stable", "removed"):
         errors.append("otel.status must be experimental, stable, or removed")
-    return errors
-
-
-def _validate_dynconf_schema(inventory):
-    """Validate the dynamic-configuration key entries."""
-    errors, _ = _validate_named_entries(
-        inventory, "dynconf_keys", DYNCONF_FIELDS)
     return errors
 
 
@@ -375,7 +459,6 @@ def validate_inventory_schema(inventory):
     if set(active_names) & set(reject_names):
         errors.append("directive appears in active and reject-only lists")
     errors.extend(_validate_otel_schema(inventory))
-    errors.extend(_validate_dynconf_schema(inventory))
     errors.extend(_validate_metric_schema(inventory))
     errors.extend(_validate_reason_schema(inventory))
     errors.extend(_validate_ffi_schema(inventory))
@@ -471,15 +554,18 @@ def _command_args(flags):
     return "unknown"
 
 
-def _command_classification(name, handler):
-    """Classify a directive as active, rejected, and/or OTel-specific."""
-    if handler == "ngx_http_markdown_reject_otel_directive":
-        return "reject_only", "reject_only"
-    if handler in ("ngx_http_markdown_reject_removed_directive",
-                   "ngx_http_markdown_reject_streaming_engine"):
+def _command_classification(handler):
+    """Classify a directive as active or reject-only.
+
+    The pre-LTS 0.9.2 convergence removed the OTel and dynconf directives and
+    the two custom-selector directives.  Removed directive names are retained
+    behind ``ngx_http_markdown_removed_directive``, which always fails
+    ``nginx -t`` with migration guidance (LTS-R008); every other handler is an
+    active directive.
+    """
+    if handler == REMOVED_DIRECTIVE_HANDLER:
         return "reject_only", "none"
-    otel = "active" if name in ("markdown_otel", "markdown_otel_endpoint") else "none"
-    return "active", otel
+    return "active", "none"
 
 
 def _clean_c_comment(comment):
@@ -625,16 +711,14 @@ def _hint_migration_target(text, hint_name):
 
 def _command_entry_metadata(name, flags, handler, fields, metadata, source_text):
     """Derive status, defaults, syntax, and migration from one command row."""
-    classification, otel_classification = _command_classification(name, handler)
+    classification, otel_classification = _command_classification(handler)
     source_metadata = (metadata or {}).get(name, {})
     status = source_metadata.get("status") or (
         "reject_only" if classification == "reject_only" else "active")
     if otel_classification == "active" and classification == "active":
         status = "experimental"
     migration_target = source_metadata.get("migration_target")
-    if handler == "ngx_http_markdown_reject_streaming_engine":
-        migration_target = "markdown_streaming"
-    elif classification == "reject_only" and fields[5] != "NULL":
+    if classification == "reject_only" and fields[5] != "NULL":
         migration_target = _hint_migration_target(source_text, fields[5]) \
             or migration_target
     elif classification == "reject_only" and migration_target is None:
@@ -789,101 +873,6 @@ def extract_reason_contract_from_rust():
         if c_name not in c_accessors:
             raise ValueError("C reason storage missing: reason_str_{}".format(c_name))
     return result
-
-
-def extract_dynconf_keys_from_c():
-    """Return the Rust-owned JSON schema keys exposed through the C bridge.
-
-    The production C path deliberately does not duplicate the JSON key table:
-    Rust owns parsing and validation, while C owns bounded file I/O and the
-    atomic snapshot commit.  Keep this check tied to both sides of that
-    boundary so a C-only key scan cannot mistake the obsolete test parser
-    for the production contract.
-    """
-    c_text = read_text(DYNCONF_PATH)
-    rust_text = read_text(os.path.join(
-        ROOT, "components", "rust-converter", "src", "dynconf", "schema.rs"))
-    if "ngx_http_markdown_dynconf_apply_ffi_result" not in c_text:
-        raise ValueError("C dynconf path does not apply the typed FFI result")
-    match = re.search(
-        r"const\s+KNOWN_KEYS\s*:\s*&\[&str\]\s*=\s*&\[(?P<body>.*?)\];",
-        rust_text,
-        re.DOTALL,
-    )
-    if match is None:
-        raise ValueError("Rust dynconf schema does not declare KNOWN_KEYS")
-    keys = re.findall(r'"([^"\\]+)"', match.group("body"))
-    if not keys or "schema_version" not in keys:
-        raise ValueError("Rust dynconf KNOWN_KEYS is empty or incomplete")
-    return sorted(keys)
-
-
-def _dynconf_type_allowed(key):
-    """Return the parser-backed type and allowed values for one key."""
-    if key in ("filter", "prune_noise"):
-        return "flag", ["on", "off"]
-    if key == "log_verbosity":
-        return "enum", ["error", "warn", "info", "debug"]
-    if key == "error_policy":
-        return "enum", ["pass", "fail_closed", "status 429", "status 503"]
-    if key == "streaming_buffer":
-        return "size", []
-    return "version", ["1"]
-
-
-def _dynconf_contract_entry(key, has_per_key_staging, required, duplicate):
-    """Build one dynamic-configuration contract from parser evidence."""
-    typ, allowed = _dynconf_type_allowed(key)
-    if key == "schema_version":
-        inheritance = "none"
-    elif has_per_key_staging:
-        inheritance = "per-key"
-    else:
-        inheritance = "unknown"
-    return {
-        "name": key, "type": typ, "allowed_values": allowed,
-        "default": "required" if required else "inherited",
-        "inheritance": inheritance,
-        "required": required, "dynamic": key != "schema_version",
-        "unknown_key": "reject", "duplicate": duplicate,
-    }
-
-
-def extract_dynconf_contract_from_c():
-    """Build the Rust JSON parser/C atomic-apply contract."""
-    text = read_text(DYNCONF_PATH)
-    keys = extract_dynconf_keys_from_c()
-    schema = read_text(os.path.join(
-        ROOT, "components", "rust-converter", "src", "dynconf", "schema.rs"))
-    parser = read_text(os.path.join(
-        ROOT, "components", "rust-converter", "src", "dynconf", "parser.rs"))
-    ffi = read_text(os.path.join(
-        ROOT, "components", "rust-converter", "src", "dynconf", "ffi.rs"))
-    if "unknown key" not in schema or "DYNCONF_ERR_UNKNOWN_KEY" not in ffi:
-        raise ValueError("dynconf parser does not reject unknown keys")
-    if "required field 'schema_version' is missing" not in schema:
-        raise ValueError("dynconf schema_version is not required")
-    if "DYNCONF_ERR_DUPLICATE_KEY" not in ffi or "DuplicateKey" not in parser:
-        raise ValueError("dynconf parser does not reject duplicate keys")
-    apply_helpers = (
-        "streaming_buffer", "filter", "prune_noise", "log_verbosity",
-        "error_policy",
-    )
-    has_per_key_staging = (
-        "candidate = *snapshot;" in text
-        and all(
-            "ngx_http_markdown_dynconf_apply_{}".format(field) in text
-            for field in apply_helpers
-        )
-    )
-    required = True
-    duplicate = "reject"
-    return {
-        key: _dynconf_contract_entry(
-            key, has_per_key_staging, key == "schema_version" and required,
-            duplicate)
-        for key in keys
-    }
 
 
 def _metric_contract_from_text(text):
@@ -1192,14 +1181,30 @@ def check_directive_contract(inventory, actual_contract):
         if contract.get("classification") == "reject_only"
     }
     drift = _compare_maps("directive", active_entries, active_actual, active_fields)
-    if reject_actual:
-        drift.append(
-            "removed directives must be absent from the live registry: {}".format(
-                ", ".join(sorted(reject_actual))))
-    # Reject-only entries are a compatibility/documentation contract.  Their
-    # expected runtime behavior is NGINX's standard unknown-directive error,
-    # so they must not be represented by live command-table stubs.
+    drift.extend(_check_reject_only_directives(inventory, reject_actual))
     return drift
+
+
+def _check_reject_only_directives(inventory, reject_actual):
+    """Validate the retained reject-only migration directives against source.
+
+    The pre-LTS 0.9.2 convergence keeps the five removed directive names
+    registered behind ``ngx_http_markdown_removed_directive`` so any usage fails
+    ``nginx -t`` with migration guidance (LTS-R008). The live command-table
+    reject-only set must therefore match the inventory's declared reject-only
+    set exactly (by name), and every live reject-only row must match the
+    inventory on every REJECT_FIELDS field (handler, migration_target, default,
+    syntax, classification, args, context, conf_offset, source_flags, post,
+    otel_classification, status) — the same full-field comparison the active
+    directive set receives.
+    """
+    inv_reject = {
+        entry["name"]: entry
+        for entry in inventory.get("reject_only_directives", [])
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+    }
+    return _compare_maps("reject-only directive", inv_reject, reject_actual,
+                         REJECT_FIELDS)
 
 
 def check_directives(inventory, actual_names):
@@ -1242,26 +1247,6 @@ def check_reason_contract(inventory, actual_contract):
         drift.append("reason code registry_count mismatch: inventory={} source={}".format(
             inventory.get("registry_count"), len(actual_contract)))
     return drift
-
-
-def check_dynconf_keys(inventory, actual_keys):
-    """Compare declared dynamic-configuration names with live parser keys."""
-    inv = set(_names(inventory.get("dynconf_keys", [])))
-    actual = set(actual_keys)
-    drift = []
-    if actual - inv:
-        drift.append("dynconf keys in source but not in inventory: {}".format(", ".join(sorted(actual - inv))))
-    if inv - actual:
-        drift.append("dynconf keys in inventory but not in source: {}".format(", ".join(sorted(inv - actual))))
-    return drift
-
-
-def check_dynconf_contract(inventory, actual_contract):
-    """Compare dynamic-configuration behavior metadata with the C parser."""
-    inv = {item.get("name"): item for item in inventory.get("dynconf_keys", [])}
-    return _compare_maps("dynconf key", inv, actual_contract,
-                         ("type", "allowed_values", "default", "inheritance",
-                          "required", "dynamic", "unknown_key", "duplicate"))
 
 
 def check_metrics(inventory, actual_names):
@@ -1319,7 +1304,6 @@ def main():
         if not all_drift:
             all_drift.extend(check_directive_contract(inventory, extract_directive_contract_from_c()))
             all_drift.extend(check_reason_contract(inventory, extract_reason_contract_from_rust()))
-            all_drift.extend(check_dynconf_contract(inventory, extract_dynconf_contract_from_c()))
             all_drift.extend(check_metric_contract(inventory, extract_metric_contract_from_c()))
             all_drift.extend(check_ffi_contract(inventory, extract_ffi_contract_from_rust()))
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:

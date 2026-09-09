@@ -14,9 +14,12 @@ Formulas (documented in components/rust-converter/src/ffi/abi.rs):
   self-referential field makes the fingerprint reproducible.
 - MARKDOWN_SYMBOL_SET_HASH: SHA-256 of the sorted newline-joined names of
   every matching ``#[unsafe(no_mangle)] pub extern "C" fn`` found by
-  ``FFI_EXPORT_RE`` in the three export modules (``exports.rs``,
-  ``streaming.rs``, and ``dynconf/ffi.rs``), truncated to the first 8
-  bytes.  The scan does not exclude cfg-gated duplicates or helpers.
+  ``FFI_EXPORT_RE`` in the export modules (``exports.rs`` and
+  ``streaming.rs``), truncated to the first 8 bytes.  The scan does not
+  exclude cfg-gated duplicates or helpers.  The former ``dynconf/ffi.rs``
+  module and its three exports (``markdown_dynconf_parse``,
+  ``markdown_dynconf_result_free``, ``markdown_dynconf_result_init``) were
+  removed in 0.9.2 (ABI 2 -> 3; design §14(b), LTS-R006/LTS-R023).
 - MARKDOWN_LAYOUT_FINGERPRINT: SHA-256 of the sorted unique
   ``struct_name:size`` lines parsed from the generated NGINX FFI
   layout-check header's ``_Static_assert`` entries, truncated to the first
@@ -37,7 +40,6 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 ABI_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "abi.rs"
 STREAMING_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "streaming.rs"
 EXPORTS_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "exports.rs"
-DYNCONF_FFI_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "dynconf" / "ffi.rs"
 HEADER_PATH = REPO_ROOT / "components" / "rust-converter" / "include" / "markdown_converter.h"
 FFI_EXPORT_RE = re.compile(
     r'#\[unsafe\(no_mangle\)\]\s*pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+(\w+)'
@@ -84,7 +86,6 @@ def symbol_export_names() -> set[str]:
     for path in (
         EXPORTS_PATH,
         STREAMING_PATH,
-        DYNCONF_FFI_PATH,
     ):
         text = _repo_file(path).read_text(encoding="utf-8")
         for match in FFI_EXPORT_RE.finditer(text):

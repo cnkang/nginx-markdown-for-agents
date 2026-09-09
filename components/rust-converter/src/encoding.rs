@@ -621,8 +621,8 @@ mod tests {
     }
 
     #[test]
-    fn cumulative_budget_across_layers() {
-        let original = vec![b'X'; 200_000];
+    fn budget_guard() {
+        let original = vec![0x58u8; 200_000];
         /* Wire = deflate(gzip(content)) for application order
          * [Gzip, Deflate]; each intermediate output is ~200000 bytes. */
         let inner = gzip_compress(&original);
@@ -638,7 +638,83 @@ mod tests {
     }
 
     #[test]
-    fn decode_chain_empty_input_matches_single_format_contract() {
+    fn cross_layer_budget_is_cumulative() {
+        // True cross-layer accumulation. Wire = deflate(gzip(payload));
+        // decode order deflate→gzip. The first decoded layer (deflate)
+        // produces the inner gzip *wire* bytes and the second decoded layer
+        // (gzip) produces the final payload. Both outputs are counted against
+        // one running counter, so cumulative = inner_wire_len + payload_len.
+        //
+        // A budget set strictly between the largest single-layer output
+        // (payload_len) and the cumulative sum (inner_wire_len + payload_len)
+        // must fail only because the counter carries the deflate layer's
+        // output into the gzip layer. A per-layer reset would wrongly succeed
+        // because neither layer alone exceeds the budget.
+        let payload = vec![0x41u8; 200_000];
+        let inner = gzip_compress(&payload);
+        let outer = deflate_compress(&inner);
+        let layers = vec![Encoding::Gzip, Encoding::Deflate];
+
+        let inner_wire_len = inner.len();
+        let payload_len = payload.len();
+        // Guard the premise: the inner wire must be non-trivial so a budget
+        // can sit between payload_len and the cumulative sum.
+        assert!(inner_wire_len > 0);
+        let cumulative_sum = inner_wire_len + payload_len;
+
+        // Budget below the cumulative sum but at/above the single largest
+        // layer output: passes under a per-layer reset, fails under a true
+        // cumulative counter.
+        let budget_between = payload_len + inner_wire_len / 2;
+        assert!(budget_between >= payload_len && budget_between < cumulative_sum);
+        let cumulative_limits = DecodeLimits {
+            max_output: budget_between,
+            ratio: 1_000_000,
+        };
+        let err = decode_chain(&outer, &layers, cumulative_limits).unwrap_err();
+        assert_eq!(
+            err,
+            ChainDecodeError::BudgetExceeded,
+            "cumulative counter must carry the first layer's output into the second"
+        );
+
+        // Control: a budget at/above the cumulative sum succeeds and yields
+        // the original payload — proving the failure above is the cumulative
+        // bound, not a single-layer bound.
+        let generous_limits = DecodeLimits {
+            max_output: cumulative_sum,
+            ratio: 1_000_000,
+        };
+        let out = decode_chain(&outer, &layers, generous_limits).unwrap();
+        assert_eq!(out, payload);
+    }
+
+    #[test]
+    fn next_layer_respects_remaining_budget() {
+        // When the cumulative counter has already consumed the whole budget
+        // after an inner layer, the next (outer-in-decode-order) layer sees a
+        // remaining budget of zero and must fail rather than decode for free.
+        // This exercises the layer_budget == 0 path (remaining_budget == 0).
+        //
+        // Build wire = deflate(gzip(payload)); decode order deflate→gzip.
+        // Set max_output so the first-decoded (deflate) layer's output
+        // exactly consumes the budget, leaving zero for the gzip layer.
+        let payload = vec![0x5au8; 120_000];
+        let inner = gzip_compress(&payload);
+        let outer = deflate_compress(&inner);
+        let layers = vec![Encoding::Gzip, Encoding::Deflate];
+        // The deflate layer decodes to `inner.len()` bytes; set the budget to
+        // exactly that so nothing remains for gzip.
+        let limits = DecodeLimits {
+            max_output: inner.len(),
+            ratio: 1_000_000,
+        };
+        let err = decode_chain(&outer, &layers, limits).unwrap_err();
+        assert_eq!(err, ChainDecodeError::BudgetExceeded);
+    }
+
+    #[test]
+    fn empty_chain_decode_matches_single_format_contract() {
         let identity_only =
             decode_chain(b"", &[Encoding::Identity], DecodeLimits::default()).unwrap();
         assert!(identity_only.is_empty());

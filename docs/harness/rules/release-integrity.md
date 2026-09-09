@@ -69,6 +69,9 @@ own objects. Do not copy provenance into every scenario record:
 4. **Fail closed on missing provenance.** The blocking gate
    (`make release-gates-check-092`) must reject any baseline policy that is
    missing any required provenance field, rather than skipping it silently.
+   Archival `verbatim_import` packs are exempt from the fields clause 9
+   leaves as imported (`source_run` and `source_artifact_sha256`); every
+   other provenance field is still required.
 5. **Raw artifact binding.** For `verbatim_run` baselines, the gate
    recomputes the SHA-256 of the raw artifact file and verifies it matches
    `source_artifact_sha256`; the finalized report (minus `baseline_policy`)
@@ -140,7 +143,12 @@ Verification:
   `refs/tags/perf-baseline/<stem>` fast path first, then any ref that
   reaches the commit, and an explicit SKIP plus a finding when a shallow or
   tagless checkout cannot decide. A present but unanchored commit fails
-  the gate and the finding names the ref to create. The `harness-tooling`
+  the gate and the finding names the ref to create. The fallback to
+  non-canonical refs (including the mutable `main` branch) is a
+  best-effort resolution for archival packs that predate the tag
+  namespace; it never substitutes for the durable anchor clause 10
+  requires, and the gate still fails when only a mutable ref reaches the
+  commit. The `harness-tooling`
   CI job first fetches the anchor refspec
   `+refs/tags/perf-baseline/*:refs/tags/perf-baseline/*`, then proves each
   commit present with `git cat-file -e` before the gate runs. An

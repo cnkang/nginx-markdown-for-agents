@@ -7,8 +7,10 @@
 ## Overview
 
 **0.9.2 is the final breaking release before 1.0.** The configuration surface
-shrank from 63 directives to exactly 25. All removed directives now
-produce NGINX's standard "unknown directive" error during `nginx -t`.
+shrank to 20 active directives. The five names removed by the pre-LTS
+convergence remain as reject-only migration entries. `nginx -t` reports an
+explicit migration message for those names. Other retired names are no longer
+registered and produce NGINX's standard "unknown directive" error.
 
 After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
 24 months.
@@ -16,59 +18,64 @@ After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
 **Upgrade path:** update your nginx.conf to remove/replace removed directives
 (see tables below), replace the module binary, then run `nginx -t` to validate.
 
-## Dynamic Configuration JSON Migration
+## Default-policy actions
 
-0.9.2 accepts the JSON v1 dynconf contract. Convert legacy line-format files
-before upgrading. The old `markdown_filter` key becomes `filter`, and
-`streaming_budget` becomes `streaming_buffer`. 0.9.2 removes `memory_budget`
-from runtime configuration. Set the static `markdown_limits
-conversion_memory=<size>` directive instead.
+> **Authentication action:** `markdown_auth_policy` changes from `allow` to
+> `deny`. Authenticated requests receive the original HTML without conversion.
+> this policy never rejects the request. Set `markdown_auth_policy allow;`
+> explicitly to retain the previous conversion behavior.
 
-```text
-# BEFORE (legacy line format)
-schema_version=0.9
-markdown_filter=on
-streaming_budget=16m
-memory_budget=64m
-```
+> **Streaming action:** `markdown_streaming` changes from `auto` to `off`.
+> Unset and `off` use bounded full-buffer conversion. Opt in with
+> `markdown_streaming auto;` or `markdown_streaming force;`. Explicit `auto`
+> prefers streaming after safety checks, regardless of response size.
 
-```json
-{
-  "schema_version": 1,
-  "filter": "on",
-  "streaming_buffer": 16777216
-}
-```
+## Integer identifier migration
 
-The 0.9.2 watcher accepts only JSON v1. The watcher rejects a legacy line-format
-file. The file does not trigger a successful reload or replace the active or
-last-known-good snapshot. Migrate it and verify the next reload through the
-diagnostics endpoint.
+| Identifier | Old integer | New integer |
+|---|---|---|
+| reason `invalid_dynconf` | 21 | Retired |
+| reason `degraded_snapshot` | 22 | Retired |
+| reason `header_plan_apply_error` | 23 | 21 |
+| reason `streaming_mid_flight_error` | 24 | 22 |
+| reason `bypass_no_transform` | 25 | 23 |
+| reason `encoding_header_invalid` | 26 | 24 |
+| ErrorClass / FFIErrorClass `HeaderPlanApplyError` | 8 | 6 |
+| ErrorClass / FFIErrorClass `StreamingMidFlightError` | 9 | 7 |
 
-The JSON contract is fail-closed: unknown keys, duplicate keys, unsupported
-schema versions, invalid types, and out-of-range values reject the entire
-candidate. The active or last-known-good snapshot remains unchanged. Before
-deployment, validate the JSON shape and supported keys, then check
-`configuration.dynconf` plus
-`nginx_markdown_dynconf_reloads_total{reason=...}` after the first poll.
+Consumers that persist reason integers must resolve the stored meaning through
+the string `metric_key` before adopting the new registry. Do not reinterpret
+old integers with the new enum. Retired reasons have no current replacement.
+Migrate error-class integers by their named class and the table above.
 
-### Diagnostics JSON schema v2
+## Static configuration migration
 
-The diagnostics endpoint now returns `schema_version: 2`. Migrate consumers
+The 0.9.2 pre-LTS convergence removed the runtime dynconf subsystem.
+Remove `markdown_dynamic_config`, `markdown_dynamic_config_path`, and
+`markdown_dynconf_dry_run` from every configuration. The names remain
+reject-only migration entries so `nginx -t` reports the required change.
+
+There is no JSON watcher, runtime key set, last-known-good dynconf snapshot, or
+`nginx_markdown_dynconf_reloads_total` family in 0.9.2. Move each desired value
+to its static directive, run `nginx -t`, and apply it with a controlled reload
+or restart. The full removed-directive table appears below.
+
+### Diagnostics JSON schema v3
+
+The diagnostics endpoint now returns `schema_version: 3`. Migrate consumers
 that read the 0.9.1 directive/profile-oriented response as follows:
 
 | 0.9.1 field | 0.9.2 field or action |
 |-------------|------------------------|
-| `config_snapshot` | `configuration.static_digest`, plus `configuration.effective` and `configuration.effective_sources` for effective dynconf fields |
+| `config_snapshot` | `configuration.static_digest`, plus `configuration.effective` and `configuration.effective_sources` for effective static fields |
 | `metrics_snapshot` | `runtime.module_metrics` for the bounded module counters |
-| `dynconf_state` | `configuration.dynconf` |
+| `dynconf_state` | Removed with the runtime dynconf subsystem |
 | `streaming_config` / old `effective_config` | `configuration.effective` and `configuration.effective_sources` |
-| `profile`, `overridden_fields`, `forced_fields` | Removed; profile presets no longer exist |
+| `profile`, `overridden_fields`, `forced_fields` | Removed. Profile presets no longer exist |
 
-The v2 dynconf object also exposes `masked_keys` and bounded categorical
-`last_error` values. Validate `schema_version` before accessing fields. Do not
-parse removed v1 sections as if they were still present. The authoritative
-schema is [`schemas/diagnostics.schema.json`](../../schemas/diagnostics.schema.json).
+Validate `schema_version` before accessing fields. Do not parse the removed
+runtime-configuration section as if it were still present. The authoritative schema is
+[`schemas/diagnostics.schema.json`](../../schemas/diagnostics.schema.json).
 
 ### Content-Encoding policy
 
@@ -117,11 +124,9 @@ lowercase implementation events in the structured `event=` field, such as
 
 | Category | Count | Action |
 |----------|-------|--------|
-| Reject-only migration stubs removed | 19 | Already caused `nginx -t` failure; now produce standard "unknown directive" |
-| Active directives removed | 14 | Replace with equivalents (see below) |
-| Directives unified into `markdown_limits` | 4 | Use `markdown_limits key=value` syntax |
-| Active directives removed (no replacement) | 1 | `markdown_stream_flush_min` — flushing uses an internal heuristic |
-| Total retained directives | 25 | No change needed |
+| Historical 0.9.0/0.9.1 reject-only removals | 19 | Already removed before 0.9.2; see the historical table below |
+| 0.9.2 convergence reject-only entries | 5 | Remove or replace them. `nginx -t` emits an explicit migration message |
+| Active directives retained | 20 | No change needed after migration |
 
 ---
 
@@ -159,7 +164,7 @@ markdown_profile streaming_first;
 markdown_streaming force;
 markdown_limits conversion_memory=256m conversion_timeout=30s streaming_buffer=16m max_inflight=128;
 markdown_error_policy pass;
-markdown_accept wildcard;
+markdown_accept force;
 ```
 
 These presets are recommendations, not equivalents. The 0.9.1 profiles
@@ -289,10 +294,10 @@ markdown_stream_excluded_types text/csv application/xml;
 
 ### `markdown_stream_threshold` → removed (internalized)
 
-The streaming threshold is now a fixed internal constant (1 MiB). Chunked
-responses (no Content-Length) stream only when `markdown_streaming` permits
-streaming. The directive's `off` behavior stays unchanged. Chunked
-responses do not stream unconditionally.
+Explicit `markdown_streaming auto` prefers streaming after safety checks,
+regardless of response size. There is no size threshold. The default is
+`off`: unset and `off` use bounded full-buffer conversion. Chunked responses
+stream only when an explicit `auto` or `force` policy permits streaming.
 
 ```nginx
 # BEFORE (0.9.1)
@@ -347,11 +352,12 @@ markdown_otel_endpoint http://otel-collector:4317;
 
 ---
 
-## Removed Reject-Only Directives (19)
+## Historical Reject-Only Directives (pre-0.9.2)
 
 These directives already caused `nginx -t` failure with a migration hint in
-0.9.0/0.9.1. In 0.9.2, the migration stubs no longer exist. NGINX
-produces its standard "unknown directive" error.
+0.9.0/0.9.1. Earlier releases removed them before the pre-LTS convergence.
+This table records historical migration context. It is not part of the 0.9.2
+command table.
 
 | Removed Directive | Replacement |
 |-------------------|-------------|
@@ -360,7 +366,7 @@ produces its standard "unknown directive" error.
 | `markdown_streaming_budget` | `markdown_limits streaming_buffer=<size>` |
 | `markdown_on_error` | `markdown_error_policy pass\|fail_closed\|status <code>` |
 | `markdown_streaming_on_error` | `markdown_error_policy pass\|fail_closed\|status <code>` |
-| `markdown_on_wildcard` | `markdown_accept strict\|wildcard\|force` |
+| `markdown_on_wildcard` | `markdown_accept strict\|force` (the `wildcard` value was removed) |
 | `markdown_etag` | `markdown_cache_validation off\|ims_only\|full` |
 | `markdown_etag_policy` | `markdown_cache_validation off\|ims_only\|full` |
 | `markdown_conditional_requests` | `markdown_cache_validation off\|ims_only\|full` |
@@ -374,6 +380,25 @@ produces its standard "unknown directive" error.
 | `markdown_otel_service_name` | Removed, no replacement |
 | `markdown_otel_span_buffer_size` | Removed, no replacement |
 | `markdown_otel_export_timeout` | Removed, no replacement |
+
+---
+
+## Removed 0.9.2 Directives (5)
+
+These directives were active in 0.9.1. The 0.9.2 pre-LTS convergence
+(LTS-R006/LTS-R009) removes them. Their names stay registered with an
+error-returning handler, so `nginx -t` fails with an explicit migration
+message naming the directive rather than a bare "unknown directive" error.
+Remove them from your configuration and rely on static config validated by
+`nginx -t` plus a reload.
+
+| Removed Directive | Replacement |
+|-------------------|-------------|
+| `markdown_dynamic_config` | Removed (dynamic-config subsystem removed); use static config validated by `nginx -t` plus a reload |
+| `markdown_dynamic_config_path` | Removed (dynamic-config subsystem removed); use static config validated by `nginx -t` plus a reload |
+| `markdown_dynconf_dry_run` | Removed (dynamic-config subsystem removed); use static config validated by `nginx -t` plus a reload |
+| `markdown_prune_selectors` | Removed (custom selectors removed); use `markdown_prune_noise on\|off` |
+| `markdown_prune_protection_selectors` | Removed (custom selectors removed); use `markdown_prune_noise on\|off` |
 
 ---
 
@@ -396,15 +421,21 @@ All resource limits are now managed through the single `markdown_limits`
 directive with key=value pairs:
 
 ```nginx
-markdown_limits conversion_timeout=30s
-               parser_timeout=10s
-               conversion_memory=64m
-               parser_budget=32m
-               streaming_buffer=2m
-               decompressed_size=10m
-               decompression_ratio=100
-               max_inflight=64;
+http {
+    markdown_limits conversion_timeout=30s
+                   parser_timeout=10s
+                   conversion_memory=64m
+                   parser_budget=32m
+                   streaming_buffer=2m
+                   decompressed_size=10m
+                   decompression_ratio=100
+                   max_inflight=64;
+}
 ```
+
+`max_inflight` is the worker-wide concurrent-conversion bound and must be
+set in the `http` context. The other keys inherit through `http`, `server`,
+and `location` levels.
 
 | Key | Type | Default | Range |
 |-----|------|---------|-------|
@@ -426,9 +457,9 @@ to keep the module default explicit.
 
 ---
 
-## Final 25-Directive Contract
+## Final 20-Directive Contract
 
-After 0.9.2, these 25 directives constitute the frozen public surface:
+After 0.9.2, these 20 directives constitute the frozen active public surface:
 
 | # | Directive | Context |
 |---|-----------|---------|
@@ -448,15 +479,10 @@ After 0.9.2, these 25 directives constitute the frozen public surface:
 | 14 | `markdown_streaming` | http, server, location |
 | 15 | `markdown_stream_excluded_types` | http, server, location |
 | 16 | `markdown_prune_noise` | http, server, location |
-| 17 | `markdown_prune_selectors` | http, server, location |
-| 18 | `markdown_prune_protection_selectors` | http, server, location |
-| 19 | `markdown_log_verbosity` | http, server, location |
-| 20 | `markdown_metrics` | location |
-| 21 | `markdown_metrics_shm_size` | http |
-| 22 | `markdown_dynamic_config` | http only — move it to the `http {}` block |
-| 23 | `markdown_dynamic_config_path` | http only — move it to the `http {}` block |
-| 24 | `markdown_dynconf_dry_run` | http only — move it to the `http {}` block |
-| 25 | `markdown_diagnostics` | location |
+| 17 | `markdown_log_verbosity` | http, server, location |
+| 18 | `markdown_metrics` | location |
+| 19 | `markdown_metrics_shm_size` | http |
+| 20 | `markdown_diagnostics` | location |
 
 ---
 
@@ -497,6 +523,7 @@ curl --fail-with-body -sS http://localhost/nginx-markdown/diagnostics \
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
+| 0.9.2 | 2026-09-08 | Codex | Align the migration contract with the static 20-directive surface and the five explicit reject-only convergence entries. |
 | 0.9.2 | 2026-08-15 | Hermes | Corrected profile preset guidance: recommended presets, not equivalents; fixed the streaming_buffer default claim. |
 | 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: active voice for removal descriptions. |
 | 0.9.2 | 2026-07-30 | Kang | Complete rewrite for 0.9.2 breaking freeze: 25-directive contract, before/after examples for all removed directives |

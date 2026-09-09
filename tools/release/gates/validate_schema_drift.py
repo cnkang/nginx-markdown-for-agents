@@ -33,24 +33,12 @@ METRICS_REGISTRY = RELEASE_ARTIFACT_DIR / "metrics-registry.json"
 DIAGNOSTICS_FIELD_CONTRACT = (
     RELEASE_ARTIFACT_DIR / "diagnostics-field-contract.json"
 )
-DYNCONF_PRECEDENCE_REPORT = (
-    RELEASE_ARTIFACT_DIR / "dynconf-precedence-report.json"
-)
 CURRENT_VERSION = DEFAULT_VERSION
 
 # Canonical contract paths
 METRICS_CONTRACT = REPO_ROOT / "schemas" / "metrics-v1.registry.json"
-DYNCONF_PRECEDENCE_CONTRACT = (
-    REPO_ROOT / "schemas" / "dynconf-precedence-v1.json"
-)
-DYNCONF_IMPLEMENTATION_SOURCES = [
-    "schemas/dynconf.schema.json",
-    "components/rust-converter/src/dynconf/schema.rs",
-    "components/nginx-module/src/ngx_http_markdown_dynconf_precedence.h",
-]
 
 # Schema paths
-DYNCONF_SCHEMA = REPO_ROOT / "schemas" / "dynconf.schema.json"
 DIAGNOSTICS_SCHEMA = REPO_ROOT / "schemas" / "diagnostics.schema.json"
 
 # Tool paths
@@ -60,7 +48,6 @@ METRICS_VALIDATOR = (
 
 # Expected schema artifacts (must all exist and be valid JSON)
 RELEASE_ARTIFACTS = [
-    DYNCONF_PRECEDENCE_REPORT,
     METRICS_REGISTRY,
     DIAGNOSTICS_FIELD_CONTRACT,
 ]
@@ -72,7 +59,6 @@ def configure_release_version(version: str) -> None:
     global RELEASE_ARTIFACT_DIR
     global METRICS_REGISTRY
     global DIAGNOSTICS_FIELD_CONTRACT
-    global DYNCONF_PRECEDENCE_REPORT
     global RELEASE_ARTIFACTS
 
     if VERSION_PATTERN.fullmatch(version) is None:
@@ -83,11 +69,7 @@ def configure_release_version(version: str) -> None:
     DIAGNOSTICS_FIELD_CONTRACT = (
         RELEASE_ARTIFACT_DIR / "diagnostics-field-contract.json"
     )
-    DYNCONF_PRECEDENCE_REPORT = (
-        RELEASE_ARTIFACT_DIR / "dynconf-precedence-report.json"
-    )
     RELEASE_ARTIFACTS = [
-        DYNCONF_PRECEDENCE_REPORT,
         METRICS_REGISTRY,
         DIAGNOSTICS_FIELD_CONTRACT,
     ]
@@ -126,8 +108,8 @@ def gate_release_artifact_existence() -> list[str]:
 def _check_metrics_registry_structure(reg: dict) -> list[str]:
     """Check basic metrics artifact structure before the dedicated validator."""
     errors = []
-    if reg.get("schema_version") != 1:
-        errors.append("metrics-registry.json: schema_version != 1")
+    if reg.get("schema_version") != 2:
+        errors.append("metrics-registry.json: schema_version != 2")
     families = reg.get("families", [])
     if not isinstance(families, list) or len(families) == 0:
         errors.append("metrics-registry.json: families empty or missing")
@@ -150,13 +132,6 @@ def gate_release_artifact_structure() -> list[str]:
         if "constraints" not in contract:
             errors.append(
                 "diagnostics-field-contract.json: constraints missing"
-            )
-    if DYNCONF_PRECEDENCE_REPORT.exists():
-        report = _load_json(DYNCONF_PRECEDENCE_REPORT)
-        if "five_tier_precedence_hierarchy" not in report:
-            errors.append(
-                "dynconf-precedence-report.json: "
-                "five_tier_precedence_hierarchy missing"
             )
     return errors
 
@@ -289,181 +264,6 @@ def gate_diagnostics_field_contract() -> list[str]:
     return errors
 
 
-def _check_dynconf_key_alignment(dynconf_keys: set[str]) -> list[str]:
-    """Check dynconf keys match diagnostics and precedence contracts."""
-    errors = []
-    if DIAGNOSTICS_FIELD_CONTRACT.exists():
-        contract = _load_json(DIAGNOSTICS_FIELD_CONTRACT)
-        contract_fields = set(contract.get("effective_fields", {}))
-        if extra := dynconf_keys - contract_fields:
-            errors.append(
-                f"dynconf.schema.json has keys not in field contract: "
-                f"{sorted(extra)}"
-            )
-        if missing := contract_fields - dynconf_keys:
-            errors.append(
-                f"Field contract has fields not in dynconf schema: "
-                f"{sorted(missing)}"
-            )
-    if DYNCONF_PRECEDENCE_REPORT.exists():
-        report = _load_json(DYNCONF_PRECEDENCE_REPORT)
-        report_fields = set(
-            report.get("field_specific_provenance_rules", {})
-            .get("fields", {})
-        )
-        if extra := dynconf_keys - report_fields:
-            errors.append(
-                f"dynconf schema has keys not in precedence report: "
-                f"{sorted(extra)}"
-            )
-        if extra := report_fields - dynconf_keys:
-            errors.append(
-                f"precedence report has fields not in dynconf schema: "
-                f"{sorted(extra)}"
-            )
-    return errors
-
-
-def _check_dynconf_streaming_buffer(schema_props: dict) -> list[str]:
-    """Check streaming_buffer bounds match across schema and diagnostics contract."""
-    if not DIAGNOSTICS_FIELD_CONTRACT.exists():
-        return []
-    contract = _load_json(DIAGNOSTICS_FIELD_CONTRACT)
-    schema_field = schema_props.get("streaming_buffer", {})
-    if not isinstance(schema_field, dict):
-        return ["dynconf streaming_buffer malformed: schema entry is not an object"]
-    effective_fields = contract.get("effective_fields")
-    if not isinstance(effective_fields, dict):
-        return ["dynconf streaming_buffer missing-contract: effective_fields absent or malformed"]
-    contract_field = effective_fields.get("streaming_buffer")
-    if not isinstance(contract_field, dict):
-        return ["dynconf streaming_buffer missing-contract: streaming_buffer entry absent or malformed"]
-    bounds = contract_field.get("bounds", {})
-    if not isinstance(bounds, dict):
-        return ["dynconf streaming_buffer malformed: bounds is not an object"]
-    errors = []
-    if bounds.get("minimum") != schema_field.get("minimum"):
-        errors.append(
-            "dynconf streaming_buffer minimum mismatch: "
-            f"schema={schema_field.get('minimum')}, "
-            f"contract={bounds.get('minimum')}"
-        )
-    if bounds.get("maximum") != schema_field.get("maximum"):
-        errors.append(
-            "dynconf streaming_buffer maximum mismatch: "
-            f"schema={schema_field.get('maximum')}, "
-            f"contract={bounds.get('maximum')}"
-        )
-    return errors
-
-
-def _check_precedence_header_contract(contract: dict) -> list[str]:
-    """Compare the C precedence header's numbered descriptions to the contract."""
-    header_path = (
-        REPO_ROOT
-        / "components"
-        / "nginx-module"
-        / "src"
-        / "ngx_http_markdown_dynconf_precedence.h"
-    )
-    try:
-        content = validate_read_path(
-            header_path, purpose="dynconf precedence implementation"
-        ).read_text(encoding="utf-8")
-    except (OSError, ValueError) as exc:
-        return [f"dynconf precedence header unreadable: {exc}"]
-
-    matches = []
-    tier_line = re.compile(r"([1-5])\. ([^\s].*)")
-    for line in content.splitlines():
-        marker = line.lstrip(" \t")
-        if not marker.startswith("*"):
-            continue
-        remainder = marker[1:].lstrip(" \t")
-        match = tier_line.fullmatch(remainder)
-        if match is None:
-            continue
-        matches.append((match.group(1), match.group(2).rstrip()))
-    expected = contract.get("five_tier_precedence_hierarchy", [])
-    actual = [(int(tier), description) for tier, description in matches]
-    expected_pairs = [
-        (entry.get("tier"), entry.get("description")) for entry in expected
-    ]
-    if actual != expected_pairs:
-        return [
-            "dynconf precedence header drifted from "
-            "schemas/dynconf-precedence-v1.json: "
-            f"expected={expected_pairs!r}, actual={actual!r}"
-        ]
-    return []
-
-
-def _check_precedence_contract_projection() -> list[str]:
-    """Check the release report is an exact projection of the canonical contract."""
-    if not DYNCONF_PRECEDENCE_CONTRACT.exists():
-        return ["dynconf-precedence-v1.json missing"]
-    if not DYNCONF_PRECEDENCE_REPORT.exists():
-        return ["dynconf-precedence-report.json missing"]
-    contract = _load_json(DYNCONF_PRECEDENCE_CONTRACT)
-    report = _load_json(DYNCONF_PRECEDENCE_REPORT)
-    contract_fields = (
-        "schema_version",
-        "allowed_provenance",
-        "five_tier_precedence_hierarchy",
-        "field_specific_provenance_rules",
-    )
-    errors = []
-    for field in contract_fields:
-        if report.get(field) != contract.get(field):
-            errors.append(
-                f"dynconf precedence artifact field '{field}' does not match "
-                "schemas/dynconf-precedence-v1.json"
-            )
-    expected_contract_source = "schemas/dynconf-precedence-v1.json"
-    if report.get("contract_source") != expected_contract_source:
-        errors.append(
-            "dynconf precedence artifact contract_source must be "
-            f"{expected_contract_source}"
-        )
-    if report.get("implementation_sources") != DYNCONF_IMPLEMENTATION_SOURCES:
-        errors.append(
-            "dynconf precedence artifact implementation_sources must be "
-            f"{DYNCONF_IMPLEMENTATION_SOURCES!r}"
-        )
-    if "source" in report:
-        errors.append(
-            "dynconf precedence artifact must not use the ambiguous source field"
-        )
-    errors.extend(_check_precedence_header_contract(contract))
-    return errors
-
-
-def gate_dynconf_schema() -> list[str]:
-    """Validate dynconf schema and precedence against independent contracts."""
-    if not DYNCONF_SCHEMA.exists():
-        return ["dynconf.schema.json missing"]
-    schema = _load_json(DYNCONF_SCHEMA)
-    schema_props = schema.get("properties", {})
-    dynconf_keys = {key for key in schema_props if key != "schema_version"}
-    errors = _check_dynconf_key_alignment(dynconf_keys)
-    errors.extend(_check_precedence_contract_projection())
-    if schema.get("additionalProperties") is not False:
-        errors.append("dynconf.schema.json must have additionalProperties: false")
-    errors.extend(_check_dynconf_streaming_buffer(schema_props))
-    if DYNCONF_PRECEDENCE_CONTRACT.exists():
-        contract = _load_json(DYNCONF_PRECEDENCE_CONTRACT)
-        report_fields = set(
-            contract.get("field_specific_provenance_rules", {})
-            .get("fields", {})
-        )
-        if report_fields != dynconf_keys:
-            errors.append(
-                "dynconf schema keys do not match canonical precedence contract: "
-                f"schema={sorted(dynconf_keys)}, contract={sorted(report_fields)}"
-            )
-    return errors
-
-
 def _run_gate(index, total, label, gate_fn):
     """Run a single gate and return errors list."""
     print(f"[{index}/{total}] {label}...")
@@ -489,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
     configure_release_version(args.version)
 
     all_errors = []
-    total = 4
+    total = 3
     passed = 0
     print("=== Schema Drift Gate Validator ===")
     print()
@@ -501,7 +301,6 @@ def main(argv: list[str] | None = None) -> int:
         ),
         ("Validating metrics registry drift", gate_metrics_registry),
         ("Validating diagnostics field contract", gate_diagnostics_field_contract),
-        ("Validating dynconf schema and precedence consistency", gate_dynconf_schema),
     ]
     for index, (label, gate_fn) in enumerate(gates, 1):
         errors = _run_gate(index, total, label, gate_fn)

@@ -8,20 +8,17 @@ source of truth. When the two disagree, the JSON inventory wins and this
 projection is stale. Prose guidance lives in
 `docs/guides/CONFIGURATION.md`.
 
-## Active Directives (25)
+## Active Directives (20)
 
 | Directive | Syntax | Default | Context |
 |---|---|---|---|
-| `markdown_accept` | `strict\|wildcard\|force` | strict | http/server/location |
+| `markdown_accept` | `strict\|force` | strict | http/server/location |
 | `markdown_auth_cookies` | `<pattern> [<pattern> ...]` | built-in `session*`, `auth*`, `PHPSESSID`, `wordpress_logged_in_*` (explicit replaces) | http/server/location |
-| `markdown_auth_policy` | `allow\|deny` | allow | http/server/location |
+| `markdown_auth_policy` | `allow\|deny` | deny | http/server/location |
 | `markdown_auto_decompress` | `on\|off` | on | http/server/location |
 | `markdown_cache_validation` | `off\|ims_only\|full` | ims_only | http/server/location |
 | `markdown_content_types` | `<type> [<type> ...]` | text/html | http/server/location |
 | `markdown_diagnostics` | `on\|off` | off | location |
-| `markdown_dynamic_config` | `on\|off` | off | http |
-| `markdown_dynamic_config_path` | `<path>` | (none) | http |
-| `markdown_dynconf_dry_run` | `on\|off` | off | http |
 | `markdown_error_policy` | `pass\|fail_closed\|status <code>` | pass | http/server/location |
 | `markdown_filter` | `on\|off\|$variable` | off | http/server/location |
 | `markdown_flavor` | `commonmark\|gfm` | commonmark | http/server/location |
@@ -31,30 +28,12 @@ projection is stale. Prose guidance lives in
 | `markdown_metrics` | `(no args)` | off | location |
 | `markdown_metrics_shm_size` | `<size>` | 8*pagesize | http |
 | `markdown_prune_noise` | `on\|off` | on | http/server/location |
-| `markdown_prune_protection_selectors` | `<string>` | empty | http/server/location |
-| `markdown_prune_selectors` | `<string>` | nav footer aside | http/server/location |
 | `markdown_stream_excluded_types` | `<type> [<type> ...]` | none | http/server/location |
-| `markdown_streaming` | `off\|auto\|force` | auto | http/server/location |
+| `markdown_streaming` | `off\|auto\|force` | off | http/server/location |
 | `markdown_token_estimate` | `on\|off` | off | http/server/location |
 | `markdown_trusted_proxies` | `<CIDR>... \| off` | off | http |
 
-## Dynconf Keys (5 runtime-mutable + schema_version metadata)
-
-The file contains 5 runtime-mutable keys for `markdown_dynamic_config` plus
-required `schema_version` metadata. Unknown/duplicate keys, invalid types, and
-out-of-range values reject the whole file. `schema_version` must be present and
-equal `1`.
-
-| Key | Type | Allowed values | Default | Inheritance |
-|---|---|---|---|---|
-| `filter` | flag | `on`, `off` | inherited | per-key |
-| `prune_noise` | flag | `on`, `off` | inherited | per-key |
-| `log_verbosity` | enum | `error`, `warn`, `info`, `debug` | inherited | per-key |
-| `error_policy` | enum | `pass`, `fail_closed`, `status 429`, `status 503` | inherited | per-key |
-| `streaming_buffer` | size | (size: 64 KiB – 1 GiB) | inherited | per-key |
-| `schema_version` | version | `1` | required | none |
-
-## Metric Families (11)
+## Metric Families (10)
 
 Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 `fixed` = no labels.
@@ -70,10 +49,9 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | fixed |
 | `nginx_markdown_streaming_events_total` | counter | `reason`, `transition` | bounded |
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | bounded |
-| `nginx_markdown_dynconf_reloads_total` | counter | `outcome`, `reason` | bounded |
 | `nginx_markdown_build_info` | gauge | `features`, `nginx_version`, `version` | bounded |
 
-## Reason Codes (27)
+## Reason Codes (25)
 
 | # | string | metric family |
 |---|---|---|
@@ -98,16 +76,14 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 | 18 | `conversion_error` | `nginx_markdown_requests_total` |
 | 19 | `memory_budget_exceeded` | `nginx_markdown_requests_total` |
 | 20 | `overload` | `nginx_markdown_requests_total` |
-| 21 | `invalid_dynconf` | `nginx_markdown_requests_total` |
-| 22 | `degraded_snapshot` | `nginx_markdown_requests_total` |
-| 23 | `header_plan_apply_error` | `nginx_markdown_requests_total` |
-| 24 | `streaming_mid_flight_error` | `nginx_markdown_requests_total` |
-| 25 | `bypass_no_transform` | `nginx_markdown_requests_total` |
-| 26 | `encoding_header_invalid` | `nginx_markdown_requests_total` |
+| 21 | `header_plan_apply_error` | `nginx_markdown_requests_total` |
+| 22 | `streaming_mid_flight_error` | `nginx_markdown_requests_total` |
+| 23 | `bypass_no_transform` | `nginx_markdown_requests_total` |
+| 24 | `encoding_header_invalid` | `nginx_markdown_requests_total` |
 
-## FFI Surface Summary (42 exports, ABI v2)
+## FFI Surface Summary (38 exports, ABI v3)
 
-- **ABI version:** 2 (frozen for 0.9.2)
+- **ABI version:** 3 (frozen for 0.9.2)
 - **Classification:** all `INTERNAL_ONLY`
 - **Generated header:** `components/rust-converter/include/markdown_converter.h`
 - Signature format: `name(params) -> return_type`
@@ -118,8 +94,6 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 
 `markdown_limits key=value ...` — each key at most once. Unknown keys, overflow,
 and malformed entries fail static NGINX configuration parsing (`nginx -t`).
-The generic `markdown_limits` directive is not parsed by the atomic dynconf
-path. Dynconf has its own supported-key schema and validation.
 Explicit zero values fail validation. This includes `max_inflight=0`.
 Configured `max_inflight` values must be integers between 1 and 65535. When unset
 or inherited, `max_inflight` merges to the default bound of 64 (there is no unlimited sentinel).
@@ -132,21 +106,25 @@ CONFIGURATION_STRUCTURE.md documents the effective module defaults.
 | `parser_timeout` | Cooperative parser deadline (converter/FFI checkpoint allowance; not a preemptive interrupt; upstream stalls do not consume it) |
 | `conversion_memory` | Full-buffer input admission and generated-output bound; transient scratch allocations are charged against the same budget so over-budget conversion fails with a controlled error before peak memory grows past it |
 | `parser_budget` | Rust parser modeled working-set ceiling |
-| `streaming_buffer` | Streaming working/replay bound (dynconf: 64 KiB – 1 GiB) |
+| `streaming_buffer` | Streaming working/replay bound (64 KiB – 1 GiB) |
 | `decompressed_size` | Cumulative decompressed output bound |
 | `decompression_ratio` | Maximum decompressed/input ratio |
 | `max_inflight` | Per-worker concurrent conversion bound |
 
 ## Removed Surface
 
-Removed directives are invalid in 0.9.2 and must not appear in documentation
-or configuration examples. See `docs/guides/0.9.2-breaking-changes.md` for the
-authoritative names and migration guidance.
+Removed directives are invalid in 0.9.2 and must not appear in configuration
+examples. The five names removed by the pre-LTS convergence remain registered
+as reject-only migration entries so `nginx -t` can report an actionable
+message. They do not contribute to the 20 active directives above. See
+`docs/guides/0.9.2-breaking-changes.md` for the authoritative names and
+migration guidance.
 
 ## Document Updates
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-09-07 | pre-LTS convergence: remove the dynconf subsystem and custom selectors — drop the Dynconf Keys table, the `nginx_markdown_dynconf_reloads_total` family (11→10), the `invalid_dynconf`/`degraded_snapshot` reason codes (27→25), and 5 removed directives (25→20). Bump FFI to 38 exports/ABI v3 to match the inventory. |
 | 0.9.2 | 2026-08-26 | Remove retired FFI exports from the active contract and synchronize the count with the inventory. |
 | 0.9.2 | 2026-08-12 | Synchronize dynconf metadata wording and the FFI export count with the frozen inventory. |
 | 0.9.2 | 2026-08-07 | Pilot: generate contract tables from public-surface-inventory.json ground truth (directives, dynconf, metrics, reason codes, FFI, limits). |

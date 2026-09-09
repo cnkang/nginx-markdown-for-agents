@@ -52,9 +52,16 @@ in `ngx_http_markdown_route_streaming_compression()`:
         )
 ```
 
-The same four-condition gate applies uniformly: `markdown_auto_decompress` ON,
-streaming selected, `markdown_cache_validation` not `full`, and a supported
-codec.
+Three general eligibility gates apply uniformly to every codec:
+`markdown_auto_decompress` ON, streaming selected, and
+`markdown_cache_validation` not `full`. The fourth condition is a codec
+precondition, evaluated per codec: the response's content coding must map
+to a codec the build actually supports. For Brotli that precondition is
+the build defines `NGX_HTTP_BROTLI` at compile time
+(`NGX_MARKDOWN_BROTLI_STREAMING=on|auto` with the decoder dependency
+present). In Brotli-disabled builds the general gates may still hold, but
+Brotli responses fail the codec precondition and remain on the full-buffer
+path.
 The change introduces no new public directive or runtime policy branch. The
 configure-time `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` environment input
 controls whether the build includes the optional decoder. It is not a
@@ -285,4 +292,5 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Reworded the Brotli precondition to active voice (the build defines NGX_HTTP_BROTLI); no behavior change |
 | 0.9.1 | 2026-07-17 | Kang | Initial ADR for Brotli streaming decompression promotion |

@@ -9,6 +9,7 @@ Source0:        %{name}-%{version}.tar.gz
 
 Requires:       nginx-r%{nginx_version}
 Requires:       nginx >= 1:%{nginx_version}
+Requires:       bash
 Conflicts:      nginx >= 1:%{nginx_version_ceil}
 
 %description
@@ -35,7 +36,7 @@ Features:
 - Noise pruning and token estimation
 - Conditional request support (ETag, If-Modified-Since)
 - Prometheus metrics endpoint
-- Dynamic configuration with dry-run validation
+- Static NGINX configuration with read-only diagnostics
 
 The module is installed as a dynamic module (.so) and must be explicitly
 enabled via load_module directive in nginx.conf.
@@ -140,6 +141,10 @@ EOF
 # The exact token has no trailing newline and is consumed after one use, so
 # every affected removal transaction stays explicit.
 %preun
+# Use fixed system paths in this root-run scriptlet; never inherit a
+# caller's PATH when invoking the trusted preremove helper.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 if [ "$1" -eq 0 ]; then
     /bin/bash /usr/libexec/nginx-markdown-for-agents/preremove.sh remove
 fi
@@ -154,37 +159,37 @@ fi
 %license /usr/share/licenses/nginx-markdown-for-agents/LICENSE
 
 %changelog
-* Thu Jul 30 2026 cnkang <liukang@noreply.github.com> - 0.9.2-nginx%{nginx_version}.1
+* Thu Jul 30 2026 Kang - 0.9.2-nginx%{nginx_version}.1
 - v0.9.2: Diagnostics reason_to_code mapping fix, C reason code constants
   synchronized (decompression series 4-11), OTel subsystem removal,
   safe dynconf file restore guidance, public surface contract drift gate,
   release gates 0.9.2
 
-* Wed Jul 29 2026 cnkang <liukang@noreply.github.com> - 0.9.1-nginx%{nginx_version}.1
+* Wed Jul 29 2026 Kang - 0.9.1-nginx%{nginx_version}.1
 - v0.9.1: Breaking — Rust baseline 1.97, streaming_engine removed, non-semantic
   flavors removed, FFI ABI reset to version 1, incomplete OTel controls
   reject-only, trusted_proxies main-only; hybrid zero-copy output, streaming
   decompression routing (gzip/deflate/Brotli), performance evidence gate
 
-* Fri Jul 03 2026 cnkang <liukang@noreply.github.com> - 0.9.0-nginx%{nginx_version}.1
+* Fri Jul 03 2026 Kang - 0.9.0-nginx%{nginx_version}.1
 - v0.9.0: Breaking — Config V2, profile system, error policy consolidation,
   inflight guard, metrics consolidation, reason code lowercase
 
-* Tue Jun 10 2026 cnkang <liukang@noreply.github.com> - 0.8.0-nginx1.26.3.1
+* Tue Jun 10 2026 Kang - 0.8.0-nginx1.26.3.1
 - v0.8.0: True streaming contract, fallback state machine, streaming
   observability, streaming security enforcement, release matrix source of
   truth, streaming configuration directives
 
-* Sat May 18 2026 cnkang <liukang@noreply.github.com> - 0.7.0-nginx1.26.3.1
+* Sat May 18 2026 Kang - 0.7.0-nginx1.26.3.1
 - v0.7.0: Package redesign per 0.7.0 release package naming and layout — correct naming, nginx version
   binding in Release tag, minimum version constraint, safe %post script
 
-* Sat May 17 2026 cnkang <liukang@noreply.github.com> - 0.7.0-1
+* Sat May 17 2026 Kang - 0.7.0-1
 - v0.7.0: Rust-first architecture, bounded decompression, Accept negotiation,
   conditional requests, decision engine, DEB/RPM packaging, K8s deployment
 
-* Wed May 06 2026 cnkang <liukang@noreply.github.com> - 0.6.1-1
+* Wed May 06 2026 Kang - 0.6.1-1
 - v0.6.1: harness Rules 27-31, output-safety risk pack, dynconf two-phase reload
 
-* Sat May 02 2026 cnkang <liukang@noreply.github.com> - 0.6.0-1
+* Sat May 02 2026 Kang - 0.6.0-1
 - Initial RPM package for v0.6.0

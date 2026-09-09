@@ -118,7 +118,7 @@ Colons and other YAML special characters are safe within double-quoted strings.
 4. `test_yaml_front_matter_whitespace_escaping` - Newlines and tabs
 5. `test_yaml_front_matter_image_url_resolution` - Absolute URL resolution
 6. `test_yaml_front_matter_disabled_by_default` - Default behavior
-7. `test_yaml_front_matter_requires_output_flag` - Metadata without output
+7. `test_yaml_front_matter_requires_both_flags` - Direct-construction flag interactions with `ConversionOptions`. Each flag alone emits no front-matter block from a direct `Options`/`Converter` construction. The `extract_metadata` promotion happens **only** in the FFI layer when `include_front_matter` is set, never in direct construction.
 8. `test_yaml_front_matter_minimal` - Minimal metadata
 9. `test_yaml_front_matter_empty_metadata` - Empty metadata handling
 10. `test_yaml_front_matter_format` - YAML structure validation

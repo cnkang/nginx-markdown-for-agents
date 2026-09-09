@@ -210,14 +210,21 @@ wins.
 
 ### Error Handling
 
-- Missing or malformed charset parameter in Content-Type: Falls back to HTML meta tag detection
-- Unsupported charset labels: Falls back to HTML meta tag detection when possible
-- Invalid bytes for the declared charset (including invalid UTF-8): Returns `ConversionError::EncodingError`
+Parsing a body fails in four scenarios:
+
 - Empty input: Returns `ConversionError::InvalidInput`
-- Charset detection never fails (always returns UTF-8 as fallback). Parsing
-  rejects only invalid UTF-8 bytes and empty input. Valid UTF-8 bytes remain
-  parseable even when the declared charset is not UTF-8. The fallback and
-  conversion-error behavior stay unchanged
+- Unsupported charset label: Returns `ConversionError::EncodingError`
+  (the module cannot map the label to a supported encoding)
+- Invalid bytes for the declared charset: Returns `ConversionError::EncodingError`
+- Invalid UTF-8 bytes (declared or detected charset is UTF-8): Returns
+  `ConversionError::EncodingError`
+
+Missing or malformed charset parameters fall back down the cascade
+(Content-Type parameter, then HTML meta tag, then UTF-8 default). Charset
+detection itself never fails: it always returns a charset, defaulting to
+UTF-8. Valid UTF-8 bytes remain parseable even when the declared charset is
+not UTF-8, because the converter only transcodes when the declared charset
+differs from UTF-8.
 
 ## Dependencies
 
@@ -244,6 +251,7 @@ wins.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-07 | Kang | Reworded the unsupported-label error note to active voice; no behavior change |
 | 0.9.2 | 2026-09-03 | Kang | Aligned transcoding story with the implementation: parser transcodes non-UTF-8 charsets via encoding_rs, meta scanning is a byte-level prescanner, and unsupported or invalid charsets fail the conversion with an encoding error |
 | 0.9.2 | 2026-08-15 | Hermes | Error handling rejects only invalid UTF-8 bytes; valid UTF-8 passes even with a non-UTF-8 declared charset |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

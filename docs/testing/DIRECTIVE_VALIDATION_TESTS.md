@@ -171,19 +171,19 @@ markdown_front_matter;      # Error: missing value
 
 ---
 
-### 8. markdown_accept (strict|wildcard|force)
+### 8. markdown_accept (strict|force)
 
 **Valid configurations:**
 ```nginx
-markdown_accept wildcard;
 markdown_accept strict;
 markdown_accept force;
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_accept yes;       # Error: invalid value, must be "strict", "wildcard", or "force"
-markdown_accept 1;         # Error: invalid value, must be "strict", "wildcard", or "force"
+markdown_accept yes;       # Error: invalid value, must be "strict" or "force"
+markdown_accept 1;         # Error: invalid value, must be "strict" or "force"
+markdown_accept wildcard;  # Error: removed in 0.9.2; use "strict" or "force"
 markdown_accept;           # Error: missing value
 ```
 
@@ -192,8 +192,6 @@ markdown_accept;           # Error: missing value
 - Context: http, server, location
 - `strict`: converts only when the request carries an explicit
   `Accept: text/markdown` header.  Wildcards (`*/*`, `text/*`) do not convert.
-- `wildcard`: converts on `Accept: text/markdown` and on the wildcard
-  values `Accept: */*` or `Accept: text/*`.
 - `force`: converts regardless of the Accept header (including when no
   Accept header is present).
 

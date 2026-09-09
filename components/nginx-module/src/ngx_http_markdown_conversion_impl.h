@@ -1012,29 +1012,21 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
 
     options->prune_noise =
         ngx_http_markdown_effective_prune_noise(eff, conf) ? 1U : 0U;
-    options->prune_selectors = NULL;
-    options->prune_selector_len = 0;
-    options->prune_protection_selectors = NULL;
-    options->prune_protection_selector_len = 0;
 
-    if (conf->advanced.prune_selectors != NULL) {
-        options->prune_selectors = conf->advanced.prune_selectors->data;
-        options->prune_selector_len = conf->advanced.prune_selectors->len;
-    }
-
-    if (conf->advanced.prune_protection_selectors != NULL) {
-        options->prune_protection_selectors =
-            conf->advanced.prune_protection_selectors->data;
-        options->prune_protection_selector_len =
-            conf->advanced.prune_protection_selectors->len;
-    }
+    /*
+     * Custom prune/protection selectors were removed in 0.9.2 (LTS-R009).
+     * The C module no longer populates the selector pointers/lengths; built-in
+     * noise reduction is driven solely by prune_noise above.  The FFI
+     * MarkdownOptions struct carries no selector fields (96-byte ABI v3), so
+     * no selector data crosses the FFI boundary.
+     */
 
     /*
      * Resolve the effective static conversion_memory budget once for this
      * request. A zero value means no FFI-side constraint, so Rust may use its
      * bounded full-buffer fallback; the normal NGINX default is 64 MiB from
-     * markdown_limits conversion_memory=64m. Runtime dynconf cannot replace
-     * this static public limit.
+     * markdown_limits conversion_memory=64m. This static public limit cannot
+     * be replaced at runtime.
      */
     options->memory_budget =
         ngx_http_markdown_effective_memory_budget(eff, conf);

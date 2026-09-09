@@ -4,7 +4,6 @@
  * Validates the diagnostics accessor functions that bridge the
  * diagnostics compilation unit with module-internal state:
  *   - collect_metrics (reads SHM metrics zone)
- *   - get_dynconf_state (reads dynconf watcher)
  *
  * Coverage targets:
  *   ngx_http_markdown_diagnostics_accessors_impl.h
@@ -25,14 +24,11 @@ struct ngx_http_markdown_conf_s {
 
 #define NGX_OK         0
 #define NGX_ERROR     -1
-#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED       0
-#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE    1
-#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE 2
-#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR     3
-#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL 5
 
 #define ngx_memzero(buf, n) memset(buf, 0, n)
 #define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
+#define ngx_min(a, b) (((a) < (b)) ? (a) : (b))
+#define ngx_strlen(s) strlen((const char *) (s))
 
 /* ── Metrics struct (mirrors production SHM layout) ───────────── */
 
@@ -87,41 +83,6 @@ typedef struct {
 /* Global metrics pointer (mirrors production) */
 static ngx_http_markdown_metrics_t  g_metrics_data;
 static ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
-
-/* ── Dynconf watcher struct (mirrors production) ──────────────── */
-
-typedef struct {
-    time_t      last_mtime;
-    time_t      applied_mtime;
-} ngx_http_markdown_dynconf_file_state_t;
-
-typedef struct {
-    u_char      source_digest[72];
-    u_char      active_digest[72];
-    u_char      lkg_digest[72];
-    ngx_uint_t  generation;
-    ngx_flag_t  lkg_valid;
-    time_t      lkg_mtime;
-} ngx_http_markdown_dynconf_digest_state_t;
-
-typedef struct {
-    ngx_uint_t  version;
-    ngx_uint_t  last_result;
-    time_t      last_success;
-    u_char      last_error[513];
-    size_t      last_error_len;
-    ngx_uint_t  last_masked_fields;
-} ngx_http_markdown_dynconf_diagnostic_state_t;
-
-typedef struct {
-    ngx_flag_t  active;
-    ngx_http_markdown_dynconf_file_state_t file_state;
-    ngx_http_markdown_dynconf_digest_state_t digest_state;
-    ngx_http_markdown_conf_t *conf;
-    ngx_http_markdown_dynconf_diagnostic_state_t diagnostic_state;
-} ngx_http_markdown_dynconf_watcher_t;
-
-static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
 
 /* ── Inflight overload stub ────────────────────────────────────── */
 
@@ -278,77 +239,50 @@ test_collect_metrics_streaming(void)
 }
 #endif
 
+/* SHA-256 is implemented by hand in the accessors header (no libcrypto
+ * dependency); pin it against NIST vectors so a regression in the
+ * transform/padding is caught by the C unit suite rather than only by
+ * the Python-hashlib golden checks. */
 static void
-test_get_dynconf_state_null_output(void)
+test_sha256_nist_vectors(void)
 {
-    TEST_SUBSECTION("get_dynconf_state with NULL output");
+    static const u_char abc[] = "abc";
+    static const u_char empty[] = "";
+    static const u_char long_input[] =
+        "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    u_char  out[65];
 
-    /* Should not crash */
-    ngx_http_markdown_diagnostics_get_dynconf_state(NULL);
+    TEST_SUBSECTION("SHA-256 NIST vectors");
 
-    TEST_PASS("NULL output is no-op");
-}
+    /* sha256_hex writes exactly 64 hex chars without a terminator (the
+     * production caller prefixes "sha256:" itself); zero the buffer so
+     * strlen-based checks are deterministic. */
+    ngx_memzero(out, sizeof(out));
 
-static void
-test_get_dynconf_state_inactive(void)
-{
-    ngx_http_markdown_diag_dynconf_t out;
+    /* NIST FIPS 180-4: SHA256("abc") */
+    TEST_ASSERT(ngx_http_markdown_sha256_hex(abc, 3, out) == NGX_OK,
+                "sha256_hex handles a short input");
+    TEST_ASSERT(ngx_strlen(out) == 64, "sha256_hex emits 64 hex chars");
+    TEST_ASSERT(ngx_memcmp(out,
+        (u_char *) "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        64) == 0, "SHA-256(abc) matches NIST vector");
 
-    TEST_SUBSECTION("get_dynconf_state when inactive");
+    /* Empty-string vector. */
+    TEST_ASSERT(ngx_http_markdown_sha256_hex(empty, 0, out) == NGX_OK,
+                "sha256_hex handles an empty input");
+    TEST_ASSERT(ngx_memcmp(out,
+        (u_char *) "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        64) == 0, "SHA-256(empty) matches NIST vector");
 
-    memset(&ngx_http_markdown_dynconf_watcher, 0,
-           sizeof(ngx_http_markdown_dynconf_watcher));
-    ngx_http_markdown_dynconf_watcher.active = 0;
-    memset(&out, 0xFF, sizeof(out));
+    /* 448-bit input crosses the padding block boundary. */
+    TEST_ASSERT(ngx_http_markdown_sha256_hex(long_input,
+                    sizeof(long_input) - 1, out) == NGX_OK,
+                "sha256_hex handles a padding-boundary input");
+    TEST_ASSERT(ngx_memcmp(out,
+        (u_char *) "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+        64) == 0, "SHA-256(padding boundary) matches NIST vector");
 
-    ngx_http_markdown_diagnostics_get_dynconf_state(&out);
-
-    TEST_ASSERT(out.active_mtime == 0, "active_mtime should be 0");
-    TEST_ASSERT(out.config_version == 0, "config_version should be 0");
-    TEST_ASSERT(out.last_known_good_mtime == 0, "lkg_mtime should be 0");
-    TEST_ASSERT(out.lkg_valid == 0, "lkg_valid should be 0");
-
-    TEST_PASS("Inactive watcher zeroes all fields");
-}
-
-static void
-test_get_dynconf_state_active(void)
-{
-    ngx_http_markdown_diag_dynconf_t out;
-
-    TEST_SUBSECTION("get_dynconf_state when active");
-
-    memset(&ngx_http_markdown_dynconf_watcher, 0,
-           sizeof(ngx_http_markdown_dynconf_watcher));
-    ngx_http_markdown_dynconf_watcher.active = 1;
-    ngx_http_markdown_dynconf_watcher.file_state.applied_mtime = 1700000000;
-    ngx_http_markdown_dynconf_watcher.diagnostic_state.version = 5;
-    ngx_http_markdown_dynconf_watcher.diagnostic_state.last_masked_fields = 0x15;
-    /*
-     * Regression (CMOD-4): last_mtime is the most recently *observed* file
-     * mtime (updated even on a rejected reload); lkg_mtime is the mtime of
-     * the previous successfully-applied config.  They are deliberately
-     * different here so the test fails if the accessor reads last_mtime
-     * instead of lkg_mtime.
-     */
-    ngx_http_markdown_dynconf_watcher.file_state.last_mtime = 1699999000;
-    ngx_http_markdown_dynconf_watcher.digest_state.lkg_mtime = 1699998000;
-    ngx_http_markdown_dynconf_watcher.digest_state.lkg_valid = 1;
-
-    ngx_http_markdown_diagnostics_get_dynconf_state(&out);
-
-    TEST_ASSERT(out.active_mtime == 1700000000,
-                "active_mtime should match");
-    TEST_ASSERT(out.config_version == 5,
-                "config_version should be 5");
-    TEST_ASSERT(out.last_known_good_mtime == 1699998000,
-                "lkg_mtime should reflect the LKG config mtime, "
-                "not last_mtime");
-    TEST_ASSERT(out.lkg_valid == 1, "lkg_valid should be 1");
-    TEST_ASSERT(out.masked_fields == 0x15,
-                "masked_fields should reflect the last applied snapshot");
-
-    TEST_PASS("Active watcher state collected correctly");
+    TEST_PASS("SHA-256 NIST vectors match");
 }
 
 int
@@ -364,9 +298,7 @@ main(void)
 #ifdef MARKDOWN_STREAMING_ENABLED
     test_collect_metrics_streaming();
 #endif
-    test_get_dynconf_state_null_output();
-    test_get_dynconf_state_inactive();
-    test_get_dynconf_state_active();
+    test_sha256_nist_vectors();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

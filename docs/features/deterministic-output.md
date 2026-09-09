@@ -252,13 +252,10 @@ fn normalize_output(&self, output: String) -> String {
                 prev_blank = true;
             }
         } else {
-            // Normalize whitespace (skip inside code blocks)
-            if active_fence.is_some() {
-                result.push_str(trimmed);
-            } else {
-                let normalized = self.normalize_line_whitespace(trimmed);
-                result.push_str(&normalized);
-            }
+            // Normalize whitespace (fenced lines already returned above, so
+            // active_fence is always None here)
+            let normalized = self.normalize_line_whitespace(trimmed);
+            result.push_str(&normalized);
             result.push('\n');
             prev_blank = false;
         }

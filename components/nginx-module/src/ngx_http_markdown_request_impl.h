@@ -317,8 +317,6 @@ const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
 const ngx_str_t *ngx_http_markdown_reason_encoding_header_invalid(void);
 const ngx_str_t *ngx_http_markdown_reason_decompression_format_error(void);
 const ngx_str_t *ngx_http_markdown_reason_overload(void);
-const ngx_str_t *ngx_http_markdown_reason_invalid_dynconf(void);
-const ngx_str_t *ngx_http_markdown_reason_degraded_snapshot(void);
 const ngx_str_t *ngx_http_markdown_reason_header_plan_apply_err(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_mid_flight_err(void);
 const ngx_str_t *ngx_http_markdown_eligibility_string(
@@ -346,46 +344,30 @@ ngx_http_markdown_log_failure_decision(ngx_http_request_t *r,
 
 
 /*
- * Bind the function-level snapshot copy and effective conf view into
- * the request-pool-allocated context.  This eliminates the race window
- * where the global active_snapshot could be swapped by a concurrent
- * timer reload between the initial header-phase read and the ctx bind.
- *
- * After this call:
- *   - When conf->advanced.dynconf_enabled is true: ctx->dynconf_snapshot holds
- *     a pool-owned copy of snap_copy, and ctx->effective_conf holds a
- *     pool-owned copy of early_eff (derived from the snapshot).
- *   - When conf->advanced.dynconf_enabled is false: ctx->dynconf_snapshot is
- *     NULL (no snapshot bound — this location uses static/inherited
- *     config only), and ctx->effective_conf holds a pool-owned copy
- *     of early_eff (derived from live conf, since header_filter
- *     passed NULL snapshot to build_effective_conf for non-dynconf
- *     locations).
- *
- * If the dynconf snapshot allocation fails, only the snapshot pointer
- * remains NULL.  The effective view has already been copied by value into
- * `eff_storage`, so effective_conf helpers continue using the header-time
- * values and do not drift to live configuration during this request.
+ * Bind the function-level effective conf view into the request-pool
+ * context (bind-once seam).  The header phase builds `early_eff` once from
+ * the merged static configuration; this copies it by value into
+ * ctx->effective_conf_storage and points ctx->effective_conf at it, so the
+ * body phase reuses the exact header-time values and cannot drift to live
+ * configuration mid-request.
  *
  * Parameters:
  *   r         - NGINX request structure (for pool and logging)
  *   ctx       - per-request context (already initialised)
- *   snap_copy - function-level snapshot captured once at header_filter entry
- *   early_eff - function-level effective view derived from snap_copy or live conf
- *   conf      - module location configuration (for dynconf_enabled check)
+ *   early_eff - function-level effective view derived from the live conf
+ *   conf      - module location configuration
  */
 static void
 ngx_http_markdown_bind_request_context_snapshot(
-    ngx_http_request_t *r,
+    const ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    const ngx_http_markdown_dynconf_snapshot_t *snap_copy,
     const ngx_http_markdown_effective_conf_t *early_eff,
     const ngx_http_markdown_conf_t *conf)
 {
     ngx_http_markdown_bind_request_snapshot(
-        r, conf, snap_copy, early_eff,
+        r, conf, early_eff,
         &ctx->effective_conf_storage,
-        &ctx->dynconf_snapshot, &ctx->effective_conf);
+        &ctx->effective_conf);
 }
 
 
@@ -845,23 +827,18 @@ ngx_http_markdown_prepare_preaccess_adoption(
         r, scan_limit, ownership);
 }
 
-/* Snapshot dynamic configuration before any preaccess state is adopted. */
+/* Build the effective configuration view before any preaccess state is
+ * adopted. */
 static void
 ngx_http_markdown_prepare_preaccess_effective_conf(
     const ngx_http_markdown_conf_t *conf,
     ngx_http_markdown_effective_conf_t *eff)
 {
-    ngx_http_markdown_dynconf_snapshot_t  snap_copy;
-
-    snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
     ngx_memzero(eff, sizeof(*eff));
-    ngx_http_markdown_build_effective_conf(
-        eff,
-        conf->advanced.dynconf_enabled == 1 ? &snap_copy : NULL,
-        conf);
+    ngx_http_markdown_build_effective_conf(eff, conf);
 }
 
-/* Evaluate preaccess eligibility against the already captured snapshot. */
+/* Evaluate preaccess eligibility against the captured effective view. */
 static ngx_flag_t
 ngx_http_markdown_prepare_preaccess_eligibility(
     ngx_http_request_t *r,
@@ -1905,7 +1882,6 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     const ngx_http_markdown_conf_t  *conf;
     ngx_flag_t                       filter_enabled;
     ngx_int_t                        precheck_rc;
-    ngx_http_markdown_dynconf_snapshot_t  snap_copy;
     ngx_http_markdown_effective_conf_t    early_eff;
 
     /* Get module configuration */
@@ -1933,13 +1909,9 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     if (ctx != NULL && ctx->lifecycle.header_filter_initialized) {
         return ngx_http_markdown_resume_header_filter_reentry(r, ctx, conf);
     }
-    /* Copy the snapshot once; dynconf-disabled locations use static conf. */
-    snap_copy = ngx_http_markdown_dynconf_watcher.active_snapshot;
+    /* Build the effective view once from the merged static configuration. */
     ngx_memzero(&early_eff, sizeof(early_eff));
-    ngx_http_markdown_build_effective_conf(
-        &early_eff,
-        conf->advanced.dynconf_enabled == 1 ? &snap_copy : NULL,
-        conf);
+    ngx_http_markdown_build_effective_conf(&early_eff, conf);
 
     /*
      * Resolve markdown_filter once in header phase and cache the result in
@@ -1965,9 +1937,10 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         }
     }
 
-    /* Bind the same request-local snapshot used for the header decision. */
+    /* Bind the same request-local effective view used for the header
+     * decision. */
     ngx_http_markdown_bind_request_context_snapshot(
-        r, ctx, &snap_copy, &early_eff, conf);
+        r, ctx, &early_eff, conf);
 
     /* Set context for this request */
     r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;

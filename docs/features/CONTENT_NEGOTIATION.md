@@ -7,16 +7,16 @@ flowchart TD
     Client["Client Request"] --> Accept{"Accept Header?"}
     Accept -->|"text/markdown"| Convert["Convert to Markdown"]
     Accept -->|"text/html"| PassHTML["Pass HTML Through"]
-    Accept -->|"*/*"| Wildcard{"markdown_accept?"}
-    Wildcard -->|wildcard| Convert
-    Wildcard -->|strict| PassHTML
+    Accept -->|"*/* or text/*"| PassHTML
     Accept -->|"application/json"| PassHTML
     Convert --> Response["Response with<br/>Content-Type: text/markdown"]
     PassHTML --> Response2["Response with<br/>Content-Type: text/html"]
-
     style Convert fill:#009639,color:#fff
-    style Wildcard fill:#f90,color:#000
 ```
+
+Wildcards (`*/*`, `text/*`) pass through under the default `strict`
+policy. Only an explicit `markdown_accept force` converts a wildcard-only
+Accept header.
 
 This module implements HTTP content negotiation to serve Markdown representations of HTML content. Clients request Markdown using the standard `Accept` header. The module then decides whether to convert the response. Eligibility rules and configuration drive that decision.
 
@@ -56,7 +56,7 @@ Accept: text/html, application/json, text/markdown
 
 The module looks for `text/markdown` in the Accept header. Quality values (q-parameters) are fully evaluated per RFC 9110 §12.5.1. The Rust negotiation engine (`markdown_negotiate_accept`) compares q-values across all listed media types. It applies tie-break rules (specificity, source order) to determine preference ordering. For example, `Accept: text/html;q=0.8, text/markdown;q=0.9` correctly selects Markdown.
 
-### Wildcard Handling
+### Accept Policy
 
 By default, wildcard Accept headers do NOT trigger conversion:
 
@@ -65,16 +65,18 @@ Accept: */*           → No conversion (returns HTML)
 Accept: text/*        → No conversion (returns HTML)
 ```
 
-To enable conversion for wildcards, use the `markdown_accept` directive:
+Use `markdown_accept force` only for a scope where conversion should proceed
+regardless of the incoming `Accept` header:
 
 ```nginx
 location /docs/ {
     markdown_filter on;
-    markdown_accept wildcard;  # Enable wildcard conversion
+    markdown_accept force;
 }
 ```
 
-With `markdown_accept wildcard`:
+With `markdown_accept force`, all eligible media types follow the conversion
+path, including requests with wildcard or missing `Accept` headers:
 ```http
 Accept: */*           → Conversion enabled
 Accept: text/*        → Conversion enabled
@@ -227,14 +229,16 @@ Content-Type: text/html
 <html>...
 ```
 
-### Test Wildcard Behavior
+### Test Accept Policy
 
 ```bash
 # Without markdown_accept (default: strict)
 curl -H "Accept: */*" http://localhost/page.html
 # Returns HTML
 
-# With markdown_accept wildcard
+# With markdown_accept force (intentional unconditional conversion).
+# Prerequisite: configure `markdown_accept force;` in the http/server/location
+# block and reload NGINX before running this probe.
 curl -H "Accept: */*" http://localhost/page.html
 # Returns Markdown
 ```

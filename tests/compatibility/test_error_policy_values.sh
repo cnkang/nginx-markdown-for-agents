@@ -217,7 +217,7 @@ EOF
     server {
         listen 127.0.0.1:19998;
         location / {
-            return 200 'ok';
+            empty_gif;
         }
     }
 }
@@ -276,7 +276,7 @@ http {
     server {
         listen 127.0.0.1:19998;
         location / {
-            return 200 'ok';
+            empty_gif;
         }
     }
 }

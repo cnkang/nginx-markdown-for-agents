@@ -61,7 +61,8 @@ def _classify_lines(lines: list[str]) -> list[str]:
             line_types.append("heredoc")
             continue
 
-        heredoc_match = re.search(r"(?<!<)<<-?(?!<)\s*['\"]?(\w+)['\"]?", line)
+        # Delimiters are shell words: leading letter or underscore.
+        heredoc_match = re.search(r"(?<!<)<<-?(?!<)\s*['\"]?([A-Za-z_]\w*)['\"]?", line)
         if heredoc_match:
             heredoc_end = heredoc_match.group(1)
             line_types.append("shell")

@@ -220,8 +220,8 @@ def _validate_family_structure(
 def validate_registry_structure(registry: dict, contract: dict | None = None) -> list[str]:
     """Validate registry structure and canonical family-count constraints."""
     errors = []
-    if registry.get("schema_version") != 1:
-        errors.append("schema_version must be 1")
+    if registry.get("schema_version") != 2:
+        errors.append("schema_version must be 2")
     families = registry.get("families", [])
     if not isinstance(families, list) or not families:
         return errors + ["families must be a non-empty list"]

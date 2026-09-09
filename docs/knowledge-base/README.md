@@ -9,7 +9,8 @@ models, and pointers.
 ## When to Use This Directory
 
 - You need the frozen 0.9.2 contract facts fast (directive list, defaults,
-  dynconf keys, metrics) without re-reading CONFIGURATION.md end to end.
+  metrics, limits, or FFI surface) without re-reading CONFIGURATION.md end to
+  end.
 - You are reviewing or writing docs and must check a claim against the
   contract (for example "is `markdown_profile` still active?" → no, removed).
 - You need to know which document to consult for a given question.
@@ -38,8 +39,9 @@ removed or not part of the contract.
 
 ### 3. Removed ≠ deprecated
 
-Directives removed in 0.9.2 fail `nginx -t` with NGINX's standard
-`unknown directive` error — there are no migration stubs left. If docs or
+Five convergence names remain reject-only migration entries, as listed below.
+Other removed names fail `nginx -t` with NGINX's standard
+`unknown directive` error. If docs or
 configs reference a removed directive, they are stale. Migration and removal
 documentation may use removed directive names (including naming
 `markdown_stream_threshold` and `markdown_stream_types` in before/after
@@ -49,18 +51,24 @@ Note: `markdown_stream_threshold` (removed in 0.9.2) and
 `markdown_large_body_threshold` (retired in 0.9.0, removed in 0.9.2) are
 distinct directives with different migration paths.
 
+The five convergence names (`markdown_dynamic_config`,
+`markdown_dynamic_config_path`, `markdown_dynconf_dry_run`,
+`markdown_prune_selectors`, and `markdown_prune_protection_selectors`) remain
+registered only as reject-only migration entries. They fail `nginx -t` with an
+explicit migration message. They are not active configuration directives.
+
 ## Contract Loading
 
 This README intentionally does not duplicate frozen numeric facts. Load
-`config-contract.md` for the current directive, dynconf, metric, reason-code,
-limit, and FFI tables. Use `docs/harness/public-surface-inventory.json` when
-you need a machine-readable value or count.
+`config-contract.md` for the current directive, metric, reason-code, limit,
+and FFI tables. Use `docs/harness/public-surface-inventory.json` when you need
+a machine-readable value or count.
 
 ## Contract Files (load on demand)
 
 - `config-contract.md` — **The frozen 0.9.2 contract in one place**: full
-  directive, dynconf, metric, reason-code, and limit tables, plus an FFI
-  surface summary. Load this for any directive/default/metric question. For
+  directive, metric, reason-code, and limit tables, plus an FFI surface
+  summary. Load this for any directive/default/metric question. For
   complete FFI export names and signatures, use the inventory or generated
   header referenced below.
 
@@ -73,11 +81,11 @@ you need a machine-readable value or count.
 | Full config contract tables | `config-contract.md` (this KB) |
 | Breaking changes & migration | `docs/guides/0.9.2-breaking-changes.md`, `docs/guides/MIGRATION-0.9.2.md` |
 | Rollback | `docs/guides/VERSION_ROLLBACK-0.9.2.md` |
-| Architecture / ADRs | `docs/architecture/ADR/` (0025 drift gate, 0026 dynconf restore, 0027 OTel removal) |
+| Architecture / ADRs | `docs/architecture/ADR/` (0025 drift gate, 0026 historical dynconf restore, 0027 OTel removal) |
 | Release notes & checklist | `docs/releases/0.9.2-release-notes.md`, `docs/releases/0.9.2-release-checklist.md` |
 | History of changes | `CHANGELOG.md` (L3 — never copied here) |
 | Metrics & diagnostics schema | `docs/architecture/observability-schema-v2.md` |
-| Dynconf semantics | `docs/architecture/ADR/0026-dynconf-file-restore-contract.md` |
+| Historical dynconf semantics | `docs/architecture/ADR/0026-dynconf-file-restore-contract.md` (pre-0.9.2 only) |
 | Project status & version planning | `docs/project/PROJECT_STATUS.md`, `docs/project/VERSION_PLANNING.md` |
 
 ## Maintenance Rules
@@ -87,7 +95,7 @@ you need a machine-readable value or count.
 2. **Keep L1 facts in sync with `docs/harness/public-surface-inventory.json`.** If the
    drift gate or `make harness-check` reports a change, update
    `config-contract.md` in the same batch.
-3. When a directive, dynconf key, limit, metric, reason code, or FFI surface
+3. When a directive, limit, metric, reason code, or FFI surface
    changes, update `config-contract.md`
    AND the Document Updates table of this file in one commit (descending
    order, newest on top).
@@ -96,6 +104,7 @@ you need a machine-readable value or count.
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-09-08 | Align the KB with the static 0.9.2 contract: remove active dynconf-key guidance and document the five reject-only migration entries. |
 | 0.9.2 | 2026-08-26 | Synchronize the knowledge-base contract with the current FFI inventory after removing retired exports. |
 | 0.9.2 | 2026-08-12 | Synchronize the knowledge-base contract with the current dynconf and FFI inventory. |
 | 0.9.2 | 2026-08-11 | Align streaming transition sources and diagnostics Schema v2 alias with the production renderer. |

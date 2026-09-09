@@ -106,7 +106,7 @@ markdown:
   # To enable the module, use an image that already contains
   # ngx_http_markdown_filter_module.so and set loadModule to its path.
   # This chart intentionally renders the safe request-path and metrics
-  # directives below. Authentication, trusted-proxy, dynamic-config,
+  # directives below. Authentication, trusted-proxy,
   # diagnostics, and front-matter directives require a custom nginx.conf.
   enabled: false
   onError: "pass"
@@ -129,8 +129,6 @@ markdown:
   # Noise pruning
   prune:
     noise: true
-    selectors: ""
-    protectionSelectors: ""
 
   # Content-type routing
   contentTypes: []

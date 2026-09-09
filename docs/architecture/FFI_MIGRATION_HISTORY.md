@@ -3,8 +3,9 @@
 ## Purpose and ownership
 
 This document records the **migration history** of the Rust↔C FFI boundary
-between v0.9.1 (ABI v1) and v0.9.2 (ABI v2): what we removed, why, and what
-replaced it. It is a historical record, not the active contract.
+between v0.9.1 (ABI v1) and v0.9.2 (final ABI v3, with ABI v2 as an intermediate
+development step): what we removed, why, and what replaced it. It is a
+historical record, not the active contract.
 
 For the **active** ABI contract (version, 4-tuple handshake, layout,
 ownership, v1 compatibility policy) see
@@ -20,8 +21,9 @@ Source: `components/rust-converter/src/decision/reason_code.rs`, exporting
 
 ## Historical ABI identity
 
-The v0.9.1 baseline identifier was `MARKDOWN_ABI_VERSION = 1`. The current
-0.9.2 bundled boundary uses ABI version 2. See
+The v0.9.1 baseline identifier was `MARKDOWN_ABI_VERSION = 1`. Early 0.9.2
+development used ABI version 2 as an intermediate step. The final 0.9.2
+release bundled boundary is **ABI version 3**. See
 [FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) for the active values.
 `markdown_abi_version()` returns the linked Rust value. NGINX checks it during
 preconfiguration and refuses directive parsing and startup on mismatch. Cargo

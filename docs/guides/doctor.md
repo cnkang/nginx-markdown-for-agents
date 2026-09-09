@@ -66,7 +66,7 @@ nginx-markdown-doctor v0.9.2
   ✓ [pass] configure_args: nginx built with --with-compat
   ✓ [pass] module_signature: ngx_http_markdown_filter_module symbol found
   ✓ [pass] rust_linkage: Rust FFI symbols found (4 exports)
-  ✓ [pass] rust_toolchain: rustc 1.97.1 meets MSRV; repository pins exact toolchain 1.97.1
+  ✓ [pass] rust_toolchain: rustc 1.98.1 meets MSRV; repository pins exact toolchain 1.98.1
   ✓ [pass] os_arch: linux/x86_64 (glibc 2.31)
   ✓ [pass] package_type: nginx installed via apt (1.28.0-1~jammy)
 
@@ -121,8 +121,8 @@ Summary: 9 passed, 0 failed, 0 warnings, 0 skipped (9 total)
     {
       "name": "rust_toolchain",
       "status": "pass",
-      "message": "rustc 1.97.1 meets MSRV; repository pins exact toolchain 1.97.1",
-      "details": { "rustc_version": "1.97.1", "msrv": "1.97", "pinned_channel": "1.97.1", "pinned_channel_expected": "1.97.1" }
+      "message": "rustc 1.98.1 meets MSRV; repository pins exact toolchain 1.98.1",
+      "details": { "rustc_version": "1.98.1", "msrv": "1.98", "pinned_channel": "1.98.1", "pinned_channel_expected": "1.98.1" }
     },
     {
       "name": "os_arch",

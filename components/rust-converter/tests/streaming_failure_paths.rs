@@ -139,6 +139,10 @@ fn oversize_input_small_streaming_budget_errors() {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
 
+    // Feature: pre-lts-convergence-092, Property 8: Malformed, empty, or
+    // truncated input routes to a failure path and frees all buffers
+    // Feature: pre-lts-convergence-092, Property 11: Non-deliverable failures
+    // never re-send bytes or count as fail-open success
     #[test]
     fn prop_malformed_no_panic(data in prop::collection::vec(any::<u8>(), 0..8192)) {
         let result = catch_unwind(AssertUnwindSafe(|| {

@@ -16,7 +16,9 @@ third-party C consumers a supported product surface.
 ## v0.9.2 bundled boundary
 
 v0.9.1's ABI version **1** is historical. The 0.9.2 breaking surface update
-advances the bundled boundary to ABI version **2**. The earlier reset:
+advances the bundled boundary to ABI version **3** (the pre-LTS convergence
+bumped 2 → 3 when it removed the dynconf subsystem and custom selectors).
+The earlier reset:
 
 - removes the unimplemented MDX and Org-mode flavor discriminants,
 - removes the unused Rust streaming-decision FFI model,
@@ -42,15 +44,15 @@ an older Rust archive or header with the new C module.
 Rust owns:
 
 ```text
-MARKDOWN_ABI_VERSION = 2
-MARKDOWN_HEADER_HASH = 0x8551f78b4d150c64
-MARKDOWN_SYMBOL_SET_HASH = 0x4d34d6a1507cb9cc
-MARKDOWN_LAYOUT_FINGERPRINT = 0x5082868a7afe5890
+MARKDOWN_ABI_VERSION = 3
+MARKDOWN_HEADER_HASH = 0x6a9422edb868dfb3
+MARKDOWN_SYMBOL_SET_HASH = 0x2cdb1bf77b851cc1
+MARKDOWN_LAYOUT_FINGERPRINT = 0x3621270dffd69355
 
-markdown_abi_version() -> 2
-markdown_abi_header_hash() -> 0x8551f78b4d150c64
-markdown_abi_symbol_set_hash() -> 0x4d34d6a1507cb9cc
-markdown_abi_layout_fingerprint() -> 0x5082868a7afe5890
+markdown_abi_version() -> 3
+markdown_abi_header_hash() -> 0x6a9422edb868dfb3
+markdown_abi_symbol_set_hash() -> 0x2cdb1bf77b851cc1
+markdown_abi_layout_fingerprint() -> 0x3621270dffd69355
 ```
 
 `cbindgen` emits all declarations into the generated header. During NGINX

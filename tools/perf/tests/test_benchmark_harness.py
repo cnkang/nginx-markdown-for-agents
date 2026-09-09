@@ -1728,6 +1728,15 @@ class TestNginxConfigGeneration:
         assert "markdown_streaming force;" in script_content, (
             "streaming_first benchmark config should explicitly enable streaming"
         )
+        assert (
+            '    balanced)\n'
+            '      # Leave engine selection unset so this profile exercises the product\n'
+            '      # default: bounded full-buffer conversion.  Explicit `auto` is reserved\n'
+            '      # for scenarios that intentionally measure the streaming preference.\n'
+            '      profile_directives=""'
+        ) in script_content, (
+            "balanced benchmark config must exercise the full-buffer product default"
+        )
         assert "markdown_streaming_zero_copy" not in script_content, (
             "zero-copy must remain an internal implementation choice"
         )

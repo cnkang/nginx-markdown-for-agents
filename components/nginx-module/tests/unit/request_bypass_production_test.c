@@ -192,14 +192,7 @@ typedef struct {
     ngx_uint_t msec;
 } ngx_time_t;
 
-struct ngx_http_markdown_dynconf_snapshot_s {
-    ngx_flag_t valid;
-};
-
 static ngx_http_markdown_conf_t *g_conf;
-static struct {
-    ngx_http_markdown_dynconf_snapshot_t active_snapshot;
-} ngx_http_markdown_dynconf_watcher;
 
 ngx_module_t ngx_http_markdown_filter_module = { 0 };
 ngx_module_t ngx_http_core_module = { 0 };
@@ -714,10 +707,8 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
 void
 ngx_http_markdown_build_effective_conf(
     ngx_http_markdown_effective_conf_t *eff,
-    const ngx_http_markdown_dynconf_snapshot_t *snap,
     const ngx_http_markdown_conf_t *conf)
 {
-    UNUSED(snap);
     if (eff == NULL || conf == NULL) {
         return;
     }
@@ -730,20 +721,16 @@ ngx_http_markdown_build_effective_conf(
 
 void
 ngx_http_markdown_bind_request_snapshot(
-    ngx_http_request_t *r,
+    const ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_dynconf_snapshot_t *snap_copy,
     const ngx_http_markdown_effective_conf_t *early_eff,
     ngx_http_markdown_effective_conf_t *eff_storage,
-    ngx_http_markdown_dynconf_snapshot_t **snapshot_slot,
     ngx_http_markdown_effective_conf_t **effective_slot)
 {
     UNUSED(r);
     UNUSED(conf);
-    UNUSED(snap_copy);
     UNUSED(early_eff);
     UNUSED(eff_storage);
-    UNUSED(snapshot_slot);
     UNUSED(effective_slot);
 }
 

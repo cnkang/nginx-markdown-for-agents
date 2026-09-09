@@ -65,7 +65,7 @@ The counters follow these conservation rules:
 - `conversion_attempts_total` increments at most once per request.
 - `conversion_deliveries_total` and output bytes increment only after the
   downstream filter accepts the converted response.
-- failed-open, failed-closed, terminal abort, and client-abort paths do not
+- fail-open, fail-closed, terminal abort, and client-abort paths do not
   count as successful deliveries.
 - the in-flight counter (diagnostics-only, not a Prometheus family) returns
   to zero after cleanup and quiescence.
@@ -73,7 +73,7 @@ The counters follow these conservation rules:
 
 ## Diagnostics
 
-The diagnostics handler returns the strict Schema v2 response documented in
+The diagnostics handler returns the strict Schema v3 response documented in
 [Observability Contract v2](../architecture/observability-schema-v2.md). It has
 no streaming-only top-level section. The frozen families provide runtime visibility via
 worker-local `runtime` counters, bounded `recent_decisions` entries, and the

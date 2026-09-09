@@ -957,6 +957,10 @@ static void test_safe_finish_null_params(void)
     TEST_PASS("safe_finish NULL parameters return NGX_ERROR");
 }
 
+/*
+ * Feature: pre-lts-convergence-092, Property 11: Non-deliverable failures
+ * never re-send bytes or count as fail-open success
+ */
 static void test_safe_finish_send_terminal_fails(void)
 {
     ngx_http_markdown_ctx_t ctx;

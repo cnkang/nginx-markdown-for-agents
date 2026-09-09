@@ -3,7 +3,7 @@
  * The production postcommit helper implementation must therefore compile
  * without requiring that subtree when MARKDOWN_STREAMING_ENABLED is absent.
  *
- * Behavioral contract (r43 P1-11): with the feature disabled the impl header
+ * Behavioral contract: with the feature disabled the impl header
  * compiles to an EMPTY translation unit — none of the postcommit helper
  * symbols may be emitted, because the production callers are themselves
  * compiled out by the same feature guard.  If a future change re-adds an

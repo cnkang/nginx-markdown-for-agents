@@ -297,7 +297,7 @@ jq empty dashboard.json
 |-------------------|-------------------|
 | `rate(nginx_markdown_parse_timeouts_total[5m]) > 0` | `rate(nginx_markdown_failures_total{reason="timeout"}[5m]) > 0` |
 | `rate(nginx_markdown_failed_open_total[5m]) > 0.01` | `rate(nginx_markdown_failopen_total[5m]) > 0.01` |
-| `sum(rate(nginx_markdown_ffi_call_errors_total[5m]))` | `rate(nginx_markdown_failures_total{reason="ffi_panic"}[5m])` |
+| `sum(rate(nginx_markdown_ffi_call_errors_total[5m]))` | `sum(rate(nginx_markdown_failures_total{reason="ffi_panic"}[5m]))` |
 | `nginx_markdown_skipped_accept_total` | `nginx_markdown_skips_total{reason="skipped_accept"}` |
 
 #### Key Changes for Alert Authors
@@ -332,7 +332,7 @@ jq empty dashboard.json
 | `markdown_parser_budget` | `markdown_limits parser_budget=` key | Removed directive (0.9.x) |
 | `markdown_stream_threshold` | _(no replacement)_ | Internal 1 MiB routing heuristic |
 | `markdown_stream_flush_min` | _(no replacement)_ | Internal flush heuristic |
-| `markdown_streaming_auto_threshold` | `markdown_streaming_engine on\|off` + `markdown_stream_threshold=<size>` (0.9.0 pair) | Removed directive; explicit policy replaces the heuristic |
+| `markdown_streaming_auto_threshold` | `markdown_streaming off\|auto\|force` (0.9.0-era pair: `markdown_streaming_engine on\|off` plus the auto threshold, both later consolidated — the engine selector was removed in 0.9.1 and the auto threshold is an internal heuristic with no replacement directive, mirroring `markdown_stream_threshold` above) | Removed directive; explicit policy replaces the heuristic |
 | `markdown_stream_precommit_buffer` | `markdown_limits streaming_buffer=` key | Removed directive (0.9.x) |
 | _(new)_ | `markdown_profile balanced\|strict_cache\|streaming_first` | One-line production defaults |
 | _(new)_ | `markdown_limits memory=64m timeout=5s max_inflight=64` | Key-value resource limits |

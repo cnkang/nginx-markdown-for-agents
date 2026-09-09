@@ -67,6 +67,39 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
     return NULL;
 }
 
+/* Find a header by name inside an arbitrary header list (not necessarily
+ * r->headers_in.headers).  Used to reconcile shadow-list modifications back
+ * onto the original entries during restoration. */
+static ngx_table_elt_t *
+ngx_http_markdown_find_header_in_list(
+    ngx_list_t *list, u_char *name, size_t name_len)
+{
+    if (list == NULL || name == NULL || name_len == 0) {
+        return NULL;
+    }
+
+    for (ngx_list_part_t *part = &list->part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NULL;
+        }
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].key.len == name_len
+                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+            {
+                return &headers[i];
+            }
+        }
+    }
+
+    return NULL;
+}
+
 /*
  * Request-pool side state for captured validators.  The module context is
  * cleared by an internal redirect, but the request pool and its cleanups are
@@ -81,7 +114,13 @@ typedef struct ngx_http_markdown_conditional_side_state_s {
 } ngx_http_markdown_conditional_side_state_t;
 
 typedef struct {
+    ngx_http_request_t                          *request;
     ngx_http_markdown_conditional_side_state_t  *entries;
+    ngx_list_t                                  original_headers;
+    ngx_list_part_t                            *shadow_tail;
+    ngx_uint_t                                  shadow_tail_count;
+    ngx_list_part_t                            *appended_headers;
+    ngx_flag_t                                  headers_shadowed;
 } ngx_http_markdown_conditional_side_table_t;
 
 static void
@@ -92,6 +131,7 @@ ngx_http_markdown_conditional_side_table_cleanup(void *data)
     table = data;
     if (table != NULL) {
         table->entries = NULL;
+        table->headers_shadowed = 0;
     }
 }
 
@@ -110,7 +150,12 @@ ngx_http_markdown_conditional_side_table(
         if (cleanup->handler
             == &ngx_http_markdown_conditional_side_table_cleanup)
         {
-            return cleanup->data;
+            ngx_http_markdown_conditional_side_table_t *table;
+
+            table = cleanup->data;
+            if (table != NULL && table->request == r) {
+                return table;
+            }
         }
     }
 
@@ -143,6 +188,7 @@ ngx_http_markdown_conditional_side_table_create(ngx_http_request_t *r)
     }
 
     cleanup->handler = ngx_http_markdown_conditional_side_table_cleanup;
+    table->request = r;
     cleanup->data = table;
     return table;
 }
@@ -202,6 +248,204 @@ ngx_http_markdown_conditional_side_state_add(
     state->next = table->entries;
     table->entries = state;
     return state;
+}
+
+static ngx_flag_t
+ngx_http_markdown_conditional_header_is_captured(
+    const ngx_http_markdown_ctx_t *ctx, const ngx_table_elt_t *header)
+{
+    if (ctx == NULL || header == NULL) {
+        return 0;
+    }
+
+    for (const ngx_http_markdown_conditional_header_state_t *state =
+             ctx->conditional.header_states;
+         state != NULL;
+         state = state->next)
+    {
+        if (state->header == header) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/*
+ * Keep captured validators out of NGINX's generic upstream-header iterator.
+ * The proxy module deliberately copies every request-header list entry that
+ * is not in its configured hash, including entries whose hash was cleared by
+ * this module.  A request-pool shadow list gives the upstream handler the
+ * original request headers minus the source validators while retaining the
+ * original entries for conversion and later restoration.
+ */
+static ngx_int_t
+ngx_http_markdown_shadow_captured_conditional_headers(
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_http_markdown_conditional_side_table_t  *table;
+    ngx_list_t                                  *source;
+    ngx_list_t                                  *shadow;
+
+    if (r == NULL || ctx == NULL || !ctx->conditional.captured
+        || !ctx->conditional.suppressed)
+    {
+        return NGX_OK;
+    }
+
+    table = ngx_http_markdown_conditional_side_table(r);
+    if (table == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (table->headers_shadowed) {
+        return NGX_OK;
+    }
+
+    source = &r->headers_in.headers;
+    if (source->part.elts == NULL && source->part.nelts != 0) {
+        return NGX_ERROR;
+    }
+
+    if (source->nalloc == 0 || source->size == 0) {
+        return NGX_ERROR;
+    }
+
+    shadow = ngx_list_create(r->pool, source->nalloc, source->size);
+    if (shadow == NULL) {
+        return NGX_ERROR;
+    }
+    table->appended_headers = ngx_pcalloc(r->pool, sizeof(ngx_list_part_t));
+    if (table->appended_headers == NULL) {
+        return NGX_ERROR;
+    }
+
+    for (ngx_list_part_t *part = &source->part;
+         part != NULL;
+         part = part->next)
+    {
+        const ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            ngx_table_elt_t  *copy;
+
+            if (ngx_http_markdown_conditional_header_is_captured(
+                    ctx, &headers[i]))
+            {
+                continue;
+            }
+
+            copy = ngx_list_push(shadow);
+            if (copy == NULL) {
+                return NGX_ERROR;
+            }
+            *copy = headers[i];
+        }
+    }
+
+    table->original_headers = *source;
+    table->headers_shadowed = 1;
+    r->headers_in.headers = *shadow;
+    /*
+     * The by-value copy above leaves last pointing at the shadow list's
+     * own embedded part (or a part chained from it).  ngx_list_push()
+     * appends through list->last, so a stale last would update the shadow
+     * part's counters while iteration starts at r->headers_in.headers.part
+     * — newly appended headers would be invisible to downstream code.
+     * Rebind last to the request's own embedded part when the shadow list
+     * is single-part; multi-part shadows keep their pool-allocated tail
+     * (still reachable through the copied part.next chain).
+     */
+    if (r->headers_in.headers.last == &shadow->part) {
+        r->headers_in.headers.last = &r->headers_in.headers.part;
+    }
+    table->shadow_tail = r->headers_in.headers.last;
+    table->shadow_tail_count = table->shadow_tail->nelts;
+    return NGX_OK;
+}
+
+static void
+ngx_http_markdown_restore_shadowed_conditional_headers(
+    ngx_http_request_t *r)
+{
+    ngx_http_markdown_conditional_side_table_t  *table;
+    ngx_list_part_t                            *tail;
+    ngx_list_part_t                            *last;
+    ngx_list_part_t                            *appended;
+    ngx_uint_t                                  capacity;
+
+    if (r == NULL) {
+        return;
+    }
+
+    table = ngx_http_markdown_conditional_side_table(r);
+    if (table == NULL || !table->headers_shadowed) {
+        return;
+    }
+
+    /* Splice only entries appended after capture, without allocation or
+     * copying headers that another module may reference by address. */
+    tail = table->shadow_tail;
+    last = r->headers_in.headers.last;
+    capacity = r->headers_in.headers.nalloc;
+    appended = tail->next;
+    if (tail->nelts > table->shadow_tail_count) {
+        table->appended_headers->elts = (ngx_table_elt_t *) tail->elts
+                                      + table->shadow_tail_count;
+        table->appended_headers->nelts = tail->nelts - table->shadow_tail_count;
+        table->appended_headers->next = tail->next;
+        appended = table->appended_headers;
+        if (last == tail) {
+            last = appended;
+            capacity -= table->shadow_tail_count;
+        }
+    }
+
+    /* Reconcile shadow-list modifications back onto the original entries
+     * before restoring the original list: a downstream module may have
+     * replaced a value or invalidated a hash on the shadow copy, and the
+     * original entries must reflect those changes while keeping their
+     * address identity (typed header pointers reference the originals). */
+    {
+        ngx_list_t  *shadow = &r->headers_in.headers;
+
+        for (ngx_list_part_t *part = &shadow->part;
+             part != NULL;
+             part = part->next)
+        {
+            ngx_table_elt_t  *headers;
+
+            headers = part->elts;
+            if (headers == NULL && part->nelts != 0) {
+                return;
+            }
+            for (ngx_uint_t i = 0; i < part->nelts; i++) {
+                ngx_table_elt_t  *orig;
+
+                orig = ngx_http_markdown_find_header_in_list(
+                    &table->original_headers,
+                    headers[i].key.data, headers[i].key.len);
+                if (orig != NULL) {
+                    orig->hash = headers[i].hash;
+                    orig->value = headers[i].value;
+                }
+            }
+        }
+    }
+
+    r->headers_in.headers = table->original_headers;
+    if (appended != NULL) {
+        r->headers_in.headers.last->next = appended;
+        r->headers_in.headers.last = last;
+        r->headers_in.headers.nalloc = capacity;
+    }
+    ngx_memzero(&table->original_headers, sizeof(table->original_headers));
+    table->headers_shadowed = 0;
 }
 
 /*
@@ -563,6 +807,8 @@ ngx_http_markdown_adopt_orphan_conditional_headers(
     if (r == NULL) {
         return NGX_ERROR;
     }
+
+    ngx_http_markdown_restore_shadowed_conditional_headers(r);
 
     adoption_limit = ngx_http_markdown_conditional_adoption_limit(
         r, scan_limit);
@@ -1688,6 +1934,12 @@ ngx_http_markdown_capture_conditional_request(
 
         ngx_http_markdown_suppress_captured_conditional_headers(r, ctx);
         ctx->conditional.suppressed = 1;
+        if (ngx_http_markdown_shadow_captured_conditional_headers(r, ctx)
+            != NGX_OK)
+        {
+            ngx_http_markdown_restore_conditional_request(r, ctx);
+            return NGX_ERROR;
+        }
         return NGX_OK;
     }
 
@@ -1733,6 +1985,12 @@ ngx_http_markdown_capture_conditional_request(
 
     ngx_http_markdown_suppress_captured_conditional_headers(r, ctx);
     ctx->conditional.suppressed = 1;
+    if (ngx_http_markdown_shadow_captured_conditional_headers(r, ctx)
+        != NGX_OK)
+    {
+        ngx_http_markdown_restore_conditional_request(r, ctx);
+        return NGX_ERROR;
+    }
     return NGX_OK;
 }
 
@@ -1741,7 +1999,13 @@ void
 ngx_http_markdown_restore_conditional_request(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
 {
-    if (r == NULL || ctx == NULL || !ctx->conditional.captured
+    if (r == NULL) {
+        return;
+    }
+
+    ngx_http_markdown_restore_shadowed_conditional_headers(r);
+
+    if (ctx == NULL || !ctx->conditional.captured
         || !ctx->conditional.suppressed)
     {
         return;
@@ -1780,6 +2044,8 @@ ngx_http_markdown_restore_orphan_conditional_request(ngx_http_request_t *r)
     if (r == NULL) {
         return;
     }
+
+    ngx_http_markdown_restore_shadowed_conditional_headers(r);
 
     ngx_http_markdown_restore_suppressed_name(r, inm_name,
                                               sizeof(inm_name) - 1);

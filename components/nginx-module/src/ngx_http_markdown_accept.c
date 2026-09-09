@@ -407,6 +407,21 @@ ngx_http_markdown_get_accept_value(ngx_http_request_t *r, ngx_str_t *out)
 
     accept_header = ngx_http_markdown_get_accept_header(r);
     if (accept_header != NULL) {
+        /* The typed singleton path applies the same validation as
+         * ngx_http_markdown_collect_accept_header: reject a value with
+         * length but no storage, and enforce the combined-value cap, so
+         * a singleton request reaches negotiation with exactly the
+         * guarantees of the merged multi-field-line path. */
+        if (accept_header->value.len > 0
+            && accept_header->value.data == NULL)
+        {
+            return NGX_ERROR;
+        }
+        if (accept_header->value.len
+            > NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX)
+        {
+            return NGX_ERROR;
+        }
         out->data = accept_header->value.data;
         out->len = accept_header->value.len;
         return NGX_OK;
@@ -456,7 +471,6 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
     struct FFIAcceptResult   result;
     ngx_int_t                accept_rc;
     ngx_str_t                accept_value;
-    uint8_t                  on_wildcard;
 
     if (conf == NULL) {
         ngx_http_markdown_set_accept_reason(
@@ -500,13 +514,14 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
         return 0;
     }
 
-    on_wildcard = (uint8_t)
-        ((conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD) ? 1 : 0);
-
+    /*
+     * Negotiation is strict-only (0.9.2, LTS-R010): the removed wildcard
+     * policy no longer feeds a wildcard-mode argument.  strict converts only
+     * on an explicit text/markdown match; force short-circuits above.
+     */
     markdown_negotiate_accept(
         accept_value.data,
         accept_value.len,
-        on_wildcard,
         &result);
 
     ngx_http_markdown_set_accept_reason(

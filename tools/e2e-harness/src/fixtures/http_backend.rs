@@ -453,6 +453,16 @@ fn scenario_response(
     if path == "/md/html" {
         return md_html_response(state, method, headers);
     }
+    if path == "/force/html" {
+        return html_response(
+            method,
+            200,
+            "<h1>force fixture html</h1>",
+            true,
+            Some("\"force-source-etag\""),
+            Some("Accept"),
+        );
+    }
     plain_response(method, 404, "text/plain", "not found")
 }
 
@@ -681,9 +691,6 @@ nginx_markdown_streaming_events_total{{transition=\"commit\",reason=\"converted\
 # HELP nginx_markdown_decompression_events_total Decompression events\n\
 # TYPE nginx_markdown_decompression_events_total counter\n\
 nginx_markdown_decompression_events_total{{encoding=\"gzip\",outcome=\"success\",reason=\"ok\"}} 0\n\
-# HELP nginx_markdown_dynconf_reloads_total Dynamic configuration reloads\n\
-# TYPE nginx_markdown_dynconf_reloads_total counter\n\
-nginx_markdown_dynconf_reloads_total{{outcome=\"success\",reason=\"ok\"}} 0\n\
 # HELP nginx_markdown_build_info Build information\n\
 # TYPE nginx_markdown_build_info gauge\n\
 nginx_markdown_build_info{{version=\"test\",nginx_version=\"test\",features=\"\"}} 1\n",

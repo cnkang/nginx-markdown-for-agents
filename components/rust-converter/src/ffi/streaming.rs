@@ -607,10 +607,6 @@ mod tests {
             base_url_len: 0,
             streaming_budget: 0,
             prune_noise: 1,
-            prune_selectors: ptr::null(),
-            prune_selector_len: 0,
-            prune_protection_selectors: ptr::null(),
-            prune_protection_selector_len: 0,
             memory_budget: 0,
             parse_timeout_ms: 0,
             parser_memory_budget: 0,
@@ -1218,9 +1214,18 @@ mod tests {
     // allows C to handle errors after output has been committed.
     // ================================================================
 
+    /// Feature: pre-lts-convergence-092, Property 12: Complete-success holds
+    /// iff all three integrity judgments hold, and all views agree.
+    /// Feature: pre-lts-convergence-092, Property 13: Late decompression-member
+    /// failure is classified incomplete even after emitted output and
+    /// terminators.
+    ///
     /// Validates: Requirements 1.7 — safe finish closes open structures.
     ///
     /// Feeds enough HTML to commit output, then calls safe_finish to
+    /// complete the remaining Markdown.  The body only exercises the
+    /// POST_COMMIT_SAFE_FINISH path and UTF-8 closing bytes; the Property
+    /// 12/13 attribution above is historical and kept for traceability.
     /// verify that open Markdown structures are gracefully closed and
     /// the return code is POST_COMMIT_SAFE_FINISH (3).
     #[test]

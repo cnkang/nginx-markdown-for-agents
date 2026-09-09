@@ -7,6 +7,10 @@
 
 **Status**: Accepted (implemented in 0.8.0)
 **Date**: 2026-06-04
+**Amended**: 2026-09-07 — the threshold rule now states that size alone
+never selects the streaming path. The threshold only nominates streaming
+candidates. `conversion_memory` plus the remaining eligibility gates still
+decide the path (see the Decision section).
 **Context**: v0.8.0 True Streaming Contract
 
 ## Context
@@ -28,8 +32,15 @@ streaming definition and updated threshold.
 
 Default to `auto` mode per RFC 0008 section 2.1:
 
-1. Responses with `Content-Length` >= `markdown_stream_threshold`
-   (target default: 1m) use the true streaming path.
+1. Responses with `Content-Length` >= the internal streaming size
+   threshold (target default: 1m) become streaming candidates.  The module
+   selects the true streaming path only after `conversion_memory` and the
+   other eligibility gates pass (RFC 0008 section 2.2).  Size alone never
+   selects the streaming path.  The threshold is an internal constant, not
+   an operator-facing configuration knob.
+   `markdown_stream_threshold` is historical wording from this ADR's era:
+   under the active Config V2 surface only `markdown_streaming
+   off|auto|force` remains a directive.
 2. Responses with chunked transfer encoding (no `Content-Length`) or absent
    `Content-Length` become streaming candidates (subject to additional
    eligibility checks per RFC 0008 section 2.2).

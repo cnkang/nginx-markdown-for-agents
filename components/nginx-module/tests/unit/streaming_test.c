@@ -191,9 +191,8 @@ static void test_preserve_duplicate_directive(void);
  * 4. conditional_requests full_support -> PATH_FULLBUFFER
  * 5. Content-Type is text/event-stream -> PATH_FULLBUFFER
  * 6. policy == force -> PATH_STREAMING
- * 7. policy == auto + CL >= fixed threshold -> PATH_STREAMING
- * 8. policy == auto + no CL -> PATH_STREAMING
- * 9. policy == auto + CL < threshold -> PATH_FULLBUFFER
+ * 7. policy == auto -> PATH_STREAMING after the safety checks above,
+ *    regardless of response size.
  */
 static ngx_uint_t
 test_select_processing_path(const test_conf_t *conf,
@@ -235,15 +234,7 @@ test_select_processing_path(const test_conf_t *conf,
         return PATH_STREAMING;
     }
 
-    /* Rules 7-9: policy auto */
-    if (r->content_length >= 0
-        && (size_t) r->content_length < (1024 * 1024))
-    {
-        /* CL < auto_threshold: full-buffer */
-        return PATH_FULLBUFFER;
-    }
-
-    /* auto + CL >= threshold or no CL */
+    /* Rule 7: auto prefers streaming regardless of response size. */
     return PATH_STREAMING;
 }
 
@@ -504,7 +495,7 @@ test_policy_auto_small_cl(void)
     test_conf_t    conf;
     test_request_t req;
 
-    TEST_SUBSECTION("Policy auto + small CL: full-buffer");
+    TEST_SUBSECTION("Policy auto + small CL: streaming");
 
     memset(&conf, 0, sizeof(conf));
     conf.streaming_policy = POLICY_AUTO;
@@ -518,9 +509,9 @@ test_policy_auto_small_cl(void)
 
     TEST_ASSERT(
         test_select_processing_path(&conf, &req)
-            == PATH_FULLBUFFER,
-        "auto + small CL should select full-buffer");
-    TEST_PASS("auto + small CL selects full-buffer");
+            == PATH_STREAMING,
+        "auto + small CL should select streaming");
+    TEST_PASS("auto + small CL selects streaming");
 }
 
 static void

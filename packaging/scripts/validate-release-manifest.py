@@ -182,6 +182,20 @@ def validate_manifest(
             if not isinstance(pkg, dict):
                 errors.append(f"{prefix}: package must be an object")
                 continue
+            malformed = [
+                key
+                for key in (
+                    "filename", "format", "version", "nginx_version",
+                    "libc", "arch", "sha256",
+                )
+                if key in pkg and not isinstance(pkg[key], str)
+            ]
+            if malformed:
+                for key in malformed:
+                    errors.append(
+                        f"{prefix}: {key} must be a string, got: {type(pkg[key]).__name__}"
+                    )
+                continue
             package_entries.append(pkg)
             # dynamic-module tarballs carry nginx_version/libc/arch instead of
             # a project version (their name encodes the NGINX version, not the

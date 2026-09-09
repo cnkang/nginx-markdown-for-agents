@@ -161,12 +161,10 @@ static uintptr_t g_ffi_accept_header_len;
 void
 markdown_negotiate_accept(const uint8_t *accept_header,
                           uintptr_t accept_header_len,
-                          uint8_t on_wildcard,
                           struct FFIAcceptResult *result)
 {
     g_ffi_accept_header = accept_header;
     g_ffi_accept_header_len = accept_header_len;
-    UNUSED(on_wildcard);
     result->should_convert = (uint8_t) g_ffi_should_convert;
     result->reason = (uint8_t) g_ffi_reason;
 }
@@ -862,6 +860,60 @@ test_accept_collection_error_guards(void)
     TEST_PASS("Accept collection error guards exercised");
 }
 
+static void
+test_should_convert_typed_singleton_validation(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    ngx_table_elt_t *typed;
+    ngx_str_t out;
+    ngx_uint_t reason;
+    /* One extra byte for the NUL terminator that strlen() requires, plus
+     * the value bytes themselves: the buffer is two bytes longer than the
+     * acceptance cap so the value stays above it after the terminator. */
+    static char oversized[NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX + 2];
+
+    /* Fill only the value bytes and keep an explicit NUL terminator at the
+     * end so add_header's strlen() reads inside the buffer: the value is
+     * still longer than NGX_HTTP_MARKDOWN_ACCEPT_HEADER_MAX, exercising
+     * the oversized-singleton rejection branch. */
+    memset(oversized, 'x', sizeof(oversized) - 1);
+    oversized[sizeof(oversized) - 1] = '\0';
+
+    /* A typed singleton whose value has length but no storage must be
+     * rejected like a malformed list field-line, not aliased into the
+     * negotiation input. */
+    memset(&r, 0, sizeof(r));
+    memset(&conf, 0, sizeof(conf));
+    g_pool_offset = 0;
+    r.headers_in.headers = *create_header_list();
+    typed = add_header(&r.headers_in.headers, "Accept", "x");
+    typed->value.data = NULL;
+    typed->value.len = 1;
+    r.headers_in.accept = typed;
+    TEST_ASSERT(ngx_http_markdown_should_convert(
+                    &r, &conf, &reason) == 0,
+                "typed singleton with NULL data does not convert");
+    TEST_ASSERT(reason == NEGOTIATE_REASON_INTERNAL_ERROR,
+                "typed singleton with NULL data reports an internal error");
+    TEST_ASSERT(ngx_http_markdown_get_accept_value(&r, &out) == NGX_ERROR,
+                "typed singleton with NULL data fails value collection");
+
+    /* A typed singleton above the combined-value cap must be rejected
+     * instead of reaching negotiation with the oversized value. */
+    memset(&r, 0, sizeof(r));
+    g_pool_offset = 0;
+    r.headers_in.headers = *create_header_list();
+    typed = add_header(&r.headers_in.headers, "Accept", oversized);
+    r.headers_in.accept = typed;
+    TEST_ASSERT(ngx_http_markdown_should_convert(
+                    &r, &conf, &reason) == 0,
+                "oversized typed singleton does not convert");
+    TEST_ASSERT(reason == NEGOTIATE_REASON_INTERNAL_ERROR,
+                "oversized typed singleton reports an internal error");
+    TEST_PASS("typed singleton validation exercised");
+}
+
 int
 main(void)
 {
@@ -893,6 +945,7 @@ main(void)
     test_should_convert_out_reason_null();
     test_accept_result_vary_mapping();
     test_markdown_options_init_defaults();
+    test_should_convert_typed_singleton_validation();
     test_markdown_options_init_null();
 
     printf("\n========================================\n");

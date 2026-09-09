@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "metrics-v1.registry.json",
   "title": "nginx-markdown-for-agents Metrics v1 Contract",
-  "description": "Canonical Prometheus metrics family, label, and histogram contract. Histogram bucket_count and max_histogram_buckets count only explicit finite buckets; Prometheus emits the +Inf bucket implicitly and it is not included in either count.",
-  "schema_version": 1,
+  "description": "Canonical Prometheus metrics family, label, and histogram contract. Histogram bucket_count and max_histogram_buckets count only explicit finite buckets; Prometheus emits the +Inf bucket implicitly and it is not included in either count. schema_version 2 (0.9.2, LTS-R006/LTS-R023): the nginx_markdown_dynconf_reloads_total family was removed, an incompatible contract change explicitly versioned (design §14(d)) rather than masqueraded as the frozen v1 content. The v1 in the file name/$id/title denotes the Prometheus text-format wire contract identity, distinct from this content schema_version.",
+  "schema_version": 2,
   "format": "prometheus_text_004",
   "constraints": {
     "family_prefix": "nginx_markdown_",
@@ -181,33 +181,6 @@
             "io_error",
             "ok",
             "truncated_input"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "nginx_markdown_dynconf_reloads_total",
-      "type": "counter",
-      "labels": [
-        {
-          "name": "outcome",
-          "values": [
-            "failure",
-            "success"
-          ]
-        },
-        {
-          "name": "reason",
-          "values": [
-            "duplicate_key",
-            "file_error",
-            "invalid_type",
-            "ok",
-            "out_of_range",
-            "parse_error",
-            "schema_version",
-            "size_exceeded",
-            "unknown_key"
           ]
         }
       ]

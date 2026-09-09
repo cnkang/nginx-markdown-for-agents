@@ -1,7 +1,7 @@
 # Prometheus Metrics Guide
 
 This guide describes the 0.9.2 production metrics contract. The endpoint emits
-only Prometheus text exposition format 0.0.4 and exactly the eleven families
+only Prometheus text exposition format 0.0.4 and exactly the ten families
 listed below. The checked-in metrics registry is the machine-readable source
 for names, types, labels, and help text. The public inventory documents the
 operator-facing surface.
@@ -48,14 +48,12 @@ path, URI, host, profile, and per-path dimensions are not emitted.
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | Peak working-set estimate from the most recent streaming conversion; not process RSS. |
 | `nginx_markdown_streaming_events_total` | counter | `transition`, `reason` | Closed streaming lifecycle transitions. |
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | Decompression completion and failure events. |
-| `nginx_markdown_dynconf_reloads_total` | counter | `outcome`, `reason` | Dynamic-configuration reload attempts. |
 | `nginx_markdown_build_info` | gauge | `version`, `nginx_version`, `features` | Build identity; value is always `1`. |
 
 The engine values are `full_buffer` and `streaming`. The streaming transition
 allowlist is `commit`, `fallback`, `safe_finish_start`, `abort_start`,
 `resume_success`, and `resume_failure`. Decompression encodings are `gzip`,
-`deflate`, and `brotli`. Its outcomes are `success` and `failure`. Dynconf
-outcomes are `success` and `failure`.
+`deflate`, and `brotli`. Its outcomes are `success` and `failure`.
 
 The conversion histogram boundaries are `0.001`, `0.005`, `0.01`, `0.025`,
 `0.05`, `0.1`, `0.25`, `0.5`, `1.0`, and `5.0` seconds, followed by `+Inf`.
@@ -166,7 +164,7 @@ Unknown numeric reason codes map to `internal_unknown` and get logged as errors.
 
 The 0.9.2 freeze removes legacy conversion, passthrough, per-path, streaming
 debug, JSON, and multi-format families. Update dashboards and alerts to the
-eleven families above. Do not carry old family names into a
+ten families above. Do not carry old family names into a
 new 0.9.2 deployment. The detailed public compatibility inventory is
 [`docs/architecture/PUBLIC_SURFACE_INVENTORY.md`](../architecture/PUBLIC_SURFACE_INVENTORY.md).
 
@@ -194,12 +192,12 @@ that reference the old name.
 
 ## Stability policy
 
-The eleven-family set is frozen for 0.9.2. A future 1.x family addition
+The ten-family set is frozen for 0.9.2. A future 1.x family addition
 requires a documented operator use case and a backward-compatible schema
 review. New labels must remain bounded and must not introduce path, URI, host,
 or other unbounded cardinality.
 
 | Version | Change |
 |---|---|
-| 0.9.2 | Replaced legacy multi-format metrics with the eleven-family Prometheus v1 contract. |
+| 0.9.2 | Replaced legacy multi-format metrics with the ten-family Prometheus v1 contract. |
 | 0.9.1 | Previous release-line metric migration guidance. |

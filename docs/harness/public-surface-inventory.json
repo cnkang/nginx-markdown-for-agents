@@ -1,6 +1,6 @@
 {
   "contract_version": "1",
-  "directive_count": 25,
+  "directive_count": 20,
   "directives": [
     {
       "args": "1",
@@ -126,14 +126,14 @@
         "location"
       ],
       "default": "strict",
-      "handler": "ngx_conf_set_enum_slot",
+      "handler": "ngx_http_markdown_accept",
       "migration_target": null,
       "name": "markdown_accept",
       "otel_classification": "none",
       "post": "&ngx_http_markdown_accept_enum",
       "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1",
       "status": "active",
-      "syntax": "strict|wildcard|force"
+      "syntax": "strict|force"
     },
     {
       "args": "1",
@@ -144,7 +144,7 @@
         "server",
         "location"
       ],
-      "default": "allow",
+      "default": "deny",
       "handler": "ngx_http_markdown_auth_policy",
       "migration_target": null,
       "name": "markdown_auth_policy",
@@ -201,7 +201,7 @@
         "server",
         "location"
       ],
-      "default": "auto",
+      "default": "off",
       "handler": "ngx_http_markdown_streaming",
       "migration_target": null,
       "name": "markdown_streaming",
@@ -320,44 +320,6 @@
       "syntax": "on|off"
     },
     {
-      "args": "1",
-      "classification": "active",
-      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
-      "context": [
-        "http",
-        "server",
-        "location"
-      ],
-      "default": "nav footer aside",
-      "handler": "ngx_conf_set_str_slot",
-      "migration_target": null,
-      "name": "markdown_prune_selectors",
-      "otel_classification": "none",
-      "post": null,
-      "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1",
-      "status": "active",
-      "syntax": "<string>"
-    },
-    {
-      "args": "1",
-      "classification": "active",
-      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
-      "context": [
-        "http",
-        "server",
-        "location"
-      ],
-      "default": "empty",
-      "handler": "ngx_conf_set_str_slot",
-      "migration_target": null,
-      "name": "markdown_prune_protection_selectors",
-      "otel_classification": "none",
-      "post": null,
-      "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1",
-      "status": "active",
-      "syntax": "<string>"
-    },
-    {
       "args": "flag",
       "classification": "active",
       "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
@@ -373,57 +335,6 @@
       "otel_classification": "none",
       "post": null,
       "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG",
-      "status": "active",
-      "syntax": "on|off"
-    },
-    {
-      "args": "flag",
-      "classification": "active",
-      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
-      "context": [
-        "http"
-      ],
-      "default": "off",
-      "handler": "ngx_http_markdown_dynconf_flag",
-      "migration_target": null,
-      "name": "markdown_dynamic_config",
-      "otel_classification": "none",
-      "post": null,
-      "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG",
-      "status": "active",
-      "syntax": "on|off"
-    },
-    {
-      "args": "1",
-      "classification": "active",
-      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
-      "context": [
-        "http"
-      ],
-      "default": "(none)",
-      "handler": "ngx_http_markdown_set_dynconf_path",
-      "migration_target": null,
-      "name": "markdown_dynamic_config_path",
-      "otel_classification": "none",
-      "post": null,
-      "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1",
-      "status": "active",
-      "syntax": "<path>"
-    },
-    {
-      "args": "flag",
-      "classification": "active",
-      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
-      "context": [
-        "http"
-      ],
-      "default": "off",
-      "handler": "ngx_http_markdown_dynconf_flag",
-      "migration_target": null,
-      "name": "markdown_dynconf_dry_run",
-      "otel_classification": "none",
-      "post": null,
-      "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG",
       "status": "active",
       "syntax": "on|off"
     },
@@ -464,97 +375,11 @@
       "syntax": "<type> [<type> ...]"
     }
   ],
-  "dynconf_keys": [
-    {
-      "allowed_values": [
-        "on",
-        "off"
-      ],
-      "default": "inherited",
-      "duplicate": "reject",
-      "dynamic": true,
-      "inheritance": "per-key",
-      "name": "filter",
-      "required": false,
-      "type": "flag",
-      "unknown_key": "reject"
-    },
-    {
-      "allowed_values": [
-        "on",
-        "off"
-      ],
-      "default": "inherited",
-      "duplicate": "reject",
-      "dynamic": true,
-      "inheritance": "per-key",
-      "name": "prune_noise",
-      "required": false,
-      "type": "flag",
-      "unknown_key": "reject"
-    },
-    {
-      "allowed_values": [
-        "error",
-        "warn",
-        "info",
-        "debug"
-      ],
-      "default": "inherited",
-      "duplicate": "reject",
-      "dynamic": true,
-      "inheritance": "per-key",
-      "name": "log_verbosity",
-      "required": false,
-      "type": "enum",
-      "unknown_key": "reject"
-    },
-    {
-      "allowed_values": [
-        "pass",
-        "fail_closed",
-        "status 429",
-        "status 503"
-      ],
-      "default": "inherited",
-      "duplicate": "reject",
-      "dynamic": true,
-      "inheritance": "per-key",
-      "name": "error_policy",
-      "required": false,
-      "type": "enum",
-      "unknown_key": "reject"
-    },
-    {
-      "allowed_values": [],
-      "default": "inherited",
-      "duplicate": "reject",
-      "dynamic": true,
-      "inheritance": "per-key",
-      "name": "streaming_buffer",
-      "required": false,
-      "type": "size",
-      "unknown_key": "reject"
-    },
-    {
-      "allowed_values": [
-        "1"
-      ],
-      "default": "required",
-      "duplicate": "reject",
-      "dynamic": false,
-      "inheritance": "none",
-      "name": "schema_version",
-      "required": true,
-      "type": "version",
-      "unknown_key": "reject"
-    }
-  ],
-  "ffi_abi_version": 2,
+  "ffi_abi_version": 3,
   "ffi_classification": "INTERNAL_ONLY",
   "ffi_exports": [
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_abi_header_hash",
@@ -564,7 +389,7 @@
       "signature": "markdown_abi_header_hash() -> u64"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_abi_layout_fingerprint",
@@ -574,7 +399,7 @@
       "signature": "markdown_abi_layout_fingerprint() -> u64"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_abi_symbol_set_hash",
@@ -584,7 +409,7 @@
       "signature": "markdown_abi_symbol_set_hash() -> u64"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_abi_version",
@@ -594,7 +419,7 @@
       "signature": "markdown_abi_version() -> u32"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_base_url_input_init",
@@ -604,7 +429,7 @@
       "signature": "markdown_base_url_input_init(result: *mut FFIBaseUrlInput) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_build_header_plan",
@@ -614,7 +439,7 @@
       "signature": "markdown_build_header_plan(content_type: *const u8, content_type_len: usize, has_etag: u8, result: *mut FFIHeaderPlan) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_chain_decode_free",
@@ -624,7 +449,7 @@
       "signature": "markdown_chain_decode_free(result: *mut FFIChainDecodeResult) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_chain_decode_result_init",
@@ -634,7 +459,7 @@
       "signature": "markdown_chain_decode_result_init(result: *mut FFIChainDecodeResult) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_classify_error_code",
@@ -644,7 +469,7 @@
       "signature": "markdown_classify_error_code(error_code: u32) -> u8"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_convert",
@@ -654,7 +479,7 @@
       "signature": "markdown_convert(handle: *mut MarkdownConverterHandle, html: *const u8, html_len: usize, options: *const MarkdownOptions, result: *mut MarkdownResult) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_converter_free",
@@ -664,7 +489,7 @@
       "signature": "markdown_converter_free(handle: *mut MarkdownConverterHandle) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_converter_new",
@@ -674,7 +499,7 @@
       "signature": "markdown_converter_new() -> *mut MarkdownConverterHandle"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_decide_base_url",
@@ -684,7 +509,7 @@
       "signature": "markdown_decide_base_url(input: *const FFIBaseUrlInput, out_buf: *mut u8, out_buf_cap: usize, out: *mut FFIBaseUrlDecision) -> u8"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_decide_conditional",
@@ -694,7 +519,7 @@
       "signature": "markdown_decide_conditional(input: *const FFIConditionalInput, out: *mut FFIConditionalDecision) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_decide_eligibility",
@@ -704,7 +529,7 @@
       "signature": "markdown_decide_eligibility(input: *const FFIEligibilityInput) -> u8"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_decode_encoding_chain",
@@ -714,7 +539,7 @@
       "signature": "markdown_decode_encoding_chain(input: *const u8, input_len: usize, layers: *const u8, layer_count: u32, max_output: usize, ratio: u64, result: *mut FFIChainDecodeResult) -> u32"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_decomp_result_init",
@@ -724,7 +549,7 @@
       "signature": "markdown_decomp_result_init(result: *mut FFIDecompResult) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_decompress_bounded",
@@ -734,7 +559,7 @@
       "signature": "markdown_decompress_bounded(input: *const u8, input_len: usize, format: u8, budget: usize, ratio: u64, result: *mut FFIDecompResult) -> u32"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_decompress_free",
@@ -744,37 +569,7 @@
       "signature": "markdown_decompress_free(result: *mut FFIDecompResult) -> ()"
     },
     {
-      "abi_version": 2,
-      "classification": "INTERNAL_ONLY",
-      "generated_header": "components/rust-converter/include/markdown_converter.h",
-      "name": "markdown_dynconf_parse",
-      "params": "data: *const u8, data_len: usize, result: *mut FFIDynconfResult",
-      "return_type": "()",
-      "safety": "unsafe",
-      "signature": "markdown_dynconf_parse(data: *const u8, data_len: usize, result: *mut FFIDynconfResult) -> ()"
-    },
-    {
-      "abi_version": 2,
-      "classification": "INTERNAL_ONLY",
-      "generated_header": "components/rust-converter/include/markdown_converter.h",
-      "name": "markdown_dynconf_result_free",
-      "params": "result: *mut FFIDynconfResult",
-      "return_type": "()",
-      "safety": "unsafe",
-      "signature": "markdown_dynconf_result_free(result: *mut FFIDynconfResult) -> ()"
-    },
-    {
-      "abi_version": 2,
-      "classification": "INTERNAL_ONLY",
-      "generated_header": "components/rust-converter/include/markdown_converter.h",
-      "name": "markdown_dynconf_result_init",
-      "params": "result: *mut FFIDynconfResult",
-      "return_type": "()",
-      "safety": "unsafe",
-      "signature": "markdown_dynconf_result_init(result: *mut FFIDynconfResult) -> ()"
-    },
-    {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_header_plan_free",
@@ -784,7 +579,7 @@
       "signature": "markdown_header_plan_free(plan: *mut FFIHeaderPlan) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_header_plan_init",
@@ -794,17 +589,17 @@
       "signature": "markdown_header_plan_init(result: *mut FFIHeaderPlan) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_negotiate_accept",
-      "params": "accept_header: *const u8, accept_header_len: usize, on_wildcard: u8, result: *mut FFIAcceptResult",
+      "params": "accept_header: *const u8, accept_header_len: usize, result: *mut FFIAcceptResult",
       "return_type": "()",
       "safety": "unsafe",
-      "signature": "markdown_negotiate_accept(accept_header: *const u8, accept_header_len: usize, on_wildcard: u8, result: *mut FFIAcceptResult) -> ()"
+      "signature": "markdown_negotiate_accept(accept_header: *const u8, accept_header_len: usize, result: *mut FFIAcceptResult) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_options_init",
@@ -814,7 +609,7 @@
       "signature": "markdown_options_init(result: *mut MarkdownOptions) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_parse_encoding_chain",
@@ -824,7 +619,7 @@
       "signature": "markdown_parse_encoding_chain(value: *const u8, value_len: usize, result: *mut FFIEncodingChainResult) -> u8"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_reason_code_count",
@@ -834,7 +629,7 @@
       "signature": "markdown_reason_code_count() -> u32"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_reason_code_metric_key",
@@ -844,7 +639,7 @@
       "signature": "markdown_reason_code_metric_key(code: u32, out_len: *mut usize) -> *const u8"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_reason_code_str",
@@ -854,7 +649,7 @@
       "signature": "markdown_reason_code_str(code: u32, out_len: *mut usize) -> *const u8"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_result_free",
@@ -864,7 +659,7 @@
       "signature": "markdown_result_free(result: *mut MarkdownResult) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_result_init",
@@ -874,17 +669,7 @@
       "signature": "markdown_result_init(result: *mut MarkdownResult) -> ()"
     },
     {
-      "abi_version": 2,
-      "classification": "INTERNAL_ONLY",
-      "generated_header": "components/rust-converter/include/markdown_converter.h",
-      "name": "markdown_sha256_hex",
-      "params": "data: *const u8, data_len: usize, output: *mut u8, output_len: usize",
-      "return_type": "u32",
-      "safety": "unsafe",
-      "signature": "markdown_sha256_hex(data: *const u8, data_len: usize, output: *mut u8, output_len: usize) -> u32"
-    },
-    {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_streaming_abort",
@@ -894,7 +679,7 @@
       "signature": "markdown_streaming_abort(handle: *mut StreamingConverterHandle) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_streaming_feed",
@@ -904,7 +689,7 @@
       "signature": "markdown_streaming_feed(handle: *mut StreamingConverterHandle, data: *const u8, data_len: usize, out_data: *mut *mut u8, out_len: *mut usize) -> u32"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_streaming_finalize",
@@ -914,7 +699,7 @@
       "signature": "markdown_streaming_finalize(handle: *mut StreamingConverterHandle, result: *mut MarkdownResult) -> u32"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_streaming_new_with_code",
@@ -924,7 +709,7 @@
       "signature": "markdown_streaming_new_with_code(options: *const MarkdownOptions, out_handle: *mut *mut StreamingConverterHandle) -> u32"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_streaming_output_free",
@@ -934,7 +719,7 @@
       "signature": "markdown_streaming_output_free(data: *mut u8, len: usize) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_streaming_safe_finish",
@@ -944,7 +729,7 @@
       "signature": "markdown_streaming_safe_finish(handle: *mut StreamingConverterHandle, out_data: *mut *mut u8, out_len: *mut usize) -> u32"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_trusted_proxies_free",
@@ -954,7 +739,7 @@
       "signature": "markdown_trusted_proxies_free(handle: *mut MarkdownTrustedProxies) -> ()"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_trusted_proxies_new",
@@ -964,7 +749,7 @@
       "signature": "markdown_trusted_proxies_new() -> *mut MarkdownTrustedProxies"
     },
     {
-      "abi_version": 2,
+      "abi_version": 3,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_trusted_proxies_push",
@@ -1058,22 +843,12 @@
     {
       "bounded_cardinality": "bounded",
       "labels": [
-        "outcome",
-        "reason"
-      ],
-      "name": "nginx_markdown_dynconf_reloads_total",
-      "order": 9,
-      "type": "counter"
-    },
-    {
-      "bounded_cardinality": "bounded",
-      "labels": [
         "features",
         "nginx_version",
         "version"
       ],
       "name": "nginx_markdown_build_info",
-      "order": 10,
+      "order": 9,
       "type": "gauge"
     }
   ],
@@ -1252,24 +1027,8 @@
       "string": "overload"
     },
     {
-      "c_accessor": "reason_str_invalid_dynconf",
-      "discriminant": 21,
-      "metric_family": "nginx_markdown_requests_total",
-      "metric_key": "markdown_errors_total",
-      "name": "InvalidDynconf",
-      "string": "invalid_dynconf"
-    },
-    {
-      "c_accessor": "reason_str_degraded_snapshot",
-      "discriminant": 22,
-      "metric_family": "nginx_markdown_requests_total",
-      "metric_key": "markdown_errors_total",
-      "name": "DegradedSnapshot",
-      "string": "degraded_snapshot"
-    },
-    {
       "c_accessor": "reason_str_header_plan_apply_err",
-      "discriminant": 23,
+      "discriminant": 21,
       "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "HeaderPlanApplyError",
@@ -1277,7 +1036,7 @@
     },
     {
       "c_accessor": "reason_str_streaming_mid_flight_err",
-      "discriminant": 24,
+      "discriminant": 22,
       "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "StreamingMidFlightError",
@@ -1285,7 +1044,7 @@
     },
     {
       "c_accessor": "reason_str_bypass_no_transform",
-      "discriminant": 25,
+      "discriminant": 23,
       "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_skipped_total",
       "name": "BypassNoTransform",
@@ -1293,14 +1052,104 @@
     },
     {
       "c_accessor": "reason_str_encoding_header_invalid",
-      "discriminant": 26,
+      "discriminant": 24,
       "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "EncodingHeaderInvalid",
       "string": "encoding_header_invalid"
     }
   ],
-  "registry_count": 27,
-  "reject_only_directives": [],
-  "schema_version": "0.9.2"
+  "registry_count": 25,
+  "reject_only_directives": [
+    {
+      "args": "any",
+      "classification": "reject_only",
+      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "(not applicable)",
+      "handler": "ngx_http_markdown_removed_directive",
+      "migration_target": "(not implemented)",
+      "name": "markdown_prune_selectors",
+      "otel_classification": "none",
+      "post": null,
+      "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY",
+      "status": "reject_only",
+      "syntax": "<string>"
+    },
+    {
+      "args": "any",
+      "classification": "reject_only",
+      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "(not applicable)",
+      "handler": "ngx_http_markdown_removed_directive",
+      "migration_target": "(not implemented)",
+      "name": "markdown_prune_protection_selectors",
+      "otel_classification": "none",
+      "post": null,
+      "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY",
+      "status": "reject_only",
+      "syntax": "<string>"
+    },
+    {
+      "args": "any",
+      "classification": "reject_only",
+      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+      "context": [
+        "http"
+      ],
+      "default": "(not applicable)",
+      "handler": "ngx_http_markdown_removed_directive",
+      "migration_target": "(not implemented)",
+      "name": "markdown_dynamic_config",
+      "otel_classification": "none",
+      "post": null,
+      "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_ANY",
+      "status": "reject_only",
+      "syntax": "on|off"
+    },
+    {
+      "args": "any",
+      "classification": "reject_only",
+      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+      "context": [
+        "http"
+      ],
+      "default": "(not applicable)",
+      "handler": "ngx_http_markdown_removed_directive",
+      "migration_target": "(not implemented)",
+      "name": "markdown_dynamic_config_path",
+      "otel_classification": "none",
+      "post": null,
+      "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_ANY",
+      "status": "reject_only",
+      "syntax": "<path>"
+    },
+    {
+      "args": "any",
+      "classification": "reject_only",
+      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+      "context": [
+        "http"
+      ],
+      "default": "(not applicable)",
+      "handler": "ngx_http_markdown_removed_directive",
+      "migration_target": "(not implemented)",
+      "name": "markdown_dynconf_dry_run",
+      "otel_classification": "none",
+      "post": null,
+      "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_ANY",
+      "status": "reject_only",
+      "syntax": "on|off"
+    }
+  ],
+  "schema_version": "0.9.3"
 }

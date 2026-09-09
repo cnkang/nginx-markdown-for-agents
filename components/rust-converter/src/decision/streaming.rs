@@ -12,7 +12,7 @@
 pub enum StreamingPolicy {
     /// `off` — never stream.
     Off = 0,
-    /// `auto` — stream large responses, full-buffer small ones.
+    /// `auto` — prefer streaming for eligible responses.
     Auto = 1,
     /// `force` — always stream eligible responses.
     Force = 2,

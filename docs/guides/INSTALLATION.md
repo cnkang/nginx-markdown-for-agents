@@ -331,23 +331,25 @@ Compile the module from source when you use a custom NGINX build or a platform w
 
 | Component | Minimum Version | Purpose |
 |-----------|----------------|---------|
-| **Rust Toolchain** | 1.97.1+ | Building the Rust converter (pinned baseline) |
-| **Cargo** | 1.97.1+ | Rust package manager (included with Rust) |
+| **Rust Toolchain** | 1.98.1+ | Building the Rust converter (pinned baseline) |
+| **Cargo** | 1.98.1+ | Rust package manager (included with Rust) |
 | **cbindgen** | 0.29.4 | Generating C header files from Rust |
 | **NGINX** | 1.24.0+ | Web server (source code required for module compilation) |
 | **GCC/Clang** | GCC 4.8+ or Clang 3.4+ | C compiler for NGINX module |
 | **Make** | 3.81+ | Build automation |
 | **PCRE** | 8.0+ | Regular expression library (NGINX dependency) |
 | **zlib** | 1.2.0+ | gzip/deflate support and NGINX dependency |
-| **libbrotlidec** | 1.0.9+ | Optional: Brotli streaming decompression |
+| **libbrotlidec** | 1.0.9+ | Brotli decoder library (required for the C-side streaming Brotli path. The Rust converter always includes Brotli decoding) |
 | **OpenSSL** | 1.0.2+ | SSL/TLS support (optional, for HTTPS) |
 
 **Development Headers Required:**
 - PCRE development headers (`pcre-devel` or `libpcre3-dev`)
 - zlib development headers (`zlib-devel` or `zlib1g-dev`)
 - Brotli decoder development headers (`brotli-devel` or `libbrotli-dev`) —
-  required only for `NGX_MARKDOWN_BROTLI_STREAMING=on`. `auto` falls back to
-  the Rust bounded full-buffer decoder when they are unavailable
+  required for the C-side streaming Brotli path (`NGX_MARKDOWN_BROTLI_STREAMING=on`).
+  The Rust converter always includes Brotli decoding, so a build without the
+  C-side library still supports the Brotli encoding through the bounded
+  full-buffer decoder. The capability gate reports the actual build state
 - OpenSSL development headers (`openssl-devel` or `libssl-dev`) — optional
 
 ### Platform-Specific Prerequisites
@@ -437,7 +439,7 @@ tar -xzf nginx-1.24.0.tar.gz
 
 ```bash
 # Check Rust version
-rustc --version  # Should be 1.97.1 or higher
+rustc --version  # Should be 1.98.1 or higher
 
 # Check Cargo version
 cargo --version
@@ -689,8 +691,6 @@ The minimum supported NGINX version is **1.24.0**. Older versions are out of sco
 
 If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [Manual Source Build](#6-secondary-manual-source-build) instructions. They compile the module for your version.
 
-### Platform Compatibility Matrix
-
 <!-- BEGIN AUTO-GENERATED MATRIX -->
 | NGINX Version | OS Type | Architecture | Support Tier |
 |---------------|---------|--------------|--------------|
@@ -702,19 +702,20 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.26.3 | glibc | x86_64 | Full |
 | 1.26.3 | musl | aarch64 | Full |
 | 1.26.3 | musl | x86_64 | Full |
+| 1.26.3 | unlisted | unlisted | Source Only |
 | 1.28.3 | glibc | aarch64 | Full |
 | 1.28.3 | glibc | x86_64 | Full |
 | 1.28.3 | musl | aarch64 | Full |
 | 1.28.3 | musl | x86_64 | Full |
+| 1.28.3 | unlisted | unlisted | Source Only |
 | 1.30.4 | glibc | aarch64 | Full |
 | 1.30.4 | glibc | x86_64 | Full |
 | 1.30.4 | musl | aarch64 | Full |
 | 1.30.4 | musl | x86_64 | Full |
-| 1.31.4 | glibc | aarch64 | Full |
-| 1.31.4 | glibc | x86_64 | Full |
-| 1.31.4 | musl | aarch64 | Full |
-| 1.31.4 | musl | x86_64 | Full |
-
+| 1.31.5 | glibc | aarch64 | Best-Effort |
+| 1.31.5 | glibc | x86_64 | Best-Effort |
+| 1.31.5 | musl | aarch64 | Best-Effort |
+| 1.31.5 | musl | x86_64 | Best-Effort |
 <!-- END AUTO-GENERATED MATRIX -->
 
 <!-- BEGIN:release-matrix:installation-matrix -->
@@ -725,81 +726,84 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.4 | mainline | debian12 | glibc | arm64 | supported |
-| 1.31.4 | mainline | debian12 | glibc | amd64 | supported |
+| 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | best-effort |
+| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | best-effort |
 | 1.30.4 | stable | debian12 | glibc | arm64 | supported |
 | 1.30.4 | stable | debian12 | glibc | amd64 | supported |
-| 1.28.3 | legacy | debian12 | glibc | arm64 | supported |
-| 1.28.3 | legacy | debian12 | glibc | amd64 | supported |
-| 1.26.3 | legacy | debian12 | glibc | arm64 | supported |
-| 1.26.3 | legacy | debian12 | glibc | amd64 | supported |
-| 1.24.0 | legacy | debian12 | glibc | arm64 | supported |
-| 1.24.0 | legacy | debian12 | glibc | amd64 | supported |
+| 1.28.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.28.3 | stable | debian12 | glibc | amd64 | supported |
+| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
+| 1.24.0 | stable | debian12 | glibc | arm64 | supported |
+| 1.24.0 | stable | debian12 | glibc | amd64 | supported |
 
 ### docker-image
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.4 | mainline | debian12 | glibc | arm64 | supported |
-| 1.31.4 | mainline | debian12 | glibc | amd64 | supported |
-| 1.31.4 | mainline | alpine3.24 | musl | arm64 | supported |
-| 1.31.4 | mainline | alpine3.24 | musl | amd64 | supported |
-| 1.26.3 | legacy | debian12 | glibc | arm64 | supported |
-| 1.26.3 | legacy | debian12 | glibc | amd64 | supported |
-| 1.26.3 | legacy | alpine3.20 | musl | arm64 | supported |
-| 1.26.3 | legacy | alpine3.20 | musl | amd64 | supported |
+| 1.31.5 | mainline | debian12 | glibc | arm64 | best-effort |
+| 1.31.5 | mainline | debian12 | glibc | amd64 | best-effort |
+| 1.31.5 | mainline | alpine3.24 | musl | arm64 | best-effort |
+| 1.31.5 | mainline | alpine3.24 | musl | amd64 | best-effort |
+| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | supported |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | supported |
 
 ### dynamic-module
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.4 | mainline | linux | glibc | arm64 | supported |
-| 1.31.4 | mainline | linux | musl | arm64 | supported |
-| 1.31.4 | mainline | linux | glibc | amd64 | supported |
-| 1.31.4 | mainline | linux | musl | amd64 | supported |
+| 1.31.5 | mainline | linux | glibc | arm64 | best-effort |
+| 1.31.5 | mainline | linux | musl | arm64 | best-effort |
+| 1.31.5 | mainline | linux | glibc | amd64 | best-effort |
+| 1.31.5 | mainline | linux | musl | amd64 | best-effort |
 | 1.30.4 | stable | linux | glibc | arm64 | supported |
 | 1.30.4 | stable | linux | musl | arm64 | supported |
 | 1.30.4 | stable | linux | glibc | amd64 | supported |
 | 1.30.4 | stable | linux | musl | amd64 | supported |
-| 1.28.3 | legacy | linux | glibc | arm64 | supported |
-| 1.28.3 | legacy | linux | musl | arm64 | supported |
-| 1.28.3 | legacy | linux | glibc | amd64 | supported |
-| 1.28.3 | legacy | linux | musl | amd64 | supported |
-| 1.26.3 | legacy | linux | glibc | arm64 | supported |
-| 1.26.3 | legacy | linux | musl | arm64 | supported |
-| 1.26.3 | legacy | linux | glibc | amd64 | supported |
-| 1.26.3 | legacy | linux | musl | amd64 | supported |
-| 1.24.0 | legacy | linux | glibc | arm64 | supported |
-| 1.24.0 | legacy | linux | musl | arm64 | supported |
-| 1.24.0 | legacy | linux | glibc | amd64 | supported |
-| 1.24.0 | legacy | linux | musl | amd64 | supported |
+| 1.28.3 | stable | linux | glibc | arm64 | supported |
+| 1.28.3 | stable | linux | musl | arm64 | supported |
+| 1.28.3 | stable | linux | glibc | amd64 | supported |
+| 1.28.3 | stable | linux | musl | amd64 | supported |
+| 1.26.3 | stable | linux | glibc | arm64 | supported |
+| 1.26.3 | stable | linux | musl | arm64 | supported |
+| 1.26.3 | stable | linux | glibc | amd64 | supported |
+| 1.26.3 | stable | linux | musl | amd64 | supported |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | best-effort |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | best-effort |
+| 1.24.0 | stable | linux | glibc | arm64 | supported |
+| 1.24.0 | stable | linux | musl | arm64 | supported |
+| 1.24.0 | stable | linux | glibc | amd64 | supported |
+| 1.24.0 | stable | linux | musl | amd64 | supported |
 
 ### homebrew-formula
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.26.3 | legacy | macos | darwin | arm64 | experimental |
+| 1.26.3 | stable | macos | darwin | arm64 | experimental |
 
 ### rpm-package
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.4 | mainline | almalinux9 | glibc | arm64 | supported |
-| 1.31.4 | mainline | almalinux9 | glibc | amd64 | supported |
+| 1.31.5 | mainline | almalinux9 | glibc | arm64 | best-effort |
+| 1.31.5 | mainline | almalinux9 | glibc | amd64 | best-effort |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | supported |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | supported |
-| 1.28.3 | legacy | almalinux9 | glibc | arm64 | supported |
-| 1.28.3 | legacy | almalinux9 | glibc | amd64 | supported |
-| 1.26.3 | legacy | almalinux9 | glibc | arm64 | supported |
-| 1.26.3 | legacy | almalinux9 | glibc | amd64 | supported |
-| 1.24.0 | legacy | almalinux9 | glibc | arm64 | supported |
-| 1.24.0 | legacy | almalinux9 | glibc | amd64 | supported |
+| 1.28.3 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.28.3 | stable | almalinux9 | glibc | amd64 | supported |
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | supported |
+| 1.24.0 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.24.0 | stable | almalinux9 | glibc | amd64 | supported |
 
 ### source
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.26.3 | legacy | any | n/a | any | best-effort |
+| 1.28.3 | stable | any | n/a | any | best-effort |
+| 1.26.3 | stable | any | n/a | any | best-effort |
 <!-- END:release-matrix:installation-matrix -->
 
 ---
@@ -1510,7 +1514,7 @@ brew install pcre
 # Update Rust toolchain
 rustup update
 
-# Check Rust version (must be 1.97.0+)
+# Check Rust version (must be 1.98.0+)
 rustc --version
 
 # Clean and rebuild

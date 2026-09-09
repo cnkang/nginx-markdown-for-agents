@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from tools.release.gates.validate_k8s_manifests import (  # noqa: E402
     GATE4_LOCAL_REQUIRED_SNIPPETS,
