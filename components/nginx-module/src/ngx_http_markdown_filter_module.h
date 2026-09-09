@@ -1558,7 +1558,7 @@ typedef struct {
         ngx_atomic_t  precommit_reject_total;    /* Pre-Commit fail-closed */
         ngx_atomic_t  budget_exceeded_total;     /* Memory budget exceeded */
         ngx_atomic_t  last_ttfb_ms;              /* Last streaming TTFB (milliseconds) */
-        ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak estimate (bytes; not RSS) */
+        ngx_atomic_t  last_peak_memory_bytes;    /* Run-wide conversion peak estimate (bytes; not RSS); high-water mark across streaming + full-buffer */
 
         /* Fallback/failure counters */
         ngx_atomic_t  streaming_fallback_precommit_pass;  /* Pre-commit HTML pass-through */
