@@ -78,10 +78,11 @@ DIFF_PATH = MATRIX_PATH.parent / "matrix-diff.json"
 # ---------------------------------------------------------------------------
 # Scraping / version constants
 # ---------------------------------------------------------------------------
+NGINX_ORG = "nginx.org"
 NGINX_DOWNLOAD_URL = "https://nginx.org/en/download.html"
 REPO_SLUG = os.environ.get("GITHUB_REPOSITORY", "cnkang/nginx-markdown-for-agents")
 GITHUB_API_ACCEPT = "application/vnd.github+json"
-NGINX_DOWNLOAD_ALLOWED_HOSTS = {"nginx.org"}
+NGINX_DOWNLOAD_ALLOWED_HOSTS = {NGINX_ORG}
 GITHUB_RELEASE_ALLOWED_HOSTS = {"api.github.com"}
 
 # Supported platform combinations
@@ -1159,9 +1160,9 @@ def _mark_new_versions_pending(
             candidate["verification_state"] = "pending"
             candidate["support_stage"] = "best-effort"
             candidate["date"] = recorded_date
-            candidate["source"] = "nginx.org"
+            candidate["source"] = NGINX_ORG
             candidate["provenance"] = {
-                "kind": "nginx.org",
+                "kind": NGINX_ORG,
                 "reference": NGINX_DOWNLOAD_URL,
             }
         marked.append(candidate)
@@ -1234,11 +1235,10 @@ def _canonical_dynamic_entry(
     target_env = {"glibc": "gnu", "musl": "musl"}.get(libc)
     if target_env is None:
         raise ValueError(f"unsupported libc for target construction: {libc}")
-    target = normalized.get("target")
-    if not target or "-unknown-" not in target:
+    if not normalized.get("target") or "-unknown-" not in normalized["target"]:
         # A bare arch value (for example "aarch64" via the arch alias)
         # is not a canonical target triple; construct the full triple.
-        target = f"{normalized_arch}-unknown-linux-{target_env}"
+        normalized["target"] = f"{normalized_arch}-unknown-linux-{target_env}"
     generated = {
         "nginx_version": version,
         "nginx_channel": classify_version(version),

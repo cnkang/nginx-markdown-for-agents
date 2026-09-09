@@ -845,12 +845,10 @@ ngx_http_markdown_diag_error_name(ngx_uint_t policy, ngx_uint_t status)
 static const char *
 ngx_http_markdown_diag_source_name(ngx_uint_t source)
 {
-    switch (source) {
-    case NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE:
+    if (source == NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE) {
         return "request_variable";
-    default:
-        return "static";
     }
+    return "static";
 }
 
 

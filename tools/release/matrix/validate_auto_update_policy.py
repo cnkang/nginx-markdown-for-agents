@@ -59,27 +59,36 @@ def validate_policy(matrix: dict[str, Any], diff: dict[str, Any]) -> list[str]:
         if version not in added_set:
             continue
         matched_versions.add(version)
-        support_tier = entry.get("support_tier")
-        verification_state = entry.get("verification_state")
-        support_stage = entry.get("support_stage")
-        if support_tier != "best-effort":
-            violations.append(
-                f"entries[{index}] version {version} must have "
-                f"support_tier=best-effort from auto-discovery "
-                f"(got {support_tier!r})"
-            )
-        if verification_state != "pending":
-            violations.append(
-                f"entries[{index}] version {version} must have "
-                f"verification_state=pending (got {verification_state!r})"
-            )
-        if support_stage not in {"best-effort", "experimental"}:
-            violations.append(
-                f"entries[{index}] version {version} must have a non-primary "
-                f"support_stage (got {support_stage!r})"
-            )
+        violations.extend(_check_added_version_entry(entry, index, version))
     for version in sorted(added_set - matched_versions):
         violations.append(f"added version {version} has no matrix entries")
+    return violations
+
+
+def _check_added_version_entry(
+    entry: dict[str, Any], index: int, version: str
+) -> list[str]:
+    """Return policy violations for one auto-discovered version entry."""
+    violations: list[str] = []
+    support_tier = entry.get("support_tier")
+    verification_state = entry.get("verification_state")
+    support_stage = entry.get("support_stage")
+    if support_tier != "best-effort":
+        violations.append(
+            f"entries[{index}] version {version} must have "
+            f"support_tier=best-effort from auto-discovery "
+            f"(got {support_tier!r})"
+        )
+    if verification_state != "pending":
+        violations.append(
+            f"entries[{index}] version {version} must have "
+            f"verification_state=pending (got {verification_state!r})"
+        )
+    if support_stage not in {"best-effort", "experimental"}:
+        violations.append(
+            f"entries[{index}] version {version} must have a non-primary "
+            f"support_stage (got {support_stage!r})"
+        )
     return violations
 
 

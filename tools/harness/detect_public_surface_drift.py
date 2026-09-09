@@ -554,7 +554,7 @@ def _command_args(flags):
     return "unknown"
 
 
-def _command_classification(name, handler):
+def _command_classification(handler):
     """Classify a directive as active or reject-only.
 
     The pre-LTS 0.9.2 convergence removed the OTel and dynconf directives and
@@ -711,7 +711,7 @@ def _hint_migration_target(text, hint_name):
 
 def _command_entry_metadata(name, flags, handler, fields, metadata, source_text):
     """Derive status, defaults, syntax, and migration from one command row."""
-    classification, otel_classification = _command_classification(name, handler)
+    classification, otel_classification = _command_classification(handler)
     source_metadata = (metadata or {}).get(name, {})
     status = source_metadata.get("status") or (
         "reject_only" if classification == "reject_only" else "active")
