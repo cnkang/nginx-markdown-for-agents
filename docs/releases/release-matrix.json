@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_from": {
     "path": "tools/release-matrix.json",
-    "sha256": "sha256:dea3a29f28cb55d863c8946b30346e101f7325e7407281f8fc05c0185fb81864"
+    "sha256": "sha256:fb9229aa392283f1bcd43e5f7bd0379e3dc888d50e6ad79892a50a6e03a1b827"
   },
   "entries": [
     {
@@ -672,7 +672,7 @@
       "abi_version": 3,
       "verification_state": "verified",
       "support_stage": "best-effort",
-      "date": "2026-09-07",
+      "date": "2026-09-08",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",

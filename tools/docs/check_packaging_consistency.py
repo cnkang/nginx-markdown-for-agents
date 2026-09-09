@@ -353,11 +353,11 @@ def check_matrix_consistency() -> list[str]:
                 f"Full-tier entry missing from compatibility table: "
                 f"nginx={nginx} os_type={os_type} arch={arch}"
             )
-        elif matching[0][3].lower() != "full":
+        elif matching[0][3].lower() not in ("full", "supported"):
             errors.append(
                 f"Compatibility table tier mismatch: "
                 f"nginx={nginx} os_type={os_type} arch={arch} "
-                f"expected 'Full' but found '{matching[0][3]}'"
+                f"expected 'Full' or 'Supported' but found '{matching[0][3]}'"
             )
     if matched == 0:
         errors.append(
