@@ -30,7 +30,7 @@ Implement a two-phase fallback state machine per RFC 0008 section 3:
    instead of re-reading upstream data without bound.  Precedence: the
    replay-buffer fail-closed rule GOVERNS — when replay data is
    unavailable before commit, the module fails closed (configured error
-   status 429/503/502 via `markdown_error_status`) regardless of a
+   status 429/503/502 via `markdown_error_policy status <code>`) regardless of a
    `pass` error policy, because a pass policy cannot be honored without
    the original bytes.
 2. **Post-commit phase**: Markdown output has been partially delivered. On
