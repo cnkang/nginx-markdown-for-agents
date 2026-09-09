@@ -14,6 +14,7 @@ import json
 import os
 import pathlib
 import sys
+import tempfile
 from typing import Any
 
 
@@ -118,18 +119,29 @@ def _resolve_regular_file(path: pathlib.Path) -> pathlib.Path:
 
 
 def _resolve_write_target(path: pathlib.Path) -> pathlib.Path:
-    """Resolve a CLI-supplied write target inside the repository root."""
+    """Resolve a CLI-supplied write target inside an allowed root.
+
+    The gate runs in agentic CI contexts where CLI arguments may come from
+    an untrusted caller.  Write targets are confined to the repository root
+    or the system temporary directory (the E2E smoke scripts stage
+    capability reports under the platform temp dir), and symlinks and
+    non-regular files are rejected.
+    """
     if path.is_symlink():
         raise ValueError(f"refusing symlink path: {path}")
     resolved = path.resolve()
     if resolved.exists() and not resolved.is_file():
         raise ValueError(f"write target is not a regular file: {path}")
-    root = pathlib.Path.cwd().resolve()
-    try:
-        resolved.relative_to(root)
-    except ValueError as exc:
+    allowed_roots = (
+        pathlib.Path.cwd().resolve(),
+        pathlib.Path(tempfile.gettempdir()).resolve(),
+    )
+    if not any(
+        resolved == root or resolved.is_relative_to(root)
+        for root in allowed_roots
+    ):
         raise ValueError(
-            f"write target escapes repository root: {path}") from exc
+            f"write target escapes allowed roots: {path}")
     return resolved
 
 
