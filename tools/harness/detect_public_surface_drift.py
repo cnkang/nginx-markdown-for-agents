@@ -257,15 +257,15 @@ def _check_reject_only_entry(entry, index):
     if entry.get("classification") != "reject_only":
         errors.append(
             "reject_only_directives[{}].classification must be reject_only".format(
-                    index))
-        if entry.get("handler") != REMOVED_DIRECTIVE_HANDLER:
-            errors.append(
-                "reject_only_directives[{}].handler must be {}".format(
-                    index, REMOVED_DIRECTIVE_HANDLER))
-        if not isinstance(entry.get("migration_target"), str):
-            errors.append(
-                "reject_only_directives[{}].migration_target must be a "
-                "string".format(index))
+                index))
+    if entry.get("handler") != REMOVED_DIRECTIVE_HANDLER:
+        errors.append(
+            "reject_only_directives[{}].handler must be {}".format(
+                index, REMOVED_DIRECTIVE_HANDLER))
+    if not isinstance(entry.get("migration_target"), str):
+        errors.append(
+            "reject_only_directives[{}].migration_target must be a "
+            "string".format(index))
     return errors
 
 
