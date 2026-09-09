@@ -4203,7 +4203,7 @@ ngx_http_markdown_streaming_failopen_passthrough(
              * so body_filter consumes this chain without re-forwarding,
              * while future input chains (failopen_active) continue via
              * continue_failopen_input instead of being dropped. */
-            ctx->streaming.completion.failopen_chain_forwarded = 1;
+            ngx_http_markdown_streaming_failopen_mark_chain_forwarded(ctx);
         }
         return rc;
     }
@@ -4467,6 +4467,13 @@ ngx_http_markdown_streaming_ensure_handle(
          */
         rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, in);
+
+        if (rc == NGX_DONE) {
+            /* Normalize NGX_DONE: the body filter must not treat a
+             * successful fail-open delivery as a streaming fallback
+             * and re-enter full-buffer processing. */
+            rc = NGX_OK;
+        }
 
         /*
          * Only latch failopen_completed on confirmed downstream
@@ -4981,6 +4988,14 @@ ngx_http_markdown_streaming_append_replay_chunk(
     if (rc == NGX_DECLINED && !ctx->eligible) {
         rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, cl);
+        if (rc == NGX_DONE) {
+            /* Normalize: NGX_DONE from fail-open delivery must not be
+             * interpreted by the body filter as a streaming fallback
+             * (which would re-enter full-buffer processing and forward
+             * the same bytes again).  Mirrors the normalization in
+             * handle_chunk_result. */
+            rc = NGX_OK;
+        }
         /* Only set latch on successful delivery, not NGX_AGAIN (Rule 47) */
         if (rc == NGX_OK) {
             ctx->failopen_completed = 1;
@@ -5063,6 +5078,13 @@ ngx_http_markdown_streaming_handle_consumed_again(
             if (rc == NGX_DECLINED && !ctx->eligible) {
                 rc = ngx_http_markdown_streaming_failopen_passthrough(
                     r, ctx, cl);
+                if (rc == NGX_DONE) {
+                    /* Normalize NGX_DONE (see the replay-buffer-limit
+                     * path above): the body filter must not treat a
+                     * successful fail-open delivery as a streaming
+                     * fallback and re-enter full-buffer processing. */
+                    rc = NGX_OK;
+                }
                 if (rc == NGX_OK || rc == NGX_DONE) {
                     ctx->failopen_completed = 1;
                 }
@@ -5227,6 +5249,12 @@ ngx_http_markdown_streaming_finalize_on_last_buf(
          */
         rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, in);
+        if (rc == NGX_DONE) {
+            /* Normalize NGX_DONE: the body filter must not treat a
+             * successful fail-open delivery as a streaming fallback
+             * and re-enter full-buffer processing. */
+            rc = NGX_OK;
+        }
         if (rc == NGX_OK || rc == NGX_DONE) {
             ctx->failopen_completed = 1;
         }
@@ -5290,8 +5318,19 @@ ngx_http_markdown_streaming_enqueue_with_pending_header(
              * the request terminates with an error. */
             return NGX_ERROR;
         }
-        return ngx_http_markdown_streaming_failopen_passthrough(
+        rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, in);
+        if (rc == NGX_DONE) {
+            rc = NGX_OK;
+        }
+        if (rc == NGX_OK) {
+            /* The current chain was delivered by fail-open.  Consume
+             * the per-invocation marker so the next body-filter
+             * invocation with a NEW chain routes through
+             * continue_failopen_input instead of being swallowed by
+             * the failopen_completed latch. */
+            ctx->streaming.completion.failopen_chain_forwarded = 0;
+        }
     }
     return rc;
 }
@@ -5398,8 +5437,22 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
         rc = ngx_http_markdown_streaming_precommit_error(
             r, ctx, conf, enqueue_error);
         if (rc == NGX_DECLINED && !ctx->eligible) {
-            return ngx_http_markdown_streaming_failopen_passthrough(
+            rc = ngx_http_markdown_streaming_failopen_passthrough(
                 r, ctx, in);
+            if (rc == NGX_DONE) {
+                /* Normalize NGX_DONE: the body filter must not treat a
+                 * successful fail-open delivery as a streaming fallback
+                 * and re-enter full-buffer processing. */
+                rc = NGX_OK;
+            }
+            if (rc == NGX_OK) {
+                /* The current chain was delivered by fail-open.  Consume
+                 * the per-invocation marker so the next body-filter
+                 * invocation with a NEW chain routes through
+                 * continue_failopen_input instead of being swallowed by
+                 * the failopen_completed latch. */
+                ctx->streaming.completion.failopen_chain_forwarded = 0;
+            }
         }
         return rc;
     }
