@@ -721,7 +721,7 @@ ngx_http_markdown_build_effective_conf(
 
 void
 ngx_http_markdown_bind_request_snapshot(
-    ngx_http_request_t *r,
+    const ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *early_eff,
     ngx_http_markdown_effective_conf_t *eff_storage,
