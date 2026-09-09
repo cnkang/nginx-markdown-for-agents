@@ -15,7 +15,7 @@ flowchart TD
 ```
 
 Wildcards (`*/*`, `text/*`) pass through under the default `strict`
-policy; only an explicit `markdown_accept force` converts a wildcard-only
+policy. Only an explicit `markdown_accept force` converts a wildcard-only
 Accept header.
 
 This module implements HTTP content negotiation to serve Markdown representations of HTML content. Clients request Markdown using the standard `Accept` header. The module then decides whether to convert the response. Eligibility rules and configuration drive that decision.

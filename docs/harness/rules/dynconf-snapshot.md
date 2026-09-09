@@ -113,12 +113,11 @@ Verification:
   eligibility paths. `effective_conf_test.c` builds the effective view from
   the merged static configuration and asserts the by-value projection through
   `ngx_http_markdown_effective_*()` accessors.
-- Cross-TU visibility of the effective-conf struct and its accessors is
-  enforced by the committed-header/ABI drift gates (`make
-  release-gates-check-092`); the header is generated and pinned by
-  cbindgen + `normalize_cbindgen_header.py`, so any field moved out of
-  `filter_module.h` breaks the ABI fingerprint check.
-
+- The committed-header/ABI drift gates (`make release-gates-check-092`)
+  enforce cross-TU visibility of the effective-conf struct and its
+  accessors. cbindgen + `normalize_cbindgen_header.py` generate and pin the
+  header, so any field moved out of `filter_module.h` breaks the ABI
+  fingerprint check.
 ---
 
 ### 71. [CURRENT — static] Static explicit settings block overrides and propagate to child levels

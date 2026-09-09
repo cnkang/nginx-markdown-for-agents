@@ -16,7 +16,7 @@ a public surface source metadata and ABI drift gate for release integrity.
 
 0.9.2 is the breaking release before 1.0. The release reduces the
 configuration surface to 20 active directives and five reject-only migration
-entries. Those five names produce migration errors; other removed names
+entries. Those five names produce migration errors. Other removed names
 produce `unknown directive` errors. See
 [docs/guides/0.9.2-breaking-changes.md](docs/guides/0.9.2-breaking-changes.md)
 for the complete reference. See
@@ -55,7 +55,7 @@ before/after examples.
 - **Runtime configuration removed.** Move dynamic settings to static directives
   and apply them with `nginx -t` and a controlled reload or restart. See
   [static configuration migration](docs/guides/MIGRATION-0.9.2.md#static-configuration-migration).
-  The streaming-buffer default is 2 MiB; set
+  The streaming-buffer default is 2 MiB. Set
   `markdown_limits streaming_buffer=256k` to retain the old bound.
 - **Content-Encoding policy.** Malformed, unknown, and excessively deep
   encoding chains follow `markdown_error_policy`. Only `pass` forwards the

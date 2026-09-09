@@ -160,7 +160,7 @@ Override the NGINX version **and** the base image together. The module must
 use a build compiled against the exact NGINX build shipped in the base
 image, or the load fails with an ABI mismatch. The F5 Ingress Controller
 image pins its own NGINX build, so a custom NGINX version requires the
-plain NGINX base image (see the plain-NGINX example below); the
+plain NGINX base image (see the plain-NGINX example below). The
 `NGINX_INGRESS_IMAGE` argument then selects the matching `nginx:<version>`
 image instead of the Ingress Controller image.
 

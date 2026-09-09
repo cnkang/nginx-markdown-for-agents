@@ -21,7 +21,7 @@ After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
 ## Default-policy actions
 
 > **Authentication action:** `markdown_auth_policy` changes from `allow` to
-> `deny`. Authenticated requests receive the original HTML without conversion;
+> `deny`. Authenticated requests receive the original HTML without conversion.
 > this policy never rejects the request. Set `markdown_auth_policy allow;`
 > explicitly to retain the previous conversion behavior.
 
