@@ -219,6 +219,19 @@ def _validate_reject_only_migration(inventory):
         errors.append(
             "post-convergence inventory must contain exactly {} reject-only "
             "migration directives".format(FINAL_REJECT_ONLY_COUNT))
+    errors.extend(_check_reject_only_names(reject_only))
+    for index, entry in enumerate(reject_only):
+        if not isinstance(entry, dict):
+            errors.append(
+                "reject_only_directives[{}] must be an object".format(index))
+            continue
+        errors.extend(_check_reject_only_entry(entry, index))
+    return errors
+
+
+def _check_reject_only_names(reject_only):
+    """Return errors for missing or unexpected reject-only directive names."""
+    errors = []
     names = {entry.get("name") for entry in reject_only
              if isinstance(entry, dict)}
     missing = sorted(REJECT_ONLY_NAMES - names)
@@ -231,18 +244,19 @@ def _validate_reject_only_migration(inventory):
         errors.append(
             "reject_only_directives contains unexpected names: {}".format(
                 ", ".join(extra)))
-    for index, entry in enumerate(reject_only):
-        if not isinstance(entry, dict):
-            errors.append(
-                "reject_only_directives[{}] must be an object".format(index))
-            continue
-        if entry.get("status") != "reject_only":
-            errors.append(
-                "reject_only_directives[{}].status must be reject_only".format(
-                    index))
-        if entry.get("classification") != "reject_only":
-            errors.append(
-                "reject_only_directives[{}].classification must be reject_only".format(
+    return errors
+
+
+def _check_reject_only_entry(entry, index):
+    """Return errors for one reject-only directive entry's fields."""
+    errors = []
+    if entry.get("status") != "reject_only":
+        errors.append(
+            "reject_only_directives[{}].status must be reject_only".format(
+                index))
+    if entry.get("classification") != "reject_only":
+        errors.append(
+            "reject_only_directives[{}].classification must be reject_only".format(
                     index))
         if entry.get("handler") != REMOVED_DIRECTIVE_HANDLER:
             errors.append(
