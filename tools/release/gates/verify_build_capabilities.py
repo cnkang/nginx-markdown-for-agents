@@ -17,6 +17,13 @@ import sys
 import tempfile
 from typing import Any
 
+# Allow direct execution (tests invoke this script via subprocess without
+# PYTHONPATH) while keeping the tools.lib import for the harness detector.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
+
+from tools.lib.path_validation import validate_write_path_within_root
+
 
 EXPECTED_ENGINES = ("full_buffer", "streaming")
 EXPECTED_ENCODINGS = (
@@ -118,38 +125,42 @@ def _resolve_regular_file(path: pathlib.Path) -> pathlib.Path:
     return resolved
 
 
-def _resolve_write_target(path: pathlib.Path) -> pathlib.Path:
-    """Resolve a CLI-supplied write target inside an allowed root.
+def _allowed_write_roots() -> set[pathlib.Path]:
+    """Return the resolved roots a write target may live under.
 
     The gate runs in agentic CI contexts where CLI arguments may come from
     an untrusted caller.  Write targets are confined to the repository root
-    or the system temporary directory (the E2E smoke scripts stage
-    capability reports under the platform temp dir), and symlinks and
-    non-regular files are rejected.
+    or the platform temporary locations (the E2E smoke scripts stage
+    capability reports under the temp dir; on macOS /tmp is a symlink to
+    /private/tmp, so the resolved aliases are included).
+    """
+    roots = {pathlib.Path.cwd().resolve()}
+    roots.add(pathlib.Path(tempfile.gettempdir()).resolve())
+    for alias in (os.environ.get("TMPDIR"), os.sep + "tmp", os.sep + "var" + os.sep + "tmp"):
+        if not alias:
+            continue
+        alias_root = pathlib.Path(alias).resolve()
+        if alias_root.is_dir():
+            roots.add(alias_root)
+    return roots
+
+
+def _write_root_for(path: pathlib.Path) -> pathlib.Path:
+    """Return the allowed root that contains the write target.
+
+    Rejects symlinks and non-regular-file targets before resolving the
+    containing root, so validate_write_path_within_root only ever sees a
+    concrete target inside an allowed tree.
     """
     if path.is_symlink():
         raise ValueError(f"refusing symlink path: {path}")
     target = path.resolve()
     if target.exists() and not target.is_file():
         raise ValueError(f"write target is not a regular file: {path}")
-    allowed_roots = {pathlib.Path.cwd().resolve()}
-    allowed_roots.add(pathlib.Path(tempfile.gettempdir()).resolve())
-    # The E2E smoke scripts stage capability reports under the platform
-    # temp dir; on macOS /tmp is a symlink to /private/tmp, so include
-    # the resolved aliases of the conventional temp locations.
-    for alias in (os.environ.get("TMPDIR"), os.sep + "tmp", os.sep + "var" + os.sep + "tmp"):
-        if not alias:
-            continue
-        alias_root = pathlib.Path(alias).resolve()
-        if alias_root.is_dir():
-            allowed_roots.add(alias_root)
-    if not any(
-        target == root or target.is_relative_to(root)
-        for root in allowed_roots
-    ):
-        raise ValueError(
-            f"write target escapes allowed roots: {path}")
-    return target
+    for root in _allowed_write_roots():
+        if target == root or target.is_relative_to(root):
+            return root
+    raise ValueError(f"write target escapes allowed roots: {path}")
 
 
 def validate(report: dict[str, Any]) -> list[str]:
@@ -197,7 +208,8 @@ def main(argv: list[str] | None = None) -> int:
             else _load_report(_resolve_regular_file(args.capabilities))
         )
         if args.write is not None:
-            write_target = _resolve_write_target(args.write)
+            write_target = validate_write_path_within_root(
+                args.write, _write_root_for(args.write))
             write_target.parent.mkdir(parents=True, exist_ok=True)
             with write_target.open("w", encoding="utf-8") as handle:
                 handle.write(json.dumps(report, indent=2) + "\n")
