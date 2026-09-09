@@ -83,6 +83,18 @@ pub fn get_with_headers(url: &str, headers: &HashMap<String, String>) -> Result<
     to_http_response(resp)
 }
 
+/// Send a GET request with a header PAIR list, allowing repeated header
+/// names (e.g. two `X-Test` lines) so scenarios can exercise duplicate
+/// request-header handling end to end.
+pub fn get_with_header_pairs(url: &str, headers: &[(&str, &str)]) -> Result<HttpResponse> {
+    let mut req = shared_client().get(url);
+    for (key, value) in headers {
+        req = req.header(*key, *value);
+    }
+    let resp = req.send()?;
+    to_http_response(resp)
+}
+
 /// Convert a `reqwest::blocking::Response` into our `HttpResponse`.
 fn to_http_response(resp: reqwest::blocking::Response) -> Result<HttpResponse> {
     let status = resp.status().as_u16();

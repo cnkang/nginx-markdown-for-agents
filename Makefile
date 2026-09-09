@@ -684,6 +684,7 @@ security-actionlint:
 	fi; \
 	actionlint -color -shellcheck= $$workflow_files
 
+security-shellcheck: SHELL := /bin/bash
 security-shellcheck:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "ERROR: shellcheck not found. Install from https://www.shellcheck.net/ or your package manager." >&2; exit 127; }
 	@tmp_files=$$(mktemp); \

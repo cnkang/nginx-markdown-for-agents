@@ -16,6 +16,10 @@
 //! 9. 304 response contains Vary: Accept
 //! 10. HEAD request describes the Markdown representation (Content-Type
 //!     text/markdown, Vary: Accept, no fabricated Content-Length/ETag)
+//! 11. Duplicate same-name request headers (X-Test: A + X-Test: B) survive
+//!     the conditional capture/shadow/restore lifecycle intact, verified
+//!     against the upstream header echo under both the conversion
+//!     (/md/echo-headers) and auth-deny (/md-deny/echo-headers) locations.
 
 use crate::assertions;
 use crate::http;
@@ -286,12 +290,68 @@ fn append_head_case(
     }
 }
 
+fn append_echo_headers_case(
+    url: &str,
+    headers: &[(&str, &str)],
+    assertions: &mut Vec<AssertionResult>,
+) {
+    /*
+     * Duplicate same-name request headers must survive the module's
+     * conditional capture/shadow/restore intact.  The fixture echoes the
+     * upstream-received headers back in the body; a name-based restore
+     * would have collapsed A/B into B/B, and both lines here prove the
+     * identity mapping preserved every occurrence in upstream order.
+     */
+    let resp = match http::get_with_header_pairs(url, headers) {
+        Ok(resp) => resp,
+        Err(e) => {
+            assertions.push(AssertionResult {
+                name: "case11_duplicate_header_echo_request".to_string(),
+                passed: false,
+                expected: "upstream echo reachable".to_string(),
+                actual: format!("request failed: {e}"),
+                message: None,
+            });
+            return;
+        }
+    };
+    assertions.push(assertions::assert_status(
+        "case11_duplicate_header_echo_status",
+        resp.status,
+        200,
+    ));
+    let body = resp.body.clone();
+    let has_a = body.lines().any(|l| l == "x-test: A");
+    let has_b = body.lines().any(|l| l == "x-test: B");
+    assertions.push(AssertionResult {
+        name: "case11_duplicate_header_a_preserved".to_string(),
+        passed: has_a,
+        expected: "x-test: A present in upstream echo".to_string(),
+        actual: if has_a {
+            "present".to_string()
+        } else {
+            "MISSING (restore collapsed the duplicate?)".to_string()
+        },
+        message: None,
+    });
+    assertions.push(AssertionResult {
+        name: "case11_duplicate_header_b_preserved".to_string(),
+        passed: has_b,
+        expected: "x-test: B present in upstream echo".to_string(),
+        actual: if has_b {
+            "present".to_string()
+        } else {
+            "MISSING (restore collapsed the duplicate?)".to_string()
+        },
+        message: None,
+    });
+}
+
 /// Run the conditional-requests scenario.
 pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     const SCENARIO: &str = "conditional-requests";
     let start = std::time::Instant::now();
     let mut assertions = Vec::new();
-
     if let Err(report) = common::ensure_reuse_nginx_binary(&ctx, SCENARIO, start) {
         return Ok(report);
     }
@@ -316,6 +376,37 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
 
     append_if_none_match_cases(&url, &headers, &response_etag, &mut assertions);
     append_if_modified_since_cases(&url, &headers, &mut assertions);
+
+    /*
+     * Duplicate-header survival through the conditional lifecycle:
+     * - /md/html with If-None-Match: preaccess capture -> suppress ->
+     *   shadow install -> upstream request -> restore (identity map).
+     *   Upstream (fixture /echo-headers) echoes the X-Test pair back.
+     * - /force/html: header filter runs restore on the forwarded
+     *   response; still exercises the shadow path on the request side.
+     * Assert both A and B survive in upstream order, proving the
+     * shadow->original identity map (P1-1) keeps duplicates intact.
+     */
+    append_echo_headers_case(
+        &format!("{base_url}/md/echo-headers"),
+        &[
+            ("Accept", "text/markdown"),
+            ("If-None-Match", "\"non-matching-etag-99999\""),
+            ("X-Test", "A"),
+            ("X-Test", "B"),
+        ],
+        &mut assertions,
+    );
+    append_echo_headers_case(
+        &format!("{base_url}/md-deny/echo-headers"),
+        &[
+            ("Accept", "text/markdown"),
+            ("If-None-Match", "\"non-matching-etag-99999\""),
+            ("X-Test", "A"),
+            ("X-Test", "B"),
+        ],
+        &mut assertions,
+    );
 
     append_head_case(&url, &headers, &mut assertions);
 
