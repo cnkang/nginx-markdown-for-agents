@@ -82,6 +82,7 @@ pub(crate) fn set_success_result(result: &mut MarkdownResult, output: Conversion
     result.markdown_len = md_len;
     result.markdown = md_ptr;
     result.token_estimate = output.token_estimate;
+    result.peak_memory_estimate = output.peak_working_set_bytes;
     result.error_code = ERROR_SUCCESS;
     result.error_message = ptr::null_mut();
     result.error_len = 0;

@@ -126,6 +126,7 @@ fn convert_empty_payload<'a>(
         markdown,
         etag,
         token_estimate,
+        peak_working_set_bytes: 0,
     }
 }
 
@@ -273,6 +274,7 @@ pub(crate) fn convert_inner(
         markdown,
         etag,
         token_estimate,
+        peak_working_set_bytes: ctx.peak_working_set(),
     })
 }
 

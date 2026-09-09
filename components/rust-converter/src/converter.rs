@@ -290,6 +290,20 @@ pub struct ConversionContext {
     /// temporary buffers under the same budget, so allocation failures surface
     /// as a controlled `MemoryLimit` error instead of an allocator abort.
     working_set_bytes: usize,
+    /// High-water mark of `working_set_bytes` across the whole conversion.
+    ///
+    /// Exported through the FFI as `MarkdownResult.peak_memory_estimate` so
+    /// the NGINX module can publish a per-conversion peak that covers both
+    /// full-buffer and streaming paths (a positive sample then certifies a
+    /// per-request peak for the soak qualification gate).
+    peak_working_set_bytes: usize,
+    /// Whether the output buffer's capacity is currently charged to the
+    /// working set.  Nested list-item rendering must reserve the output
+    /// capacity only ONCE per conversion: an inner item reached through
+    /// `render_list_item_content` / `handle_list_with_context` would
+    /// otherwise double-charge the same retained output allocation and
+    /// spuriously fail the budget for deeply nested lists.
+    output_charge_active: bool,
 }
 
 /// Fallible Markdown output writer bound to one conversion budget.
@@ -446,6 +460,8 @@ impl ConversionContext {
             input_size_hint: 0,
             output_budget: DEFAULT_FULL_BUFFER_OUTPUT_BUDGET,
             working_set_bytes: 0,
+            peak_working_set_bytes: 0,
+            output_charge_active: false,
         }
     }
 
@@ -521,7 +537,16 @@ impl ConversionContext {
             )));
         }
         self.working_set_bytes = projected;
+        if projected > self.peak_working_set_bytes {
+            self.peak_working_set_bytes = projected;
+        }
         Ok(())
+    }
+
+    /// Current high-water mark of the transient working set across this
+    /// conversion (bytes), used for per-request peak reporting.
+    pub(crate) fn peak_working_set(&self) -> usize {
+        self.peak_working_set_bytes
     }
 
     /// Release a previously reserved transient working-set charge.

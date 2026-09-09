@@ -1298,9 +1298,9 @@ fn test_parse_timeout_enforced_when_overrun() {
     let converter = markdown_converter_new();
     assert!(!converter.is_null(), "Converter should not be NULL");
 
-    let mut large_html = Vec::with_capacity(1024 * 1024);
+    let mut large_html = Vec::with_capacity(4 * 1024 * 1024);
     large_html.extend_from_slice(b"<html><body>");
-    for i in 0..15000 {
+    for i in 0..60000 {
         large_html.extend_from_slice(
             format!("<p>paragraph number {i} with enough text to ensure parsing cost</p>")
                 .as_bytes(),

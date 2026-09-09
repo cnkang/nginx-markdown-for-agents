@@ -24,7 +24,7 @@ fn invalid_discriminant() -> impl Strategy<Value = u32> {
 proptest! {
     /// Property 12: from_discriminant returns None for all invalid values.
     ///
-    /// For any numeric value >= REASON_CODE_COUNT (27), the function must
+    /// For any numeric value >= REASON_CODE_COUNT (the registry's current count), the function must
     /// return None, indicating no valid reason code exists for that
     /// discriminant.
     #[test]
