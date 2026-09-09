@@ -4153,6 +4153,10 @@ ngx_http_markdown_streaming_send_failopen_chain(
 }
 
 
+static void
+ngx_http_markdown_streaming_failopen_mark_chain_forwarded(
+    ngx_http_markdown_ctx_t *ctx);
+
 static ngx_int_t
 ngx_http_markdown_streaming_failopen_passthrough(
     ngx_http_request_t *r,
@@ -4242,7 +4246,15 @@ ngx_http_markdown_streaming_failopen_passthrough(
         *tail = cloned;
     }
 
-    return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, head);
+    rc = ngx_http_markdown_streaming_send_failopen_chain(r, ctx, head);
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        /* The CURRENT input chain was forwarded downstream (replay
+         * prefix + cloned input).  Mark it so body_filter consumes this
+         * chain without re-forwarding, while future input chains
+         * (failopen_active) continue via continue_failopen_input. */
+        ngx_http_markdown_streaming_failopen_mark_chain_forwarded(ctx);
+    }
+    return rc;
 }
 
 /*
@@ -4260,7 +4272,6 @@ ngx_http_markdown_streaming_failopen_mark_chain_forwarded(
         ctx->streaming.completion.failopen_chain_forwarded = 1;
     }
 }
-
 
 /*
  * Handle the result of process_chunk within the body filter loop.
