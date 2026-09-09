@@ -5270,6 +5270,13 @@ ngx_http_markdown_streaming_finalize_on_last_buf(
         }
         if (rc == NGX_OK || rc == NGX_DONE) {
             ctx->failopen_completed = 1;
+            /* Consume the per-invocation marker: this finalization path
+             * returns directly (it does not pass through the body
+             * filter's marker consumption at the failopen_completed
+             * latch), so a residual marker would make the next
+             * body-filter invocation with a NEW chain treat it as
+             * already forwarded and silently drop it. */
+            ctx->streaming.completion.failopen_chain_forwarded = 0;
         }
     }
 
