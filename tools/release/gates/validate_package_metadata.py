@@ -1307,11 +1307,12 @@ _SHELL_KEYWORDS = frozenset(
 def _shell_command_segments(line: str) -> list[list[str]]:
     """Split one logical line into the token lists of its shell commands.
 
-    A spec may chain or guard commands (``if true; then install ...; fi``), so a
-    check that reads only the first word of the line would miss installs.
+    A spec may chain or guard commands (``if true; then install ...; fi``,
+    ``test -f x && install ...``), so a check that reads only the first word of
+    the line would miss installs.
     """
     segments: list[list[str]] = []
-    for raw in re.split(r"[;\n]", line):
+    for raw in re.split(r"&&|\|\||[;\n]", line):
         tokens = _strip_inline_comment(raw.split())
         while tokens and tokens[0] in _SHELL_KEYWORDS:
             tokens = tokens[1:]
