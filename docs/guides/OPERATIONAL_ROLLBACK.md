@@ -604,14 +604,15 @@ disabled_before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
 # fall outside the location that disables conversion) and include the Host
 # header so the request reaches that scope.  The path is configurable so the
 # probe can target the ACTUAL location affected by the rollback.
-# Isolation semantics: the decision-log corroboration below reads ONLY the
-# bytes appended after LOG_OFFSET, so entries from earlier runs or unrelated
-# traffic before the probe cannot match.  On a shared instance where other
-# traffic may hit the SAME fixed path inside the offset window, set
-# ROLLBACK_PROBE_PATH to a run-unique path (e.g. /rollback-probe-$$) and
-# ensure the markdown_filter location covers it (a prefix location such as
-# /rollback-probe/ covers both the fixed and the run-unique forms).
-ROLLBACK_PROBE_PATH="${ROLLBACK_PROBE_PATH:-/rollback-probe}"
+# Isolation semantics: the default path below is RUN-UNIQUE
+# (/rollback-probe-<epoch>-<pid>), so a shared instance cannot attribute an
+# unrelated request to this probe even inside the offset window.  The
+# decision-log corroboration additionally reads ONLY the bytes appended after
+# LOG_OFFSET.  Override ROLLBACK_PROBE_PATH only when your probe location is a
+# fixed path; keep that location a PREFIX match (for example
+# `location /rollback-probe` or `location ^~ /rollback-probe/`) so it covers the
+# run-unique default as well as a fixed override.
+ROLLBACK_PROBE_PATH="${ROLLBACK_PROBE_PATH:-/rollback-probe-$(date +%s)-$$}"
 LOG_OFFSET=$(wc -c < /var/log/nginx/error.log 2>/dev/null || echo 0)
 curl -sS -o /dev/null \
   -H "Accept: text/markdown" \

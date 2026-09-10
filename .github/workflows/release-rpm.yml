@@ -211,6 +211,12 @@ jobs:
             "/tmp/${TARBALL_DIR}/preremove.sh" \
             "${NGINX_VERSION}"
           cp LICENSE "/tmp/${TARBALL_DIR}/"
+          # The RPM spec installs the loader snippet from this path, so it must
+          # travel inside the source tarball (rpmbuild builds from the tarball,
+          # not from the repository checkout).
+          mkdir -p "/tmp/${TARBALL_DIR}/packaging/nfpm/modules"
+          cp packaging/nfpm/modules/mod-markdown.conf \
+            "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"
 
           cd /tmp
           tar czf "$HOME/rpmbuild/SOURCES/${PKG_NAME}-${PKG_VERSION}.tar.gz" "${TARBALL_DIR}"

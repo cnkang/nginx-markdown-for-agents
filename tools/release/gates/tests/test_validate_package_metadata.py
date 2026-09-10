@@ -836,3 +836,135 @@ class TestModuleBuildCompat:
             status == "FAIL" and "build-compat" in check_id
             for status, check_id, _message in result.results
         )
+
+class TestRpmSpecSourcesAreStaged:
+    """Every RPM spec install source must reach the rpmbuild tarball."""
+
+    def test_repository_spec_sources_are_all_staged(self) -> None:
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+        assert not result.has_failures, [
+            msg for status, _cid, msg in result.results if status == "FAIL"
+        ]
+
+    def test_validator_flags_a_source_missing_from_the_tarball(
+        self, monkeypatch
+    ) -> None:
+        """A spec install line the workflow never stages must fail the gate."""
+
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "install -m 0644 README.md \\\n"
+                    "    %{buildroot}/usr/share/doc/nginx-markdown-for-agents/README.md\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            # The workflow stages README.md only: the snippet is missing.
+            return 'cp README.md "/tmp/${TARBALL_DIR}/"\n'
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+
+        failures = [
+            check_id
+            for status, check_id, _message in result.results
+            if status == "FAIL"
+        ]
+        assert "rpm-spec-sources:mod-markdown.conf" in failures
+        assert not any("README" in cid for cid in failures)
+
+class TestModuleSnippetEdgeCases:
+    """Edge cases codex flagged in the snippet/compat gate rules."""
+
+    def test_compat_flag_inside_a_comment_does_not_satisfy_the_gate(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(_path: Path) -> str:
+            return (
+                "# remember to add --with-compat here\n"
+                "./configure --add-dynamic-module=components/nginx-module\n"
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_build_compat(result)
+
+        assert any(
+            status == "FAIL" and check_id.startswith("build-compat:")
+            for status, check_id, _message in result.results
+        )
+
+    def test_indented_active_loader_directive_defeats_opt_in(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(path: Path) -> str:
+            body = "# main context, top level of nginx.conf, prefix notes\n"
+            if path == validator.RPM_MODULE_SNIPPET:
+                # Commented form plus an indented live directive.
+                return (
+                    body
+                    + "#load_module modules/ngx_http_markdown_filter_module.so;\n"
+                    + "  load_module modules/ngx_http_markdown_filter_module.so;\n"
+                )
+            return body + validator.MODULE_SNIPPET_DEB_LOAD_LINE + "\n"
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        assert any(
+            status == "FAIL" and check_id == "snippet:rpm:opt-in-loading"
+            for status, check_id, _message in result.results
+        )
+
+    def test_block_form_directive_defeats_the_loader_only_rule(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(path: Path) -> str:
+            body = "# main context, top level of nginx.conf, prefix notes\n"
+            if path == validator.RPM_MODULE_SNIPPET:
+                return (
+                    body
+                    + "http {\n"
+                    + validator.MODULE_SNIPPET_RPM_LOAD_LINE
+                    + "\n}\n"
+                )
+            return body + validator.MODULE_SNIPPET_DEB_LOAD_LINE + "\n"
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        assert any(
+            status == "FAIL"
+            and check_id.endswith(":only-load-module-directive")
+            for status, check_id, _message in result.results
+        )
+
+    def test_rpm_spec_must_install_and_ship_the_snippet(self, monkeypatch) -> None:
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The install line and the %files entry are both missing.
+                return "Name: nginx-module-markdown-for-agents\n"
+            if path == validator.NFPM_CONFIG:
+                return (
+                    '  - src: "./packaging/nfpm/modules/mod-markdown.conf"\n'
+                    '    dst: "/usr/share/nginx/modules/mod-markdown.conf"\n'
+                    "    type: config|noreplace\n"
+                    "    packager: rpm\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        failures = [
+            check_id
+            for status, check_id, _message in result.results
+            if status == "FAIL"
+        ]
+        assert "rpm:modules:install" in failures
+        assert "rpm:modules:files" in failures
