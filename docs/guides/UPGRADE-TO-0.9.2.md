@@ -148,16 +148,25 @@ case "${NGINX_CONF_DIR}" in
     exit 1
     ;;
 esac
+# Reject a symlinked backup root BEFORE any privileged creation:
+# install -d would follow the symlink and create or modify the target
+# before the check below could reject it.  -L is false for a
+# NON-EXISTENT path, so a fresh host still passes this precheck.
+if [[ -L "${CONFIG_BACKUP_DIR}" ]]; then
+  echo "ERROR: CONFIG_BACKUP_DIR must not be a symlink (resolved target would be modified by install -d)" >&2
+  exit 1
+fi
 # Create the backup root (a fresh host may not have it) BEFORE
 # canonicalizing: GNU readlink -f fails when parent components are
 # missing, which would abort a fresh-host upgrade before the directory
-# is created.  The symlink precheck below still rejects a symlinked
-# backup root before any destructive operation.
+# is created.  The resolved-target checks below still reject a backup
+# root that resolves to a system root.
 sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 RESOLVED_CONF_DIR="$(readlink -f "${NGINX_CONF_DIR}")"
 RESOLVED_BACKUP_DIR="$(readlink -f "${CONFIG_BACKUP_DIR}")"
 if [[ "${RESOLVED_CONF_DIR}" == "/" \
-      || "${RESOLVED_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* \
+      || "${RESOLVED_CONF_DIR}" == "${CONFIG_BACKUP_DIR}" \
+      || "${RESOLVED_CONF_DIR}" == "${CONFIG_BACKUP_DIR}/"* \
       || "${RESOLVED_CONF_DIR}" == "/etc" \
       || "${RESOLVED_CONF_DIR}" == "/var" \
       || "${RESOLVED_CONF_DIR}" == "/usr" \
@@ -283,7 +292,11 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # such as modules-enabled/*.conf), then verify exactly one staged entry.
 sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}" \
     | while read -r staged_conf; do
-        sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
+        # The staged tree is a disposable copy: edit in place WITHOUT
+        # .bak backups, so no stale backup file can be scanned below,
+        # counted as a second load_module entry, or loaded by a
+        # wildcard include during nginx -t.
+        sudo sed -i "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
             "${staged_conf}"
       done
 staged_loads="$(sudo grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
@@ -639,11 +652,19 @@ case "${CONFIG_BACKUP_DIR}" in
     exit 1
     ;;
 esac
+# Reject a symlinked backup root BEFORE any privileged creation:
+# install -d would follow the symlink and create or modify the target
+# before the check below could reject it.  -L is false for a
+# NON-EXISTENT path, so a fresh host still passes this precheck.
+if [[ -L "${CONFIG_BACKUP_DIR}" ]]; then
+  echo "ERROR: CONFIG_BACKUP_DIR must not be a symlink (resolved target would be modified by install -d)" >&2
+  exit 1
+fi
 # Create the backup root (a fresh host may not have it) BEFORE
 # canonicalizing: GNU readlink -f fails when parent components are
 # missing, which would abort a fresh-host upgrade before the directory
-# is created.  The symlink precheck below still rejects a symlinked
-# backup root before any destructive operation.
+# is created.  The resolved-target checks below still reject a backup
+# root that resolves to a system root.
 sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 # The backup root must not be a symlink and must resolve to a dedicated
 # directory: a symlinked CONFIG_BACKUP_DIR could point the destructive
@@ -697,7 +718,11 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # diagnostics schema) and need no config edit:
 sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run" "${STAGED_ROOT}" \
     | while read -r staged_conf; do
-        sudo sed -i.bak -E \
+        # The staged tree is a disposable copy: edit in place WITHOUT
+        # .bak backups, so no stale backup file can be scanned below,
+        # counted as a second load_module entry, or loaded by a
+        # wildcard include during nginx -t.
+        sudo sed -i -E \
             -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_dynamic_config_path[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
@@ -711,7 +736,7 @@ sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dy
 # modules-enabled/*.conf), so rewrite across the whole staged tree.
 sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}" \
     | while read -r staged_conf; do
-        sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
+        sudo sed -i "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
             "${staged_conf}"
       done
 staged_loads="$(sudo grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
