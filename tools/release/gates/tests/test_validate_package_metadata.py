@@ -1049,6 +1049,28 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._spec_installs_snippet(body)
 
+    def test_brace_on_the_next_line_still_closes_the_function(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage()\n"
+            "{\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+            "stage\n"
+        )
+        assert validator._spec_installs_snippet(body)
+
+    def test_quoted_brace_does_not_close_the_function(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() { printf '%s' 'literal } brace'; "
+            f"install -m 0644 {source} {destination}; }}\n"
+            "stage\n"
+        )
+        assert validator._spec_installs_snippet(body)
+
     def test_superseded_definition_is_not_live(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
