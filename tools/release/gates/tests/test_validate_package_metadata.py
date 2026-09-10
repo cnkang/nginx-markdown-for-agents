@@ -1028,6 +1028,39 @@ class TestModuleSnippetEdgeCases:
             tokens, "packaging/nfpm/modules/mod-markdown.conf"
         )
 
+    def test_guard_inside_a_function_group_is_tracked(self, monkeypatch) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The guard opens inside a group on the same line.
+                return (
+                    "%install\n"
+                    "f() { if false; then install -m 0644 "
+                    "packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf; fi; }\n"
+                    "f\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_separator_inside_a_comment_stays_inactive(self) -> None:
+        spec = (
+            "%install\n"
+            "echo ok # disabled; install -m 0644 "
+            "packaging/nfpm/modules/mod-markdown.conf "
+            "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+        )
+        assert validator._spec_install_sources(spec) == []
+
     def test_marker_without_a_path_boundary_does_not_prove_staging(self) -> None:
         tokens = [
             "cp",

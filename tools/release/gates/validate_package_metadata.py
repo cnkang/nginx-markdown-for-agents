@@ -1310,15 +1310,20 @@ _SHELL_KEYWORDS = frozenset(
 def _strip_guard_keywords(
     tokens: list[str], pending_guard: bool
 ) -> tuple[list[str], bool, int]:
-    """Strip leading shell keywords and report guard state and depth change."""
+    """Strip leading shell keywords and report guard state and depth change.
+
+    Guard keywords are counted wherever they appear in the command, because a
+    construct may open inside a group on the same line, as in
+    ``f() { if false; then install ...; fi; }``.
+    """
     depth_delta = 0
-    while tokens and tokens[0] in _SHELL_KEYWORDS:
-        keyword = tokens[0]
-        if keyword in _GUARD_OPENERS:
+    for token in tokens:
+        if token in _GUARD_OPENERS:
             depth_delta += 1
             pending_guard = True
-        elif keyword in _GUARD_CLOSERS:
+        elif token in _GUARD_CLOSERS:
             depth_delta -= 1
+    while tokens and tokens[0] in _SHELL_KEYWORDS:
         tokens = tokens[1:]
     return tokens, pending_guard, depth_delta
 
