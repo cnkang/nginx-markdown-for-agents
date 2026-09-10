@@ -298,6 +298,26 @@ STAGED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX")"
 # cleanup itself fails.
 trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; exit "$rc"' EXIT
 sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
+# Apply the deterministic part of MIGRATION-0.9.2.md to the STAGED COPY:
+# remove the five retired directives (three dynconf + two prune
+# selectors).  The remaining migration items are consumer-side (reason
+# integers, diagnostics schema) and need no config edit.  The staged
+# tree is a disposable copy: edit in place WITHOUT .bak backups, so no
+# stale backup file can be scanned below, counted as a second
+# load_module entry, or loaded by a wildcard include during nginx -t.
+sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${STAGED_ROOT}" 2>/dev/null \
+    | while read -r staged_conf; do
+        sudo sed -i -E \
+            -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_dynamic_config_path[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
+            "${staged_conf}"
+      done || true
+# A configuration with NO retired directives is already 0.9.2 compliant:
+# grep exits 1 on no match, which under pipefail would fail the pipeline
+# above; the `|| true` treats no-match as success.
 # Rewrite the Markdown module's load_module entry across the WHOLE
 # staged tree (the entry may live in nginx.conf or an included file
 # such as modules-enabled/*.conf), then verify exactly one staged entry.
@@ -731,7 +751,7 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # dynconf directives (MIGRATION-0.9.2.md "Static configuration
 # migration"); the remaining items are consumer-side (reason integers,
 # diagnostics schema) and need no config edit:
-sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run" "${STAGED_ROOT}" 2>/dev/null \
+sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${STAGED_ROOT}" 2>/dev/null \
     | while read -r staged_conf; do
         # The staged tree is a disposable copy: edit in place WITHOUT
         # .bak backups, so no stale backup file can be scanned below,
@@ -741,6 +761,8 @@ sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dy
             -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_dynamic_config_path[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
             "${staged_conf}"
       done || true
 # A configuration with NO retired dynconf directives is a valid 0.9.2
@@ -768,12 +790,14 @@ sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
 # directives.  The active load_module entry stays as-is — it already
 # references the canonical module path, which the swap below replaces
 # with the 0.9.2 binary.
-sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run" "${NGINX_CONF_DIR}" 2>/dev/null \
+sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
     | while read -r active_conf; do
         sudo sed -i -E \
             -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_dynamic_config_path[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
             "${active_conf}"
       done || true
 # A configuration with NO retired dynconf directives is already 0.9.2
