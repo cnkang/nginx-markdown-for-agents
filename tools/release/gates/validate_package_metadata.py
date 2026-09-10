@@ -906,7 +906,7 @@ def _spec_installs_snippet(install_body: str) -> bool:
     destination must be the operand that receives the file, so a comment or a
     trailing argument cannot stand in for the real destination.
     """
-    for tokens, guarded in _install_commands(install_body):
+    for tokens, guarded in _shell_commands(install_body):
         if guarded or Path(tokens[0]).name != "install":
             continue
         sources, destination = _parse_install_operands(tokens[1:])
@@ -1298,6 +1298,12 @@ def _parse_install_operands(tokens: list[str]) -> tuple[list[str], str | None]:
     return operands[:-1], operands[-1]
 
 
+# A workflow step starts a fresh shell in the checkout directory.
+_STEP_BOUNDARY_PATTERN = re.compile(r"^\s*-\s|^\s*run:")
+
+# A function definition opens a group whose body does not run until the
+# function is called, so its commands are never a live install.
+_FUNCTION_DEFINITION = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\(\)$")
 _SEPARATOR_TOKENS = (";", "&&", "||")
 _SEPARATOR_SPLIT = re.compile(r"(&&|\|\||;)")
 _GUARD_OPENERS = frozenset({"if", "while", "until", "for"})
@@ -1318,10 +1324,10 @@ def _strip_guard_keywords(
     """
     depth_delta = 0
     for token in tokens:
-        if token in _GUARD_OPENERS:
+        if token in _GUARD_OPENERS or _FUNCTION_DEFINITION.match(token):
             depth_delta += 1
             pending_guard = True
-        elif token in _GUARD_CLOSERS:
+        elif token in _GUARD_CLOSERS or token == "}":
             depth_delta -= 1
     while tokens and tokens[0] in _SHELL_KEYWORDS:
         tokens = tokens[1:]
@@ -1353,7 +1359,7 @@ def _line_commands(line: str) -> list[tuple[list[str], bool]]:
     return commands
 
 
-def _install_commands(body: str) -> list[tuple[list[str], bool]]:
+def _shell_commands(body: str) -> list[tuple[list[str], bool]]:
     """Return (tokens, guarded) for every command in an %install body.
 
     Commands may be chained or guarded (``test -f x && install ...``,
@@ -1385,7 +1391,7 @@ def _spec_install_sources(spec: str) -> list[str]:
     """
     body = _spec_section(spec, "%install")
     sources: list[str] = []
-    for tokens, _guarded in _install_commands(body):
+    for tokens, _guarded in _shell_commands(body):
         if Path(tokens[0]).name != "install":
             continue
         for source in _parse_install_operands(tokens[1:])[0]:
@@ -1443,6 +1449,11 @@ def _destination_matches_source(destination: str, source_path: str) -> bool:
     marker = TARBALL_MARKER_PATTERN.search(destination)
     if not marker:
         return False
+    prefix = destination[: marker.start()].strip('"').strip()
+    # The tarball tree lives directly under the staging root, so any other
+    # prefix copies the file where the archive step never looks.
+    if prefix not in ("", "/tmp") or ".." in prefix.split("/"):
+        return False
     suffix = destination[marker.end() :].strip('"').lstrip("/")
     if ".." in suffix.split("/"):
         return False
@@ -1494,25 +1505,69 @@ def _is_staging_command(tokens: list[str], source_path: str) -> bool:
     return _names_expected_source(operands[: staged_indexes[0]], source_path)
 
 
+def _classify_staging_command(
+    tokens: list[str], guarded: bool, directory_changed: bool, source_path: str
+) -> str | None:
+    """Classify one workflow command for the staging proof.
+
+    Returns "staged" when the command copies the file into the tarball tree,
+    "directory" when it changes the working directory, and None otherwise.  A
+    guarded command proves nothing.
+    """
+    if guarded:
+        return None
+    if Path(tokens[0]).name in ("cd", "pushd"):
+        return "directory"
+    if directory_changed:
+        return None
+    if _is_staging_command(tokens, source_path):
+        return "staged"
+    return None
+
+
+def _advance_workflow_state(
+    line: str, state: dict[str, object], source_path: str
+) -> bool:
+    """Fold one workflow line into ``state``; return True when it proves staging.
+
+    ``state`` carries the directory and guard state between lines, because a
+    ``cd`` or an open guard affects the commands that follow it.
+    """
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return False
+    if _STEP_BOUNDARY_PATTERN.match(line):
+        state["directory_changed"] = False
+        state["guard_depth"] = 0
+    for tokens, separator_guard in _line_commands(line):
+        guarded = bool(state["guard_depth"]) or separator_guard
+        tokens, guarded, depth_delta = _strip_guard_keywords(tokens, guarded)
+        if tokens:
+            verdict = _classify_staging_command(
+                tokens, guarded, bool(state["directory_changed"]), source_path
+            )
+            if verdict == "staged":
+                return True
+            if verdict == "directory":
+                state["directory_changed"] = True
+        state["guard_depth"] = max(0, int(state["guard_depth"]) + depth_delta)
+    return False
+
+
 def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
     """Return True when a live workflow command copies ``source`` into the tarball.
 
-    The command must name the repository path as one operand and the rpmbuild
-    staging tree as a DIFFERENT operand, so a path that only appears in a
-    comment, in an echo, or in a copy from another directory cannot satisfy the
-    contract.
+    Only an unguarded command proves staging, and within one step a ``cd``
+    invalidates the relative repository paths that follow it.  A new workflow
+    step starts in the checkout again, so the directory state resets there.
     """
     source_path = source.lstrip("./")
+    state: dict[str, object] = {"directory_changed": False, "guard_depth": 0}
     for line in _logical_lines(workflow):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        # Drop an inline comment before tokenizing: a commented-out destination
-        # must not prove that the file is staged.
-        tokens = _strip_inline_comment(stripped.split())
-        if tokens and _is_staging_command(tokens, source_path):
+        if _advance_workflow_state(line, state, source_path):
             return True
     return False
+
 
 def validate_rpm_spec_sources_are_staged(result: ValidationResult) -> None:
     """Every file the RPM spec installs must reach the rpmbuild tarball.

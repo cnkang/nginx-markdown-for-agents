@@ -459,8 +459,10 @@ migrate_restore() {
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
     PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
-      echo "ERROR: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration link now serves the snapshot and the previous tree is still in place there. Remove or relocate ${ROOT_LINK_TARGET} once the upgrade is confirmed" >&2
-      return 1
+      # The configuration is already restored: only the parking of the previous
+      # target failed, so report it and keep the restore successful.
+      echo "WARN: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration is restored and the previous tree stays in place there. Remove or relocate it once the upgrade is confirmed" >&2
+      return 0
     }
     sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
     if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
@@ -547,8 +549,10 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
     PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
-      echo "ERROR: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration link now serves the snapshot and the previous tree is still in place there. Remove or relocate ${ROOT_LINK_TARGET} once the upgrade is confirmed" >&2
-      return 1
+      # The configuration is already restored: only the parking of the previous
+      # target failed, so report it and keep the restore successful.
+      echo "WARN: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration is restored and the previous tree stays in place there. Remove or relocate it once the upgrade is confirmed" >&2
+      return 0
     }
     sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
     if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
@@ -1299,8 +1303,10 @@ migrate_restore() {
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
     PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
-      echo "ERROR: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration link now serves the snapshot and the previous tree is still in place there. Remove or relocate ${ROOT_LINK_TARGET} once the upgrade is confirmed" >&2
-      return 1
+      # The configuration is already restored: only the parking of the previous
+      # target failed, so report it and keep the restore successful.
+      echo "WARN: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration is restored and the previous tree stays in place there. Remove or relocate it once the upgrade is confirmed" >&2
+      return 0
     }
     sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
     if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
@@ -1387,8 +1393,10 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
     PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
-      echo "ERROR: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration link now serves the snapshot and the previous tree is still in place there. Remove or relocate ${ROOT_LINK_TARGET} once the upgrade is confirmed" >&2
-      return 1
+      # The configuration is already restored: only the parking of the previous
+      # target failed, so report it and keep the restore successful.
+      echo "WARN: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration is restored and the previous tree stays in place there. Remove or relocate it once the upgrade is confirmed" >&2
+      return 0
     }
     sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
     if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
@@ -1681,8 +1689,8 @@ restore_previous_module_and_config() {
   fi
   if ! sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null; then
     if ! sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
-    echo "WARN: could not remove the staged module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged; remove it manually" >&2
-  fi
+      echo "WARN: could not remove the staged module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged; remove it manually" >&2
+    fi
     MIGRATE_ACTIVE=0
     echo "ERROR: could not snapshot the installed 0.9.2 module for undo; the 0.9.2 module and its configuration remain in place. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree" >&2
     return 1
@@ -1691,8 +1699,11 @@ restore_previous_module_and_config() {
   #    with.
   if ! sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null; then
     if ! sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null; then
-    echo "WARN: could not remove the module snapshot ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged; remove it manually" >&2
-  fi
+      echo "WARN: could not remove the module snapshot ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged; remove it manually" >&2
+    fi
+    if ! sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
+      echo "WARN: could not remove the staged module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged; remove it manually" >&2
+    fi
     MIGRATE_ACTIVE=0
     echo "ERROR: could not replace the active module with the previous module; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
     return 1
