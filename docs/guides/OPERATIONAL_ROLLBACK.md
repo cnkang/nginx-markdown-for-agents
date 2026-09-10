@@ -636,7 +636,8 @@ if [ "$LOG_LEVEL_OK" -eq 1 ]; then
     exit 1
   fi
 else
-  echo "INFO: decision-log corroboration skipped (log level below info/debug); counter delta above is authoritative" >&2
+  echo "FAIL: decision-log corroboration unavailable (log level below info/debug). The global disabled counter delta cannot prove THIS probe request was the one counted — unrelated traffic may have produced the delta. Isolate the instance (or raise the log level) and re-run the probe." >&2
+  exit 1
 fi
 if [ "$before" = "$after" ]; then
   echo "OK: no conversion activity in the quiet window after rollback"
