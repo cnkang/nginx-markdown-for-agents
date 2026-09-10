@@ -304,10 +304,19 @@ fi
 # rollback of this rollback.
 # Preserve the live 0.9.1 module BEFORE touching the configuration so a
 # failure at any later step can restore the exact pre-rollback binary.
+# Guard BOTH commands: a failed backup must abort before any
+# configuration change, or the recovery path would reference a backup
+# that does not exist.
 sudo cp -a -- "$MODULES_DIR/ngx_http_markdown_filter_module.so" \
-    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" && \
+    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" || {
+  echo "ERROR: could not back up the 0.9.1 module; aborting before any configuration change" >&2
+  exit 1
+}
 sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" \
-    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak"
+    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak" || {
+  echo "ERROR: could not finalize the 0.9.1 module backup; aborting before any configuration change" >&2
+  exit 1
+}
 sudo cp -a -- "${CONFIG_090}" "${CONFIG_DIR}.restore-0.9.0"
 sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.pre-0.9.0"
 if ! sudo mv -- "${CONFIG_DIR}.restore-0.9.0" "${CONFIG_DIR}"; then
