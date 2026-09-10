@@ -300,56 +300,44 @@ markdown_copy_runtime_conf_from_nginx_bin() {
   return 0
 }
 
-markdown_nginx_modules_dir() {
+markdown_nginx_modules_candidates() {
   local nginx_bin="$1"
-  local source_root source_modules modules_path binary_dir
+  local source_root modules_path
 
   markdown_validate_nginx_bin "${nginx_bin}" || return 1
 
+  # Installed layout: modules live next to the prefix the binary reports.
   source_root="$(cd "$(dirname "${nginx_bin}")/.." && pwd)"
-  source_modules="${source_root}/modules"
-  if [[ -d "${source_modules}" ]]; then
-    printf '%s\n' "${source_modules}"
-    return 0
-  fi
+  printf '%s\n' "${source_root}/modules"
 
   # A source tree that was compiled but never installed keeps its dynamic
   # modules beside the binary in objs/, which is the layout `make modules`
   # produces and the one the reuse workflow points NGINX_BIN at.
-  binary_dir="$(cd "$(dirname "${nginx_bin}")" && pwd)"
-  if find "${binary_dir}" -maxdepth 1 -type f -name '*markdown*.so' \
-    -print -quit | grep -q .; then
-    printf '%s\n' "${binary_dir}"
-    return 0
-  fi
+  printf '%s\n' "$(cd "$(dirname "${nginx_bin}")" && pwd)"
 
   modules_path="$("${nginx_bin}" -V 2>&1 | tr ' ' '\n' | sed -n 's/^--modules-path=//p' | tail -n1)"
-  if [[ -n "${modules_path}" && -d "${modules_path}" ]]; then
+  if [[ -n "${modules_path}" ]]; then
     printf '%s\n' "${modules_path}"
-    return 0
   fi
-
-  return 1
 }
 
 markdown_find_dynamic_markdown_module() {
   local nginx_bin="$1"
-  local modules_dir module_path
+  local candidate module_path
 
-  modules_dir="$(markdown_nginx_modules_dir "${nginx_bin}")" || return 1
-  module_path="$(
-    find "${modules_dir}" -maxdepth 1 -type f \( \
-      -name 'ngx_http_markdown*.so' -o \
-      -name '*markdown*.so' \
-    \) | sort | head -n1
-  )"
+  while IFS= read -r candidate; do
+    [[ -d "${candidate}" ]] || continue
+    module_path="$(
+      find "${candidate}" -maxdepth 1 -type f -name 'ngx_http_markdown*.so' \
+        | sort | head -n1
+    )"
+    if [[ -n "${module_path}" ]]; then
+      printf '%s\n' "${module_path}"
+      return 0
+    fi
+  done < <(markdown_nginx_modules_candidates "${nginx_bin}")
 
-  if [[ -z "${module_path}" ]]; then
-    return 1
-  fi
-
-  printf '%s\n' "${module_path}"
-  return 0
+  return 1
 }
 
 markdown_prepare_runtime_reuse() {
@@ -365,17 +353,21 @@ markdown_prepare_runtime_reuse() {
       echo "Configured MODULE_SO is not a regular file: ${module_path}" >&2
       return 1
     fi
-    module_name="${module_path##*/}"
-    if [[ "${module_name}" != *.so || \
-          "${module_name}" == *[!A-Za-z0-9_.-]* ]]; then
-      echo "Configured MODULE_SO has an unsafe module filename: ${module_name}" >&2
-      return 1
-    fi
   else
     module_path="$(markdown_find_dynamic_markdown_module "${nginx_bin}" || true)"
   fi
   if [[ -z "${module_path}" ]]; then
     return 0
+  fi
+
+  # The basename reaches the generated `load_module` directive, so it must stay
+  # inside the characters an NGINX module name uses, whether it was configured
+  # explicitly or discovered next to the binary.
+  module_name="${module_path##*/}"
+  if [[ "${module_name}" != *.so || \
+        "${module_name}" == *[!A-Za-z0-9_.-]* ]]; then
+    echo "unsafe module filename: ${module_name} (${module_path})" >&2
+    return 1
   fi
 
   mkdir -p "${runtime_dir}/modules"
