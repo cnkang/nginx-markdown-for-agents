@@ -638,7 +638,7 @@ if [ "$LOG_LEVEL_OK" -eq 1 ]; then
   # grep -q in the pipeline would SIGPIPE the upstream greps and, under
   # pipefail, make the whole pipeline fail even when the entry exists.
   PROBE_LOG_ENTRIES="$(tail -c +$((LOG_OFFSET + 1)) /var/log/nginx/error.log 2>/dev/null \
-      | grep "markdown:" | grep "reason=disabled" | grep -F "uri=${ROLLBACK_PROBE_PATH}")"
+      | grep "markdown:" | grep "reason=disabled" | grep -F "uri=${ROLLBACK_PROBE_PATH} ")"
   if [ -n "$PROBE_LOG_ENTRIES" ]; then
     echo "OK: decision log corroborates the rollback-probe disabled entry"
   else
