@@ -253,15 +253,19 @@ ngx_http_markdown_prepare_strip_public_value(ngx_http_request_t *r,
         if (ngx_http_markdown_cache_control_token_is_private(
                 token_start, token_end))
         {
-            /* A bare private directive covers the whole response and
-             * suppresses the append below.  A field-qualified form
-             * (private="Set-Cookie") is skipped from the rewritten value
-             * but does NOT satisfy whole-response privacy, so the
-             * whole-response private is still appended. */
             if ((size_t) (token_end - token_start)
                 == sizeof(ngx_http_markdown_cc_private) - 1)
             {
+                /* Bare private: keep it in the rewritten value and
+                 * suppress the whole-response append below. */
                 private_present = 1;
+            } else {
+                /* Field-qualified private (private="Set-Cookie"): it is
+                 * removed from the rewritten value (the module enforces
+                 * whole-response privacy) but does NOT satisfy
+                 * whole-response privacy, so the bare private is still
+                 * appended below. */
+                continue;
             }
         }
 
