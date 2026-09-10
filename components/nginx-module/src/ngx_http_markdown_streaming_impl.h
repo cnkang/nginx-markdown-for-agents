@@ -4096,6 +4096,14 @@ ngx_http_markdown_streaming_clone_chain_deep(
             /* Payload bytes were copied: the clone is memory-backed. */
             b->memory = 1;
             b->temporary = in->buf->temporary;
+        } else if (in->buf->pos != NULL && in->buf->last != NULL
+                   && in->buf->last == in->buf->pos)
+        {
+            /* A zero-length buffer keeps VALID bounds (pos == last):
+             * downstream sizing logic must not see NULL pointers.  It
+             * stays non-memory (no payload was copied). */
+            b->pos = in->buf->pos;
+            b->last = in->buf->last;
         } else {
             b->pos = NULL;
             b->last = NULL;

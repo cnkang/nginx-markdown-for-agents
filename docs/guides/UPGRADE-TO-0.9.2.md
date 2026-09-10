@@ -3,10 +3,11 @@
 ## Overview
 
 > **Platform requirement:** the upgrade and rollback procedures in this
-> guide use GNU coreutils (`mv -T`, `stat -c`, `readlink -f`) and are
-> therefore Linux-only. macOS/BSD hosts must run the equivalent commands
-> with GNU coreutils installed (e.g. `brew install coreutils` and a
-> `gmv`/`gstat` prefix) or adapt the commands accordingly.
+> guide use GNU coreutils (`mv -T`, `stat -c`, `readlink -f`,
+> `sha256sum`) and are therefore Linux-only. macOS/BSD hosts must run
+> the equivalent commands with GNU coreutils installed (e.g.
+> `brew install coreutils` and a `gmv`/`gstat`/`greadlink`/`gsha256sum`
+> prefix) or adapt the commands accordingly.
 
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
 0.9.2 is a **breaking release**. The release freezes 20 active directives and
@@ -243,14 +244,18 @@ reject-only migration entries). Before validating or restarting
 NGINX, apply the 0.9.2 migration:
 
 ```bash
-# Apply the 0.9.2 directive changes documented in MIGRATION-0.9.2.md:
-# removed profile/OTel directives and consolidated markdown_limits keys.
-# The runtime dynconf file/watcher was removed; move its values to static
-# directives and validate with nginx -t before a controlled reload.
+# Apply the 0.9.2 directive changes documented in MIGRATION-0.9.2.md to
+# the STAGED COPY below (${STAGED_ROOT}) BEFORE validation: removed
+# profile/OTel directives, consolidated markdown_limits keys, and the
+# default-policy actions.  The runtime dynconf file/watcher was removed;
+# move its values to static directives and validate with nginx -t before
+# a controlled reload.
 # (The markdown_streaming_engine -> markdown_streaming rename happened in
 # 0.9.1, not 0.9.2; 0.9.2 removed markdown_stream_threshold and
 # markdown_streaming_zero_copy.)
 # See docs/guides/MIGRATION-0.9.2.md for the complete mapping.
+# After staged validation succeeds, repeat the SAME edits on the active
+# tree (${NGINX_CONF_DIR}) before the module swap.
 ```
 
 Validate the migrated configuration with the staged 0.9.2 module BEFORE

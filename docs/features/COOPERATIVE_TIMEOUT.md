@@ -18,7 +18,8 @@ flowchart TD
 
     style Success fill:#090,color:#fff
     style FailOpen fill:#f90,color:#000
-    style FailClosed fill:#c00,color:#fff
+    style PolicyClosed fill:#c00,color:#fff
+    style ReplayUnavailableClosed fill:#c00,color:#fff
 ```
 
 The NGINX Markdown for Agents converter implements a **cooperative timeout mechanism**. It protects against resource exhaustion from slow or malicious HTML conversions. This mechanism provides timeout enforcement without thread spawning, making it compatible with NGINX's event-driven worker model.
