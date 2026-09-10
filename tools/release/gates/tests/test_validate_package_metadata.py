@@ -1049,6 +1049,18 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._spec_installs_snippet(body)
 
+    def test_escaped_brace_does_not_close_the_function(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            "  printf \\}\n"
+            "  { :; }\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
     def test_folded_scalar_joins_its_lines(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         # YAML folds this block into one shell command, whose head is `-`.
