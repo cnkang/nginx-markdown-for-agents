@@ -567,8 +567,9 @@ case "${NGINX_CONF_DIR}" in
           || "${NGINX_CONF_DIR}" == "/root" \
           || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* \
           || ! -d "${NGINX_CONF_DIR}" \
-          || ! -f "${NGINX_CONF_DIR}/nginx.conf" ]]; then
-      echo "ERROR: unsafe NGINX_CONF_DIR '${NGINX_CONF_DIR}' (must be an absolute existing dedicated config root containing nginx.conf, not a system root or the backup directory)" >&2
+          || ! -f "${NGINX_CONF_DIR}/nginx.conf" \
+          || -L "${NGINX_CONF_DIR}/nginx.conf" ]]; then
+      echo "ERROR: unsafe NGINX_CONF_DIR '${NGINX_CONF_DIR}' (must be an absolute existing dedicated config root containing a REGULAR nginx.conf, not a system root, the backup directory, or a symlinked nginx.conf)" >&2
       exit 1
     fi
     ;;
@@ -679,6 +680,18 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # migration mistake surfaces here with the active configuration still
 # intact.  After staged validation succeeds, repeat the SAME edits on
 # the active tree (${NGINX_CONF_DIR}) before the module swap.
+# The deterministic part of the migration is removing the three retired
+# dynconf directives (MIGRATION-0.9.2.md "Static configuration
+# migration"); the remaining items are consumer-side (reason integers,
+# diagnostics schema) and need no config edit:
+sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run" "${STAGED_ROOT}" \
+    | while read -r staged_conf; do
+        sudo sed -i.bak -E \
+            -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_dynamic_config_path[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
+            "${staged_conf}"
+      done
 # Rewrite ONLY the Markdown module's load_module entry (other modules'
 # load_module lines must be preserved untouched), then verify exactly one
 # staged entry exists — a missing or duplicated Markdown entry means the

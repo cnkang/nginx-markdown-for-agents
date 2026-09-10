@@ -5304,6 +5304,15 @@ ngx_http_markdown_streaming_process_chain(
             return rc;
         }
 
+        if (ctx->failopen_completed) {
+            /* append_replay_chunk can itself route through the
+             * pre-commit error policy (replay-buffer limit exceeded)
+             * and fail-open, forwarding the current chain downstream.
+             * Stop here: advancing pos or processing successor links
+             * would corrupt the already-forwarded chain. */
+            return NGX_OK;
+        }
+
         /* Mark buffer as consumed */
         cl->buf->pos = cl->buf->last;
     }
