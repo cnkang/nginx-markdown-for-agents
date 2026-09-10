@@ -492,7 +492,7 @@ migrate_restore() {
   fi
 }
 MIGRATE_ACTIVE=1
-trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; migrate_restore; exit "$rc"' EXIT
+trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; migrate_restore || :; exit "$rc"' EXIT
 if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
     | while read -r active_conf; do
         sudo sed -i -E \
@@ -1329,7 +1329,7 @@ migrate_restore() {
   fi
 }
 MIGRATE_ACTIVE=1
-trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; migrate_restore; exit "$rc"' EXIT
+trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; migrate_restore || :; exit "$rc"' EXIT
 if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
     | while read -r active_conf; do
         sudo sed -i -E \
@@ -1518,7 +1518,7 @@ if ! sudo nginx -t; then
   # configuration — the pair the operator is running — instead of leaving the
   # migrated directives in place for an older module.
   RESTORE_CLEANUP_SET=1
-  trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" "$RESTORE_STAGED" || :; migrate_restore; exit "$rc"' EXIT
+  trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" "$RESTORE_STAGED" || :; migrate_restore || :; exit "$rc"' EXIT
   if ! sudo nginx -t -c "${RESTORE_STAGED}/nginx.conf"; then
     sudo rm -rf "${RESTORE_STAGED}"
     echo "ERROR: restored configuration fails validation; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
@@ -1646,46 +1646,61 @@ stop_started_nginx() {
     sudo nginx -s stop 2>/dev/null || true
   fi
   sleep 1
-  # Never swap the module under a master that still maps it: report a stop that
-  # did not take effect so the caller can abort the recovery.
-  if [[ "$systemd_managed" -eq 1 ]] && systemctl is-active --quiet nginx 2>/dev/null; then
-    return 1
-  fi
-  if [[ "$systemd_managed" -ne 1 ]] && pgrep -x nginx >/dev/null 2>&1; then
+  # Never swap the module under a master that still maps it.  Check for a live
+  # process rather than the unit state: a lingering or non-systemd master keeps
+  # running while the unit reports inactive.
+  if pgrep -x nginx >/dev/null 2>&1; then
     return 1
   fi
   return 0
 }
 
 restore_previous_module_and_config() {
-  # 1) Never replace the module under a live process.  When the stop does not
-  #    take effect, the 0.9.2 module stays installed and the migration trap is
-  #    disarmed so it cannot restore a configuration that pair does not match.
+  # Every exit below leaves the installed module and the active configuration
+  # pairing with each other, because the module is swapped only around a
+  # configuration restore that either succeeds or is undone.
+  # 1) Never replace the module under a live process.  The 0.9.2 module and its
+  #    configuration stay in place, so the migration trap is disarmed.
   if ! stop_started_nginx; then
     MIGRATE_ACTIVE=0
     echo "ERROR: NGINX is still running after the stop request; refusing to replace the module of a live master. Stop NGINX, install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
     return 1
   fi
-  # 2) Restore the previous module.  When either step fails the 0.9.2 module is
-  #    still in place, so disarm the migration trap instead of restoring a
-  #    configuration that cannot pair with it.
+  # 2) Stage the previous module and snapshot the installed 0.9.2 module.  Both
+  #    are copies: nothing live changes yet, so a failure here needs no undo.
   if ! sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
     MIGRATE_ACTIVE=0
     echo "ERROR: could not stage the previous module from ${MODULE_BACKUP}; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
     return 1
   fi
+  if ! sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null; then
+    sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null || :
+    MIGRATE_ACTIVE=0
+    echo "ERROR: could not snapshot the installed 0.9.2 module for undo; the 0.9.2 module and its configuration remain in place. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree" >&2
+    return 1
+  fi
+  # 3) Install the previous module, then restore the configuration it pairs
+  #    with.
   if ! sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null; then
+    sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null || :
     MIGRATE_ACTIVE=0
     echo "ERROR: could not replace the active module with the previous module; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
     return 1
   fi
-  # 3) Restore the configuration the previous module pairs with and validate the
-  #    pair before the service is allowed to run again.
   if ! migrate_restore; then
-    MIGRATE_ACTIVE=0
-    echo "ERROR: could not restore the pre-migration configuration; NGINX stays stopped and the previous module is installed. Restore manually: copy ${CONFIG_BACKUP_DIR}/tree over ${NGINX_CONF_DIR}, then run nginx -t and start NGINX" >&2
+    # Undo the module swap so the 0.9.2 module pairs with the configuration that
+    # is still active, instead of leaving the previous module with a migrated
+    # configuration.
+    if sudo mv -Tf "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null; then
+      MIGRATE_ACTIVE=0
+      echo "ERROR: could not restore the pre-migration configuration; the 0.9.2 module was put back and pairs with the active configuration. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree, then run nginx -t" >&2
+      return 1
+    fi
+    echo "ERROR: could not restore the pre-migration configuration and could not put the 0.9.2 module back; NGINX stays stopped. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree" >&2
     return 1
   fi
+  sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null || :
+  # 4) Validate the recovered pair before the service is allowed to run again.
   if ! sudo nginx -t; then
     MIGRATE_ACTIVE=0
     echo "ERROR: the restored module and configuration fail validation; NGINX stays stopped. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree" >&2

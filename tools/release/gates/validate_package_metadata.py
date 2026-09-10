@@ -1236,10 +1236,10 @@ def _check_snippet_opt_in(
         )
 
 
-TARBALL_STAGING_MARKERS = (
-    "${TARBALL_DIR}",
-    "$TARBALL_DIR",
-    "TARBALL_DIR",
+# A shell variable reference to the staging tree, but not a longer name such as
+# $NOT_TARBALL_DIR: the reference must end at a non-identifier character.
+TARBALL_MARKER_PATTERN = re.compile(
+    r"\$\{TARBALL_DIR\}|\$TARBALL_DIR(?![A-Za-z0-9_])"
 )
 
 
@@ -1281,6 +1281,12 @@ def _parse_install_operands(tokens: list[str]) -> tuple[list[str], str | None]:
     while index < len(tokens) and tokens[index].startswith("-"):
         option = tokens[index]
         index += 1
+        # ``--option=value`` carries its value inside the same token.
+        name, separator, inline_value = option.partition("=")
+        if separator:
+            if name == "--target-directory":
+                target_directory = True
+            continue
         if option in _INSTALL_VALUE_OPTIONS:
             if option in ("-t", "--target-directory"):
                 target_directory = True
@@ -1339,7 +1345,7 @@ def _is_staging_command(tokens: list[str], source_path: str) -> bool:
     staged_indexes = [
         index
         for index, operand in enumerate(operands)
-        if any(marker in operand for marker in TARBALL_STAGING_MARKERS)
+        if TARBALL_MARKER_PATTERN.search(operand)
     ]
     if not staged_indexes:
         return False
