@@ -15,7 +15,7 @@ flowchart TD
     ReplayAvail -->|yes| FailOpen["Return Original HTML"]
     ReplayAvail -->|no| ReplayUnavailableClosed["Return the configured fail-closed status (429/503/502)"]
     OnError -->|fail_closed| PolicyClosed["Return the configured error status (default 502)"]
-    OnError -->|status| StatusPolicy["Return the configured status code (markdown_error_status)"]
+    OnError -->|status| StatusPolicy["Return the configured status code (markdown_error_policy status)"]
 
     style Success fill:#090,color:#fff
     style FailOpen fill:#f90,color:#000
