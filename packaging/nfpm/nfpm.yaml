@@ -71,6 +71,16 @@ contents:
     type: config|noreplace
     packager: deb
 
+  # RPM family: ship the ready-to-use drop-in at the nginx.org reference path.
+  # Current nginx.org packages do not include that directory automatically, and
+  # layouts that do include it cannot be allowed to load the module silently —
+  # so the snippet ships with load_module commented out and the operator
+  # enables it explicitly (see the file's header for both activation routes).
+  - src: "./packaging/nfpm/modules/mod-markdown.conf"
+    dst: "/usr/share/nginx/modules/mod-markdown.conf"
+    type: config|noreplace
+    packager: rpm
+
   - src: "./LICENSE"
     dst: "/usr/share/licenses/nginx-markdown-for-agents/LICENSE"
 

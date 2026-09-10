@@ -645,10 +645,17 @@ if [ "$nginx_t_status" -ne 0 ]; then
   echo "FAIL: nginx -T failed (exit $nginx_t_status); cannot verify the logging configuration" >&2
   exit 1
 fi
-if printf '%s' "$NGINX_T_OUTPUT" | grep -q "markdown_log_verbosity.*\(info\|debug\)" \
-    && printf '%s' "$NGINX_T_OUTPUT" | grep -E "^[[:space:]]*error_log[[:space:]]+[^;]*[[:space:]]+(info|debug)[[:space:]]*;" ; then
-  LOG_LEVEL_OK=1
-fi
+# Match the first condition with a shell pattern instead of piping into
+# grep -q: a short-circuiting grep would SIGPIPE printf and, under pipefail,
+# fail the pipeline even though the directive is present.
+case "$NGINX_T_OUTPUT" in
+  *markdown_log_verbosity*info* | *markdown_log_verbosity*debug*)
+    if printf '%s\n' "$NGINX_T_OUTPUT" \
+        | grep -E "^[[:space:]]*error_log[[:space:]]+[^;]*[[:space:]]+(info|debug)[[:space:]]*;" >/dev/null; then
+      LOG_LEVEL_OK=1
+    fi
+    ;;
+esac
 if [ "$LOG_LEVEL_OK" -eq 1 ]; then
   # Capture the filtered output FIRST, then test it: a short-circuiting
   # grep -q in the pipeline would SIGPIPE the upstream greps and, under

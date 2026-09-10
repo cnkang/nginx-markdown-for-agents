@@ -113,6 +113,7 @@ MODULE_NAME_SURFACES = [
     PROJECT_ROOT / "packaging" / "rpm" / "nginx-markdown-module.spec",
     PROJECT_ROOT / "packaging" / "snippets" / "mod-markdown-for-agents.conf",
     PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / "mod-markdown.conf",
+    PROJECT_ROOT / "packaging" / "nfpm" / "modules" / "mod-markdown.conf",
     NFPM_POSTINSTALL,
     SMOKE_TEST_BASIC,
     PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-diagnostics.sh",
@@ -124,6 +125,53 @@ MODULE_NAME_SURFACES = [
     RELEASE_PACKAGES_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
 ]
+
+# NGINX dynamic modules load only through a main-context load_module directive,
+# and the relative `modules/<name>.so` form resolves against the binary's
+# compiled --modules-path.  Each package family ships its snippet in the
+# directory that family's nginx.conf pulls in:
+#   DEB -> /usr/share/nginx/modules-available (operator symlinks it into
+#          /etc/nginx/modules-enabled/)
+#   RPM -> /usr/share/nginx/modules (nginx.org's nginx.conf includes it
+#          automatically, so the shipped directive stays commented out)
+NFPM_RPM_ONLY_MODULES_PATTERN = (
+    r'src: "\./packaging/nfpm/modules/mod-markdown\.conf"\n'
+    r'\s+dst: "/usr/share/nginx/modules/mod-markdown\.conf"\n'
+    r"\s+type: config\|noreplace\n"
+    r"\s+packager: rpm"
+)
+DEB_MODULE_SNIPPET = (
+    PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / "mod-markdown.conf"
+)
+RPM_MODULE_SNIPPET = PROJECT_ROOT / "packaging" / "nfpm" / "modules" / "mod-markdown.conf"
+# load_module with a RELATIVE path is resolved against the NGINX prefix, not
+# against --modules-path.  Debian/Ubuntu distribution packages populate the
+# prefix-relative directory as well (which is why their snippets use the
+# relative form), but this project ships the module only in the compiled
+# modules directory — so the DEB snippet must use the absolute path.  nginx.org
+# packages ship /etc/nginx/modules as a symlink to their modules directory, so
+# the relative form is correct for the RPM snippet.
+MODULE_SNIPPET_DEB_LOAD_LINE = (
+    "load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;"
+)
+MODULE_SNIPPET_RPM_LOAD_LINE = (
+    "load_module modules/ngx_http_markdown_filter_module.so;"
+)
+MODULE_SNIPPET_INACTIVE_LOAD_LINE = f"#{MODULE_SNIPPET_RPM_LOAD_LINE}"
+
+# A dynamic module only loads into a core binary built with a matching configure
+# signature.  Official nginx.org binaries (and every distribution package this
+# project targets) build with --with-compat, which relaxes that check to the
+# module API version — so a release module MUST be configured with
+# --with-compat or the package installs cleanly and then fails to load with
+# "module ... is not binary compatible".
+WITH_COMPAT_BUILD_SURFACES = [
+    RELEASE_PACKAGES_WORKFLOW,
+    RELEASE_RPM_WORKFLOW,
+    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc",
+    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl",
+]
+WITH_COMPAT_FLAG = "--with-compat"
 RELEASE_VERSION_SURFACES = [
     RELEASE_PACKAGES_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
@@ -834,6 +882,17 @@ def validate_nfpm_config(result: ValidationResult) -> None:
             "nfpm:modules-available:deb-only",
             "modules-available snippet must be limited to packager: deb",
         )
+    if re.search(NFPM_RPM_ONLY_MODULES_PATTERN, content):
+        result.pass_(
+            "nfpm:modules:rpm-only",
+            "module snippet is packaged at the RPM-family path for RPM only",
+        )
+    else:
+        result.fail(
+            "nfpm:modules:rpm-only",
+            "RPM packages must ship the module snippet at "
+            "/usr/share/nginx/modules/mod-markdown.conf with packager: rpm",
+        )
 
 
 def validate_rpm_spec(result: ValidationResult) -> None:
@@ -914,6 +973,169 @@ def validate_module_filename_consistency(result: ValidationResult) -> None:
                 f"module-name:missing:{rel}",
                 f"{rel} does not reference {CANONICAL_MODULE_SO}",
             )
+
+
+def _check_snippet_load_form(
+    result: ValidationResult, family: str, rel: str, content: str, expected_line: str
+) -> None:
+    """The snippet must load the module with the form its family resolves."""
+    check_id = f"snippet:{family}:load-module-form"
+    if expected_line in content:
+        result.pass_(
+            check_id,
+            f"{rel} uses the load_module form that resolves on {family}",
+        )
+    else:
+        result.fail(check_id, f"{rel} must load the module with '{expected_line}'")
+
+
+def _check_snippet_guidance(
+    result: ValidationResult, family: str, rel: str, content: str
+) -> None:
+    """The snippet must tell the operator where load_module belongs."""
+    check_id = f"snippet:{family}:main-context-guidance"
+    lowered = content.lower()
+    if "main context" in lowered and "top level" in lowered:
+        result.pass_(
+            check_id,
+            f"{rel} tells the operator load_module belongs at the top level "
+            "(main context) of nginx.conf",
+        )
+    else:
+        result.fail(
+            check_id,
+            f"{rel} must document that load_module belongs in the main "
+            "context (top level of nginx.conf, before events/http)",
+        )
+
+
+def _check_snippet_directives(
+    result: ValidationResult, family: str, rel: str, content: str, expected_line: str
+) -> None:
+    """A loader snippet carries no active directive besides load_module."""
+    check_id = f"snippet:{family}:only-load-module-directive"
+    directives = [
+        line.strip()
+        for line in content.splitlines()
+        if line.strip()
+        and not line.lstrip().startswith("#")
+        and line.rstrip().endswith(";")
+    ]
+    unexpected = [item for item in directives if item != expected_line]
+    if unexpected:
+        result.fail(
+            check_id,
+            f"{rel} must only carry the load_module directive; found "
+            f"{unexpected} (conversion directives belong to the operator's "
+            "location blocks)",
+        )
+    else:
+        result.pass_(
+            check_id,
+            f"{rel} carries no active directives besides load_module",
+        )
+
+
+def _check_snippet_opt_in(
+    result: ValidationResult,
+    family: str,
+    rel: str,
+    content: str,
+    expected_line: str,
+    ships_active: bool,
+) -> None:
+    """No include mechanism may load the module without an operator decision."""
+    check_id = f"snippet:{family}:opt-in-loading"
+    active_line = re.search(
+        rf"^(?!#){re.escape(expected_line)}", content, re.MULTILINE
+    )
+    inactive_line = f"#{expected_line}"
+    if ships_active and active_line:
+        result.pass_(
+            check_id,
+            f"{rel} ships the active directive activated by an explicit "
+            "operator symlink",
+        )
+    elif not ships_active and inactive_line in content and not active_line:
+        result.pass_(
+            check_id,
+            f"{rel} ships the directive commented out so no include mechanism "
+            "can load it without an operator decision",
+        )
+    elif ships_active:
+        result.fail(
+            check_id,
+            f"{rel} must ship the active load_module directive for the "
+            "symlink-based activation flow",
+        )
+    else:
+        result.fail(
+            check_id,
+            f"{rel} must keep load_module commented out: an active directive "
+            "could be loaded by an include mechanism without an operator "
+            "decision",
+        )
+
+
+def validate_module_build_compat(result: ValidationResult) -> None:
+    """Every module build surface must configure with ``--with-compat``.
+
+    nginx refuses to load a dynamic module whose configure signature differs
+    from the core binary (``module ... is not binary compatible``).
+    ``--with-compat`` reduces that signature to the dynamic-module API version,
+    which is what lets the release artifacts load into nginx.org and
+    distribution binaries.  Dropping the flag still builds and packages
+    successfully, so the failure only appears on a target host — hence this
+    static guard on every build surface.
+    """
+    for path in WITH_COMPAT_BUILD_SURFACES:
+        rel = path.relative_to(PROJECT_ROOT)
+        content = read_safe(path)
+        check_id = f"build-compat:{rel}"
+        if not content:
+            result.fail(check_id, f"{rel} not found")
+            continue
+        if WITH_COMPAT_FLAG in content:
+            result.pass_(check_id, f"{rel} configures the module with {WITH_COMPAT_FLAG}")
+        else:
+            result.fail(
+                check_id,
+                f"{rel} must configure nginx with {WITH_COMPAT_FLAG} when it "
+                "builds the dynamic module, or the artifact will not load into "
+                "an nginx.org/distribution binary",
+            )
+
+
+def validate_module_snippet_best_practices(result: ValidationResult) -> None:
+    """Check the shipped module snippets follow NGINX dynamic-module practice.
+
+    NGINX documents that a dynamic module is loaded with a ``load_module``
+    directive in the MAIN context (top level of nginx.conf, before the events
+    and http blocks).  A relative path there is resolved against the NGINX
+    prefix — not against --modules-path — so the snippet must use the form
+    that resolves on its own family: DEB ships the module only in
+    /usr/lib/nginx/modules (absolute path), while nginx.org RPM packages ship
+    /etc/nginx/modules as a symlink to their modules directory (relative
+    form).  The snippets must also document that main-context placement, carry
+    no configuration directives, and never load the module silently.
+    """
+    expectations = (
+        ("deb", DEB_MODULE_SNIPPET, True, MODULE_SNIPPET_DEB_LOAD_LINE),
+        ("rpm", RPM_MODULE_SNIPPET, False, MODULE_SNIPPET_RPM_LOAD_LINE),
+    )
+    for family, path, ships_active, expected_line in expectations:
+        rel = path.relative_to(PROJECT_ROOT)
+        content = read_safe(path)
+        if not content:
+            result.fail(f"snippet:{family}:exists", f"{rel} not found")
+            continue
+        result.pass_(f"snippet:{family}:exists", f"{rel} present")
+        _check_snippet_load_form(result, family, str(rel), content, expected_line)
+        _check_snippet_guidance(result, family, str(rel), content)
+        _check_snippet_directives(result, family, str(rel), content, expected_line)
+        _check_snippet_opt_in(
+            result, family, str(rel), content, expected_line, ships_active
+        )
 
 
 def checksum_identifiers() -> set[str]:
@@ -1661,6 +1883,8 @@ def main() -> int:
     validate_rpm_spec(result)
     validate_nginx_dependency_constraints(result)
     validate_module_filename_consistency(result)
+    validate_module_snippet_best_practices(result)
+    validate_module_build_compat(result)
     validate_release_versions_have_checksums(result)
     validate_release_artifact_flow(result)
     validate_standalone_workflow_packaging(result)

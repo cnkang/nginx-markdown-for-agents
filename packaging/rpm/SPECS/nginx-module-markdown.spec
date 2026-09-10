@@ -54,6 +54,14 @@ install -d %{buildroot}/usr/lib64/nginx/modules
 install -m 0644 ngx_http_markdown_filter_module.so \
     %{buildroot}/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so
 
+# RPM family: ship the ready-to-use drop-in at the nginx.org reference path
+# with load_module commented out.  Current nginx.org packages do not include
+# that directory automatically; where a layout does include it, an active
+# directive would load a third-party module without an operator decision.
+install -d %{buildroot}/usr/share/nginx/modules
+install -m 0644 packaging/nfpm/modules/mod-markdown.conf \
+    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf
+
 install -d %{buildroot}/usr/share/doc/nginx-markdown-for-agents
 install -m 0644 README.md \
     %{buildroot}/usr/share/doc/nginx-markdown-for-agents/README.md
@@ -151,6 +159,7 @@ fi
 
 %files
 /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so
+%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf
 /usr/share/doc/nginx-markdown-for-agents/README.md
 /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 /usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
