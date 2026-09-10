@@ -611,12 +611,19 @@ impl MarkdownConverter {
         if let Some(context) = ctx.as_deref_mut() {
             context.reserve_working_set(outer_capacity)?;
         }
+        let render_result =
+            self.render_list_item_content(node, output, depth, ordered, &mut ctx);
+        // Release the outer charge on EVERY path (render success or
+        // error): a render failure must not leave working_set_bytes
+        // inflated for the rest of the conversion.
+        if let Some(context) = ctx.as_deref_mut() {
+            context.release_working_set(outer_capacity);
+        }
+        let item_output = match render_result {
+            Ok((item_output, _)) => item_output,
+            Err(error) => return Err(error),
+        };
         let result = (|| {
-            let (item_output, _) =
-                self.render_list_item_content(node, output, depth, ordered, &mut ctx)?;
-            if let Some(context) = ctx.as_deref_mut() {
-                context.release_working_set(outer_capacity);
-            }
             self.format_list_item_with_context(
                 output,
                 item_output,

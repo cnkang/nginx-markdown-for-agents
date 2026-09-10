@@ -117,7 +117,18 @@ sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 # modules-enabled): MIGRATION-0.9.2.md may touch any path under
 # ${NGINX_CONF_DIR}, and the rollback path must be able to restore every
 # migrated file and remove anything the migration added.
+# Reserve the snapshot root: a pre-existing tree/ from an older backup
+# would merge stale files into the snapshot, so it is removed first.
+sudo rm -rf "${CONFIG_BACKUP_DIR}/tree"
 sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree/"
+# Record whether the configuration root itself is a symlink: the rollback
+# restores the tree wholesale (rm -rf + cp -a), which would replace a
+# symlink root with a real directory and orphan the original target.
+if [[ -L "${NGINX_CONF_DIR}" ]]; then
+  readlink "${NGINX_CONF_DIR}" | sudo tee "${CONFIG_BACKUP_DIR}/tree-root-link" >/dev/null
+else
+  sudo rm -f "${CONFIG_BACKUP_DIR}/tree-root-link"
+fi
 MODULE_PATH="$MODULES_DIR/ngx_http_markdown_filter_module.so"
 MODULE_BACKUP="${MODULE_PATH}.0.9.1.bak"
 if [[ ! -f "${MODULE_PATH}" ]]; then
@@ -270,6 +281,12 @@ sudo nginx -t || {
     echo "ERROR: configuration restore failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
     exit 1
   }
+  # Restore the root's symlink identity if the pre-upgrade root was a
+  # symlink (the rm -rf above replaced it with a real directory).
+  if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
+    sudo rm -rf "${NGINX_CONF_DIR}"
+    sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
+  fi
   if sudo nginx -t; then
     echo "INFO: previous module and configuration restored and verified." >&2
   else
@@ -451,6 +468,12 @@ if ! sudo nginx -t; then
   # added is removed, so no migrated configuration can remain.
   sudo rm -rf "${NGINX_CONF_DIR}"
   sudo cp -a "${CONFIG_BACKUP_DIR}/tree" "${NGINX_CONF_DIR}"
+  # Restore the root's symlink identity if the pre-upgrade root was a
+  # symlink (the rm -rf above replaced it with a real directory).
+  if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
+    sudo rm -rf "${NGINX_CONF_DIR}"
+    sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
+  fi
   if ! sudo nginx -t; then
     echo "ERROR: restored module and configuration also fail validation; do not start NGINX. ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR} are preserved — restore manually from them." >&2
     exit 1
