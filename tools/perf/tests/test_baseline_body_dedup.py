@@ -33,6 +33,9 @@ def test_shared_body_copies_are_identical(name: str) -> None:
 
 @pytest.mark.parametrize("name", SHARED_BODIES)
 def test_only_the_top_level_copy_is_a_regular_file(name: str) -> None:
+    canonical = BASELINES / name
+    assert canonical.is_file(), f"{canonical} is the stored payload and must exist"
+    assert not canonical.is_symlink(), f"{canonical} must be the stored payload"
     for copy in sorted(BASELINES.rglob(name)):
         if copy.parent == BASELINES:
             assert not copy.is_symlink(), f"{copy} should be the stored payload"
