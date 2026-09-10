@@ -604,6 +604,13 @@ disabled_before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
 # fall outside the location that disables conversion) and include the Host
 # header so the request reaches that scope.  The path is configurable so the
 # probe can target the ACTUAL location affected by the rollback.
+# Isolation semantics: the decision-log corroboration below reads ONLY the
+# bytes appended after LOG_OFFSET, so entries from earlier runs or unrelated
+# traffic before the probe cannot match.  On a shared instance where other
+# traffic may hit the SAME fixed path inside the offset window, set
+# ROLLBACK_PROBE_PATH to a run-unique path (e.g. /rollback-probe-$$) and
+# ensure the markdown_filter location covers it (a prefix location such as
+# /rollback-probe/ covers both the fixed and the run-unique forms).
 ROLLBACK_PROBE_PATH="${ROLLBACK_PROBE_PATH:-/rollback-probe}"
 LOG_OFFSET=$(wc -c < /var/log/nginx/error.log 2>/dev/null || echo 0)
 curl -sS -o /dev/null \

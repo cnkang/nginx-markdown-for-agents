@@ -4070,6 +4070,14 @@ ngx_http_markdown_streaming_clone_chain_deep(
         if (in->buf == NULL) {
             continue;
         }
+        cl = ngx_alloc_chain_link(r->pool);
+        if (cl == NULL) {
+            return NULL;
+        }
+        b = ngx_calloc_buf(r->pool);
+        if (b == NULL) {
+            return NULL;
+        }
         /* A file-backed buffer cannot be deep-cloned by copying payload
          * bytes (the data lives in the file, not in pos..last).  The
          * ngx_file_t reference is owned by the original producer, but
@@ -4089,23 +4097,11 @@ ngx_http_markdown_streaming_clone_chain_deep(
             b->file_last = in->buf->file_last;
             b->pos = in->buf->pos;
             b->last = in->buf->last;
-            cl = ngx_alloc_chain_link(r->pool);
-            if (cl == NULL) {
-                return NULL;
-            }
             cl->buf = b;
             cl->next = NULL;
             *tail = cl;
             tail = &cl->next;
             continue;
-        }
-        cl = ngx_alloc_chain_link(r->pool);
-        if (cl == NULL) {
-            return NULL;
-        }
-        b = ngx_calloc_buf(r->pool);
-        if (b == NULL) {
-            return NULL;
         }
         if (in->buf->pos != NULL && in->buf->last != NULL
             && in->buf->last > in->buf->pos)
