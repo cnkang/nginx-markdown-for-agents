@@ -1414,6 +1414,7 @@ def _command_entry(
 
 
 _QUOTED_SEGMENT = re.compile(r"'[^']*'|\"[^\"]*\"")
+_ESCAPED_BRACE = re.compile(r"\\[{}]")
 
 
 def _brace_delta(tokens: list[str]) -> int:
@@ -1423,6 +1424,8 @@ def _brace_delta(tokens: list[str]) -> int:
     are removed before the depth is counted.
     """
     cleaned = _QUOTED_SEGMENT.sub(" ", " ".join(tokens))
+    # An escaped brace is a literal character, not a group boundary.
+    cleaned = _ESCAPED_BRACE.sub(" ", cleaned)
     return cleaned.count("{") - cleaned.count("}")
 
 
