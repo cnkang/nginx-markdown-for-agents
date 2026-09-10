@@ -130,6 +130,9 @@ case "${CONFIG_BACKUP_DIR}" in
     ;;
 esac
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
+# Normalize away a trailing slash: every derived sibling path below
+# (backups, staging trees, markers) assumes a slash-free root.
+NGINX_CONF_DIR="${NGINX_CONF_DIR%/}"
 # Path-safety guard: the rollback deletes and recreates the configuration
 # root with sudo, so reject unsafe overrides.  The value must be an
 # absolute path to an EXISTING directory that contains nginx.conf (a
@@ -451,10 +454,16 @@ migrate_restore() {
       echo "ERROR: could not replace the configuration-root symlink; the active link is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
       return 0
     fi
-    # The active link now points at the snapshot; the old target is
-    # orphaned and safe to remove (a removal failure only leaves a
-    # stale directory, never a dangling link).
-    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
+    # The active link now points at the snapshot.  Keep the previous
+    # target as recovery material instead of deleting it: move it to a
+    # unique sibling so the original path stays clean while the
+    # pre-migration tree remains available if the operator needs it.
+    PREVIOUS_TARGET="${ROOT_LINK_TARGET}.pre-migration-$(date +%s)"
+    if sudo mv "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
+      echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
+    else
+      echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+    fi
   else
     # Non-symlink root: move the active tree to a UNIQUE sibling,
     # install the snapshot, and roll back on failure.
@@ -472,7 +481,7 @@ migrate_restore() {
       echo "ERROR: could not install the snapshot; the previous tree was rolled back and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
       return 0
     fi
-    sudo rm -rf "${ROLLBACK_OLD}" 2>/dev/null || true
+    echo "NOTE: the previous configuration tree was preserved as ${ROLLBACK_OLD}; remove it once the upgrade is confirmed"
   fi
 }
 MIGRATE_ACTIVE=1
@@ -523,10 +532,16 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       echo "ERROR: could not replace the configuration-root symlink; the active link is untouched. Restore manually from ${MIGRATE_BACKUP}" >&2
       exit 1
     }
-    # The active link now points at the snapshot; the old target is
-    # orphaned and safe to remove (a removal failure only leaves a
-    # stale directory, never a dangling link).
-    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
+    # The active link now points at the snapshot.  Keep the previous
+    # target as recovery material instead of deleting it: move it to a
+    # unique sibling so the original path stays clean while the
+    # pre-migration tree remains available if the operator needs it.
+    PREVIOUS_TARGET="${ROOT_LINK_TARGET}.pre-migration-$(date +%s)"
+    if sudo mv "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
+      echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
+    else
+      echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+    fi
   else
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
     sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
@@ -579,6 +594,9 @@ set -euo pipefail
 # every operation checked) so the old module is never left paired with
 # the migrated configuration.  Fails with manual-recovery guidance.
 restore_pre_migration_tree() {
+  # Normalize the configuration-root path first: a trailing slash would turn
+  # every derived sibling path into a CHILD of the active tree.
+  NGINX_CONF_DIR="${NGINX_CONF_DIR%/}"
   if [[ -L "${NGINX_CONF_DIR}" ]]; then
     ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
     RESTORE_STAGED="$(sudo mktemp -d "$(dirname "${ROOT_LINK_TARGET}")/.nginx-restore-XXXXXX")" || {
@@ -589,30 +607,27 @@ restore_pre_migration_tree() {
       echo "ERROR: could not stage the pre-migration tree; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
     }
-    # Atomic replacement: move staged tree to a unique sibling of the
-    # resolved target, then replace the target symlink.  This avoids
-    # the window where the target is removed but the move fails.
-    RESTORE_NEW="${ROOT_LINK_TARGET}.restore-new-$(date +%s%N)-$$"
-    if ! sudo mv "${RESTORE_STAGED}" "${RESTORE_NEW}" 2>/dev/null; then
-      echo "ERROR: could not move the staged tree into place; the target is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
+    # Replace the target directory through a move-aside rename: rename cannot
+    # overwrite a non-empty directory, so the old target moves to a unique
+    # sibling first and the staged tree takes its place.  A failed install
+    # moves the old target back, so the symlink never dangles and the
+    # pre-migration tree is never lost.
+    PREVIOUS_TARGET="${ROOT_LINK_TARGET}.pre-restore-$(date +%s)"
+    if ! sudo mv "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
+      echo "ERROR: could not move the previous configuration target aside; the active tree is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
     fi
-    if ! sudo mv -Tf "${RESTORE_NEW}" "${ROOT_LINK_TARGET}" 2>/dev/null; then
-      sudo rm -rf "${RESTORE_NEW}" 2>/dev/null || true
-      echo "ERROR: could not replace the configuration-root target; the previous target is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
+    if ! sudo mv "${RESTORE_STAGED}" "${ROOT_LINK_TARGET}" 2>/dev/null; then
+      if ! sudo mv "${PREVIOUS_TARGET}" "${ROOT_LINK_TARGET}" 2>/dev/null; then
+        echo "ERROR: could not install the pre-migration tree AND could not move the previous target back; both trees are preserved: ${RESTORE_STAGED} (pre-migration) and ${PREVIOUS_TARGET} (previous target). Restore manually" >&2
+        exit 1
+      fi
+      echo "ERROR: could not install the pre-migration tree; the previous target was moved back and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
     fi
-    sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
-    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" || {
-      echo "ERROR: could not recreate the configuration-root symlink; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
-      exit 1
-    }
-    sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" || {
-      echo "ERROR: could not replace the configuration-root symlink; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
-      exit 1
-    }
+    echo "NOTE: the previous configuration target was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
   else
-    RESTORE_STAGED="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR%/}")/.nginx-restore-XXXXXX")" || {
+    RESTORE_STAGED="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR}")/.nginx-restore-XXXXXX")" || {
       echo "ERROR: could not allocate a restore staging directory; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
     }
@@ -620,17 +635,21 @@ restore_pre_migration_tree() {
       echo "ERROR: could not stage the pre-migration tree; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
     }
-    # Atomic replacement for non-symlink roots: same unique-sibling pattern.
-    RESTORE_NEW="${NGINX_CONF_DIR}.restore-new-$(date +%s%N)-$$"
-    if ! sudo mv "${RESTORE_STAGED}" "${RESTORE_NEW}" 2>/dev/null; then
-      echo "ERROR: could not move the staged tree into place; the target is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
+    # Same move-aside/rollback sequence for a plain directory root.
+    PREVIOUS_TARGET="${NGINX_CONF_DIR}.pre-restore-$(date +%s)"
+    if ! sudo mv "${NGINX_CONF_DIR}" "${PREVIOUS_TARGET}" 2>/dev/null; then
+      echo "ERROR: could not move the active configuration tree aside; it is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
     fi
-    if ! sudo mv -Tf "${RESTORE_NEW}" "${NGINX_CONF_DIR}" 2>/dev/null; then
-      sudo rm -rf "${RESTORE_NEW}" 2>/dev/null || true
-      echo "ERROR: could not replace the configuration root; the previous root is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
+    if ! sudo mv "${RESTORE_STAGED}" "${NGINX_CONF_DIR}" 2>/dev/null; then
+      if ! sudo mv "${PREVIOUS_TARGET}" "${NGINX_CONF_DIR}" 2>/dev/null; then
+        echo "ERROR: could not install the pre-migration tree AND could not move the previous tree back; both trees are preserved: ${RESTORE_STAGED} (pre-migration) and ${PREVIOUS_TARGET} (previous). Restore manually" >&2
+        exit 1
+      fi
+      echo "ERROR: could not install the pre-migration tree; the previous tree was moved back and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
     fi
+    echo "NOTE: the previous configuration tree was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
   fi
 }
 # The active configuration was already migrated; the OLD module is still
@@ -837,7 +856,7 @@ sudo nginx -t || {
       echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     }
-    sudo rm -rf "${ROLLBACK_OLD}" 2>/dev/null || true
+    echo "NOTE: the previous configuration tree was preserved as ${ROLLBACK_OLD}; remove it once the upgrade is confirmed"
   fi
   if sudo nginx -t; then
     echo "INFO: previous module and configuration restored and verified." >&2
@@ -921,6 +940,9 @@ set -euo pipefail
 # rollback command expands them.
 CONFIG_BACKUP_DIR="${CONFIG_BACKUP_DIR:-/var/backups/nginx-markdown-0.9.1}"
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
+# Normalize away a trailing slash: every derived sibling path below
+# (backups, staging trees, markers) assumes a slash-free root.
+NGINX_CONF_DIR="${NGINX_CONF_DIR%/}"
 case "${NGINX_CONF_DIR}" in
   /*)
     if [[ "${NGINX_CONF_DIR}" == "/" \
@@ -982,10 +1004,16 @@ case "${CONFIG_BACKUP_DIR}" in
           || "${CONFIG_BACKUP_DIR}" == "/srv" \
           || "${CONFIG_BACKUP_DIR}" == "/home" \
           || "${CONFIG_BACKUP_DIR}" == "/root" \
+          || "${CONFIG_BACKUP_DIR}" == "/var/backups" \
+          || "${CONFIG_BACKUP_DIR}" == "/var/tmp" \
+          || "${CONFIG_BACKUP_DIR}" == "/var/log" \
+          || "${CONFIG_BACKUP_DIR}" == "/backup" \
+          || "${CONFIG_BACKUP_DIR}" == "/backups" \
+          || "${CONFIG_BACKUP_DIR}" == "/tmp" \
           || "${CONFIG_BACKUP_DIR}" == "${NGINX_CONF_DIR}" \
           || "${CONFIG_BACKUP_DIR}" == "${NGINX_CONF_DIR}/"* \
           || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}/"* ]]; then
-      echo "ERROR: unsafe CONFIG_BACKUP_DIR '${CONFIG_BACKUP_DIR}' (must be an absolute dedicated backup root, not a system root, and distinct from NGINX_CONF_DIR)" >&2
+      echo "ERROR: unsafe CONFIG_BACKUP_DIR '${CONFIG_BACKUP_DIR}' (use an absolute DEDICATED backup directory, for example /var/backups/nginx-markdown-for-agents; a system root or a shared backup/temp directory is refused, and it must differ from NGINX_CONF_DIR)" >&2
       exit 1
     fi
     ;;
@@ -1229,10 +1257,16 @@ migrate_restore() {
       echo "ERROR: could not replace the configuration-root symlink; the active link is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
       return 0
     fi
-    # The active link now points at the snapshot; the old target is
-    # orphaned and safe to remove (a removal failure only leaves a
-    # stale directory, never a dangling link).
-    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
+    # The active link now points at the snapshot.  Keep the previous
+    # target as recovery material instead of deleting it: move it to a
+    # unique sibling so the original path stays clean while the
+    # pre-migration tree remains available if the operator needs it.
+    PREVIOUS_TARGET="${ROOT_LINK_TARGET}.pre-migration-$(date +%s)"
+    if sudo mv "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
+      echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
+    else
+      echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+    fi
   else
     # Non-symlink root: move the active tree to a UNIQUE sibling,
     # install the snapshot, and roll back on failure.
@@ -1250,7 +1284,7 @@ migrate_restore() {
       echo "ERROR: could not install the snapshot; the previous tree was rolled back and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
       return 0
     fi
-    sudo rm -rf "${ROLLBACK_OLD}" 2>/dev/null || true
+    echo "NOTE: the previous configuration tree was preserved as ${ROLLBACK_OLD}; remove it once the upgrade is confirmed"
   fi
 }
 MIGRATE_ACTIVE=1
@@ -1301,10 +1335,16 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       echo "ERROR: could not replace the configuration-root symlink; the active link is untouched. Restore manually from ${MIGRATE_BACKUP}" >&2
       exit 1
     }
-    # The active link now points at the snapshot; the old target is
-    # orphaned and safe to remove (a removal failure only leaves a
-    # stale directory, never a dangling link).
-    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
+    # The active link now points at the snapshot.  Keep the previous
+    # target as recovery material instead of deleting it: move it to a
+    # unique sibling so the original path stays clean while the
+    # pre-migration tree remains available if the operator needs it.
+    PREVIOUS_TARGET="${ROOT_LINK_TARGET}.pre-migration-$(date +%s)"
+    if sudo mv "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
+      echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
+    else
+      echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+    fi
   else
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
     sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
@@ -1395,6 +1435,11 @@ if ! sudo nginx -t; then
   # binary.  Fail closed with a manual-recovery instruction instead of
   # continuing into the configuration restore and restart.
   if [[ "$MODULE_RESTORE_FAILED" -ne 0 ]]; then
+    # Disarm the migration trap: the 0.9.2 module is still installed, so
+    # restoring the pre-migration configuration here would pair the new
+    # binary with the old tree.  Leave the active tree as-is and let the
+    # operator restore both halves together.
+    MIGRATE_ACTIVE=0
     echo "ERROR: the previous module could not be restored; NGINX remains stopped with the 0.9.2 module installed and the migrated configuration active. Restore manually: install the previous module from ${MODULE_BACKUP} and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
     exit 1
   fi
@@ -1506,7 +1551,7 @@ if ! sudo nginx -t; then
       echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     }
-    sudo rm -rf "${ROLLBACK_OLD}" 2>/dev/null || true
+    echo "NOTE: the previous configuration tree was preserved as ${ROLLBACK_OLD}; remove it once the upgrade is confirmed"
   fi
   if ! sudo nginx -t; then
     echo "ERROR: restored module and configuration also fail validation; do not start NGINX. ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR} are preserved — restore manually from them." >&2

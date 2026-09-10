@@ -313,12 +313,28 @@ sudo cp -a -- "$MODULES_DIR/ngx_http_markdown_filter_module.so" \
   echo "ERROR: could not back up the 0.9.1 module; aborting before any configuration change" >&2
   exit 1
 }
-sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" \
-    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak" || {
+# Never overwrite an existing backup silently: an older backup may hold a
+# different module than the one running now, and replacing it would destroy
+# the only copy.  Compare first and abort when they differ.
+if [ -e "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak" ] \
+    && ! sudo cmp -s "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak" \
+        "$MODULES_DIR/ngx_http_markdown_filter_module.so"; then
+  sudo rm -f -- "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" 2>/dev/null || true
+  echo "ERROR: an existing backup $MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak differs from the live module; preserve or remove it before re-running the rollback" >&2
+  exit 1
+fi
+if [ -e "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak" ]; then
+  # Identical content: the existing backup already captures this module, so
+  # keep it and drop the temporary copy.
+  sudo rm -f -- "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" 2>/dev/null || true
+else
+  sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" \
+      "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak" || {
   sudo rm -f -- "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" 2>/dev/null || true
   echo "ERROR: could not finalize the 0.9.1 module backup; aborting before any configuration change" >&2
   exit 1
 }
+fi
 sudo cp -a -- "${CONFIG_090}" "${CONFIG_DIR}.restore-0.9.0"
 sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.pre-0.9.0"
 if ! sudo mv -- "${CONFIG_DIR}.restore-0.9.0" "${CONFIG_DIR}"; then

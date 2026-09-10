@@ -1321,11 +1321,21 @@ def _is_generated_dynamic_row(entry: object) -> bool:
 
 
 def _is_dynamic_module_entry(entry: object) -> bool:
-    """Return True when ``entry`` describes an OS dynamic-module row."""
-    return (
-        isinstance(entry, dict)
-        and _matrix_entry_identity(entry)[1] in OS_TYPES
-    )
+    """Return True when ``entry`` describes an OS dynamic-module row.
+
+    The identity's libc field selects the dynamic-module OS set, and an
+    explicit ``artifact_type`` must agree with that selection: a row that
+    declares a different artifact type is never a dynamic-module row, while a
+    row without the field (older matrix inputs) stays eligible.
+    """
+    if not isinstance(entry, dict):
+        return False
+
+    artifact_type = entry.get("artifact_type")
+    if artifact_type is not None and artifact_type != "dynamic-module":
+        return False
+
+    return _matrix_entry_identity(entry)[1] in OS_TYPES
 
 
 def _dynamic_entry_sort_key(entry: dict) -> tuple:

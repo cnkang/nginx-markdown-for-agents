@@ -7,6 +7,7 @@ Run:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -658,3 +659,180 @@ class TestReleaseGateSnippetExpectations:
         assert "markdown_incremental_finalize" in validator.RETIRED_RELEASE_FFI_SYMBOLS
         assert "markdown_incremental_free" in validator.RETIRED_RELEASE_FFI_SYMBOLS
         assert "markdown_streaming_free" in validator.RETIRED_RELEASE_FFI_SYMBOLS
+
+
+# ---------------------------------------------------------------------------
+# Module snippet best practices (NGINX dynamic-module loading)
+# ---------------------------------------------------------------------------
+
+
+class TestModuleSnippetBestPractices:
+    """The shipped module snippets follow NGINX dynamic-module practice.
+
+    NGINX loads dynamic modules only through a main-context ``load_module``
+    directive, and a relative path there resolves against the NGINX *prefix*
+    (not ``--modules-path``).  Each snippet must therefore use the form that
+    actually resolves on its package family, must keep loading an explicit
+    operator decision, and must not carry configuration directives.
+    """
+
+    def test_shipped_snippets_use_resolvable_form_and_document_main_context(
+        self,
+    ) -> None:
+        for path in (validator.DEB_MODULE_SNIPPET, validator.RPM_MODULE_SNIPPET):
+            content = path.read_text(encoding="utf-8")
+            lowered = content.lower()
+            assert "main context" in lowered, path
+            assert "top level" in lowered, path
+            assert "prefix" in lowered, path
+
+        deb = validator.DEB_MODULE_SNIPPET.read_text(encoding="utf-8")
+        rpm = validator.RPM_MODULE_SNIPPET.read_text(encoding="utf-8")
+        # DEB ships the module only in /usr/lib/nginx/modules, so a relative
+        # path would resolve under the prefix and miss the file.
+        assert validator.MODULE_SNIPPET_DEB_LOAD_LINE in deb
+        # nginx.org RPM packages ship /etc/nginx/modules -> modules-path, so the
+        # relative form resolves.
+        assert validator.MODULE_SNIPPET_RPM_LOAD_LINE in rpm
+
+    def test_deb_snippet_is_active_while_rpm_snippet_stays_opt_in(self) -> None:
+        deb = validator.DEB_MODULE_SNIPPET.read_text(encoding="utf-8")
+        rpm = validator.RPM_MODULE_SNIPPET.read_text(encoding="utf-8")
+
+        assert re.search(
+            rf"^(?!#){re.escape(validator.MODULE_SNIPPET_DEB_LOAD_LINE)}",
+            deb,
+            re.MULTILINE,
+        )
+        assert validator.MODULE_SNIPPET_INACTIVE_LOAD_LINE in rpm
+        assert not re.search(
+            rf"^(?!#){re.escape(validator.MODULE_SNIPPET_RPM_LOAD_LINE)}",
+            rpm,
+            re.MULTILINE,
+        )
+
+    def test_validator_flags_active_rpm_directive(self, monkeypatch) -> None:
+        """An auto-loaded RPM snippet must fail the gate."""
+
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_MODULE_SNIPPET:
+                return (
+                    "# main context / top level, prefix-relative form\n"
+                    "load_module modules/ngx_http_markdown_filter_module.so;\n"
+                )
+            return (
+                "# main context / top level, prefix-relative notes\n"
+                "load_module /usr/lib/nginx/modules/"
+                "ngx_http_markdown_filter_module.so;\n"
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        assert any(
+            status == "FAIL" and check_id == "snippet:rpm:opt-in-loading"
+            for status, check_id, _message in result.results
+        )
+
+    def test_validator_flags_unresolvable_module_path(self, monkeypatch) -> None:
+        """A path form that cannot resolve on the family must fail the gate."""
+
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.DEB_MODULE_SNIPPET:
+                # Relative path: resolves under the prefix, where this package
+                # installs nothing.
+                return (
+                    "# main context, top level of nginx.conf, prefix notes\n"
+                    "load_module modules/ngx_http_markdown_filter_module.so;\n"
+                )
+            # Absolute RPM-family path: valid everywhere but not the form the
+            # RPM snippet is specified to ship.
+            return (
+                "# main context, top level of nginx.conf, prefix notes\n"
+                "load_module /usr/lib64/nginx/modules/"
+                "ngx_http_markdown_filter_module.so;\n"
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        failures = [
+            check_id
+            for status, check_id, _message in result.results
+            if status == "FAIL"
+        ]
+        assert "snippet:deb:load-module-form" in failures
+        assert "snippet:rpm:load-module-form" in failures
+
+    def test_validator_flags_conversion_directive_in_snippet(
+        self, monkeypatch
+    ) -> None:
+        """Loader snippets must not carry response-conversion directives."""
+
+        def fake_read_safe(_path: Path) -> str:
+            return (
+                "# main context, top level of nginx.conf, prefix notes\n"
+                "load_module /usr/lib/nginx/modules/"
+                "ngx_http_markdown_filter_module.so;\n"
+                "markdown_filter on;\n"
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        assert any(
+            status == "FAIL"
+            and check_id.endswith(":only-load-module-directive")
+            for status, check_id, _message in result.results
+        )
+
+    def test_nfpm_ships_rpm_snippet_at_nginxorg_reference_path(self) -> None:
+        """The RPM snippet is packaged for the RPM family only."""
+        content = validator.NFPM_CONFIG.read_text(encoding="utf-8")
+        assert re.search(validator.NFPM_RPM_ONLY_MODULES_PATTERN, content)
+
+        without_entry = content.replace(
+            '  - src: "./packaging/nfpm/modules/mod-markdown.conf"\n'
+            '    dst: "/usr/share/nginx/modules/mod-markdown.conf"\n'
+            "    type: config|noreplace\n"
+            "    packager: rpm\n",
+            "",
+        )
+        assert without_entry != content
+        assert not re.search(validator.NFPM_RPM_ONLY_MODULES_PATTERN, without_entry)
+
+class TestModuleBuildCompat:
+    """Release modules must be configured with --with-compat."""
+
+    def test_release_surfaces_keep_the_compat_flag(self) -> None:
+        assert validator.WITH_COMPAT_FLAG == "--with-compat"
+        assert validator.RELEASE_PACKAGES_WORKFLOW in validator.WITH_COMPAT_BUILD_SURFACES
+        assert validator.RELEASE_RPM_WORKFLOW in validator.WITH_COMPAT_BUILD_SURFACES
+
+        result = validator.ValidationResult()
+        validator.validate_module_build_compat(result)
+        assert not result.has_failures
+
+    def test_validator_flags_a_surface_without_the_compat_flag(
+        self, monkeypatch
+    ) -> None:
+        """A build surface that drops --with-compat must fail the gate."""
+
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RELEASE_PACKAGES_WORKFLOW:
+                # A configure line without the compat flag still builds and
+                # packages, so only this guard catches it.
+                return "./configure --add-dynamic-module=components/nginx-module"
+            return "--with-compat --add-dynamic-module=components/nginx-module"
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_build_compat(result)
+
+        assert any(
+            status == "FAIL" and "build-compat" in check_id
+            for status, check_id, _message in result.results
+        )

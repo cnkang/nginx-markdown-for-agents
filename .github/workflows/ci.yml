@@ -273,7 +273,15 @@ jobs:
       - name: Install test dependencies
         run: >-
           python3 -m pip install --upgrade pip &&
-          python3 -m pip install pytest==8.3.5 PyYAML==6.0.2
+          python3 -m pip install pytest==8.3.5 PyYAML==6.0.2 lizard==1.23.0 complexipy==6.0.1
+
+      - name: Install shellcheck
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          fi
+          shellcheck --version
 
       - name: Run regex safety detector
         run: make regex-security-check
@@ -289,6 +297,12 @@ jobs:
 
       - name: Run Python complexity detector
         run: PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
+
+      - name: Run full complexity check (lizard C/Rust, complexipy, shellcheck)
+        # Mirrors `make complexity-check` from the local gate set: the C and Rust
+        # CCN/length/parameter thresholds plus the shellcheck sweep.  Running it
+        # on pull requests keeps a complexity violation from reaching a release.
+        run: make complexity-check
 
       - name: Run repository harness checks
         run: make harness-check
@@ -564,6 +578,13 @@ jobs:
           bash tools/harness/detect_version_consistency.sh
           make reason-codegen-check
           PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py
+          # Package metadata + shipped module-snippet contract: validates the nFPM
+          # layout for both package families, the RPM snippet path, that each
+          # snippet loads the module with the form that resolves on its family,
+          # and that no snippet loads a third-party module without an explicit
+          # operator decision.  Cheap and static, so it runs on every pull
+          # request instead of only at release time.
+          PYTHONPATH=. python3 tools/release/gates/validate_package_metadata.py
           make reason-codegen-generate
           make reason-codegen-check
           PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py

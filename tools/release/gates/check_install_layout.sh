@@ -174,12 +174,14 @@ required_paths_for_package() {
     case "$pkg_basename" in
         *.deb)
             printf '%s\n%s\n' \
-                "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so" \
+                "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+/usr/share/nginx/modules-available/mod-markdown.conf" \
                 "$COMMON_REQUIRED_PATHS"
             ;;
         *.rpm)
             printf '%s\n%s\n' \
-                "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" \
+                "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so
+/usr/share/nginx/modules/mod-markdown.conf" \
                 "$COMMON_REQUIRED_PATHS"
             ;;
         *)
