@@ -597,8 +597,7 @@ fi
 disabled_before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
   -H "Host: ${ROLLBACK_HOST:-localhost}" \
   http://localhost/markdown-metrics | \
-  grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"' | \
-  awk '{sum += $NF} END {print sum+0}')
+  awk '/nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"/ {sum += $NF} END {print sum+0}')
 # Trigger a unique request first so the disabled signal is guaranteed to be
 # emitted by this verification, not by unrelated traffic.  Use a FIXED path
 # covered by the affected markdown_filter scope (a timestamp-based path may
@@ -615,8 +614,7 @@ sleep 1
 disabled_after=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
   -H "Host: ${ROLLBACK_HOST:-localhost}" \
   http://localhost/markdown-metrics | \
-  grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"' | \
-  awk '{sum += $NF} END {print sum+0}')
+  awk '/nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"/ {sum += $NF} END {print sum+0}')
 if [ -z "$disabled_after" ] || [ "$disabled_after" -le "$disabled_before" ]; then
   echo "FAIL: disabled signal did not increase after the rollback probe (before=$disabled_before after=$disabled_after; expected the probe request to be counted as outcome=skipped reason=disabled)"
   exit 1
@@ -629,16 +627,22 @@ fi
 # the probe FAILS with an isolate-and-rerun instruction instead of
 # trusting the global counter delta.
 LOG_LEVEL_OK=0
-if nginx -T 2>/dev/null | grep -q "markdown_log_verbosity.*\(info\|debug\)" \
-    && nginx -T 2>/dev/null | grep -E "^[[:space:]]*error_log[[:space:]]+[^;]*[[:space:]]+(info|debug)[[:space:]]*;" ; then
+# Capture nginx -T ONCE and search the captured output: a short-circuiting
+# grep -q on a large nginx -T stream can SIGPIPE the producer and, under
+# pipefail, make the condition falsely fail.
+NGINX_T_OUTPUT="$(nginx -T 2>/dev/null || true)"
+if printf '%s' "$NGINX_T_OUTPUT" | grep -q "markdown_log_verbosity.*\(info\|debug\)" \
+    && printf '%s' "$NGINX_T_OUTPUT" | grep -E "^[[:space:]]*error_log[[:space:]]+[^;]*[[:space:]]+(info|debug)[[:space:]]*;" ; then
   LOG_LEVEL_OK=1
 fi
 if [ "$LOG_LEVEL_OK" -eq 1 ]; then
   # Capture the filtered output FIRST, then test it: a short-circuiting
   # grep -q in the pipeline would SIGPIPE the upstream greps and, under
   # pipefail, make the whole pipeline fail even when the entry exists.
+  # The `|| true` also normalizes the no-match exit status so the
+  # assignment itself cannot trip set -e before the test below.
   PROBE_LOG_ENTRIES="$(tail -c +$((LOG_OFFSET + 1)) /var/log/nginx/error.log 2>/dev/null \
-      | grep "markdown:" | grep "reason=disabled" | grep -F "uri=${ROLLBACK_PROBE_PATH} ")"
+      | grep "markdown:" | grep "reason=disabled" | grep -F "uri=${ROLLBACK_PROBE_PATH} " || true)"
   if [ -n "$PROBE_LOG_ENTRIES" ]; then
     echo "OK: decision log corroborates the rollback-probe disabled entry"
   else
