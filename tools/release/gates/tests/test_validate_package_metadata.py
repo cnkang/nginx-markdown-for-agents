@@ -1049,6 +1049,16 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._spec_installs_snippet(body)
 
+    def test_leading_list_marker_does_not_prove_staging(self) -> None:
+        workflow = (
+            "run: |\n"
+            '  - cp packaging/nfpm/modules/mod-markdown.conf '
+            '"/tmp/${TARBALL_DIR}/packaging/nfpm/modules/" || true\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
     def test_guarded_directory_change_still_counts(self) -> None:
         workflow = (
             "run: |\n"
