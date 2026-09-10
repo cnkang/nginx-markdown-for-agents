@@ -1169,6 +1169,9 @@ def _build_soak_record(
         # evidence failure, not an instrumentation gap.
         "module_managed_peak_observed": peak_observed,
         "per_request_peak_bytes": peak_bytes if peak_observed else None,
+        # v1 schema field name is historical (streaming-only era); the
+        # value is the run-wide high-water mark covering streaming AND
+        # full-buffer conversions, matching the gauge semantics above.
         "last_streaming_peak_estimate_bytes": peak_bytes,
         "errors": [],
         "status": "pass",

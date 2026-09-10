@@ -253,7 +253,16 @@ ngx_http_markdown_prepare_strip_public_value(ngx_http_request_t *r,
         if (ngx_http_markdown_cache_control_token_is_private(
                 token_start, token_end))
         {
-            private_present = 1;
+            /* A bare private directive covers the whole response and
+             * suppresses the append below.  A field-qualified form
+             * (private="Set-Cookie") is skipped from the rewritten value
+             * but does NOT satisfy whole-response privacy, so the
+             * whole-response private is still appended. */
+            if ((size_t) (token_end - token_start)
+                == sizeof(ngx_http_markdown_cc_private) - 1)
+            {
+                private_present = 1;
+            }
         }
 
         if (wrote_token) {
@@ -627,15 +636,23 @@ static ngx_flag_t
 ngx_http_markdown_cache_control_token_is_private(const u_char *token_start,
                                                  const u_char *token_end)
 {
-    if ((size_t) (token_end - token_start)
-        != sizeof(ngx_http_markdown_cc_private) - 1)
-    {
+    size_t  len = (size_t) (token_end - token_start);
+    size_t  private_len = sizeof(ngx_http_markdown_cc_private) - 1;
+
+    if (len < private_len) {
         return 0;
     }
-
-    return ngx_http_markdown_token_equals_ignore_case(
-        token_start, ngx_http_markdown_cc_private,
-        sizeof(ngx_http_markdown_cc_private) - 1);
+    if (!ngx_http_markdown_token_equals_ignore_case(
+            token_start, ngx_http_markdown_cc_private, private_len)) {
+        return 0;
+    }
+    /* The directive name must be followed by '=' (a value, e.g.
+     * private="Set-Cookie") or the end of the raw token — never a bare
+     * prefix of a longer name (private-foo, privatex). */
+    if (len > private_len && token_start[private_len] != '=') {
+        return 0;
+    }
+    return 1;
 }
 
 /*
