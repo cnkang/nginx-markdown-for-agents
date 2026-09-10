@@ -1020,6 +1020,14 @@ class TestModuleSnippetEdgeCases:
             tokens, "packaging/nfpm/scripts/preremove.sh"
         )
 
+    def test_install_after_a_logical_and_is_parsed(self) -> None:
+        spec = (
+            "%install\n"
+            "test -f present.conf && install -m 0644 present.conf %{buildroot}/etc/\n"
+            "install -m 0644 missing.conf %{buildroot}/etc/ || exit 1\n"
+        )
+        assert validator._spec_install_sources(spec) == ["present.conf", "missing.conf"]
+
     def test_guarded_install_is_parsed(self) -> None:
         spec = (
             "%install\n"
