@@ -11,7 +11,9 @@ flowchart TD
     Done -->|yes| Success["Return Markdown"]
     Done -->|no| Check
     Fail --> OnError{"markdown_error_policy?"}
-    OnError -->|pass| FailOpen["Return Original HTML"]
+    OnError -->|pass| ReplayAvail{"Replay buffer available?"}
+    ReplayAvail -->|yes| FailOpen["Return Original HTML"]
+    ReplayAvail -->|no| FailClosed["Return the configured fail-closed status (429/503/502)"]
     OnError -->|fail_closed| FailClosed["Return the configured error status (default 502)"]
 
     style Success fill:#090,color:#fff
