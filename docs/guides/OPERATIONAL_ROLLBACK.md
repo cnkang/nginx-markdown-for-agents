@@ -624,9 +624,10 @@ fi
 # Corroborate with the decision log: the probe's own path must appear in
 # a disabled entry written AFTER the recorded offset.  A counter delta
 # alone cannot prove THIS request was the one counted.  The check is
-# mandatory only when the log level can actually carry non-failure
-# entries (module verbosity info/debug AND error_log info/debug);
-# otherwise it degrades to informational, matching Step 1.
+# mandatory: when the log level cannot carry non-failure entries
+# (module verbosity below info/debug OR error_log below info/debug),
+# the probe FAILS with an isolate-and-rerun instruction instead of
+# trusting the global counter delta.
 LOG_LEVEL_OK=0
 if nginx -T 2>/dev/null | grep -q "markdown_log_verbosity.*\(info\|debug\)" \
     && nginx -T 2>/dev/null | grep -E "^[[:space:]]*error_log[[:space:]]+[^;]*[[:space:]]+(info|debug)[[:space:]]*;" ; then
@@ -637,7 +638,7 @@ if [ "$LOG_LEVEL_OK" -eq 1 ]; then
   # grep -q in the pipeline would SIGPIPE the upstream greps and, under
   # pipefail, make the whole pipeline fail even when the entry exists.
   PROBE_LOG_ENTRIES="$(tail -c +$((LOG_OFFSET + 1)) /var/log/nginx/error.log 2>/dev/null \
-      | grep "markdown:" | grep "reason=disabled" | grep -F "${ROLLBACK_PROBE_PATH}")"
+      | grep "markdown:" | grep "reason=disabled" | grep -F "uri=${ROLLBACK_PROBE_PATH}")"
   if [ -n "$PROBE_LOG_ENTRIES" ]; then
     echo "OK: decision log corroborates the rollback-probe disabled entry"
   else

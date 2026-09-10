@@ -313,11 +313,17 @@ sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dy
             -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
-            "${staged_conf}"
-      done || true
+            "${staged_conf}" || exit 1
+      done
+grep_rc=${PIPESTATUS[0]}
+sed_rc=${PIPESTATUS[1]}
+if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
+  echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc)" >&2
+  exit 1
+fi
 # A configuration with NO retired directives is already 0.9.2 compliant:
-# grep exits 1 on no match, which under pipefail would fail the pipeline
-# above; the `|| true` treats no-match as success.
+# grep exit status 1 (no match) is accepted by the check above; any
+# other grep or sed failure aborts the upgrade.
 # Rewrite the Markdown module's load_module entry across the WHOLE
 # staged tree (the entry may live in nginx.conf or an included file
 # such as modules-enabled/*.conf), then verify exactly one staged entry.
@@ -763,11 +769,17 @@ sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dy
             -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
-            "${staged_conf}"
-      done || true
+            "${staged_conf}" || exit 1
+      done
+grep_rc=${PIPESTATUS[0]}
+sed_rc=${PIPESTATUS[1]}
+if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
+  echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc)" >&2
+  exit 1
+fi
 # A configuration with NO retired dynconf directives is a valid 0.9.2
-# configuration: grep exits 1 on no match, which under pipefail would
-# fail the pipeline above; the `|| true` treats no-match as success.
+# configuration: grep exit status 1 (no match) is accepted by the check
+# above; any other grep or sed failure aborts the upgrade.
 # Rewrite ONLY the Markdown module's load_module entry (other modules'
 # load_module lines must be preserved untouched), then verify exactly one
 # staged entry exists — a missing or duplicated Markdown entry means the
@@ -798,11 +810,17 @@ sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dy
             -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
-            "${active_conf}"
-      done || true
+            "${active_conf}" || exit 1
+      done
+grep_rc=${PIPESTATUS[0]}
+sed_rc=${PIPESTATUS[1]}
+if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
+  echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc)" >&2
+  exit 1
+fi
 # A configuration with NO retired dynconf directives is already 0.9.2
-# compliant: grep exits 1 on no match, which under pipefail would fail
-# the pipeline above; the `|| true` treats no-match as success.
+# compliant: grep exit status 1 (no match) is accepted by the check
+# above; any other grep or sed failure aborts the upgrade.
 MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
 MODULE_BACKUP_OWNED=0
 if [[ -e "${MODULE_BACKUP}" ]]; then
