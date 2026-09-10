@@ -1558,58 +1558,21 @@ def _is_staging_command(tokens: list[str], source_path: str) -> bool:
 _FOLDED_RUN = re.compile(r"^(\s*)run:\s*>\s*$")
 
 
-def _split_paragraphs(block: list[str]) -> list[str]:
-    """Join each non-blank run of lines into one command."""
-    paragraphs: list[str] = []
-    current: list[str] = []
-    for line in block:
-        if line:
-            current.append(line)
-            continue
-        if current:
-            paragraphs.append(" ".join(current))
-            current = []
-    if current:
-        paragraphs.append(" ".join(current))
-    return paragraphs
-
-
-def _fold_scalars(lines: list[str]) -> list[str]:
-    """Join the lines of a folded YAML scalar (`run: >`) into shell lines.
-
-    YAML folds a paragraph into one line and turns a blank line into a newline,
-    so paragraphs stay separate commands and their boundaries are preserved.
-    """
-    folded: list[str] = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        folded.append(line)
-        marker = _FOLDED_RUN.match(line)
-        index += 1
-        if marker is None:
-            continue
-        indent = len(marker.group(1))
-        block: list[str] = []
-        while index < len(lines):
-            following = lines[index]
-            if following.strip() and len(following) - len(following.lstrip()) <= indent:
-                break
-            block.append(following.strip())
-            index += 1
-        folded.extend(_split_paragraphs(block))
-    return folded
-
-
 def _split_workflow_steps(workflow: str) -> list[str]:
     """Return the shell body of each workflow step.
 
     Every step runs in its own shell, so directory and function state do not
     carry across the boundary.
     """
+    if any(_FOLDED_RUN.match(line) for line in _logical_lines(workflow)):
+        # A folded scalar (`run: >`) is not modelled: YAML rejoins its lines, and
+        # a check that reads them separately accepts commands the shell never
+        # runs.  The repository's workflows use `run: |`, so an unverifiable
+        # folded step fails the gate instead of passing on a guess.
+        return []
     steps: list[str] = []
     current: list[str] = []
-    for line in _fold_scalars(_logical_lines(workflow)):
+    for line in _logical_lines(workflow):
         if _STEP_BOUNDARY_PATTERN.match(line) and current:
             steps.append("\n".join(current))
             current = []

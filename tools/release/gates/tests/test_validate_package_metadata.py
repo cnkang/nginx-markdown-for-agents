@@ -1062,15 +1062,24 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._spec_installs_snippet(body)
 
-    def test_folded_scalar_joins_its_lines(self) -> None:
+    def test_folded_scalar_is_not_proven(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
-        # YAML folds this block into one shell command, whose head is `-`.
+        # YAML rejoins a folded block, so the step is not proven either way.
         workflow = (
             "run: >\n"
-            "  - if false && false || false\n"
+            "  echo before\n"
+            "  if false; then\n"
             f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
         )
         assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_block_scalar_is_scanned_line_by_line(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
 
     def test_brace_on_the_next_line_still_closes_the_function(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
