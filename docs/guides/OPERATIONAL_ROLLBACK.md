@@ -572,6 +572,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 # that window (no client traffic of your own inside it).
 sleep 5
 before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  -H "Host: ${ROLLBACK_HOST:-localhost}" \
   http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
 if [ -z "$before" ]; then
@@ -580,6 +581,7 @@ if [ -z "$before" ]; then
 fi
 sleep 5
 after=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  -H "Host: ${ROLLBACK_HOST:-localhost}" \
   http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
 if [ -z "$after" ]; then
@@ -593,6 +595,7 @@ fi
 # fall outside the location that disables conversion) and include the Host
 # header so the request reaches that scope.
 disabled_before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  -H "Host: ${ROLLBACK_HOST:-localhost}" \
   http://localhost/markdown-metrics | \
   grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"' | \
   awk '{sum += $NF} END {print sum+0}')
@@ -605,6 +608,7 @@ curl -sS -o /dev/null \
   "http://localhost/rollback-probe"
 sleep 1
 disabled_after=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  -H "Host: ${ROLLBACK_HOST:-localhost}" \
   http://localhost/markdown-metrics | \
   grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"' | \
   awk '{sum += $NF} END {print sum+0}')
