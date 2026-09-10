@@ -4070,14 +4070,34 @@ ngx_http_markdown_streaming_clone_chain_deep(
         if (in->buf == NULL) {
             continue;
         }
-        /* A file-backed buffer cannot be deep-cloned: the ngx_file_t
-         * reference is owned by the original producer and may be closed
-         * after this body-filter invocation, and the clone has no
-         * request-owned file state.  Refuse the clone (fail-closed)
-         * rather than retain a dangling file reference — the same
-         * principle as the replay-buffer exhaustion rule. */
+        /* A file-backed buffer cannot be deep-cloned by copying payload
+         * bytes (the data lives in the file, not in pos..last).  The
+         * ngx_file_t reference is owned by the original producer, but
+         * NGINX's filter-chain contract keeps file buffers valid for the
+         * request lifetime (the write filter reads them synchronously),
+         * so the clone may retain the file reference with its exact
+         * file_pos/file_last window.  Refusing the clone (the previous
+         * behavior) made the fail-open continuation path return
+         * NGX_ERROR and TRUNCATE a pass-through response once fail-open
+         * had already forwarded headers or prior body data — worse than
+         * the retained reference, which follows the same lifetime rule
+         * as every other file buffer in the chain. */
         if (in->buf->in_file) {
-            return NULL;
+            b->in_file = 1;
+            b->file = in->buf->file;
+            b->file_pos = in->buf->file_pos;
+            b->file_last = in->buf->file_last;
+            b->pos = in->buf->pos;
+            b->last = in->buf->last;
+            cl = ngx_alloc_chain_link(r->pool);
+            if (cl == NULL) {
+                return NULL;
+            }
+            cl->buf = b;
+            cl->next = NULL;
+            *tail = cl;
+            tail = &cl->next;
+            continue;
         }
         cl = ngx_alloc_chain_link(r->pool);
         if (cl == NULL) {

@@ -810,6 +810,13 @@ sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
 # directives.  The active load_module entry stays as-is — it already
 # references the canonical module path, which the swap below replaces
 # with the 0.9.2 binary.
+# Snapshot the active tree FIRST: the sed edits below are in-place, so a
+# mid-migration failure must be able to restore the untouched tree
+# instead of leaving a partially migrated configuration.
+sudo cp -a "${NGINX_CONF_DIR}" "${NGINX_CONF_DIR}.migrate-backup" || {
+  echo "ERROR: could not snapshot the active configuration tree before migration; aborting" >&2
+  exit 1
+}
 if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
     | while read -r active_conf; do
         sudo sed -i -E \
@@ -827,9 +834,16 @@ fi
 grep_rc="${pipeline_status[0]}"
 sed_rc="${pipeline_status[1]}"
 if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
-  echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc)" >&2
+  echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc); restoring the untouched active tree" >&2
+  sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
+  sudo mv "${NGINX_CONF_DIR}.migrate-backup" "${NGINX_CONF_DIR}" 2>/dev/null || {
+    echo "ERROR: could not restore the active tree from ${NGINX_CONF_DIR}.migrate-backup; restore manually" >&2
+    exit 1
+  }
   exit 1
 fi
+# Migration succeeded: drop the snapshot.
+sudo rm -rf "${NGINX_CONF_DIR}.migrate-backup" 2>/dev/null || true
 # A configuration with NO retired directives is already 0.9.2
 # compliant: grep exit status 1 (no match) is accepted by the check
 # above; any other grep or sed failure aborts the upgrade.
@@ -885,10 +899,22 @@ if ! sudo nginx -t; then
   echo "ERROR: nginx -t failed after module swap; restoring previous module and configuration..." >&2
   # Stage the backup beside the live module, then swap atomically with
   # mv -f so a torn in-place copy can never leave a half-written .so.
+  # Guard BOTH commands: a failure must be reported with the specific
+  # operation, and the configuration recovery below still runs so the
+  # operator is not left with an uncertain module/configuration pair.
+  MODULE_RESTORE_FAILED=0
   sudo cp -a "${MODULE_BACKUP}" \
-      "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged"
-  sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" \
-      "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+      "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" || {
+    echo "ERROR: could not stage the previous module from ${MODULE_BACKUP}; the 0.9.2 module remains installed" >&2
+    MODULE_RESTORE_FAILED=1
+  }
+  if [ "$MODULE_RESTORE_FAILED" -eq 0 ]; then
+    sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" \
+        "${MODULES_DIR}/ngx_http_markdown_filter_module.so" || {
+      echo "ERROR: could not replace the active module with the previous module; the 0.9.2 module remains installed" >&2
+      MODULE_RESTORE_FAILED=1
+    }
+  fi
   # The active configuration tree was migrated by MIGRATION-0.9.2.md
   # before the swap; the old module may not accept the migrated
   # directives, so restore the backed-up 0.9.1 tree alongside the old
