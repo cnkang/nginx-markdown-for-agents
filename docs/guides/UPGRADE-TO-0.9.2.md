@@ -118,6 +118,17 @@ if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
   exit 1
 fi
 CONFIG_BACKUP_DIR="/var/backups/nginx-markdown-0.9.1"
+# Absolute-path guard for the backup root (defensive: the value is a
+# fixed constant today, but if it ever becomes environment-overridable
+# a relative value such as "backup" or "." must be rejected BEFORE any
+# privileged creation or cleanup operation).
+case "${CONFIG_BACKUP_DIR}" in
+  /*) ;;
+  *)
+    echo "ERROR: CONFIG_BACKUP_DIR must be an absolute path" >&2
+    exit 1
+    ;;
+esac
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
 # Path-safety guard: the rollback deletes and recreates the configuration
 # root with sudo, so reject unsafe overrides.  The value must be an
@@ -290,7 +301,7 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # Rewrite the Markdown module's load_module entry across the WHOLE
 # staged tree (the entry may live in nginx.conf or an included file
 # such as modules-enabled/*.conf), then verify exactly one staged entry.
-sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}" \
+sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}"  2>/dev/null \
     | while read -r staged_conf; do
         # The staged tree is a disposable copy: edit in place WITHOUT
         # .bak backups, so no stale backup file can be scanned below,
@@ -298,7 +309,7 @@ sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}" \
         # wildcard include during nginx -t.
         sudo sed -i "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
             "${staged_conf}"
-      done
+      done || true
 staged_loads="$(sudo grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
 if [[ "${staged_loads}" -ne 1 ]]; then
     echo "ERROR: expected exactly one Markdown load_module entry in the staged config tree, found ${staged_loads}" >&2
@@ -601,15 +612,10 @@ esac
 # Same resolved, bidirectional disjoint-path validation as the package
 # flow: the backup directory must not live inside (or equal) the active
 # configuration root, or a rollback rm -rf could delete the backup.
+# RESOLVED_BACKUP_DIR is computed AFTER the backup root is created
+# (below): GNU readlink -f fails when parent components are missing,
+# which would abort a fresh-host upgrade before install -d runs.
 RESOLVED_CONF_DIR="$(readlink -f "${NGINX_CONF_DIR}")"
-RESOLVED_BACKUP_DIR="$(readlink -f "${CONFIG_BACKUP_DIR}")"
-if [[ "${RESOLVED_CONF_DIR}" == "${RESOLVED_BACKUP_DIR}" \
-      || "${RESOLVED_CONF_DIR}" == "${RESOLVED_BACKUP_DIR}/"* \
-      || "${RESOLVED_BACKUP_DIR}" == "${RESOLVED_CONF_DIR}" \
-      || "${RESOLVED_BACKUP_DIR}" == "${RESOLVED_CONF_DIR}/"* ]]; then
-  echo "ERROR: NGINX_CONF_DIR and CONFIG_BACKUP_DIR must be disjoint paths (resolved: '${RESOLVED_CONF_DIR}' vs '${RESOLVED_BACKUP_DIR}')" >&2
-  exit 1
-fi
 # Copy the module into the ACTIVE NGINX module directory.  Determine it
 # from the running binary: `nginx -V 2>&1 | grep modules-path` (for example
 # /usr/lib/nginx/modules on Debian/Ubuntu, /usr/lib64/nginx/modules on
@@ -682,6 +688,15 @@ if [[ -L "${CONFIG_BACKUP_DIR}" \
   echo "ERROR: unsafe CONFIG_BACKUP_DIR '${CONFIG_BACKUP_DIR}' (must be a real dedicated directory, not a symlink or a system root; resolved: '${RESOLVED_BACKUP_DIR}')" >&2
   exit 1
 fi
+# Disjoint-path validation (moved here so RESOLVED_BACKUP_DIR is
+# computed after the backup root exists):
+if [[ "${RESOLVED_CONF_DIR}" == "${RESOLVED_BACKUP_DIR}" \
+      || "${RESOLVED_CONF_DIR}" == "${RESOLVED_BACKUP_DIR}/"* \
+      || "${RESOLVED_BACKUP_DIR}" == "${RESOLVED_CONF_DIR}" \
+      || "${RESOLVED_BACKUP_DIR}" == "${RESOLVED_CONF_DIR}/"* ]]; then
+  echo "ERROR: NGINX_CONF_DIR and CONFIG_BACKUP_DIR must be disjoint paths (resolved: '${RESOLVED_CONF_DIR}' vs '${RESOLVED_BACKUP_DIR}')" >&2
+  exit 1
+fi
 sudo rm -rf "${CONFIG_BACKUP_DIR}/tree"
 sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree/"
 if [[ -L "${NGINX_CONF_DIR}" ]]; then
@@ -716,7 +731,7 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # dynconf directives (MIGRATION-0.9.2.md "Static configuration
 # migration"); the remaining items are consumer-side (reason integers,
 # diagnostics schema) and need no config edit:
-sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run" "${STAGED_ROOT}" \
+sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run" "${STAGED_ROOT}" 2>/dev/null \
     | while read -r staged_conf; do
         # The staged tree is a disposable copy: edit in place WITHOUT
         # .bak backups, so no stale backup file can be scanned below,
@@ -727,24 +742,43 @@ sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dy
             -e "s|^[[:space:]]*markdown_dynamic_config_path[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
             "${staged_conf}"
-      done
+      done || true
+# A configuration with NO retired dynconf directives is a valid 0.9.2
+# configuration: grep exits 1 on no match, which under pipefail would
+# fail the pipeline above; the `|| true` treats no-match as success.
 # Rewrite ONLY the Markdown module's load_module entry (other modules'
 # load_module lines must be preserved untouched), then verify exactly one
 # staged entry exists — a missing or duplicated Markdown entry means the
 # rewrite did not target the right line and validation would be meaningless.
 # The entry may live in nginx.conf OR in an included file (e.g.
 # modules-enabled/*.conf), so rewrite across the whole staged tree.
-sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}" \
+sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}"  2>/dev/null \
     | while read -r staged_conf; do
         sudo sed -i "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
             "${staged_conf}"
-      done
+      done || true
 staged_loads="$(sudo grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
 if [[ "${staged_loads}" -ne 1 ]]; then
     echo "ERROR: expected exactly one Markdown load_module entry in the staged config tree, found ${staged_loads}" >&2
     exit 1
 fi
 sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
+# Staged validation succeeded.  Apply the SAME migration to the ACTIVE
+# tree now (before the module swap): remove the three retired dynconf
+# directives.  The active load_module entry stays as-is — it already
+# references the canonical module path, which the swap below replaces
+# with the 0.9.2 binary.
+sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run" "${NGINX_CONF_DIR}" 2>/dev/null \
+    | while read -r active_conf; do
+        sudo sed -i -E \
+            -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_dynamic_config_path[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
+            "${active_conf}"
+      done || true
+# A configuration with NO retired dynconf directives is already 0.9.2
+# compliant: grep exits 1 on no match, which under pipefail would fail
+# the pipeline above; the `|| true` treats no-match as success.
 MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
 MODULE_BACKUP_OWNED=0
 if [[ -e "${MODULE_BACKUP}" ]]; then

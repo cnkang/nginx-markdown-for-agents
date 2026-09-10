@@ -633,8 +633,12 @@ if nginx -T 2>/dev/null | grep -q "markdown_log_verbosity.*\(info\|debug\)" \
   LOG_LEVEL_OK=1
 fi
 if [ "$LOG_LEVEL_OK" -eq 1 ]; then
-  if tail -c +$((LOG_OFFSET + 1)) /var/log/nginx/error.log 2>/dev/null \
-      | grep "markdown:" | grep "reason=disabled" | grep -qF "${ROLLBACK_PROBE_PATH}"; then
+  # Capture the filtered output FIRST, then test it: a short-circuiting
+  # grep -q in the pipeline would SIGPIPE the upstream greps and, under
+  # pipefail, make the whole pipeline fail even when the entry exists.
+  PROBE_LOG_ENTRIES="$(tail -c +$((LOG_OFFSET + 1)) /var/log/nginx/error.log 2>/dev/null \
+      | grep "markdown:" | grep "reason=disabled" | grep -F "${ROLLBACK_PROBE_PATH}")"
+  if [ -n "$PROBE_LOG_ENTRIES" ]; then
     echo "OK: decision log corroborates the rollback-probe disabled entry"
   else
     echo "FAIL: no disabled decision-log entry for ${ROLLBACK_PROBE_PATH} after the recorded offset (log level is info/debug but the entry is missing)"
