@@ -71,7 +71,7 @@ process records a covering sub-spec:
 |---------------|----------|---------------|--------------------|-------------------|-----------------|------------------|--------|
 | TM-001 | Ubuntu | 1.24.x | Small | full-buffer | convert | — | Pending |
 | TM-002 | Ubuntu | 1.24.x | Small | full-buffer | skip | — | Pending |
-| TM-003 | Ubuntu | 1.24.x | Small | full-buffer | fallback | — | Unreachable (aggregate rules: full-buffer/fallback rows are not exercised by the 0.5.0 aggregate suite) |
+| TM-003 | Ubuntu | 1.24.x | Small | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-004 | Ubuntu | 1.24.x | Small | full-buffer | fail-open | — | Pending |
 | TM-005 | Ubuntu | 1.24.x | Small | full-buffer | fail-closed | — | Pending |
 | TM-006 | Ubuntu | 1.24.x | Small | full-buffer | post-commit failure | — | Pending |

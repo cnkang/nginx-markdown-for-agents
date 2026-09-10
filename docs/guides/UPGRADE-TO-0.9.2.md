@@ -353,7 +353,7 @@ sudo nginx -t || {
   # staging dir sits BESIDE the configuration root so the final mv stays
   # on the same filesystem (a TMPDIR staging dir would cross devices and
   # fail the atomic rename).
-  RESTORE_STAGED="$(mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
+  RESTORE_STAGED="$(sudo mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
   # Dedicated cleanup trap: any unguarded failure under set -euo pipefail
   # must still remove the staging tree; disarmed after a successful move.
   RESTORE_CLEANUP_SET=1
@@ -373,16 +373,26 @@ sudo nginx -t || {
   # into its resolved target (old target preserved until the swap
   # succeeds); a real directory is replaced wholesale with mv.
   # The mktemp staging dir is user-owned mode-0700; restore the active
-  # root's owner/group/mode onto the staged tree before the rename so
-  # the replacement root does not inherit mktemp metadata.
+  # root's owner/group/mode onto the staged ROOT DIRECTORY ONLY before
+  # the rename (cp -a already preserved file-specific ownership and
+  # modes beneath it; a recursive chown/chmod would overwrite them).
   ROOT_OWNER="$(stat -c '%U:%G' "${NGINX_CONF_DIR}")"
   ROOT_MODE="$(stat -c '%a' "${NGINX_CONF_DIR}")"
-  sudo chown -R "${ROOT_OWNER}" "${RESTORE_STAGED}"
-  sudo chmod -R "${ROOT_MODE}" "${RESTORE_STAGED}"
+  sudo chown "${ROOT_OWNER}" "${RESTORE_STAGED}"
+  sudo chmod "${ROOT_MODE}" "${RESTORE_STAGED}"
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
     sudo rm -rf "${NGINX_CONF_DIR}"
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
     ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
+    # The staging dir was created beside the SYMLINK; the final mv moves
+    # it to the resolved TARGET, which may be on a different filesystem.
+    # Verify device identity and fail closed before attempting the swap
+    # (a cross-device mv would degrade to a non-atomic copy).
+    if [[ "$(stat -c '%d' "${RESTORE_STAGED}")" != "$(stat -c '%d' "${ROOT_LINK_TARGET}")" ]]; then
+      sudo rm -rf "${RESTORE_STAGED}"
+      echo "ERROR: configuration root target is on a different filesystem than the staging dir; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    fi
     if [[ -e "${ROOT_LINK_TARGET}" || -L "${ROOT_LINK_TARGET}" ]]; then
       sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old"
       sudo mv -f "${ROOT_LINK_TARGET}" "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || {
@@ -542,6 +552,23 @@ fi
 # restore the pre-upgrade state.  Use the SAME tree snapshot contract as
 # the package flow (${CONFIG_BACKUP_DIR}/tree + tree-root-link), so the
 # rollback below restores the whole tree wholesale.
+# Validate the environment-overridden backup root BEFORE the rm -rf:
+# it must be an absolute, dedicated path, distinct from the config root.
+case "${CONFIG_BACKUP_DIR}" in
+  /*)
+    if [[ "${CONFIG_BACKUP_DIR}" == "/" \
+          || "${CONFIG_BACKUP_DIR}" == "${NGINX_CONF_DIR}" \
+          || "${CONFIG_BACKUP_DIR}" == "${NGINX_CONF_DIR}/"* \
+          || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}/"* ]]; then
+      echo "ERROR: unsafe CONFIG_BACKUP_DIR '${CONFIG_BACKUP_DIR}' (must be an absolute dedicated backup root, distinct from NGINX_CONF_DIR)" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "ERROR: CONFIG_BACKUP_DIR must be an absolute path" >&2
+    exit 1
+    ;;
+esac
 sudo rm -rf "${CONFIG_BACKUP_DIR}/tree"
 sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree/"
 if [[ -L "${NGINX_CONF_DIR}" ]]; then
@@ -549,10 +576,11 @@ if [[ -L "${NGINX_CONF_DIR}" ]]; then
 else
   sudo rm -f "${CONFIG_BACKUP_DIR}/tree-root-link"
 fi
-# Apply MIGRATION-0.9.2.md to the active configuration, then stage the
-# rebuilt module and validate it with a temporary config that explicitly
-# references the staged binary (a plain `nginx -t` would still load the
-# ACTIVE module, not the staged one).
+# Apply MIGRATION-0.9.2.md to a STAGED COPY of the configuration FIRST
+# and validate it against the staged module, so a validation failure
+# cannot leave the ACTIVE tree migrated while the old module is still
+# installed.  Only after staged validation succeeds is the same
+# migration applied to the active tree.
 sudo cp objs/ngx_http_markdown_filter_module.so \
     "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new"
 STAGED_ROOT="$("$(command -v mktemp)" -d "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX")"
@@ -560,10 +588,12 @@ STAGED_ROOT="$("$(command -v mktemp)" -d "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXX
 # cleanup needs sudo; preserve the original exit status even if the
 # cleanup itself fails.
 trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; exit "$rc"' EXIT
-# Validate the ACTIVE migrated configuration tree against the staged
-# module: copy the live config dir and rewrite its load_module entry to
-# reference the staged .so, then run nginx -t against that copy.
+# Copy the live config dir into the staged tree, apply MIGRATION-0.9.2.md
+# to the COPY, rewrite its load_module entry to reference the staged .so,
+# then run nginx -t against that copy.
 sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
+# (Apply MIGRATION-0.9.2.md to ${STAGED_ROOT} here — the same edits that
+# will later be applied to the active tree.)
 # Rewrite ONLY the Markdown module's load_module entry (other modules'
 # load_module lines must be preserved untouched), then verify exactly one
 # staged entry exists — a missing or duplicated Markdown entry means the
@@ -648,7 +678,7 @@ if ! sudo nginx -t; then
   # fully staged and validated tree replaces the active root.  The
   # staging dir sits BESIDE the configuration root so the final mv stays
   # on the same filesystem.
-  RESTORE_STAGED="$(mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
+  RESTORE_STAGED="$(sudo mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
   # Dedicated cleanup trap: any unguarded failure under set -euo pipefail
   # must still remove the staging tree; disarmed after a successful move.
   RESTORE_CLEANUP_SET=1
@@ -664,16 +694,26 @@ if ! sudo nginx -t; then
   # into its resolved target (old target preserved until the swap
   # succeeds); a real directory is replaced wholesale with mv.
   # The mktemp staging dir is user-owned mode-0700; restore the active
-  # root's owner/group/mode onto the staged tree before the rename so
-  # the replacement root does not inherit mktemp metadata.
+  # root's owner/group/mode onto the staged ROOT DIRECTORY ONLY before
+  # the rename (cp -a already preserved file-specific ownership and
+  # modes beneath it; a recursive chown/chmod would overwrite them).
   ROOT_OWNER="$(stat -c '%U:%G' "${NGINX_CONF_DIR}")"
   ROOT_MODE="$(stat -c '%a' "${NGINX_CONF_DIR}")"
-  sudo chown -R "${ROOT_OWNER}" "${RESTORE_STAGED}"
-  sudo chmod -R "${ROOT_MODE}" "${RESTORE_STAGED}"
+  sudo chown "${ROOT_OWNER}" "${RESTORE_STAGED}"
+  sudo chmod "${ROOT_MODE}" "${RESTORE_STAGED}"
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
     sudo rm -rf "${NGINX_CONF_DIR}"
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
     ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
+    # The staging dir was created beside the SYMLINK; the final mv moves
+    # it to the resolved TARGET, which may be on a different filesystem.
+    # Verify device identity and fail closed before attempting the swap
+    # (a cross-device mv would degrade to a non-atomic copy).
+    if [[ "$(stat -c '%d' "${RESTORE_STAGED}")" != "$(stat -c '%d' "${ROOT_LINK_TARGET}")" ]]; then
+      sudo rm -rf "${RESTORE_STAGED}"
+      echo "ERROR: configuration root target is on a different filesystem than the staging dir; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    fi
     if [[ -e "${ROOT_LINK_TARGET}" || -L "${ROOT_LINK_TARGET}" ]]; then
       sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old"
       sudo mv -f "${ROOT_LINK_TARGET}" "${ROOT_LINK_TARGET}.rollback-old"
