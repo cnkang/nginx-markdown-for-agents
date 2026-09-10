@@ -170,6 +170,21 @@ if [[ "${RESOLVED_CONF_DIR}" == "${RESOLVED_BACKUP_DIR}" \
   echo "ERROR: NGINX_CONF_DIR and CONFIG_BACKUP_DIR must be disjoint paths (resolved: '${RESOLVED_CONF_DIR}' vs '${RESOLVED_BACKUP_DIR}')" >&2
   exit 1
 fi
+# The backup root itself must not be a symlink and must resolve to a
+# dedicated directory: a symlinked CONFIG_BACKUP_DIR could point the
+# destructive rm -rf below at a system root or the config tree.
+if [[ -L "${CONFIG_BACKUP_DIR}" \
+      || "${RESOLVED_BACKUP_DIR}" == "/" \
+      || "${RESOLVED_BACKUP_DIR}" == "/etc" \
+      || "${RESOLVED_BACKUP_DIR}" == "/var" \
+      || "${RESOLVED_BACKUP_DIR}" == "/usr" \
+      || "${RESOLVED_BACKUP_DIR}" == "/opt" \
+      || "${RESOLVED_BACKUP_DIR}" == "/srv" \
+      || "${RESOLVED_BACKUP_DIR}" == "/home" \
+      || "${RESOLVED_BACKUP_DIR}" == "/root" ]]; then
+  echo "ERROR: unsafe CONFIG_BACKUP_DIR '${CONFIG_BACKUP_DIR}' (must be a real dedicated directory, not a symlink or a system root; resolved: '${RESOLVED_BACKUP_DIR}')" >&2
+  exit 1
+fi
 sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 # Back up the ENTIRE configuration tree (not just nginx.conf + conf.d +
 # modules-enabled): MIGRATION-0.9.2.md may touch any path under
@@ -538,10 +553,17 @@ NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
 case "${NGINX_CONF_DIR}" in
   /*)
     if [[ "${NGINX_CONF_DIR}" == "/" \
+          || "${NGINX_CONF_DIR}" == "/etc" \
+          || "${NGINX_CONF_DIR}" == "/var" \
+          || "${NGINX_CONF_DIR}" == "/usr" \
+          || "${NGINX_CONF_DIR}" == "/opt" \
+          || "${NGINX_CONF_DIR}" == "/srv" \
+          || "${NGINX_CONF_DIR}" == "/home" \
+          || "${NGINX_CONF_DIR}" == "/root" \
           || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* \
           || ! -d "${NGINX_CONF_DIR}" \
           || ! -f "${NGINX_CONF_DIR}/nginx.conf" ]]; then
-      echo "ERROR: unsafe NGINX_CONF_DIR '${NGINX_CONF_DIR}'" >&2
+      echo "ERROR: unsafe NGINX_CONF_DIR '${NGINX_CONF_DIR}' (must be an absolute existing dedicated config root containing nginx.conf, not a system root or the backup directory)" >&2
       exit 1
     fi
     ;;
@@ -605,6 +627,22 @@ case "${CONFIG_BACKUP_DIR}" in
     ;;
 esac
 # Create the backup root (a fresh host may not have it) before snapshotting.
+# The backup root must not be a symlink and must resolve to a dedicated
+# directory: a symlinked CONFIG_BACKUP_DIR could point the destructive
+# rm -rf below at a system root or the config tree.
+RESOLVED_BACKUP_DIR="$(readlink -f "${CONFIG_BACKUP_DIR}")"
+if [[ -L "${CONFIG_BACKUP_DIR}" \
+      || "${RESOLVED_BACKUP_DIR}" == "/" \
+      || "${RESOLVED_BACKUP_DIR}" == "/etc" \
+      || "${RESOLVED_BACKUP_DIR}" == "/var" \
+      || "${RESOLVED_BACKUP_DIR}" == "/usr" \
+      || "${RESOLVED_BACKUP_DIR}" == "/opt" \
+      || "${RESOLVED_BACKUP_DIR}" == "/srv" \
+      || "${RESOLVED_BACKUP_DIR}" == "/home" \
+      || "${RESOLVED_BACKUP_DIR}" == "/root" ]]; then
+  echo "ERROR: unsafe CONFIG_BACKUP_DIR '${CONFIG_BACKUP_DIR}' (must be a real dedicated directory, not a symlink or a system root; resolved: '${RESOLVED_BACKUP_DIR}')" >&2
+  exit 1
+fi
 sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 sudo rm -rf "${CONFIG_BACKUP_DIR}/tree"
 sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree/"
