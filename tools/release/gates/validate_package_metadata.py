@@ -1318,18 +1318,21 @@ def _strip_guard_keywords(
 ) -> tuple[list[str], bool, int]:
     """Strip leading shell keywords and report guard state and depth change.
 
-    Guard keywords are counted wherever they appear in the command, because a
-    construct may open inside a group on the same line, as in
-    ``f() { if false; then install ...; fi; }``.
+    Keywords are read positionally, so a word such as ``fi`` used as an
+    argument is not mistaken for a guard boundary, while a definition written as
+    ``f() { if false; then ...; fi; }`` still opens a group whose body does not
+    run.
     """
     depth_delta = 0
-    for token in tokens:
-        if token in _GUARD_OPENERS or _FUNCTION_DEFINITION.match(token):
+    while tokens:
+        head = tokens[0]
+        if head in _GUARD_OPENERS or head == "function" or _FUNCTION_DEFINITION.match(head):
             depth_delta += 1
             pending_guard = True
-        elif token in _GUARD_CLOSERS or token == "}":
+        elif head in _GUARD_CLOSERS or head == "}":
             depth_delta -= 1
-    while tokens and tokens[0] in _SHELL_KEYWORDS:
+        elif head not in _SHELL_KEYWORDS:
+            break
         tokens = tokens[1:]
     return tokens, pending_guard, depth_delta
 

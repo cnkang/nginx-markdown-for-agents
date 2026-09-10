@@ -1028,6 +1028,33 @@ class TestModuleSnippetEdgeCases:
             tokens, "packaging/nfpm/modules/mod-markdown.conf"
         )
 
+    def test_closer_keyword_as_an_argument_keeps_the_guard_open(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # `echo fi` must not close the guard opened by `if false`.
+                return (
+                    "%install\n"
+                    "if false; then\n"
+                    "    echo fi\n"
+                    "    install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "        %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "fi\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
     def test_function_body_install_does_not_satisfy_the_snippet_check(
         self, monkeypatch
     ) -> None:
