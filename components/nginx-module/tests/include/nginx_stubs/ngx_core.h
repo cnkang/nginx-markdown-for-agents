@@ -35,6 +35,10 @@ struct ngx_buf_s {
     unsigned    last_in_chain:1;
     unsigned    flush:1;
     unsigned    sync:1;
+    unsigned    in_file:1;
+    void       *file;
+    off_t       file_pos;
+    off_t       file_last;
 };
 typedef struct ngx_http_complex_value_s ngx_http_complex_value_t;
 
