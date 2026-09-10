@@ -1049,6 +1049,57 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._spec_installs_snippet(body)
 
+    def test_superseded_definition_is_not_live(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+            "stage() { echo replacement; }\n"
+            "stage\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_case_branch_install_is_guarded(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            '  case "$1" in\n'
+            "    run)\n"
+            f"      install -m 0644 {source} {destination}\n"
+            "      ;;\n"
+            "  esac\n"
+            "}\n"
+            "stage skip\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_recursive_body_is_not_live(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            "  stage\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+            "stage\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_workflow_function_body_requires_a_call(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        body = (
+            "run: |\n"
+            "  stage() {\n"
+            f'    cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+            "  }\n"
+        )
+        called = body + "  stage\n"
+        assert not validator._workflow_stages_into_tarball(body, source)
+        assert validator._workflow_stages_into_tarball(called, source)
+
     def test_single_line_uncalled_function_is_not_live(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
