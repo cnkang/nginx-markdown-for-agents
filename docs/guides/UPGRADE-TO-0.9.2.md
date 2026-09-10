@@ -127,7 +127,8 @@ NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
 case "${NGINX_CONF_DIR}" in
   /*)
     if [[ "${NGINX_CONF_DIR}" == "/" \
-          || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* \
+          || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}" \
+          || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}/"* \
           || "${NGINX_CONF_DIR}" == "/etc" \
           || "${NGINX_CONF_DIR}" == "/var" \
           || "${NGINX_CONF_DIR}" == "/usr" \
@@ -147,6 +148,12 @@ case "${NGINX_CONF_DIR}" in
     exit 1
     ;;
 esac
+# Create the backup root (a fresh host may not have it) BEFORE
+# canonicalizing: GNU readlink -f fails when parent components are
+# missing, which would abort a fresh-host upgrade before the directory
+# is created.  The symlink precheck below still rejects a symlinked
+# backup root before any destructive operation.
+sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 RESOLVED_CONF_DIR="$(readlink -f "${NGINX_CONF_DIR}")"
 RESOLVED_BACKUP_DIR="$(readlink -f "${CONFIG_BACKUP_DIR}")"
 if [[ "${RESOLVED_CONF_DIR}" == "/" \
@@ -186,7 +193,6 @@ if [[ -L "${CONFIG_BACKUP_DIR}" \
   echo "ERROR: unsafe CONFIG_BACKUP_DIR '${CONFIG_BACKUP_DIR}' (must be a real dedicated directory, not a symlink or a system root; resolved: '${RESOLVED_BACKUP_DIR}')" >&2
   exit 1
 fi
-sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 # Back up the ENTIRE configuration tree (not just nginx.conf + conf.d +
 # modules-enabled): MIGRATION-0.9.2.md may touch any path under
 # ${NGINX_CONF_DIR}, and the rollback path must be able to restore every
@@ -565,7 +571,8 @@ case "${NGINX_CONF_DIR}" in
           || "${NGINX_CONF_DIR}" == "/srv" \
           || "${NGINX_CONF_DIR}" == "/home" \
           || "${NGINX_CONF_DIR}" == "/root" \
-          || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* \
+          || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}" \
+          || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}/"* \
           || ! -d "${NGINX_CONF_DIR}" \
           || ! -f "${NGINX_CONF_DIR}/nginx.conf" \
           || -L "${NGINX_CONF_DIR}/nginx.conf" ]]; then
@@ -632,7 +639,12 @@ case "${CONFIG_BACKUP_DIR}" in
     exit 1
     ;;
 esac
-# Create the backup root (a fresh host may not have it) before snapshotting.
+# Create the backup root (a fresh host may not have it) BEFORE
+# canonicalizing: GNU readlink -f fails when parent components are
+# missing, which would abort a fresh-host upgrade before the directory
+# is created.  The symlink precheck below still rejects a symlinked
+# backup root before any destructive operation.
+sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 # The backup root must not be a symlink and must resolve to a dedicated
 # directory: a symlinked CONFIG_BACKUP_DIR could point the destructive
 # rm -rf below at a system root or the config tree.
@@ -649,7 +661,6 @@ if [[ -L "${CONFIG_BACKUP_DIR}" \
   echo "ERROR: unsafe CONFIG_BACKUP_DIR '${CONFIG_BACKUP_DIR}' (must be a real dedicated directory, not a symlink or a system root; resolved: '${RESOLVED_BACKUP_DIR}')" >&2
   exit 1
 fi
-sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 sudo rm -rf "${CONFIG_BACKUP_DIR}/tree"
 sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree/"
 if [[ -L "${NGINX_CONF_DIR}" ]]; then
