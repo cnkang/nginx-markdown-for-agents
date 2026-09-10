@@ -342,31 +342,18 @@ if ! sudo nginx -t; then
   }
   sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}" || {
     # The 0.9.1 configuration restore failed.  Put the ACTIVE tree back
-    # AND restore the 0.9.0 module (${MODULE_090}, NOT the
-    # .pre-0.9.0.bak which holds the 0.9.1 module), so the
-    # module/configuration pair stays consistent (0.9.0 module + 0.9.0
-    # config), then report manual recovery.  Never leave the 0.9.1
-    # module paired with the 0.9.0 configuration.  Every step fails
-    # closed: a stale or partial staging file must never be reused.
+    # (the .restore-failed tree IS the 0.9.1 configuration that was
+    # moved aside above).  The module was ALREADY restored to 0.9.1
+    # before this point, so restoring the 0.9.1 configuration keeps the
+    # module/configuration pair consistent — do NOT install ${MODULE_090}
+    # here, that would pair the 0.9.0 module with the 0.9.1 tree.  Every
+    # step fails closed: a stale or partial staging file must never be
+    # reused.
     sudo mv -- "${CONFIG_DIR}.restore-failed" "${CONFIG_DIR}" || {
       echo "ERROR: could not restore the active configuration tree; NGINX remains stopped. Restore manually from ${CONFIG_DIR}.pre-0.9.0" >&2
       exit 1
     }
-    MODULE_STAGE="$(sudo mktemp "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore-failed.XXXXXX")" || {
-      echo "ERROR: could not allocate a module staging path; NGINX remains stopped. Restore manually from ${MODULE_090}" >&2
-      exit 1
-    }
-    sudo rm -f -- "${MODULE_STAGE}"
-    sudo cp -a -- "${MODULE_090}" "${MODULE_STAGE}" || {
-      echo "ERROR: could not stage the 0.9.0 module; NGINX remains stopped. Restore manually from ${MODULE_090}" >&2
-      exit 1
-    }
-    sudo mv -f -- "${MODULE_STAGE}" \
-        "$MODULES_DIR/ngx_http_markdown_filter_module.so" || {
-      echo "ERROR: could not replace the active module with the 0.9.0 module; NGINX remains stopped. Restore manually from ${MODULE_090}" >&2
-      exit 1
-    }
-    echo "ERROR: 0.9.1 configuration restore failed; NGINX remains stopped. Restore manually from ${MODULE_090} and ${CONFIG_DIR}.pre-0.9.0" >&2
+    echo "ERROR: 0.9.1 configuration restore failed; NGINX remains stopped. Restore manually from $MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak and ${CONFIG_DIR}.pre-0.9.0" >&2
     exit 1
   }
   exit 1
