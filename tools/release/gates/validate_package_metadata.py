@@ -1310,7 +1310,7 @@ _SEPARATOR_SPLIT = re.compile(r"(&&|\|\||;)")
 _PLAIN_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # Tokens that prefix a command without being the command itself.
-_COMMAND_PREFIXES = frozenset({"(", "{", "!", "%{?}", "+", "-"})
+_COMMAND_PREFIXES = frozenset({"(", "{", "!"})
 _GUARD_OPENERS = frozenset({"if", "while", "until", "for"})
 _GUARD_CLOSERS = frozenset({"fi", "done"})
 _SHELL_KEYWORDS = frozenset(
