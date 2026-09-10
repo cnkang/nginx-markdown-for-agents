@@ -1413,22 +1413,28 @@ def _command_entry(
     return (tokens, pending_guard or guard_depth > 0, owner)
 
 
+_QUOTED_SEGMENT = re.compile(r"'[^']*'|\"[^\"]*\"")
+
+
 def _brace_delta(tokens: list[str]) -> int:
-    """Return how the command changes the brace depth."""
-    depth = 0
-    for token in tokens:
-        if token == "{":
-            depth += 1
-        elif token == "}":
-            depth -= 1
-    return depth
+    """Return how a command changes the brace depth.
+
+    Braces inside quotes belong to the text, not to the shell grammar, so they
+    are removed before the depth is counted.
+    """
+    cleaned = _QUOTED_SEGMENT.sub(" ", " ".join(tokens))
+    return cleaned.count("{") - cleaned.count("}")
 
 
 def _close_function(
     head: str, brace_depth: int, function_stack: list[tuple[str, int, int]]
 ) -> None:
-    """Drop a function once its matching brace closes."""
-    if head == "}" and function_stack and brace_depth < function_stack[-1][2]:
+    """Drop a function once its body closes.
+
+    The recorded depth is the enclosing scope, so a definition that opens its
+    body on a following line still closes at its matching brace.
+    """
+    if head == "}" and function_stack and brace_depth <= function_stack[-1][2]:
         function_stack.pop()
 
 
@@ -1447,12 +1453,13 @@ def _scan_line(
         pending_guard = pending_guard or separator_guard
         # Count braces before the keyword scan consumes them, otherwise a
         # definition group never opens and its function never closes.
+        enclosing_depth = brace_depth
         brace_depth = max(0, brace_depth + _brace_delta(tokens))
         tokens, pending_guard, depth_delta = _strip_guard_keywords(tokens, pending_guard)
         if definition and not functions:
             identity = int(state["definitions"]) + 1
             state["definitions"] = identity
-            functions.append((definition, identity, brace_depth))
+            functions.append((definition, identity, enclosing_depth))
         owner = (functions[-1][0], functions[-1][1]) if functions else None
         if tokens and not _is_definition_line(definition, tokens):
             entries.append((tokens, pending_guard or guard_depth > 0, owner))
