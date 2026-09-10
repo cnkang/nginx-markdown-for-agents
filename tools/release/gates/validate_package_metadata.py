@@ -1238,7 +1238,7 @@ def _check_snippet_opt_in(
 # A shell variable reference to the staging tree, but not a longer name such as
 # $NOT_TARBALL_DIR: the reference must end at a non-identifier character.
 TARBALL_MARKER_PATTERN = re.compile(
-    r"(?:^|/)(\$\{TARBALL_DIR\}|\$TARBALL_DIR(?![A-Za-z0-9_]))"
+    r"(?:^|/)(\$\{TARBALL_DIR\}|\$TARBALL_DIR)(?=/|$)"
 )
 
 
@@ -1298,6 +1298,8 @@ def _parse_install_operands(tokens: list[str]) -> tuple[list[str], str | None]:
     return operands[:-1], operands[-1]
 
 
+_SEPARATOR_TOKENS = (";", "&&", "||")
+_SEPARATOR_SPLIT = re.compile(r"(&&|\|\||;)")
 _GUARD_OPENERS = frozenset({"if", "while", "until", "for"})
 _GUARD_CLOSERS = frozenset({"fi", "done"})
 _SHELL_KEYWORDS = frozenset(
@@ -1321,6 +1323,31 @@ def _strip_guard_keywords(
     return tokens, pending_guard, depth_delta
 
 
+def _line_commands(line: str) -> list[tuple[list[str], bool]]:
+    """Return (tokens, follows_conditional_operator) for each command on a line.
+
+    The line comment is removed FIRST, because everything after an unquoted ``#``
+    belongs to the comment, separators and installs included.  Separators are
+    then honored even when they are glued to the previous word.
+    """
+    commands: list[tuple[list[str], bool]] = []
+    current: list[str] = []
+    separator_guard = False
+    for token in _strip_inline_comment(line.split()):
+        for piece in _SEPARATOR_SPLIT.split(token):
+            if piece in _SEPARATOR_TOKENS:
+                if current:
+                    commands.append((current, separator_guard))
+                    current = []
+                separator_guard = piece in ("&&", "||")
+                continue
+            if piece:
+                current.append(piece)
+    if current:
+        commands.append((current, separator_guard))
+    return commands
+
+
 def _install_commands(body: str) -> list[tuple[list[str], bool]]:
     """Return (tokens, guarded) for every command in an %install body.
 
@@ -1332,12 +1359,8 @@ def _install_commands(body: str) -> list[tuple[list[str], bool]]:
     guard_depth = 0
     for line in _logical_lines(body):
         pending_guard = guard_depth > 0
-        for raw in re.split(r"(&&|\|\||[;\n])", line):
-            if raw in ("&&", "||", ";", "\n", ""):
-                if raw in ("&&", "||"):
-                    pending_guard = True
-                continue
-            tokens = _strip_inline_comment(raw.split())
+        for tokens, separator_guard in _line_commands(line):
+            pending_guard = pending_guard or separator_guard
             tokens, pending_guard, depth_delta = _strip_guard_keywords(
                 tokens, pending_guard
             )
