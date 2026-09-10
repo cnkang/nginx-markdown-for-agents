@@ -764,11 +764,11 @@ def validate_nfpm_deb_dependency_contract(
         versions = sorted(
             set(_extract_matrix_versions() if nginx_versions is None else nginx_versions)
         )
-    except RuntimeError as exc:
-        # A malformed release matrix must not crash the whole gate run:
-        # record the standard validation failure and let main continue
-        # with the remaining validators, exiting through the usual FAIL
-        # path.
+    except (RuntimeError, OSError) as exc:
+        # A malformed or unreadable release matrix must not crash the
+        # whole gate run: record the standard validation failure and let
+        # main continue with the remaining validators, exiting through
+        # the usual FAIL path.
         return False, [f"release matrix unreadable: {exc}"]
     if not versions:
         return False, ["no release-blocking NGINX versions found in release matrix"]

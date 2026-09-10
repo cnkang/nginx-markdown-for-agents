@@ -325,7 +325,7 @@ fn append_echo_headers_case(
     let count_b = body.lines().filter(|l| *l == "x-test: B").count();
     let count_inm = body
         .lines()
-        .filter(|l| l.starts_with("if-none-match:"))
+        .filter(|l| *l == "if-none-match: \"non-matching-etag-99999\"")
         .count();
     assertions.push(AssertionResult {
         name: "case11_duplicate_header_a_preserved".to_string(),
