@@ -557,14 +557,15 @@ typedef struct MarkdownResult {
    */
   uintptr_t error_len;
   /**
-   * Peak working-set memory estimate during streaming conversion (bytes).
+   * Peak working-set memory estimate during conversion (bytes).
    *
    * This is the peak of the converter-tracked working set (retained
    * output capacity plus transient scratch), NOT a total conversion
    * memory peak: parser/DOM allocations and process RSS are not
-   * included.
-   * Populated by `markdown_streaming_finalize` from
-   * `StreamingStats.peak_memory_estimate`.
+   * included.  Populated by both the streaming path
+   * (`markdown_streaming_finalize` from `StreamingStats.peak_memory_estimate`)
+   * and the full-buffer path, which publish into the same run-wide
+   * high-water gauge.
    */
   uintptr_t peak_memory_estimate;
 } MarkdownResult;
