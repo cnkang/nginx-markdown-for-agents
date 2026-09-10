@@ -352,7 +352,11 @@ if ! sudo nginx -t; then
       echo "ERROR: could not restore the active configuration tree; NGINX remains stopped. Restore manually from ${CONFIG_DIR}.pre-0.9.0" >&2
       exit 1
     }
-    MODULE_STAGE="$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore-failed.$$"
+    MODULE_STAGE="$(sudo mktemp "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore-failed.XXXXXX")" || {
+      echo "ERROR: could not allocate a module staging path; NGINX remains stopped. Restore manually from ${MODULE_090}" >&2
+      exit 1
+    }
+    sudo rm -f -- "${MODULE_STAGE}"
     sudo cp -a -- "${MODULE_090}" "${MODULE_STAGE}" || {
       echo "ERROR: could not stage the 0.9.0 module; NGINX remains stopped. Restore manually from ${MODULE_090}" >&2
       exit 1

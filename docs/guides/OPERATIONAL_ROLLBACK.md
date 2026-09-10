@@ -599,13 +599,18 @@ disabled_before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
   http://localhost/markdown-metrics | \
   grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"' | \
   awk '{sum += $NF} END {print sum+0}')
-# Record the error-log offset so the decision-log corroboration below
-# covers only the bytes appended by THIS probe request.
+# Trigger a unique request first so the disabled signal is guaranteed to be
+# emitted by this verification, not by unrelated traffic.  Use a FIXED path
+# covered by the affected markdown_filter scope (a timestamp-based path may
+# fall outside the location that disables conversion) and include the Host
+# header so the request reaches that scope.  The path is configurable so the
+# probe can target the ACTUAL location affected by the rollback.
+ROLLBACK_PROBE_PATH="${ROLLBACK_PROBE_PATH:-/rollback-probe}"
 LOG_OFFSET=$(wc -c < /var/log/nginx/error.log 2>/dev/null || echo 0)
 curl -sS -o /dev/null \
   -H "Accept: text/markdown" \
   -H "Host: ${ROLLBACK_HOST:-localhost}" \
-  "http://localhost/rollback-probe"
+  "http://localhost${ROLLBACK_PROBE_PATH}"
 sleep 1
 disabled_after=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
   -H "Host: ${ROLLBACK_HOST:-localhost}" \
@@ -629,10 +634,10 @@ if nginx -T 2>/dev/null | grep -q "markdown_log_verbosity.*\(info\|debug\)" \
 fi
 if [ "$LOG_LEVEL_OK" -eq 1 ]; then
   if tail -c +$((LOG_OFFSET + 1)) /var/log/nginx/error.log 2>/dev/null \
-      | grep "markdown:" | grep "reason=disabled" | grep -q "rollback-probe"; then
+      | grep "markdown:" | grep "reason=disabled" | grep -qF "${ROLLBACK_PROBE_PATH}"; then
     echo "OK: decision log corroborates the rollback-probe disabled entry"
   else
-    echo "FAIL: no disabled decision-log entry for /rollback-probe after the recorded offset (log level is info/debug but the entry is missing)"
+    echo "FAIL: no disabled decision-log entry for ${ROLLBACK_PROBE_PATH} after the recorded offset (log level is info/debug but the entry is missing)"
     exit 1
   fi
 else
