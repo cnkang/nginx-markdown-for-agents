@@ -4049,7 +4049,10 @@ ngx_http_markdown_streaming_clone_chain_links(
  * never corrupt a pending_output that references the clone.
  *
  * Terminal flags (last_buf / last_in_chain) and the memory flag are
- * preserved; the clone is always memory-backed.
+ * preserved.  Payload buffers (pos < last) are copied into pool memory
+ * and are memory-backed; zero-length buffers keep VALID shared bounds
+ * (pos == last) and control sentinels (NULL pos/last) stay non-memory,
+ * so downstream sizing logic never sees invalid bounds.
  *
  * Returns the head of the cloned chain, or NULL on allocation failure.
  */

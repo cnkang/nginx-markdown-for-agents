@@ -346,12 +346,22 @@ if ! sudo nginx -t; then
     # .pre-0.9.0.bak which holds the 0.9.1 module), so the
     # module/configuration pair stays consistent (0.9.0 module + 0.9.0
     # config), then report manual recovery.  Never leave the 0.9.1
-    # module paired with the 0.9.0 configuration.
-    sudo mv -- "${CONFIG_DIR}.restore-failed" "${CONFIG_DIR}" 2>/dev/null || true
-    sudo cp -a -- "${MODULE_090}" \
-        "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore-failed" 2>/dev/null || true
-    sudo mv -f -- "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore-failed" \
-        "$MODULES_DIR/ngx_http_markdown_filter_module.so" 2>/dev/null || true
+    # module paired with the 0.9.0 configuration.  Every step fails
+    # closed: a stale or partial staging file must never be reused.
+    sudo mv -- "${CONFIG_DIR}.restore-failed" "${CONFIG_DIR}" || {
+      echo "ERROR: could not restore the active configuration tree; NGINX remains stopped. Restore manually from ${CONFIG_DIR}.pre-0.9.0" >&2
+      exit 1
+    }
+    MODULE_STAGE="$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore-failed.$$"
+    sudo cp -a -- "${MODULE_090}" "${MODULE_STAGE}" || {
+      echo "ERROR: could not stage the 0.9.0 module; NGINX remains stopped. Restore manually from ${MODULE_090}" >&2
+      exit 1
+    }
+    sudo mv -f -- "${MODULE_STAGE}" \
+        "$MODULES_DIR/ngx_http_markdown_filter_module.so" || {
+      echo "ERROR: could not replace the active module with the 0.9.0 module; NGINX remains stopped. Restore manually from ${MODULE_090}" >&2
+      exit 1
+    }
     echo "ERROR: 0.9.1 configuration restore failed; NGINX remains stopped. Restore manually from ${MODULE_090} and ${CONFIG_DIR}.pre-0.9.0" >&2
     exit 1
   }
