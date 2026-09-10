@@ -1311,8 +1311,8 @@ _PLAIN_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # Tokens that prefix a command without being the command itself.
 _COMMAND_PREFIXES = frozenset({"(", "{", "!"})
-_GUARD_OPENERS = frozenset({"if", "while", "until", "for"})
-_GUARD_CLOSERS = frozenset({"fi", "done"})
+_GUARD_OPENERS = frozenset({"if", "while", "until", "for", "case"})
+_GUARD_CLOSERS = frozenset({"fi", "done", "esac"})
 _SHELL_KEYWORDS = frozenset(
     {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for"}
 )
@@ -1425,66 +1425,110 @@ def _brace_delta(tokens: list[str]) -> int:
 
 
 def _close_function(
-    head: str, brace_depth: int, function_stack: list[tuple[str, int]]
+    head: str, brace_depth: int, function_stack: list[tuple[str, int, int]]
 ) -> None:
     """Drop a function once its matching brace closes."""
-    if head == "}" and function_stack and brace_depth < function_stack[-1][1]:
+    if head == "}" and function_stack and brace_depth < function_stack[-1][2]:
         function_stack.pop()
 
 
-def _scan_shell_commands(body: str) -> list[tuple[list[str], bool, str | None]]:
-    """Return (tokens, guarded_by_shell, owning function) for every command.
+def _scan_line(
+    line: str, state: dict[str, object]
+) -> list[tuple[list[str], bool, tuple[str, int] | None]]:
+    """Return the commands on one line and advance the scan state."""
+    entries: list[tuple[list[str], bool, tuple[str, int] | None]] = []
+    functions: list[tuple[str, int, int]] = state["functions"]  # type: ignore[assignment]
+    guard_depth = int(state["guard_depth"])
+    brace_depth = int(state["brace_depth"])
+    pending_guard = guard_depth > 0
+    for tokens, separator_guard in _line_commands(line):
+        head = tokens[0] if tokens else ""
+        definition = _function_definition(tokens)
+        pending_guard = pending_guard or separator_guard
+        # Count braces before the keyword scan consumes them, otherwise a
+        # definition group never opens and its function never closes.
+        brace_depth = max(0, brace_depth + _brace_delta(tokens))
+        tokens, pending_guard, depth_delta = _strip_guard_keywords(tokens, pending_guard)
+        if definition and not functions:
+            identity = int(state["definitions"]) + 1
+            state["definitions"] = identity
+            functions.append((definition, identity, brace_depth))
+        owner = (functions[-1][0], functions[-1][1]) if functions else None
+        if tokens and not _is_definition_line(definition, tokens):
+            entries.append((tokens, pending_guard or guard_depth > 0, owner))
+        _close_function(head, brace_depth, functions)
+        guard_depth = max(0, guard_depth + depth_delta)
+        pending_guard = False
+    state["guard_depth"] = guard_depth
+    state["brace_depth"] = brace_depth
+    return entries
 
-    ``guarded_by_shell`` covers real guards such as `if`, `&&`, or a subshell;
-    the owning function is tracked separately so the caller can decide whether
-    the body runs at all.
+
+def _scan_shell_commands(body: str) -> list[tuple[list[str], bool, tuple[str, int] | None]]:
+    """Return (tokens, guarded_by_shell, owner) for every command.
+
+    ``guarded_by_shell`` covers real guards such as `if`, `case`, or `&&`.  The
+    owner identifies the function body a command belongs to, and each definition
+    gets its own identity so a later redefinition can supersede it.
     """
-    commands: list[tuple[list[str], bool, str | None]] = []
-    guard_depth = 0
-    brace_depth = 0
-    function_stack: list[tuple[str, int]] = []
+    state: dict[str, object] = {
+        "guard_depth": 0,
+        "brace_depth": 0,
+        "definitions": 0,
+        "functions": [],
+    }
+    commands: list[tuple[list[str], bool, tuple[str, int] | None]] = []
     for line in _logical_lines(body):
-        pending_guard = guard_depth > 0
-        for tokens, separator_guard in _line_commands(line):
-            head = tokens[0] if tokens else ""
-            definition = _function_definition(tokens)
-            pending_guard = pending_guard or separator_guard
-            # Count braces before the keyword scan consumes them, otherwise a
-            # definition group never opens and its function never closes.
-            brace_depth = max(0, brace_depth + _brace_delta(tokens))
-            tokens, pending_guard, depth_delta = _strip_guard_keywords(
-                tokens, pending_guard
-            )
-            if definition and not function_stack:
-                # Record the owner before its own line's body is read, so a
-                # single-line definition still owns the commands it contains.
-                function_stack.append((definition, brace_depth))
-            entry = _command_entry(
-                tokens, pending_guard, guard_depth, function_stack, definition
-            )
-            if entry is not None:
-                commands.append(entry)
-            _close_function(head, brace_depth, function_stack)
-            guard_depth = max(0, guard_depth + depth_delta)
-            pending_guard = False
+        commands.extend(_scan_line(line, state))
     return commands
+
+
+def _live_function_commands(
+    scan: list[tuple[list[str], bool, tuple[str, int] | None]]
+) -> set[int]:
+    """Return the indexes of the function-body commands that actually run.
+
+    A body runs only when something calls it, only the last definition of a name
+    is in effect, and a body that calls itself before its commands is treated as
+    unreachable.
+    """
+    bodies: dict[int, list[int]] = {}
+    names: dict[int, str] = {}
+    latest: dict[str, int] = {}
+    calls: set[str] = set()
+    for index, (tokens, guarded, owner) in enumerate(scan):
+        if owner is None:
+            if not guarded and _PLAIN_NAME.match(tokens[0]):
+                calls.add(tokens[0])
+            continue
+        name, identity = owner
+        bodies.setdefault(identity, []).append(index)
+        names[identity] = name
+        latest[name] = identity
+    live: set[int] = set()
+    for identity, indexes in bodies.items():
+        name = names[identity]
+        if name not in calls or latest.get(name) != identity:
+            continue
+        if any(scan[index][0][0] == name for index in indexes):
+            continue
+        live.update(indexes)
+    return live
 
 
 def _shell_commands(body: str) -> list[tuple[list[str], bool]]:
     """Return (tokens, guarded) for every command in a shell body.
 
-    A command counts as guarded when a real guard wraps it, or when it belongs
-    to a function body that the same body never calls.
+    A command counts as guarded when a shell guard wraps it, or when it belongs
+    to a function body that this body never calls.
     """
     scan = _scan_shell_commands(body)
-    called = {
-        tokens[0]
-        for tokens, guarded, owner in scan
-        if not guarded and owner is None and _PLAIN_NAME.match(tokens[0])
-    }
+    live = _live_function_commands(scan)
     return [
-        (tokens, guarded or (owner is not None and owner not in called))
-        for tokens, guarded, owner in scan
+        (tokens, guarded or index not in live)
+        if owner is not None
+        else (tokens, guarded)
+        for index, (tokens, guarded, owner) in enumerate(scan)
     ]
 
 
@@ -1611,67 +1655,43 @@ def _is_staging_command(tokens: list[str], source_path: str) -> bool:
     return _names_expected_source(operands[: staged_indexes[0]], source_path)
 
 
-def _classify_staging_command(
-    tokens: list[str], guarded: bool, directory_changed: bool, source_path: str
-) -> str | None:
-    """Classify one workflow command for the staging proof.
+def _split_workflow_steps(workflow: str) -> list[str]:
+    """Return the shell body of each workflow step.
 
-    Returns "staged" when the command copies the file into the tarball tree,
-    "directory" when it changes the working directory, and None otherwise.  A
-    guarded command proves nothing.
+    Every step runs in its own shell, so directory and function state do not
+    carry across the boundary.
     """
-    if Path(tokens[0]).name in ("cd", "pushd"):
-        # A guarded change may or may not run: assume it does, because a missed
-        # change would let a relative path pass as staged.
-        return "directory"
-    if guarded or directory_changed:
-        return None
-    if _is_staging_command(tokens, source_path):
-        return "staged"
-    return None
-
-
-def _advance_workflow_state(
-    line: str, state: dict[str, object], source_path: str
-) -> bool:
-    """Fold one workflow line into ``state``; return True when it proves staging.
-
-    ``state`` carries the directory and guard state between lines, because a
-    ``cd`` or an open guard affects the commands that follow it.
-    """
-    stripped = line.strip()
-    if not stripped or stripped.startswith("#"):
-        return False
-    if _STEP_BOUNDARY_PATTERN.match(line):
-        state["directory_changed"] = False
-        state["guard_depth"] = 0
-    for tokens, separator_guard in _line_commands(line):
-        guarded = bool(state["guard_depth"]) or separator_guard
-        tokens, guarded, depth_delta = _strip_guard_keywords(tokens, guarded)
-        if tokens:
-            verdict = _classify_staging_command(
-                tokens, guarded, bool(state["directory_changed"]), source_path
-            )
-            if verdict == "staged":
-                return True
-            if verdict == "directory":
-                state["directory_changed"] = True
-        state["guard_depth"] = max(0, int(state["guard_depth"]) + depth_delta)
-    return False
+    steps: list[str] = []
+    current: list[str] = []
+    for line in _logical_lines(workflow):
+        if _STEP_BOUNDARY_PATTERN.match(line) and current:
+            steps.append("\n".join(current))
+            current = []
+        current.append(line)
+    if current:
+        steps.append("\n".join(current))
+    return steps
 
 
 def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
     """Return True when a live workflow command copies ``source`` into the tarball.
 
     Only an unguarded command proves staging, and within one step a ``cd``
-    invalidates the relative repository paths that follow it.  A new workflow
-    step starts in the checkout again, so the directory state resets there.
+    invalidates the relative repository paths that follow it.
     """
     source_path = source.lstrip("./")
-    state: dict[str, object] = {"directory_changed": False, "guard_depth": 0}
-    for line in _logical_lines(workflow):
-        if _advance_workflow_state(line, state, source_path):
-            return True
+    for step in _split_workflow_steps(workflow):
+        directory_changed = False
+        for tokens, guarded in _shell_commands(step):
+            if Path(tokens[0]).name in ("cd", "pushd"):
+                # A guarded change may or may not run: assume it does, because a
+                # missed change would let a relative path pass as staged.
+                directory_changed = True
+                continue
+            if guarded or directory_changed:
+                continue
+            if _is_staging_command(tokens, source_path):
+                return True
     return False
 
 
