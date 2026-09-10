@@ -83,3 +83,41 @@ def test_prepare_runtime_reuse_rejects_unsafe_explicit_module_filename(
 
     assert result.returncode == 1
     assert "unsafe module filename: unsafe module.so" in result.stderr
+
+
+def test_module_beside_the_binary_is_discovered(tmp_path: Path) -> None:
+    """A compiled source tree keeps its dynamic module in objs/."""
+    build_root = tmp_path / "nginx-1.30.4"
+    objs = build_root / "objs"
+    (build_root / "conf").mkdir(parents=True)
+    objs.mkdir(parents=True)
+    (build_root / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    nginx_bin = objs / "nginx"
+    nginx_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    nginx_bin.chmod(0o755)
+    module = objs / "ngx_http_markdown_filter_module.so"
+    module.write_bytes(b"module-bytes")
+    runtime_dir = tmp_path / "runtime"
+
+    command = (
+        f'source "{HELPER}"; '
+        f"unset MODULE_SO; "
+        f'markdown_prepare_runtime_reuse "{nginx_bin}" "{runtime_dir}"'
+    )
+    env = os.environ.copy()
+    env.pop("MODULE_SO", None)
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == (
+        "load_module modules/ngx_http_markdown_filter_module.so;"
+    )
+    assert (runtime_dir / "modules" / module.name).read_bytes() == b"module-bytes"
