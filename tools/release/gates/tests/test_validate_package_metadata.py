@@ -1049,6 +1049,16 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._spec_installs_snippet(body)
 
+    def test_folded_scalar_joins_its_lines(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        # YAML folds this block into one shell command, whose head is `-`.
+        workflow = (
+            "run: >\n"
+            "  - if false && false || false\n"
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
     def test_brace_on_the_next_line_still_closes_the_function(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"

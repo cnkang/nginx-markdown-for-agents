@@ -1662,6 +1662,36 @@ def _is_staging_command(tokens: list[str], source_path: str) -> bool:
     return _names_expected_source(operands[: staged_indexes[0]], source_path)
 
 
+_FOLDED_RUN = re.compile(r"^(\s*)run:\s*>\s*$")
+
+
+def _fold_scalars(lines: list[str]) -> list[str]:
+    """Join the lines of a folded YAML scalar (`run: >`) into one shell line.
+
+    YAML folds that block into a single shell command, so a parser that keeps
+    the line breaks would read commands the shell never runs separately.
+    """
+    folded: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        folded.append(line)
+        marker = _FOLDED_RUN.match(line)
+        index += 1
+        if marker is None:
+            continue
+        indent = len(marker.group(1))
+        block: list[str] = []
+        while index < len(lines):
+            following = lines[index]
+            if following.strip() and len(following) - len(following.lstrip()) <= indent:
+                break
+            block.append(following.strip())
+            index += 1
+        folded.append(" ".join(part for part in block if part))
+    return folded
+
+
 def _split_workflow_steps(workflow: str) -> list[str]:
     """Return the shell body of each workflow step.
 
@@ -1670,7 +1700,7 @@ def _split_workflow_steps(workflow: str) -> list[str]:
     """
     steps: list[str] = []
     current: list[str] = []
-    for line in _logical_lines(workflow):
+    for line in _fold_scalars(_logical_lines(workflow)):
         if _STEP_BOUNDARY_PATTERN.match(line) and current:
             steps.append("\n".join(current))
             current = []
