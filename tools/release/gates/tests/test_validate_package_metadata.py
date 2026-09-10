@@ -1028,6 +1028,39 @@ class TestModuleSnippetEdgeCases:
             tokens, "packaging/nfpm/modules/mod-markdown.conf"
         )
 
+    def test_subshell_guard_is_detected(self, monkeypatch) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # A subshell prefix must not hide the guard inside it.
+                return (
+                    "%install\n"
+                    "( if false; then install -m 0644 "
+                    "packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf; fi )\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_brace_and_negation_prefixes_are_detected(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        assert not validator._spec_installs_snippet(
+            f"{{ if false; then install -m 0644 {source} {destination}; fi; }}"
+        )
+        assert not validator._spec_installs_snippet(
+            f"! if false; then install -m 0644 {source} {destination}; fi"
+        )
+
     def test_closer_keyword_as_an_argument_keeps_the_guard_open(
         self, monkeypatch
     ) -> None:

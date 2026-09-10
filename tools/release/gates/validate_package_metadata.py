@@ -1306,6 +1306,8 @@ _STEP_BOUNDARY_PATTERN = re.compile(r"^\s*-\s|^\s*run:")
 _FUNCTION_DEFINITION = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\(\)$")
 _SEPARATOR_TOKENS = (";", "&&", "||")
 _SEPARATOR_SPLIT = re.compile(r"(&&|\|\||;)")
+# Tokens that prefix a command without being the command itself.
+_COMMAND_PREFIXES = frozenset({"(", "{", "!", "%{?}", "+", "-"})
 _GUARD_OPENERS = frozenset({"if", "while", "until", "for"})
 _GUARD_CLOSERS = frozenset({"fi", "done"})
 _SHELL_KEYWORDS = frozenset(
@@ -1331,7 +1333,11 @@ def _strip_guard_keywords(
             pending_guard = True
         elif head in _GUARD_CLOSERS or head == "}":
             depth_delta -= 1
-        elif head not in _SHELL_KEYWORDS:
+        elif head in _SHELL_KEYWORDS or head in _COMMAND_PREFIXES:
+            # `then`, `else`, `(`, `{`, `!` and friends introduce the command
+            # that follows; the guard itself is decided by the keywords.
+            pass
+        else:
             break
         tokens = tokens[1:]
     return tokens, pending_guard, depth_delta
