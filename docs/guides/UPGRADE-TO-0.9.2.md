@@ -159,10 +159,20 @@ case "${NGINX_CONF_DIR}" in
     exit 1
     ;;
 esac
-# Reject a symlinked backup root BEFORE any privileged creation:
-# install -d would follow the symlink and create or modify the target
-# before the check below could reject it.  -L is false for a
-# NON-EXISTENT path, so a fresh host still passes this precheck.
+# Reject a symlinked backup root or ANY symlinked parent component
+# BEFORE privileged creation: install -d would follow a symlink in an
+# existing parent and create the directory outside the intended
+# location.  -L is false for a NON-EXISTENT path, so a fresh host with
+# missing parents still passes this precheck (the parents are created
+# by install -d itself, which never follows a symlink it just made).
+BACKUP_PARENT="$(dirname "${CONFIG_BACKUP_DIR}")"
+while [[ "${BACKUP_PARENT}" != "/" && "${BACKUP_PARENT}" != "." ]]; do
+  if [[ -L "${BACKUP_PARENT}" ]]; then
+    echo "ERROR: CONFIG_BACKUP_DIR parent component '${BACKUP_PARENT}' is a symlink; install -d would follow it outside the intended location" >&2
+    exit 1
+  fi
+  BACKUP_PARENT="$(dirname "${BACKUP_PARENT}")"
+done
 if [[ -L "${CONFIG_BACKUP_DIR}" ]]; then
   echo "ERROR: CONFIG_BACKUP_DIR must not be a symlink (resolved target would be modified by install -d)" >&2
   exit 1
@@ -423,34 +433,38 @@ migrate_restore() {
           || "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}/"* ]]; then
       return 0
     fi
-    # Create the replacement link at a sibling staging path and
-    # atomically rename it over the active link (GNU mv -T uses
-    # rename(2)): a failed ln leaves the ACTIVE link untouched, so the
-    # configuration root is never left missing.
+    # Atomic link swap with NO dangling window: the replacement link
+    # points DIRECTLY at the snapshot directory (the snapshot is itself
+    # a unique staging path), and the old target is deleted only AFTER
+    # the swap succeeds.  Every failure leaves the active link
+    # untouched and the snapshot preserved for manual recovery.
     if ! sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
-      # A stale staging link would make the ln below fail or target the
-      # wrong path; fail closed with the snapshot preserved.
       return 0
     fi
-    if ! sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
-      # Link creation failed: the active link is still in place and the
-      # snapshot stays available for manual recovery.
+    if ! sudo ln -s "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
       return 0
     fi
     if ! sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" 2>/dev/null; then
       sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
-      # The link swap failed: the active link still points at the
-      # possibly partially edited target.  Restore the target IN PLACE
-      # from the snapshot so the active tree is whole again.
-      sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
-      sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || true
       return 0
     fi
+    # The active link now points at the snapshot; the old target is
+    # orphaned and safe to remove (a removal failure only leaves a
+    # stale directory, never a dangling link).
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
-    sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || true
   else
-    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+    # Non-symlink root: move the active tree to a UNIQUE sibling,
+    # install the snapshot, and roll back on failure.
+    ROLLBACK_OLD="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR}")/.nginx-old-XXXXXX")" 2>/dev/null || return 0
+    sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
+    if ! sudo mv "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}" 2>/dev/null; then
+      return 0
+    fi
+    if ! sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null; then
+      sudo mv "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+      return 0
+    fi
+    sudo rm -rf "${ROLLBACK_OLD}" 2>/dev/null || true
   fi
 }
 MIGRATE_ACTIVE=1
@@ -483,12 +497,16 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       echo "ERROR: migration snapshot ${MIGRATE_BACKUP} is inside the resolved target ${ROOT_LINK_TARGET}; restore manually" >&2
       exit 1
     fi
-    # Create the replacement link at a sibling staging path and
-    # atomically rename it over the active link: a failed ln leaves the
-    # ACTIVE link untouched, so the configuration root is never left
-    # missing.
-    sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
-    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" || {
+    # Atomic link swap with NO dangling window: the replacement link
+    # points DIRECTLY at the snapshot directory (the snapshot is itself
+    # a unique staging path), and the old target is deleted only AFTER
+    # the swap succeeds.  Every failure leaves the active link
+    # untouched and the snapshot preserved for manual recovery.
+    if ! sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
+      echo "ERROR: could not clear the staging symlink ${NGINX_CONF_DIR}.link-new; restore manually from ${MIGRATE_BACKUP}" >&2
+      exit 1
+    fi
+    sudo ln -s "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}.link-new" || {
       echo "ERROR: could not create the replacement configuration-root symlink; the active link is untouched and the resolved target was NOT deleted. Restore manually from ${MIGRATE_BACKUP}" >&2
       exit 1
     }
@@ -497,24 +515,10 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       echo "ERROR: could not replace the configuration-root symlink; the active link is untouched. Restore manually from ${MIGRATE_BACKUP}" >&2
       exit 1
     }
-    # Retain the old target until the replacement is fully installed:
-    # move it aside, install the snapshot, and roll back on failure so
-    # the active link never points at a missing target.
-    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || true
-    if [[ -e "${ROOT_LINK_TARGET}" || -L "${ROOT_LINK_TARGET}" ]]; then
-      sudo mv -f "${ROOT_LINK_TARGET}" "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || {
-        echo "ERROR: could not move the old configuration target aside; restore manually from ${MIGRATE_BACKUP}" >&2
-        exit 1
-      }
-    fi
-    sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || {
-      if [[ -e "${ROOT_LINK_TARGET}.rollback-old" ]]; then
-        sudo mv -f "${ROOT_LINK_TARGET}.rollback-old" "${ROOT_LINK_TARGET}" 2>/dev/null || true
-      fi
-      echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; the previous target was rolled back. Restore manually" >&2
-      exit 1
-    }
-    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || true
+    # The active link now points at the snapshot; the old target is
+    # orphaned and safe to remove (a removal failure only leaves a
+    # stale directory, never a dangling link).
+    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
   else
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
     sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
@@ -580,6 +584,11 @@ if command -v systemctl >/dev/null 2>&1 \
     sudo systemctl stop nginx
   else
     echo "ERROR: nginx.service is active but does not own the running NGINX master; refusing to stop" >&2
+    # The active configuration was already migrated; restore the
+    # pre-migration tree so the old module is not left paired with the
+    # migrated configuration.
+    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
+    sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${NGINX_CONF_DIR}/" 2>/dev/null || true
     exit 1
   fi
 else
@@ -594,6 +603,9 @@ else
     while pgrep -x nginx >/dev/null 2>&1; do
       if [[ "$waited" -ge 30 ]]; then
         echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting upgrade" >&2
+        # Same pairing guard: restore the pre-migration tree.
+        sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
+        sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${NGINX_CONF_DIR}/" 2>/dev/null || true
         exit 1
       fi
       sleep 1
@@ -893,10 +905,20 @@ case "${CONFIG_BACKUP_DIR}" in
     exit 1
     ;;
 esac
-# Reject a symlinked backup root BEFORE any privileged creation:
-# install -d would follow the symlink and create or modify the target
-# before the check below could reject it.  -L is false for a
-# NON-EXISTENT path, so a fresh host still passes this precheck.
+# Reject a symlinked backup root or ANY symlinked parent component
+# BEFORE privileged creation: install -d would follow a symlink in an
+# existing parent and create the directory outside the intended
+# location.  -L is false for a NON-EXISTENT path, so a fresh host with
+# missing parents still passes this precheck (the parents are created
+# by install -d itself, which never follows a symlink it just made).
+BACKUP_PARENT="$(dirname "${CONFIG_BACKUP_DIR}")"
+while [[ "${BACKUP_PARENT}" != "/" && "${BACKUP_PARENT}" != "." ]]; do
+  if [[ -L "${BACKUP_PARENT}" ]]; then
+    echo "ERROR: CONFIG_BACKUP_DIR parent component '${BACKUP_PARENT}' is a symlink; install -d would follow it outside the intended location" >&2
+    exit 1
+  fi
+  BACKUP_PARENT="$(dirname "${BACKUP_PARENT}")"
+done
 if [[ -L "${CONFIG_BACKUP_DIR}" ]]; then
   echo "ERROR: CONFIG_BACKUP_DIR must not be a symlink (resolved target would be modified by install -d)" >&2
   exit 1
@@ -1100,34 +1122,38 @@ migrate_restore() {
           || "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}/"* ]]; then
       return 0
     fi
-    # Create the replacement link at a sibling staging path and
-    # atomically rename it over the active link (GNU mv -T uses
-    # rename(2)): a failed ln leaves the ACTIVE link untouched, so the
-    # configuration root is never left missing.
+    # Atomic link swap with NO dangling window: the replacement link
+    # points DIRECTLY at the snapshot directory (the snapshot is itself
+    # a unique staging path), and the old target is deleted only AFTER
+    # the swap succeeds.  Every failure leaves the active link
+    # untouched and the snapshot preserved for manual recovery.
     if ! sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
-      # A stale staging link would make the ln below fail or target the
-      # wrong path; fail closed with the snapshot preserved.
       return 0
     fi
-    if ! sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
-      # Link creation failed: the active link is still in place and the
-      # snapshot stays available for manual recovery.
+    if ! sudo ln -s "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
       return 0
     fi
     if ! sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" 2>/dev/null; then
       sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
-      # The link swap failed: the active link still points at the
-      # possibly partially edited target.  Restore the target IN PLACE
-      # from the snapshot so the active tree is whole again.
-      sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
-      sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || true
       return 0
     fi
+    # The active link now points at the snapshot; the old target is
+    # orphaned and safe to remove (a removal failure only leaves a
+    # stale directory, never a dangling link).
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
-    sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || true
   else
-    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+    # Non-symlink root: move the active tree to a UNIQUE sibling,
+    # install the snapshot, and roll back on failure.
+    ROLLBACK_OLD="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR}")/.nginx-old-XXXXXX")" 2>/dev/null || return 0
+    sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
+    if ! sudo mv "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}" 2>/dev/null; then
+      return 0
+    fi
+    if ! sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null; then
+      sudo mv "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+      return 0
+    fi
+    sudo rm -rf "${ROLLBACK_OLD}" 2>/dev/null || true
   fi
 }
 MIGRATE_ACTIVE=1
@@ -1160,12 +1186,16 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       echo "ERROR: migration snapshot ${MIGRATE_BACKUP} is inside the resolved target ${ROOT_LINK_TARGET}; restore manually" >&2
       exit 1
     fi
-    # Create the replacement link at a sibling staging path and
-    # atomically rename it over the active link: a failed ln leaves the
-    # ACTIVE link untouched, so the configuration root is never left
-    # missing.
-    sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
-    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" || {
+    # Atomic link swap with NO dangling window: the replacement link
+    # points DIRECTLY at the snapshot directory (the snapshot is itself
+    # a unique staging path), and the old target is deleted only AFTER
+    # the swap succeeds.  Every failure leaves the active link
+    # untouched and the snapshot preserved for manual recovery.
+    if ! sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
+      echo "ERROR: could not clear the staging symlink ${NGINX_CONF_DIR}.link-new; restore manually from ${MIGRATE_BACKUP}" >&2
+      exit 1
+    fi
+    sudo ln -s "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}.link-new" || {
       echo "ERROR: could not create the replacement configuration-root symlink; the active link is untouched and the resolved target was NOT deleted. Restore manually from ${MIGRATE_BACKUP}" >&2
       exit 1
     }
@@ -1174,24 +1204,10 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       echo "ERROR: could not replace the configuration-root symlink; the active link is untouched. Restore manually from ${MIGRATE_BACKUP}" >&2
       exit 1
     }
-    # Retain the old target until the replacement is fully installed:
-    # move it aside, install the snapshot, and roll back on failure so
-    # the active link never points at a missing target.
-    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || true
-    if [[ -e "${ROOT_LINK_TARGET}" || -L "${ROOT_LINK_TARGET}" ]]; then
-      sudo mv -f "${ROOT_LINK_TARGET}" "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || {
-        echo "ERROR: could not move the old configuration target aside; restore manually from ${MIGRATE_BACKUP}" >&2
-        exit 1
-      }
-    fi
-    sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || {
-      if [[ -e "${ROOT_LINK_TARGET}.rollback-old" ]]; then
-        sudo mv -f "${ROOT_LINK_TARGET}.rollback-old" "${ROOT_LINK_TARGET}" 2>/dev/null || true
-      fi
-      echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; the previous target was rolled back. Restore manually" >&2
-      exit 1
-    }
-    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || true
+    # The active link now points at the snapshot; the old target is
+    # orphaned and safe to remove (a removal failure only leaves a
+    # stale directory, never a dangling link).
+    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
   else
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
     sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
@@ -1205,21 +1221,11 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
   MIGRATE_ACTIVE=0
   exit 1
 fi
-# Migration succeeded: mark the migration complete (the trap no longer
-# restores), clean the staged tree and the snapshot explicitly (the
-# trap that used to clean them was replaced), and disarm the trap ONLY
-# after both cleanups succeed — a failed cleanup is reported so the
-# root-owned temporary directory is not silently leaked.
-MIGRATE_ACTIVE=0
-if ! sudo rm -rf -- "$STAGED_ROOT" 2>/dev/null; then
-  echo "ERROR: could not clean the staged tree $STAGED_ROOT; remove it manually" >&2
-  exit 1
-fi
-if ! sudo rm -rf "${MIGRATE_BACKUP}" 2>/dev/null; then
-  echo "ERROR: could not clean the migration snapshot ${MIGRATE_BACKUP}; remove it manually" >&2
-  exit 1
-fi
-trap - EXIT
+# Migration succeeded.  The migration EXIT trap stays ARMED through the
+# module swap below: a stop/quit or swap failure must restore the
+# pre-migration tree (MIGRATE_BACKUP) so the old module is never left
+# paired with the migrated configuration.  The trap is disarmed and the
+# snapshot cleaned only after the post-start verification succeeds.
 # A configuration with NO retired directives is already 0.9.2
 # compliant: grep exit status 1 (no match) is accepted by the check
 # Record the service-manager ownership decision BEFORE stopping: after
@@ -1235,6 +1241,10 @@ if command -v systemctl >/dev/null 2>&1 \
         sudo systemctl stop nginx
     else
         echo "ERROR: nginx.service is active but does not own the running NGINX master; refusing to stop" >&2
+        # The active configuration was already migrated; the migration
+        # EXIT trap restores the pre-migration tree (MIGRATE_BACKUP) on
+        # exit, so the old module is not left paired with the migrated
+        # configuration.
         exit 1
     fi
 else
@@ -1244,6 +1254,8 @@ else
         while pgrep -x nginx >/dev/null 2>&1; do
             if [[ "$waited" -ge 30 ]]; then
                 echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting upgrade" >&2
+                # Same pairing guard: the migration EXIT trap restores
+                # the pre-migration tree on exit.
                 exit 1
             fi
             sleep 1
@@ -1450,6 +1462,18 @@ if ! grep -Fq "${PROBE_MARKER}" "${PROBE_BODY}"; then
   exit 1
 fi
 rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
+# The swap and post-start verification succeeded: disarm the migration
+# trap and clean the staged tree and the migration snapshot.
+MIGRATE_ACTIVE=0
+if ! sudo rm -rf -- "$STAGED_ROOT" 2>/dev/null; then
+  echo "ERROR: could not clean the staged tree $STAGED_ROOT; remove it manually" >&2
+  exit 1
+fi
+if ! sudo rm -rf "${MIGRATE_BACKUP}" 2>/dev/null; then
+  echo "ERROR: could not clean the migration snapshot ${MIGRATE_BACKUP}; remove it manually" >&2
+  exit 1
+fi
+trap - EXIT
 # Discard the backup only when THIS run created it; a pre-existing backup
 # left by an earlier upgrade stays until that upgrade's cleanup removes it.
 if [[ "${MODULE_BACKUP_OWNED}" -eq 1 ]]; then
