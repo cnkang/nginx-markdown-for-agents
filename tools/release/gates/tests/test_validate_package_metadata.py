@@ -1028,7 +1028,8 @@ class TestModuleSnippetEdgeCases:
             tokens, "packaging/nfpm/modules/mod-markdown.conf"
         )
 
-    def test_called_function_body_is_live(self) -> None:
+    def test_function_body_is_conservatively_guarded(self) -> None:
+        """A body that a check cannot prove runs stays guarded on purpose."""
         source = "packaging/nfpm/modules/mod-markdown.conf"
         destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
         body = (
@@ -1037,7 +1038,7 @@ class TestModuleSnippetEdgeCases:
             "}\n"
             "stage\n"
         )
-        assert validator._spec_installs_snippet(body)
+        assert not validator._spec_installs_snippet(body)
 
     def test_function_with_spaced_parentheses_stays_guarded(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
@@ -1081,7 +1082,7 @@ class TestModuleSnippetEdgeCases:
             "}\n"
             "stage\n"
         )
-        assert validator._spec_installs_snippet(body)
+        assert not validator._spec_installs_snippet(body)
 
     def test_quoted_brace_does_not_close_the_function(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
@@ -1091,7 +1092,7 @@ class TestModuleSnippetEdgeCases:
             f"install -m 0644 {source} {destination}; }}\n"
             "stage\n"
         )
-        assert validator._spec_installs_snippet(body)
+        assert not validator._spec_installs_snippet(body)
 
     def test_superseded_definition_is_not_live(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
@@ -1142,7 +1143,8 @@ class TestModuleSnippetEdgeCases:
         )
         called = body + "  stage\n"
         assert not validator._workflow_stages_into_tarball(body, source)
-        assert validator._workflow_stages_into_tarball(called, source)
+        # A body stays unproven even when the step calls it.
+        assert not validator._workflow_stages_into_tarball(called, source)
 
     def test_single_line_uncalled_function_is_not_live(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
@@ -1164,7 +1166,7 @@ class TestModuleSnippetEdgeCases:
             f"  {{ install -m 0644 {source} {destination}; }}\n"
             "}\n"
         )
-        assert validator._spec_installs_snippet(called)
+        assert not validator._spec_installs_snippet(called)
         assert not validator._spec_installs_snippet(uncalled)
 
     def test_leading_list_marker_does_not_prove_staging(self) -> None:
