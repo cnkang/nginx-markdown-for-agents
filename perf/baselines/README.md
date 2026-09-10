@@ -288,6 +288,16 @@ Each platform has a dedicated baseline file:
   derived from `module-baseline-092-raw.json`. The canonical workflow
   validates all eight scenario triplets before upload.
 
+## Shared Response Payloads
+
+The `streaming-first` and `large-body` response payloads are byte-identical in
+every probe set. Only the top-level copies exist as regular files
+(`streaming-first.body`, `large-body.body`); each per-set copy is a symlink to
+them. That keeps about 9 MB of duplicate evidence out of the repository while
+every reader still sees the same bytes, and
+`tools/perf/tests/test_baseline_body_dedup.py` keeps the copies identical and
+the links inside this directory.
+
 ## Running Benchmarks
 
 ### Basic Usage
