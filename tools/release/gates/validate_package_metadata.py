@@ -1303,9 +1303,12 @@ _STEP_BOUNDARY_PATTERN = re.compile(r"^\s*-\s|^\s*run:")
 
 # A function definition opens a group whose body does not run until the
 # function is called, so its commands are never a live install.
-_FUNCTION_DEFINITION = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\(\)$")
+_FUNCTION_DEFINITION = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)$")
 _SEPARATOR_TOKENS = (";", "&&", "||")
 _SEPARATOR_SPLIT = re.compile(r"(&&|\|\||;)")
+# A bare command name, as opposed to a definition such as `stage()`.
+_PLAIN_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 # Tokens that prefix a command without being the command itself.
 _COMMAND_PREFIXES = frozenset({"(", "{", "!", "%{?}", "+", "-"})
 _GUARD_OPENERS = frozenset({"if", "while", "until", "for"})
@@ -1328,14 +1331,15 @@ def _strip_guard_keywords(
     depth_delta = 0
     while tokens:
         head = tokens[0]
-        if head in _GUARD_OPENERS or head == "function" or _FUNCTION_DEFINITION.match(head):
+        if head in _GUARD_OPENERS or head == "function":
             depth_delta += 1
             pending_guard = True
         elif head in _GUARD_CLOSERS or head == "}":
             depth_delta -= 1
-        elif head in _SHELL_KEYWORDS or head in _COMMAND_PREFIXES:
-            # `then`, `else`, `(`, `{`, `!` and friends introduce the command
-            # that follows; the guard itself is decided by the keywords.
+        elif _FUNCTION_DEFINITION.match(head) or head in _SHELL_KEYWORDS or head in _COMMAND_PREFIXES:
+            # A definition skeleton, a connective such as `then`, or a prefix
+            # such as `(` and `{`: step over it and keep reading, because a
+            # guard may follow on the same command.
             pass
         else:
             break
@@ -1368,27 +1372,97 @@ def _line_commands(line: str) -> list[tuple[list[str], bool]]:
     return commands
 
 
-def _shell_commands(body: str) -> list[tuple[list[str], bool]]:
-    """Return (tokens, guarded) for every command in an %install body.
+def _function_definition(tokens: list[str]) -> str | None:
+    """Return the function name when these tokens open a definition.
 
-    Commands may be chained or guarded (``test -f x && install ...``,
-    ``if ...; then install ...; fi``) and a guard may span lines, so the state
-    is tracked across the whole body rather than per line.
+    The parentheses may be written apart from the name (``stage ()``) and the
+    opening brace may follow on the same line.
     """
-    commands: list[tuple[list[str], bool]] = []
+    if not tokens:
+        return None
+    single = _FUNCTION_DEFINITION.match(tokens[0])
+    if single:
+        return single.group(1)
+    joined = " ".join(tokens[:3])
+    spaced = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)", joined)
+    return spaced.group(1) if spaced else None
+
+
+def _is_definition_line(name: str | None, tokens: list[str]) -> bool:
+    """True when these tokens are only a function definition, which runs nothing."""
+    return name is not None and all(set(token) <= set("(){") for token in tokens[1:])
+
+
+def _command_entry(
+    tokens: list[str],
+    pending_guard: bool,
+    guard_depth: int,
+    function_stack: list[str],
+    definition: str | None,
+) -> tuple[list[str], bool, str | None] | None:
+    """Return the scan entry for one command, or None when it runs nothing."""
+    if not tokens or _is_definition_line(definition, tokens):
+        return None
+    owner = function_stack[-1] if function_stack else None
+    return (tokens, pending_guard or guard_depth > 0, owner)
+
+
+def _update_function_stack(
+    definition: str | None, head: str, function_stack: list[str]
+) -> None:
+    """Open a function group at its definition and close it at the brace."""
+    if definition and not function_stack:
+        function_stack.append(definition)
+    elif head == "}" and function_stack:
+        function_stack.pop()
+
+
+def _scan_shell_commands(body: str) -> list[tuple[list[str], bool, str | None]]:
+    """Return (tokens, guarded_by_shell, owning function) for every command.
+
+    ``guarded_by_shell`` covers real guards such as `if`, `&&`, or a subshell;
+    the owning function is tracked separately so the caller can decide whether
+    the body runs at all.
+    """
+    commands: list[tuple[list[str], bool, str | None]] = []
     guard_depth = 0
+    function_stack: list[str] = []
     for line in _logical_lines(body):
         pending_guard = guard_depth > 0
         for tokens, separator_guard in _line_commands(line):
+            head = tokens[0] if tokens else ""
+            definition = _function_definition(tokens)
             pending_guard = pending_guard or separator_guard
             tokens, pending_guard, depth_delta = _strip_guard_keywords(
                 tokens, pending_guard
             )
-            if tokens:
-                commands.append((tokens, pending_guard or guard_depth > 0))
+            entry = _command_entry(
+                tokens, pending_guard, guard_depth, function_stack, definition
+            )
+            if entry is not None:
+                commands.append(entry)
+            _update_function_stack(definition, head, function_stack)
             guard_depth = max(0, guard_depth + depth_delta)
             pending_guard = False
     return commands
+
+
+def _shell_commands(body: str) -> list[tuple[list[str], bool]]:
+    """Return (tokens, guarded) for every command in a shell body.
+
+    A command counts as guarded when a real guard wraps it, or when it belongs
+    to a function body that the same body never calls.
+    """
+    scan = _scan_shell_commands(body)
+    called = {
+        tokens[0]
+        for tokens, guarded, owner in scan
+        if not guarded and owner is None and _PLAIN_NAME.match(tokens[0])
+    }
+    return [
+        (tokens, guarded or (owner is not None and owner not in called))
+        for tokens, guarded, owner in scan
+    ]
 
 
 def _spec_install_sources(spec: str) -> list[str]:
@@ -1413,7 +1487,7 @@ def _spec_install_sources(spec: str) -> list[str]:
 # Commands that copy a file into the rpmbuild tree.  A staging proof must come
 # from one of these, so a mention of the tarball directory inside another
 # command (rm, echo, chmod, a shell test) cannot satisfy the contract.
-_STAGING_COMMANDS = frozenset({"cp", "install", "mv", "rsync", "tar"})
+_STAGING_COMMANDS = frozenset({"cp", "install", "mv", "rsync"})
 
 
 def _is_literal_operand(raw_token: str) -> bool:
@@ -1523,11 +1597,11 @@ def _classify_staging_command(
     "directory" when it changes the working directory, and None otherwise.  A
     guarded command proves nothing.
     """
-    if guarded:
-        return None
     if Path(tokens[0]).name in ("cd", "pushd"):
+        # A guarded change may or may not run: assume it does, because a missed
+        # change would let a relative path pass as staged.
         return "directory"
-    if directory_changed:
+    if guarded or directory_changed:
         return None
     if _is_staging_command(tokens, source_path):
         return "staged"

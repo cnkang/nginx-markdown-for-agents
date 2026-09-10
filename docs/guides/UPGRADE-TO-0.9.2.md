@@ -1683,11 +1683,17 @@ restore_previous_module_and_config() {
   # 2) Stage the previous module and snapshot the installed 0.9.2 module.  Both
   #    are copies: nothing live changes yet, so a failure here needs no undo.
   if ! sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
+    if ! sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
+      echo "WARN: could not remove a partial staged module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged; remove it manually" >&2
+    fi
     MIGRATE_ACTIVE=0
     echo "ERROR: could not stage the previous module from ${MODULE_BACKUP}; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
     return 1
   fi
   if ! sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null; then
+    if ! sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null; then
+      echo "WARN: could not remove a partial module snapshot ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged; remove it manually" >&2
+    fi
     if ! sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
       echo "WARN: could not remove the staged module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged; remove it manually" >&2
     fi

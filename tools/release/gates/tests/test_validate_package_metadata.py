@@ -1028,6 +1028,47 @@ class TestModuleSnippetEdgeCases:
             tokens, "packaging/nfpm/modules/mod-markdown.conf"
         )
 
+    def test_called_function_body_is_live(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+            "stage\n"
+        )
+        assert validator._spec_installs_snippet(body)
+
+    def test_function_with_spaced_parentheses_stays_guarded(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage () {\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_guarded_directory_change_still_counts(self) -> None:
+        workflow = (
+            "run: |\n"
+            "  if true; then cd components/rust-converter; fi\n"
+            '  cp packaging/nfpm/modules/mod-markdown.conf "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_tar_extraction_does_not_prove_staging(self) -> None:
+        workflow = (
+            "run: |\n"
+            '  tar -xf input.tar packaging/nfpm/modules/mod-markdown.conf '
+            '-C "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
     def test_subshell_guard_is_detected(self, monkeypatch) -> None:
         def fake_read(path: Path) -> str:
             if path == validator.RPM_SPEC:
