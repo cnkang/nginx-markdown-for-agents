@@ -4842,17 +4842,7 @@ ngx_http_markdown_streaming_null_input_resume_output(
         rc = ngx_http_markdown_streaming_send_output(
             r, ctx, pending->markdown, pending->markdown_len,
             /* last_buf */ 0);
-        if (rc == NGX_AGAIN) {
-            /* The write filter deferred the output: retain the deferred
-             * finalize result so the resume path (which re-enters this
-             * block) can re-send it, record its stats, and complete the
-             * terminal.  Detaching it here would leak the Rust-allocated
-             * markdown buffer and skip finalize stats. */
-            ctx->streaming.completion.finalize_pending_result = pending;
-            return ngx_http_markdown_streaming_handle_backpressure(
-                r, ctx);
-        }
-        if (rc != NGX_OK && rc != NGX_DONE) {
+        if (rc != NGX_OK && rc != NGX_DONE && rc != NGX_AGAIN) {
             /* The deferred finalize result owns Rust-allocated buffers;
              * release it before the hard-abort path so a definitive
              * delivery error does not leak the finalize output. */
