@@ -650,11 +650,20 @@ ngx_http_markdown_cache_control_token_is_private(const u_char *token_start,
             token_start, ngx_http_markdown_cc_private, private_len)) {
         return 0;
     }
-    /* The directive name must be followed by '=' (a value, e.g.
-     * private="Set-Cookie") or the end of the raw token — never a bare
-     * prefix of a longer name (private-foo, privatex). */
-    if (len > private_len && token_start[private_len] != '=') {
-        return 0;
+    /* The directive name must be followed by optional whitespace, then
+     * '=' (a value, e.g. private="Set-Cookie" or private = "Set-Cookie")
+     * or the end of the raw token — never a bare prefix of a longer
+     * name (private-foo, privatex). */
+    if (len > private_len) {
+        const u_char  *p = token_start + private_len;
+        const u_char  *end = token_end;
+
+        while (p < end && (*p == ' ' || *p == '\t')) {
+            p++;
+        }
+        if (p >= end || *p != '=') {
+            return 0;
+        }
     }
     return 1;
 }
