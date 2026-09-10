@@ -4041,6 +4041,63 @@ ngx_http_markdown_streaming_clone_chain_links(
     return head;
 }
 
+/*
+ * Deep-clone a chain into request pool memory: each link AND its
+ * ngx_buf_t are newly allocated, and the buf data (pos..last) is copied
+ * into request-pool memory.  The clone therefore has INDEPENDENT pos/last
+ * pointers, so advancing pos on the original chain (abandon_input) can
+ * never corrupt a pending_output that references the clone.
+ *
+ * Terminal flags (last_buf / last_in_chain) and the memory flag are
+ * preserved; the clone is always memory-backed.
+ *
+ * Returns the head of the cloned chain, or NULL on allocation failure.
+ */
+static ngx_chain_t *
+ngx_http_markdown_streaming_clone_chain_deep(
+    ngx_http_request_t *r,
+    ngx_chain_t *in)
+{
+    ngx_chain_t  *head = NULL;
+    ngx_chain_t  **tail = &head;
+    ngx_chain_t  *cl;
+    ngx_buf_t    *b;
+
+    for (; in != NULL; in = in->next) {
+        if (in->buf == NULL) {
+            continue;
+        }
+        cl = ngx_alloc_chain_link(r->pool);
+        if (cl == NULL) {
+            return NULL;
+        }
+        b = ngx_calloc_buf(r->pool);
+        if (b == NULL) {
+            return NULL;
+        }
+        if (in->buf->last > in->buf->pos) {
+            b->pos = ngx_pnalloc(r->pool, in->buf->last - in->buf->pos);
+            if (b->pos == NULL) {
+                return NULL;
+            }
+            ngx_memcpy(b->pos, in->buf->pos, in->buf->last - in->buf->pos);
+            b->last = b->pos + (in->buf->last - in->buf->pos);
+        } else {
+            b->pos = NULL;
+            b->last = NULL;
+        }
+        b->memory = 1;
+        b->last_buf = in->buf->last_buf;
+        b->last_in_chain = in->buf->last_in_chain;
+        cl->buf = b;
+        cl->next = NULL;
+        *tail = cl;
+        tail = &cl->next;
+    }
+
+    return head;
+}
+
 
 /*
  * Send a fail-open output chain downstream with backpressure and
@@ -4594,16 +4651,19 @@ ngx_http_markdown_streaming_continue_failopen_input(
         }
     }
 
-    /* Clone the chain links into request-pool memory before handing off:
+    /* Deep-clone the chain into request-pool memory before handing off:
      * body-filter input links are transient (owned by the filter chain
      * invocation), and send_failopen_chain stores the chain as
      * pending_output on NGX_AGAIN, which outlives this invocation.  The
-     * underlying ngx_buf_t is shared (stable within the request), matching
-     * the clone semantics of failopen_passthrough. */
+     * deep clone copies the buf DATA (not just the links), so the pending
+     * delivery has independent pos/last pointers: abandoning the ORIGINAL
+     * chain (advancing its pos) can never truncate the pending output,
+     * and NGINX cannot re-submit the same buffers for a duplicate
+     * forward. */
     {
         ngx_chain_t  *cloned;
 
-        cloned = ngx_http_markdown_streaming_clone_chain_links(r, input_chain);
+        cloned = ngx_http_markdown_streaming_clone_chain_deep(r, input_chain);
         if (cloned == NULL && input_chain != NULL) {
             return NGX_ERROR;
         }
