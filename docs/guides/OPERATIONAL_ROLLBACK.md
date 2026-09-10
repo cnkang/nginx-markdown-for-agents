@@ -624,7 +624,7 @@ fi
 # otherwise it degrades to informational, matching Step 1.
 LOG_LEVEL_OK=0
 if nginx -T 2>/dev/null | grep -q "markdown_log_verbosity.*\(info\|debug\)" \
-    && nginx -T 2>/dev/null | grep -q "error_log.*\(info\|debug\)"; then
+    && nginx -T 2>/dev/null | grep -E "^[[:space:]]*error_log[[:space:]]+[^;]*[[:space:]]+(info|debug)[[:space:]]*;" ; then
   LOG_LEVEL_OK=1
 fi
 if [ "$LOG_LEVEL_OK" -eq 1 ]; then
