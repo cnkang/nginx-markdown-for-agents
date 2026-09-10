@@ -1028,6 +1028,26 @@ class TestModuleSnippetEdgeCases:
             tokens, "packaging/nfpm/modules/mod-markdown.conf"
         )
 
+    def test_marker_without_a_path_boundary_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_commented_install_after_a_separator_stays_inactive(self) -> None:
+        spec = (
+            "%install\n"
+            "install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+            "%{buildroot}/usr/share/nginx/modules/ # note; "
+            "install -m 0644 other.conf %{buildroot}/tmp/\n"
+        )
+        sources = validator._spec_install_sources(spec)
+        assert sources == ["packaging/nfpm/modules/mod-markdown.conf"]
+
     def test_marker_prefixed_by_text_does_not_prove_staging(self) -> None:
         tokens = [
             "cp",
