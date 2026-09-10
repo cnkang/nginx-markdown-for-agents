@@ -202,7 +202,7 @@ ARCH_RUNNER_SNIPPET = (
     "'ubuntu-24.04' }}"
 )
 STANDALONE_CONTAINER_BASH_SHELL = "defaults:\n      run:\n        shell: bash"
-STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET = '          mkdir -p "/tmp/${TARBALL_DIR}/.render"\n          cp packaging/nfpm/scripts/preremove.sh "/tmp/${TARBALL_DIR}/.render/preremove.sh"\n          packaging/nfpm/scripts/render-nfpm-config.sh \\\n            "/tmp/${TARBALL_DIR}/.render/preremove.sh" \\\n            "/tmp/${TARBALL_DIR}/preremove.sh" \\\n            "${NGINX_VERSION}"\n          rm -rf "/tmp/${TARBALL_DIR}/.render"'
+STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET = '          mkdir -p "${RUNNER_TEMP:-/tmp}/markdown-render"\n          packaging/nfpm/scripts/render-nfpm-config.sh \\\n            packaging/nfpm/scripts/preremove.sh \\\n            "${RUNNER_TEMP:-/tmp}/markdown-render/preremove.sh" \\\n            "${NGINX_VERSION}"\n          cp "${RUNNER_TEMP:-/tmp}/markdown-render/preremove.sh" "/tmp/${TARBALL_DIR}/preremove.sh"'
 STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     "INPUT_VERSION: ${{ inputs.version }}",
     "NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}",
@@ -907,8 +907,8 @@ def _spec_installs_snippet(install_body: str) -> bool:
     trailing argument cannot stand in for the real destination.
     """
     for line in _logical_lines(install_body):
-        for tokens in _shell_command_segments(line):
-            if Path(tokens[0]).name != "install":
+        for tokens, guarded in _shell_command_segments(line):
+            if guarded or Path(tokens[0]).name != "install":
                 continue
             sources, destination = _parse_install_operands(tokens[1:])
             if (
@@ -1304,20 +1304,29 @@ _SHELL_KEYWORDS = frozenset(
 )
 
 
-def _shell_command_segments(line: str) -> list[list[str]]:
-    """Split one logical line into the token lists of its shell commands.
+def _shell_command_segments(line: str) -> list[tuple[list[str], bool]]:
+    """Split one logical line into (tokens, guarded) shell commands.
 
     A spec may chain or guard commands (``if true; then install ...; fi``,
     ``test -f x && install ...``), so a check that reads only the first word of
-    the line would miss installs.
+    the line would miss installs.  ``guarded`` marks a command whose execution
+    depends on a condition, which matters when the check must prove that the
+    packaged file is installed unconditionally.
     """
-    segments: list[list[str]] = []
-    for raw in re.split(r"&&|\|\||[;\n]", line):
+    segments: list[tuple[list[str], bool]] = []
+    pending_guard = False
+    for raw in re.split(r"(&&|\|\||[;\n])", line):
+        if raw in ("&&", "||", ";", "\n", ""):
+            pending_guard = raw in ("&&", "||")
+            continue
         tokens = _strip_inline_comment(raw.split())
+        guarded = pending_guard
         while tokens and tokens[0] in _SHELL_KEYWORDS:
             tokens = tokens[1:]
+            guarded = True
         if tokens:
-            segments.append(tokens)
+            segments.append((tokens, guarded))
+        pending_guard = False
     return segments
 
 
@@ -1331,7 +1340,7 @@ def _spec_install_sources(spec: str) -> list[str]:
     body = _spec_section(spec, "%install")
     sources: list[str] = []
     for line in _logical_lines(body):
-        for tokens in _shell_command_segments(line):
+        for tokens, _guarded in _shell_command_segments(line):
             if Path(tokens[0]).name != "install":
                 continue
             for source in _parse_install_operands(tokens[1:])[0]:
@@ -1347,39 +1356,78 @@ def _spec_install_sources(spec: str) -> list[str]:
 _STAGING_COMMANDS = frozenset({"cp", "install", "mv", "rsync", "tar"})
 
 
+def _is_literal_operand(raw_token: str) -> bool:
+    """True when the shell would pass this operand through without expanding it.
+
+    A single-quoted operand and a backslash-escaped ``$`` both suppress the
+    variable expansion that would make the operand point at the staging tree.
+    """
+    return raw_token.startswith("'") or "\\$" in raw_token
+
+
+def _unquote_operand(raw_token: str) -> str:
+    """Drop the double quotes the shell would remove from an operand."""
+    return raw_token.strip('"')
+
+
+def _destination_matches_source(destination: str, source_path: str) -> bool:
+    """True when the staged destination is where the spec expects to find it.
+
+    The destination must keep the file's name and sit either in the tarball root
+    (for a spec that names a bare file) or in the directory that mirrors the
+    source's repository directory, so a temporary staging directory does not
+    stand in for the final path.
+    """
+    marker = TARBALL_MARKER_PATTERN.search(destination)
+    if not marker:
+        return False
+    suffix = destination[marker.end() :].strip('"').lstrip("/")
+    source_name = Path(source_path).name
+    source_dir = str(Path(source_path).parent)
+    if source_dir == ".":
+        return suffix in ("", source_name)
+    return suffix in (source_dir, source_dir + "/", f"{source_dir}/{source_name}")
+
+
+def _names_expected_source(operands: list[str], source_path: str) -> bool:
+    """True when one operand names the spec source or its built artifact.
+
+    A spec that names a bare file installs an artifact the workflow builds
+    elsewhere, for example build/<module>.so, so the matching basename counts;
+    a directory-qualified source must match its repository path.
+    """
+    for raw in operands:
+        if _is_literal_operand(raw):
+            continue
+        normalized = _unquote_operand(raw).lstrip("./").rstrip("/")
+        if normalized == source_path:
+            return True
+        if "/" not in source_path and Path(normalized).name == source_path:
+            return True
+    return False
+
+
 def _is_staging_command(tokens: list[str], source_path: str) -> bool:
     """True when one command copies ``source_path`` into the tarball tree.
 
     The file must appear as an operand before the operand that references the
-    staging tree, and the staged path must keep the file's own name (a directory
-    reference, or a path ending in the source file name): staging under a
-    different name, or as a symlink, leaves the path the spec installs absent
-    from the archive.
+    staging tree, that reference must be a real expansion, and the staged path
+    must be the one the spec installs.
     """
     if not tokens or Path(tokens[0]).name not in _STAGING_COMMANDS:
         return False
     operands = [
-        token.strip('"').strip("'") for token in tokens[1:] if not token.startswith("-")
+        token for token in tokens[1:] if not token.startswith("-")
     ]
     staged_indexes = [
         index
-        for index, operand in enumerate(operands)
-        if TARBALL_MARKER_PATTERN.search(operand)
+        for index, raw in enumerate(operands)
+        if not _is_literal_operand(raw)
+        and _destination_matches_source(_unquote_operand(raw), source_path)
     ]
     if not staged_indexes:
         return False
-    destination = operands[staged_indexes[0]]
-    if not destination.endswith("/") and Path(destination).name != Path(source_path).name:
-        return False
-    for operand in operands[: staged_indexes[0]]:
-        normalized = operand.lstrip("./").rstrip("/")
-        if normalized == source_path:
-            return True
-        # A spec that names a bare file refers to an artifact the workflow builds
-        # elsewhere, for example build/<module>.so.
-        if "/" not in source_path and Path(normalized).name == source_path:
-            return True
-    return False
+    return _names_expected_source(operands[: staged_indexes[0]], source_path)
 
 
 def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:

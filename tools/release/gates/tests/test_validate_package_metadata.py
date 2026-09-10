@@ -1028,15 +1028,65 @@ class TestModuleSnippetEdgeCases:
             tokens, "packaging/nfpm/modules/mod-markdown.conf"
         )
 
-    def test_staging_into_a_subdirectory_keeps_the_name(self) -> None:
+    def test_guarded_snippet_install_fails_the_check(self, monkeypatch) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The install sits inside a branch that never runs.
+                return (
+                    "%install\n"
+                    "if false; then install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf; fi\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_temporary_directory_does_not_prove_final_staging(self) -> None:
         tokens = [
             "cp",
             "packaging/nfpm/scripts/preremove.sh",
             "/tmp/${TARBALL_DIR}/.render/preremove.sh",
         ]
-        assert validator._is_staging_command(
+        assert not validator._is_staging_command(
             tokens, "packaging/nfpm/scripts/preremove.sh"
         )
+
+    def test_single_quoted_staging_path_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "'${TARBALL_DIR}/packaging/nfpm/modules/'",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_escaped_variable_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "\\${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_rendered_copy_into_the_root_proves_staging(self) -> None:
+        tokens = [
+            "cp",
+            "${RUNNER_TEMP:-/tmp}/markdown-render/preremove.sh",
+            "/tmp/${TARBALL_DIR}/preremove.sh",
+        ]
+        assert validator._is_staging_command(tokens, "preremove.sh")
 
     def test_install_after_a_logical_and_is_parsed(self) -> None:
         spec = (
