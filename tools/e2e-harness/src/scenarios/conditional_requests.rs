@@ -323,6 +323,10 @@ fn append_echo_headers_case(
     let body = resp.body.clone();
     let count_a = body.lines().filter(|l| *l == "x-test: A").count();
     let count_b = body.lines().filter(|l| *l == "x-test: B").count();
+    let count_inm = body
+        .lines()
+        .filter(|l| l.starts_with("if-none-match:"))
+        .count();
     assertions.push(AssertionResult {
         name: "case11_duplicate_header_a_preserved".to_string(),
         passed: count_a == 1,
@@ -345,6 +349,19 @@ fn append_echo_headers_case(
         } else {
             format!(
                 "count={count_b} (restore collapsed or duplicated the entry?)"
+            )
+        },
+        message: None,
+    });
+    assertions.push(AssertionResult {
+        name: "case11_conditional_header_reaches_upstream".to_string(),
+        passed: count_inm == 1,
+        expected: "exactly one if-none-match line in upstream echo".to_string(),
+        actual: if count_inm == 1 {
+            "present exactly once".to_string()
+        } else {
+            format!(
+                "count={count_inm} (capture/restore lost or duplicated the conditional header?)"
             )
         },
         message: None,

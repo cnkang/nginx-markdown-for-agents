@@ -113,12 +113,11 @@ fi
 CONFIG_BACKUP_DIR="/var/backups/nginx-markdown-0.9.1"
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
 sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
-sudo cp -a "${NGINX_CONF_DIR}/nginx.conf" "${CONFIG_BACKUP_DIR}/"
-for CONFIG_DIR in "${NGINX_CONF_DIR}/conf.d" "${NGINX_CONF_DIR}/modules-enabled"; do
-  if [[ -d "${CONFIG_DIR}" ]]; then
-    sudo cp -a "${CONFIG_DIR}" "${CONFIG_BACKUP_DIR}/"
-  fi
-done
+# Back up the ENTIRE configuration tree (not just nginx.conf + conf.d +
+# modules-enabled): MIGRATION-0.9.2.md may touch any path under
+# ${NGINX_CONF_DIR}, and the rollback path must be able to restore every
+# migrated file and remove anything the migration added.
+sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree/"
 MODULE_PATH="$MODULES_DIR/ngx_http_markdown_filter_module.so"
 MODULE_BACKUP="${MODULE_PATH}.0.9.1.bak"
 if [[ ! -f "${MODULE_PATH}" ]]; then
@@ -456,14 +455,11 @@ if ! sudo nginx -t; then
   # The active configuration tree was migrated by MIGRATION-0.9.2.md
   # before the swap; the old module may not accept the migrated
   # directives, so restore the backed-up 0.9.1 tree alongside the old
-  # module before re-validating.
-  sudo cp -a "${CONFIG_BACKUP_DIR}/nginx.conf" "${NGINX_CONF_DIR}/nginx.conf"
-  for CONFIG_DIR in "${NGINX_CONF_DIR}/conf.d" "${NGINX_CONF_DIR}/modules-enabled"; do
-    if [[ -d "${CONFIG_BACKUP_DIR}/$(basename "${CONFIG_DIR}")" ]]; then
-      sudo rm -rf "${CONFIG_DIR}"
-      sudo cp -a "${CONFIG_BACKUP_DIR}/$(basename "${CONFIG_DIR}")" "${CONFIG_DIR}"
-    fi
-  done
+  # module before re-validating.  The whole tree is restored (not just
+  # nginx.conf + conf.d + modules-enabled) and any path the migration
+  # added is removed, so no migrated configuration can remain.
+  sudo rm -rf "${NGINX_CONF_DIR}"
+  sudo cp -a "${CONFIG_BACKUP_DIR}/tree" "${NGINX_CONF_DIR}"
   if ! sudo nginx -t; then
     echo "ERROR: restored module and configuration also fail validation; do not start NGINX. ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR} are preserved — restore manually from them." >&2
     exit 1
