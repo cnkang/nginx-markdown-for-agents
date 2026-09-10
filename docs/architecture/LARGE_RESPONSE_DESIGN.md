@@ -259,7 +259,10 @@ HEAD requests, 304 responses, and fail-open replays always use the full-buffer p
 | 304 Not Modified | Full-buffer path | No body conversion needed; conditional logic operates on cached state |
 | Fail-open replay | Full-buffer path | The module is replaying already-buffered original HTML; incremental processing does not apply |
 
-When `markdown_large_body_threshold` is set to `off`, all requests follow the full-buffer path. The runtime behavior is identical to a build that does not include this feature.
+> ⚠️ **HISTORICAL** — the directive and the path selection below belong to the retired
+> pre-0.9.0 threshold router. 0.9.2 removed `markdown_large_body_threshold`, so select
+> paths with `markdown_streaming` and read every "full-buffer path" or "incremental
+> path" label in this section as pre-0.9.0 wording.
 
 ## Non-Degradation Guarantees
 

@@ -910,31 +910,41 @@ def validate_rpm_spec_snippet(result: ValidationResult) -> None:
     if not spec:
         result.fail("rpm:modules:snippet", f"{RPM_SPEC} not found")
     else:
+        install_body = _spec_section(spec, "%install")
+        files_body = _spec_section(spec, "%files")
         install_ok = re.search(
             r"^install -m [0-7]+ packaging/nfpm/modules/mod-markdown\.conf \\?\s*$",
-            spec,
+            install_body,
             re.MULTILINE,
+        )
+        destination_ok = re.search(
+            r"%\{buildroot\}/usr/share/nginx/modules/mod-markdown\.conf",
+            install_body,
         )
         files_ok = re.search(
             r"^%config\(noreplace\) /usr/share/nginx/modules/mod-markdown\.conf$",
-            spec,
+            files_body,
             re.MULTILINE,
         )
-        if install_ok:
+        if install_ok and destination_ok:
             result.pass_(
                 "rpm:modules:install",
-                "the RPM spec installs the module snippet",
+                "the RPM spec %install installs the module snippet from "
+                "packaging/nfpm/modules/mod-markdown.conf into "
+                "%{buildroot}/usr/share/nginx/modules/",
             )
         else:
             result.fail(
                 "rpm:modules:install",
-                "the RPM spec must install packaging/nfpm/modules/"
-                "mod-markdown.conf into %{buildroot}/usr/share/nginx/modules/",
+                "the RPM spec %install section must install packaging/nfpm/"
+                "modules/mod-markdown.conf into "
+                "%{buildroot}/usr/share/nginx/modules/",
             )
         if files_ok:
             result.pass_(
                 "rpm:modules:files",
-                "the RPM spec ships the snippet as %config(noreplace)",
+                "the RPM spec %files section ships the snippet as "
+                "%config(noreplace)",
             )
         else:
             result.fail(
@@ -1024,18 +1034,99 @@ def validate_module_filename_consistency(result: ValidationResult) -> None:
             )
 
 
+def _logical_lines(content: str) -> list[str]:
+    """Return complete logical lines (comments kept, continuations joined)."""
+    lines: list[str] = []
+    buffer = ""
+    for raw in content.splitlines():
+        line = raw.rstrip("\r")
+        if line.endswith("\\"):
+            buffer += line[:-1] + " "
+            continue
+        lines.append((buffer + line).rstrip())
+        buffer = ""
+    if buffer:
+        lines.append(buffer.rstrip())
+    return lines
+
+
+# RPM section headers, so a %files entry such as `%config(noreplace) ...` is
+# not mistaken for the start of a new section.
+RPM_SECTIONS = frozenset(
+    {
+        "%prep",
+        "%build",
+        "%install",
+        "%check",
+        "%files",
+        "%changelog",
+        "%pre",
+        "%post",
+        "%preun",
+        "%postun",
+        "%pretrans",
+        "%posttrans",
+        "%clean",
+        "%description",
+        "%generate_buildrequires",
+        "%sourcelist",
+        "%patchlist",
+    }
+)
+
+
+def _spec_section(content: str, section: str) -> str:
+    """Return the body of one RPM ``%section`` (empty when absent)."""
+    body: list[str] = []
+    inside = False
+    for line in content.splitlines():
+        first = line.strip().split()[0] if line.strip() else ""
+        if first in RPM_SECTIONS or first.startswith("%package"):
+            inside = first == section
+            continue
+        if inside:
+            body.append(line)
+    return "\n".join(body)
+
+
 def _check_snippet_load_form(
-    result: ValidationResult, family: str, rel: str, content: str, expected_line: str
+    result: ValidationResult,
+    family: str,
+    rel: str,
+    content: str,
+    expected_line: str,
+    ships_active: bool,
 ) -> None:
     """The snippet must load the module with the form its family resolves."""
     check_id = f"snippet:{family}:load-module-form"
-    if expected_line in content:
+    # Match a COMPLETE logical line: a substring hit inside a comment (for
+    # example prose quoting the directive) must not satisfy the contract.
+    live = [
+        line.strip()
+        for line in _logical_lines(content)
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    commented = [
+        line.strip()
+        for line in _logical_lines(content)
+        if line.lstrip().startswith("#") and line.lstrip()[1:].strip() != ""
+    ]
+    if expected_line in live and expected_line not in commented:
         result.pass_(
             check_id,
             f"{rel} uses the load_module form that resolves on {family}",
         )
+    elif f"#{expected_line}" in commented and expected_line not in live and not ships_active:
+        result.pass_(
+            check_id,
+            f"{rel} ships the loader directive as a complete commented line",
+        )
     else:
-        result.fail(check_id, f"{rel} must load the module with '{expected_line}'")
+        result.fail(
+            check_id,
+            f"{rel} must load the module with '{expected_line}' as a complete "
+            "line (live for DEB, commented for RPM)",
+        )
 
 
 def _check_snippet_guidance(
@@ -1099,8 +1190,9 @@ def _check_snippet_opt_in(
     # Any uncommented loader directive counts as active, at any indentation:
     # a snippet carrying both the commented form and an indented live directive
     # would otherwise pass as opt-in.
-    active_line = re.search(
-        rf"^[ \t]*(?!#){re.escape(expected_line)}", content, re.MULTILINE
+    logical = [line.strip() for line in _logical_lines(content)]
+    active_line = any(
+        line == expected_line for line in logical if not line.startswith("#")
     )
     inactive_line = f"#{expected_line}"
     if ships_active and active_line:
@@ -1109,7 +1201,7 @@ def _check_snippet_opt_in(
             f"{rel} ships the active directive activated by an explicit "
             "operator symlink",
         )
-    elif not ships_active and inactive_line in content and not active_line:
+    elif not ships_active and inactive_line in logical and not active_line:
         result.pass_(
             check_id,
             f"{rel} ships the directive commented out so no include mechanism "
@@ -1130,13 +1222,90 @@ def _check_snippet_opt_in(
         )
 
 
+TARBALL_STAGING_MARKERS = (
+    "${TARBALL_DIR}",
+    "$TARBALL_DIR",
+    "TARBALL_DIR",
+)
+
+
+# install(1) options that consume the following token as their argument.
+_INSTALL_VALUE_OPTIONS = frozenset(
+    {
+        "-m",
+        "--mode",
+        "-o",
+        "--owner",
+        "-g",
+        "--group",
+        "-t",
+        "--target-directory",
+        "-S",
+        "--suffix",
+    }
+)
+
+
+def _install_command_source(tokens: list[str]) -> str | None:
+    """Return the source operand of an install(1) argument list, if any."""
+    index = 0
+    while index < len(tokens) and tokens[index].startswith("-"):
+        option = tokens[index]
+        index += 1
+        if option in _INSTALL_VALUE_OPTIONS:
+            index += 1
+    if index >= len(tokens):
+        return None
+    return tokens[index].strip('"').strip("'")
+
+
+def _spec_install_sources(spec: str) -> list[str]:
+    """Return the source paths of every install command in %install.
+
+    Parsed deterministically (no pattern matching) so that a hostile spec cannot
+    trigger backtracking and so that quoted paths, continuation lines, and
+    option arguments stay unambiguous.
+    """
+    body = _spec_section(spec, "%install")
+    sources: list[str] = []
+    for line in _logical_lines(body):
+        stripped = line.strip()
+        if not stripped.startswith("install"):
+            continue
+        if len(stripped) > len("install") and not stripped[len("install")].isspace():
+            continue
+        source = _install_command_source(stripped.split()[1:])
+        if source is None or source.startswith("/") or source.startswith("%{buildroot}"):
+            continue
+        sources.append(source)
+    return sources
+
+
+def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
+    """Return True when a live workflow command copies ``source`` into the tarball.
+
+    The line must reference the rpmbuild staging tree AND the file itself, so a
+    path that only appears in a comment, or that the workflow copies somewhere
+    else, cannot satisfy the contract.
+    """
+    name = Path(source).name
+    for line in _logical_lines(workflow):
+        if line.lstrip().startswith("#"):
+            continue
+        if not any(marker in line for marker in TARBALL_STAGING_MARKERS):
+            continue
+        if name in line:
+            return True
+    return False
+
+
 def validate_rpm_spec_sources_are_staged(result: ValidationResult) -> None:
     """Every file the RPM spec installs must reach the rpmbuild tarball.
 
     rpmbuild builds from the source tarball that release-rpm.yml assembles, not
     from the repository checkout: a spec line that installs a path the workflow
     never copies fails the release build, and only at release time.  Cross-check
-    the spec's install sources against the workflow's staging steps.
+    the spec's %install sources against the workflow's tarball staging commands.
     """
     spec = read_safe(RPM_SPEC)
     workflow = read_safe(RELEASE_RPM_WORKFLOW)
@@ -1149,29 +1318,27 @@ def validate_rpm_spec_sources_are_staged(result: ValidationResult) -> None:
         )
         return
 
-    sources = re.findall(r"^install -m [0-7]+ ([^\s\\]+)", spec, re.MULTILINE)
+    sources = _spec_install_sources(spec)
     if not sources:
         result.fail(
             "rpm-spec-sources:none-parsed",
-            "no install sources parsed from the RPM spec (parser or spec shape "
-            "changed)",
+            "no install sources parsed from the RPM spec %install section "
+            "(parser or spec shape changed)",
         )
         return
 
     for source in sources:
-        if source.startswith("/") or source.startswith("%{buildroot}"):
-            continue
         check_id = f"rpm-spec-sources:{Path(source).name}"
-        if source in workflow or Path(source).name in workflow:
+        if _workflow_stages_into_tarball(workflow, source):
             result.pass_(
                 check_id,
-                f"release-rpm.yml stages {source} for the rpmbuild tarball",
+                f"release-rpm.yml copies {source} into the rpmbuild tarball",
             )
         else:
             result.fail(
                 check_id,
                 f"the RPM spec installs {source}, but release-rpm.yml never "
-                "copies it into the source tarball",
+                "copies it into the rpmbuild source tarball",
             )
 
 
@@ -1266,7 +1433,9 @@ def validate_module_snippet_best_practices(result: ValidationResult) -> None:
             result.fail(f"snippet:{family}:exists", f"{rel} not found")
             continue
         result.pass_(f"snippet:{family}:exists", f"{rel} present")
-        _check_snippet_load_form(result, family, str(rel), content, expected_line)
+        _check_snippet_load_form(
+            result, family, str(rel), content, expected_line, ships_active
+        )
         _check_snippet_guidance(result, family, str(rel), content)
         _check_snippet_directives(result, family, str(rel), content, expected_line)
         _check_snippet_opt_in(
@@ -1565,7 +1734,13 @@ def extract_nginx_versions(content: str) -> set[str]:
     versions: set[str] = set()
 
     if "tools/release-matrix.json" in content:
-        versions.update(_extract_matrix_versions())
+        # A malformed matrix must not abort version extraction: fall back to the
+        # in-file version surfaces so the checksum check still runs, and let the
+        # matrix validator report the malformed data as its own failure.
+        try:
+            versions.update(_extract_matrix_versions())
+        except (RuntimeError, OSError, ValueError, KeyError, TypeError):
+            pass
 
     for raw_line in content.splitlines():
         line = _strip_unquoted_comment(raw_line).strip()
