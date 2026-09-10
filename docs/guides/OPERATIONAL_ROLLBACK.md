@@ -629,8 +629,15 @@ fi
 LOG_LEVEL_OK=0
 # Capture nginx -T ONCE and search the captured output: a short-circuiting
 # grep -q on a large nginx -T stream can SIGPIPE the producer and, under
-# pipefail, make the condition falsely fail.
-NGINX_T_OUTPUT="$(nginx -T 2>/dev/null || true)"
+# pipefail, make the condition falsely fail.  The exit status is captured
+# separately: a failed nginx -T must fail the probe explicitly instead of
+# being masked by partial output.
+nginx_t_status=0
+NGINX_T_OUTPUT="$(nginx -T 2>/dev/null)" || nginx_t_status=$?
+if [ "$nginx_t_status" -ne 0 ]; then
+  echo "FAIL: nginx -T failed (exit $nginx_t_status); cannot verify the logging configuration" >&2
+  exit 1
+fi
 if printf '%s' "$NGINX_T_OUTPUT" | grep -q "markdown_log_verbosity.*\(info\|debug\)" \
     && printf '%s' "$NGINX_T_OUTPUT" | grep -E "^[[:space:]]*error_log[[:space:]]+[^;]*[[:space:]]+(info|debug)[[:space:]]*;" ; then
   LOG_LEVEL_OK=1
