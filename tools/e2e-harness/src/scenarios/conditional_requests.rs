@@ -325,6 +325,10 @@ fn append_echo_headers_case(
     let count_b = body.lines().filter(|l| *l == "x-test: B").count();
     let count_inm = body
         .lines()
+        .filter(|l| l.starts_with("if-none-match:"))
+        .count();
+    let count_inm_value = body
+        .lines()
         .filter(|l| *l == "if-none-match: \"non-matching-etag-99999\"")
         .count();
     assertions.push(AssertionResult {
@@ -354,14 +358,14 @@ fn append_echo_headers_case(
         message: None,
     });
     assertions.push(AssertionResult {
-        name: "case11_conditional_header_reaches_upstream".to_string(),
-        passed: count_inm == 1,
-        expected: "exactly one if-none-match line in upstream echo".to_string(),
-        actual: if count_inm == 1 {
-            "present exactly once".to_string()
+        name: "case11_conditional_header_suppressed_upstream".to_string(),
+        passed: count_inm == 0 && count_inm_value == 0,
+        expected: "no if-none-match line in upstream echo (validator suppressed)".to_string(),
+        actual: if count_inm == 0 {
+            "absent (suppressed as designed)".to_string()
         } else {
             format!(
-                "count={count_inm} (capture/restore lost or duplicated the conditional header?)"
+                "count={count_inm} value_count={count_inm_value} (validator leaked upstream?)"
             )
         },
         message: None,
