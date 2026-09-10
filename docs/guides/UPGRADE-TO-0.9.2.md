@@ -2,6 +2,12 @@
 
 ## Overview
 
+> **Platform requirement:** the upgrade and rollback procedures in this
+> guide use GNU coreutils (`mv -T`, `stat -c`, `readlink -f`) and are
+> therefore Linux-only. macOS/BSD hosts must run the equivalent commands
+> with GNU coreutils installed (e.g. `brew install coreutils` and a
+> `gmv`/`gstat` prefix) or adapt the commands accordingly.
+
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
 0.9.2 is a **breaking release**. The release freezes 20 active directives and
 retains five removed names as reject-only migration entries. Those entries fail
@@ -392,6 +398,9 @@ sudo nginx -t || {
     # active link (GNU mv -T uses rename(2)), so a failure never
     # leaves the configuration root without a link.
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}.link-new" || {
+      # Remove any stale temporary link (a previous failed attempt may
+      # have left one) and the staged tree, then report manual recovery.
+      sudo rm -f "${NGINX_CONF_DIR}.link-new"
       sudo rm -rf "${RESTORE_STAGED}"
       echo "ERROR: could not create the replacement configuration-root link; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
@@ -576,10 +585,17 @@ fi
 case "${CONFIG_BACKUP_DIR}" in
   /*)
     if [[ "${CONFIG_BACKUP_DIR}" == "/" \
+          || "${CONFIG_BACKUP_DIR}" == "/etc" \
+          || "${CONFIG_BACKUP_DIR}" == "/var" \
+          || "${CONFIG_BACKUP_DIR}" == "/usr" \
+          || "${CONFIG_BACKUP_DIR}" == "/opt" \
+          || "${CONFIG_BACKUP_DIR}" == "/srv" \
+          || "${CONFIG_BACKUP_DIR}" == "/home" \
+          || "${CONFIG_BACKUP_DIR}" == "/root" \
           || "${CONFIG_BACKUP_DIR}" == "${NGINX_CONF_DIR}" \
           || "${CONFIG_BACKUP_DIR}" == "${NGINX_CONF_DIR}/"* \
           || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}/"* ]]; then
-      echo "ERROR: unsafe CONFIG_BACKUP_DIR '${CONFIG_BACKUP_DIR}' (must be an absolute dedicated backup root, distinct from NGINX_CONF_DIR)" >&2
+      echo "ERROR: unsafe CONFIG_BACKUP_DIR '${CONFIG_BACKUP_DIR}' (must be an absolute dedicated backup root, not a system root, and distinct from NGINX_CONF_DIR)" >&2
       exit 1
     fi
     ;;
@@ -613,8 +629,13 @@ trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; exit "$rc"' EXIT
 # to the COPY, rewrite its load_module entry to reference the staged .so,
 # then run nginx -t against that copy.
 sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
-# (Apply MIGRATION-0.9.2.md to ${STAGED_ROOT} here — the same edits that
-# will later be applied to the active tree.)
+# Apply MIGRATION-0.9.2.md to the STAGED COPY: perform the same manual
+# edits (removed directives, replacements, default-policy actions) on
+# ${STAGED_ROOT} that the guide describes for the active tree.  The
+# staged tree is validated below BEFORE any active-tree change, so a
+# migration mistake surfaces here with the active configuration still
+# intact.  After staged validation succeeds, repeat the SAME edits on
+# the active tree (${NGINX_CONF_DIR}) before the module swap.
 # Rewrite ONLY the Markdown module's load_module entry (other modules'
 # load_module lines must be preserved untouched), then verify exactly one
 # staged entry exists — a missing or duplicated Markdown entry means the
@@ -734,6 +755,9 @@ if ! sudo nginx -t; then
     # active link (GNU mv -T uses rename(2)), so a failure never
     # leaves the configuration root without a link.
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}.link-new" || {
+      # Remove any stale temporary link (a previous failed attempt may
+      # have left one) and the staged tree, then report manual recovery.
+      sudo rm -f "${NGINX_CONF_DIR}.link-new"
       sudo rm -rf "${RESTORE_STAGED}"
       echo "ERROR: could not create the replacement configuration-root link; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
