@@ -994,6 +994,24 @@ class TestModuleSnippetEdgeCases:
         ]
         assert validator._is_staging_command(tokens, "ngx_http_markdown_filter_module.so")
 
+    def test_commented_staging_destination_does_not_prove_staging(self) -> None:
+        workflow = (
+            "cp packaging/nfpm/modules/mod-markdown.conf /tmp/elsewhere "
+            '# "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_commented_source_does_not_prove_staging(self) -> None:
+        workflow = (
+            "cp /tmp/elsewhere/mod-markdown.conf "
+            '# packaging/nfpm/modules/mod-markdown.conf "/tmp/${TARBALL_DIR}/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
     def test_staging_under_another_name_does_not_prove_staging(self) -> None:
         tokens = [
             "cp",
