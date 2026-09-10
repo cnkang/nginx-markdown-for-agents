@@ -406,8 +406,30 @@ sudo cp -a "${SNAPSHOT_SRC}/." "${MIGRATE_BACKUP}/" || {
 # MIGRATE_ACTIVE is set.  The trap also keeps cleaning STAGED_ROOT
 # (it replaces the earlier STAGED_ROOT-only trap in this bash block).
 # Disarmed after the migration succeeds.
+# The restore is symlink-aware: a symlinked root is recreated as a link
+# and the snapshot restored into the RESOLVED TARGET, preserving the
+# root's symlink identity on every failure path.
+migrate_restore() {
+  if [[ "$MIGRATE_ACTIVE" -ne 1 ]] || [[ ! -d "$MIGRATE_BACKUP" ]]; then
+    return 0
+  fi
+  if [[ -L "${NGINX_CONF_DIR}" ]]; then
+    ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
+    if [[ "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}" \
+          || "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}/"* ]]; then
+      return 0
+    fi
+    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
+    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
+    sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || true
+  else
+    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
+    sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+  fi
+}
 MIGRATE_ACTIVE=1
-trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; if [[ "$MIGRATE_ACTIVE" -eq 1 ]] && [[ -d "$MIGRATE_BACKUP" ]]; then sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true; sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true; fi; exit "$rc"' EXIT
+trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; migrate_restore; exit "$rc"' EXIT
 if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
     | while read -r active_conf; do
         sudo sed -i -E \
@@ -460,12 +482,20 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
   exit 1
 fi
 # Migration succeeded: mark the migration complete (the trap no longer
-# restores), clean the staged tree explicitly (the trap that used to
-# clean it was replaced), disarm the trap, and drop the snapshot.
+# restores), clean the staged tree and the snapshot explicitly (the
+# trap that used to clean them was replaced), and disarm the trap ONLY
+# after both cleanups succeed — a failed cleanup is reported so the
+# root-owned temporary directory is not silently leaked.
 MIGRATE_ACTIVE=0
-sudo rm -rf -- "$STAGED_ROOT" 2>/dev/null || true
+if ! sudo rm -rf -- "$STAGED_ROOT" 2>/dev/null; then
+  echo "ERROR: could not clean the staged tree $STAGED_ROOT; remove it manually" >&2
+  exit 1
+fi
+if ! sudo rm -rf "${MIGRATE_BACKUP}" 2>/dev/null; then
+  echo "ERROR: could not clean the migration snapshot ${MIGRATE_BACKUP}; remove it manually" >&2
+  exit 1
+fi
 trap - EXIT
-sudo rm -rf "${MIGRATE_BACKUP}" 2>/dev/null || true
 ```
 
 A 0.9.1 configuration fails `nginx -t` under the 0.9.2 binary (removed
@@ -597,7 +627,15 @@ sudo nginx -t || {
     # Create a temporary symlink and atomically rename it over the
     # active link (GNU mv -T uses rename(2)), so a failure never
     # leaves the configuration root without a link.
-    sudo ln -s "$(sudo cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}.link-new" || {
+    ROOT_LINK_TARGET="$(sudo cat "${CONFIG_BACKUP_DIR}/tree-root-link")" || {
+      echo "ERROR: could not read the configuration-root symlink marker ${CONFIG_BACKUP_DIR}/tree-root-link; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
+    if [[ -z "${ROOT_LINK_TARGET}" ]]; then
+      echo "ERROR: the configuration-root symlink marker is empty; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    fi
+    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" || {
       # Remove any stale temporary link (a previous failed attempt may
       # have left one) and the staged tree, then report manual recovery.
       sudo rm -f "${NGINX_CONF_DIR}.link-new"
@@ -998,8 +1036,30 @@ sudo cp -a "${SNAPSHOT_SRC}/." "${MIGRATE_BACKUP}/" || {
 # MIGRATE_ACTIVE is set.  The trap also keeps cleaning STAGED_ROOT
 # (it replaces the earlier STAGED_ROOT-only trap in this bash block).
 # Disarmed after the migration succeeds.
+# The restore is symlink-aware: a symlinked root is recreated as a link
+# and the snapshot restored into the RESOLVED TARGET, preserving the
+# root's symlink identity on every failure path.
+migrate_restore() {
+  if [[ "$MIGRATE_ACTIVE" -ne 1 ]] || [[ ! -d "$MIGRATE_BACKUP" ]]; then
+    return 0
+  fi
+  if [[ -L "${NGINX_CONF_DIR}" ]]; then
+    ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
+    if [[ "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}" \
+          || "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}/"* ]]; then
+      return 0
+    fi
+    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
+    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
+    sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || true
+  else
+    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
+    sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+  fi
+}
 MIGRATE_ACTIVE=1
-trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; if [[ "$MIGRATE_ACTIVE" -eq 1 ]] && [[ -d "$MIGRATE_BACKUP" ]]; then sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true; sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true; fi; exit "$rc"' EXIT
+trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; migrate_restore; exit "$rc"' EXIT
 if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
     | while read -r active_conf; do
         sudo sed -i -E \
@@ -1052,12 +1112,20 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
   exit 1
 fi
 # Migration succeeded: mark the migration complete (the trap no longer
-# restores), clean the staged tree explicitly (the trap that used to
-# clean it was replaced), disarm the trap, and drop the snapshot.
+# restores), clean the staged tree and the snapshot explicitly (the
+# trap that used to clean them was replaced), and disarm the trap ONLY
+# after both cleanups succeed — a failed cleanup is reported so the
+# root-owned temporary directory is not silently leaked.
 MIGRATE_ACTIVE=0
-sudo rm -rf -- "$STAGED_ROOT" 2>/dev/null || true
+if ! sudo rm -rf -- "$STAGED_ROOT" 2>/dev/null; then
+  echo "ERROR: could not clean the staged tree $STAGED_ROOT; remove it manually" >&2
+  exit 1
+fi
+if ! sudo rm -rf "${MIGRATE_BACKUP}" 2>/dev/null; then
+  echo "ERROR: could not clean the migration snapshot ${MIGRATE_BACKUP}; remove it manually" >&2
+  exit 1
+fi
 trap - EXIT
-sudo rm -rf "${MIGRATE_BACKUP}" 2>/dev/null || true
 # A configuration with NO retired directives is already 0.9.2
 # compliant: grep exit status 1 (no match) is accepted by the check
 # Record the service-manager ownership decision BEFORE stopping: after
@@ -1168,7 +1236,15 @@ if ! sudo nginx -t; then
     # Create a temporary symlink and atomically rename it over the
     # active link (GNU mv -T uses rename(2)), so a failure never
     # leaves the configuration root without a link.
-    sudo ln -s "$(sudo cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}.link-new" || {
+    ROOT_LINK_TARGET="$(sudo cat "${CONFIG_BACKUP_DIR}/tree-root-link")" || {
+      echo "ERROR: could not read the configuration-root symlink marker ${CONFIG_BACKUP_DIR}/tree-root-link; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
+    if [[ -z "${ROOT_LINK_TARGET}" ]]; then
+      echo "ERROR: the configuration-root symlink marker is empty; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    fi
+    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" || {
       # Remove any stale temporary link (a previous failed attempt may
       # have left one) and the staged tree, then report manual recovery.
       sudo rm -f "${NGINX_CONF_DIR}.link-new"
