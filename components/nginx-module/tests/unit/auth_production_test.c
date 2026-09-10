@@ -1265,6 +1265,10 @@ test_modify_cc_qualified_private_removed_and_bare_appended(void)
         { "private=\"Set-Cookie\", max-age=60", "max-age=60, private" },
         { "max-age=60, private=\"Set-Cookie\"", "max-age=60, private" },
         { "private, private=\"Set-Cookie\"",    "private" },
+        /* public + qualified private routes through the separate
+         * any_public branch: public is stripped, the qualified form is
+         * removed, and the bare private is appended. */
+        { "public, private=\"Set-Cookie\"",     "private" },
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

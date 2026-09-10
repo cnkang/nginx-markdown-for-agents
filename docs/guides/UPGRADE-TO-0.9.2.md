@@ -352,8 +352,15 @@ sudo nginx -t || {
   # fully staged and validated tree replaces the active root.  The
   # staging dir sits BESIDE the configuration root so the final mv stays
   # on the same filesystem (a TMPDIR staging dir would cross devices and
-  # fail the atomic rename).
-  RESTORE_STAGED="$(sudo mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
+  # fail the atomic rename).  For a symlinked root, resolve the target
+  # FIRST and stage beside the TARGET's parent so the mv cannot cross
+  # devices.
+  if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
+    ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
+    RESTORE_STAGED="$(sudo mktemp -d "$(dirname "${ROOT_LINK_TARGET}")/.nginx-restore-XXXXXX")"
+  else
+    RESTORE_STAGED="$(sudo mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
+  fi
   # Dedicated cleanup trap: any unguarded failure under set -euo pipefail
   # must still remove the staging tree; disarmed after a successful move.
   RESTORE_CLEANUP_SET=1
@@ -381,8 +388,20 @@ sudo nginx -t || {
   sudo chown "${ROOT_OWNER}" "${RESTORE_STAGED}"
   sudo chmod "${ROOT_MODE}" "${RESTORE_STAGED}"
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
-    sudo rm -rf "${NGINX_CONF_DIR}"
-    sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
+    # Create a temporary symlink and atomically rename it over the
+    # active link (GNU mv -T uses rename(2)), so a failure never
+    # leaves the configuration root without a link.
+    sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}.link-new" || {
+      sudo rm -rf "${RESTORE_STAGED}"
+      echo "ERROR: could not create the replacement configuration-root link; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
+    sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" || {
+      sudo rm -f "${NGINX_CONF_DIR}.link-new"
+      sudo rm -rf "${RESTORE_STAGED}"
+      echo "ERROR: could not replace the configuration-root link; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
     ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
     # The staging dir was created beside the SYMLINK; the final mv moves
     # it to the resolved TARGET, which may be on a different filesystem.
@@ -569,6 +588,8 @@ case "${CONFIG_BACKUP_DIR}" in
     exit 1
     ;;
 esac
+# Create the backup root (a fresh host may not have it) before snapshotting.
+sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 sudo rm -rf "${CONFIG_BACKUP_DIR}/tree"
 sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree/"
 if [[ -L "${NGINX_CONF_DIR}" ]]; then
@@ -677,8 +698,15 @@ if ! sudo nginx -t; then
   # validate it, so a failure leaves the active tree untouched; only a
   # fully staged and validated tree replaces the active root.  The
   # staging dir sits BESIDE the configuration root so the final mv stays
-  # on the same filesystem.
-  RESTORE_STAGED="$(sudo mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
+  # on the same filesystem.  For a symlinked root, resolve the target
+  # FIRST and stage beside the TARGET's parent so the mv cannot cross
+  # devices.
+  if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
+    ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
+    RESTORE_STAGED="$(sudo mktemp -d "$(dirname "${ROOT_LINK_TARGET}")/.nginx-restore-XXXXXX")"
+  else
+    RESTORE_STAGED="$(sudo mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
+  fi
   # Dedicated cleanup trap: any unguarded failure under set -euo pipefail
   # must still remove the staging tree; disarmed after a successful move.
   RESTORE_CLEANUP_SET=1
@@ -702,8 +730,20 @@ if ! sudo nginx -t; then
   sudo chown "${ROOT_OWNER}" "${RESTORE_STAGED}"
   sudo chmod "${ROOT_MODE}" "${RESTORE_STAGED}"
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
-    sudo rm -rf "${NGINX_CONF_DIR}"
-    sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
+    # Create a temporary symlink and atomically rename it over the
+    # active link (GNU mv -T uses rename(2)), so a failure never
+    # leaves the configuration root without a link.
+    sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}.link-new" || {
+      sudo rm -rf "${RESTORE_STAGED}"
+      echo "ERROR: could not create the replacement configuration-root link; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
+    sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" || {
+      sudo rm -f "${NGINX_CONF_DIR}.link-new"
+      sudo rm -rf "${RESTORE_STAGED}"
+      echo "ERROR: could not replace the configuration-root link; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
     ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
     # The staging dir was created beside the SYMLINK; the final mv moves
     # it to the resolved TARGET, which may be on a different filesystem.
