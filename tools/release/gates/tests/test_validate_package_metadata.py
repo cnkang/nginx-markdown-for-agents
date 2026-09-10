@@ -1028,6 +1028,67 @@ class TestModuleSnippetEdgeCases:
             tokens, "packaging/nfpm/modules/mod-markdown.conf"
         )
 
+    def test_function_body_install_does_not_satisfy_the_snippet_check(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The install sits in a function that is never called.
+                return (
+                    "%install\n"
+                    "stage_snippet() {\n"
+                    "  install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "}\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_foreign_staging_root_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        for destination in (
+            "$STAGE_ROOT/${TARBALL_DIR}/packaging/nfpm/modules/",
+            "./wrong/../${TARBALL_DIR}/packaging/nfpm/modules/",
+            "/tmp/../../outside/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ):
+            assert not validator._is_staging_command(
+                ["cp", source, destination], source
+            )
+
+    def test_relative_source_after_a_directory_change_does_not_prove_staging(self) -> None:
+        workflow = (
+            "      - name: stage\n"
+            "        run: |\n"
+            "          cd /tmp\n"
+            '          cp packaging/nfpm/modules/mod-markdown.conf "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_directory_state_resets_at_a_new_step(self) -> None:
+        workflow = (
+            "      - name: build\n"
+            "        run: |\n"
+            "          cd components/rust-converter\n"
+            "      - name: stage\n"
+            "        run: |\n"
+            '          cp packaging/nfpm/modules/mod-markdown.conf "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
     def test_guard_inside_a_function_group_is_tracked(self, monkeypatch) -> None:
         def fake_read(path: Path) -> str:
             if path == validator.RPM_SPEC:
