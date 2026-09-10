@@ -443,16 +443,16 @@ migrate_restore() {
     # untouched and the snapshot preserved for manual recovery.
     if ! sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
       echo "ERROR: could not clear the staging symlink ${NGINX_CONF_DIR}.link-new; the active link is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     fi
     if ! sudo ln -s "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
       echo "ERROR: could not create the replacement symlink; the active link is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     fi
     if ! sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" 2>/dev/null; then
       sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
       echo "ERROR: could not replace the configuration-root symlink; the active link is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     fi
     # The active link now points at the snapshot.  Keep the previous
     # target as recovery material instead of deleting it: move it to a
@@ -473,7 +473,7 @@ migrate_restore() {
     # install the snapshot, and roll back on failure.
     ROLLBACK_OLD="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR}")/.nginx-old-XXXXXX")" 2>/dev/null || {
       echo "ERROR: could not allocate a rollback directory; the active tree is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     }
     sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
     # The root is ABSENT between this rename and the snapshot rename below:
@@ -481,12 +481,12 @@ migrate_restore() {
     # cannot be swapped atomically.  A symlinked root takes the branch above.
     if ! sudo mv -T "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}" 2>/dev/null; then
       echo "ERROR: could not move the active tree aside; the active tree is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     fi
     if ! sudo mv -T "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null; then
       sudo mv -T "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null || true
       echo "ERROR: could not install the snapshot; the previous tree was rolled back and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     fi
     echo "NOTE: the previous configuration tree was preserved as ${ROLLBACK_OLD}; remove it once the upgrade is confirmed"
   fi
@@ -1280,16 +1280,16 @@ migrate_restore() {
     # untouched and the snapshot preserved for manual recovery.
     if ! sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
       echo "ERROR: could not clear the staging symlink ${NGINX_CONF_DIR}.link-new; the active link is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     fi
     if ! sudo ln -s "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
       echo "ERROR: could not create the replacement symlink; the active link is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     fi
     if ! sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" 2>/dev/null; then
       sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
       echo "ERROR: could not replace the configuration-root symlink; the active link is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     fi
     # The active link now points at the snapshot.  Keep the previous
     # target as recovery material instead of deleting it: move it to a
@@ -1310,7 +1310,7 @@ migrate_restore() {
     # install the snapshot, and roll back on failure.
     ROLLBACK_OLD="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR}")/.nginx-old-XXXXXX")" 2>/dev/null || {
       echo "ERROR: could not allocate a rollback directory; the active tree is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     }
     sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
     # The root is ABSENT between this rename and the snapshot rename below:
@@ -1318,12 +1318,12 @@ migrate_restore() {
     # cannot be swapped atomically.  A symlinked root takes the branch above.
     if ! sudo mv -T "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}" 2>/dev/null; then
       echo "ERROR: could not move the active tree aside; the active tree is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     fi
     if ! sudo mv -T "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null; then
       sudo mv -T "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null || true
       echo "ERROR: could not install the snapshot; the previous tree was rolled back and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
-      return 0
+      return 1
     fi
     echo "NOTE: the previous configuration tree was preserved as ${ROLLBACK_OLD}; remove it once the upgrade is confirmed"
   fi
@@ -1646,11 +1646,26 @@ stop_started_nginx() {
     sudo nginx -s stop 2>/dev/null || true
   fi
   sleep 1
+  # Never swap the module under a master that still maps it: report a stop that
+  # did not take effect so the caller can abort the recovery.
+  if [[ "$systemd_managed" -eq 1 ]] && systemctl is-active --quiet nginx 2>/dev/null; then
+    return 1
+  fi
+  if [[ "$systemd_managed" -ne 1 ]] && pgrep -x nginx >/dev/null 2>&1; then
+    return 1
+  fi
+  return 0
 }
 
 restore_previous_module_and_config() {
-  # 1) Never replace the module under a live process.
-  stop_started_nginx
+  # 1) Never replace the module under a live process.  When the stop does not
+  #    take effect, the 0.9.2 module stays installed and the migration trap is
+  #    disarmed so it cannot restore a configuration that pair does not match.
+  if ! stop_started_nginx; then
+    MIGRATE_ACTIVE=0
+    echo "ERROR: NGINX is still running after the stop request; refusing to replace the module of a live master. Stop NGINX, install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
+    return 1
+  fi
   # 2) Restore the previous module.  When either step fails the 0.9.2 module is
   #    still in place, so disarm the migration trap instead of restoring a
   #    configuration that cannot pair with it.
@@ -1666,7 +1681,11 @@ restore_previous_module_and_config() {
   fi
   # 3) Restore the configuration the previous module pairs with and validate the
   #    pair before the service is allowed to run again.
-  migrate_restore || true
+  if ! migrate_restore; then
+    MIGRATE_ACTIVE=0
+    echo "ERROR: could not restore the pre-migration configuration; NGINX stays stopped and the previous module is installed. Restore manually: copy ${CONFIG_BACKUP_DIR}/tree over ${NGINX_CONF_DIR}, then run nginx -t and start NGINX" >&2
+    return 1
+  fi
   if ! sudo nginx -t; then
     MIGRATE_ACTIVE=0
     echo "ERROR: the restored module and configuration fail validation; NGINX stays stopped. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree" >&2
@@ -1676,9 +1695,20 @@ restore_previous_module_and_config() {
   # its work, so disarm it and bring the service back up.
   MIGRATE_ACTIVE=0
   if [[ "$systemd_managed" -eq 1 ]]; then
-    sudo systemctl start nginx 2>/dev/null || true
+    if ! sudo systemctl start nginx 2>/dev/null || ! systemctl is-active --quiet nginx 2>/dev/null; then
+      echo "ERROR: NGINX did not become active after the recovery restart; the previous module and configuration are in place and validated. Start NGINX manually and check the error log" >&2
+      return 1
+    fi
   else
-    sudo nginx 2>/dev/null || true
+    if ! sudo nginx 2>/dev/null; then
+      echo "ERROR: NGINX did not start after the recovery restart; the previous module and configuration are in place and validated. Start NGINX manually and check the error log" >&2
+      return 1
+    fi
+    sleep 1
+    if ! pgrep -x nginx >/dev/null 2>&1; then
+      echo "ERROR: the NGINX master is not running after the recovery restart; the previous module and configuration are in place and validated. Start NGINX manually and check the error log" >&2
+      return 1
+    fi
   fi
   echo "INFO: previous module and configuration restored, validated, and NGINX restarted" >&2
   return 0

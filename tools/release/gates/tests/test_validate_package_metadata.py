@@ -920,6 +920,67 @@ class TestModuleSnippetEdgeCases:
             for status, check_id, _message in result.results
         )
 
+    def test_comment_ending_in_a_backslash_does_not_hide_the_next_line(self) -> None:
+        content = "# note: the directive follows\nload_module x;\\\nload_module y;\n"
+        lines = validator._logical_lines(content)
+        # The comment keeps its own line, so the live directives stay visible.
+        assert lines[0].startswith("# note")
+        assert "load_module x;" in lines[1]
+        assert "load_module y;" in lines[1]
+
+    def test_echo_of_the_tarball_path_does_not_prove_staging(self, monkeypatch) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return (
+                'echo "copied packaging/nfpm/modules/mod-markdown.conf into'
+                ' ${TARBALL_DIR}/"\n'
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+
+        assert any(
+            status == "FAIL" and check_id.endswith("mod-markdown.conf")
+            for status, check_id, _message in result.results
+        )
+
+    def test_multi_source_install_checks_every_source(self) -> None:
+        spec = "%install\ninstall -m 0644 a.conf b.conf %{buildroot}/etc/nginx/modules/\n"
+        assert validator._spec_install_sources(spec) == ["a.conf", "b.conf"]
+
+    def test_source_and_destination_must_share_one_install_command(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The snippet source and the packaged destination sit in two
+                # DIFFERENT install commands.
+                return (
+                    "%install\n"
+                    "install -d %{buildroot}/usr/share/nginx/modules\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf %{buildroot}/tmp/\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
     def test_prose_mentioning_the_loader_directive_defeats_the_contract(
         self, monkeypatch
     ) -> None:
