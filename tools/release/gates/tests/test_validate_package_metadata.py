@@ -1049,6 +1049,29 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._spec_installs_snippet(body)
 
+    def test_single_line_uncalled_function_is_not_live(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = f"stage() {{ install -m 0644 {source} {destination}; }}\n"
+        assert not validator._spec_installs_snippet(body)
+
+    def test_nested_group_does_not_close_the_function(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        called = (
+            "stage() {\n"
+            f"  {{ install -m 0644 {source} {destination}; }}\n"
+            "}\n"
+            "stage\n"
+        )
+        uncalled = (
+            "stage() {\n"
+            f"  {{ install -m 0644 {source} {destination}; }}\n"
+            "}\n"
+        )
+        assert validator._spec_installs_snippet(called)
+        assert not validator._spec_installs_snippet(uncalled)
+
     def test_leading_list_marker_does_not_prove_staging(self) -> None:
         workflow = (
             "run: |\n"
