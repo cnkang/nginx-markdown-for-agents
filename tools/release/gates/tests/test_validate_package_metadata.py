@@ -951,6 +951,49 @@ class TestModuleSnippetEdgeCases:
             for status, check_id, _message in result.results
         )
 
+    def test_comment_destination_does_not_satisfy_the_install_check(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The packaged path appears only inside a trailing comment, and
+                # the real destination is a different directory.
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/tmp/ # %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_directory_qualified_look_alike_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "vendor/packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_bare_spec_name_accepts_the_built_artifact(self) -> None:
+        tokens = [
+            "cp",
+            "build/ngx_http_markdown_filter_module.so",
+            "/tmp/${TARBALL_DIR}/",
+        ]
+        assert validator._is_staging_command(tokens, "ngx_http_markdown_filter_module.so")
+
     def test_look_alike_name_does_not_prove_staging(self) -> None:
         tokens = [
             "cp",
