@@ -459,8 +459,8 @@ migrate_restore() {
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
     PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
-      echo "ERROR: could not allocate a unique recovery path; the active tree is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
-      exit 1
+      echo "ERROR: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration link now serves the snapshot and the previous tree is still in place there. Remove or relocate ${ROOT_LINK_TARGET} once the upgrade is confirmed" >&2
+      return 1
     }
     sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
     if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
@@ -484,8 +484,11 @@ migrate_restore() {
       return 1
     fi
     if ! sudo mv -T "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null; then
-      sudo mv -T "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null || true
-      echo "ERROR: could not install the snapshot; the previous tree was rolled back and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
+      if sudo mv -T "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null; then
+        echo "ERROR: could not install the snapshot; the previous tree was rolled back and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
+      else
+        echo "ERROR: could not install the snapshot and could not restore the previous tree; the configuration root ${NGINX_CONF_DIR} is ABSENT. Restore it from ${MIGRATE_BACKUP} or ${ROLLBACK_OLD} before starting NGINX" >&2
+      fi
       return 1
     fi
     echo "NOTE: the previous configuration tree was preserved as ${ROLLBACK_OLD}; remove it once the upgrade is confirmed"
@@ -544,8 +547,8 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
     PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
-      echo "ERROR: could not allocate a unique recovery path; the active tree is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
-      exit 1
+      echo "ERROR: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration link now serves the snapshot and the previous tree is still in place there. Remove or relocate ${ROOT_LINK_TARGET} once the upgrade is confirmed" >&2
+      return 1
     }
     sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
     if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
@@ -1296,8 +1299,8 @@ migrate_restore() {
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
     PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
-      echo "ERROR: could not allocate a unique recovery path; the active tree is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
-      exit 1
+      echo "ERROR: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration link now serves the snapshot and the previous tree is still in place there. Remove or relocate ${ROOT_LINK_TARGET} once the upgrade is confirmed" >&2
+      return 1
     }
     sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
     if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
@@ -1321,8 +1324,11 @@ migrate_restore() {
       return 1
     fi
     if ! sudo mv -T "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null; then
-      sudo mv -T "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null || true
-      echo "ERROR: could not install the snapshot; the previous tree was rolled back and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
+      if sudo mv -T "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null; then
+        echo "ERROR: could not install the snapshot; the previous tree was rolled back and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
+      else
+        echo "ERROR: could not install the snapshot and could not restore the previous tree; the configuration root ${NGINX_CONF_DIR} is ABSENT. Restore it from ${MIGRATE_BACKUP} or ${ROLLBACK_OLD} before starting NGINX" >&2
+      fi
       return 1
     fi
     echo "NOTE: the previous configuration tree was preserved as ${ROLLBACK_OLD}; remove it once the upgrade is confirmed"
@@ -1381,8 +1387,8 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
     PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
-      echo "ERROR: could not allocate a unique recovery path; the active tree is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
-      exit 1
+      echo "ERROR: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration link now serves the snapshot and the previous tree is still in place there. Remove or relocate ${ROOT_LINK_TARGET} once the upgrade is confirmed" >&2
+      return 1
     }
     sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
     if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
@@ -1674,7 +1680,9 @@ restore_previous_module_and_config() {
     return 1
   fi
   if ! sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null; then
-    sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null || :
+    if ! sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
+    echo "WARN: could not remove the staged module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged; remove it manually" >&2
+  fi
     MIGRATE_ACTIVE=0
     echo "ERROR: could not snapshot the installed 0.9.2 module for undo; the 0.9.2 module and its configuration remain in place. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree" >&2
     return 1
@@ -1682,7 +1690,9 @@ restore_previous_module_and_config() {
   # 3) Install the previous module, then restore the configuration it pairs
   #    with.
   if ! sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null; then
-    sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null || :
+    if ! sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null; then
+    echo "WARN: could not remove the module snapshot ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged; remove it manually" >&2
+  fi
     MIGRATE_ACTIVE=0
     echo "ERROR: could not replace the active module with the previous module; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
     return 1
@@ -1693,13 +1703,19 @@ restore_previous_module_and_config() {
     # configuration.
     if sudo mv -Tf "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null; then
       MIGRATE_ACTIVE=0
-      echo "ERROR: could not restore the pre-migration configuration; the 0.9.2 module was put back and pairs with the active configuration. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree, then run nginx -t" >&2
+      if sudo test -e "${NGINX_CONF_DIR}" 2>/dev/null; then
+        echo "ERROR: could not restore the pre-migration configuration; the 0.9.2 module was put back and pairs with the active configuration. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree, then run nginx -t" >&2
+      else
+        echo "ERROR: could not restore the pre-migration configuration and the configuration root ${NGINX_CONF_DIR} is ABSENT with the 0.9.2 module installed; restore the tree from ${CONFIG_BACKUP_DIR}/tree before starting NGINX" >&2
+      fi
       return 1
     fi
     echo "ERROR: could not restore the pre-migration configuration and could not put the 0.9.2 module back; NGINX stays stopped. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree" >&2
     return 1
   fi
-  sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null || :
+  if ! sudo rm -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged" 2>/dev/null; then
+    echo "WARN: could not remove the module snapshot ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.undo-staged; remove it manually" >&2
+  fi
   # 4) Validate the recovered pair before the service is allowed to run again.
   if ! sudo nginx -t; then
     MIGRATE_ACTIVE=0
