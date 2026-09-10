@@ -302,7 +302,7 @@ markdown_copy_runtime_conf_from_nginx_bin() {
 
 markdown_nginx_modules_dir() {
   local nginx_bin="$1"
-  local source_root source_modules modules_path
+  local source_root source_modules modules_path binary_dir
 
   markdown_validate_nginx_bin "${nginx_bin}" || return 1
 
@@ -310,6 +310,16 @@ markdown_nginx_modules_dir() {
   source_modules="${source_root}/modules"
   if [[ -d "${source_modules}" ]]; then
     printf '%s\n' "${source_modules}"
+    return 0
+  fi
+
+  # A source tree that was compiled but never installed keeps its dynamic
+  # modules beside the binary in objs/, which is the layout `make modules`
+  # produces and the one the reuse workflow points NGINX_BIN at.
+  binary_dir="$(cd "$(dirname "${nginx_bin}")" && pwd)"
+  if find "${binary_dir}" -maxdepth 1 -type f -name '*markdown*.so' \
+    -print -quit | grep -q .; then
+    printf '%s\n' "${binary_dir}"
     return 0
   fi
 
