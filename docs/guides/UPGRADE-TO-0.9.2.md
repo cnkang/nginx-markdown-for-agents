@@ -121,9 +121,16 @@ case "${NGINX_CONF_DIR}" in
   /*)
     if [[ "${NGINX_CONF_DIR}" == "/" \
           || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* \
+          || "${NGINX_CONF_DIR}" == "/etc" \
+          || "${NGINX_CONF_DIR}" == "/var" \
+          || "${NGINX_CONF_DIR}" == "/usr" \
+          || "${NGINX_CONF_DIR}" == "/opt" \
+          || "${NGINX_CONF_DIR}" == "/srv" \
+          || "${NGINX_CONF_DIR}" == "/home" \
+          || "${NGINX_CONF_DIR}" == "/root" \
           || ! -d "${NGINX_CONF_DIR}" \
           || ! -f "${NGINX_CONF_DIR}/nginx.conf" ]]; then
-      echo "ERROR: unsafe NGINX_CONF_DIR '${NGINX_CONF_DIR}' (must be an absolute existing config root containing nginx.conf, not the filesystem root or the backup directory)" >&2
+      echo "ERROR: unsafe NGINX_CONF_DIR '${NGINX_CONF_DIR}' (must be an absolute existing dedicated config root containing nginx.conf, not the filesystem root, a system root, or the backup directory)" >&2
       exit 1
     fi
     ;;
@@ -134,7 +141,14 @@ case "${NGINX_CONF_DIR}" in
 esac
 RESOLVED_CONF_DIR="$(readlink -f "${NGINX_CONF_DIR}")"
 if [[ "${RESOLVED_CONF_DIR}" == "/" \
-      || "${RESOLVED_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* ]]; then
+      || "${RESOLVED_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* \
+      || "${RESOLVED_CONF_DIR}" == "/etc" \
+      || "${RESOLVED_CONF_DIR}" == "/var" \
+      || "${RESOLVED_CONF_DIR}" == "/usr" \
+      || "${RESOLVED_CONF_DIR}" == "/opt" \
+      || "${RESOLVED_CONF_DIR}" == "/srv" \
+      || "${RESOLVED_CONF_DIR}" == "/home" \
+      || "${RESOLVED_CONF_DIR}" == "/root" ]]; then
   echo "ERROR: NGINX_CONF_DIR resolves to an unsafe target '${RESOLVED_CONF_DIR}'" >&2
   exit 1
 fi
