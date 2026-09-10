@@ -592,16 +592,21 @@ fi
 # covered by the affected markdown_filter scope (a timestamp-based path may
 # fall outside the location that disables conversion) and include the Host
 # header so the request reaches that scope.
+disabled_before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | \
+  grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"' | \
+  awk '{sum += $NF} END {print sum+0}')
 curl -sS -o /dev/null \
   -H "Accept: text/markdown" \
   -H "Host: ${ROLLBACK_HOST:-localhost}" \
   "http://localhost/rollback-probe"
 sleep 1
-disabled=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+disabled_after=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
   http://localhost/markdown-metrics | \
-  grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"')
-if [ -z "$disabled" ]; then
-  echo "FAIL: disabled signal not present after rollback check (expected requests_total outcome=skipped reason=disabled)"
+  grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"' | \
+  awk '{sum += $NF} END {print sum+0}')
+if [ -z "$disabled_after" ] || [ "$disabled_after" -le "$disabled_before" ]; then
+  echo "FAIL: disabled signal did not increase after the rollback probe (before=$disabled_before after=$disabled_after; expected the probe request to be counted as outcome=skipped reason=disabled)"
   exit 1
 fi
 if [ "$before" = "$after" ]; then

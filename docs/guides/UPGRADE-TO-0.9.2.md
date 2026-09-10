@@ -254,7 +254,7 @@ sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}" \
         sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
             "${staged_conf}"
       done
-staged_loads="$(grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
+staged_loads="$(sudo grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
 if [[ "${staged_loads}" -ne 1 ]]; then
     echo "ERROR: expected exactly one Markdown load_module entry in the staged config tree, found ${staged_loads}" >&2
     exit 1
@@ -349,8 +349,11 @@ sudo nginx -t || {
   # added, matching the source-build rollback below.
   # Build the complete restored tree in a sibling staging path FIRST and
   # validate it, so a failure leaves the active tree untouched; only a
-  # fully staged and validated tree replaces the active root.
-  RESTORE_STAGED="$(mktemp -d "${TMPDIR:-/tmp}/nginx-0.9.2-restore-XXXXXX")"
+  # fully staged and validated tree replaces the active root.  The
+  # staging dir sits BESIDE the configuration root so the final mv stays
+  # on the same filesystem (a TMPDIR staging dir would cross devices and
+  # fail the atomic rename).
+  RESTORE_STAGED="$(mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
   sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${RESTORE_STAGED}/" 2>/dev/null || {
     sudo rm -rf "${RESTORE_STAGED}"
     echo "ERROR: configuration restore staging failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
@@ -498,6 +501,18 @@ case "${NGINX_CONF_DIR}" in
     exit 1
     ;;
 esac
+# Same resolved, bidirectional disjoint-path validation as the package
+# flow: the backup directory must not live inside (or equal) the active
+# configuration root, or a rollback rm -rf could delete the backup.
+RESOLVED_CONF_DIR="$(readlink -f "${NGINX_CONF_DIR}")"
+RESOLVED_BACKUP_DIR="$(readlink -f "${CONFIG_BACKUP_DIR}")"
+if [[ "${RESOLVED_CONF_DIR}" == "${RESOLVED_BACKUP_DIR}" \
+      || "${RESOLVED_CONF_DIR}" == "${RESOLVED_BACKUP_DIR}/"* \
+      || "${RESOLVED_BACKUP_DIR}" == "${RESOLVED_CONF_DIR}" \
+      || "${RESOLVED_BACKUP_DIR}" == "${RESOLVED_CONF_DIR}/"* ]]; then
+  echo "ERROR: NGINX_CONF_DIR and CONFIG_BACKUP_DIR must be disjoint paths (resolved: '${RESOLVED_CONF_DIR}' vs '${RESOLVED_BACKUP_DIR}')" >&2
+  exit 1
+fi
 # Copy the module into the ACTIVE NGINX module directory.  Determine it
 # from the running binary: `nginx -V 2>&1 | grep modules-path` (for example
 # /usr/lib/nginx/modules on Debian/Ubuntu, /usr/lib64/nginx/modules on
@@ -549,7 +564,7 @@ sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}" \
         sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
             "${staged_conf}"
       done
-staged_loads="$(grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
+staged_loads="$(sudo grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
 if [[ "${staged_loads}" -ne 1 ]]; then
     echo "ERROR: expected exactly one Markdown load_module entry in the staged config tree, found ${staged_loads}" >&2
     exit 1
@@ -617,20 +632,49 @@ if ! sudo nginx -t; then
   # module before re-validating.  The whole tree is restored (not just
   # nginx.conf + conf.d + modules-enabled) and any path the migration
   # added is removed, so no migrated configuration can remain.
-  # If the pre-upgrade root was a symlink, recreate the symlink FIRST
-  # and restore the tree into its resolved target, so the restored
-  # contents are not stranded in a temporary real directory that the
-  # symlink replacement would discard.
+  # Build the complete restored tree in a sibling staging path FIRST and
+  # validate it, so a failure leaves the active tree untouched; only a
+  # fully staged and validated tree replaces the active root.  The
+  # staging dir sits BESIDE the configuration root so the final mv stays
+  # on the same filesystem.
+  RESTORE_STAGED="$(mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
+  sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${RESTORE_STAGED}/"
+  if ! sudo nginx -t -c "${RESTORE_STAGED}/nginx.conf"; then
+    sudo rm -rf "${RESTORE_STAGED}"
+    echo "ERROR: restored configuration fails validation; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+    exit 1
+  fi
+  # Staging validated: atomically replace the active root.  A symlink
+  # root is recreated as a link and the staged tree atomically moved
+  # into its resolved target (old target preserved until the swap
+  # succeeds); a real directory is replaced wholesale with mv.
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
     sudo rm -rf "${NGINX_CONF_DIR}"
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
-    # Remove ALL direct children of the resolved target, including
-    # dotfiles (a plain glob would leave migration-added hidden files).
-    sudo find "${NGINX_CONF_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-    sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${NGINX_CONF_DIR}/"
+    ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
+    if [[ -e "${ROOT_LINK_TARGET}" || -L "${ROOT_LINK_TARGET}" ]]; then
+      sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old"
+      sudo mv -f "${ROOT_LINK_TARGET}" "${ROOT_LINK_TARGET}.rollback-old"
+    fi
+    sudo mv -f "${RESTORE_STAGED}" "${ROOT_LINK_TARGET}" || {
+      if [[ -e "${ROOT_LINK_TARGET}.rollback-old" ]]; then
+        sudo mv -f "${ROOT_LINK_TARGET}.rollback-old" "${ROOT_LINK_TARGET}"
+      fi
+      sudo rm -rf "${RESTORE_STAGED}"
+      echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
+    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old"
   else
-    sudo rm -rf "${NGINX_CONF_DIR}"
-    sudo cp -a "${CONFIG_BACKUP_DIR}/tree" "${NGINX_CONF_DIR}"
+    sudo rm -rf "${NGINX_CONF_DIR}.rollback-old"
+    sudo mv -f "${NGINX_CONF_DIR}" "${NGINX_CONF_DIR}.rollback-old"
+    sudo mv -f "${RESTORE_STAGED}" "${NGINX_CONF_DIR}" || {
+      sudo mv -f "${NGINX_CONF_DIR}.rollback-old" "${NGINX_CONF_DIR}"
+      sudo rm -rf "${RESTORE_STAGED}"
+      echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
+    sudo rm -rf "${NGINX_CONF_DIR}.rollback-old"
   fi
   if ! sudo nginx -t; then
     echo "ERROR: restored module and configuration also fail validation; do not start NGINX. ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR} are preserved — restore manually from them." >&2
