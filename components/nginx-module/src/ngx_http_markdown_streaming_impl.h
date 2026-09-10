@@ -4105,6 +4105,20 @@ ngx_http_markdown_streaming_clone_chain_deep(
             b->last_in_chain = in->buf->last_in_chain;
             b->flush = in->buf->flush;
             b->sync = in->buf->sync;
+            /* Preserve the remaining buffer metadata the write filter
+             * may consult: start/end bounds, tag, shadow, and the
+             * mmap/recycled/last_shadow/temp_file flags.  The shadow
+             * pointer is retained as-is: the clone is a pass-through
+             * copy of the same request-owned buffer, so the shadow
+             * relationship stays valid for the request lifetime. */
+            b->start = in->buf->start;
+            b->end = in->buf->end;
+            b->tag = in->buf->tag;
+            b->shadow = in->buf->shadow;
+            b->mmap = in->buf->mmap;
+            b->recycled = in->buf->recycled;
+            b->last_shadow = in->buf->last_shadow;
+            b->temp_file = in->buf->temp_file;
             cl->buf = b;
             cl->next = NULL;
             *tail = cl;
@@ -4143,6 +4157,20 @@ ngx_http_markdown_streaming_clone_chain_deep(
         b->last_in_chain = in->buf->last_in_chain;
         b->flush = in->buf->flush;
         b->sync = in->buf->sync;
+        /* Preserve the remaining buffer metadata the write filter may
+         * consult: start/end bounds, tag, shadow, and the
+         * mmap/recycled/last_shadow/temp_file flags.  The shadow
+         * pointer is retained as-is: the clone is a pass-through copy
+         * of the same request-owned buffer, so the shadow relationship
+         * stays valid for the request lifetime. */
+        b->start = in->buf->start;
+        b->end = in->buf->end;
+        b->tag = in->buf->tag;
+        b->shadow = in->buf->shadow;
+        b->mmap = in->buf->mmap;
+        b->recycled = in->buf->recycled;
+        b->last_shadow = in->buf->last_shadow;
+        b->temp_file = in->buf->temp_file;
         cl->buf = b;
         cl->next = NULL;
         *tail = cl;
