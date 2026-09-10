@@ -261,24 +261,15 @@ sudo nginx -t || {
     echo "ERROR: atomic module replacement failed; NGINX remains stopped. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}." >&2
     exit 1
   }
-  sudo cp -a "${CONFIG_BACKUP_DIR}/nginx.conf" "${NGINX_CONF_DIR}/nginx.conf" 2>/dev/null || {
+  # Restore the ENTIRE backed-up configuration tree wholesale: the
+  # backup (step 3) captured ${NGINX_CONF_DIR}/. as tree/, so restoring
+  # it replaces every migrated file and removes anything the migration
+  # added, matching the source-build rollback below.
+  sudo rm -rf "${NGINX_CONF_DIR}"
+  sudo cp -a "${CONFIG_BACKUP_DIR}/tree" "${NGINX_CONF_DIR}" 2>/dev/null || {
     echo "ERROR: configuration restore failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
     exit 1
   }
-  # Restore the remaining backed-up configuration directories. cp -a of the
-  # whole directory replaces each target wholesale; targets absent from the
-  # backup are removed only when the source copy succeeded.
-  for CONFIG_DIR in "conf.d" "modules-enabled"; do
-    if [[ -d "${CONFIG_BACKUP_DIR}/${CONFIG_DIR}" ]]; then
-      sudo rm -rf "${NGINX_CONF_DIR}/${CONFIG_DIR}"
-      sudo cp -a "${CONFIG_BACKUP_DIR}/${CONFIG_DIR}" "${NGINX_CONF_DIR}/${CONFIG_DIR}" 2>/dev/null || {
-        echo "ERROR: ${CONFIG_DIR} restore failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
-        exit 1
-      }
-    else
-      sudo rm -rf "${NGINX_CONF_DIR}/${CONFIG_DIR}"
-    fi
-  done
   if sudo nginx -t; then
     echo "INFO: previous module and configuration restored and verified." >&2
   else
