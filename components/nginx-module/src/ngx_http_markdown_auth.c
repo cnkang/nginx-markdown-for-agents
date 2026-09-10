@@ -1090,6 +1090,7 @@ ngx_http_markdown_cache_control_has_qualified_directive(
     const u_char                       *end;
     ngx_http_markdown_cc_directive_t    parsed;
     ngx_int_t                           rc;
+    ngx_flag_t                          matched = 0;
 
     if (value == NULL || value->len == 0 || value->data == NULL
         || directive == NULL || directive->len == 0
@@ -1104,7 +1105,14 @@ ngx_http_markdown_cache_control_has_qualified_directive(
     for (/* void */; /* void */; /* void */) {
         rc = ngx_http_markdown_next_cache_control_directive(
             &p, end, &parsed);
+        if (rc == NGX_DECLINED) {
+            /* The whole value parsed cleanly; the match (if any) is
+             * authoritative. */
+            return matched;
+        }
         if (rc != NGX_OK) {
+            /* Malformed trailing data: do not report a match for a
+             * value that fails to parse completely. */
             return 0;
         }
 
@@ -1120,7 +1128,7 @@ ngx_http_markdown_cache_control_has_qualified_directive(
             && ngx_http_markdown_token_equals_ignore_case(
                    parsed.name_start, directive->data, directive->len))
         {
-            return 1;
+            matched = 1;
         }
     }
 }
