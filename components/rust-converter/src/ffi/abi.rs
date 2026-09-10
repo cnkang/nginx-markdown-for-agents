@@ -378,7 +378,8 @@ pub(crate) struct ConversionOutput {
     pub(crate) etag: Option<Box<[u8]>>,
     /// Heuristic token count estimate for LLM context-window budgeting.
     pub(crate) token_estimate: u32,
-    /// High-water mark of the transient working set during this conversion (bytes).
+    /// High-water mark of the converter-tracked working set during this
+    /// conversion (bytes): retained output capacity plus transient scratch.
     pub(crate) peak_working_set_bytes: usize,
 }
 

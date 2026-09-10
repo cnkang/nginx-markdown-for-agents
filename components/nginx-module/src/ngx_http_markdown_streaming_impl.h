@@ -4075,7 +4075,9 @@ ngx_http_markdown_streaming_clone_chain_deep(
         if (b == NULL) {
             return NULL;
         }
-        if (in->buf->last > in->buf->pos) {
+        if (in->buf->pos != NULL && in->buf->last != NULL
+            && in->buf->last > in->buf->pos)
+        {
             b->pos = ngx_pnalloc(r->pool, in->buf->last - in->buf->pos);
             if (b->pos == NULL) {
                 return NULL;
@@ -4089,6 +4091,8 @@ ngx_http_markdown_streaming_clone_chain_deep(
         b->memory = 1;
         b->last_buf = in->buf->last_buf;
         b->last_in_chain = in->buf->last_in_chain;
+        b->flush = in->buf->flush;
+        b->sync = in->buf->sync;
         cl->buf = b;
         cl->next = NULL;
         *tail = cl;
@@ -4660,6 +4664,7 @@ ngx_http_markdown_streaming_continue_failopen_input(
      * chain (advancing its pos) can never truncate the pending output,
      * and NGINX cannot re-submit the same buffers for a duplicate
      * forward. */
+    ngx_chain_t  *original_chain = input_chain;
     {
         ngx_chain_t  *cloned;
 
@@ -4673,19 +4678,19 @@ ngx_http_markdown_streaming_continue_failopen_input(
     rc = ngx_http_markdown_streaming_send_failopen_chain(
         r, ctx, input_chain);
     if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
-        /* NGX_AGAIN: the cloned chain is now pending_output-owned by
-         * downstream.  Abandon the ORIGINAL chain (advance pos) so NGINX
-         * does not re-submit the same buffers on the next body-filter
-         * invocation — the clone shares the same ngx_buf_t, so the data
-         * remains intact for the pending delivery, and re-submitting the
-         * original would enqueue it into pending_input and forward the
-         * same bytes a second time after the drain. */
-        ngx_http_markdown_streaming_abandon_input(input_chain);
+        /* NGX_AGAIN: the CLONE is now pending_output-owned by downstream
+         * and must never be advanced.  Abandon the ORIGINAL chain
+         * (advance its pos) so NGINX does not re-submit the same buffers
+         * on the next body-filter invocation — the clone has independent
+         * data, so the pending delivery stays intact, and re-submitting
+         * the original would enqueue it into pending_input and forward
+         * the same bytes a second time after the drain. */
+        ngx_http_markdown_streaming_abandon_input(original_chain);
         ngx_http_markdown_streaming_sync_buffered(r, ctx);
         return rc;
     }
 
-    ngx_http_markdown_streaming_abandon_input(input_chain);
+    ngx_http_markdown_streaming_abandon_input(original_chain);
     if (last_buf) {
         ctx->streaming.completion.upstream_terminal_seen = 0;
         /*
