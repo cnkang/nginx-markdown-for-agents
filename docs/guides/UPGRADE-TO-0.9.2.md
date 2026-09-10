@@ -238,7 +238,10 @@ if [[ -e "${CONFIG_BACKUP_DIR}/tree" ]]; then
 fi
 sudo mv "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree" || {
   if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
-    sudo mv "${CONFIG_BACKUP_DIR}/tree.old" "${CONFIG_BACKUP_DIR}/tree"
+    if ! sudo mv "${CONFIG_BACKUP_DIR}/tree.old" "${CONFIG_BACKUP_DIR}/tree"; then
+      echo "ERROR: could not install the new configuration snapshot AND could not restore the previous one; both artifacts are preserved at ${CONFIG_BACKUP_DIR}/tree.new and ${CONFIG_BACKUP_DIR}/tree.old — restore manually" >&2
+      exit 1
+    fi
   fi
   echo "ERROR: could not install the new configuration snapshot; the previous snapshot was restored" >&2
   exit 1
@@ -398,9 +401,13 @@ sudo cp -a "${SNAPSHOT_SRC}/." "${MIGRATE_BACKUP}/" || {
 }
 # Interruption-safe recovery: from this point until the migration
 # completes, any exit (including a signal during the in-place sed
-# edits) restores the untouched snapshot if the active root is missing
-# or was partially edited.  Disarmed after the migration succeeds.
-trap 'rc=$?; if [[ ! -e "${NGINX_CONF_DIR}" ]] && [[ -d "${MIGRATE_BACKUP}" ]]; then sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true; fi; exit "$rc"' EXIT
+# edits) restores the untouched snapshot — the root may still EXIST
+# but be partially edited, so the trap replaces it wholesale whenever
+# MIGRATE_ACTIVE is set.  The trap also keeps cleaning STAGED_ROOT
+# (it replaces the earlier STAGED_ROOT-only trap in this bash block).
+# Disarmed after the migration succeeds.
+MIGRATE_ACTIVE=1
+trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; if [[ "$MIGRATE_ACTIVE" -eq 1 ]] && [[ -d "$MIGRATE_BACKUP" ]]; then sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true; sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true; fi; exit "$rc"' EXIT
 if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
     | while read -r active_conf; do
         sudo sed -i -E \
@@ -423,8 +430,17 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
     # Symlinked root: recreate the link and restore the snapshot into
     # the RESOLVED TARGET, preserving the root's symlink identity.
     ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
+    # The migration snapshot must NOT live inside the resolved target:
+    # deleting the target below would delete the snapshot itself.
+    if [[ "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}"           || "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}/"* ]]; then
+      echo "ERROR: migration snapshot ${MIGRATE_BACKUP} is inside the resolved target ${ROOT_LINK_TARGET}; restore manually" >&2
+      exit 1
+    fi
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" || {
+      echo "ERROR: could not recreate the configuration-root symlink; the resolved target was NOT deleted. Restore manually from ${MIGRATE_BACKUP}" >&2
+      exit 1
+    }
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
     sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || {
       echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; restore manually" >&2
@@ -437,9 +453,17 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       exit 1
     }
   fi
+  # The explicit restore above already replaced the active root; disarm
+  # the restoration trap BEFORE exiting so it cannot rm -rf the freshly
+  # restored tree and fail the second mv.
+  MIGRATE_ACTIVE=0
   exit 1
 fi
-# Migration succeeded: disarm the restoration trap and drop the snapshot.
+# Migration succeeded: mark the migration complete (the trap no longer
+# restores), clean the staged tree explicitly (the trap that used to
+# clean it was replaced), disarm the trap, and drop the snapshot.
+MIGRATE_ACTIVE=0
+sudo rm -rf -- "$STAGED_ROOT" 2>/dev/null || true
 trap - EXIT
 sudo rm -rf "${MIGRATE_BACKUP}" 2>/dev/null || true
 ```
@@ -573,7 +597,7 @@ sudo nginx -t || {
     # Create a temporary symlink and atomically rename it over the
     # active link (GNU mv -T uses rename(2)), so a failure never
     # leaves the configuration root without a link.
-    sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}.link-new" || {
+    sudo ln -s "$(sudo cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}.link-new" || {
       # Remove any stale temporary link (a previous failed attempt may
       # have left one) and the staged tree, then report manual recovery.
       sudo rm -f "${NGINX_CONF_DIR}.link-new"
@@ -838,7 +862,10 @@ if [[ -e "${CONFIG_BACKUP_DIR}/tree" ]]; then
 fi
 sudo mv "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree" || {
   if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
-    sudo mv "${CONFIG_BACKUP_DIR}/tree.old" "${CONFIG_BACKUP_DIR}/tree"
+    if ! sudo mv "${CONFIG_BACKUP_DIR}/tree.old" "${CONFIG_BACKUP_DIR}/tree"; then
+      echo "ERROR: could not install the new configuration snapshot AND could not restore the previous one; both artifacts are preserved at ${CONFIG_BACKUP_DIR}/tree.new and ${CONFIG_BACKUP_DIR}/tree.old — restore manually" >&2
+      exit 1
+    fi
   fi
   echo "ERROR: could not install the new configuration snapshot; the previous snapshot was restored" >&2
   exit 1
@@ -966,9 +993,13 @@ sudo cp -a "${SNAPSHOT_SRC}/." "${MIGRATE_BACKUP}/" || {
 }
 # Interruption-safe recovery: from this point until the migration
 # completes, any exit (including a signal during the in-place sed
-# edits) restores the untouched snapshot if the active root is missing
-# or was partially edited.  Disarmed after the migration succeeds.
-trap 'rc=$?; if [[ ! -e "${NGINX_CONF_DIR}" ]] && [[ -d "${MIGRATE_BACKUP}" ]]; then sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true; fi; exit "$rc"' EXIT
+# edits) restores the untouched snapshot — the root may still EXIST
+# but be partially edited, so the trap replaces it wholesale whenever
+# MIGRATE_ACTIVE is set.  The trap also keeps cleaning STAGED_ROOT
+# (it replaces the earlier STAGED_ROOT-only trap in this bash block).
+# Disarmed after the migration succeeds.
+MIGRATE_ACTIVE=1
+trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; if [[ "$MIGRATE_ACTIVE" -eq 1 ]] && [[ -d "$MIGRATE_BACKUP" ]]; then sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true; sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true; fi; exit "$rc"' EXIT
 if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
     | while read -r active_conf; do
         sudo sed -i -E \
@@ -991,8 +1022,17 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
     # Symlinked root: recreate the link and restore the snapshot into
     # the RESOLVED TARGET, preserving the root's symlink identity.
     ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
+    # The migration snapshot must NOT live inside the resolved target:
+    # deleting the target below would delete the snapshot itself.
+    if [[ "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}"           || "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}/"* ]]; then
+      echo "ERROR: migration snapshot ${MIGRATE_BACKUP} is inside the resolved target ${ROOT_LINK_TARGET}; restore manually" >&2
+      exit 1
+    fi
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" || {
+      echo "ERROR: could not recreate the configuration-root symlink; the resolved target was NOT deleted. Restore manually from ${MIGRATE_BACKUP}" >&2
+      exit 1
+    }
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
     sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || {
       echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; restore manually" >&2
@@ -1005,9 +1045,17 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       exit 1
     }
   fi
+  # The explicit restore above already replaced the active root; disarm
+  # the restoration trap BEFORE exiting so it cannot rm -rf the freshly
+  # restored tree and fail the second mv.
+  MIGRATE_ACTIVE=0
   exit 1
 fi
-# Migration succeeded: disarm the restoration trap and drop the snapshot.
+# Migration succeeded: mark the migration complete (the trap no longer
+# restores), clean the staged tree explicitly (the trap that used to
+# clean it was replaced), disarm the trap, and drop the snapshot.
+MIGRATE_ACTIVE=0
+sudo rm -rf -- "$STAGED_ROOT" 2>/dev/null || true
 trap - EXIT
 sudo rm -rf "${MIGRATE_BACKUP}" 2>/dev/null || true
 # A configuration with NO retired directives is already 0.9.2
@@ -1120,7 +1168,7 @@ if ! sudo nginx -t; then
     # Create a temporary symlink and atomically rename it over the
     # active link (GNU mv -T uses rename(2)), so a failure never
     # leaves the configuration root without a link.
-    sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}.link-new" || {
+    sudo ln -s "$(sudo cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}.link-new" || {
       # Remove any stale temporary link (a previous failed attempt may
       # have left one) and the staged tree, then report manual recovery.
       sudo rm -f "${NGINX_CONF_DIR}.link-new"
