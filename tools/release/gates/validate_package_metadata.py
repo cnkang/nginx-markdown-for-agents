@@ -906,16 +906,15 @@ def _spec_installs_snippet(install_body: str) -> bool:
     destination must be the operand that receives the file, so a comment or a
     trailing argument cannot stand in for the real destination.
     """
-    for line in _logical_lines(install_body):
-        for tokens, guarded in _shell_command_segments(line):
-            if guarded or Path(tokens[0]).name != "install":
-                continue
-            sources, destination = _parse_install_operands(tokens[1:])
-            if (
-                SNIPPET_INSTALL_SOURCE in sources
-                and destination == SNIPPET_INSTALL_DESTINATION
-            ):
-                return True
+    for tokens, guarded in _install_commands(install_body):
+        if guarded or Path(tokens[0]).name != "install":
+            continue
+        sources, destination = _parse_install_operands(tokens[1:])
+        if (
+            SNIPPET_INSTALL_SOURCE in sources
+            and destination == SNIPPET_INSTALL_DESTINATION
+        ):
+            return True
     return False
 
 
@@ -1239,7 +1238,7 @@ def _check_snippet_opt_in(
 # A shell variable reference to the staging tree, but not a longer name such as
 # $NOT_TARBALL_DIR: the reference must end at a non-identifier character.
 TARBALL_MARKER_PATTERN = re.compile(
-    r"\$\{TARBALL_DIR\}|\$TARBALL_DIR(?![A-Za-z0-9_])"
+    r"(?:^|/)(\$\{TARBALL_DIR\}|\$TARBALL_DIR(?![A-Za-z0-9_]))"
 )
 
 
@@ -1299,35 +1298,54 @@ def _parse_install_operands(tokens: list[str]) -> tuple[list[str], str | None]:
     return operands[:-1], operands[-1]
 
 
+_GUARD_OPENERS = frozenset({"if", "while", "until", "for"})
+_GUARD_CLOSERS = frozenset({"fi", "done"})
 _SHELL_KEYWORDS = frozenset(
     {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for"}
 )
 
 
-def _shell_command_segments(line: str) -> list[tuple[list[str], bool]]:
-    """Split one logical line into (tokens, guarded) shell commands.
+def _strip_guard_keywords(
+    tokens: list[str], pending_guard: bool
+) -> tuple[list[str], bool, int]:
+    """Strip leading shell keywords and report guard state and depth change."""
+    depth_delta = 0
+    while tokens and tokens[0] in _SHELL_KEYWORDS:
+        keyword = tokens[0]
+        if keyword in _GUARD_OPENERS:
+            depth_delta += 1
+            pending_guard = True
+        elif keyword in _GUARD_CLOSERS:
+            depth_delta -= 1
+        tokens = tokens[1:]
+    return tokens, pending_guard, depth_delta
 
-    A spec may chain or guard commands (``if true; then install ...; fi``,
-    ``test -f x && install ...``), so a check that reads only the first word of
-    the line would miss installs.  ``guarded`` marks a command whose execution
-    depends on a condition, which matters when the check must prove that the
-    packaged file is installed unconditionally.
+
+def _install_commands(body: str) -> list[tuple[list[str], bool]]:
+    """Return (tokens, guarded) for every command in an %install body.
+
+    Commands may be chained or guarded (``test -f x && install ...``,
+    ``if ...; then install ...; fi``) and a guard may span lines, so the state
+    is tracked across the whole body rather than per line.
     """
-    segments: list[tuple[list[str], bool]] = []
-    pending_guard = False
-    for raw in re.split(r"(&&|\|\||[;\n])", line):
-        if raw in ("&&", "||", ";", "\n", ""):
-            pending_guard = raw in ("&&", "||")
-            continue
-        tokens = _strip_inline_comment(raw.split())
-        guarded = pending_guard
-        while tokens and tokens[0] in _SHELL_KEYWORDS:
-            tokens = tokens[1:]
-            guarded = True
-        if tokens:
-            segments.append((tokens, guarded))
-        pending_guard = False
-    return segments
+    commands: list[tuple[list[str], bool]] = []
+    guard_depth = 0
+    for line in _logical_lines(body):
+        pending_guard = guard_depth > 0
+        for raw in re.split(r"(&&|\|\||[;\n])", line):
+            if raw in ("&&", "||", ";", "\n", ""):
+                if raw in ("&&", "||"):
+                    pending_guard = True
+                continue
+            tokens = _strip_inline_comment(raw.split())
+            tokens, pending_guard, depth_delta = _strip_guard_keywords(
+                tokens, pending_guard
+            )
+            if tokens:
+                commands.append((tokens, pending_guard or guard_depth > 0))
+            guard_depth = max(0, guard_depth + depth_delta)
+            pending_guard = False
+    return commands
 
 
 def _spec_install_sources(spec: str) -> list[str]:
@@ -1339,14 +1357,13 @@ def _spec_install_sources(spec: str) -> list[str]:
     """
     body = _spec_section(spec, "%install")
     sources: list[str] = []
-    for line in _logical_lines(body):
-        for tokens, _guarded in _shell_command_segments(line):
-            if Path(tokens[0]).name != "install":
+    for tokens, _guarded in _install_commands(body):
+        if Path(tokens[0]).name != "install":
+            continue
+        for source in _parse_install_operands(tokens[1:])[0]:
+            if source.startswith("/") or source.startswith("%{buildroot}"):
                 continue
-            for source in _parse_install_operands(tokens[1:])[0]:
-                if source.startswith("/") or source.startswith("%{buildroot}"):
-                    continue
-                sources.append(source)
+            sources.append(source)
     return sources
 
 
@@ -1370,6 +1387,23 @@ def _unquote_operand(raw_token: str) -> str:
     return raw_token.strip('"')
 
 
+def _normalize_operand(raw_token: str) -> str | None:
+    """Return a repository-relative operand, or None when it cannot be one.
+
+    Absolute and parent-relative operands never name a path inside the
+    repository, and only one explicit ``./`` prefix is removed so that a name
+    such as ``.foo`` keeps its leading dot.
+    """
+    operand = _unquote_operand(raw_token)
+    if operand.startswith("/") or operand.startswith(".."):
+        return None
+    if "/../" in operand or operand.endswith("/.."):
+        return None
+    if operand.startswith("./"):
+        operand = operand[2:]
+    return operand.rstrip("/")
+
+
 def _destination_matches_source(destination: str, source_path: str) -> bool:
     """True when the staged destination is where the spec expects to find it.
 
@@ -1382,6 +1416,8 @@ def _destination_matches_source(destination: str, source_path: str) -> bool:
     if not marker:
         return False
     suffix = destination[marker.end() :].strip('"').lstrip("/")
+    if ".." in suffix.split("/"):
+        return False
     source_name = Path(source_path).name
     source_dir = str(Path(source_path).parent)
     if source_dir == ".":
@@ -1399,7 +1435,9 @@ def _names_expected_source(operands: list[str], source_path: str) -> bool:
     for raw in operands:
         if _is_literal_operand(raw):
             continue
-        normalized = _unquote_operand(raw).lstrip("./").rstrip("/")
+        normalized = _normalize_operand(raw)
+        if normalized is None:
+            continue
         if normalized == source_path:
             return True
         if "/" not in source_path and Path(normalized).name == source_path:
@@ -1416,9 +1454,7 @@ def _is_staging_command(tokens: list[str], source_path: str) -> bool:
     """
     if not tokens or Path(tokens[0]).name not in _STAGING_COMMANDS:
         return False
-    operands = [
-        token for token in tokens[1:] if not token.startswith("-")
-    ]
+    operands = [token for token in tokens[1:] if not token.startswith("-")]
     staged_indexes = [
         index
         for index, raw in enumerate(operands)

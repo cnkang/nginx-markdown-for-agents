@@ -1028,6 +1028,62 @@ class TestModuleSnippetEdgeCases:
             tokens, "packaging/nfpm/modules/mod-markdown.conf"
         )
 
+    def test_marker_prefixed_by_text_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/prefix${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_parent_relative_source_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "../vendored/packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_single_dot_prefix_is_accepted(self) -> None:
+        tokens = [
+            "cp",
+            "./packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_multiline_guarded_install_fails_the_snippet_check(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The guard opens on one line and closes on another.
+                return (
+                    "%install\n"
+                    "if true; then\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "fi\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
     def test_guarded_snippet_install_fails_the_check(self, monkeypatch) -> None:
         def fake_read(path: Path) -> str:
             if path == validator.RPM_SPEC:
