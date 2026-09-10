@@ -219,8 +219,18 @@ fi
 # migrated file and remove anything the migration added.
 # Reserve the snapshot root: a pre-existing tree/ from an older backup
 # would merge stale files into the snapshot, so it is removed first.
+# Stage the new snapshot in a temporary sibling directory and rename it
+# into place ONLY after the copy completes, so an interrupted copy can
+# never leave a half-written tree/ (the previous tree/ stays valid until
+# the atomic rename).
+sudo rm -rf "${CONFIG_BACKUP_DIR}/tree.new"
+sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree.new/" || {
+  sudo rm -rf "${CONFIG_BACKUP_DIR}/tree.new"
+  echo "ERROR: configuration snapshot copy failed; the previous snapshot (if any) is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
+  exit 1
+}
 sudo rm -rf "${CONFIG_BACKUP_DIR}/tree"
-sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree/"
+sudo mv "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree"
 # Record whether the configuration root itself is a symlink: the rollback
 # restores the tree wholesale (rm -rf + cp -a), which would replace a
 # symlink root with a real directory and orphan the original target.
@@ -340,12 +350,51 @@ sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}"  2>/dev/nul
         sudo sed -i "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
             "${staged_conf}"
       done || true
-staged_loads="$(sudo grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
+staged_loads="$(sudo grep -rc --exclude='*.bak' --exclude='*.disabled' 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
 if [[ "${staged_loads}" -ne 1 ]]; then
     echo "ERROR: expected exactly one Markdown load_module entry in the staged config tree, found ${staged_loads}" >&2
     exit 1
 fi
 sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
+# Staged validation succeeded.  Apply the SAME migration to the ACTIVE
+# tree now (before the module swap): remove the five retired
+# directives.  The active load_module entry stays as-is — it already
+# references the canonical module path, which the swap below replaces
+# with the 0.9.2 binary.
+# Snapshot the active tree FIRST: the sed edits below are in-place, so a
+# mid-migration failure must be able to restore the untouched tree
+# instead of leaving a partially migrated configuration.
+sudo cp -a "${NGINX_CONF_DIR}" "${NGINX_CONF_DIR}.migrate-backup" || {
+  echo "ERROR: could not snapshot the active configuration tree before migration; aborting" >&2
+  exit 1
+}
+if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
+    | while read -r active_conf; do
+        sudo sed -i -E \
+            -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_dynamic_config_path[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
+            "${active_conf}" || exit 1
+      done; then
+    pipeline_status=(0 0)
+else
+    pipeline_status=("${PIPESTATUS[@]}")
+fi
+grep_rc="${pipeline_status[0]}"
+sed_rc="${pipeline_status[1]}"
+if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
+  echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc); restoring the untouched active tree" >&2
+  sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
+  sudo mv "${NGINX_CONF_DIR}.migrate-backup" "${NGINX_CONF_DIR}" 2>/dev/null || {
+    echo "ERROR: could not restore the active tree from ${NGINX_CONF_DIR}.migrate-backup; restore manually" >&2
+    exit 1
+  }
+  exit 1
+fi
+# Migration succeeded: drop the snapshot.
+sudo rm -rf "${NGINX_CONF_DIR}.migrate-backup" 2>/dev/null || true
 ```
 
 A 0.9.1 configuration fails `nginx -t` under the 0.9.2 binary (removed
@@ -727,8 +776,14 @@ if [[ "${RESOLVED_CONF_DIR}" == "${RESOLVED_BACKUP_DIR}" \
   echo "ERROR: NGINX_CONF_DIR and CONFIG_BACKUP_DIR must be disjoint paths (resolved: '${RESOLVED_CONF_DIR}' vs '${RESOLVED_BACKUP_DIR}')" >&2
   exit 1
 fi
+sudo rm -rf "${CONFIG_BACKUP_DIR}/tree.new"
+sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree.new/" || {
+  sudo rm -rf "${CONFIG_BACKUP_DIR}/tree.new"
+  echo "ERROR: configuration snapshot copy failed; the previous snapshot (if any) is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
+  exit 1
+}
 sudo rm -rf "${CONFIG_BACKUP_DIR}/tree"
-sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree/"
+sudo mv "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree"
 if [[ -L "${NGINX_CONF_DIR}" ]]; then
   readlink "${NGINX_CONF_DIR}" | sudo tee "${CONFIG_BACKUP_DIR}/tree-root-link" >/dev/null
 else
@@ -799,7 +854,7 @@ sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}"  2>/dev/nul
         sudo sed -i "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
             "${staged_conf}"
       done || true
-staged_loads="$(sudo grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
+staged_loads="$(sudo grep -rc --exclude='*.bak' --exclude='*.disabled' 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
 if [[ "${staged_loads}" -ne 1 ]]; then
     echo "ERROR: expected exactly one Markdown load_module entry in the staged config tree, found ${staged_loads}" >&2
     exit 1
@@ -810,6 +865,23 @@ sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
 # directives.  The active load_module entry stays as-is — it already
 # references the canonical module path, which the swap below replaces
 # with the 0.9.2 binary.
+# Back up the running module FIRST: a backup failure or mismatch must
+# abort while the untouched pre-upgrade tree is still restorable.
+MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
+MODULE_BACKUP_OWNED=0
+if [[ -e "${MODULE_BACKUP}" ]]; then
+    if ! sudo -n cmp -s -- "${MODULE_BACKUP}" \
+        "${MODULES_DIR}/ngx_http_markdown_filter_module.so"; then
+        echo "ERROR: existing backup differs from the installed module or cannot be read; inspect it before upgrading" >&2
+        exit 1
+    fi
+    echo "Preserving existing pre-upgrade module backup: ${MODULE_BACKUP}"
+else
+    sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
+        "${MODULE_BACKUP}.staged"
+    sudo mv -f "${MODULE_BACKUP}.staged" "${MODULE_BACKUP}"
+    MODULE_BACKUP_OWNED=1
+fi
 # Snapshot the active tree FIRST: the sed edits below are in-place, so a
 # mid-migration failure must be able to restore the untouched tree
 # instead of leaving a partially migrated configuration.
@@ -846,22 +918,6 @@ fi
 sudo rm -rf "${NGINX_CONF_DIR}.migrate-backup" 2>/dev/null || true
 # A configuration with NO retired directives is already 0.9.2
 # compliant: grep exit status 1 (no match) is accepted by the check
-# above; any other grep or sed failure aborts the upgrade.
-MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
-MODULE_BACKUP_OWNED=0
-if [[ -e "${MODULE_BACKUP}" ]]; then
-    if ! sudo -n cmp -s -- "${MODULE_BACKUP}" \
-        "${MODULES_DIR}/ngx_http_markdown_filter_module.so"; then
-        echo "ERROR: existing backup differs from the installed module or cannot be read; inspect it before upgrading" >&2
-        exit 1
-    fi
-    echo "Preserving existing pre-upgrade module backup: ${MODULE_BACKUP}"
-else
-    sudo cp -a "${MODULES_DIR}/ngx_http_markdown_filter_module.so" \
-        "${MODULE_BACKUP}.staged"
-    sudo mv -f "${MODULE_BACKUP}.staged" "${MODULE_BACKUP}"
-    MODULE_BACKUP_OWNED=1
-fi
 # Record the service-manager ownership decision BEFORE stopping: after
 # a successful stop, is-active is false even on systemd-managed hosts.
 systemd_managed=0
@@ -921,6 +977,14 @@ if ! sudo nginx -t; then
   # module before re-validating.  The whole tree is restored (not just
   # nginx.conf + conf.d + modules-enabled) and any path the migration
   # added is removed, so no migrated configuration can remain.
+  # If the MODULE restore failed, the 0.9.2 module is still installed:
+  # restoring the 0.9.1 configuration would pair it with the 0.9.2
+  # binary.  Fail closed with a manual-recovery instruction instead of
+  # continuing into the configuration restore and restart.
+  if [ "$MODULE_RESTORE_FAILED" -ne 0 ]; then
+    echo "ERROR: the previous module could not be restored; NGINX remains stopped with the 0.9.2 module installed and the migrated configuration active. Restore manually: install the previous module from ${MODULE_BACKUP} and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
+    exit 1
+  fi
   # Build the complete restored tree in a sibling staging path FIRST and
   # validate it, so a failure leaves the active tree untouched; only a
   # fully staged and validated tree replaces the active root.  The
