@@ -204,15 +204,17 @@ jobs:
           cp docs/guides/INSTALL.md "/tmp/${TARBALL_DIR}/docs/guides/"
           cp docs/guides/PACKAGE_INSTALLATION.md "/tmp/${TARBALL_DIR}/docs/guides/"
           cp docs/guides/PACKAGE_COMPATIBILITY.md "/tmp/${TARBALL_DIR}/docs/guides/"
-          # Stage the maintainer script with a plain copy, then render it inside
-          # the tarball tree so the trusted executable prelude is self-contained
-          # and the packaged script is the rendered one.
-          cp packaging/nfpm/scripts/preremove.sh "/tmp/${TARBALL_DIR}/preremove.sh.raw"
+          # Stage the maintainer script with a plain copy that keeps its name,
+          # then render it into the tarball root so the trusted executable
+          # prelude is self-contained and the packaged script is the rendered
+          # one.  The staging directory is removed before the archive is built.
+          mkdir -p "/tmp/${TARBALL_DIR}/.render"
+          cp packaging/nfpm/scripts/preremove.sh "/tmp/${TARBALL_DIR}/.render/preremove.sh"
           packaging/nfpm/scripts/render-nfpm-config.sh \
-            "/tmp/${TARBALL_DIR}/preremove.sh.raw" \
+            "/tmp/${TARBALL_DIR}/.render/preremove.sh" \
             "/tmp/${TARBALL_DIR}/preremove.sh" \
             "${NGINX_VERSION}"
-          rm -f "/tmp/${TARBALL_DIR}/preremove.sh.raw"
+          rm -rf "/tmp/${TARBALL_DIR}/.render"
           cp LICENSE "/tmp/${TARBALL_DIR}/"
           # The RPM spec installs the loader snippet from this path, so it must
           # travel inside the source tarball (rpmbuild builds from the tarball,

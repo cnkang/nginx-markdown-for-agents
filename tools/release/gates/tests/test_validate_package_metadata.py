@@ -994,6 +994,40 @@ class TestModuleSnippetEdgeCases:
         ]
         assert validator._is_staging_command(tokens, "ngx_http_markdown_filter_module.so")
 
+    def test_staging_under_another_name_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}/renamed.conf",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_symlink_does_not_prove_staging(self) -> None:
+        tokens = ["ln", "-s", "packaging/nfpm/modules/mod-markdown.conf", "${TARBALL_DIR}/"]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_staging_into_a_subdirectory_keeps_the_name(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/scripts/preremove.sh",
+            "/tmp/${TARBALL_DIR}/.render/preremove.sh",
+        ]
+        assert validator._is_staging_command(
+            tokens, "packaging/nfpm/scripts/preremove.sh"
+        )
+
+    def test_guarded_install_is_parsed(self) -> None:
+        spec = (
+            "%install\n"
+            "install -m 0644 present.conf %{buildroot}/etc/\n"
+            "if true; then install -m 0644 missing.conf %{buildroot}/etc/; fi\n"
+        )
+        assert validator._spec_install_sources(spec) == ["present.conf", "missing.conf"]
+
     def test_look_alike_name_does_not_prove_staging(self) -> None:
         tokens = [
             "cp",

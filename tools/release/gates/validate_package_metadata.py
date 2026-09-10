@@ -202,7 +202,7 @@ ARCH_RUNNER_SNIPPET = (
     "'ubuntu-24.04' }}"
 )
 STANDALONE_CONTAINER_BASH_SHELL = "defaults:\n      run:\n        shell: bash"
-STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET = '          cp packaging/nfpm/scripts/preremove.sh "/tmp/${TARBALL_DIR}/preremove.sh.raw"\n          packaging/nfpm/scripts/render-nfpm-config.sh \\\n            "/tmp/${TARBALL_DIR}/preremove.sh.raw" \\\n            "/tmp/${TARBALL_DIR}/preremove.sh" \\\n            "${NGINX_VERSION}"'
+STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET = '          mkdir -p "/tmp/${TARBALL_DIR}/.render"\n          cp packaging/nfpm/scripts/preremove.sh "/tmp/${TARBALL_DIR}/.render/preremove.sh"\n          packaging/nfpm/scripts/render-nfpm-config.sh \\\n            "/tmp/${TARBALL_DIR}/.render/preremove.sh" \\\n            "/tmp/${TARBALL_DIR}/preremove.sh" \\\n            "${NGINX_VERSION}"\n          rm -rf "/tmp/${TARBALL_DIR}/.render"'
 STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     "INPUT_VERSION: ${{ inputs.version }}",
     "NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}",
@@ -907,15 +907,15 @@ def _spec_installs_snippet(install_body: str) -> bool:
     trailing argument cannot stand in for the real destination.
     """
     for line in _logical_lines(install_body):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        tokens = _strip_inline_comment(stripped.split())
-        if not tokens or Path(tokens[0]).name != "install":
-            continue
-        sources, destination = _parse_install_operands(tokens[1:])
-        if SNIPPET_INSTALL_SOURCE in sources and destination == SNIPPET_INSTALL_DESTINATION:
-            return True
+        for tokens in _shell_command_segments(line):
+            if Path(tokens[0]).name != "install":
+                continue
+            sources, destination = _parse_install_operands(tokens[1:])
+            if (
+                SNIPPET_INSTALL_SOURCE in sources
+                and destination == SNIPPET_INSTALL_DESTINATION
+            ):
+                return True
     return False
 
 
@@ -1299,6 +1299,27 @@ def _parse_install_operands(tokens: list[str]) -> tuple[list[str], str | None]:
     return operands[:-1], operands[-1]
 
 
+_SHELL_KEYWORDS = frozenset(
+    {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for"}
+)
+
+
+def _shell_command_segments(line: str) -> list[list[str]]:
+    """Split one logical line into the token lists of its shell commands.
+
+    A spec may chain or guard commands (``if true; then install ...; fi``), so a
+    check that reads only the first word of the line would miss installs.
+    """
+    segments: list[list[str]] = []
+    for raw in re.split(r"[;\n]", line):
+        tokens = _strip_inline_comment(raw.split())
+        while tokens and tokens[0] in _SHELL_KEYWORDS:
+            tokens = tokens[1:]
+        if tokens:
+            segments.append(tokens)
+    return segments
+
+
 def _spec_install_sources(spec: str) -> list[str]:
     """Return the source paths of every install command in %install.
 
@@ -1309,33 +1330,30 @@ def _spec_install_sources(spec: str) -> list[str]:
     body = _spec_section(spec, "%install")
     sources: list[str] = []
     for line in _logical_lines(body):
-        stripped = line.strip()
-        if not stripped.startswith("install"):
-            continue
-        if len(stripped) > len("install") and not stripped[len("install")].isspace():
-            continue
-        for source in _parse_install_operands(
-            _strip_inline_comment(stripped.split())[1:]
-        )[0]:
-            if source.startswith("/") or source.startswith("%{buildroot}"):
+        for tokens in _shell_command_segments(line):
+            if Path(tokens[0]).name != "install":
                 continue
-            sources.append(source)
+            for source in _parse_install_operands(tokens[1:])[0]:
+                if source.startswith("/") or source.startswith("%{buildroot}"):
+                    continue
+                sources.append(source)
     return sources
 
 
 # Commands that copy a file into the rpmbuild tree.  A staging proof must come
 # from one of these, so a mention of the tarball directory inside another
 # command (rm, echo, chmod, a shell test) cannot satisfy the contract.
-_STAGING_COMMANDS = frozenset({"cp", "install", "mv", "rsync", "ln", "tar"})
+_STAGING_COMMANDS = frozenset({"cp", "install", "mv", "rsync", "tar"})
 
 
 def _is_staging_command(tokens: list[str], source_path: str) -> bool:
     """True when one command copies ``source_path`` into the tarball tree.
 
-    The staged operand must equal the repository path or name it as its
-    directory-qualified suffix, and it must appear BEFORE the first operand that
-    references the staging tree.  Look-alike names such as
-    ``mod-markdown.conf.bak`` therefore fail.
+    The file must appear as an operand before the operand that references the
+    staging tree, and the staged path must keep the file's own name (a directory
+    reference, or a path ending in the source file name): staging under a
+    different name, or as a symlink, leaves the path the spec installs absent
+    from the archive.
     """
     if not tokens or Path(tokens[0]).name not in _STAGING_COMMANDS:
         return False
@@ -1349,14 +1367,15 @@ def _is_staging_command(tokens: list[str], source_path: str) -> bool:
     ]
     if not staged_indexes:
         return False
+    destination = operands[staged_indexes[0]]
+    if not destination.endswith("/") and Path(destination).name != Path(source_path).name:
+        return False
     for operand in operands[: staged_indexes[0]]:
         normalized = operand.lstrip("./").rstrip("/")
         if normalized == source_path:
             return True
-        # A spec that names a bare file (no directory) refers to an artifact the
-        # workflow builds elsewhere, for example build/<module>.so: accept the
-        # matching basename there, but never a look-alike path for a
-        # directory-qualified source.
+        # A spec that names a bare file refers to an artifact the workflow builds
+        # elsewhere, for example build/<module>.so.
         if "/" not in source_path and Path(normalized).name == source_path:
             return True
     return False
