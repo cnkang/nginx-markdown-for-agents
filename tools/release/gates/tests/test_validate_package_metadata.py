@@ -921,12 +921,55 @@ class TestModuleSnippetEdgeCases:
         )
 
     def test_comment_ending_in_a_backslash_does_not_hide_the_next_line(self) -> None:
-        content = "# note: the directive follows\nload_module x;\\\nload_module y;\n"
+        content = "# note: this comment ends with a backslash \\\nload_module y;\n"
         lines = validator._logical_lines(content)
-        # The comment keeps its own line, so the live directives stay visible.
-        assert lines[0].startswith("# note")
-        assert "load_module x;" in lines[1]
-        assert "load_module y;" in lines[1]
+        # The comment keeps the backslash and its own line, so the directive
+        # that follows stays a separate logical line.
+        assert lines[0] == "# note: this comment ends with a backslash \\"
+        assert lines[1] == "load_module y;"
+
+    def test_removal_command_referencing_the_tree_does_not_prove_staging(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return 'rm -f "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/mod-markdown.conf"\n'
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+
+        assert any(
+            status == "FAIL" and check_id.endswith("mod-markdown.conf")
+            for status, check_id, _message in result.results
+        )
+
+    def test_look_alike_name_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf.bak",
+            "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_copy_from_another_directory_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "vendor/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
 
     def test_echo_of_the_tarball_path_does_not_prove_staging(self, monkeypatch) -> None:
         def fake_read(path: Path) -> str:

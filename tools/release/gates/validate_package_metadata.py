@@ -149,6 +149,10 @@ DEB_MODULE_SNIPPET = (
     PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / "mod-markdown.conf"
 )
 RPM_MODULE_SNIPPET = PROJECT_ROOT / "packaging" / "nfpm" / "modules" / "mod-markdown.conf"
+
+# Snippet paths shared by the RPM spec checks.
+SNIPPET_INSTALL_SOURCE = "packaging/nfpm/modules/mod-markdown.conf"
+SNIPPET_INSTALL_DESTINATION = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
 # load_module with a RELATIVE path is resolved against the NGINX prefix, not
 # against --modules-path.  Debian/Ubuntu distribution packages populate the
 # prefix-relative directory as well (which is why their snippets use the
@@ -198,12 +202,7 @@ ARCH_RUNNER_SNIPPET = (
     "'ubuntu-24.04' }}"
 )
 STANDALONE_CONTAINER_BASH_SHELL = "defaults:\n      run:\n        shell: bash"
-STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET = (
-    "packaging/nfpm/scripts/render-nfpm-config.sh \\\n"
-    "            packaging/nfpm/scripts/preremove.sh \\\n"
-    "            \"/tmp/${TARBALL_DIR}/preremove.sh\" \\\n"
-    "            \"${NGINX_VERSION}\""
-)
+STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET = '          cp packaging/nfpm/scripts/preremove.sh "/tmp/${TARBALL_DIR}/preremove.sh.raw"\n          packaging/nfpm/scripts/render-nfpm-config.sh \\\n            "/tmp/${TARBALL_DIR}/preremove.sh.raw" \\\n            "/tmp/${TARBALL_DIR}/preremove.sh" \\\n            "${NGINX_VERSION}"'
 STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     "INPUT_VERSION: ${{ inputs.version }}",
     "NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}",
@@ -900,6 +899,24 @@ def validate_nfpm_config(result: ValidationResult) -> None:
         )
 
 
+def _spec_installs_snippet(install_body: str) -> bool:
+    """True when one install command names both the snippet source and its target.
+
+    Matching source and destination independently would accept a copy that never
+    lands in the packaged module directory.
+    """
+    for line in _logical_lines(install_body):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        operands = stripped.split()
+        if not operands or Path(operands[0]).name != "install":
+            continue
+        if SNIPPET_INSTALL_SOURCE in operands and SNIPPET_INSTALL_DESTINATION in operands:
+            return True
+    return False
+
+
 def validate_rpm_spec_snippet(result: ValidationResult) -> None:
     """The RPM spec must install and ship the module loader snippet.
 
@@ -912,16 +929,7 @@ def validate_rpm_spec_snippet(result: ValidationResult) -> None:
     else:
         install_body = _spec_section(spec, "%install")
         files_body = _spec_section(spec, "%files")
-        # Source and destination must appear in ONE logical install command:
-        # matching them independently would accept a copy that never lands in
-        # the packaged module directory.
-        snippet_source = "packaging/nfpm/modules/mod-markdown.conf"
-        snippet_destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
-        install_ok = any(
-            snippet_source in line and snippet_destination in line
-            for line in _logical_lines(install_body)
-            if line.strip() and not line.lstrip().startswith("#")
-        )
+        install_ok = _spec_installs_snippet(install_body)
         destination_ok = True
         files_ok = re.search(
             r"^%config\(noreplace\) /usr/share/nginx/modules/mod-markdown\.conf$",
@@ -1294,41 +1302,21 @@ def _spec_install_sources(spec: str) -> list[str]:
     return sources
 
 
-# Commands that never stage a file into the rpmbuild tree, so a mention of the
-# tarball directory on one of their lines must not count as staging.
-_NON_STAGING_COMMANDS = frozenset(
-    {
-        "echo",
-        "printf",
-        "cat",
-        "ls",
-        "grep",
-        "rg",
-        "test",
-        "sed",
-        "awk",
-        "head",
-        "tail",
-        "tee",
-        "find",
-        "env",
-        "true",
-        "false",
-        "chmod",
-        "chown",
-    }
-)
+# Commands that copy a file into the rpmbuild tree.  A staging proof must come
+# from one of these, so a mention of the tarball directory inside another
+# command (rm, echo, chmod, a shell test) cannot satisfy the contract.
+_STAGING_COMMANDS = frozenset({"cp", "install", "mv", "rsync", "ln", "tar"})
 
 
 def _is_staging_command(tokens: list[str], source_path: str) -> bool:
     """True when one command copies ``source_path`` into the tarball tree.
 
-    The file must appear as an operand BEFORE the first operand that references
-    the staging tree, so the proof follows the direction of the copy: a command
-    that reads out of the tarball, or that mentions the file only as a trailing
-    argument, does not stage it.
+    The staged operand must equal the repository path or name it as its
+    directory-qualified suffix, and it must appear BEFORE the first operand that
+    references the staging tree.  Look-alike names such as
+    ``mod-markdown.conf.bak`` therefore fail.
     """
-    if not tokens or Path(tokens[0]).name in _NON_STAGING_COMMANDS:
+    if not tokens or Path(tokens[0]).name not in _STAGING_COMMANDS:
         return False
     operands = [
         token.strip('"').strip("'") for token in tokens[1:] if not token.startswith("-")
@@ -1340,10 +1328,11 @@ def _is_staging_command(tokens: list[str], source_path: str) -> bool:
     ]
     if not staged_indexes:
         return False
-    return any(
-        source_path in operand.lstrip("./")
-        for operand in operands[: staged_indexes[0]]
-    )
+    for operand in operands[: staged_indexes[0]]:
+        normalized = operand.lstrip("./").rstrip("/")
+        if normalized == source_path or normalized.endswith("/" + source_path):
+            return True
+    return False
 
 
 def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
