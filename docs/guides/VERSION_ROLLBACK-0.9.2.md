@@ -333,11 +333,11 @@ sudo cp -a -- "${MODULE_090}" \
   # independently: if either fails, report manual recovery instead of
   # claiming the pair was restored.
   if ! sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed" 2>/dev/null; then
-    echo "ERROR: could not stage the 0.9.0 module AND could not move the active 0.9.0 tree aside. The 0.9.1 module is still installed and the 0.9.0 tree is still active at ${CONFIG_DIR}; NGINX remains stopped. Recover with: sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed" && sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}"" >&2
+    echo "ERROR: could not stage the 0.9.0 module AND could not move the active 0.9.0 tree aside. The 0.9.1 module is still installed and the 0.9.0 tree is still active at ${CONFIG_DIR}; NGINX remains stopped. Recover with: sudo mv -- \"${CONFIG_DIR}\" \"${CONFIG_DIR}.restore-failed\" && sudo mv -- \"${CONFIG_DIR}.pre-0.9.0\" \"${CONFIG_DIR}\"" >&2
     exit 1
   fi
   if ! sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}" 2>/dev/null; then
-    echo "ERROR: could not stage the 0.9.0 module AND could not restore the 0.9.1 tree; NGINX remains stopped. The 0.9.1 tree is at ${CONFIG_DIR}.pre-0.9.0; restore manually with: sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}"" >&2
+    echo "ERROR: could not stage the 0.9.0 module AND could not restore the 0.9.1 tree; NGINX remains stopped. The 0.9.1 tree is at ${CONFIG_DIR}.pre-0.9.0; restore manually with: sudo mv -- \"${CONFIG_DIR}.pre-0.9.0\" \"${CONFIG_DIR}\"" >&2
     exit 1
   fi
   echo "ERROR: could not stage the 0.9.0 module; the 0.9.1 module/configuration pair was restored. NGINX remains stopped. Verify with: sudo nginx -t, then start NGINX" >&2
@@ -346,11 +346,11 @@ sudo cp -a -- "${MODULE_090}" \
 sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \
     "$MODULES_DIR/ngx_http_markdown_filter_module.so" || {
   if ! sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed" 2>/dev/null; then
-    echo "ERROR: could not replace the active module with the 0.9.0 module AND could not move the active 0.9.0 tree aside. The 0.9.1 module is still installed and the 0.9.0 tree is still active at ${CONFIG_DIR}; NGINX remains stopped. Recover with: sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed" && sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}"" >&2
+    echo "ERROR: could not replace the active module with the 0.9.0 module AND could not move the active 0.9.0 tree aside. The 0.9.1 module is still installed and the 0.9.0 tree is still active at ${CONFIG_DIR}; NGINX remains stopped. Recover with: sudo mv -- \"${CONFIG_DIR}\" \"${CONFIG_DIR}.restore-failed\" && sudo mv -- \"${CONFIG_DIR}.pre-0.9.0\" \"${CONFIG_DIR}\"" >&2
     exit 1
   fi
   if ! sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}" 2>/dev/null; then
-    echo "ERROR: could not replace the active module with the 0.9.0 module AND could not restore the 0.9.1 tree; NGINX remains stopped. The 0.9.1 tree is at ${CONFIG_DIR}.pre-0.9.0; restore manually with: sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}"" >&2
+    echo "ERROR: could not replace the active module with the 0.9.0 module AND could not restore the 0.9.1 tree; NGINX remains stopped. The 0.9.1 tree is at ${CONFIG_DIR}.pre-0.9.0; restore manually with: sudo mv -- \"${CONFIG_DIR}.pre-0.9.0\" \"${CONFIG_DIR}\"" >&2
     exit 1
   fi
   echo "ERROR: could not replace the active module with the 0.9.0 module; the 0.9.1 module/configuration pair was restored. NGINX remains stopped. Verify with: sudo nginx -t, then start NGINX" >&2
@@ -386,7 +386,7 @@ if ! sudo nginx -t; then
     # 0.9.1 module.  Fail closed instead: the 0.9.1 tree is still at
     # ${CONFIG_DIR}.pre-0.9.0 and the module is 0.9.1, so the operator
     # can complete the pair manually.
-    echo "ERROR: 0.9.1 configuration restore failed; NGINX remains stopped. The 0.9.1 tree is at ${CONFIG_DIR}.pre-0.9.0 and the 0.9.1 module is installed; restore manually with: sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}"" >&2
+    echo "ERROR: 0.9.1 configuration restore failed; NGINX remains stopped. The 0.9.1 tree is at ${CONFIG_DIR}.pre-0.9.0 and the 0.9.1 module is installed; restore manually with: sudo mv -- \"${CONFIG_DIR}.pre-0.9.0\" \"${CONFIG_DIR}\"" >&2
     exit 1
   }
   exit 1
