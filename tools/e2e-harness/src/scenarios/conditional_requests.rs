@@ -292,6 +292,7 @@ fn append_head_case(
 
 fn append_echo_headers_case(
     url: &str,
+    location_tag: &str,
     headers: &[(&str, &str)],
     assertions: &mut Vec<AssertionResult>,
 ) {
@@ -306,7 +307,7 @@ fn append_echo_headers_case(
         Ok(resp) => resp,
         Err(e) => {
             assertions.push(AssertionResult {
-                name: "case11_duplicate_header_echo_request".to_string(),
+                name: format!("case11_{location_tag}_duplicate_header_echo_request"),
                 passed: false,
                 expected: "upstream echo reachable".to_string(),
                 actual: format!("request failed: {e}"),
@@ -316,7 +317,7 @@ fn append_echo_headers_case(
         }
     };
     assertions.push(assertions::assert_status(
-        "case11_duplicate_header_echo_status",
+        &format!("case11_{location_tag}_duplicate_header_echo_status"),
         resp.status,
         200,
     ));
@@ -327,12 +328,16 @@ fn append_echo_headers_case(
         .lines()
         .filter(|l| l.starts_with("if-none-match:"))
         .count();
+    // count_inm_value is intentionally kept: it distinguishes "no
+    // if-none-match line at all" from "an if-none-match line with a
+    // DIFFERENT value" in the failure message, so a regression that
+    // forwards a mangled validator is diagnosable at a glance.
     let count_inm_value = body
         .lines()
         .filter(|l| *l == "if-none-match: \"non-matching-etag-99999\"")
         .count();
     assertions.push(AssertionResult {
-        name: "case11_duplicate_header_a_preserved".to_string(),
+        name: format!("case11_{location_tag}_duplicate_header_a_preserved"),
         passed: count_a == 1,
         expected: "exactly one x-test: A line in upstream echo".to_string(),
         actual: if count_a == 1 {
@@ -345,7 +350,7 @@ fn append_echo_headers_case(
         message: None,
     });
     assertions.push(AssertionResult {
-        name: "case11_duplicate_header_b_preserved".to_string(),
+        name: format!("case11_{location_tag}_duplicate_header_b_preserved"),
         passed: count_b == 1,
         expected: "exactly one x-test: B line in upstream echo".to_string(),
         actual: if count_b == 1 {
@@ -358,7 +363,7 @@ fn append_echo_headers_case(
         message: None,
     });
     assertions.push(AssertionResult {
-        name: "case11_conditional_header_suppressed_upstream".to_string(),
+        name: format!("case11_{location_tag}_conditional_header_suppressed_upstream"),
         passed: count_inm == 0 && count_inm_value == 0,
         expected: "no if-none-match line in upstream echo (validator suppressed)".to_string(),
         actual: if count_inm == 0 {
@@ -414,6 +419,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
      */
     append_echo_headers_case(
         &format!("{base_url}/md/echo-headers"),
+        "md",
         &[
             ("Accept", "text/markdown"),
             ("If-None-Match", "\"non-matching-etag-99999\""),
@@ -424,6 +430,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     );
     append_echo_headers_case(
         &format!("{base_url}/md-deny/echo-headers"),
+        "md_deny",
         &[
             ("Accept", "text/markdown"),
             ("If-None-Match", "\"non-matching-etag-99999\""),
