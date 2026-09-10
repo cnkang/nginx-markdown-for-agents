@@ -4762,6 +4762,16 @@ ngx_http_markdown_streaming_continue_failopen_input(
             r, ctx, NULL, 0, /* last_buf */ 1);
     }
 
+    /* Normalize NGX_DONE for a NON-terminal chain: the downstream
+     * filter confirmed delivery, but this chain carried no terminal
+     * marker, so the body filter must not treat the return as a
+     * terminal completion (mirrors the failopen_passthrough
+     * normalization).  A terminal chain keeps NGX_DONE so the caller
+     * can observe the confirmed terminal delivery. */
+    if (rc == NGX_DONE && !last_buf) {
+        rc = NGX_OK;
+    }
+
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
     return rc;
 }

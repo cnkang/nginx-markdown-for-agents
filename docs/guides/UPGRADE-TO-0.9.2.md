@@ -384,16 +384,20 @@ sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
 # .migrate-backup name would nest inside the active root when
 # NGINX_CONF_DIR carries a trailing slash, and a stale snapshot from an
 # interrupted run would be merged by cp -a instead of replaced.
-MIGRATE_BACKUP="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR}")/.nginx-migrate-XXXXXX")" || {
+# For a symlinked root, resolve the target FIRST and create the
+# snapshot beside the RESOLVED parent: a snapshot created beside the
+# symlink path itself can land INSIDE the resolved target (e.g.
+# /data/link -> /data), which the restore path would then delete.
+SNAPSHOT_SRC="${NGINX_CONF_DIR}"
+SNAPSHOT_PARENT="$(dirname "${NGINX_CONF_DIR}")"
+if [[ -L "${NGINX_CONF_DIR}" ]]; then
+  SNAPSHOT_SRC="$(readlink -f "${NGINX_CONF_DIR}")"
+  SNAPSHOT_PARENT="$(dirname "${SNAPSHOT_SRC}")"
+fi
+MIGRATE_BACKUP="$(sudo mktemp -d "${SNAPSHOT_PARENT}/.nginx-migrate-XXXXXX")" || {
   echo "ERROR: could not allocate a migration snapshot directory; aborting" >&2
   exit 1
 }
-# For a symlinked root, snapshot the RESOLVED TARGET tree: cp -a of the
-# link itself would copy the symlink, not the configuration tree.
-SNAPSHOT_SRC="${NGINX_CONF_DIR}"
-if [[ -L "${NGINX_CONF_DIR}" ]]; then
-  SNAPSHOT_SRC="$(readlink -f "${NGINX_CONF_DIR}")"
-fi
 sudo cp -a "${SNAPSHOT_SRC}/." "${MIGRATE_BACKUP}/" || {
   sudo rm -rf "${MIGRATE_BACKUP}"
   echo "ERROR: could not snapshot the active configuration tree before migration; aborting" >&2
@@ -420,7 +424,11 @@ migrate_restore() {
       return 0
     fi
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+    if ! sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" 2>/dev/null; then
+      # Link recreation failed: do NOT delete the resolved target —
+      # the snapshot stays available for manual recovery.
+      return 0
+    fi
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
     sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || true
   else
@@ -1014,16 +1022,20 @@ fi
 # .migrate-backup name would nest inside the active root when
 # NGINX_CONF_DIR carries a trailing slash, and a stale snapshot from an
 # interrupted run would be merged by cp -a instead of replaced.
-MIGRATE_BACKUP="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR}")/.nginx-migrate-XXXXXX")" || {
+# For a symlinked root, resolve the target FIRST and create the
+# snapshot beside the RESOLVED parent: a snapshot created beside the
+# symlink path itself can land INSIDE the resolved target (e.g.
+# /data/link -> /data), which the restore path would then delete.
+SNAPSHOT_SRC="${NGINX_CONF_DIR}"
+SNAPSHOT_PARENT="$(dirname "${NGINX_CONF_DIR}")"
+if [[ -L "${NGINX_CONF_DIR}" ]]; then
+  SNAPSHOT_SRC="$(readlink -f "${NGINX_CONF_DIR}")"
+  SNAPSHOT_PARENT="$(dirname "${SNAPSHOT_SRC}")"
+fi
+MIGRATE_BACKUP="$(sudo mktemp -d "${SNAPSHOT_PARENT}/.nginx-migrate-XXXXXX")" || {
   echo "ERROR: could not allocate a migration snapshot directory; aborting" >&2
   exit 1
 }
-# For a symlinked root, snapshot the RESOLVED TARGET tree: cp -a of the
-# link itself would copy the symlink, not the configuration tree.
-SNAPSHOT_SRC="${NGINX_CONF_DIR}"
-if [[ -L "${NGINX_CONF_DIR}" ]]; then
-  SNAPSHOT_SRC="$(readlink -f "${NGINX_CONF_DIR}")"
-fi
 sudo cp -a "${SNAPSHOT_SRC}/." "${MIGRATE_BACKUP}/" || {
   sudo rm -rf "${MIGRATE_BACKUP}"
   echo "ERROR: could not snapshot the active configuration tree before migration; aborting" >&2
@@ -1050,7 +1062,11 @@ migrate_restore() {
       return 0
     fi
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+    if ! sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" 2>/dev/null; then
+      # Link recreation failed: do NOT delete the resolved target —
+      # the snapshot stays available for manual recovery.
+      return 0
+    fi
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
     sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || true
   else
