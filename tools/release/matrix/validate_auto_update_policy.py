@@ -49,16 +49,6 @@ def validate_policy(matrix: dict[str, Any], diff: dict[str, Any]) -> list[str]:
         return ["release matrix entries must be a list"]
 
     violations: list[str] = []
-    # Versions must be non-empty strings: a malformed entry (dict/list/
-    # number) would raise TypeError inside the set comprehension or the
-    # later sorted() over mixed types, crashing the gate instead of
-    # producing the controlled FAIL message.
-    for version in added:
-        if not isinstance(version, str) or not version:
-            return [
-                "malformed matrix version entry "
-                f"{version!r} (must be a non-empty string)"
-            ]
     added_set = set(added)
     matched_versions: set[str] = set()
     for index, entry in enumerate(entries):

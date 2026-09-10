@@ -253,6 +253,102 @@ ngx_http_markdown_conditional_header_is_captured(
 }
 
 /*
+ * Count the request headers that must be shadowed: every entry the
+ * conditional validator logic did NOT capture (captured entries stay in
+ * the original list for conversion and later restoration).  The shadow
+ * list can span multiple parts, so the source per-part capacity is not a
+ * bound on the total entry count.
+ *
+ * Returns NGX_OK, or NGX_ERROR when a source part is malformed.
+ */
+static ngx_int_t
+ngx_http_markdown_shadow_count_headers(
+    const ngx_http_markdown_ctx_t *ctx, const ngx_list_t *source,
+    ngx_uint_t *count)
+{
+    ngx_uint_t  shadow_entries;
+
+    shadow_entries = 0;
+
+    for (const ngx_list_part_t *part = &source->part;
+         part != NULL;
+         part = part->next)
+    {
+        const ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (!ngx_http_markdown_conditional_header_is_captured(
+                    ctx, &headers[i]))
+            {
+                shadow_entries++;
+            }
+        }
+    }
+
+    *count = shadow_entries;
+    return NGX_OK;
+}
+
+/*
+ * Push a shadow copy of every non-captured request header and record the
+ * shadow/original pointer identity in the side table's map, so later
+ * restoration pairs entries by identity instead of by name lookup (which
+ * cannot distinguish duplicate header names).
+ *
+ * Returns NGX_OK, or NGX_ERROR on a malformed part, allocation failure,
+ * or an undersized map.
+ */
+static ngx_int_t
+ngx_http_markdown_shadow_copy_headers(
+    const ngx_http_markdown_ctx_t *ctx, const ngx_list_t *source,
+    ngx_list_t *shadow,
+    ngx_http_markdown_conditional_side_table_t *table)
+{
+    for (const ngx_list_part_t *part = &source->part;
+         part != NULL;
+         part = part->next)
+    {
+        const ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            ngx_table_elt_t  *copy;
+
+            if (ngx_http_markdown_conditional_header_is_captured(
+                    ctx, &headers[i]))
+            {
+                continue;
+            }
+
+            copy = ngx_list_push(shadow);
+            if (copy == NULL) {
+                return NGX_ERROR;
+            }
+            *copy = headers[i];
+
+            if (table->shadow_map_count >= table->shadow_map_capacity) {
+                return NGX_ERROR;
+            }
+            table->shadow_map[table->shadow_map_count].shadow = copy;
+            table->shadow_map[table->shadow_map_count].original =
+                (ngx_table_elt_t *) &headers[i];
+            table->shadow_map_count++;
+        }
+    }
+
+    return NGX_OK;
+}
+
+/*
  * Keep captured validators out of NGINX's generic upstream-header iterator.
  * The proxy module deliberately copies every request-header list entry that
  * is not in its configured hash, including entries whose hash was cleared by
@@ -267,6 +363,7 @@ ngx_http_markdown_shadow_captured_conditional_headers(
     ngx_http_markdown_conditional_side_table_t  *table;
     ngx_list_t                                  *source;
     ngx_list_t                                  *shadow;
+    ngx_uint_t                                   shadow_entries;
 
     if (r == NULL || ctx == NULL || !ctx->conditional.captured
         || !ctx->conditional.suppressed)
@@ -301,77 +398,25 @@ ngx_http_markdown_shadow_captured_conditional_headers(
         return NGX_ERROR;
     }
 
-    /*
-     * Count the shadow entries first so the identity map is exactly
-     * sized.  The shadow list can span multiple parts (ngx_list_push
-     * allocates a new part when the current one fills), so the source
-     * per-part capacity is not a bound on the total entry count.
-     */
+    if (ngx_http_markdown_shadow_count_headers(ctx, source,
+            &shadow_entries)
+        != NGX_OK)
     {
-        ngx_uint_t  shadow_entries = 0;
-
-        for (ngx_list_part_t *part = &source->part;
-             part != NULL;
-             part = part->next)
-        {
-            const ngx_table_elt_t  *headers;
-
-            headers = part->elts;
-            if (headers == NULL && part->nelts != 0) {
-                return NGX_ERROR;
-            }
-            for (ngx_uint_t i = 0; i < part->nelts; i++) {
-                if (!ngx_http_markdown_conditional_header_is_captured(
-                        ctx, &headers[i]))
-                {
-                    shadow_entries++;
-                }
-            }
-        }
-
-        table->shadow_map_capacity = shadow_entries;
-        table->shadow_map = ngx_pcalloc(r->pool,
-            shadow_entries * sizeof(ngx_http_markdown_shadow_map_entry_t));
-        if (table->shadow_map == NULL) {
-            return NGX_ERROR;
-        }
-        table->shadow_map_count = 0;
+        return NGX_ERROR;
     }
 
-    for (ngx_list_part_t *part = &source->part;
-         part != NULL;
-         part = part->next)
+    table->shadow_map_capacity = shadow_entries;
+    table->shadow_map = ngx_pcalloc(r->pool,
+        shadow_entries * sizeof(ngx_http_markdown_shadow_map_entry_t));
+    if (table->shadow_map == NULL) {
+        return NGX_ERROR;
+    }
+    table->shadow_map_count = 0;
+
+    if (ngx_http_markdown_shadow_copy_headers(ctx, source, shadow, table)
+        != NGX_OK)
     {
-        const ngx_table_elt_t  *headers;
-
-        headers = part->elts;
-        if (headers == NULL && part->nelts != 0) {
-            return NGX_ERROR;
-        }
-
-        for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            ngx_table_elt_t  *copy;
-
-            if (ngx_http_markdown_conditional_header_is_captured(
-                    ctx, &headers[i]))
-            {
-                continue;
-            }
-
-            copy = ngx_list_push(shadow);
-            if (copy == NULL) {
-                return NGX_ERROR;
-            }
-            *copy = headers[i];
-
-            if (table->shadow_map_count >= table->shadow_map_capacity) {
-                return NGX_ERROR;
-            }
-            table->shadow_map[table->shadow_map_count].shadow = copy;
-            table->shadow_map[table->shadow_map_count].original =
-                (ngx_table_elt_t *) &headers[i];
-            table->shadow_map_count++;
-        }
+        return NGX_ERROR;
     }
 
     table->original_headers = *source;

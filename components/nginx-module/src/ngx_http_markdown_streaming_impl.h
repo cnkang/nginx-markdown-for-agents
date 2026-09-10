@@ -4105,20 +4105,16 @@ ngx_http_markdown_streaming_clone_chain_deep(
             b->last_in_chain = in->buf->last_in_chain;
             b->flush = in->buf->flush;
             b->sync = in->buf->sync;
-            /* Preserve the remaining buffer metadata the write filter
-             * may consult: start/end bounds, tag, shadow, and the
-             * mmap/recycled/last_shadow/temp_file flags.  The shadow
-             * pointer is retained as-is: the clone is a pass-through
-             * copy of the same request-owned buffer, so the shadow
-             * relationship stays valid for the request lifetime. */
-            b->start = in->buf->start;
-            b->end = in->buf->end;
+            /* The clone references the SAME file window, so the file
+             * coordinates and the in_file marker are preserved.  The
+             * start/end bounds stay NULL (file buffers do not use
+             * them), and mmap/recycled/last_shadow/temp_file describe
+             * the ORIGINAL buffer's backing storage and must not be
+             * transferred to the clone.  tag and shadow are
+             * request-owned and remain valid for the clone's
+             * lifetime. */
             b->tag = in->buf->tag;
             b->shadow = in->buf->shadow;
-            b->mmap = in->buf->mmap;
-            b->recycled = in->buf->recycled;
-            b->last_shadow = in->buf->last_shadow;
-            b->temp_file = in->buf->temp_file;
             cl->buf = b;
             cl->next = NULL;
             *tail = cl;
@@ -4157,20 +4153,20 @@ ngx_http_markdown_streaming_clone_chain_deep(
         b->last_in_chain = in->buf->last_in_chain;
         b->flush = in->buf->flush;
         b->sync = in->buf->sync;
-        /* Preserve the remaining buffer metadata the write filter may
-         * consult: start/end bounds, tag, shadow, and the
-         * mmap/recycled/last_shadow/temp_file flags.  The shadow
-         * pointer is retained as-is: the clone is a pass-through copy
-         * of the same request-owned buffer, so the shadow relationship
-         * stays valid for the request lifetime. */
-        b->start = in->buf->start;
-        b->end = in->buf->end;
+        /* Preserve only metadata that describes the request-level
+         * relationship, not the source storage layout.  The clone owns
+         * freshly allocated storage, so its bounds must be rebased onto
+         * that allocation; copying the source start/end would break the
+         * start <= pos <= last <= end invariant because those pointers
+         * refer to the ORIGINAL arena.  mmap/recycled/last_shadow/
+         * temp_file likewise describe the original backing storage and
+         * must not be transferred.  tag and shadow are request-owned
+         * and remain valid for the clone's lifetime because the clone
+         * is a pass-through copy of the same request-owned buffer. */
+        b->start = b->pos;
+        b->end = b->last;
         b->tag = in->buf->tag;
         b->shadow = in->buf->shadow;
-        b->mmap = in->buf->mmap;
-        b->recycled = in->buf->recycled;
-        b->last_shadow = in->buf->last_shadow;
-        b->temp_file = in->buf->temp_file;
         cl->buf = b;
         cl->next = NULL;
         *tail = cl;
@@ -4337,6 +4333,15 @@ ngx_http_markdown_streaming_failopen_passthrough(
             return NGX_ERROR;
         }
         rc = ngx_http_markdown_streaming_send_failopen_chain(r, ctx, cloned);
+        if (rc == NGX_AGAIN) {
+            /* Downstream owns the chain as pending_output (the RETAIN
+             * disposition is already set): the delivery is NOT
+             * confirmed, so the per-invocation marker stays clear and
+             * the caller must propagate the backpressure.  body_filter
+             * re-enters through resume_pending() once the write event
+             * drains the retained output. */
+            return NGX_AGAIN;
+        }
         if (rc == NGX_OK || rc == NGX_DONE) {
             /* The CURRENT input chain was forwarded downstream.  Mark it
              * so body_filter consumes this chain without re-forwarding,
@@ -4386,6 +4391,15 @@ ngx_http_markdown_streaming_failopen_passthrough(
     }
 
     rc = ngx_http_markdown_streaming_send_failopen_chain(r, ctx, head);
+    if (rc == NGX_AGAIN) {
+        /* Downstream owns the replay-prefix chain as pending_output (the
+         * RETAIN disposition is already set): the delivery is NOT
+         * confirmed, so the per-invocation marker stays clear and the
+         * caller must propagate the backpressure.  body_filter re-enters
+         * through resume_pending() once the write event drains the
+         * retained output. */
+        return NGX_AGAIN;
+    }
     if (rc == NGX_OK || rc == NGX_DONE) {
         /* The CURRENT input chain was forwarded downstream (replay
          * prefix + cloned input).  Mark it so body_filter consumes this

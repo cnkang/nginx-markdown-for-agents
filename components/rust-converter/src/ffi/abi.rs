@@ -56,7 +56,7 @@ pub const MARKDOWN_ABI_VERSION: u32 = 3;
 /// Regenerated for ABI 3 (dynconf/selector removal, 0.9.2) from the
 /// cbindgen-generated header via
 /// `tools/release/gates/compute_abi_fingerprints.py`.
-pub const MARKDOWN_HEADER_HASH: u64 = 0x6a9422edb868dfb3;
+pub const MARKDOWN_HEADER_HASH: u64 = 0xeb70b17b15d5a6ce;
 
 /// SHA-256 truncated hash of the sorted exported symbol name set.
 ///
@@ -322,10 +322,15 @@ pub struct MarkdownResult {
     /// This is the peak of the converter-tracked working set (retained
     /// output capacity plus transient scratch), NOT a total conversion
     /// memory peak: parser/DOM allocations and process RSS are not
-    /// included.  Populated by both the streaming path
+    /// included.  The field is populated by both the streaming path
     /// (`markdown_streaming_finalize` from
-    /// `StreamingStats.peak_memory_estimate`) and the full-buffer path,
-    /// which publish into the same run-wide high-water gauge.
+    /// `StreamingStats.peak_memory_estimate`) and the full-buffer path.
+    /// Metric publication of the run-wide high-water gauge
+    /// (`nginx_markdown_streaming_peak_memory_bytes`) happens only in
+    /// streaming builds: the full-buffer path's
+    /// `ngx_http_markdown_metrics_record_conversion_peak()` is a no-op
+    /// when `MARKDOWN_STREAMING_ENABLED` is undefined, so the field
+    /// value and the gauge publication are distinct concerns.
     pub peak_memory_estimate: usize,
 }
 
