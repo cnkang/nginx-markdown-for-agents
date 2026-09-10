@@ -589,11 +589,19 @@ restore_pre_migration_tree() {
       echo "ERROR: could not stage the pre-migration tree; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
     }
-    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
-    sudo mv "${RESTORE_STAGED}" "${ROOT_LINK_TARGET}" || {
-      echo "ERROR: could not install the pre-migration tree; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
+    # Atomic replacement: move staged tree to a unique sibling of the
+    # resolved target, then replace the target symlink.  This avoids
+    # the window where the target is removed but the move fails.
+    RESTORE_NEW="${ROOT_LINK_TARGET}.restore-new-$(date +%s%N)-$$"
+    if ! sudo mv "${RESTORE_STAGED}" "${RESTORE_NEW}" 2>/dev/null; then
+      echo "ERROR: could not move the staged tree into place; the target is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
-    }
+    fi
+    if ! sudo mv -Tf "${RESTORE_NEW}" "${ROOT_LINK_TARGET}" 2>/dev/null; then
+      sudo rm -rf "${RESTORE_NEW}" 2>/dev/null || true
+      echo "ERROR: could not replace the configuration-root target; the previous target is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    fi
     sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
     sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" || {
       echo "ERROR: could not recreate the configuration-root symlink; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
@@ -612,11 +620,17 @@ restore_pre_migration_tree() {
       echo "ERROR: could not stage the pre-migration tree; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
     }
-    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo mv "${RESTORE_STAGED}" "${NGINX_CONF_DIR}" || {
-      echo "ERROR: could not install the pre-migration tree; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
+    # Atomic replacement for non-symlink roots: same unique-sibling pattern.
+    RESTORE_NEW="${NGINX_CONF_DIR}.restore-new-$(date +%s%N)-$$"
+    if ! sudo mv "${RESTORE_STAGED}" "${RESTORE_NEW}" 2>/dev/null; then
+      echo "ERROR: could not move the staged tree into place; the target is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
-    }
+    fi
+    if ! sudo mv -Tf "${RESTORE_NEW}" "${NGINX_CONF_DIR}" 2>/dev/null; then
+      sudo rm -rf "${RESTORE_NEW}" 2>/dev/null || true
+      echo "ERROR: could not replace the configuration root; the previous root is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    fi
   fi
 }
 # The active configuration was already migrated; the OLD module is still

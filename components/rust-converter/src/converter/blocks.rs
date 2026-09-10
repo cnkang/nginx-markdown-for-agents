@@ -611,8 +611,7 @@ impl MarkdownConverter {
         if let Some(context) = ctx.as_deref_mut() {
             context.reserve_working_set(outer_capacity)?;
         }
-        let render_result =
-            self.render_list_item_content(node, output, depth, ordered, &mut ctx);
+        let render_result = self.render_list_item_content(node, output, depth, ordered, &mut ctx);
         // Release the outer charge on EVERY path (render success or
         // error): a render failure must not leave working_set_bytes
         // inflated for the rest of the conversion.
@@ -623,21 +622,16 @@ impl MarkdownConverter {
             Ok((item_output, _)) => item_output,
             Err(error) => return Err(error),
         };
-        let result = (|| {
-            self.format_list_item_with_context(
-                output,
-                item_output,
-                depth,
-                ordered,
-                &mut ctx,
-            )?;
+        /* The format phase runs only after the outer charge was released
+         * above; the budget check runs on the fully formatted item.  A
+         * formatting error propagates immediately, so no closure is
+         * needed to guard the check. */
+        self.format_list_item_with_context(output, item_output, depth, ordered, &mut ctx)?;
 
-            if let Some(context) = ctx.as_deref_mut() {
-                context.check_output_budget(output.len())?;
-            }
-            Ok(())
-        })();
-        result
+        if let Some(context) = ctx {
+            context.check_output_budget(output.len())?;
+        }
+        Ok(())
     }
 
     /// Handle code block elements (pre/code) with optional timeout context.
