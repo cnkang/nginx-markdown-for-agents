@@ -1399,11 +1399,13 @@ def _scan_shell_commands(body: str) -> list[tuple[list[str], bool]]:
     """Return (tokens, guarded) for every command in a shell body.
 
     A command counts as guarded when a shell guard wraps it or when it appears
-    inside a function definition.  Bodies are treated as unexecuted whatever
-    calls them: modelling call liveness, scopes, and brace nesting in a static
-    check produced more wrong verdicts than it prevented, so this gate stays
-    conservative and refuses a body it cannot prove runs.  The repository's
-    packaging surfaces install their files from the top level.
+    after a function definition, because that body is never proven to run:
+    modelling call liveness, scopes, and brace nesting in a static check produced
+    more wrong verdicts than it prevented (each model accepted a shape it should
+    have rejected, or rejected one it should have accepted).  The repository's
+    packaging surfaces install their files from the top level, so the rule costs
+    them nothing, and a spec that hides its install inside a function body is
+    rejected loudly instead of being trusted.
     """
     commands: list[tuple[list[str], bool]] = []
     guard_depth = 0

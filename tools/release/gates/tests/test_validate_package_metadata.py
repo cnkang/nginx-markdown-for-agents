@@ -1062,6 +1062,29 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._spec_installs_snippet(body)
 
+    def test_commands_after_a_definition_stay_conservatively_guarded(self) -> None:
+        """The rule trades a loud rejection for never trusting an unproven body."""
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+            f"install -m 0644 {source} {destination}\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_quoted_brace_does_not_end_the_function_body(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            "  printf '%s' 'a } b'\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
     def test_folded_scalar_is_not_proven(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         # YAML rejoins a folded block, so the step is not proven either way.
