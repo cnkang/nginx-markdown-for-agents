@@ -126,6 +126,11 @@ or FFI exports. Use `markdown_streaming` and
 
 ## Historical pre-0.9.0 threshold router
 
+> ⚠️ **HISTORICAL** — every directive and path-selection rule documented under this
+> heading belongs to the retired pre-0.9.0 threshold router. 0.9.2 removed
+> `markdown_large_body_threshold`, so select paths with `markdown_streaming` and read
+> each "full-buffer path" or "incremental path" label here as pre-0.9.0 wording.
+
 > ⚠️ **RETIRED IN 0.9.0, REMOVED IN 0.9.2** — The `markdown_large_body_threshold`
 > directive was a **reject-only stub** in 0.9.0 and 0.9.1. The 0.9.2 release
 > deleted the stub, so setting it in `nginx.conf` now fails `nginx -t`
@@ -259,10 +264,7 @@ HEAD requests, 304 responses, and fail-open replays always use the full-buffer p
 | 304 Not Modified | Full-buffer path | No body conversion needed; conditional logic operates on cached state |
 | Fail-open replay | Full-buffer path | The module is replaying already-buffered original HTML; incremental processing does not apply |
 
-> ⚠️ **HISTORICAL** — the directive and the path selection below belong to the retired
-> pre-0.9.0 threshold router. 0.9.2 removed `markdown_large_body_threshold`, so select
-> paths with `markdown_streaming` and read every "full-buffer path" or "incremental
-> path" label in this section as pre-0.9.0 wording.
+The retired router selects a path as follows.
 
 ## Non-Degradation Guarantees
 

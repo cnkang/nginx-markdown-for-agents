@@ -912,15 +912,17 @@ def validate_rpm_spec_snippet(result: ValidationResult) -> None:
     else:
         install_body = _spec_section(spec, "%install")
         files_body = _spec_section(spec, "%files")
-        install_ok = re.search(
-            r"^install -m [0-7]+ packaging/nfpm/modules/mod-markdown\.conf \\?\s*$",
-            install_body,
-            re.MULTILINE,
+        # Source and destination must appear in ONE logical install command:
+        # matching them independently would accept a copy that never lands in
+        # the packaged module directory.
+        snippet_source = "packaging/nfpm/modules/mod-markdown.conf"
+        snippet_destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        install_ok = any(
+            snippet_source in line and snippet_destination in line
+            for line in _logical_lines(install_body)
+            if line.strip() and not line.lstrip().startswith("#")
         )
-        destination_ok = re.search(
-            r"%\{buildroot\}/usr/share/nginx/modules/mod-markdown\.conf",
-            install_body,
-        )
+        destination_ok = True
         files_ok = re.search(
             r"^%config\(noreplace\) /usr/share/nginx/modules/mod-markdown\.conf$",
             files_body,
@@ -1040,7 +1042,9 @@ def _logical_lines(content: str) -> list[str]:
     buffer = ""
     for raw in content.splitlines():
         line = raw.rstrip("\r")
-        if line.endswith("\\"):
+        # A trailing backslash continues a command, never a comment: joining a
+        # comment with the following line would hide that line from the checks.
+        if line.endswith("\\") and not line.lstrip().startswith("#"):
             buffer += line[:-1] + " "
             continue
         lines.append((buffer + line).rstrip())
@@ -1246,17 +1250,26 @@ _INSTALL_VALUE_OPTIONS = frozenset(
 )
 
 
-def _install_command_source(tokens: list[str]) -> str | None:
-    """Return the source operand of an install(1) argument list, if any."""
+def _install_command_sources(tokens: list[str]) -> list[str]:
+    """Return the SOURCE operands of an install(1) argument list.
+
+    install(1) syntax is ``install [OPTION]... SOURCE... DEST``; with
+    ``-t DIR``/``--target-directory=DIR`` every operand is a source.  The
+    destination is therefore dropped only when no target directory is given.
+    """
     index = 0
+    target_directory = False
     while index < len(tokens) and tokens[index].startswith("-"):
         option = tokens[index]
         index += 1
         if option in _INSTALL_VALUE_OPTIONS:
+            if option in ("-t", "--target-directory"):
+                target_directory = True
             index += 1
-    if index >= len(tokens):
-        return None
-    return tokens[index].strip('"').strip("'")
+    operands = [token.strip('"').strip("'") for token in tokens[index:]]
+    if target_directory:
+        return operands
+    return operands[:-1]
 
 
 def _spec_install_sources(spec: str) -> list[str]:
@@ -1274,30 +1287,81 @@ def _spec_install_sources(spec: str) -> list[str]:
             continue
         if len(stripped) > len("install") and not stripped[len("install")].isspace():
             continue
-        source = _install_command_source(stripped.split()[1:])
-        if source is None or source.startswith("/") or source.startswith("%{buildroot}"):
-            continue
-        sources.append(source)
+        for source in _install_command_sources(stripped.split()[1:]):
+            if source.startswith("/") or source.startswith("%{buildroot}"):
+                continue
+            sources.append(source)
     return sources
+
+
+# Commands that never stage a file into the rpmbuild tree, so a mention of the
+# tarball directory on one of their lines must not count as staging.
+_NON_STAGING_COMMANDS = frozenset(
+    {
+        "echo",
+        "printf",
+        "cat",
+        "ls",
+        "grep",
+        "rg",
+        "test",
+        "sed",
+        "awk",
+        "head",
+        "tail",
+        "tee",
+        "find",
+        "env",
+        "true",
+        "false",
+        "chmod",
+        "chown",
+    }
+)
+
+
+def _is_staging_command(tokens: list[str], source_path: str) -> bool:
+    """True when one command copies ``source_path`` into the tarball tree.
+
+    The file must appear as an operand BEFORE the first operand that references
+    the staging tree, so the proof follows the direction of the copy: a command
+    that reads out of the tarball, or that mentions the file only as a trailing
+    argument, does not stage it.
+    """
+    if not tokens or Path(tokens[0]).name in _NON_STAGING_COMMANDS:
+        return False
+    operands = [
+        token.strip('"').strip("'") for token in tokens[1:] if not token.startswith("-")
+    ]
+    staged_indexes = [
+        index
+        for index, operand in enumerate(operands)
+        if any(marker in operand for marker in TARBALL_STAGING_MARKERS)
+    ]
+    if not staged_indexes:
+        return False
+    return any(
+        source_path in operand.lstrip("./")
+        for operand in operands[: staged_indexes[0]]
+    )
 
 
 def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
     """Return True when a live workflow command copies ``source`` into the tarball.
 
-    The line must reference the rpmbuild staging tree AND the file itself, so a
-    path that only appears in a comment, or that the workflow copies somewhere
-    else, cannot satisfy the contract.
+    The command must name the repository path as one operand and the rpmbuild
+    staging tree as a DIFFERENT operand, so a path that only appears in a
+    comment, in an echo, or in a copy from another directory cannot satisfy the
+    contract.
     """
-    name = Path(source).name
+    source_path = source.lstrip("./")
     for line in _logical_lines(workflow):
-        if line.lstrip().startswith("#"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
-        if not any(marker in line for marker in TARBALL_STAGING_MARKERS):
-            continue
-        if name in line:
+        if _is_staging_command(stripped.split(), source_path):
             return True
     return False
-
 
 def validate_rpm_spec_sources_are_staged(result: ValidationResult) -> None:
     """Every file the RPM spec installs must reach the rpmbuild tarball.
