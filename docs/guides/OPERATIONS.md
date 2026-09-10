@@ -147,9 +147,15 @@ Configure alerts based on these thresholds:
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
 | Failure rate | > 10% for 5 minutes | Page on-call engineer |
-| System error rate (sum(rate(nginx_markdown_requests_total{outcome="aborted"}[5m])) / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-10)) | > 1% for 5 minutes | Page on-call engineer |
+| System error rate — aborted delivery only (sum(rate(nginx_markdown_requests_total{outcome="aborted",reason="streaming_mid_flight_error"}[5m])) / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-10)) | > 1% for 5 minutes | Page on-call engineer |
 | Conversion time (p95) | > 500ms for 10 minutes | Page on-call engineer |
 | Module crash | Worker restart detected | Page on-call engineer |
+
+The system-error alert pins the shipped reason label
+(`outcome="aborted",reason="streaming_mid_flight_error"`): the aborted family
+covers delivery aborts, and matching on `outcome="aborted"` alone would silently
+widen the alert if another abort reason is ever published. Use the filtered
+expression when you add or rename alert rules.
 
 #### Warning Alerts
 

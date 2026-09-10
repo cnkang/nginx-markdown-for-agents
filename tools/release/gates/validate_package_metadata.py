@@ -127,13 +127,18 @@ MODULE_NAME_SURFACES = [
 ]
 
 # NGINX dynamic modules load only through a main-context load_module directive,
-# and the relative `modules/<name>.so` form resolves against the binary's
-# compiled --modules-path.  Each package family ships its snippet in the
-# directory that family's nginx.conf pulls in:
-#   DEB -> /usr/share/nginx/modules-available (operator symlinks it into
-#          /etc/nginx/modules-enabled/)
-#   RPM -> /usr/share/nginx/modules (nginx.org's nginx.conf includes it
-#          automatically, so the shipped directive stays commented out)
+# and a RELATIVE path in that directive resolves against the nginx prefix (not
+# against --modules-path).  Each package family ships its snippet in the
+# directory that family's layout uses, with the directive form that resolves
+# there:
+#   DEB -> /usr/share/nginx/modules-available (the operator symlinks it into
+#          /etc/nginx/modules-enabled/, which Debian's nginx.conf includes at
+#          the top level); the snippet uses the absolute modules path because
+#          this project installs the .so only in the compiled modules directory.
+#   RPM -> /usr/share/nginx/modules, shipped with the directive commented out
+#          so no include mechanism can load the module without an operator
+#          decision; the relative form resolves through the /etc/nginx/modules
+#          symlink nginx.org packages ship.
 NFPM_RPM_ONLY_MODULES_PATTERN = (
     r'src: "\./packaging/nfpm/modules/mod-markdown\.conf"\n'
     r'\s+dst: "/usr/share/nginx/modules/mod-markdown\.conf"\n'
@@ -895,6 +900,50 @@ def validate_nfpm_config(result: ValidationResult) -> None:
         )
 
 
+def validate_rpm_spec_snippet(result: ValidationResult) -> None:
+    """The RPM spec must install and ship the module loader snippet.
+
+    The nFPM entry alone is not enough: the spec-driven RPM build ships its own
+    file list, so an omission there drops the snippet from that artifact.
+    """
+    spec = read_safe(RPM_SPEC)
+    if not spec:
+        result.fail("rpm:modules:snippet", f"{RPM_SPEC} not found")
+    else:
+        install_ok = re.search(
+            r"^install -m [0-7]+ packaging/nfpm/modules/mod-markdown\.conf \\?\s*$",
+            spec,
+            re.MULTILINE,
+        )
+        files_ok = re.search(
+            r"^%config\(noreplace\) /usr/share/nginx/modules/mod-markdown\.conf$",
+            spec,
+            re.MULTILINE,
+        )
+        if install_ok:
+            result.pass_(
+                "rpm:modules:install",
+                "the RPM spec installs the module snippet",
+            )
+        else:
+            result.fail(
+                "rpm:modules:install",
+                "the RPM spec must install packaging/nfpm/modules/"
+                "mod-markdown.conf into %{buildroot}/usr/share/nginx/modules/",
+            )
+        if files_ok:
+            result.pass_(
+                "rpm:modules:files",
+                "the RPM spec ships the snippet as %config(noreplace)",
+            )
+        else:
+            result.fail(
+                "rpm:modules:files",
+                "the RPM spec %files section must list "
+                "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf",
+            )
+
+
 def validate_rpm_spec(result: ValidationResult) -> None:
     """Validate the RPM spec file exists and has required sections."""
     check_id = "rpm:exists"
@@ -1014,14 +1063,15 @@ def _check_snippet_directives(
 ) -> None:
     """A loader snippet carries no active directive besides load_module."""
     check_id = f"snippet:{family}:only-load-module-directive"
-    directives = [
+    # Reject every live (non-comment, non-blank) line except the loader
+    # directive itself — block-form directives such as `http {` do not end in a
+    # semicolon and would slip past a semicolon-only scan.
+    live_lines = [
         line.strip()
         for line in content.splitlines()
-        if line.strip()
-        and not line.lstrip().startswith("#")
-        and line.rstrip().endswith(";")
+        if line.strip() and not line.lstrip().startswith("#")
     ]
-    unexpected = [item for item in directives if item != expected_line]
+    unexpected = [item for item in live_lines if item != expected_line]
     if unexpected:
         result.fail(
             check_id,
@@ -1046,8 +1096,11 @@ def _check_snippet_opt_in(
 ) -> None:
     """No include mechanism may load the module without an operator decision."""
     check_id = f"snippet:{family}:opt-in-loading"
+    # Any uncommented loader directive counts as active, at any indentation:
+    # a snippet carrying both the commented form and an indented live directive
+    # would otherwise pass as opt-in.
     active_line = re.search(
-        rf"^(?!#){re.escape(expected_line)}", content, re.MULTILINE
+        rf"^[ \t]*(?!#){re.escape(expected_line)}", content, re.MULTILINE
     )
     inactive_line = f"#{expected_line}"
     if ships_active and active_line:
@@ -1077,6 +1130,77 @@ def _check_snippet_opt_in(
         )
 
 
+def validate_rpm_spec_sources_are_staged(result: ValidationResult) -> None:
+    """Every file the RPM spec installs must reach the rpmbuild tarball.
+
+    rpmbuild builds from the source tarball that release-rpm.yml assembles, not
+    from the repository checkout: a spec line that installs a path the workflow
+    never copies fails the release build, and only at release time.  Cross-check
+    the spec's install sources against the workflow's staging steps.
+    """
+    spec = read_safe(RPM_SPEC)
+    workflow = read_safe(RELEASE_RPM_WORKFLOW)
+    if not spec:
+        result.fail("rpm-spec-sources:spec-missing", f"{RPM_SPEC} not found")
+        return
+    if not workflow:
+        result.fail(
+            "rpm-spec-sources:workflow-missing", f"{RELEASE_RPM_WORKFLOW} not found"
+        )
+        return
+
+    sources = re.findall(r"^install -m [0-7]+ ([^\s\\]+)", spec, re.MULTILINE)
+    if not sources:
+        result.fail(
+            "rpm-spec-sources:none-parsed",
+            "no install sources parsed from the RPM spec (parser or spec shape "
+            "changed)",
+        )
+        return
+
+    for source in sources:
+        if source.startswith("/") or source.startswith("%{buildroot}"):
+            continue
+        check_id = f"rpm-spec-sources:{Path(source).name}"
+        if source in workflow or Path(source).name in workflow:
+            result.pass_(
+                check_id,
+                f"release-rpm.yml stages {source} for the rpmbuild tarball",
+            )
+        else:
+            result.fail(
+                check_id,
+                f"the RPM spec installs {source}, but release-rpm.yml never "
+                "copies it into the source tarball",
+            )
+
+
+def _dynamic_module_configure_invocations(content: str) -> list[str]:
+    """Return joined shell commands that configure a dynamic module build.
+
+    Shell line continuations are joined first so a configure invocation split
+    across several lines is examined as one command; comment lines are dropped
+    so a commented flag cannot satisfy the check.
+    """
+    joined: list[str] = []
+    buffer = ""
+    for raw in content.splitlines():
+        line = raw.rstrip()
+        stripped = line.lstrip()
+        if not buffer and stripped.startswith("#"):
+            continue
+        if line.endswith("\\"):
+            buffer += line[:-1] + " "
+            continue
+        candidate = buffer + line
+        buffer = ""
+        if "--add-dynamic-module" in candidate:
+            joined.append(candidate)
+    if buffer and "--add-dynamic-module" in buffer:
+        joined.append(buffer)
+    return joined
+
+
 def validate_module_build_compat(result: ValidationResult) -> None:
     """Every module build surface must configure with ``--with-compat``.
 
@@ -1095,14 +1219,26 @@ def validate_module_build_compat(result: ValidationResult) -> None:
         if not content:
             result.fail(check_id, f"{rel} not found")
             continue
-        if WITH_COMPAT_FLAG in content:
-            result.pass_(check_id, f"{rel} configures the module with {WITH_COMPAT_FLAG}")
-        else:
+        invocations = _dynamic_module_configure_invocations(content)
+        if not invocations:
             result.fail(
                 check_id,
-                f"{rel} must configure nginx with {WITH_COMPAT_FLAG} when it "
-                "builds the dynamic module, or the artifact will not load into "
-                "an nginx.org/distribution binary",
+                f"{rel} has no --add-dynamic-module configure invocation to "
+                "check (parser or build shape changed)",
+            )
+            continue
+        missing = [line for line in invocations if WITH_COMPAT_FLAG not in line]
+        if missing:
+            result.fail(
+                check_id,
+                f"{rel} builds the dynamic module without {WITH_COMPAT_FLAG}: "
+                f"{missing[0].strip()} — the artifact will not load into an "
+                "nginx.org/distribution binary",
+            )
+        else:
+            result.pass_(
+                check_id,
+                f"{rel} configures every module build with {WITH_COMPAT_FLAG}",
             )
 
 
@@ -1885,6 +2021,8 @@ def main() -> int:
     validate_module_filename_consistency(result)
     validate_module_snippet_best_practices(result)
     validate_module_build_compat(result)
+    validate_rpm_spec_sources_are_staged(result)
+    validate_rpm_spec_snippet(result)
     validate_release_versions_have_checksums(result)
     validate_release_artifact_flow(result)
     validate_standalone_workflow_packaging(result)
