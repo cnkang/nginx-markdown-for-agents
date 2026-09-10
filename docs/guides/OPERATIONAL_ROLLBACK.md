@@ -596,6 +596,9 @@ disabled_before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
   http://localhost/markdown-metrics | \
   grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"' | \
   awk '{sum += $NF} END {print sum+0}')
+# Record the error-log offset so the decision-log corroboration below
+# covers only the bytes appended by THIS probe request.
+LOG_OFFSET=$(wc -c < /var/log/nginx/error.log 2>/dev/null || echo 0)
 curl -sS -o /dev/null \
   -H "Accept: text/markdown" \
   -H "Host: ${ROLLBACK_HOST:-localhost}" \
@@ -607,6 +610,16 @@ disabled_after=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
   awk '{sum += $NF} END {print sum+0}')
 if [ -z "$disabled_after" ] || [ "$disabled_after" -le "$disabled_before" ]; then
   echo "FAIL: disabled signal did not increase after the rollback probe (before=$disabled_before after=$disabled_after; expected the probe request to be counted as outcome=skipped reason=disabled)"
+  exit 1
+fi
+# Corroborate with the decision log: the probe's own path must appear in
+# a disabled entry written AFTER the recorded offset.  A counter delta
+# alone cannot prove THIS request was the one counted.
+if tail -c +$((LOG_OFFSET + 1)) /var/log/nginx/error.log 2>/dev/null \
+    | grep "markdown:" | grep "reason=disabled" | grep -q "rollback-probe"; then
+  echo "OK: decision log corroborates the rollback-probe disabled entry"
+else
+  echo "FAIL: no disabled decision-log entry for /rollback-probe after the recorded offset (log level may be too low; set markdown_log_verbosity info or debug)"
   exit 1
 fi
 if [ "$before" = "$after" ]; then
