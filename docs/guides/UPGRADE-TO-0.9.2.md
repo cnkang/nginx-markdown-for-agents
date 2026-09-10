@@ -242,8 +242,9 @@ prove the migrated syntax is valid under the 0.9.2 binary:
 ```bash
 STAGED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX")"
 # The staged tree contains root-owned files (sudo cp -a / sudo sed), so
-# cleanup needs sudo; preserve the original exit status.
-trap 'rc=$?; sudo rm -rf "$STAGED_ROOT"; exit $rc' EXIT
+# cleanup needs sudo; preserve the original exit status even if the
+# cleanup itself fails.
+trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; exit "$rc"' EXIT
 sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # Rewrite the Markdown module's load_module entry across the WHOLE
 # staged tree (the entry may live in nginx.conf or an included file
@@ -355,27 +356,36 @@ sudo nginx -t || {
     echo "ERROR: configuration restore staging failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
     exit 1
   }
-  if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
-    # The pre-upgrade root was a symlink: stage the link identity too.
-    sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${RESTORE_STAGED}/.root-link"
-  fi
   if ! sudo nginx -t -c "${RESTORE_STAGED}/nginx.conf"; then
     sudo rm -rf "${RESTORE_STAGED}"
     echo "ERROR: restored configuration fails validation; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
     exit 1
   fi
   # Staging validated: atomically replace the active root.  A symlink
-  # root is recreated as a link and the staged tree copied into its
-  # target; a real directory is replaced wholesale with mv.
+  # root is recreated as a link and the staged tree atomically moved
+  # into its resolved target (old target preserved until the swap
+  # succeeds); a real directory is replaced wholesale with mv.
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
     sudo rm -rf "${NGINX_CONF_DIR}"
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
-    sudo find "${NGINX_CONF_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-    sudo cp -a "${RESTORE_STAGED}/." "${NGINX_CONF_DIR}/" 2>/dev/null || {
+    ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
+    if [[ -e "${ROOT_LINK_TARGET}" || -L "${ROOT_LINK_TARGET}" ]]; then
+      sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old"
+      sudo mv -f "${ROOT_LINK_TARGET}" "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || {
+        sudo rm -rf "${RESTORE_STAGED}"
+        echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+        exit 1
+      }
+    fi
+    sudo mv -f "${RESTORE_STAGED}" "${ROOT_LINK_TARGET}" 2>/dev/null || {
+      if [[ -e "${ROOT_LINK_TARGET}.rollback-old" ]]; then
+        sudo mv -f "${ROOT_LINK_TARGET}.rollback-old" "${ROOT_LINK_TARGET}"
+      fi
       sudo rm -rf "${RESTORE_STAGED}"
-      echo "ERROR: configuration restore failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     }
+    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old"
   else
     sudo rm -rf "${NGINX_CONF_DIR}.rollback-old"
     sudo mv -f "${NGINX_CONF_DIR}" "${NGINX_CONF_DIR}.rollback-old" 2>/dev/null || {
@@ -521,8 +531,9 @@ sudo cp objs/ngx_http_markdown_filter_module.so \
     "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new"
 STAGED_ROOT="$("$(command -v mktemp)" -d "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX")"
 # The staged tree contains root-owned files (sudo cp -a / sudo sed), so
-# cleanup needs sudo; preserve the original exit status.
-trap 'rc=$?; sudo rm -rf "$STAGED_ROOT"; exit $rc' EXIT
+# cleanup needs sudo; preserve the original exit status even if the
+# cleanup itself fails.
+trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; exit "$rc"' EXIT
 # Validate the ACTIVE migrated configuration tree against the staged
 # module: copy the live config dir and rewrite its load_module entry to
 # reference the staged .so, then run nginx -t against that copy.
