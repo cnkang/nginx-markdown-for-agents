@@ -1047,12 +1047,12 @@ class TestModuleSnippetEdgeCases:
     ) -> None:
         def fake_read(path: Path) -> str:
             if path == validator.RPM_SPEC:
-                # The snippet source and the packaged destination sit in two
-                # DIFFERENT install commands.
+                # The packaged path appears on a non-install line, which the
+                # independent-substring check accepted.
                 return (
                     "%install\n"
-                    "install -d %{buildroot}/usr/share/nginx/modules\n"
                     "install -m 0644 packaging/nfpm/modules/mod-markdown.conf %{buildroot}/tmp/\n"
+                    "echo %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
                     "%files\n"
                     "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
                 )
@@ -1065,6 +1065,59 @@ class TestModuleSnippetEdgeCases:
         assert any(
             status == "FAIL" and check_id == "rpm:modules:install"
             for status, check_id, _message in result.results
+        )
+
+    def test_swapped_install_operands_fail_the_install_check(self, monkeypatch) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # Source and destination are swapped: rpmbuild would look for the
+                # buildroot path as its input.
+                return (
+                    "%install\n"
+                    "install -m 0644 %{buildroot}/usr/share/nginx/modules/mod-markdown.conf "
+                    "packaging/nfpm/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_target_directory_equals_form_keeps_every_operand_a_source(self) -> None:
+        spec = (
+            "%install\n"
+            "install --target-directory=%{buildroot}/usr/share/doc "
+            "packaging/nfpm/modules/not-staged.conf\n"
+        )
+        assert validator._spec_install_sources(spec) == [
+            "packaging/nfpm/modules/not-staged.conf"
+        ]
+
+    def test_similar_variable_name_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "$NOT_TARBALL_DIR/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_touch_does_not_prove_staging(self) -> None:
+        tokens = [
+            "touch",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "${TARBALL_DIR}/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
         )
 
     def test_prose_mentioning_the_loader_directive_defeats_the_contract(
