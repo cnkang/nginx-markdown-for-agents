@@ -855,6 +855,7 @@ class TestRpmSpecSourcesAreStaged:
         def fake_read_safe(path: Path) -> str:
             if path == validator.RPM_SPEC:
                 return (
+                    "%install\n"
                     "install -m 0644 README.md \\\n"
                     "    %{buildroot}/usr/share/doc/nginx-markdown-for-agents/README.md\n"
                     "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
@@ -919,6 +920,31 @@ class TestModuleSnippetEdgeCases:
             for status, check_id, _message in result.results
         )
 
+    def test_prose_mentioning_the_loader_directive_defeats_the_contract(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(path: Path) -> str:
+            body = "# main context, top level of nginx.conf, prefix notes\n"
+            if path == validator.RPM_MODULE_SNIPPET:
+                return body + "#" + validator.MODULE_SNIPPET_RPM_LOAD_LINE + "\n"
+            # The DEB snippet mentions the directive only inside a sentence: a
+            # substring hit must not satisfy the loader contract.
+            return (
+                body
+                + "# Enable conversion with "
+                + validator.MODULE_SNIPPET_DEB_LOAD_LINE
+                + "\n"
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        assert any(
+            status == "FAIL" and check_id == "snippet:deb:load-module-form"
+            for status, check_id, _message in result.results
+        )
+
     def test_block_form_directive_defeats_the_loader_only_rule(
         self, monkeypatch
     ) -> None:
@@ -968,3 +994,90 @@ class TestModuleSnippetEdgeCases:
         ]
         assert "rpm:modules:install" in failures
         assert "rpm:modules:files" in failures
+
+class TestStagingProofAndSectionScoping:
+    """Tightened rules: staging proof inside the tarball tree, section scoping."""
+
+    def test_source_only_mentioned_in_a_comment_does_not_prove_staging(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            # The path appears in a comment only.
+            return '# TODO: copy packaging/nfpm/modules/mod-markdown.conf later\n'
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+
+        assert any(
+            status == "FAIL" and check_id.endswith("mod-markdown.conf")
+            for status, check_id, _message in result.results
+        )
+
+    def test_source_copied_outside_the_tarball_does_not_prove_staging(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return "cp packaging/nfpm/modules/mod-markdown.conf /somewhere/else/\n"
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+
+        assert any(status == "FAIL" for status, _cid, _msg in result.results)
+
+    def test_files_entry_outside_the_files_section_fails(self, monkeypatch) -> None:
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so\n"
+                    "%changelog\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:files"
+            for status, check_id, _message in result.results
+        )
+
+    def test_install_line_outside_the_install_section_fails(self, monkeypatch) -> None:
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%prep\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )

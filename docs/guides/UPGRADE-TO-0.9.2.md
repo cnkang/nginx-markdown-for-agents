@@ -476,12 +476,15 @@ migrate_restore() {
       return 0
     }
     sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
-    if ! sudo mv "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}" 2>/dev/null; then
+    # The root is ABSENT between this rename and the snapshot rename below:
+    # rename cannot replace a non-empty directory, so a plain-directory root
+    # cannot be swapped atomically.  A symlinked root takes the branch above.
+    if ! sudo mv -T "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}" 2>/dev/null; then
       echo "ERROR: could not move the active tree aside; the active tree is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
       return 0
     fi
-    if ! sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null; then
-      sudo mv "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+    if ! sudo mv -T "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null; then
+      sudo mv -T "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null || true
       echo "ERROR: could not install the snapshot; the previous tree was rolled back and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
       return 0
     fi
@@ -552,7 +555,7 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
     fi
   else
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
+    sudo mv -T "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
       echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; restore manually" >&2
       exit 1
     }
@@ -661,7 +664,9 @@ restore_pre_migration_tree() {
     }
     # A plain directory cannot be replaced by rename while it is non-empty, so
     # the root moves aside for the duration of one rename and moves back when
-    # the install fails; the previous tree is preserved, never deleted.
+    # the install fails; the previous tree is preserved, never deleted.  The
+    # ROOT IS ABSENT for that single rename: use a symlinked configuration
+    # root (the branch above) when the root must never be absent.
     PREVIOUS_TARGET="$(sudo mktemp -d "${NGINX_CONF_DIR}.pre-restore-XXXXXX")" || {
       echo "ERROR: could not allocate a unique recovery path; the active tree is untouched and the backup is preserved at ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1
@@ -811,63 +816,62 @@ sudo nginx -t || {
     # Create a temporary symlink and atomically rename it over the
     # active link (GNU mv -T uses rename(2)), so a failure never
     # leaves the configuration root without a link.
-    ROOT_LINK_TARGET="$(sudo cat "${CONFIG_BACKUP_DIR}/tree-root-link")" || {
+    SAVED_LINK_TARGET="$(sudo cat "${CONFIG_BACKUP_DIR}/tree-root-link")" || {
       echo "ERROR: could not read the configuration-root symlink marker ${CONFIG_BACKUP_DIR}/tree-root-link; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     }
-    if [[ -z "${ROOT_LINK_TARGET}" ]]; then
+    if [[ -z "${SAVED_LINK_TARGET}" ]]; then
       echo "ERROR: the configuration-root symlink marker is empty; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     fi
-    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" || {
-      # Remove any stale temporary link (a previous failed attempt may
-      # have left one) and the staged tree, then report manual recovery.
-      sudo rm -f "${NGINX_CONF_DIR}.link-new"
-      sudo rm -rf "${RESTORE_STAGED}"
-      echo "ERROR: could not create the replacement configuration-root link; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
-      exit 1
-    }
-    sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" || {
-      sudo rm -f "${NGINX_CONF_DIR}.link-new"
-      sudo rm -rf "${RESTORE_STAGED}"
-      echo "ERROR: could not replace the configuration-root link; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
-      exit 1
-    }
     ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
-    # The staging dir was created beside the SYMLINK; the final mv moves
-    # it to the resolved TARGET, which may be on a different filesystem.
-    # Verify device identity and fail closed before attempting the swap
-    # (a cross-device mv would degrade to a non-atomic copy).
-    if [[ "$(stat -c '%d' "${RESTORE_STAGED}")" != "$(stat -c '%d' "${ROOT_LINK_TARGET}")" ]]; then
+    # Stage the restored tree beside the CURRENT target, then repoint the
+    # configuration link at it with a single rename.  The root therefore never
+    # points at a missing directory, so an interruption between the two moves
+    # cannot leave a dangling link.
+    RESTORE_NEW="$(sudo mktemp -d "${ROOT_LINK_TARGET}.restore-XXXXXX")" || {
       sudo rm -rf "${RESTORE_STAGED}"
-      echo "ERROR: configuration root target is on a different filesystem than the staging dir; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
-      exit 1
-    fi
-    if [[ -e "${ROOT_LINK_TARGET}" || -L "${ROOT_LINK_TARGET}" ]]; then
-      # Unique sibling rollback path: a fixed .rollback-old name would
-      # be deleted before the replacement succeeds, losing the
-      # last-known-good tree on an interrupted retry.
-      ROLLBACK_OLD="$(sudo mktemp -d "$(dirname "${ROOT_LINK_TARGET}")/.nginx-old-XXXXXX")" || {
-        sudo rm -rf "${RESTORE_STAGED}"
-        echo "ERROR: could not allocate a rollback directory; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
-        exit 1
-      }
-      sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
-      sudo mv -f "${ROOT_LINK_TARGET}" "${ROLLBACK_OLD}" 2>/dev/null || {
-        sudo rm -rf "${RESTORE_STAGED}"
-        echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
-        exit 1
-      }
-    fi
-    sudo mv -f "${RESTORE_STAGED}" "${ROOT_LINK_TARGET}" 2>/dev/null || {
-      if [[ -n "${ROLLBACK_OLD:-}" && -e "${ROLLBACK_OLD}" ]]; then
-        sudo mv -f "${ROLLBACK_OLD}" "${ROOT_LINK_TARGET}"
-      fi
-      sudo rm -rf "${RESTORE_STAGED}"
-      echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      echo "ERROR: could not allocate a unique restore path; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     }
-    sudo rm -rf "${ROLLBACK_OLD:-}" 2>/dev/null || true
+    sudo rmdir "${RESTORE_NEW}" 2>/dev/null || true
+    # The staged tree is created beside the SYMLINK while the target it must
+    # replace lives elsewhere: verify device identity before the rename (a
+    # cross-device mv would degrade to a non-atomic copy).
+    if [[ "$(stat -c '%d' "${RESTORE_STAGED}")" != "$(stat -c '%d' "$(dirname "${RESTORE_NEW}")")" ]]; then
+      sudo rm -rf "${RESTORE_STAGED}"
+      echo "ERROR: configuration root target is on a different filesystem than the staged tree; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    fi
+    if ! sudo mv -T "${RESTORE_STAGED}" "${RESTORE_NEW}" 2>/dev/null; then
+      echo "ERROR: could not move the staged tree beside the target; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    fi
+    sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+    sudo ln -s "${RESTORE_NEW}" "${NGINX_CONF_DIR}.link-new" || {
+      sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+      echo "ERROR: could not create the replacement configuration-root link; the active link is untouched and the restored tree is preserved at ${RESTORE_NEW}." >&2
+      exit 1
+    }
+    if ! sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}"; then
+      sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+      echo "ERROR: could not repoint the configuration-root link; the active link is untouched and the restored tree is preserved at ${RESTORE_NEW}." >&2
+      exit 1
+    fi
+    # The link now serves the restored tree; preserve the previous target as
+    # recovery material instead of deleting it.
+    ROLLBACK_OLD="$(sudo mktemp -d "$(dirname "${ROOT_LINK_TARGET}")/.nginx-old-XXXXXX")" || {
+      echo "WARN: could not allocate a recovery path for the previous configuration target ${ROOT_LINK_TARGET}; it was left in place" >&2
+      ROLLBACK_OLD=""
+    }
+    if [[ -n "${ROLLBACK_OLD}" ]]; then
+      sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
+      if sudo mv -T "${ROOT_LINK_TARGET}" "${ROLLBACK_OLD}" 2>/dev/null; then
+        echo "NOTE: the previous configuration target was preserved as ${ROLLBACK_OLD}; remove it once the upgrade is confirmed"
+      else
+        echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+      fi
+    fi
   else
     ROLLBACK_OLD="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR%/}")/.nginx-old-XXXXXX")" || {
       sudo rm -rf "${RESTORE_STAGED}"
@@ -875,13 +879,13 @@ sudo nginx -t || {
       exit 1
     }
     sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
-    sudo mv -f "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}" 2>/dev/null || {
+    sudo mv -Tf "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}" 2>/dev/null || {
       sudo rm -rf "${RESTORE_STAGED}"
       echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     }
-    sudo mv -f "${RESTORE_STAGED}" "${NGINX_CONF_DIR}" 2>/dev/null || {
-      sudo mv -f "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}"
+    sudo mv -Tf "${RESTORE_STAGED}" "${NGINX_CONF_DIR}" 2>/dev/null || {
+      sudo mv -Tf "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}"
       sudo rm -rf "${RESTORE_STAGED}"
       echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
@@ -1309,12 +1313,15 @@ migrate_restore() {
       return 0
     }
     sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
-    if ! sudo mv "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}" 2>/dev/null; then
+    # The root is ABSENT between this rename and the snapshot rename below:
+    # rename cannot replace a non-empty directory, so a plain-directory root
+    # cannot be swapped atomically.  A symlinked root takes the branch above.
+    if ! sudo mv -T "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}" 2>/dev/null; then
       echo "ERROR: could not move the active tree aside; the active tree is untouched and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
       return 0
     fi
-    if ! sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null; then
-      sudo mv "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null || true
+    if ! sudo mv -T "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null; then
+      sudo mv -T "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}" 2>/dev/null || true
       echo "ERROR: could not install the snapshot; the previous tree was rolled back and the snapshot ${MIGRATE_BACKUP} is preserved for manual recovery" >&2
       return 0
     fi
@@ -1385,7 +1392,7 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
     fi
   else
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
+    sudo mv -T "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
       echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; restore manually" >&2
       exit 1
     }
@@ -1575,11 +1582,11 @@ if ! sudo nginx -t; then
         exit 1
       }
       sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
-      sudo mv -f "${ROOT_LINK_TARGET}" "${ROLLBACK_OLD}"
+      sudo mv -Tf "${ROOT_LINK_TARGET}" "${ROLLBACK_OLD}"
     fi
-    sudo mv -f "${RESTORE_STAGED}" "${ROOT_LINK_TARGET}" || {
+    sudo mv -Tf "${RESTORE_STAGED}" "${ROOT_LINK_TARGET}" || {
       if [[ -n "${ROLLBACK_OLD:-}" && -e "${ROLLBACK_OLD}" ]]; then
-        sudo mv -f "${ROLLBACK_OLD}" "${ROOT_LINK_TARGET}"
+        sudo mv -Tf "${ROLLBACK_OLD}" "${ROOT_LINK_TARGET}"
       fi
       sudo rm -rf "${RESTORE_STAGED}"
       echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
@@ -1593,9 +1600,12 @@ if ! sudo nginx -t; then
       exit 1
     }
     sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
-    sudo mv -f "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}"
-    sudo mv -f "${RESTORE_STAGED}" "${NGINX_CONF_DIR}" || {
-      sudo mv -f "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}"
+    # Plain-directory root: the configuration root is ABSENT between these
+    # two renames (rename cannot replace a non-empty directory).  A symlinked
+    # root swaps atomically instead; the previous tree is preserved either way.
+    sudo mv -Tf "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}"
+    sudo mv -Tf "${RESTORE_STAGED}" "${NGINX_CONF_DIR}" || {
+      sudo mv -Tf "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}"
       sudo rm -rf "${RESTORE_STAGED}"
       echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
@@ -1624,6 +1634,56 @@ if [[ "$systemd_managed" -eq 1 ]]; then
 else
     sudo nginx
 fi
+# Recovery helpers for the post-start checks.  Replacing the module file under
+# a live master is unsafe (the running worker still maps the previous file, and
+# a reload could pick up a half-restored pair), so every failure path stops the
+# started instance first and restarts it only once the restored module and
+# configuration validate together.
+stop_started_nginx() {
+  if [[ "$systemd_managed" -eq 1 ]]; then
+    sudo systemctl stop nginx 2>/dev/null || true
+  else
+    sudo nginx -s stop 2>/dev/null || true
+  fi
+  sleep 1
+}
+
+restore_previous_module_and_config() {
+  # 1) Never replace the module under a live process.
+  stop_started_nginx
+  # 2) Restore the previous module.  When either step fails the 0.9.2 module is
+  #    still in place, so disarm the migration trap instead of restoring a
+  #    configuration that cannot pair with it.
+  if ! sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
+    MIGRATE_ACTIVE=0
+    echo "ERROR: could not stage the previous module from ${MODULE_BACKUP}; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
+    return 1
+  fi
+  if ! sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null; then
+    MIGRATE_ACTIVE=0
+    echo "ERROR: could not replace the active module with the previous module; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
+    return 1
+  fi
+  # 3) Restore the configuration the previous module pairs with and validate the
+  #    pair before the service is allowed to run again.
+  migrate_restore || true
+  if ! sudo nginx -t; then
+    MIGRATE_ACTIVE=0
+    echo "ERROR: the restored module and configuration fail validation; NGINX stays stopped. Restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree" >&2
+    return 1
+  fi
+  # The recovered pair is consistent and validated: the migration trap has done
+  # its work, so disarm it and bring the service back up.
+  MIGRATE_ACTIVE=0
+  if [[ "$systemd_managed" -eq 1 ]]; then
+    sudo systemctl start nginx 2>/dev/null || true
+  else
+    sudo nginx 2>/dev/null || true
+  fi
+  echo "INFO: previous module and configuration restored, validated, and NGINX restarted" >&2
+  return 0
+}
+
 # Post-start verification: the new master must be serving and converting
 # before the backup is removed.  Probe a fixed, known-convertible fixture
 # (a path already verified to return text/html upstream and convert to
@@ -1633,32 +1693,16 @@ sleep 1
 if [[ "$systemd_managed" -eq 1 ]]; then
     if ! systemctl is-active --quiet nginx; then
       echo "ERROR: nginx service inactive after start; restoring the previous module so the migration trap's configuration restore pairs with it" >&2
-      if ! sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
-        echo "ERROR: could not stage the previous module from ${MODULE_BACKUP}; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
-        exit 1
-      fi
-      if ! sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null; then
-        # The 0.9.2 module is still installed: disarm the migration trap so
-        # the pre-migration configuration is not restored for the new binary.
-        MIGRATE_ACTIVE=0
-        echo "ERROR: could not replace the active module with the previous module; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
-        exit 1
-      fi
+      # Stop the started master, restore the previous module and the
+      # configuration it pairs with, validate them, then restart.
+      restore_previous_module_and_config || true
       exit 1
     fi
 elif ! pgrep -x nginx >/dev/null 2>&1; then
   echo "ERROR: NGINX master not running after start; restoring the previous module so the migration trap's configuration restore pairs with it" >&2
-  if ! sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
-    echo "ERROR: could not stage the previous module from ${MODULE_BACKUP}; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
-    exit 1
-  fi
-  if ! sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null; then
-    # The 0.9.2 module is still installed: disarm the migration trap so
-    # the pre-migration configuration is not restored for the new binary.
-    MIGRATE_ACTIVE=0
-    echo "ERROR: could not replace the active module with the previous module; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
-    exit 1
-  fi
+  # Stop the started master, restore the previous module and the
+  # configuration it pairs with, validate them, then restart.
+  restore_previous_module_and_config || true
   exit 1
 fi
 PROBE_PATH="/known-convertible-page"   # adjust to your verified fixture
@@ -1672,17 +1716,9 @@ if ! curl -fsS --max-time 10 -H 'Accept: text/markdown' \
         -D "${PROBE_HEADERS}" \
         -o "${PROBE_BODY}" "http://localhost${PROBE_PATH}"; then
   echo "ERROR: post-start check failed (probe request); restoring the previous module so the migration trap's configuration restore pairs with it" >&2
-  if ! sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
-    echo "ERROR: could not stage the previous module from ${MODULE_BACKUP}; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
-    exit 1
-  fi
-  if ! sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null; then
-    # The 0.9.2 module is still installed: disarm the migration trap so
-    # the pre-migration configuration is not restored for the new binary.
-    MIGRATE_ACTIVE=0
-    echo "ERROR: could not replace the active module with the previous module; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
-    exit 1
-  fi
+  # Stop the started master, restore the previous module and the
+  # configuration it pairs with, validate them, then restart.
+  restore_previous_module_and_config || true
   rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
   exit 1
 fi
@@ -1695,17 +1731,9 @@ fi
 if ! grep -Fq "${PROBE_MARKER}" "${PROBE_BODY}"; then
   echo "ERROR: post-start check failed (converted body lacks the fixture marker); restoring the previous module so the migration trap's configuration restore pairs with it" >&2
   echo "  Inspect the probe response and verify ${PROBE_PATH} converts before removing the backup." >&2
-  if ! sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null; then
-    echo "ERROR: could not stage the previous module from ${MODULE_BACKUP}; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
-    exit 1
-  fi
-  if ! sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null; then
-    # The 0.9.2 module is still installed: disarm the migration trap so
-    # the pre-migration configuration is not restored for the new binary.
-    MIGRATE_ACTIVE=0
-    echo "ERROR: could not replace the active module with the previous module; the 0.9.2 module remains installed. Restore manually: install the previous module and the 0.9.1 tree from ${CONFIG_BACKUP_DIR}/tree, then run nginx -t and start NGINX" >&2
-    exit 1
-  fi
+  # Stop the started master, restore the previous module and the
+  # configuration it pairs with, validate them, then restart.
+  restore_previous_module_and_config || true
   rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
   exit 1
 fi
