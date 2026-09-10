@@ -340,25 +340,25 @@ check_config_valid() {
         return
     fi
 
-    # Create a minimal test config
-    local tmp_conf
-    tmp_conf=$(mktemp "${TMPDIR:-/tmp}/doctor-nginx-XXXXXX.conf") || {
-        emit_check "config_valid" "fail" "could not create temp config file"
+    # Create a minimal test config inside a PRIVATE mktemp -d directory:
+    # fixed config/error-log/PID filenames live inside it, so sibling
+    # paths are never derived in a shared TMPDIR (which could collide or
+    # be pre-created by another process).
+    local tmp_dir
+    tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/doctor-nginx-XXXXXX") || {
+        emit_check "config_valid" "fail" "could not create temp config directory"
         return
     }
-    # Unique per-invocation log/PID paths derived from the already-created
-    # tmp_conf name: the mktemp'd base is guaranteed unique and collision-free,
-    # and deriving keeps macOS/GNU behavior identical (avoids mktemp -u which
-    # is GNU-only and doesn't reserve the name).
-    local tmp_error_log="${tmp_conf%.conf}.error.log"
-    local tmp_pid="${tmp_conf%.conf}.pid"
+    local tmp_conf="${tmp_dir}/nginx.conf"
+    local tmp_error_log="${tmp_dir}/error.log"
+    local tmp_pid="${tmp_dir}/nginx.pid"
 
     # TMPDIR is user-controlled: a value containing nginx-config metacharacters
     # (semicolon, quote, whitespace) would inject directives into the heredoc
     # below.  Reject it up front instead of emitting a config that nginx -t
     # would misparse or that could alter the test's behavior.
-    if [[ "$tmp_conf" == *[!A-Za-z0-9_./-]* ]]; then
-        rm -f "$tmp_conf"
+    if [[ "$tmp_dir" == *[!A-Za-z0-9_./-]* ]]; then
+        rm -rf "$tmp_dir"
         emit_check "config_valid" "fail" \
             "TMPDIR contains characters unsafe for nginx config"
         return
@@ -366,7 +366,7 @@ check_config_valid() {
 
     # cleanup helper called at every return path — RETURN trap
     # leaks to caller on bash 3.2 (macOS default), so use explicit helper.
-    _check_config_valid_cleanup() { rm -f "$tmp_conf" "$tmp_error_log" "$tmp_pid"; }
+    _check_config_valid_cleanup() { rm -rf "$tmp_dir"; }
 
     # Write a config that loads the markdown module if found,
     # and includes a stable directive so the test validates that

@@ -4067,6 +4067,15 @@ ngx_http_markdown_streaming_clone_chain_deep(
         if (in->buf == NULL) {
             continue;
         }
+        /* A file-backed buffer cannot be deep-cloned: the ngx_file_t
+         * reference is owned by the original producer and may be closed
+         * after this body-filter invocation, and the clone has no
+         * request-owned file state.  Refuse the clone (fail-closed)
+         * rather than retain a dangling file reference — the same
+         * principle as the replay-buffer exhaustion rule. */
+        if (in->buf->in_file) {
+            return NULL;
+        }
         cl = ngx_alloc_chain_link(r->pool);
         if (cl == NULL) {
             return NULL;
@@ -4097,14 +4106,6 @@ ngx_http_markdown_streaming_clone_chain_deep(
         b->flush = in->buf->flush;
         b->sync = in->buf->sync;
         b->temporary = in->buf->temporary;
-        /* Preserve file-backed buffer metadata: a file buffer has NULL
-         * memory pointers, so the data copy above is skipped and the
-         * file reference must be carried over unchanged for the pending
-         * delivery to read the same bytes. */
-        b->in_file = in->buf->in_file;
-        b->file = in->buf->file;
-        b->file_pos = in->buf->file_pos;
-        b->file_last = in->buf->file_last;
         cl->buf = b;
         cl->next = NULL;
         *tail = cl;
