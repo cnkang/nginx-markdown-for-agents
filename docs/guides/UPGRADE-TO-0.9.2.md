@@ -331,7 +331,7 @@ else
 fi
 grep_rc="${pipeline_status[0]}"
 sed_rc="${pipeline_status[1]}"
-if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
+if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]]; then
   echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc)" >&2
   exit 1
 fi
@@ -363,8 +363,23 @@ sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
 # with the 0.9.2 binary.
 # Snapshot the active tree FIRST: the sed edits below are in-place, so a
 # mid-migration failure must be able to restore the untouched tree
-# instead of leaving a partially migrated configuration.
-sudo cp -a "${NGINX_CONF_DIR}" "${NGINX_CONF_DIR}.migrate-backup" || {
+# instead of leaving a partially migrated configuration.  The snapshot
+# lives in a UNIQUE sibling directory (mktemp): a fixed
+# .migrate-backup name would nest inside the active root when
+# NGINX_CONF_DIR carries a trailing slash, and a stale snapshot from an
+# interrupted run would be merged by cp -a instead of replaced.
+MIGRATE_BACKUP="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR}")/.nginx-migrate-XXXXXX")" || {
+  echo "ERROR: could not allocate a migration snapshot directory; aborting" >&2
+  exit 1
+}
+# For a symlinked root, snapshot the RESOLVED TARGET tree: cp -a of the
+# link itself would copy the symlink, not the configuration tree.
+SNAPSHOT_SRC="${NGINX_CONF_DIR}"
+if [[ -L "${NGINX_CONF_DIR}" ]]; then
+  SNAPSHOT_SRC="$(readlink -f "${NGINX_CONF_DIR}")"
+fi
+sudo cp -a "${SNAPSHOT_SRC}/." "${MIGRATE_BACKUP}/" || {
+  sudo rm -rf "${MIGRATE_BACKUP}"
   echo "ERROR: could not snapshot the active configuration tree before migration; aborting" >&2
   exit 1
 }
@@ -384,17 +399,21 @@ else
 fi
 grep_rc="${pipeline_status[0]}"
 sed_rc="${pipeline_status[1]}"
-if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
+if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]]; then
   echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc); restoring the untouched active tree" >&2
+  # Interruption-safe recovery: if the process dies between the rm -rf
+  # and the mv, the EXIT trap below restores the snapshot so the active
+  # root is never left missing.
+  trap 'rc=$?; if [ ! -e "${NGINX_CONF_DIR}" ] && [ -d "${MIGRATE_BACKUP}" ]; then sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true; fi; exit "$rc"' EXIT
   sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-  sudo mv "${NGINX_CONF_DIR}.migrate-backup" "${NGINX_CONF_DIR}" 2>/dev/null || {
-    echo "ERROR: could not restore the active tree from ${NGINX_CONF_DIR}.migrate-backup; restore manually" >&2
+  sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
+    echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; restore manually" >&2
     exit 1
   }
   exit 1
 fi
 # Migration succeeded: drop the snapshot.
-sudo rm -rf "${NGINX_CONF_DIR}.migrate-backup" 2>/dev/null || true
+sudo rm -rf "${MIGRATE_BACKUP}" 2>/dev/null || true
 ```
 
 A 0.9.1 configuration fails `nginx -t` under the 0.9.2 binary (removed
@@ -836,7 +855,7 @@ else
 fi
 grep_rc="${pipeline_status[0]}"
 sed_rc="${pipeline_status[1]}"
-if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
+if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]]; then
   echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc)" >&2
   exit 1
 fi
@@ -884,8 +903,23 @@ else
 fi
 # Snapshot the active tree FIRST: the sed edits below are in-place, so a
 # mid-migration failure must be able to restore the untouched tree
-# instead of leaving a partially migrated configuration.
-sudo cp -a "${NGINX_CONF_DIR}" "${NGINX_CONF_DIR}.migrate-backup" || {
+# instead of leaving a partially migrated configuration.  The snapshot
+# lives in a UNIQUE sibling directory (mktemp): a fixed
+# .migrate-backup name would nest inside the active root when
+# NGINX_CONF_DIR carries a trailing slash, and a stale snapshot from an
+# interrupted run would be merged by cp -a instead of replaced.
+MIGRATE_BACKUP="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR}")/.nginx-migrate-XXXXXX")" || {
+  echo "ERROR: could not allocate a migration snapshot directory; aborting" >&2
+  exit 1
+}
+# For a symlinked root, snapshot the RESOLVED TARGET tree: cp -a of the
+# link itself would copy the symlink, not the configuration tree.
+SNAPSHOT_SRC="${NGINX_CONF_DIR}"
+if [[ -L "${NGINX_CONF_DIR}" ]]; then
+  SNAPSHOT_SRC="$(readlink -f "${NGINX_CONF_DIR}")"
+fi
+sudo cp -a "${SNAPSHOT_SRC}/." "${MIGRATE_BACKUP}/" || {
+  sudo rm -rf "${MIGRATE_BACKUP}"
   echo "ERROR: could not snapshot the active configuration tree before migration; aborting" >&2
   exit 1
 }
@@ -905,17 +939,21 @@ else
 fi
 grep_rc="${pipeline_status[0]}"
 sed_rc="${pipeline_status[1]}"
-if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
+if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]]; then
   echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc); restoring the untouched active tree" >&2
+  # Interruption-safe recovery: if the process dies between the rm -rf
+  # and the mv, the EXIT trap below restores the snapshot so the active
+  # root is never left missing.
+  trap 'rc=$?; if [ ! -e "${NGINX_CONF_DIR}" ] && [ -d "${MIGRATE_BACKUP}" ]; then sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || true; fi; exit "$rc"' EXIT
   sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-  sudo mv "${NGINX_CONF_DIR}.migrate-backup" "${NGINX_CONF_DIR}" 2>/dev/null || {
-    echo "ERROR: could not restore the active tree from ${NGINX_CONF_DIR}.migrate-backup; restore manually" >&2
+  sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
+    echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; restore manually" >&2
     exit 1
   }
   exit 1
 fi
 # Migration succeeded: drop the snapshot.
-sudo rm -rf "${NGINX_CONF_DIR}.migrate-backup" 2>/dev/null || true
+sudo rm -rf "${MIGRATE_BACKUP}" 2>/dev/null || true
 # A configuration with NO retired directives is already 0.9.2
 # compliant: grep exit status 1 (no match) is accepted by the check
 # Record the service-manager ownership decision BEFORE stopping: after
@@ -1000,9 +1038,11 @@ if ! sudo nginx -t; then
   fi
   # Dedicated cleanup trap: any unguarded failure under set -euo pipefail
   # must still remove the staging tree; disarmed after a successful move.
+  # This trap REPLACES the earlier STAGED_ROOT trap (same bash block), so
+  # it must clean BOTH staging trees or the earlier one leaks on the
+  # module-validation failure path.
   RESTORE_CLEANUP_SET=1
-  trap 'rc=$?; sudo rm -rf -- "$RESTORE_STAGED" || :; exit "$rc"' EXIT
-  sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${RESTORE_STAGED}/"
+  trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" "$RESTORE_STAGED" || :; exit "$rc"' EXIT
   if ! sudo nginx -t -c "${RESTORE_STAGED}/nginx.conf"; then
     sudo rm -rf "${RESTORE_STAGED}"
     echo "ERROR: restored configuration fails validation; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
