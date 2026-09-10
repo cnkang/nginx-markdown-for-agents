@@ -305,7 +305,7 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # tree is a disposable copy: edit in place WITHOUT .bak backups, so no
 # stale backup file can be scanned below, counted as a second
 # load_module entry, or loaded by a wildcard include during nginx -t.
-sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${STAGED_ROOT}" 2>/dev/null \
+if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${STAGED_ROOT}" 2>/dev/null \
     | while read -r staged_conf; do
         sudo sed -i -E \
             -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
@@ -314,9 +314,13 @@ sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dy
             -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
             "${staged_conf}" || exit 1
-      done
-grep_rc=${PIPESTATUS[0]}
-sed_rc=${PIPESTATUS[1]}
+      done; then
+    pipeline_status=(0 0)
+else
+    pipeline_status=("${PIPESTATUS[@]}")
+fi
+grep_rc="${pipeline_status[0]}"
+sed_rc="${pipeline_status[1]}"
 if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
   echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc)" >&2
   exit 1
@@ -757,7 +761,7 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # dynconf directives (MIGRATION-0.9.2.md "Static configuration
 # migration"); the remaining items are consumer-side (reason integers,
 # diagnostics schema) and need no config edit:
-sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${STAGED_ROOT}" 2>/dev/null \
+if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${STAGED_ROOT}" 2>/dev/null \
     | while read -r staged_conf; do
         # The staged tree is a disposable copy: edit in place WITHOUT
         # .bak backups, so no stale backup file can be scanned below,
@@ -770,14 +774,18 @@ sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dy
             -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
             "${staged_conf}" || exit 1
-      done
-grep_rc=${PIPESTATUS[0]}
-sed_rc=${PIPESTATUS[1]}
+      done; then
+    pipeline_status=(0 0)
+else
+    pipeline_status=("${PIPESTATUS[@]}")
+fi
+grep_rc="${pipeline_status[0]}"
+sed_rc="${pipeline_status[1]}"
 if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
   echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc)" >&2
   exit 1
 fi
-# A configuration with NO retired dynconf directives is a valid 0.9.2
+# A configuration with NO retired directives is a valid 0.9.2
 # configuration: grep exit status 1 (no match) is accepted by the check
 # above; any other grep or sed failure aborts the upgrade.
 # Rewrite ONLY the Markdown module's load_module entry (other modules'
@@ -798,11 +806,11 @@ if [[ "${staged_loads}" -ne 1 ]]; then
 fi
 sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
 # Staged validation succeeded.  Apply the SAME migration to the ACTIVE
-# tree now (before the module swap): remove the three retired dynconf
+# tree now (before the module swap): remove the five retired directives
 # directives.  The active load_module entry stays as-is — it already
 # references the canonical module path, which the swap below replaces
 # with the 0.9.2 binary.
-sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
+if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
     | while read -r active_conf; do
         sudo sed -i -E \
             -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
@@ -811,14 +819,18 @@ sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dy
             -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
             "${active_conf}" || exit 1
-      done
-grep_rc=${PIPESTATUS[0]}
-sed_rc=${PIPESTATUS[1]}
+      done; then
+    pipeline_status=(0 0)
+else
+    pipeline_status=("${PIPESTATUS[@]}")
+fi
+grep_rc="${pipeline_status[0]}"
+sed_rc="${pipeline_status[1]}"
 if { [ "$grep_rc" -ne 0 ] && [ "$grep_rc" -ne 1 ]; } || [ "$sed_rc" -ne 0 ]; then
   echo "ERROR: migration edit failed (grep=$grep_rc sed=$sed_rc)" >&2
   exit 1
 fi
-# A configuration with NO retired dynconf directives is already 0.9.2
+# A configuration with NO retired directives is already 0.9.2
 # compliant: grep exit status 1 (no match) is accepted by the check
 # above; any other grep or sed failure aborts the upgrade.
 MODULE_BACKUP="${MODULES_DIR}/.ngx_http_markdown_filter_module.so.pre-0.9.2.bak"
