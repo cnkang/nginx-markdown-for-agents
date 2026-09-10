@@ -121,3 +121,103 @@ def test_module_beside_the_binary_is_discovered(tmp_path: Path) -> None:
         "load_module modules/ngx_http_markdown_filter_module.so;"
     )
     assert (runtime_dir / "modules" / module.name).read_bytes() == b"module-bytes"
+
+
+def test_module_is_found_when_the_prefix_modules_dir_is_empty(
+    tmp_path: Path,
+) -> None:
+    """An empty <prefix>/modules must not stop the search for the module."""
+    build_root = tmp_path / "nginx-1.30.4"
+    objs = build_root / "objs"
+    (build_root / "conf").mkdir(parents=True)
+    (build_root / "modules").mkdir()
+    objs.mkdir(parents=True)
+    (build_root / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    nginx_bin = objs / "nginx"
+    nginx_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    nginx_bin.chmod(0o755)
+    module = objs / "ngx_http_markdown_filter_module.so"
+    module.write_bytes(b"module-bytes")
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(module)
+
+
+def test_unrelated_markdown_library_is_not_selected(tmp_path: Path) -> None:
+    """Only the NGINX module counts, not any .so with markdown in its name."""
+    build_root = tmp_path / "nginx-1.30.4"
+    objs = build_root / "objs"
+    (build_root / "conf").mkdir(parents=True)
+    objs.mkdir(parents=True)
+    (build_root / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    nginx_bin = objs / "nginx"
+    nginx_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    nginx_bin.chmod(0o755)
+    (objs / "libmarkdown-parser.so").write_bytes(b"not-the-module")
+    module = objs / "ngx_http_markdown_filter_module.so"
+    module.write_bytes(b"module-bytes")
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(module)
+
+
+def test_discovered_module_with_unsafe_name_is_rejected(tmp_path: Path) -> None:
+    """A discovered basename never reaches the generated load_module line."""
+    build_root = tmp_path / "nginx-1.30.4"
+    objs = build_root / "objs"
+    (build_root / "conf").mkdir(parents=True)
+    objs.mkdir(parents=True)
+    (build_root / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    nginx_bin = objs / "nginx"
+    nginx_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    nginx_bin.chmod(0o755)
+    (objs / "ngx_http_markdown bad.so").write_bytes(b"module-bytes")
+
+    command = (
+        f'source "{HELPER}"; '
+        f"unset MODULE_SO; "
+        f'markdown_prepare_runtime_reuse "{nginx_bin}" "{tmp_path / "runtime"}"'
+    )
+    env = os.environ.copy()
+    env.pop("MODULE_SO", None)
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 1
+    assert "unsafe module filename" in result.stderr
+    assert "load_module" not in result.stdout
