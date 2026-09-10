@@ -1,9 +1,10 @@
 """Keep the mirrored baseline bodies pointing at a single real file.
 
-The streaming-first and large-body payloads are recorded once per baseline set,
-and every copy is byte-identical. They are stored as symlinks to the top-level
-file so the repository does not carry megabytes of duplicate evidence; these
-tests keep that true and keep the links inside the repository.
+The response payloads recorded for the streaming-first scenarios are
+byte-identical in every probe set, and the large-body payload repeats too. They
+are stored once and linked everywhere else so the repository does not carry
+megabytes of duplicate evidence; these tests keep that true and keep the links
+inside the repository.
 """
 
 from __future__ import annotations
@@ -15,8 +16,17 @@ import pytest
 
 BASELINES = Path(__file__).resolve().parents[3] / "perf" / "baselines"
 
-# Payload families whose copies must stay byte-identical to one another.
-SHARED_BODIES = ("streaming-first.body", "large-body.body")
+# The payloads that exist as one stored file.
+STORED_BODIES = ("streaming-first.body", "large-body.body")
+
+# Scenario names that reuse the streaming-first payload.
+VARIANT_BODIES = (
+    "gzip-streaming-first.body",
+    "deflate-streaming-first.body",
+    "brotli-streaming-first.body",
+)
+
+SHARED_BODIES = STORED_BODIES + VARIANT_BODIES
 
 
 def _digest(path: Path) -> str:
@@ -31,16 +41,22 @@ def test_shared_body_copies_are_identical(name: str) -> None:
     assert len(digests) == 1, f"{name}: copies diverged: {sorted(digests)}"
 
 
-@pytest.mark.parametrize("name", SHARED_BODIES)
-def test_only_the_top_level_copy_is_a_regular_file(name: str) -> None:
+@pytest.mark.parametrize("name", STORED_BODIES)
+def test_stored_payload_is_a_regular_file(name: str) -> None:
     canonical = BASELINES / name
     assert canonical.is_file(), f"{canonical} is the stored payload and must exist"
     assert not canonical.is_symlink(), f"{canonical} must be the stored payload"
     for copy in sorted(BASELINES.rglob(name)):
-        if copy.parent == BASELINES:
-            assert not copy.is_symlink(), f"{copy} should be the stored payload"
-        else:
-            assert copy.is_symlink(), f"{copy} should link to the stored payload"
+        if copy != canonical:
+            assert copy.is_symlink(), f"{copy} should link to {canonical}"
+
+
+@pytest.mark.parametrize("name", VARIANT_BODIES)
+def test_variant_payloads_are_links(name: str) -> None:
+    copies = sorted(BASELINES.rglob(name))
+    assert copies, f"{name}: expected at least one copy"
+    for copy in copies:
+        assert copy.is_symlink(), f"{copy} should link to the stored payload"
 
 
 def test_links_resolve_inside_the_baselines_directory() -> None:
