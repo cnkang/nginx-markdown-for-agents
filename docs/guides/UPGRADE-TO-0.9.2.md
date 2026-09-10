@@ -113,16 +113,31 @@ fi
 CONFIG_BACKUP_DIR="/var/backups/nginx-markdown-0.9.1"
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
 # Path-safety guard: the rollback deletes and recreates the configuration
-# root with sudo, so reject unsafe overrides (empty, relative, root, or
-# anything that could point at the backup directory or a system root).
+# root with sudo, so reject unsafe overrides.  The value must be an
+# absolute path to an EXISTING directory that contains nginx.conf (a
+# config root), must not be the filesystem root or the backup directory,
+# and its resolved symlink target must be safe too.
 case "${NGINX_CONF_DIR}" in
-  ""|/|/*/*|*)
-    if [[ "${NGINX_CONF_DIR}" == "/" || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* || "${NGINX_CONF_DIR}" != /* ]]; then
-      echo "ERROR: unsafe NGINX_CONF_DIR '${NGINX_CONF_DIR}'; refusing to proceed" >&2
+  /*)
+    if [[ "${NGINX_CONF_DIR}" == "/" \
+          || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* \
+          || ! -d "${NGINX_CONF_DIR}" \
+          || ! -f "${NGINX_CONF_DIR}/nginx.conf" ]]; then
+      echo "ERROR: unsafe NGINX_CONF_DIR '${NGINX_CONF_DIR}' (must be an absolute existing config root containing nginx.conf, not the filesystem root or the backup directory)" >&2
       exit 1
     fi
     ;;
+  *)
+    echo "ERROR: NGINX_CONF_DIR must be an absolute path" >&2
+    exit 1
+    ;;
 esac
+RESOLVED_CONF_DIR="$(readlink -f "${NGINX_CONF_DIR}")"
+if [[ "${RESOLVED_CONF_DIR}" == "/" \
+      || "${RESOLVED_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* ]]; then
+  echo "ERROR: NGINX_CONF_DIR resolves to an unsafe target '${RESOLVED_CONF_DIR}'" >&2
+  exit 1
+fi
 sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 # Back up the ENTIRE configuration tree (not just nginx.conf + conf.d +
 # modules-enabled): MIGRATION-0.9.2.md may touch any path under
@@ -202,8 +217,19 @@ prove the migrated syntax is valid under the 0.9.2 binary:
 STAGED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX")"
 trap 'rm -rf "$STAGED_ROOT"' EXIT
 sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
-sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
-    "${STAGED_ROOT}/nginx.conf"
+# Rewrite the Markdown module's load_module entry across the WHOLE
+# staged tree (the entry may live in nginx.conf or an included file
+# such as modules-enabled/*.conf), then verify exactly one staged entry.
+sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}" \
+    | while read -r staged_conf; do
+        sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
+            "${staged_conf}"
+      done
+staged_loads="$(grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
+if [[ "${staged_loads}" -ne 1 ]]; then
+    echo "ERROR: expected exactly one Markdown load_module entry in the staged config tree, found ${staged_loads}" >&2
+    exit 1
+fi
 sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
 ```
 
@@ -299,7 +325,9 @@ sudo nginx -t || {
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
     sudo rm -rf "${NGINX_CONF_DIR}"
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
-    sudo rm -rf "${NGINX_CONF_DIR}/"*
+    # Remove ALL direct children of the resolved target, including
+    # dotfiles (a plain glob would leave migration-added hidden files).
+    sudo find "${NGINX_CONF_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
     sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${NGINX_CONF_DIR}/" 2>/dev/null || {
       echo "ERROR: configuration restore failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
@@ -387,6 +415,27 @@ make modules
 
 ```bash
 set -euo pipefail
+# Self-contained variable definitions: this block may be run standalone,
+# so CONFIG_BACKUP_DIR / NGINX_CONF_DIR must be defined here (and pass
+# the same path-safety guard as the package flow) before any backup or
+# rollback command expands them.
+CONFIG_BACKUP_DIR="${CONFIG_BACKUP_DIR:-/var/backups/nginx-markdown-0.9.1}"
+NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
+case "${NGINX_CONF_DIR}" in
+  /*)
+    if [[ "${NGINX_CONF_DIR}" == "/" \
+          || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* \
+          || ! -d "${NGINX_CONF_DIR}" \
+          || ! -f "${NGINX_CONF_DIR}/nginx.conf" ]]; then
+      echo "ERROR: unsafe NGINX_CONF_DIR '${NGINX_CONF_DIR}'" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "ERROR: NGINX_CONF_DIR must be an absolute path" >&2
+    exit 1
+    ;;
+esac
 # Copy the module into the ACTIVE NGINX module directory.  Determine it
 # from the running binary: `nginx -V 2>&1 | grep modules-path` (for example
 # /usr/lib/nginx/modules on Debian/Ubuntu, /usr/lib64/nginx/modules on
@@ -510,7 +559,9 @@ if ! sudo nginx -t; then
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
     sudo rm -rf "${NGINX_CONF_DIR}"
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
-    sudo rm -rf "${NGINX_CONF_DIR}/"*
+    # Remove ALL direct children of the resolved target, including
+    # dotfiles (a plain glob would leave migration-added hidden files).
+    sudo find "${NGINX_CONF_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
     sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${NGINX_CONF_DIR}/"
   else
     sudo rm -rf "${NGINX_CONF_DIR}"

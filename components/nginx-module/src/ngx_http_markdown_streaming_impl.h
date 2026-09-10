@@ -4097,6 +4097,14 @@ ngx_http_markdown_streaming_clone_chain_deep(
         b->flush = in->buf->flush;
         b->sync = in->buf->sync;
         b->temporary = in->buf->temporary;
+        /* Preserve file-backed buffer metadata: a file buffer has NULL
+         * memory pointers, so the data copy above is skipped and the
+         * file reference must be carried over unchanged for the pending
+         * delivery to read the same bytes. */
+        b->in_file = in->buf->in_file;
+        b->file = in->buf->file;
+        b->file_pos = in->buf->file_pos;
+        b->file_last = in->buf->file_last;
         cl->buf = b;
         cl->next = NULL;
         *tail = cl;
