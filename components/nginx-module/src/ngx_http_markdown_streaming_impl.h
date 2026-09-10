@@ -4097,6 +4097,14 @@ ngx_http_markdown_streaming_clone_chain_deep(
             b->file_last = in->buf->file_last;
             b->pos = in->buf->pos;
             b->last = in->buf->last;
+            /* Preserve terminal/control flags exactly like the
+             * memory-buffer branch below: a final file buffer must keep
+             * its last_buf/last_in_chain markers and flush/sync
+             * semantics, or the terminal could be lost or duplicated. */
+            b->last_buf = in->buf->last_buf;
+            b->last_in_chain = in->buf->last_in_chain;
+            b->flush = in->buf->flush;
+            b->sync = in->buf->sync;
             cl->buf = b;
             cl->next = NULL;
             *tail = cl;
