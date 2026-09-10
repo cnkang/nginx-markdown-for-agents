@@ -334,8 +334,19 @@ if ! sudo nginx -t; then
     exit 1
   }
   # Module is back to 0.9.1; now restore the 0.9.1 configuration tree.
-  sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed"
-  sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}"
+  # Guard BOTH moves: a failure in either must not leave the active
+  # module and configuration tree inconsistent.
+  sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed" || {
+    echo "ERROR: could not move the active configuration tree aside; NGINX remains stopped. Restore manually from $MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak and ${CONFIG_DIR}.pre-0.9.0" >&2
+    exit 1
+  }
+  sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}" || {
+    # Put the active tree back so the system is not left without a
+    # configuration root, then report manual recovery.
+    sudo mv -- "${CONFIG_DIR}.restore-failed" "${CONFIG_DIR}" 2>/dev/null || true
+    echo "ERROR: 0.9.1 configuration restore failed; NGINX remains stopped. Restore manually from $MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak and ${CONFIG_DIR}.pre-0.9.0" >&2
+    exit 1
+  }
   exit 1
 fi
 sudo nginx
