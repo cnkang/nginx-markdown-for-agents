@@ -1395,7 +1395,10 @@ def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        if _is_staging_command(stripped.split(), source_path):
+        # Drop an inline comment before tokenizing: a commented-out destination
+        # must not prove that the file is staged.
+        tokens = _strip_inline_comment(stripped.split())
+        if tokens and _is_staging_command(tokens, source_path):
             return True
     return False
 
