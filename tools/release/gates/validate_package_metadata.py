@@ -900,19 +900,21 @@ def validate_nfpm_config(result: ValidationResult) -> None:
 
 
 def _spec_installs_snippet(install_body: str) -> bool:
-    """True when one install command names both the snippet source and its target.
+    """True when one install command ships the snippet to its packaged path.
 
-    Matching source and destination independently would accept a copy that never
-    lands in the packaged module directory.
+    The command is parsed (options and inline comments removed) and the
+    destination must be the operand that receives the file, so a comment or a
+    trailing argument cannot stand in for the real destination.
     """
     for line in _logical_lines(install_body):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        operands = stripped.split()
-        if not operands or Path(operands[0]).name != "install":
+        tokens = _strip_inline_comment(stripped.split())
+        if not tokens or Path(tokens[0]).name != "install":
             continue
-        if SNIPPET_INSTALL_SOURCE in operands and SNIPPET_INSTALL_DESTINATION in operands:
+        sources, destination = _parse_install_operands(tokens[1:])
+        if SNIPPET_INSTALL_SOURCE in sources and destination == SNIPPET_INSTALL_DESTINATION:
             return True
     return False
 
@@ -1258,12 +1260,21 @@ _INSTALL_VALUE_OPTIONS = frozenset(
 )
 
 
-def _install_command_sources(tokens: list[str]) -> list[str]:
-    """Return the SOURCE operands of an install(1) argument list.
+def _strip_inline_comment(tokens: list[str]) -> list[str]:
+    """Drop the tokens that follow an inline shell comment marker."""
+    for index, token in enumerate(tokens):
+        if token.startswith("#"):
+            return tokens[:index]
+    return tokens
 
-    install(1) syntax is ``install [OPTION]... SOURCE... DEST``; with
-    ``-t DIR``/``--target-directory=DIR`` every operand is a source.  The
-    destination is therefore dropped only when no target directory is given.
+
+def _parse_install_operands(tokens: list[str]) -> tuple[list[str], str | None]:
+    """Return (sources, destination) for an install(1) argument list.
+
+    install(1) reads ``install [OPTION]... SOURCE... DEST``; with ``-t DIR`` the
+    destination is the option argument and every operand is a source.  The
+    destination is reported separately so a caller can require it to be the
+    operand that actually receives the file.
     """
     index = 0
     target_directory = False
@@ -1276,8 +1287,10 @@ def _install_command_sources(tokens: list[str]) -> list[str]:
             index += 1
     operands = [token.strip('"').strip("'") for token in tokens[index:]]
     if target_directory:
-        return operands
-    return operands[:-1]
+        return operands, None
+    if len(operands) < 2:
+        return [], None
+    return operands[:-1], operands[-1]
 
 
 def _spec_install_sources(spec: str) -> list[str]:
@@ -1295,7 +1308,9 @@ def _spec_install_sources(spec: str) -> list[str]:
             continue
         if len(stripped) > len("install") and not stripped[len("install")].isspace():
             continue
-        for source in _install_command_sources(stripped.split()[1:]):
+        for source in _parse_install_operands(
+            _strip_inline_comment(stripped.split())[1:]
+        )[0]:
             if source.startswith("/") or source.startswith("%{buildroot}"):
                 continue
             sources.append(source)
@@ -1330,7 +1345,13 @@ def _is_staging_command(tokens: list[str], source_path: str) -> bool:
         return False
     for operand in operands[: staged_indexes[0]]:
         normalized = operand.lstrip("./").rstrip("/")
-        if normalized == source_path or normalized.endswith("/" + source_path):
+        if normalized == source_path:
+            return True
+        # A spec that names a bare file (no directory) refers to an artifact the
+        # workflow builds elsewhere, for example build/<module>.so: accept the
+        # matching basename there, but never a look-alike path for a
+        # directory-qualified source.
+        if "/" not in source_path and Path(normalized).name == source_path:
             return True
     return False
 
