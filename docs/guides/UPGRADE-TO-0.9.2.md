@@ -427,7 +427,11 @@ migrate_restore() {
     # atomically rename it over the active link (GNU mv -T uses
     # rename(2)): a failed ln leaves the ACTIVE link untouched, so the
     # configuration root is never left missing.
-    sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+    if ! sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
+      # A stale staging link would make the ln below fail or target the
+      # wrong path; fail closed with the snapshot preserved.
+      return 0
+    fi
     if ! sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
       # Link creation failed: the active link is still in place and the
       # snapshot stays available for manual recovery.
@@ -435,6 +439,11 @@ migrate_restore() {
     fi
     if ! sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" 2>/dev/null; then
       sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+      # The link swap failed: the active link still points at the
+      # possibly partially edited target.  Restore the target IN PLACE
+      # from the snapshot so the active tree is whole again.
+      sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
+      sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || true
       return 0
     fi
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
@@ -488,11 +497,24 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       echo "ERROR: could not replace the configuration-root symlink; the active link is untouched. Restore manually from ${MIGRATE_BACKUP}" >&2
       exit 1
     }
-    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
+    # Retain the old target until the replacement is fully installed:
+    # move it aside, install the snapshot, and roll back on failure so
+    # the active link never points at a missing target.
+    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || true
+    if [[ -e "${ROOT_LINK_TARGET}" || -L "${ROOT_LINK_TARGET}" ]]; then
+      sudo mv -f "${ROOT_LINK_TARGET}" "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || {
+        echo "ERROR: could not move the old configuration target aside; restore manually from ${MIGRATE_BACKUP}" >&2
+        exit 1
+      }
+    fi
     sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || {
-      echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; restore manually" >&2
+      if [[ -e "${ROOT_LINK_TARGET}.rollback-old" ]]; then
+        sudo mv -f "${ROOT_LINK_TARGET}.rollback-old" "${ROOT_LINK_TARGET}" 2>/dev/null || true
+      fi
+      echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; the previous target was rolled back. Restore manually" >&2
       exit 1
     }
+    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || true
   else
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
     sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
@@ -1082,7 +1104,11 @@ migrate_restore() {
     # atomically rename it over the active link (GNU mv -T uses
     # rename(2)): a failed ln leaves the ACTIVE link untouched, so the
     # configuration root is never left missing.
-    sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+    if ! sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
+      # A stale staging link would make the ln below fail or target the
+      # wrong path; fail closed with the snapshot preserved.
+      return 0
+    fi
     if ! sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
       # Link creation failed: the active link is still in place and the
       # snapshot stays available for manual recovery.
@@ -1090,6 +1116,11 @@ migrate_restore() {
     fi
     if ! sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" 2>/dev/null; then
       sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+      # The link swap failed: the active link still points at the
+      # possibly partially edited target.  Restore the target IN PLACE
+      # from the snapshot so the active tree is whole again.
+      sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
+      sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || true
       return 0
     fi
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
@@ -1143,11 +1174,24 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       echo "ERROR: could not replace the configuration-root symlink; the active link is untouched. Restore manually from ${MIGRATE_BACKUP}" >&2
       exit 1
     }
-    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
+    # Retain the old target until the replacement is fully installed:
+    # move it aside, install the snapshot, and roll back on failure so
+    # the active link never points at a missing target.
+    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || true
+    if [[ -e "${ROOT_LINK_TARGET}" || -L "${ROOT_LINK_TARGET}" ]]; then
+      sudo mv -f "${ROOT_LINK_TARGET}" "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || {
+        echo "ERROR: could not move the old configuration target aside; restore manually from ${MIGRATE_BACKUP}" >&2
+        exit 1
+      }
+    fi
     sudo mv "${MIGRATE_BACKUP}" "${ROOT_LINK_TARGET}" 2>/dev/null || {
-      echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; restore manually" >&2
+      if [[ -e "${ROOT_LINK_TARGET}.rollback-old" ]]; then
+        sudo mv -f "${ROOT_LINK_TARGET}.rollback-old" "${ROOT_LINK_TARGET}" 2>/dev/null || true
+      fi
+      echo "ERROR: could not restore the active tree from ${MIGRATE_BACKUP}; the previous target was rolled back. Restore manually" >&2
       exit 1
     }
+    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || true
   else
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
     sudo mv "${MIGRATE_BACKUP}" "${NGINX_CONF_DIR}" 2>/dev/null || {
