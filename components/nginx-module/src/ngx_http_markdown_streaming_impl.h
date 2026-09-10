@@ -4613,6 +4613,14 @@ ngx_http_markdown_streaming_continue_failopen_input(
     rc = ngx_http_markdown_streaming_send_failopen_chain(
         r, ctx, input_chain);
     if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
+        /* NGX_AGAIN: the cloned chain is now pending_output-owned by
+         * downstream.  Abandon the ORIGINAL chain (advance pos) so NGINX
+         * does not re-submit the same buffers on the next body-filter
+         * invocation — the clone shares the same ngx_buf_t, so the data
+         * remains intact for the pending delivery, and re-submitting the
+         * original would enqueue it into pending_input and forward the
+         * same bytes a second time after the drain. */
+        ngx_http_markdown_streaming_abandon_input(input_chain);
         ngx_http_markdown_streaming_sync_buffered(r, ctx);
         return rc;
     }

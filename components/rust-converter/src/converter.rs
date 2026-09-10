@@ -595,6 +595,14 @@ impl ConversionContext {
         &'a mut self,
         output: &'a mut String,
     ) -> BudgetedMarkdownWriter<'a> {
+        // Record the combined peak at creation: a writer operating on an
+        // already-capacity-backed String may never grow, and the exported
+        // peak must be nonzero for the soak qualification gate to accept
+        // the observation as conversion evidence.
+        let combined = output.capacity().saturating_add(self.working_set_bytes);
+        if combined > self.peak_working_set_bytes {
+            self.peak_working_set_bytes = combined;
+        }
         BudgetedMarkdownWriter { output, ctx: self }
     }
 
