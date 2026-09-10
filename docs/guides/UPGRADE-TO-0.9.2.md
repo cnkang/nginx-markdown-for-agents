@@ -112,6 +112,17 @@ if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
 fi
 CONFIG_BACKUP_DIR="/var/backups/nginx-markdown-0.9.1"
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
+# Path-safety guard: the rollback deletes and recreates the configuration
+# root with sudo, so reject unsafe overrides (empty, relative, root, or
+# anything that could point at the backup directory or a system root).
+case "${NGINX_CONF_DIR}" in
+  ""|/|/*/*|*)
+    if [[ "${NGINX_CONF_DIR}" == "/" || "${NGINX_CONF_DIR}" == "${CONFIG_BACKUP_DIR}"* || "${NGINX_CONF_DIR}" != /* ]]; then
+      echo "ERROR: unsafe NGINX_CONF_DIR '${NGINX_CONF_DIR}'; refusing to proceed" >&2
+      exit 1
+    fi
+    ;;
+esac
 sudo install -d -m 0750 "${CONFIG_BACKUP_DIR}"
 # Back up the ENTIRE configuration tree (not just nginx.conf + conf.d +
 # modules-enabled): MIGRATION-0.9.2.md may touch any path under
@@ -188,6 +199,11 @@ whose `load_module` entry points to the staged `.so` — a plain
 prove the migrated syntax is valid under the 0.9.2 binary:
 
 ```bash
+STAGED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX")"
+trap 'rm -rf "$STAGED_ROOT"' EXIT
+sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
+sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
+    "${STAGED_ROOT}/nginx.conf"
 sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
 ```
 
@@ -276,16 +292,24 @@ sudo nginx -t || {
   # backup (step 3) captured ${NGINX_CONF_DIR}/. as tree/, so restoring
   # it replaces every migrated file and removes anything the migration
   # added, matching the source-build rollback below.
-  sudo rm -rf "${NGINX_CONF_DIR}"
-  sudo cp -a "${CONFIG_BACKUP_DIR}/tree" "${NGINX_CONF_DIR}" 2>/dev/null || {
-    echo "ERROR: configuration restore failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
-    exit 1
-  }
-  # Restore the root's symlink identity if the pre-upgrade root was a
-  # symlink (the rm -rf above replaced it with a real directory).
+  # If the pre-upgrade root was a symlink, recreate the symlink FIRST
+  # and restore the tree into its resolved target, so the restored
+  # contents are not stranded in a temporary real directory that the
+  # symlink replacement would discard.
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
     sudo rm -rf "${NGINX_CONF_DIR}"
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
+    sudo rm -rf "${NGINX_CONF_DIR}/"*
+    sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${NGINX_CONF_DIR}/" 2>/dev/null || {
+      echo "ERROR: configuration restore failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
+  else
+    sudo rm -rf "${NGINX_CONF_DIR}"
+    sudo cp -a "${CONFIG_BACKUP_DIR}/tree" "${NGINX_CONF_DIR}" 2>/dev/null || {
+      echo "ERROR: configuration restore failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
   fi
   if sudo nginx -t; then
     echo "INFO: previous module and configuration restored and verified." >&2
@@ -378,8 +402,16 @@ fi
 # applies to source builds.
 # Back up the active NGINX configuration tree and the running module
 # BEFORE stopping NGINX so a failed validation or start can always
-# restore the pre-upgrade state.
-sudo cp -a "${NGINX_CONF_DIR}" "${CONFIG_BACKUP_DIR}/"
+# restore the pre-upgrade state.  Use the SAME tree snapshot contract as
+# the package flow (${CONFIG_BACKUP_DIR}/tree + tree-root-link), so the
+# rollback below restores the whole tree wholesale.
+sudo rm -rf "${CONFIG_BACKUP_DIR}/tree"
+sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree/"
+if [[ -L "${NGINX_CONF_DIR}" ]]; then
+  readlink "${NGINX_CONF_DIR}" | sudo tee "${CONFIG_BACKUP_DIR}/tree-root-link" >/dev/null
+else
+  sudo rm -f "${CONFIG_BACKUP_DIR}/tree-root-link"
+fi
 # Apply MIGRATION-0.9.2.md to the active configuration, then stage the
 # rebuilt module and validate it with a temporary config that explicitly
 # references the staged binary (a plain `nginx -t` would still load the
@@ -396,11 +428,16 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # load_module lines must be preserved untouched), then verify exactly one
 # staged entry exists — a missing or duplicated Markdown entry means the
 # rewrite did not target the right line and validation would be meaningless.
-sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]]\+.*ngx_http_markdown_filter_module\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
-    "${STAGED_ROOT}/nginx.conf"
-staged_loads="$(grep -c 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}/nginx.conf" || true)"
+# The entry may live in nginx.conf OR in an included file (e.g.
+# modules-enabled/*.conf), so rewrite across the whole staged tree.
+sudo grep -rl "ngx_http_markdown_filter_module\.so" "${STAGED_ROOT}" \
+    | while read -r staged_conf; do
+        sudo sed -i.bak "s|^[[:space:]]*load_module[[:space:]]\\+.*ngx_http_markdown_filter_module\\.so.*|load_module ${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new;|" \
+            "${staged_conf}"
+      done
+staged_loads="$(grep -rc 'ngx_http_markdown_filter_module.so.0.9.2.new' "${STAGED_ROOT}" | awk -F: '{s+=$2} END {print s+0}')"
 if [[ "${staged_loads}" -ne 1 ]]; then
-    echo "ERROR: expected exactly one Markdown load_module entry in the staged config, found ${staged_loads}" >&2
+    echo "ERROR: expected exactly one Markdown load_module entry in the staged config tree, found ${staged_loads}" >&2
     exit 1
 fi
 sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
@@ -466,13 +503,18 @@ if ! sudo nginx -t; then
   # module before re-validating.  The whole tree is restored (not just
   # nginx.conf + conf.d + modules-enabled) and any path the migration
   # added is removed, so no migrated configuration can remain.
-  sudo rm -rf "${NGINX_CONF_DIR}"
-  sudo cp -a "${CONFIG_BACKUP_DIR}/tree" "${NGINX_CONF_DIR}"
-  # Restore the root's symlink identity if the pre-upgrade root was a
-  # symlink (the rm -rf above replaced it with a real directory).
+  # If the pre-upgrade root was a symlink, recreate the symlink FIRST
+  # and restore the tree into its resolved target, so the restored
+  # contents are not stranded in a temporary real directory that the
+  # symlink replacement would discard.
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
     sudo rm -rf "${NGINX_CONF_DIR}"
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
+    sudo rm -rf "${NGINX_CONF_DIR}/"*
+    sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${NGINX_CONF_DIR}/"
+  else
+    sudo rm -rf "${NGINX_CONF_DIR}"
+    sudo cp -a "${CONFIG_BACKUP_DIR}/tree" "${NGINX_CONF_DIR}"
   fi
   if ! sudo nginx -t; then
     echo "ERROR: restored module and configuration also fail validation; do not start NGINX. ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR} are preserved — restore manually from them." >&2
