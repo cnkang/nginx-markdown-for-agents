@@ -4093,19 +4093,21 @@ ngx_http_markdown_streaming_clone_chain_deep(
             }
             ngx_memcpy(b->pos, in->buf->pos, in->buf->last - in->buf->pos);
             b->last = b->pos + (in->buf->last - in->buf->pos);
+            /* Payload bytes were copied: the clone is memory-backed. */
+            b->memory = 1;
+            b->temporary = in->buf->temporary;
         } else {
             b->pos = NULL;
             b->last = NULL;
-            /* An empty control buffer (flush/sync sentinel) is accepted
-             * by ngx_http_write_filter via its flush/sync flags, which
-             * are preserved below. */
+            /* An empty control buffer (flush/sync sentinel) stays a
+             * NON-memory buffer: no payload was copied, and
+             * ngx_http_write_filter accepts it via its preserved
+             * flush/sync flags below.  memory/temporary are NOT set. */
         }
-        b->memory = 1;
         b->last_buf = in->buf->last_buf;
         b->last_in_chain = in->buf->last_in_chain;
         b->flush = in->buf->flush;
         b->sync = in->buf->sync;
-        b->temporary = in->buf->temporary;
         cl->buf = b;
         cl->next = NULL;
         *tail = cl;

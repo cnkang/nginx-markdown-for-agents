@@ -614,13 +614,25 @@ if [ -z "$disabled_after" ] || [ "$disabled_after" -le "$disabled_before" ]; the
 fi
 # Corroborate with the decision log: the probe's own path must appear in
 # a disabled entry written AFTER the recorded offset.  A counter delta
-# alone cannot prove THIS request was the one counted.
-if tail -c +$((LOG_OFFSET + 1)) /var/log/nginx/error.log 2>/dev/null \
-    | grep "markdown:" | grep "reason=disabled" | grep -q "rollback-probe"; then
-  echo "OK: decision log corroborates the rollback-probe disabled entry"
+# alone cannot prove THIS request was the one counted.  The check is
+# mandatory only when the log level can actually carry non-failure
+# entries (module verbosity info/debug AND error_log info/debug);
+# otherwise it degrades to informational, matching Step 1.
+LOG_LEVEL_OK=0
+if nginx -T 2>/dev/null | grep -q "markdown_log_verbosity.*\(info\|debug\)" \
+    && nginx -T 2>/dev/null | grep -q "error_log.*\(info\|debug\)"; then
+  LOG_LEVEL_OK=1
+fi
+if [ "$LOG_LEVEL_OK" -eq 1 ]; then
+  if tail -c +$((LOG_OFFSET + 1)) /var/log/nginx/error.log 2>/dev/null \
+      | grep "markdown:" | grep "reason=disabled" | grep -q "rollback-probe"; then
+    echo "OK: decision log corroborates the rollback-probe disabled entry"
+  else
+    echo "FAIL: no disabled decision-log entry for /rollback-probe after the recorded offset (log level is info/debug but the entry is missing)"
+    exit 1
+  fi
 else
-  echo "FAIL: no disabled decision-log entry for /rollback-probe after the recorded offset (log level may be too low; set markdown_log_verbosity info or debug)"
-  exit 1
+  echo "INFO: decision-log corroboration skipped (log level below info/debug); counter delta above is authoritative" >&2
 fi
 if [ "$before" = "$after" ]; then
   echo "OK: no conversion activity in the quiet window after rollback"
