@@ -567,6 +567,50 @@ module happens after the swap (step 6), where `nginx -t` runs again.
 
 ```bash
 set -euo pipefail
+# Restore the pre-migration configuration tree (staged, symlink-aware,
+# every operation checked) so the old module is never left paired with
+# the migrated configuration.  Fails with manual-recovery guidance.
+restore_pre_migration_tree() {
+  if [[ -L "${NGINX_CONF_DIR}" ]]; then
+    ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
+    RESTORE_STAGED="$(sudo mktemp -d "$(dirname "${ROOT_LINK_TARGET}")/.nginx-restore-XXXXXX")" || {
+      echo "ERROR: could not allocate a restore staging directory; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    }
+    sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${RESTORE_STAGED}/" || {
+      echo "ERROR: could not stage the pre-migration tree; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    }
+    sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
+    sudo mv "${RESTORE_STAGED}" "${ROOT_LINK_TARGET}" || {
+      echo "ERROR: could not install the pre-migration tree; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    }
+    sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" || {
+      echo "ERROR: could not recreate the configuration-root symlink; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    }
+    sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" || {
+      echo "ERROR: could not replace the configuration-root symlink; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    }
+  else
+    RESTORE_STAGED="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR%/}")/.nginx-restore-XXXXXX")" || {
+      echo "ERROR: could not allocate a restore staging directory; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    }
+    sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${RESTORE_STAGED}/" || {
+      echo "ERROR: could not stage the pre-migration tree; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    }
+    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
+    sudo mv "${RESTORE_STAGED}" "${NGINX_CONF_DIR}" || {
+      echo "ERROR: could not install the pre-migration tree; restore manually from ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    }
+  fi
+}
 sudo nginx -t
 # systemd-managed host: verify the RUNNING nginx process is actually
 # owned by nginx.service before restarting through systemd.  A unit
@@ -587,8 +631,7 @@ if command -v systemctl >/dev/null 2>&1 \
     # The active configuration was already migrated; restore the
     # pre-migration tree so the old module is not left paired with the
     # migrated configuration.
-    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${NGINX_CONF_DIR}/" 2>/dev/null || true
+    restore_pre_migration_tree
     exit 1
   fi
 else
@@ -604,8 +647,7 @@ else
       if [[ "$waited" -ge 30 ]]; then
         echo "ERROR: NGINX master did not exit within 30s of 'nginx -s quit'; aborting upgrade" >&2
         # Same pairing guard: restore the pre-migration tree.
-        sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-        sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${NGINX_CONF_DIR}/" 2>/dev/null || true
+        restore_pre_migration_tree
         exit 1
       fi
       sleep 1
@@ -654,7 +696,7 @@ sudo nginx -t || {
     ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
     RESTORE_STAGED="$(sudo mktemp -d "$(dirname "${ROOT_LINK_TARGET}")/.nginx-restore-XXXXXX")"
   else
-    RESTORE_STAGED="$(sudo mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
+    RESTORE_STAGED="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR%/}")/.nginx-restore-XXXXXX")"
   fi
   # Dedicated cleanup trap: any unguarded failure under set -euo pipefail
   # must still remove the staging tree; disarmed after a successful move.
@@ -719,36 +761,49 @@ sudo nginx -t || {
       exit 1
     fi
     if [[ -e "${ROOT_LINK_TARGET}" || -L "${ROOT_LINK_TARGET}" ]]; then
-      sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old"
-      sudo mv -f "${ROOT_LINK_TARGET}" "${ROOT_LINK_TARGET}.rollback-old" 2>/dev/null || {
+      # Unique sibling rollback path: a fixed .rollback-old name would
+      # be deleted before the replacement succeeds, losing the
+      # last-known-good tree on an interrupted retry.
+      ROLLBACK_OLD="$(sudo mktemp -d "$(dirname "${ROOT_LINK_TARGET}")/.nginx-old-XXXXXX")" || {
+        sudo rm -rf "${RESTORE_STAGED}"
+        echo "ERROR: could not allocate a rollback directory; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+        exit 1
+      }
+      sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
+      sudo mv -f "${ROOT_LINK_TARGET}" "${ROLLBACK_OLD}" 2>/dev/null || {
         sudo rm -rf "${RESTORE_STAGED}"
         echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
         exit 1
       }
     fi
     sudo mv -f "${RESTORE_STAGED}" "${ROOT_LINK_TARGET}" 2>/dev/null || {
-      if [[ -e "${ROOT_LINK_TARGET}.rollback-old" ]]; then
-        sudo mv -f "${ROOT_LINK_TARGET}.rollback-old" "${ROOT_LINK_TARGET}"
+      if [[ -n "${ROLLBACK_OLD:-}" && -e "${ROLLBACK_OLD}" ]]; then
+        sudo mv -f "${ROLLBACK_OLD}" "${ROOT_LINK_TARGET}"
       fi
       sudo rm -rf "${RESTORE_STAGED}"
       echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     }
-    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old"
+    sudo rm -rf "${ROLLBACK_OLD:-}" 2>/dev/null || true
   else
-    sudo rm -rf "${NGINX_CONF_DIR}.rollback-old"
-    sudo mv -f "${NGINX_CONF_DIR}" "${NGINX_CONF_DIR}.rollback-old" 2>/dev/null || {
+    ROLLBACK_OLD="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR%/}")/.nginx-old-XXXXXX")" || {
+      sudo rm -rf "${RESTORE_STAGED}"
+      echo "ERROR: could not allocate a rollback directory; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
+    sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
+    sudo mv -f "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}" 2>/dev/null || {
       sudo rm -rf "${RESTORE_STAGED}"
       echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     }
     sudo mv -f "${RESTORE_STAGED}" "${NGINX_CONF_DIR}" 2>/dev/null || {
-      sudo mv -f "${NGINX_CONF_DIR}.rollback-old" "${NGINX_CONF_DIR}"
+      sudo mv -f "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}"
       sudo rm -rf "${RESTORE_STAGED}"
       echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     }
-    sudo rm -rf "${NGINX_CONF_DIR}.rollback-old"
+    sudo rm -rf "${ROLLBACK_OLD}" 2>/dev/null || true
   fi
   if sudo nginx -t; then
     echo "INFO: previous module and configuration restored and verified." >&2
@@ -1312,7 +1367,7 @@ if ! sudo nginx -t; then
     ROOT_LINK_TARGET="$(readlink -f "${NGINX_CONF_DIR}")"
     RESTORE_STAGED="$(sudo mktemp -d "$(dirname "${ROOT_LINK_TARGET}")/.nginx-restore-XXXXXX")"
   else
-    RESTORE_STAGED="$(sudo mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
+    RESTORE_STAGED="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR%/}")/.nginx-restore-XXXXXX")"
   fi
   # Dedicated cleanup trap: any unguarded failure under set -euo pipefail
   # must still remove the staging tree; disarmed after a successful move.
@@ -1375,28 +1430,41 @@ if ! sudo nginx -t; then
       exit 1
     fi
     if [[ -e "${ROOT_LINK_TARGET}" || -L "${ROOT_LINK_TARGET}" ]]; then
-      sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old"
-      sudo mv -f "${ROOT_LINK_TARGET}" "${ROOT_LINK_TARGET}.rollback-old"
+      # Unique sibling rollback path: a fixed .rollback-old name would
+      # be deleted before the replacement succeeds, losing the
+      # last-known-good tree on an interrupted retry.
+      ROLLBACK_OLD="$(sudo mktemp -d "$(dirname "${ROOT_LINK_TARGET}")/.nginx-old-XXXXXX")" || {
+        sudo rm -rf "${RESTORE_STAGED}"
+        echo "ERROR: could not allocate a rollback directory; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+        exit 1
+      }
+      sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
+      sudo mv -f "${ROOT_LINK_TARGET}" "${ROLLBACK_OLD}"
     fi
     sudo mv -f "${RESTORE_STAGED}" "${ROOT_LINK_TARGET}" || {
-      if [[ -e "${ROOT_LINK_TARGET}.rollback-old" ]]; then
-        sudo mv -f "${ROOT_LINK_TARGET}.rollback-old" "${ROOT_LINK_TARGET}"
+      if [[ -n "${ROLLBACK_OLD:-}" && -e "${ROLLBACK_OLD}" ]]; then
+        sudo mv -f "${ROLLBACK_OLD}" "${ROOT_LINK_TARGET}"
       fi
       sudo rm -rf "${RESTORE_STAGED}"
       echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     }
-    sudo rm -rf "${ROOT_LINK_TARGET}.rollback-old"
+    sudo rm -rf "${ROLLBACK_OLD:-}" 2>/dev/null || true
   else
-    sudo rm -rf "${NGINX_CONF_DIR}.rollback-old"
-    sudo mv -f "${NGINX_CONF_DIR}" "${NGINX_CONF_DIR}.rollback-old"
+    ROLLBACK_OLD="$(sudo mktemp -d "$(dirname "${NGINX_CONF_DIR%/}")/.nginx-old-XXXXXX")" || {
+      sudo rm -rf "${RESTORE_STAGED}"
+      echo "ERROR: could not allocate a rollback directory; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
+      exit 1
+    }
+    sudo rmdir "${ROLLBACK_OLD}" 2>/dev/null || true
+    sudo mv -f "${NGINX_CONF_DIR}" "${ROLLBACK_OLD}"
     sudo mv -f "${RESTORE_STAGED}" "${NGINX_CONF_DIR}" || {
-      sudo mv -f "${NGINX_CONF_DIR}.rollback-old" "${NGINX_CONF_DIR}"
+      sudo mv -f "${ROLLBACK_OLD}" "${NGINX_CONF_DIR}"
       sudo rm -rf "${RESTORE_STAGED}"
       echo "ERROR: configuration swap failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
       exit 1
     }
-    sudo rm -rf "${NGINX_CONF_DIR}.rollback-old"
+    sudo rm -rf "${ROLLBACK_OLD}" 2>/dev/null || true
   fi
   if ! sudo nginx -t; then
     echo "ERROR: restored module and configuration also fail validation; do not start NGINX. ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR} are preserved — restore manually from them." >&2
