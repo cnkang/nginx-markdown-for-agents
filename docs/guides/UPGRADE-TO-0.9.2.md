@@ -423,10 +423,18 @@ migrate_restore() {
           || "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}/"* ]]; then
       return 0
     fi
-    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    if ! sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" 2>/dev/null; then
-      # Link recreation failed: do NOT delete the resolved target —
-      # the snapshot stays available for manual recovery.
+    # Create the replacement link at a sibling staging path and
+    # atomically rename it over the active link (GNU mv -T uses
+    # rename(2)): a failed ln leaves the ACTIVE link untouched, so the
+    # configuration root is never left missing.
+    sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+    if ! sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
+      # Link creation failed: the active link is still in place and the
+      # snapshot stays available for manual recovery.
+      return 0
+    fi
+    if ! sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" 2>/dev/null; then
+      sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
       return 0
     fi
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
@@ -466,9 +474,18 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       echo "ERROR: migration snapshot ${MIGRATE_BACKUP} is inside the resolved target ${ROOT_LINK_TARGET}; restore manually" >&2
       exit 1
     fi
-    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" || {
-      echo "ERROR: could not recreate the configuration-root symlink; the resolved target was NOT deleted. Restore manually from ${MIGRATE_BACKUP}" >&2
+    # Create the replacement link at a sibling staging path and
+    # atomically rename it over the active link: a failed ln leaves the
+    # ACTIVE link untouched, so the configuration root is never left
+    # missing.
+    sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" || {
+      echo "ERROR: could not create the replacement configuration-root symlink; the active link is untouched and the resolved target was NOT deleted. Restore manually from ${MIGRATE_BACKUP}" >&2
+      exit 1
+    }
+    sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" || {
+      sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+      echo "ERROR: could not replace the configuration-root symlink; the active link is untouched. Restore manually from ${MIGRATE_BACKUP}" >&2
       exit 1
     }
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
@@ -1061,10 +1078,18 @@ migrate_restore() {
           || "${MIGRATE_BACKUP}" == "${ROOT_LINK_TARGET}/"* ]]; then
       return 0
     fi
-    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    if ! sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" 2>/dev/null; then
-      # Link recreation failed: do NOT delete the resolved target —
-      # the snapshot stays available for manual recovery.
+    # Create the replacement link at a sibling staging path and
+    # atomically rename it over the active link (GNU mv -T uses
+    # rename(2)): a failed ln leaves the ACTIVE link untouched, so the
+    # configuration root is never left missing.
+    sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+    if ! sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" 2>/dev/null; then
+      # Link creation failed: the active link is still in place and the
+      # snapshot stays available for manual recovery.
+      return 0
+    fi
+    if ! sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" 2>/dev/null; then
+      sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
       return 0
     fi
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
@@ -1104,9 +1129,18 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
       echo "ERROR: migration snapshot ${MIGRATE_BACKUP} is inside the resolved target ${ROOT_LINK_TARGET}; restore manually" >&2
       exit 1
     fi
-    sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
-    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}" || {
-      echo "ERROR: could not recreate the configuration-root symlink; the resolved target was NOT deleted. Restore manually from ${MIGRATE_BACKUP}" >&2
+    # Create the replacement link at a sibling staging path and
+    # atomically rename it over the active link: a failed ln leaves the
+    # ACTIVE link untouched, so the configuration root is never left
+    # missing.
+    sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+    sudo ln -s "${ROOT_LINK_TARGET}" "${NGINX_CONF_DIR}.link-new" || {
+      echo "ERROR: could not create the replacement configuration-root symlink; the active link is untouched and the resolved target was NOT deleted. Restore manually from ${MIGRATE_BACKUP}" >&2
+      exit 1
+    }
+    sudo mv -Tf "${NGINX_CONF_DIR}.link-new" "${NGINX_CONF_DIR}" || {
+      sudo rm -f "${NGINX_CONF_DIR}.link-new" 2>/dev/null || true
+      echo "ERROR: could not replace the configuration-root symlink; the active link is untouched. Restore manually from ${MIGRATE_BACKUP}" >&2
       exit 1
     }
     sudo rm -rf "${ROOT_LINK_TARGET}" 2>/dev/null || true
