@@ -29,16 +29,22 @@ struct ngx_buf_s {
     u_char     *last;
     u_char     *start;
     u_char     *end;
+    void       *tag;
+    void       *file;
+    void       *shadow;
+    off_t       file_pos;
+    off_t       file_last;
     unsigned    temporary:1;
     unsigned    memory:1;
+    unsigned    mmap:1;
+    unsigned    recycled:1;
     unsigned    last_buf:1;
     unsigned    last_in_chain:1;
     unsigned    flush:1;
     unsigned    sync:1;
     unsigned    in_file:1;
-    void       *file;
-    off_t       file_pos;
-    off_t       file_last;
+    unsigned    last_shadow:1;
+    unsigned    temp_file:1;
 };
 typedef struct ngx_http_complex_value_s ngx_http_complex_value_t;
 

@@ -660,7 +660,11 @@ fi
 
 # Swap the staged module into place atomically while NGINX is stopped.
 sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.0.9.2.new" \
-    "${MODULES_DIR}/ngx_http_markdown_filter_module.so"
+    "${MODULES_DIR}/ngx_http_markdown_filter_module.so" || {
+  echo "ERROR: module swap failed; the old module is still installed and the active configuration is migrated. Restoring the pre-migration tree so the pair stays consistent" >&2
+  restore_pre_migration_tree
+  exit 1
+}
 # The swap is reversible: if nginx -t fails here, restore the module backup
 # taken in step 4 (${MODULE_BACKUP}) AND the migrated configuration from
 # ${CONFIG_BACKUP_DIR}, re-run nginx -t on the restored pair, then start.
@@ -1496,11 +1500,15 @@ fi
 sleep 1
 if [[ "$systemd_managed" -eq 1 ]]; then
     if ! systemctl is-active --quiet nginx; then
-      echo "ERROR: nginx service inactive after start; keeping ${MODULE_BACKUP} for rollback" >&2
+      echo "ERROR: nginx service inactive after start; restoring the previous module so the migration trap's configuration restore pairs with it" >&2
+      sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null || true
+      sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null || true
       exit 1
     fi
 elif ! pgrep -x nginx >/dev/null 2>&1; then
-  echo "ERROR: NGINX master not running after start; keeping ${MODULE_BACKUP} for rollback" >&2
+  echo "ERROR: NGINX master not running after start; restoring the previous module so the migration trap's configuration restore pairs with it" >&2
+  sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null || true
+  sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null || true
   exit 1
 fi
 PROBE_PATH="/known-convertible-page"   # adjust to your verified fixture
@@ -1513,7 +1521,9 @@ PROBE_HEADERS="$(mktemp)"
 if ! curl -fsS --max-time 10 -H 'Accept: text/markdown' \
         -D "${PROBE_HEADERS}" \
         -o "${PROBE_BODY}" "http://localhost${PROBE_PATH}"; then
-  echo "ERROR: post-start check failed (probe request); keeping ${MODULE_BACKUP} for rollback" >&2
+  echo "ERROR: post-start check failed (probe request); restoring the previous module so the migration trap's configuration restore pairs with it" >&2
+  sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null || true
+  sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null || true
   rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
   exit 1
 fi
@@ -1524,8 +1534,10 @@ if ! grep -qi '^Content-Type: text/markdown' "${PROBE_HEADERS}"; then
   exit 1
 fi
 if ! grep -Fq "${PROBE_MARKER}" "${PROBE_BODY}"; then
-  echo "ERROR: post-start check failed (converted body lacks the fixture marker); keeping ${MODULE_BACKUP} for rollback" >&2
+  echo "ERROR: post-start check failed (converted body lacks the fixture marker); restoring the previous module so the migration trap's configuration restore pairs with it" >&2
   echo "  Inspect the probe response and verify ${PROBE_PATH} converts before removing the backup." >&2
+  sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" 2>/dev/null || true
+  sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.restore-staged" "${MODULES_DIR}/ngx_http_markdown_filter_module.so" 2>/dev/null || true
   rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
   exit 1
 fi
