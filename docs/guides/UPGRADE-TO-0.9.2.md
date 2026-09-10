@@ -354,6 +354,10 @@ sudo nginx -t || {
   # on the same filesystem (a TMPDIR staging dir would cross devices and
   # fail the atomic rename).
   RESTORE_STAGED="$(mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
+  # Dedicated cleanup trap: any unguarded failure under set -euo pipefail
+  # must still remove the staging tree; disarmed after a successful move.
+  RESTORE_CLEANUP_SET=1
+  trap 'rc=$?; sudo rm -rf -- "$RESTORE_STAGED" || :; exit "$rc"' EXIT
   sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${RESTORE_STAGED}/" 2>/dev/null || {
     sudo rm -rf "${RESTORE_STAGED}"
     echo "ERROR: configuration restore staging failed; NGINX remains stopped. Restore manually from ${CONFIG_BACKUP_DIR}." >&2
@@ -368,6 +372,13 @@ sudo nginx -t || {
   # root is recreated as a link and the staged tree atomically moved
   # into its resolved target (old target preserved until the swap
   # succeeds); a real directory is replaced wholesale with mv.
+  # The mktemp staging dir is user-owned mode-0700; restore the active
+  # root's owner/group/mode onto the staged tree before the rename so
+  # the replacement root does not inherit mktemp metadata.
+  ROOT_OWNER="$(stat -c '%U:%G' "${NGINX_CONF_DIR}")"
+  ROOT_MODE="$(stat -c '%a' "${NGINX_CONF_DIR}")"
+  sudo chown -R "${ROOT_OWNER}" "${RESTORE_STAGED}"
+  sudo chmod -R "${ROOT_MODE}" "${RESTORE_STAGED}"
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
     sudo rm -rf "${NGINX_CONF_DIR}"
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"
@@ -638,6 +649,10 @@ if ! sudo nginx -t; then
   # staging dir sits BESIDE the configuration root so the final mv stays
   # on the same filesystem.
   RESTORE_STAGED="$(mktemp -d "${NGINX_CONF_DIR}.restore-XXXXXX")"
+  # Dedicated cleanup trap: any unguarded failure under set -euo pipefail
+  # must still remove the staging tree; disarmed after a successful move.
+  RESTORE_CLEANUP_SET=1
+  trap 'rc=$?; sudo rm -rf -- "$RESTORE_STAGED" || :; exit "$rc"' EXIT
   sudo cp -a "${CONFIG_BACKUP_DIR}/tree/." "${RESTORE_STAGED}/"
   if ! sudo nginx -t -c "${RESTORE_STAGED}/nginx.conf"; then
     sudo rm -rf "${RESTORE_STAGED}"
@@ -648,6 +663,13 @@ if ! sudo nginx -t; then
   # root is recreated as a link and the staged tree atomically moved
   # into its resolved target (old target preserved until the swap
   # succeeds); a real directory is replaced wholesale with mv.
+  # The mktemp staging dir is user-owned mode-0700; restore the active
+  # root's owner/group/mode onto the staged tree before the rename so
+  # the replacement root does not inherit mktemp metadata.
+  ROOT_OWNER="$(stat -c '%U:%G' "${NGINX_CONF_DIR}")"
+  ROOT_MODE="$(stat -c '%a' "${NGINX_CONF_DIR}")"
+  sudo chown -R "${ROOT_OWNER}" "${RESTORE_STAGED}"
+  sudo chmod -R "${ROOT_MODE}" "${RESTORE_STAGED}"
   if [[ -f "${CONFIG_BACKUP_DIR}/tree-root-link" ]]; then
     sudo rm -rf "${NGINX_CONF_DIR}"
     sudo ln -s "$(cat "${CONFIG_BACKUP_DIR}/tree-root-link")" "${NGINX_CONF_DIR}"

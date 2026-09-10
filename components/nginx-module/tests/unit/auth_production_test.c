@@ -1243,6 +1243,54 @@ test_modify_cc_qualified_private_adds_bare_private(void)
 }
 
 static void
+test_token_is_private_qualified(void)
+{
+    const char *s = "private=\"Set-Cookie\"";
+    ngx_flag_t r = ngx_http_markdown_cache_control_token_is_private(
+        (const u_char *) s, (const u_char *) s + strlen(s));
+    TEST_ASSERT(r == 1, "field-qualified private is recognized");
+    TEST_PASS("field-qualified private recognized");
+}
+
+static void
+test_modify_cc_qualified_private_removed_and_bare_appended(void)
+{
+    /* The field-qualified form must be REMOVED from the rewritten value
+     * and the bare private appended exactly once, for all three
+     * orderings: qualified-first, qualified-last, and bare+qualified. */
+    static const struct {
+        const char *source;
+        const char *expected;
+    } cases[] = {
+        { "private=\"Set-Cookie\", max-age=60", "max-age=60, private" },
+        { "max-age=60, private=\"Set-Cookie\"", "max-age=60, private" },
+        { "private, private=\"Set-Cookie\"",    "private" },
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        ngx_http_request_t *r;
+        ngx_table_elt_t    *entry;
+        ngx_int_t           rc;
+
+        reset_pool();
+        r = make_req();
+        if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+        entry = add_header(&r->headers_out.headers, "Cache-Control",
+                           cases[i].source, 1);
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+
+        TEST_ASSERT(rc == NGX_OK, "qualified private rewrite succeeds");
+        TEST_ASSERT(entry != NULL
+                    && entry->value.len == strlen(cases[i].expected)
+                    && memcmp(entry->value.data, cases[i].expected,
+                              strlen(cases[i].expected)) == 0,
+                    "qualified private removed, bare private appended once");
+    }
+    TEST_PASS("field-qualified private is removed and bare private appended");
+}
+
+static void
 test_modify_cc_quoted_text_adds_private_outside_quote(void)
 {
     ngx_http_request_t *r;
@@ -1403,6 +1451,8 @@ main(void)
     test_modify_cc_ignores_invalidated_no_store();
     test_modify_cc_no_store_and_public_normalizes_public();
     test_modify_cc_qualified_private_adds_bare_private();
+    test_token_is_private_qualified();
+    test_modify_cc_qualified_private_removed_and_bare_appended();
     test_modify_cc_quoted_text_adds_private_outside_quote();
     test_modify_cc_malformed_value_fails_closed_atomically();
 

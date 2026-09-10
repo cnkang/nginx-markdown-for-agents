@@ -44,6 +44,7 @@ typedef struct {
     ngx_table_elt_t  *first_entry;
     ngx_flag_t        has_no_store;
     ngx_flag_t        has_private;
+    ngx_flag_t        has_qualified_private;
     ngx_flag_t        any_public;
     ngx_flag_t        malformed;
     size_t             header_count;
@@ -1077,6 +1078,54 @@ ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
 }
 
 /*
+ * Test whether a Cache-Control value contains a FIELD-QUALIFIED form of
+ * the given directive (name followed by '=' and a value).  The bare
+ * form is matched by ngx_http_markdown_cache_control_has_directive.
+ */
+static ngx_flag_t
+ngx_http_markdown_cache_control_has_qualified_directive(
+    const ngx_str_t *value, const ngx_str_t *directive)
+{
+    const u_char                       *p;
+    const u_char                       *end;
+    ngx_http_markdown_cc_directive_t    parsed;
+    ngx_int_t                           rc;
+
+    if (value == NULL || value->len == 0 || value->data == NULL
+        || directive == NULL || directive->len == 0
+        || directive->data == NULL)
+    {
+        return 0;
+    }
+
+    p = value->data;
+    end = p + value->len;
+
+    for (/* void */; /* void */; /* void */) {
+        rc = ngx_http_markdown_next_cache_control_directive(
+            &p, end, &parsed);
+        if (rc != NGX_OK) {
+            return 0;
+        }
+
+        if (parsed.name_start == NULL || parsed.name_end == NULL
+            || parsed.name_end < parsed.name_start)
+        {
+            return 0;
+        }
+
+        if (parsed.has_value
+            && (size_t) (parsed.name_end - parsed.name_start)
+               == directive->len
+            && ngx_http_markdown_token_equals_ignore_case(
+                   parsed.name_start, directive->data, directive->len))
+        {
+            return 1;
+        }
+    }
+}
+
+/*
  * Test whether a header entry is a Cache-Control header.
  *
  * Compares key length and data against the canonical Cache-Control
@@ -1194,6 +1243,8 @@ ngx_http_markdown_apply_cc_directive(ngx_http_markdown_cc_scan_t *scan,
     {
         if (!directive->has_value) {
             scan->has_private = 1;
+        } else {
+            scan->has_qualified_private = 1;
         }
         return;
     }
@@ -1272,6 +1323,7 @@ ngx_http_markdown_scan_cache_control_headers(ngx_list_t *headers,
     scan->first_entry = NULL;
     scan->has_no_store = 0;
     scan->has_private = 0;
+    scan->has_qualified_private = 0;
     scan->any_public = 0;
     scan->malformed = 0;
     scan->header_count = 0;
@@ -1351,10 +1403,24 @@ ngx_http_markdown_rewrite_public_entries(ngx_http_request_t *r,
             {
                 rc = ngx_http_markdown_prepare_strip_public_value(
                     r, &elts[i].value, &updates[update_count].value);
+            } else if (ngx_http_markdown_cache_control_has_qualified_directive(
+                           &elts[i].value,
+                           &ngx_http_markdown_private_directive))
+            {
+                /* Field-qualified private (private="Set-Cookie") does NOT
+                 * satisfy whole-response privacy: strip the qualified
+                 * form (the strip helper skips qualified private tokens
+                 * and appends the bare directive unless a bare private
+                 * is already present).  Checked BEFORE the bare-private
+                 * test so an entry carrying BOTH forms is still
+                 * rewritten. */
+                rc = ngx_http_markdown_prepare_strip_public_value(
+                    r, &elts[i].value, &updates[update_count].value);
             } else if (ngx_http_markdown_cache_control_has_directive(
                            &elts[i].value,
                            &ngx_http_markdown_private_directive))
             {
+                /* Bare private already satisfies whole-response privacy. */
                 continue;
             } else {
                 rc = ngx_http_markdown_prepare_append_private_value(
@@ -1484,6 +1550,16 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
                           "markdown: normalizing public Cache-Control "
                           "while preserving no-store");
         }
+        return ngx_http_markdown_rewrite_public_entries(
+                   r, &r->headers_out.headers, scan.header_count);
+    }
+
+    /*
+     * Field-qualified private (private="Set-Cookie") does NOT satisfy
+     * whole-response privacy: strip the qualified form and append the
+     * bare private via the rewrite path.
+     */
+    if (scan.has_qualified_private) {
         return ngx_http_markdown_rewrite_public_entries(
                    r, &r->headers_out.headers, scan.header_count);
     }
