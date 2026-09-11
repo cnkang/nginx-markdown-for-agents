@@ -210,7 +210,7 @@ The `incremental` feature is off by default. The 0.9.2 release removed the incre
 > **Historical note**: the Rust `IncrementalConverter` interface and the
 > incremental FFI API sections below describe the REMOVED 0.8.x design. This
 > document keeps them for historical reference only. They are not part of the
-> 0.9.2 build, and no API contract refers to them.
+> 0.9.2 build. Users must not use them as an API contract.
 
 ### Rust Interface
 
