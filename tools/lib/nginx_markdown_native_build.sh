@@ -300,15 +300,32 @@ markdown_copy_runtime_conf_from_nginx_bin() {
   return 0
 }
 
+markdown_nginx_prefix() {
+  local nginx_bin="$1"
+  local reported
+
+  # A binary may live outside the prefix it was configured with, so the
+  # reported prefix wins over the directory layout.
+  reported="$("${nginx_bin}" -V 2>&1 | tr ' ' '\n' | sed -n 's/^--prefix=//p' | tail -n1)"
+  if [[ -n "${reported}" ]]; then
+    printf '%s\n' "${reported}"
+    return 0
+  fi
+
+  (cd "$(dirname "${nginx_bin}")/.." && pwd)
+  return 0
+}
+
 markdown_nginx_modules_candidates() {
   local nginx_bin="$1"
-  local source_root modules_path
+  local prefix modules_path
 
   markdown_validate_nginx_bin "${nginx_bin}" || return 1
 
-  # Installed layout: modules live next to the prefix the binary reports.
-  source_root="$(cd "$(dirname "${nginx_bin}")/.." && pwd)"
-  printf '%s\n' "${source_root}/modules"
+  prefix="$(markdown_nginx_prefix "${nginx_bin}")"
+
+  # Installed layout: modules live under the prefix the binary reports.
+  printf '%s\n' "${prefix}/modules"
 
   # A source tree that was compiled but never installed keeps its dynamic
   # modules beside the binary in objs/, which is the layout `make modules`
@@ -319,10 +336,12 @@ markdown_nginx_modules_candidates() {
   if [[ -n "${modules_path}" ]]; then
     # A relative --modules-path is relative to the prefix, not to the caller.
     if [[ "${modules_path}" != /* ]]; then
-      modules_path="${source_root}/${modules_path}"
+      modules_path="${prefix}/${modules_path}"
     fi
     printf '%s\n' "${modules_path}"
   fi
+
+  return 0
 }
 
 markdown_find_module_in_dir() {
