@@ -9,7 +9,7 @@ typedef struct {
 } ngx_str_t;
 
 typedef ngx_uint_t ngx_msec_t;
-typedef int ngx_atomic_t;
+typedef volatile ngx_uint_t ngx_atomic_t;   /* mirrors nginx: volatile atomic unsigned type */
 typedef ngx_uint_t ngx_atomic_uint_t;
 typedef ngx_int_t ngx_atomic_int_t;
 
