@@ -330,3 +330,113 @@ def test_modules_path_is_relative_to_the_reported_prefix(tmp_path: Path) -> None
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(module)
+
+
+def test_runtime_conf_prefers_the_reported_prefix(tmp_path: Path) -> None:
+    """The reported prefix wins over a configuration beside the binary."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    prefix = tmp_path / "prefix"
+    (prefix / "conf").mkdir(parents=True)
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    decoy = tmp_path / "conf"
+    decoy.mkdir()
+    (decoy / "mime.types").write_text("types { }\n", encoding="utf-8")
+    nginx_bin = bin_dir / "nginx"
+    nginx_bin.write_text(
+        "#!/bin/sh\n"
+        f'echo "configure arguments: --prefix={prefix}"\n',
+        encoding="utf-8",
+    )
+    nginx_bin.chmod(0o755)
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_nginx_runtime_conf_dir "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(prefix / "conf")
+
+
+def test_runtime_conf_falls_back_to_the_build_tree(tmp_path: Path) -> None:
+    """A reported prefix without mime.types still reuses the build tree conf."""
+    build_root = tmp_path / "nginx-1.30.4"
+    objs = build_root / "objs"
+    (build_root / "conf").mkdir(parents=True)
+    objs.mkdir(parents=True)
+    (build_root / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    nginx_bin = objs / "nginx"
+    nginx_bin.write_text(
+        '#!/bin/sh\necho "configure arguments: --prefix=/usr/local/nginx"\n',
+        encoding="utf-8",
+    )
+    nginx_bin.chmod(0o755)
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_nginx_runtime_conf_dir "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(build_root / "conf")
+
+
+def test_reuse_of_a_binary_outside_its_prefix(tmp_path: Path) -> None:
+    """The reuse path loads the module of a binary installed outside its prefix."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    prefix = tmp_path / "prefix"
+    (prefix / "conf").mkdir(parents=True)
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    nginx_bin = bin_dir / "nginx"
+    nginx_bin.write_text(
+        "#!/bin/sh\n"
+        f'echo "configure arguments: --prefix={prefix} --modules-path=modules"\n',
+        encoding="utf-8",
+    )
+    nginx_bin.chmod(0o755)
+    modules = prefix / "modules"
+    modules.mkdir()
+    module = modules / "ngx_http_markdown_filter_module.so"
+    module.write_bytes(b"module-bytes")
+    runtime_dir = tmp_path / "runtime"
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_prepare_runtime_reuse "{nginx_bin}" "{runtime_dir}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == (
+        "load_module modules/ngx_http_markdown_filter_module.so;"
+    )
+    assert (runtime_dir / "modules" / module.name).is_file()
+    assert (runtime_dir / "conf" / "mime.types").is_file()

@@ -1796,6 +1796,13 @@ class TestNginxConfigGeneration:
         copy_call = script_content.index(
             '"$RESOLVED_CP" -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"'
         )
-        guard_at = script_content.rindex("if [[ -L ", 0, copy_call)
-        assert guard_at != -1, "the copy must be preceded by the link guard"
-        assert '"$RESOLVED_RM" -f' in script_content[guard_at:copy_call]
+        block_start = script_content.index(
+            'PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"'
+        )
+        guard_block = script_content[block_start:copy_call]
+        assert '[[ -L "${PROBE_OUTPUT_DIR}" ]]' in guard_block, (
+            "a symlinked probe directory must be rejected"
+        )
+        assert '"$RESOLVED_RM" -rf "${PROBE_OUTPUT_DIR}"' in guard_block, (
+            "the retained probe directory must be rebuilt before the copy"
+        )
