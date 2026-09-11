@@ -290,8 +290,9 @@ Each platform has a dedicated baseline file:
 
 ## Shared Response Payloads
 
-The `streaming-first` and `large-body` response payloads are byte-identical in
-every probe set. Only the top-level copies exist as regular files
+Each of the `streaming-first` and `large-body` response payloads is identical in
+every probe set, although the two payloads differ from each other. Only the
+top-level copies exist as regular files
 (`streaming-first.body`, `large-body.body`); each per-set copy is a symlink to
 them. That keeps about 9 MB of duplicate evidence out of the repository while
 every reader still sees the same bytes, and
