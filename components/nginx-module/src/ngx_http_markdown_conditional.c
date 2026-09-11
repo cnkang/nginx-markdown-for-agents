@@ -305,7 +305,7 @@ ngx_http_markdown_shadow_count_headers(
  */
 static ngx_int_t
 ngx_http_markdown_shadow_copy_headers(
-    const ngx_http_markdown_ctx_t *ctx, ngx_list_t *source,
+    const ngx_http_markdown_ctx_t *ctx, const ngx_list_t *source,
     ngx_list_t *shadow,
     ngx_http_markdown_conditional_side_table_t *table)
 {
@@ -360,7 +360,7 @@ ngx_http_markdown_shadow_captured_conditional_headers(
     ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx)
 {
     ngx_http_markdown_conditional_side_table_t  *table;
-    ngx_list_t                                  *source;
+    const ngx_list_t                            *source;
     ngx_list_t                                  *shadow;
     ngx_uint_t                                   shadow_entries;
 
@@ -2277,6 +2277,21 @@ typedef struct {
     const ngx_table_elt_t  *last_modified_header;
 } ngx_http_markdown_conditional_validators_t;
 
+/*
+ * Message length to log for a failed conversion.
+ *
+ * The converter reports the message length as a size, so clamp it to the range
+ * of a precision argument and report nothing when the message is absent.  A
+ * macro keeps the expression at the call site, where the logging helpers may be
+ * compiled out.
+ */
+#define ngx_http_markdown_loggable_error_len(result)                          \
+    (((result)->error_message == NULL)                                        \
+         ? 0                                                                  \
+         : (((result)->error_len > (size_t) INT_MAX) ? INT_MAX                \
+                                                     : (int) (result)->error_len))
+
+
 static ngx_int_t
 ngx_http_markdown_generate_conditional_result(
     ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
@@ -2287,7 +2302,6 @@ ngx_http_markdown_generate_conditional_result(
 {
     struct MarkdownOptions  options;
     struct MarkdownResult   *conv_result;
-    int                     error_len;
 
     *result = NULL;
 
@@ -2329,14 +2343,11 @@ ngx_http_markdown_generate_conditional_result(
     }
 
     if (conv_result->error_code != 0) {
-        error_len = (conv_result->error_len > (size_t) INT_MAX)
-            ? INT_MAX
-            : (int) conv_result->error_len;
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                      "markdown: conversion failed during conditional check: "
                      "error_code=%ud message=\"%*s\"",
                      conv_result->error_code,
-                     (conv_result->error_message != NULL) ? error_len : 0,
+                     ngx_http_markdown_loggable_error_len(conv_result),
                      (conv_result->error_message != NULL) ? conv_result->error_message : (u_char *) "");
 
         markdown_result_free(conv_result);
