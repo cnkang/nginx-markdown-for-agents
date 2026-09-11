@@ -308,18 +308,29 @@ markdown_nginx_configure_value() {
   local nginx_bin="$1"
   local flag="--$2="
 
-  # `nginx -V` prints the configure line, where a value may be double quoted
-  # because the path contains spaces, and may end in any whitespace.
-  "${nginx_bin}" -V 2>&1 | awk -v flag="${flag}" '
+  # `nginx -V` prints the configure line, which wraps any value containing a
+  # space in single quotes, and a value may also be quoted with double quotes or
+  # end in any whitespace.
+  "${nginx_bin}" -V 2>&1 | awk -v flag="${flag}" -v sq="'" '
+    BEGIN {
+      quoted = "[\"][^\"]*[\"]|" sq "[^" sq "]*" sq
+      pattern = "--[A-Za-z0-9_-]+=(" quoted "|[^\"[:space:]]*)"
+    }
     { line = line $0 " " }
     END {
       rest = line
-      while (match(rest, /--[A-Za-z0-9_-]+=("[^"]*"|[^"[:space:]]*)/)) {
+      while (match(rest, pattern)) {
         token = substr(rest, RSTART, RLENGTH)
         rest = substr(rest, RSTART + RLENGTH)
         if (index(token, flag) == 1) {
           value = substr(token, length(flag) + 1)
-          gsub(/^"|"$/, "", value)
+          if (substr(value, 1, 1) == "\"" || substr(value, 1, 1) == sq) {
+            value = substr(value, 2)
+          }
+          last = length(value)
+          if (last > 0 && (substr(value, last, 1) == "\"" || substr(value, last, 1) == sq)) {
+            value = substr(value, 1, last - 1)
+          }
           gsub(/[[:space:]]+$/, "", value)
           print value
           exit

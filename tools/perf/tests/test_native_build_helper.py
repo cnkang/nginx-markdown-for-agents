@@ -565,3 +565,34 @@ def test_configured_modules_directory_beats_the_binary_directory(
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(expected)
+
+
+def test_single_quoted_prefix_with_spaces_is_unquoted(tmp_path: Path) -> None:
+    """nginx quotes a value containing spaces with single quotes."""
+    configure_line = (
+        "configure arguments: --prefix='/opt/nginx with space'"
+        " --modules-path='lib/nginx mods'"
+    )
+    cfg = tmp_path / "configure.txt"
+    cfg.write_text(configure_line + "\n", encoding="utf-8")
+    nginx_bin = tmp_path / "nginx"
+    nginx_bin.write_text(
+        '#!/bin/sh\ncat "%s"\n' % cfg, encoding="utf-8"
+    )
+    nginx_bin.chmod(0o755)
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_nginx_prefix "{nginx_bin}"; '
+        f'markdown_nginx_configure_value "{nginx_bin}" modules-path'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["/opt/nginx with space", "lib/nginx mods"]
