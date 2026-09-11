@@ -1142,6 +1142,24 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._workflow_stages_into_tarball(workflow, source)
 
+    def test_plain_mkdir_of_a_child_does_not_create_the_tree(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir "${TARBALL_DIR}/sub"\n'
+            f'  cp {source} "${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_recursive_mkdir_of_a_child_creates_the_tree(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "${TARBALL_DIR}/sub"\n'
+            f'  cp {source} "${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
     def test_block_scalar_is_scanned_line_by_line(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         workflow = (
