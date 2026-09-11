@@ -1321,11 +1321,11 @@ _STEP_BOUNDARY_PATTERN = re.compile(r"^\s*-\s|^\s*run:")
 
 # A function definition opens a group whose body does not run until the
 # function is called, so its commands are never a live install.
-_FUNCTION_DEFINITION = re.compile(r"^([^\W\d]\w*)\s*\(\s*\)$")
+_FUNCTION_DEFINITION = re.compile(r"^([^\W\d]\w*)\s*\(\s*\)$", re.ASCII)
 _SEPARATOR_TOKENS = (";", "&&", "||")
 _SEPARATOR_SPLIT = re.compile(r"(&&|\|\||;)")
 # A bare command name, as opposed to a definition such as `stage()`.
-_PLAIN_NAME = re.compile(r"^[^\W\d]\w*$")
+_PLAIN_NAME = re.compile(r"^[^\W\d]\w*$", re.ASCII)
 
 # Tokens that prefix a command without being the command itself.
 _COMMAND_PREFIXES = frozenset({"(", "{", "!"})
@@ -1402,7 +1402,7 @@ def _function_definition(tokens: list[str]) -> str | None:
     if single:
         return single.group(1)
     joined = " ".join(tokens[:3])
-    spaced = re.match(r"^([^\W\d]\w*)\s*\(\s*\)", joined)
+    spaced = re.match(r"^([^\W\d]\w*)\s*\(\s*\)", joined, re.ASCII)
     return spaced.group(1) if spaced else None
 
 
