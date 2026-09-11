@@ -1581,17 +1581,31 @@ PYEOF
 
 # Output report
 if [[ -n "$OUTPUT_PATH" ]]; then
-  "$RESOLVED_MKDIR" -p "$("$SYSTEM_DIRNAME" "$OUTPUT_PATH")"
-  echo "$REPORT_JSON" > "$OUTPUT_PATH"
   PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"
   # A retained probe set may share identical payloads through symlinks, and the
   # copy would write through one of them and overwrite the stored payload
-  # instead of adding a file, so the directory is rebuilt from the probes that
-  # were just collected.
+  # instead of adding a file, so the previous artifacts are replaced.  Only a
+  # directory that already holds this tool's probe artifacts is touched: any
+  # other entry means the derived path was not produced by this tool.
   if [[ -L "${PROBE_OUTPUT_DIR}" ]]; then
     "$RESOLVED_RM" -f "${PROBE_OUTPUT_DIR}"
   fi
-  "$RESOLVED_RM" -rf "${PROBE_OUTPUT_DIR}"
+  if [[ -d "${PROBE_OUTPUT_DIR}" ]]; then
+    for probe_entry in "${PROBE_OUTPUT_DIR}"/*; do
+      [[ -e "${probe_entry}" || -L "${probe_entry}" ]] || continue
+      case "${probe_entry##*/}" in
+        *.body|*.headers|*.json)
+          "$RESOLVED_RM" -f "${probe_entry}"
+          ;;
+        *)
+          echo "ERROR: refusing to replace ${PROBE_OUTPUT_DIR}: unexpected entry ${probe_entry##*/}" >&2
+          exit 1
+          ;;
+      esac
+    done
+  fi
+  "$RESOLVED_MKDIR" -p "$("$SYSTEM_DIRNAME" "$OUTPUT_PATH")"
+  echo "$REPORT_JSON" > "$OUTPUT_PATH"
   "$RESOLVED_MKDIR" -p "$PROBE_OUTPUT_DIR"
   "$RESOLVED_CP" -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"
   log "Report written to: $OUTPUT_PATH"

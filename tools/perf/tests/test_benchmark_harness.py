@@ -1803,6 +1803,12 @@ class TestNginxConfigGeneration:
         assert '[[ -L "${PROBE_OUTPUT_DIR}" ]]' in guard_block, (
             "a symlinked probe directory must be rejected"
         )
-        assert '"$RESOLVED_RM" -rf "${PROBE_OUTPUT_DIR}"' in guard_block, (
-            "the retained probe directory must be rebuilt before the copy"
+        assert '"$RESOLVED_RM" -rf' not in guard_block, (
+            "the retained directory must not be wiped recursively"
+        )
+        assert "*.body|*.headers|*.json)" in guard_block, (
+            "only this tool's probe artifacts may be replaced"
+        )
+        assert "refusing to replace" in guard_block, (
+            "an unexpected entry must stop the run instead of being deleted"
         )

@@ -298,6 +298,16 @@ every reader still sees the same bytes, and
 `tools/perf/tests/test_baseline_body_dedup.py` keeps the copies identical and
 the links inside this directory.
 
+## Why the Compressed Variant Bodies Are Identical
+
+The recorded `.body` files are the decoded markdown response: the headers show
+`Transfer-Encoding: chunked` and no `Content-Encoding`, and the compression is
+exercised on the wire by the `Accept-Encoding` variant of each scenario. The
+recorded digest is therefore the same for `streaming-first`,
+`gzip-streaming-first`, `deflate-streaming-first`, and `brotli-streaming-first`,
+which is why they share one stored payload; the variant name describes the
+negotiated encoding of the request, not the bytes on disk.
+
 ## Running Benchmarks
 
 ### Basic Usage
