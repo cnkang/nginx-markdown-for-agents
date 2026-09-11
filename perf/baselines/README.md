@@ -301,12 +301,28 @@ the links inside this directory.
 ## Why the Compressed Variant Bodies Are Identical
 
 The recorded `.body` files are the decoded markdown response: the headers show
-`Transfer-Encoding: chunked` and no `Content-Encoding`, and the compression is
-exercised on the wire by the `Accept-Encoding` variant of each scenario. The
-recorded digest is therefore the same for `streaming-first`,
-`gzip-streaming-first`, `deflate-streaming-first`, and `brotli-streaming-first`,
-which is why they share one stored payload; the variant name describes the
-negotiated encoding of the request, not the bytes on disk.
+`Transfer-Encoding: chunked` and no `Content-Encoding`, and the scenario selects
+its compression through the request the benchmark sends (`?gzip=1`,
+`?deflate=1`, `?brotli=1`) rather than through client negotiation. The recorded
+digest is therefore the same for `streaming-first`, `gzip-streaming-first`,
+`deflate-streaming-first`, and `brotli-streaming-first`, which is why they share
+one stored payload; the variant name describes the query-selected upstream
+compression of that scenario, not the bytes on disk.
+
+## Which Layer Selects a Compression
+
+Two independent layers compress a response, and the benchmark varies only the
+first one:
+
+| Layer | Who acts | How it is selected |
+| --- | --- | --- |
+| The upstream response, which this module decompresses | The mock upstream in `tools/perf/upstream_mock.py` | The scenario declares the encoding, and the benchmark passes it in the URL as `?gzip=1`, `?deflate=1`, or `?brotli=1` |
+| The response a client receives | Output filters such as gzip or brotli | The client sends `Accept-Encoding`; see `docs/architecture/filter-ordering.md` |
+
+The upstream layer is the code path this module implements, and a declared value
+keeps the recorded evidence comparable across platforms and versions. The client
+layer belongs to the output filters and is covered by
+`tests/e2e/filter_ordering_test.sh`.
 
 ## Running Benchmarks
 
