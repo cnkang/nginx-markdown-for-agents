@@ -422,8 +422,10 @@ markdown_find_dynamic_markdown_module() {
     return 1
   fi
 
-  # The module this project builds wins wherever it lives: a differently named
-  # match in an earlier directory must not shadow it.
+  # Directory order is the decision that matters: an explicitly configured
+  # modules directory describes this installation better than one inferred from
+  # the layout, so the first directory that holds a module wins. The name this
+  # project builds only orders the choice within that directory.
   for candidate in "${candidates[@]}"; do
     [[ -d "${candidate}" ]] || continue
     module_path="$(
@@ -433,10 +435,6 @@ markdown_find_dynamic_markdown_module() {
       printf '%s\n' "${module_path}"
       return 0
     fi
-  done
-
-  for candidate in "${candidates[@]}"; do
-    [[ -d "${candidate}" ]] || continue
     module_path="$(markdown_find_module_in_dir "${candidate}")"
     if [[ -f "${module_path}" ]]; then
       printf '%s\n' "${module_path}"
