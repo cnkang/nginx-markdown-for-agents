@@ -1324,8 +1324,6 @@ _STEP_BOUNDARY_PATTERN = re.compile(r"^\s*-\s|^\s*run:")
 _FUNCTION_DEFINITION = re.compile(r"^([^\W\d]\w*)\s*\(\s*\)$", re.ASCII)
 _SEPARATOR_TOKENS = (";", "&&", "||")
 _SEPARATOR_SPLIT = re.compile(r"(&&|\|\||;)")
-# A bare command name, as opposed to a definition such as `stage()`.
-_PLAIN_NAME = re.compile(r"^[^\W\d]\w*$", re.ASCII)
 
 # Tokens that prefix a command without being the command itself.
 _COMMAND_PREFIXES = frozenset({"(", "{", "!"})
@@ -2326,6 +2324,8 @@ def extract_nginx_versions(content: str) -> set[str]:
         try:
             versions.update(_extract_matrix_versions())
         except (RuntimeError, OSError, ValueError, KeyError, TypeError):
+            # Keep the line-based fallback available for versions declared
+            # directly in the file when the matrix cannot be read.
             pass
 
     for raw_line in content.splitlines():
