@@ -378,8 +378,10 @@ def test_runtime_conf_falls_back_to_the_build_tree(tmp_path: Path) -> None:
         "types { text/plain txt; }\n", encoding="utf-8"
     )
     nginx_bin = objs / "nginx"
+    absent_prefix = tmp_path / "absent-prefix"
     nginx_bin.write_text(
-        '#!/bin/sh\necho "configure arguments: --prefix=/usr/local/nginx"\n',
+        "#!/bin/sh\n"
+        f'echo "configure arguments: --prefix={absent_prefix}"\n',
         encoding="utf-8",
     )
     nginx_bin.chmod(0o755)
