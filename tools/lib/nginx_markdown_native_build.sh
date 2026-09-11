@@ -429,13 +429,13 @@ markdown_find_dynamic_markdown_module() {
   for candidate in "${candidates[@]}"; do
     [[ -d "${candidate}" ]] || continue
     module_path="$(
-      markdown_find_module_in_dir "${candidate}" 'ngx_http_markdown_filter_module.so'
+      markdown_find_module_in_dir "${candidate}" 'ngx_http_markdown_filter_module.so' || true
     )"
     if [[ -f "${module_path}" ]]; then
       printf '%s\n' "${module_path}"
       return 0
     fi
-    module_path="$(markdown_find_module_in_dir "${candidate}")"
+    module_path="$(markdown_find_module_in_dir "${candidate}" || true)"
     if [[ -f "${module_path}" ]]; then
       printf '%s\n' "${module_path}"
       return 0
