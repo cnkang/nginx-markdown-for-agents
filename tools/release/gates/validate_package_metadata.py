@@ -1490,7 +1490,9 @@ def _normalize_operand(raw_token: str) -> str | None:
     return operand.rstrip("/")
 
 
-def _destination_matches_source(destination: str, source_path: str) -> bool:
+def _destination_matches_source(
+    destination: str, source_path: str, staging_roots: set[str] | None = None
+) -> bool:
     """True when the staged destination is where the spec expects to find it.
 
     The destination must keep the file's name and sit either in the tarball root
@@ -1502,9 +1504,16 @@ def _destination_matches_source(destination: str, source_path: str) -> bool:
     if not marker:
         return False
     prefix = destination[: marker.start()].strip('"').strip()
-    # The tarball tree lives directly under the staging root, so any other
-    # prefix copies the file where the archive step never looks.
-    if prefix not in ("", "/tmp") or ".." in prefix.split("/"):
+    if ".." in prefix.split("/"):
+        return False
+    # The tarball tree lives directly under the root the workflow creates for it,
+    # so a destination naming another directory copies the file where the archive
+    # step never looks. A caller that knows the step passes its roots; a direct
+    # caller only states that the tree sits under an absolute path.
+    if staging_roots is None:
+        if prefix and not prefix.startswith("/"):
+            return False
+    elif prefix not in ("", *sorted(staging_roots)):
         return False
     suffix = destination[marker.end() :].strip('"').lstrip("/")
     if ".." in suffix.split("/"):
@@ -1536,7 +1545,9 @@ def _names_expected_source(operands: list[str], source_path: str) -> bool:
     return False
 
 
-def _is_staging_command(tokens: list[str], source_path: str) -> bool:
+def _is_staging_command(
+    tokens: list[str], source_path: str, staging_roots: set[str] | None = None
+) -> bool:
     """True when one command copies ``source_path`` into the tarball tree.
 
     The file must appear as an operand before the operand that references the
@@ -1550,7 +1561,7 @@ def _is_staging_command(tokens: list[str], source_path: str) -> bool:
         index
         for index, raw in enumerate(operands)
         if not _is_literal_operand(raw)
-        and _destination_matches_source(_unquote_operand(raw), source_path)
+        and _destination_matches_source(_unquote_operand(raw), source_path, staging_roots)
     ]
     if not staged_indexes:
         return False
@@ -1584,6 +1595,28 @@ def _split_workflow_steps(workflow: str) -> list[str]:
     return steps
 
 
+def _declared_staging_roots(step: str) -> set[str]:
+    """Roots a step creates for the tarball tree.
+
+    A destination proves staging only when it names one of these roots, so the
+    check follows the workflow's own commands instead of a directory name.
+    """
+    roots: set[str] = set()
+    for line in _logical_lines(step):
+        tokens = line.split()
+        if not tokens or Path(tokens[0]).name != "mkdir":
+            continue
+        operands = [token.strip('"').strip("'") for token in tokens[1:] if not token.startswith("-")]
+        for operand in operands:
+            marker = TARBALL_MARKER_PATTERN.search(operand)
+            if marker is None:
+                continue
+            root = operand[: marker.start()].rstrip("/")
+            if root:
+                roots.add(root)
+    return roots
+
+
 def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
     """Return True when a live workflow command copies ``source`` into the tarball.
 
@@ -1592,6 +1625,7 @@ def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
     """
     source_path = source.lstrip("./")
     for step in _split_workflow_steps(workflow):
+        staging_roots = _declared_staging_roots(step)
         directory_changed = False
         for tokens, guarded in _shell_commands(step):
             if Path(tokens[0]).name in ("cd", "pushd"):
@@ -1601,7 +1635,7 @@ def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
                 continue
             if guarded or directory_changed:
                 continue
-            if _is_staging_command(tokens, source_path):
+            if _is_staging_command(tokens, source_path, staging_roots):
                 return True
     return False
 

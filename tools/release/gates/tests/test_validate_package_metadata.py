@@ -862,7 +862,10 @@ class TestRpmSpecSourcesAreStaged:
                     "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
                 )
             # The workflow stages README.md only: the snippet is missing.
-            return 'cp README.md "/tmp/${TARBALL_DIR}/"\n'
+            return (
+                'mkdir -p "/tmp/${TARBALL_DIR}"\n'
+                'cp README.md "/tmp/${TARBALL_DIR}/"\n'
+            )
 
         monkeypatch.setattr(validator, "read_safe", fake_read_safe)
         result = validator.ValidationResult()
@@ -1096,10 +1099,26 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._workflow_stages_into_tarball(workflow, source)
 
+    def test_staging_root_must_be_the_one_the_step_creates(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/elsewhere/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+        accepted = (
+            "run: |\n"
+            '  mkdir -p "/elsewhere/${TARBALL_DIR}"\n'
+            f'  cp {source} "/elsewhere/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(accepted, source)
+
     def test_block_scalar_is_scanned_line_by_line(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         workflow = (
             "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
             f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
         )
         assert validator._workflow_stages_into_tarball(workflow, source)
@@ -1333,7 +1352,7 @@ class TestModuleSnippetEdgeCases:
             "      - name: stage\n"
             "        run: |\n"
             "          cd /tmp\n"
-            '          cp packaging/nfpm/modules/mod-markdown.conf "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
+            '          mkdir -p "/tmp/${TARBALL_DIR}"\n          cp packaging/nfpm/modules/mod-markdown.conf "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
         )
         assert not validator._workflow_stages_into_tarball(
             workflow, "packaging/nfpm/modules/mod-markdown.conf"
@@ -1346,6 +1365,7 @@ class TestModuleSnippetEdgeCases:
             "          cd components/rust-converter\n"
             "      - name: stage\n"
             "        run: |\n"
+            '          mkdir -p "/tmp/${TARBALL_DIR}"\n'
             '          cp packaging/nfpm/modules/mod-markdown.conf "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
         )
         assert validator._workflow_stages_into_tarball(
