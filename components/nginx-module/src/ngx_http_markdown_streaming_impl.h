@@ -21,6 +21,8 @@
 #include "ngx_http_markdown_stream_postcommit.h"
 #include "ngx_http_markdown_stream_commit.h"
 
+#include "ngx_http_markdown_metrics_peak_impl.h"
+
 typedef struct {
     ngx_flag_t  main_terminal;
     ngx_flag_t  subrequest_terminal;
@@ -3633,20 +3635,9 @@ ngx_http_markdown_streaming_record_finalize_stats(
          * soak qualification gate can read a run-wide peak rather than
          * only the most recent streaming sample.
          */
-        for (;;) {
-            ngx_atomic_t  observed;
-
-            observed = ngx_http_markdown_metrics->streaming.last_peak_memory_bytes;
-            if (observed >= (ngx_atomic_t) peak_memory_bytes) {
-                break;
-            }
-            if (ngx_atomic_cmp_set(
-                    &ngx_http_markdown_metrics->streaming.last_peak_memory_bytes,
-                    observed, (ngx_atomic_t) peak_memory_bytes))
-            {
-                break;
-            }
-        }
+        ngx_http_markdown_metrics_update_peak(
+            &ngx_http_markdown_metrics->streaming.last_peak_memory_bytes,
+            peak_memory_bytes);
     }
 }
 
@@ -4407,6 +4398,30 @@ ngx_http_markdown_streaming_failopen_passthrough(
          * (failopen_active) continue via continue_failopen_input. */
         ngx_http_markdown_streaming_failopen_mark_chain_forwarded(ctx);
     }
+    return rc;
+}
+
+
+/*
+ * Deliver a fail-open passthrough after a pre-commit enqueue failure and
+ * normalize the result.  A successful delivery reports NGX_DONE or NGX_OK and
+ * marks the context, so the body filter does not treat it as a streaming
+ * fallback and re-enter full-buffer processing.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_failopen_after_enqueue_error(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *cl)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_streaming_failopen_passthrough(r, ctx, cl);
+    if (rc == NGX_DONE) {
+        rc = NGX_OK;
+    }
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        ctx->failopen_completed = 1;
+    }
+
     return rc;
 }
 
@@ -5275,18 +5290,8 @@ ngx_http_markdown_streaming_handle_consumed_again(
             rc = ngx_http_markdown_streaming_precommit_error(
                 r, ctx, conf, enqueue_error);
             if (rc == NGX_DECLINED && !ctx->eligible) {
-                rc = ngx_http_markdown_streaming_failopen_passthrough(
+                rc = ngx_http_markdown_streaming_failopen_after_enqueue_error(
                     r, ctx, cl);
-                if (rc == NGX_DONE) {
-                    /* Normalize NGX_DONE (see the replay-buffer-limit
-                     * path above): the body filter must not treat a
-                     * successful fail-open delivery as a streaming
-                     * fallback and re-enter full-buffer processing. */
-                    rc = NGX_OK;
-                }
-                if (rc == NGX_OK || rc == NGX_DONE) {
-                    ctx->failopen_completed = 1;
-                }
             }
             return rc;
         }

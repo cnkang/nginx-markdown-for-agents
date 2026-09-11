@@ -181,6 +181,51 @@ ngx_http_markdown_prepare_append_private_value(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/* How the rewrite treats one Cache-Control token. */
+#define NGX_HTTP_MARKDOWN_TOKEN_COPY          0
+#define NGX_HTTP_MARKDOWN_TOKEN_SKIP          1
+#define NGX_HTTP_MARKDOWN_TOKEN_BARE_PRIVATE  2
+
+
+static ngx_int_t
+ngx_http_markdown_cache_token_disposition(const u_char *token_start,
+    const u_char *token_end)
+{
+    if (token_start == NULL || token_end == NULL || token_end <= token_start) {
+        return NGX_HTTP_MARKDOWN_TOKEN_SKIP;
+    }
+
+    if (ngx_http_markdown_cache_control_token_is_public(token_start, token_end)) {
+        return NGX_HTTP_MARKDOWN_TOKEN_SKIP;
+    }
+
+    if (ngx_http_markdown_cache_control_token_is_private(token_start, token_end)) {
+        if ((size_t) (token_end - token_start)
+            == sizeof(ngx_http_markdown_cc_private) - 1)
+        {
+            return NGX_HTTP_MARKDOWN_TOKEN_BARE_PRIVATE;
+        }
+
+        /* Field-qualified private (private="Set-Cookie"): the module enforces
+         * whole-response privacy, so the rewrite drops this token and still
+         * appends the bare private directive. */
+        return NGX_HTTP_MARKDOWN_TOKEN_SKIP;
+    }
+
+    return NGX_HTTP_MARKDOWN_TOKEN_COPY;
+}
+
+
+static void
+ngx_http_markdown_append_cache_separator(u_char **dst, ngx_flag_t wrote_token)
+{
+    if (wrote_token) {
+        *(*dst)++ = ',';
+        *(*dst)++ = ' ';
+    }
+}
+
+
 /* Prepare a public-to-private rewrite without changing the source header. */
 static ngx_int_t
 ngx_http_markdown_prepare_strip_public_value(ngx_http_request_t *r,
@@ -197,6 +242,7 @@ ngx_http_markdown_prepare_strip_public_value(ngx_http_request_t *r,
     ngx_flag_t      wrote_token;
     ngx_flag_t      private_present;
     ngx_int_t       rc;
+    ngx_int_t       disposition;
 
     if (r == NULL || source == NULL || prepared == NULL
         || (source->len != 0 && source->data == NULL))
@@ -239,41 +285,19 @@ ngx_http_markdown_prepare_strip_public_value(ngx_http_request_t *r,
             return NGX_ERROR;
         }
 
-        if (token_start == NULL || token_end == NULL
-            || token_end <= token_start)
-        {
+        disposition = ngx_http_markdown_cache_token_disposition(token_start,
+                                                               token_end);
+        if (disposition == NGX_HTTP_MARKDOWN_TOKEN_SKIP) {
             continue;
         }
 
-        if (ngx_http_markdown_cache_control_token_is_public(
-                token_start, token_end))
-        {
-            continue;
+        if (disposition == NGX_HTTP_MARKDOWN_TOKEN_BARE_PRIVATE) {
+            /* Bare private: keep it in the rewritten value and suppress the
+             * whole-response append below. */
+            private_present = 1;
         }
 
-        if (ngx_http_markdown_cache_control_token_is_private(
-                token_start, token_end))
-        {
-            if ((size_t) (token_end - token_start)
-                == sizeof(ngx_http_markdown_cc_private) - 1)
-            {
-                /* Bare private: keep it in the rewritten value and
-                 * suppress the whole-response append below. */
-                private_present = 1;
-            } else {
-                /* Field-qualified private (private="Set-Cookie"): it is
-                 * removed from the rewritten value (the module enforces
-                 * whole-response privacy) but does NOT satisfy
-                 * whole-response privacy, so the bare private is still
-                 * appended below. */
-                continue;
-            }
-        }
-
-        if (wrote_token) {
-            *dst++ = ',';
-            *dst++ = ' ';
-        }
+        ngx_http_markdown_append_cache_separator(&dst, wrote_token);
         dst = ngx_cpymem(dst, token_start,
                          (size_t) (token_end - token_start));
         wrote_token = 1;
@@ -283,10 +307,7 @@ ngx_http_markdown_prepare_strip_public_value(ngx_http_request_t *r,
      * already carry one: a source value such as "public, private" must
      * not become "private, private". */
     if (!private_present) {
-        if (wrote_token) {
-            *dst++ = ',';
-            *dst++ = ' ';
-        }
+        ngx_http_markdown_append_cache_separator(&dst, wrote_token);
         dst = ngx_cpymem(dst,
                          ngx_http_markdown_cc_private,
                          sizeof(ngx_http_markdown_cc_private) - 1);
@@ -1309,6 +1330,25 @@ ngx_http_markdown_scan_cc_header(ngx_table_elt_t *entry,
 }
 
 
+/* Record one Cache-Control entry in the scan result. */
+static void
+ngx_http_markdown_scan_cache_control_entry(ngx_table_elt_t *elt,
+    ngx_http_markdown_cc_scan_t *scan)
+{
+    if (!ngx_http_markdown_is_cache_control_header(elt)) {
+        return;
+    }
+
+    if (scan->header_count == (size_t) -1) {
+        scan->malformed = 1;
+        return;
+    }
+
+    scan->header_count++;
+    ngx_http_markdown_scan_cc_header(elt, scan);
+}
+
+
 /*
  * Scan all Cache-Control headers and collect directive flags.
  *
@@ -1340,15 +1380,7 @@ ngx_http_markdown_scan_cache_control_headers(ngx_list_t *headers,
     for (/* void */; part != NULL; part = part->next) {
         elts = part->elts;
         for (size_t i = 0; i < part->nelts; i++) {
-            if (!ngx_http_markdown_is_cache_control_header(&elts[i])) {
-                continue;
-            }
-            if (scan->header_count == (size_t) -1) {
-                scan->malformed = 1;
-                continue;
-            }
-            scan->header_count++;
-            ngx_http_markdown_scan_cc_header(&elts[i], scan);
+            ngx_http_markdown_scan_cache_control_entry(&elts[i], scan);
         }
     }
 }

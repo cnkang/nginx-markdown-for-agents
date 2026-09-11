@@ -305,7 +305,7 @@ ngx_http_markdown_shadow_count_headers(
  */
 static ngx_int_t
 ngx_http_markdown_shadow_copy_headers(
-    const ngx_http_markdown_ctx_t *ctx, const ngx_list_t *source,
+    const ngx_http_markdown_ctx_t *ctx, ngx_list_t *source,
     ngx_list_t *shadow,
     ngx_http_markdown_conditional_side_table_t *table)
 {
@@ -313,7 +313,7 @@ ngx_http_markdown_shadow_copy_headers(
          part != NULL;
          part = part->next)
     {
-        const ngx_table_elt_t  *headers;
+        ngx_table_elt_t  *headers;
 
         headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
@@ -339,8 +339,7 @@ ngx_http_markdown_shadow_copy_headers(
                 return NGX_ERROR;
             }
             table->shadow_map[table->shadow_map_count].shadow = copy;
-            table->shadow_map[table->shadow_map_count].original =
-                (ngx_table_elt_t *) &headers[i];
+            table->shadow_map[table->shadow_map_count].original = &headers[i];
             table->shadow_map_count++;
         }
     }
@@ -490,11 +489,11 @@ ngx_http_markdown_restore_shadowed_conditional_headers(
      * lose the earlier values.  Entries appended to the shadow list after
      * capture have no map entry and are spliced back below. */
     {
-        ngx_list_t  *shadow = &r->headers_in.headers;
+        const ngx_list_t  *shadow = &r->headers_in.headers;
 
         for (ngx_uint_t i = 0; i < table->shadow_map_count; i++) {
-            ngx_table_elt_t  *shadow_elt;
-            ngx_table_elt_t  *orig;
+            const ngx_table_elt_t  *shadow_elt;
+            ngx_table_elt_t        *orig;
 
             shadow_elt = table->shadow_map[i].shadow;
             orig = table->shadow_map[i].original;
@@ -1053,6 +1052,76 @@ ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2,
     return 0;
 }
 
+/* Advance past the separators that precede a cache directive. */
+static void
+ngx_http_markdown_skip_cache_separators(const u_char **cursor,
+    const u_char *end)
+{
+    while (*cursor < end
+           && (**cursor == ' ' || **cursor == '\t' || **cursor == ','))
+    {
+        (*cursor)++;
+    }
+}
+
+
+/* Advance past a quoted string, honoring backslash escapes (RFC 9111). */
+static void
+ngx_http_markdown_skip_quoted_string(const u_char **cursor, const u_char *end)
+{
+    const u_char  *p;
+
+    p = *cursor + 1;                       /* opening quote */
+
+    while (p < end) {
+        if (*p == '\\' && p + 1 < end) {
+            p += 2;
+            continue;
+        }
+        if (*p == '"') {
+            p++;
+            break;
+        }
+        p++;
+    }
+
+    *cursor = p;
+}
+
+
+/* Advance to the next comma; commas inside a quoted string are data. */
+static void
+ngx_http_markdown_skip_to_next_comma(const u_char **cursor, const u_char *end)
+{
+    while (*cursor < end && **cursor != ',') {
+        if (**cursor == '"') {
+            ngx_http_markdown_skip_quoted_string(cursor, end);
+            continue;
+        }
+        (*cursor)++;
+    }
+}
+
+
+/* True when the value at ``p`` is the directive and ends at a boundary. */
+static ngx_flag_t
+ngx_http_markdown_cache_directive_matches(const u_char *p, const u_char *end,
+    const u_char *directive, size_t directive_len)
+{
+    const u_char  *after;
+
+    if ((size_t) (end - p) < directive_len
+        || ngx_http_markdown_strncasecmp_const(p, directive, directive_len) != 0)
+    {
+        return 0;
+    }
+
+    after = p + directive_len;
+
+    return after == end || *after == ',' || *after == ' ' || *after == '\t';
+}
+
+
 static ngx_flag_t
 ngx_http_markdown_header_has_cache_directive(const ngx_table_elt_t *header,
     const u_char *directive, size_t directive_len)
@@ -1070,45 +1139,15 @@ ngx_http_markdown_header_has_cache_directive(const ngx_table_elt_t *header,
     end = p + header->value.len;
 
     while (p < end) {
-        while (p < end && (*p == ' ' || *p == '\t' || *p == ',')) {
-            p++;
-        }
+        ngx_http_markdown_skip_cache_separators(&p, end);
 
-        if ((size_t)(end - p) >= directive_len
-            && ngx_http_markdown_strncasecmp_const(
-                   p, directive, directive_len) == 0)
+        if (ngx_http_markdown_cache_directive_matches(p, end, directive,
+                                                      directive_len))
         {
-            const u_char *after = p + directive_len;
-
-            if (after == end || *after == ',' || *after == ' '
-                || *after == '\t')
-            {
-                return 1;
-            }
+            return 1;
         }
 
-        /* Skip to the next comma, honoring quoted-string values: commas
-         * inside a quoted string are data, not directive delimiters
-         * (RFC 9111).  A quoted string may contain escaped quotes
-         * (backslash-quote), which must not terminate the string. */
-        while (p < end && *p != ',') {
-            if (*p == '"') {
-                p++;
-                while (p < end) {
-                    if (*p == '\\' && p + 1 < end) {
-                        p += 2;
-                        continue;
-                    }
-                    if (*p == '"') {
-                        p++;
-                        break;
-                    }
-                    p++;
-                }
-                continue;
-            }
-            p++;
-        }
+        ngx_http_markdown_skip_to_next_comma(&p, end);
     }
 
     return 0;

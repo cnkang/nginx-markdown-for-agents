@@ -15,6 +15,8 @@
 #include <limits.h>
 #include "ngx_http_markdown_diagnostics.h"
 
+#include "ngx_http_markdown_metrics_peak_impl.h"
+
 /* The 412 status constant is used by the conditional-result resolver.
  * Production builds get it from ngx_http.h; standalone test binaries that
  * include this implementation header without NGINX headers need a fallback. */
@@ -1225,20 +1227,9 @@ ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_uint_t peak_bytes)
         return;
     }
 
-    for (;;) {
-        ngx_atomic_uint_t  observed;
-
-        observed = ngx_http_markdown_metrics->streaming.last_peak_memory_bytes;
-        if (observed >= peak_bytes) {
-            break;
-        }
-        if (ngx_atomic_cmp_set(
-                &ngx_http_markdown_metrics->streaming.last_peak_memory_bytes,
-                observed, peak_bytes))
-        {
-            break;
-        }
-    }
+    ngx_http_markdown_metrics_update_peak(
+        &ngx_http_markdown_metrics->streaming.last_peak_memory_bytes,
+        peak_bytes);
 }
 #else
 static void
