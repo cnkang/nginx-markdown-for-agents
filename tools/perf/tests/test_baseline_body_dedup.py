@@ -38,6 +38,13 @@ VARIANT_BODIES = (
 
 SHARED_BODIES = STORED_BODIES + VARIANT_BODIES
 
+# The payload each variant mirror must resolve to.
+VARIANT_SOURCE = {
+    "gzip-streaming-first.body": "streaming-first.body",
+    "deflate-streaming-first.body": "streaming-first.body",
+    "brotli-streaming-first.body": "streaming-first.body",
+}
+
 FILE_MODE = "100644"
 LINK_MODE = "120000"
 
@@ -104,8 +111,9 @@ def test_shared_payload_copies_are_committed_as_links(name: str) -> None:
         mode, _content = _committed_entry(path)
         assert mode == LINK_MODE, f"{path} must be a link, not a copy"
         landed, _bytes = _resolve(path)
-        assert landed.rsplit("/", 1)[-1] in STORED_BODIES, (
-            f"{path} must resolve to a stored payload, not to {landed}"
+        expected_source = VARIANT_SOURCE.get(name, name)
+        assert landed == f"{BASELINES_REL}/{expected_source}", (
+            f"{path} must resolve to {expected_source}, not to {landed}"
         )
 
 
