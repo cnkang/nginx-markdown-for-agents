@@ -263,19 +263,23 @@ markdown_validate_nginx_bin() {
 
 markdown_nginx_runtime_conf_dir() {
   local nginx_bin="$1"
-  local source_root source_conf
+  local prefix source_root candidate
 
   markdown_validate_nginx_bin "${nginx_bin}" || return 1
 
+  prefix="$(markdown_nginx_prefix "${nginx_bin}")"
   source_root="$(cd "$(dirname "${nginx_bin}")/.." && pwd)"
-  source_conf="${source_root}/conf"
 
-  if [[ ! -f "${source_conf}/mime.types" ]]; then
-    return 1
-  fi
+  # The prefix the binary reports wins; a source tree that has not been
+  # installed keeps its configuration next to the build instead.
+  for candidate in "${prefix}/conf" "${source_root}/conf"; do
+    if [[ -f "${candidate}/mime.types" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
 
-  printf '%s\n' "${source_conf}"
-  return 0
+  return 1
 }
 
 markdown_can_reuse_nginx_bin() {
