@@ -25,6 +25,14 @@ import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+# The names the validators compare against repeat across the spec, workflow, and
+# packaging checks, so each one lives here once.
+DOCKERFILE_GLIBC = "Dockerfile.glibc"
+DOCKERFILE_MUSL = "Dockerfile.musl"
+MODULE_SNIPPET_NAME = "mod-markdown.conf"
+RPM_SECTION_INSTALL = "%install"
+RPM_SECTION_PREUN = "%preun"
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 NFPM_CONFIG = PROJECT_ROOT / "packaging" / "nfpm" / "nfpm.yaml"
@@ -61,8 +69,8 @@ PACKAGE_REMOVAL_GUARD_TEST = (
     PROJECT_ROOT / "packaging" / "tests" / "test-package-removal-guard.sh"
 )
 RELEASE_DOCKERFILES = [
-    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc",
-    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl",
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_GLIBC,
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_MUSL,
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.install-example",
 ]
 CANONICAL_MODULE_SO = "ngx_http_markdown_filter_module.so"
@@ -106,14 +114,14 @@ NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN = (
     r"\s+packager: deb"
 )
 RPM_REQUIRED_FIELDS = ["Name", "Version", "Requires"]
-RPM_REQUIRED_SECTIONS = ["%post", "%preun", "%changelog"]
+RPM_REQUIRED_SECTIONS = ["%post", RPM_SECTION_PREUN, "%changelog"]
 MODULE_NAME_SURFACES = [
     NFPM_CONFIG,
     RPM_SPEC,
     PROJECT_ROOT / "packaging" / "rpm" / "nginx-markdown-module.spec",
     PROJECT_ROOT / "packaging" / "snippets" / "mod-markdown-for-agents.conf",
-    PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / "mod-markdown.conf",
-    PROJECT_ROOT / "packaging" / "nfpm" / "modules" / "mod-markdown.conf",
+    PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / MODULE_SNIPPET_NAME,
+    PROJECT_ROOT / "packaging" / "nfpm" / "modules" / MODULE_SNIPPET_NAME,
     NFPM_POSTINSTALL,
     SMOKE_TEST_BASIC,
     PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-diagnostics.sh",
@@ -146,13 +154,15 @@ NFPM_RPM_ONLY_MODULES_PATTERN = (
     r"\s+packager: rpm"
 )
 DEB_MODULE_SNIPPET = (
-    PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / "mod-markdown.conf"
+    PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / MODULE_SNIPPET_NAME
 )
-RPM_MODULE_SNIPPET = PROJECT_ROOT / "packaging" / "nfpm" / "modules" / "mod-markdown.conf"
+RPM_MODULE_SNIPPET = PROJECT_ROOT / "packaging" / "nfpm" / "modules" / MODULE_SNIPPET_NAME
 
 # Snippet paths shared by the RPM spec checks.
-SNIPPET_INSTALL_SOURCE = "packaging/nfpm/modules/mod-markdown.conf"
-SNIPPET_INSTALL_DESTINATION = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+SNIPPET_INSTALL_SOURCE = f"packaging/nfpm/modules/{MODULE_SNIPPET_NAME}"
+SNIPPET_INSTALL_DESTINATION = (
+    "%{buildroot}/usr/share/nginx/modules/" + MODULE_SNIPPET_NAME
+)
 # load_module with a RELATIVE path is resolved against the NGINX prefix, not
 # against --modules-path.  Debian/Ubuntu distribution packages populate the
 # prefix-relative directory as well (which is why their snippets use the
@@ -177,8 +187,8 @@ MODULE_SNIPPET_INACTIVE_LOAD_LINE = f"#{MODULE_SNIPPET_RPM_LOAD_LINE}"
 WITH_COMPAT_BUILD_SURFACES = [
     RELEASE_PACKAGES_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
-    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc",
-    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl",
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_GLIBC,
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_MUSL,
 ]
 WITH_COMPAT_FLAG = "--with-compat"
 RELEASE_VERSION_SURFACES = [
@@ -322,7 +332,7 @@ RPM_FORCE_REMOVE_INSTRUCTION_SNIPPETS = [
     "sudo tee /etc/nginx/markdown-module-force-remove >/dev/null",
 ]
 RPM_PREUN_SNIPPETS = [
-    "%preun",
+    RPM_SECTION_PREUN,
     "if [ \"$1\" -eq 0 ]; then",
     "/bin/bash /usr/libexec/nginx-markdown-for-agents/preremove.sh remove",
     "install -m 0755 preremove.sh",
@@ -330,7 +340,7 @@ RPM_PREUN_SNIPPETS = [
 ]
 RELEASE_BUILD_GLIBC_SNIPPETS = {
     RELEASE_PACKAGES_WORKFLOW: ["container: almalinux@sha256:"],
-    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc": [
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_GLIBC: [
         "AlmaLinux 9 manifest",
         "ARG OS_BASE=almalinux@sha256:",
         "dnf install -y",
@@ -339,7 +349,7 @@ RELEASE_BUILD_GLIBC_SNIPPETS = {
         "COPY rust-toolchain.toml /src/rust-toolchain.toml",
         "rustup toolchain install",
     ],
-    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl": [
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_MUSL: [
         "install-verified-rustup.sh",
         "--libc musl",
         "--toolchain none",
@@ -895,7 +905,7 @@ def validate_nfpm_config(result: ValidationResult) -> None:
         result.fail(
             "nfpm:modules:rpm-only",
             "RPM packages must ship the module snippet at "
-            "/usr/share/nginx/modules/mod-markdown.conf with packager: rpm",
+            f"/usr/share/nginx/modules/{MODULE_SNIPPET_NAME} with packager: rpm",
         )
 
 
@@ -928,7 +938,7 @@ def validate_rpm_spec_snippet(result: ValidationResult) -> None:
     if not spec:
         result.fail("rpm:modules:snippet", f"{RPM_SPEC} not found")
     else:
-        install_body = _spec_section(spec, "%install")
+        install_body = _spec_section(spec, RPM_SECTION_INSTALL)
         files_body = _spec_section(spec, "%files")
         install_ok = _spec_installs_snippet(install_body)
         destination_ok = True
@@ -941,14 +951,14 @@ def validate_rpm_spec_snippet(result: ValidationResult) -> None:
             result.pass_(
                 "rpm:modules:install",
                 "the RPM spec %install installs the module snippet from "
-                "packaging/nfpm/modules/mod-markdown.conf into "
+                f"packaging/nfpm/modules/{MODULE_SNIPPET_NAME} into "
                 "%{buildroot}/usr/share/nginx/modules/",
             )
         else:
             result.fail(
                 "rpm:modules:install",
                 "the RPM spec %install section must install packaging/nfpm/"
-                "modules/mod-markdown.conf into "
+                f"modules/{MODULE_SNIPPET_NAME} into "
                 "%{buildroot}/usr/share/nginx/modules/",
             )
         if files_ok:
@@ -961,7 +971,7 @@ def validate_rpm_spec_snippet(result: ValidationResult) -> None:
             result.fail(
                 "rpm:modules:files",
                 "the RPM spec %files section must list "
-                "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf",
+                f"%config(noreplace) /usr/share/nginx/modules/{MODULE_SNIPPET_NAME}",
             )
 
 
@@ -1069,13 +1079,13 @@ RPM_SECTIONS = frozenset(
     {
         "%prep",
         "%build",
-        "%install",
+        RPM_SECTION_INSTALL,
         "%check",
         "%files",
         "%changelog",
         "%pre",
         "%post",
-        "%preun",
+        RPM_SECTION_PREUN,
         "%postun",
         "%pretrans",
         "%posttrans",
@@ -1281,7 +1291,7 @@ def _parse_install_operands(tokens: list[str]) -> tuple[list[str], str | None]:
         option = tokens[index]
         index += 1
         # ``--option=value`` carries its value inside the same token.
-        name, separator, inline_value = option.partition("=")
+        name, separator, _ = option.partition("=")
         if separator:
             if name == "--target-directory":
                 target_directory = True
@@ -1303,11 +1313,11 @@ _STEP_BOUNDARY_PATTERN = re.compile(r"^\s*-\s|^\s*run:")
 
 # A function definition opens a group whose body does not run until the
 # function is called, so its commands are never a live install.
-_FUNCTION_DEFINITION = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)$")
+_FUNCTION_DEFINITION = re.compile(r"^([^\W\d]\w*)\s*\(\s*\)$")
 _SEPARATOR_TOKENS = (";", "&&", "||")
 _SEPARATOR_SPLIT = re.compile(r"(&&|\|\||;)")
 # A bare command name, as opposed to a definition such as `stage()`.
-_PLAIN_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_PLAIN_NAME = re.compile(r"^[^\W\d]\w*$")
 
 # Tokens that prefix a command without being the command itself.
 _COMMAND_PREFIXES = frozenset({"(", "{", "!"})
@@ -1384,7 +1394,7 @@ def _function_definition(tokens: list[str]) -> str | None:
     if single:
         return single.group(1)
     joined = " ".join(tokens[:3])
-    spaced = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)", joined)
+    spaced = re.match(r"^([^\W\d]\w*)\s*\(\s*\)", joined)
     return spaced.group(1) if spaced else None
 
 
@@ -1441,13 +1451,13 @@ def _spec_install_sources(spec: str) -> list[str]:
     trigger backtracking and so that quoted paths, continuation lines, and
     option arguments stay unambiguous.
     """
-    body = _spec_section(spec, "%install")
+    body = _spec_section(spec, RPM_SECTION_INSTALL)
     sources: list[str] = []
     for tokens, _guarded in _shell_commands(body):
         if Path(tokens[0]).name != "install":
             continue
         for source in _parse_install_operands(tokens[1:])[0]:
-            if source.startswith("/") or source.startswith("%{buildroot}"):
+            if source.startswith(("/", "%{buildroot}")):
                 continue
             sources.append(source)
     return sources
@@ -1481,7 +1491,7 @@ def _normalize_operand(raw_token: str) -> str | None:
     such as ``.foo`` keeps its leading dot.
     """
     operand = _unquote_operand(raw_token)
-    if operand.startswith("/") or operand.startswith(".."):
+    if operand.startswith(("/", "..")):
         return None
     if "/../" in operand or operand.endswith("/.."):
         return None
@@ -2477,7 +2487,7 @@ def validate_release_rust_build_invariants(result: ValidationResult) -> None:
 
     for symbol in RETIRED_RELEASE_FFI_SYMBOLS:
         sid = f"rust-build-invariant:retired:{symbol}"
-        pattern = rf"(?<![A-Za-z0-9_]){re.escape(symbol)}(?![A-Za-z0-9_])"
+        pattern = rf"(?<!\w){re.escape(symbol)}(?!\w)"
         if re.search(pattern, content):
             result.fail(
                 sid,
