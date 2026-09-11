@@ -596,3 +596,123 @@ def test_single_quoted_prefix_with_spaces_is_unquoted(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ["/opt/nginx with space", "lib/nginx mods"]
+
+
+def _stub_nginx(tmp_path: Path, configure_line: str) -> Path:
+    cfg = tmp_path / "configure.txt"
+    cfg.write_text(configure_line + "\n", encoding="utf-8")
+    nginx_bin = tmp_path / "nginx"
+    nginx_bin.write_text('#!/bin/sh\ncat "%s"\n' % cfg, encoding="utf-8")
+    nginx_bin.chmod(0o755)
+    return nginx_bin
+
+
+def test_modules_directory_reached_through_a_symlink_is_searched(
+    tmp_path: Path,
+) -> None:
+    """A packaged layout may expose the modules directory through a symlink."""
+    prefix = tmp_path / "prefix"
+    (prefix / "conf").mkdir(parents=True)
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    real_modules = tmp_path / "real-modules"
+    real_modules.mkdir()
+    link = prefix / "modules-link"
+    link.symlink_to(real_modules)
+    module = real_modules / "ngx_http_markdown_filter_module.so"
+    module.write_bytes(b"module-bytes")
+    nginx_bin = _stub_nginx(
+        tmp_path,
+        f"configure arguments: --prefix={prefix} --modules-path={link}",
+    )
+    runtime_dir = tmp_path / "runtime"
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_prepare_runtime_reuse "{nginx_bin}" "{runtime_dir}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == (
+        "load_module modules/ngx_http_markdown_filter_module.so;"
+    )
+    assert (runtime_dir / "modules" / module.name).read_bytes() == b"module-bytes"
+
+
+def test_module_reached_through_a_symlink_is_loaded(tmp_path: Path) -> None:
+    """A versioned module that is linked into place is still discovered."""
+    prefix = tmp_path / "prefix"
+    modules = prefix / "modules"
+    (prefix / "conf").mkdir(parents=True)
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    modules.mkdir(parents=True)
+    versioned = modules / ".ngx_http_markdown_filter_module.so.1.0"
+    versioned.write_bytes(b"module-bytes")
+    module = modules / "ngx_http_markdown_filter_module.so"
+    module.symlink_to(versioned)
+    nginx_bin = _stub_nginx(
+        tmp_path,
+        f"configure arguments: --prefix={prefix} --modules-path=modules",
+    )
+    runtime_dir = tmp_path / "runtime"
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_prepare_runtime_reuse "{nginx_bin}" "{runtime_dir}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == (
+        "load_module modules/ngx_http_markdown_filter_module.so;"
+    )
+    assert (runtime_dir / "modules" / module.name).read_bytes() == b"module-bytes"
+
+
+def test_dangling_module_link_is_not_reported_as_found(tmp_path: Path) -> None:
+    """A link that resolves to nothing must not count as a discovered module."""
+    prefix = tmp_path / "prefix"
+    modules = prefix / "modules"
+    (prefix / "conf").mkdir(parents=True)
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    modules.mkdir(parents=True)
+    (modules / "ngx_http_markdown_filter_module.so").symlink_to(
+        tmp_path / "gone.so"
+    )
+    nginx_bin = _stub_nginx(
+        tmp_path,
+        f"configure arguments: --prefix={prefix} --modules-path=modules",
+    )
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 1, result.stdout
+    assert result.stdout.strip() == ""
