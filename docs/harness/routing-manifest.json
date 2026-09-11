@@ -44,7 +44,9 @@
       ".kiro/active-spec.txt"
     ],
     "multiple_spec_policy": "explain-current-choice",
-    "conflict_policy": "stop-and-confirm"
+    "conflict_policy": "stop-and-confirm",
+    "conflict_policy_scope": "Apply only to unresolved concrete contract conflicts after checking existing user authorization. A warning alone does not require a pause; resolve it from current evidence or pause only work dependent on missing information.",
+    "rule_revision_scope": "Explicit user requests may revise repository rules and affected consumers while preserving runtime correctness. Skills and optional specs do not expand authorized task scope."
   },
   "verification_families": {
     "harness-sync": {
