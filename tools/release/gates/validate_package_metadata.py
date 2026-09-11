@@ -1667,11 +1667,17 @@ def _roots_after_removal(tokens: list[str], roots: set[str]) -> set[str]:
         # A plain rm cannot take a directory away.
         return roots
 
-    if name not in ("rm", "rmdir"):
+    if name not in ("rm", "rmdir", "mv"):
         return roots
 
-    for operand in (token.strip('"').strip("'") for token in tokens[1:]
-                    if not token.startswith("-")):
+    operands = [token.strip('"').strip("'") for token in tokens[1:]
+                if not token.startswith("-")]
+    if name == "mv":
+        # Moving a directory away leaves the source path without it; the
+        # destination is not assumed to create anything.
+        operands = operands[:1]
+
+    for operand in operands:
         roots = _roots_removed_by_operand(operand, roots)
 
     return roots
@@ -1719,7 +1725,7 @@ def _step_stages_into_tarball(step: str, source_path: str) -> bool:
             staging_roots |= _staging_roots_in_command(tokens)
             continue
 
-        if name in ("rm", "rmdir"):
+        if name in ("rm", "rmdir", "mv"):
             staging_roots = _roots_after_removal(tokens, staging_roots)
             continue
 

@@ -1200,6 +1200,16 @@ class TestModuleSnippetEdgeCases:
         )
         assert validator._workflow_stages_into_tarball(workflow, source)
 
+    def test_moved_away_tree_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  mv "/tmp/${TARBALL_DIR}" "/tmp/gone"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
     def test_block_scalar_is_scanned_line_by_line(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         workflow = (
