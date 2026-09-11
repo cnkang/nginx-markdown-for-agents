@@ -1747,7 +1747,12 @@ def _roots_removed_by_operand(operand: str, roots: set[str]) -> set[str]:
     marker = TARBALL_MARKER_PATTERN.search(operand)
 
     if marker is not None:
-        # The command removes the tree itself or a child of it.
+        if operand[marker.end():].strip("/") != "":
+            # The command removes a child of the tree, so the tree itself
+            # survives and the roots that place it stay valid.
+            return roots
+
+        # Removing the tree itself retires the root that places it there.
         parent = _normalize_shell_path(operand[: marker.start()].rstrip("/"))
         return {root for root in roots if root not in ("", parent)}
 
