@@ -1645,6 +1645,55 @@ def _staging_roots_in_command(tokens: list[str]) -> set[str]:
     return roots
 
 
+def _removes_directories(tokens: list[str]) -> bool:
+    """Whether an ``rm`` command carries a recursive flag."""
+    return any(
+        (token.startswith("-") and "r" in token[1:].lower())
+        or token == "--recursive"
+        for token in tokens[1:]
+    )
+
+
+def _roots_after_removal(tokens: list[str], roots: set[str]) -> set[str]:
+    """The roots a live removal command leaves behind.
+
+    A removal of the tarball tree, of a parent directory, or of the tree itself
+    retires the roots it covers, so a later copy cannot be proven against a root
+    that no longer exists.  Unrelated roots are kept.
+    """
+    name = Path(tokens[0]).name
+
+    if name == "rm" and not _removes_directories(tokens):
+        # A plain rm cannot take a directory away.
+        return roots
+
+    if name not in ("rm", "rmdir"):
+        return roots
+
+    for operand in (token.strip('"').strip("'") for token in tokens[1:]
+                    if not token.startswith("-")):
+        roots = _roots_removed_by_operand(operand, roots)
+
+    return roots
+
+
+def _roots_removed_by_operand(operand: str, roots: set[str]) -> set[str]:
+    """The roots one removal operand takes away."""
+    marker = TARBALL_MARKER_PATTERN.search(operand)
+
+    if marker is not None:
+        # The command removes the tree itself or a child of it.
+        parent = operand[: marker.start()].rstrip("/")
+        return {root for root in roots if root not in ("", parent)}
+
+    path = operand.rstrip("/")
+    return {
+        root
+        for root in roots
+        if root != path and not root.startswith(path + "/")
+    }
+
+
 def _step_stages_into_tarball(step: str, source_path: str) -> bool:
     """Whether one step stages the source against a root it created first.
 
@@ -1668,6 +1717,10 @@ def _step_stages_into_tarball(step: str, source_path: str) -> bool:
 
         if name == "mkdir":
             staging_roots |= _staging_roots_in_command(tokens)
+            continue
+
+        if name in ("rm", "rmdir"):
+            staging_roots = _roots_after_removal(tokens, staging_roots)
             continue
 
         if _is_staging_command(tokens, source_path, staging_roots):
