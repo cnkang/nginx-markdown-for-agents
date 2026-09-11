@@ -1591,6 +1591,11 @@ if [[ -n "$OUTPUT_PATH" ]]; then
     "$RESOLVED_RM" -f "${PROBE_OUTPUT_DIR}"
   fi
   if [[ -d "${PROBE_OUTPUT_DIR}" ]]; then
+    # Include hidden entries so an unexpected one is refused as well; the glob
+    # option is restored so the rest of the script keeps its default behaviour.
+    PROBE_DOTGLOB_OFF=0
+    shopt -q dotglob || PROBE_DOTGLOB_OFF=1
+    shopt -s dotglob
     for probe_entry in "${PROBE_OUTPUT_DIR}"/*; do
       [[ -e "${probe_entry}" || -L "${probe_entry}" ]] || continue
       case "${probe_entry##*/}" in
@@ -1603,6 +1608,9 @@ if [[ -n "$OUTPUT_PATH" ]]; then
           ;;
       esac
     done
+    if [[ "${PROBE_DOTGLOB_OFF}" -eq 1 ]]; then
+      shopt -u dotglob
+    fi
   fi
   "$RESOLVED_MKDIR" -p "$("$SYSTEM_DIRNAME" "$OUTPUT_PATH")"
   echo "$REPORT_JSON" > "$OUTPUT_PATH"
