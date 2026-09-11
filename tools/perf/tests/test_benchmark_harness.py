@@ -1787,3 +1787,15 @@ class TestNginxConfigGeneration:
         assert 'streaming.get("precommit_failopen_total")' in validation
         assert "failopen_total / requests_total" in validation
         assert '"streaming_fallback_total": streaming.get' in validation
+
+    def test_probe_copy_replaces_retained_links_before_copying(self):
+        """A retained probe set shares payloads through links; never write through one."""
+        assert BENCHMARK_SCRIPT.exists(), "Benchmark script not found"
+        script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+
+        copy_call = script_content.index(
+            '"$RESOLVED_CP" -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"'
+        )
+        guard_at = script_content.rindex("if [[ -L ", 0, copy_call)
+        assert guard_at != -1, "the copy must be preceded by the link guard"
+        assert '"$RESOLVED_RM" -f' in script_content[guard_at:copy_call]

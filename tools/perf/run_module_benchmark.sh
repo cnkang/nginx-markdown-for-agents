@@ -1585,6 +1585,14 @@ if [[ -n "$OUTPUT_PATH" ]]; then
   echo "$REPORT_JSON" > "$OUTPUT_PATH"
   PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"
   "$RESOLVED_MKDIR" -p "$PROBE_OUTPUT_DIR"
+  # A retained probe set may share identical payloads through symlinks, and the
+  # copy would write through one of them and overwrite the stored payload
+  # instead of adding a file, so the links are removed first.
+  for probe_entry in "$PROBE_OUTPUT_DIR"/*; do
+    if [[ -L "${probe_entry}" ]]; then
+      "$RESOLVED_RM" -f "${probe_entry}"
+    fi
+  done
   "$RESOLVED_CP" -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"
   log "Report written to: $OUTPUT_PATH"
   log "Probe artifacts written to: $PROBE_OUTPUT_DIR"

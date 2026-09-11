@@ -317,8 +317,32 @@ markdown_nginx_modules_candidates() {
 
   modules_path="$("${nginx_bin}" -V 2>&1 | tr ' ' '\n' | sed -n 's/^--modules-path=//p' | tail -n1)"
   if [[ -n "${modules_path}" ]]; then
+    # A relative --modules-path is relative to the prefix, not to the caller.
+    if [[ "${modules_path}" != /* ]]; then
+      modules_path="${source_root}/${modules_path}"
+    fi
     printf '%s\n' "${modules_path}"
   fi
+}
+
+markdown_find_module_in_dir() {
+  local candidate="$1"
+  local module_path
+
+  # Prefer the module this project builds: another ngx_http_markdown*.so in the
+  # same directory must not win merely because its name sorts first.
+  module_path="$(
+    find "${candidate}" -maxdepth 1 -type f \
+      -name 'ngx_http_markdown_filter_module.so' | sort | head -n1
+  )"
+  if [[ -z "${module_path}" ]]; then
+    module_path="$(
+      find "${candidate}" -maxdepth 1 -type f -name 'ngx_http_markdown*.so' \
+        | sort | head -n1
+    )"
+  fi
+  printf '%s\n' "${module_path}"
+  return 0
 }
 
 markdown_find_dynamic_markdown_module() {
@@ -327,10 +351,7 @@ markdown_find_dynamic_markdown_module() {
 
   while IFS= read -r candidate; do
     [[ -d "${candidate}" ]] || continue
-    module_path="$(
-      find "${candidate}" -maxdepth 1 -type f -name 'ngx_http_markdown*.so' \
-        | sort | head -n1
-    )"
+    module_path="$(markdown_find_module_in_dir "${candidate}")"
     if [[ -n "${module_path}" ]]; then
       printf '%s\n' "${module_path}"
       return 0

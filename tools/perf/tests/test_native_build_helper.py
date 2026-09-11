@@ -221,3 +221,74 @@ def test_discovered_module_with_unsafe_name_is_rejected(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "unsafe module filename" in result.stderr
     assert "load_module" not in result.stdout
+
+
+def test_relative_modules_path_is_resolved_against_the_prefix(
+    tmp_path: Path,
+) -> None:
+    """A relative --modules-path is relative to the prefix, not the caller."""
+    prefix = tmp_path / "pfx"
+    (prefix / "sbin").mkdir(parents=True)
+    (prefix / "conf").mkdir()
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    nginx_bin = prefix / "sbin" / "nginx"
+    nginx_bin.write_text(
+        "#!/bin/sh\n"
+        'echo "nginx version: nginx/1.30.4"\n'
+        'echo "configure arguments: --modules-path=lib/nginx/modules"\n',
+        encoding="utf-8",
+    )
+    nginx_bin.chmod(0o755)
+    modules = prefix / "lib" / "nginx" / "modules"
+    modules.mkdir(parents=True)
+    module = modules / "ngx_http_markdown_filter_module.so"
+    module.write_bytes(b"module-bytes")
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(module)
+
+
+def test_module_name_wins_over_a_similar_name(tmp_path: Path) -> None:
+    """A differently suffixed module must not win because it sorts first."""
+    build_root = tmp_path / "nginx-1.30.4"
+    objs = build_root / "objs"
+    (build_root / "conf").mkdir(parents=True)
+    objs.mkdir(parents=True)
+    (build_root / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    nginx_bin = objs / "nginx"
+    nginx_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    nginx_bin.chmod(0o755)
+    (objs / "ngx_http_markdown-rogue.so").write_bytes(b"not-the-module")
+    module = objs / "ngx_http_markdown_filter_module.so"
+    module.write_bytes(b"module-bytes")
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(module)
