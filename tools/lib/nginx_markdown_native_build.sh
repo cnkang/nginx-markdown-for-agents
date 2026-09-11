@@ -390,13 +390,21 @@ markdown_nginx_modules_candidates() {
 markdown_find_module_in_dir() {
   local candidate="$1"
   local pattern="${2:-ngx_http_markdown*.so}"
+  local match
 
   # The trailing slash makes find follow a modules directory the layout exposes
   # through a symlink, which a packaged installation may do, and the module
   # itself may be a symlink too, so links that resolve to a file count as well.
-  find "${candidate%/}/" -maxdepth 1 \( -type f -o -type l \) -name "${pattern}" \
-    | sort | head -n1
-  return 0
+  # A link that resolves to nothing is skipped instead of ending the search, so
+  # a dangling name that sorts first cannot hide a usable module beside it.
+  while IFS= read -r match; do
+    if [[ -f "${match}" ]]; then
+      printf '%s\n' "${match}"
+      return 0
+    fi
+  done < <(find "${candidate%/}/" -maxdepth 1 \( -type f -o -type l \) -name "${pattern}" | sort)
+
+  return 1
 }
 
 markdown_find_dynamic_markdown_module() {
@@ -407,6 +415,12 @@ markdown_find_dynamic_markdown_module() {
   while IFS= read -r candidate; do
     candidates+=("${candidate}")
   done < <(markdown_nginx_modules_candidates "${nginx_bin}")
+
+  # Bash 3.2 aborts on an empty array expansion under `set -u`, so a rejected
+  # binary reports its validation failure instead of an unbound variable.
+  if [[ ${#candidates[@]} -eq 0 ]]; then
+    return 1
+  fi
 
   # The module this project builds wins wherever it lives: a differently named
   # match in an earlier directory must not shadow it.
