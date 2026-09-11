@@ -35,7 +35,7 @@ ABI or configuration stability across 0.9.1 and 0.9.2.
 - OTel ADR-0006 factual correction (the historical proposal selected OTLP
   HTTP/JSON, not protobuf). OTel tracing is not built into the 0.9.2 product.
   No request-pool or worker-owned exporter state is part of the release.
-- Dynconf is removed in 0.9.2: configuration is static, and operators
+- 0.9.2 removes dynconf: configuration is static, and operators
   restore the backed-up, versioned configuration tree atomically
   (not a single static configuration file).
 - Release-gates-check-092 target with public-surface drift, version

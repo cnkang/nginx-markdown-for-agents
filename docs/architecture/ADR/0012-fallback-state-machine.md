@@ -32,8 +32,8 @@ Implement a two-phase fallback state machine per RFC 0008 section 3:
    unavailable before commit, the module fails closed (configured error
    status 429/503/502 via the `markdown_error_policy` directive's
    `status <code>` form, or the `fail_closed` policy value) regardless of a
-   `pass` error policy, because a pass policy cannot be honored without
-   the original bytes.
+   `pass` error policy, because the module cannot honor a pass policy
+   without the original bytes.
 2. **Post-commit phase**: Markdown output has been partially delivered. On
    error, the module MUST NOT attempt to replay the original HTML. The
    module terminates the response with whatever Markdown it produced.

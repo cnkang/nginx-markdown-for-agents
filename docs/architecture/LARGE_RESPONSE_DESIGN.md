@@ -208,9 +208,9 @@ incremental = []
 The `incremental` feature is off by default. The 0.9.2 release removed the incremental exports entirely: no `markdown_incremental_*` symbols are built or exported. The legacy `markdown_convert()` ABI remains unchanged.
 
 > **Historical note**: the Rust `IncrementalConverter` interface and the
-> incremental FFI API sections below describe the REMOVED 0.8.x design and
-> are retained for historical reference only. They are not part of the
-> 0.9.2 build and must not be used as an API contract.
+> incremental FFI API sections below describe the REMOVED 0.8.x design. This
+> document keeps them for historical reference only. They are not part of the
+> 0.9.2 build, and no API contract refers to them.
 
 ### Rust Interface
 
@@ -241,9 +241,9 @@ Error --> [*]
 
 ### FFI Functions (historical)
 
-The 0.8.x incremental build exported these functions only when the
-`incremental` feature was enabled; they are REMOVED in 0.9.2 and are
-retained below for historical reference only:
+0.8.x builds exported these functions only with the `incremental` feature.
+0.9.2 REMOVES them, and this document keeps them below for historical
+reference only:
 
 | FFI Function | Purpose |
 |-------------|---------|
