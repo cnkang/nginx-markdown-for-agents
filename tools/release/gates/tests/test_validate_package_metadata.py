@@ -1160,6 +1160,46 @@ class TestModuleSnippetEdgeCases:
         )
         assert validator._workflow_stages_into_tarball(workflow, source)
 
+    def test_removed_tree_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  rm -rf "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_removed_parent_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  rm -rf "/tmp"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_unrelated_removal_keeps_the_root(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  rm -rf "/tmp/other"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_plain_rm_of_a_file_keeps_the_root(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  rm "/tmp/${TARBALL_DIR}/stale"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
     def test_block_scalar_is_scanned_line_by_line(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         workflow = (
