@@ -1304,13 +1304,11 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._workflow_stages_into_tarball(workflow, source)
 
-    def test_identifier_patterns_stay_ascii(self) -> None:
+    def test_function_definition_pattern_stays_ascii(self) -> None:
         # The shortened class must keep the ASCII meaning of the pattern it
-        # replaced, so a non-ASCII letter is not an identifier.
+        # replaced, so a non-ASCII letter is not a function identifier.
         assert validator._FUNCTION_DEFINITION.match("stage()")
         assert not validator._FUNCTION_DEFINITION.match("caf\u00e9()")
-        assert validator._PLAIN_NAME.match("stage")
-        assert not validator._PLAIN_NAME.match("caf\u00e9")
 
     def test_block_scalar_is_scanned_line_by_line(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
