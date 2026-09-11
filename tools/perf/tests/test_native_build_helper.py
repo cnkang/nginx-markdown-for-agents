@@ -716,3 +716,57 @@ def test_dangling_module_link_is_not_reported_as_found(tmp_path: Path) -> None:
 
     assert result.returncode == 1, result.stdout
     assert result.stdout.strip() == ""
+
+
+def test_dangling_link_does_not_hide_a_usable_module(tmp_path: Path) -> None:
+    """A dead link that sorts first must not end the search in its directory."""
+    prefix = tmp_path / "prefix"
+    modules = prefix / "modules"
+    (prefix / "conf").mkdir(parents=True)
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    modules.mkdir(parents=True)
+    (modules / "ngx_http_markdown-a.so").symlink_to(tmp_path / "missing.so")
+    usable = modules / "ngx_http_markdown-b.so"
+    usable.write_bytes(b"module-bytes")
+    nginx_bin = _stub_nginx(
+        tmp_path,
+        f"configure arguments: --prefix={prefix} --modules-path=modules",
+    )
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(usable)
+
+
+def test_missing_binary_reports_its_validation_failure(tmp_path: Path) -> None:
+    """A rejected binary must not abort the caller with an unbound array."""
+    missing = tmp_path / "definitely-missing-nginx"
+    command = (
+        "set -euo pipefail; "
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{missing}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 1
+    assert "not executable" in result.stderr
+    assert "unbound variable" not in result.stderr
