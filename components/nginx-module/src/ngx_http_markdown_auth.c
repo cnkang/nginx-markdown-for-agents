@@ -1394,7 +1394,7 @@ ngx_http_markdown_scan_cache_control_headers(ngx_list_t *headers,
  */
 static ngx_int_t
 ngx_http_markdown_prepare_entry_value(ngx_http_request_t *r,
-    ngx_table_elt_t *elt, ngx_str_t *value)
+    const ngx_table_elt_t *elt, ngx_str_t *value)
 {
     if (ngx_http_markdown_cache_control_has_directive(
             &elt->value, &ngx_http_markdown_public_directive))
