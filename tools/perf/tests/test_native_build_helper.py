@@ -816,3 +816,40 @@ def test_configured_directory_wins_over_a_later_canonical_module(
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(expected)
+
+
+def test_empty_modules_directory_before_a_matching_one(tmp_path: Path) -> None:
+    """An existing but empty candidate directory must not abort the caller."""
+    prefix = tmp_path / "prefix"
+    (prefix / "conf").mkdir(parents=True)
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    (prefix / "modules").mkdir()
+    objs = tmp_path / "objs"
+    objs.mkdir()
+    module = objs / "ngx_http_markdown_filter_module.so"
+    module.write_bytes(b"module-bytes")
+    nginx_bin = objs / "nginx"
+    nginx_bin.write_text(
+        "#!/bin/sh\n"
+        f'echo "configure arguments: --prefix={prefix}"\n',
+        encoding="utf-8",
+    )
+    nginx_bin.chmod(0o755)
+
+    command = (
+        "set -euo pipefail; "
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(module)
