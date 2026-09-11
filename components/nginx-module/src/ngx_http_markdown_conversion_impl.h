@@ -1219,14 +1219,14 @@ ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
  */
 #ifdef MARKDOWN_STREAMING_ENABLED
 static void
-ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_t peak_bytes)
+ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_uint_t peak_bytes)
 {
     if (ngx_http_markdown_metrics == NULL || peak_bytes <= 0) {
         return;
     }
 
     for (;;) {
-        ngx_atomic_t  observed;
+        ngx_atomic_uint_t  observed;
 
         observed = ngx_http_markdown_metrics->streaming.last_peak_memory_bytes;
         if (observed >= peak_bytes) {
@@ -1242,7 +1242,7 @@ ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_t peak_bytes)
 }
 #else
 static void
-ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_t peak_bytes)
+ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_uint_t peak_bytes)
 {
     (void) peak_bytes;
 }
