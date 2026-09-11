@@ -433,7 +433,6 @@ typedef struct ngx_pool_s ngx_pool_t;
 typedef struct ngx_http_variable_value_s ngx_http_variable_value_t;
 typedef ngx_uint_t ngx_atomic_uint_t;
 
-typedef int ngx_atomic_t;
 
 static ngx_inline ngx_atomic_uint_t
 ngx_atomic_cmp_set(ngx_atomic_t *lock, ngx_atomic_t old,
