@@ -5,8 +5,8 @@
 > **Platform requirement:** the upgrade and rollback procedures in this
 > guide use GNU coreutils (`mv -T`, `stat -c`, `readlink -f`,
 > `sha256sum`) and are therefore Linux-only. macOS/BSD hosts must run
-> the equivalent commands with GNU coreutils installed (e.g.
-> `brew install coreutils` and a `gmv`/`gstat`/`greadlink`/`gsha256sum`
+> the equivalent commands with GNU coreutils installed (for example,
+> `brew install coreutils` with a `gmv`/`gstat`/`greadlink`/`gsha256sum`
 > prefix) or adapt the commands accordingly.
 
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
