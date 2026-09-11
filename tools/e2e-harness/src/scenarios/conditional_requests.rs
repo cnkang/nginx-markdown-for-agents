@@ -343,9 +343,7 @@ fn append_echo_headers_case(
         actual: if count_a == 1 {
             "present exactly once".to_string()
         } else {
-            format!(
-                "count={count_a} (restore collapsed or duplicated the entry?)"
-            )
+            format!("count={count_a} (restore collapsed or duplicated the entry?)")
         },
         message: None,
     });
@@ -356,9 +354,7 @@ fn append_echo_headers_case(
         actual: if count_b == 1 {
             "present exactly once".to_string()
         } else {
-            format!(
-                "count={count_b} (restore collapsed or duplicated the entry?)"
-            )
+            format!("count={count_b} (restore collapsed or duplicated the entry?)")
         },
         message: None,
     });
@@ -369,9 +365,7 @@ fn append_echo_headers_case(
         actual: if count_inm == 0 {
             "absent (suppressed as designed)".to_string()
         } else {
-            format!(
-                "count={count_inm} value_count={count_inm_value} (validator leaked upstream?)"
-            )
+            format!("count={count_inm} value_count={count_inm_value} (validator leaked upstream?)")
         },
         message: None,
     });
@@ -415,7 +409,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
      * - /force/html: header filter runs restore on the forwarded
      *   response; still exercises the shadow path on the request side.
      * Assert both A and B survive in upstream order, proving the
-     * shadow->original identity map (P1-1) keeps duplicates intact.
+     * shadow->original identity map keeps duplicates intact.
      */
     append_echo_headers_case(
         &format!("{base_url}/md/echo-headers"),
