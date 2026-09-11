@@ -1114,6 +1114,34 @@ class TestModuleSnippetEdgeCases:
         )
         assert validator._workflow_stages_into_tarball(accepted, source)
 
+    def test_staging_root_created_after_the_copy_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_staging_root_inside_a_false_branch_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            "  if false; then\n"
+            '    mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            "  fi\n"
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_tree_copied_without_creating_it_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            f'  cp {source} "${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
     def test_block_scalar_is_scanned_line_by_line(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         workflow = (

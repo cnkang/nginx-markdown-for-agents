@@ -1521,9 +1521,13 @@ def _destination_matches_source(
     # step never looks. A caller that knows the step passes its roots; a direct
     # caller only states that the tree sits under an absolute path.
     if staging_roots is None:
+        # A direct caller states the weaker shape: an absolute path or the tree
+        # itself.
         if prefix and not prefix.startswith("/"):
             return False
-    elif prefix not in ("", *sorted(staging_roots)):
+    elif prefix not in staging_roots:
+        # The workflow path requires the tree's own root, so an empty prefix
+        # only counts when a live command created the tree at the destination.
         return False
     suffix = destination[marker.end() :].strip('"').lstrip("/")
     if ".." in suffix.split("/"):
@@ -1605,26 +1609,59 @@ def _split_workflow_steps(workflow: str) -> list[str]:
     return steps
 
 
-def _declared_staging_roots(step: str) -> set[str]:
-    """Roots a step creates for the tarball tree.
+def _staging_roots_in_command(tokens: list[str]) -> set[str]:
+    """Roots one ``mkdir`` command creates for the tarball tree.
 
-    A destination proves staging only when it names one of these roots, so the
-    check follows the workflow's own commands instead of a directory name.
+    The root is the text before the marker, or the empty string when the
+    command creates the tree itself.  A guarded command never runs, so it
+    records nothing.
     """
     roots: set[str] = set()
-    for line in _logical_lines(step):
-        tokens = line.split()
-        if not tokens or Path(tokens[0]).name != "mkdir":
+
+    if not tokens or Path(tokens[0]).name != "mkdir":
+        return roots
+
+    operands = [token.strip('"').strip("'") for token in tokens[1:]
+                if not token.startswith("-")]
+
+    for operand in operands:
+        marker = TARBALL_MARKER_PATTERN.search(operand)
+        if marker is None:
             continue
-        operands = [token.strip('"').strip("'") for token in tokens[1:] if not token.startswith("-")]
-        for operand in operands:
-            marker = TARBALL_MARKER_PATTERN.search(operand)
-            if marker is None:
-                continue
-            root = operand[: marker.start()].rstrip("/")
-            if root:
-                roots.add(root)
+        roots.add(operand[: marker.start()].rstrip("/"))
+
     return roots
+
+
+def _step_stages_into_tarball(step: str, source_path: str) -> bool:
+    """Whether one step stages the source against a root it created first.
+
+    Roots exist from the command that creates them until the end of the step, so
+    a copy only proves staging against a root an earlier live command created.
+    """
+    staging_roots: set[str] = set()
+    directory_changed = False
+
+    for tokens, guarded in _shell_commands(step):
+        name = Path(tokens[0]).name
+
+        if name in ("cd", "pushd"):
+            # A guarded change may or may not run: assume it does, because a
+            # missed change would let a relative path pass as staged.
+            directory_changed = True
+            continue
+
+        if guarded or directory_changed:
+            continue
+
+        if name == "mkdir":
+            staging_roots |= _staging_roots_in_command(tokens)
+            continue
+
+        if _is_staging_command(tokens, source_path, staging_roots):
+            return True
+
+    return False
 
 
 def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
@@ -1634,20 +1671,10 @@ def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
     invalidates the relative repository paths that follow it.
     """
     source_path = source.lstrip("./")
-    for step in _split_workflow_steps(workflow):
-        staging_roots = _declared_staging_roots(step)
-        directory_changed = False
-        for tokens, guarded in _shell_commands(step):
-            if Path(tokens[0]).name in ("cd", "pushd"):
-                # A guarded change may or may not run: assume it does, because a
-                # missed change would let a relative path pass as staged.
-                directory_changed = True
-                continue
-            if guarded or directory_changed:
-                continue
-            if _is_staging_command(tokens, source_path, staging_roots):
-                return True
-    return False
+    return any(
+        _step_stages_into_tarball(step, source_path)
+        for step in _split_workflow_steps(workflow)
+    )
 
 
 def validate_rpm_spec_sources_are_staged(result: ValidationResult) -> None:
