@@ -1210,6 +1210,42 @@ class TestModuleSnippetEdgeCases:
         )
         assert not validator._workflow_stages_into_tarball(workflow, source)
 
+    def test_bundled_parents_flag_records_the_root(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -pv "${TARBALL_DIR}/sub"\n'
+            f'  cp {source} "${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_equivalent_variable_forms_compare_equal(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "${HOME}/t/${TARBALL_DIR}"\n'
+            f'  cp {source} "$HOME/t/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_install_directory_creates_the_root(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  install -d "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_move_into_the_tree_still_proves_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  mv {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
     def test_block_scalar_is_scanned_line_by_line(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         workflow = (

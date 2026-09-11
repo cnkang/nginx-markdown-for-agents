@@ -1252,6 +1252,14 @@ TARBALL_MARKER_PATTERN = re.compile(
 )
 
 
+_SIMPLE_VARIABLE_PATTERN = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _normalize_shell_path(text: str) -> str:
+    """Collapse ``$NAME`` and ``${NAME}`` so equivalent references compare equal."""
+    return _SIMPLE_VARIABLE_PATTERN.sub(r"${\1}", text)
+
+
 # install(1) options that consume the following token as their argument.
 _INSTALL_VALUE_OPTIONS = frozenset(
     {
@@ -1513,7 +1521,7 @@ def _destination_matches_source(
     marker = TARBALL_MARKER_PATTERN.search(destination)
     if not marker:
         return False
-    prefix = destination[: marker.start()].strip('"').strip()
+    prefix = _normalize_shell_path(destination[: marker.start()].strip('"').strip())
     if ".." in prefix.split("/"):
         return False
     # The tarball tree lives directly under the root the workflow creates for it,
@@ -1616,33 +1624,84 @@ def _staging_roots_in_command(tokens: list[str]) -> set[str]:
     command creates the tree itself.  A guarded command never runs, so it
     records nothing.
     """
+    if not tokens:
+        return set()
+
+    recursive = _creates_the_whole_chain(tokens)
+
+    if recursive is None:
+        return set()
+
     roots: set[str] = set()
 
-    if not tokens or Path(tokens[0]).name != "mkdir":
-        return roots
-
-    recursive = any(token in ("-p", "--parents") for token in tokens[1:])
-    operands = [token.strip('"').strip("'") for token in tokens[1:]
-                if not token.startswith("-")]
-
-    for operand in operands:
-        marker = TARBALL_MARKER_PATTERN.search(operand)
-        if marker is None:
-            continue
-
-        root = operand[: marker.start()].rstrip("/")
-        if recursive:
-            # `mkdir -p` builds the whole chain, so any prefix of the tree is
-            # created including the tree itself.
-            roots.add(root)
-            continue
-
-        if operand[marker.end():].strip("/") == "":
-            # A plain mkdir creates its last component, so the tree itself is
-            # created only when the operand ends at the marker.
+    for operand in _command_operands(tokens):
+        root = _tree_root_in(operand, recursive)
+        if root is not None:
             roots.add(root)
 
     return roots
+
+
+def _creates_the_whole_chain(tokens: list[str]) -> bool | None:
+    """Whether the command creates every directory leading to its operand.
+
+    `mkdir -p` (including bundled forms such as `-pv`) and `install -d` build the
+    whole chain; a plain `mkdir` creates only its last component.  Returns None
+    for a command that creates nothing.
+    """
+    name = Path(tokens[0]).name
+
+    if name == "mkdir":
+        return _has_parents_flag(tokens)
+
+    if name == "install":
+        return any(
+            token in ("-d", "--directory")
+            for token in tokens[1:]
+            if token.startswith("-")
+        )
+
+    return None
+
+
+def _command_operands(tokens: list[str]) -> list[str]:
+    """The unquoted operands of a command."""
+    return [
+        token.strip('"').strip("'")
+        for token in tokens[1:]
+        if not token.startswith("-")
+    ]
+
+
+def _tree_root_in(operand: str, recursive: bool) -> str | None:
+    """The tree root one operand places, or None when it places none.
+
+    A plain `mkdir` creates its last component, so the tree itself must be the
+    operand's last component for the command to vouch for it.
+    """
+    marker = TARBALL_MARKER_PATTERN.search(operand)
+
+    if marker is None:
+        return None
+
+    if not recursive and operand[marker.end():].strip("/") != "":
+        return None
+
+    return _normalize_shell_path(operand[: marker.start()].rstrip("/"))
+
+
+def _has_parents_flag(tokens: list[str]) -> bool:
+    """Whether a command carries ``mkdir``'s parent-creating flag.
+
+    The flag may be standalone, spelled out, or bundled with other short
+    options such as ``-pv``.
+    """
+    for token in tokens[1:]:
+        if token == "--parents":
+            return True
+        if token.startswith("-") and not token.startswith("--") and "p" in token[1:]:
+            return True
+    return False
 
 
 def _removes_directories(tokens: list[str]) -> bool:
@@ -1689,10 +1748,10 @@ def _roots_removed_by_operand(operand: str, roots: set[str]) -> set[str]:
 
     if marker is not None:
         # The command removes the tree itself or a child of it.
-        parent = operand[: marker.start()].rstrip("/")
+        parent = _normalize_shell_path(operand[: marker.start()].rstrip("/"))
         return {root for root in roots if root not in ("", parent)}
 
-    path = operand.rstrip("/")
+    path = _normalize_shell_path(operand.rstrip("/"))
     return {
         root
         for root in roots
@@ -1721,16 +1780,16 @@ def _step_stages_into_tarball(step: str, source_path: str) -> bool:
         if guarded or directory_changed:
             continue
 
-        if name == "mkdir":
+        if name in ("mkdir", "install"):
             staging_roots |= _staging_roots_in_command(tokens)
-            continue
-
-        if name in ("rm", "rmdir", "mv"):
-            staging_roots = _roots_after_removal(tokens, staging_roots)
             continue
 
         if _is_staging_command(tokens, source_path, staging_roots):
             return True
+
+        if name in ("rm", "rmdir", "mv"):
+            staging_roots = _roots_after_removal(tokens, staging_roots)
+            continue
 
     return False
 
