@@ -465,16 +465,21 @@ fn scenario_response(
         use axum::http::Response;
         let mut lines: Vec<String> = Vec::new();
         for (name, value) in headers.iter() {
-            lines.push(format!("{}: {}", name.as_str(), value.to_str().unwrap_or("?")));
+            lines.push(format!(
+                "{}: {}",
+                name.as_str(),
+                value.to_str().unwrap_or("?")
+            ));
         }
         let mut sorted = lines;
         sorted.sort();
         return Response::builder()
             .status(200)
             .header("Content-Type", "text/plain")
-            .body(Body::from(
-                format!("--- headers ---\n{}\n", sorted.join("\n")),
-            ))
+            .body(Body::from(format!(
+                "--- headers ---\n{}\n",
+                sorted.join("\n")
+            )))
             .unwrap();
     }
     if path == "/force/html" {

@@ -156,12 +156,14 @@ rust-fmt-check:
 	@echo "=== Rust Formatting Check ==="
 	cd $(RUST_DIR) && cargo fmt --all -- --check
 	cargo fmt --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all -- --check
+	cargo fmt --manifest-path tools/e2e-harness/Cargo.toml --all -- --check
 	@echo "  Rust Formatting Check: PASSED"
 
 rust-clippy-check:
 	@echo "=== Rust Clippy Check ==="
 	cargo clippy --manifest-path $(RUST_DIR)/Cargo.toml --all-targets --all-features -- -D warnings
 	cargo clippy --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all-targets -- -D warnings
+	cargo clippy --manifest-path tools/e2e-harness/Cargo.toml --all-targets -- -D warnings
 	@echo "  Rust Clippy Check: PASSED"
 
 test-rust: rust-fmt-check
