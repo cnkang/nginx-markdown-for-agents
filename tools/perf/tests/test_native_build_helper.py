@@ -440,3 +440,128 @@ def test_reuse_of_a_binary_outside_its_prefix(tmp_path: Path) -> None:
     )
     assert (runtime_dir / "modules" / module.name).is_file()
     assert (runtime_dir / "conf" / "mime.types").is_file()
+
+
+def test_quoted_prefix_with_spaces_is_unquoted(tmp_path: Path) -> None:
+    """A quoted configure value with spaces is reported without the quotes."""
+    nginx_bin = tmp_path / "nginx"
+    nginx_bin.write_text(
+        "#!/bin/sh\n"
+        "echo 'configure arguments: --prefix=\"/opt/nginx with space\"'\n",
+        encoding="utf-8",
+    )
+    nginx_bin.chmod(0o755)
+
+    command = f'source "{HELPER}"; markdown_nginx_prefix "{nginx_bin}"'
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "/opt/nginx with space"
+
+
+def test_prefix_value_stops_at_any_whitespace(tmp_path: Path) -> None:
+    """A value followed by a tab does not swallow the next configure flag."""
+    nginx_bin = tmp_path / "nginx"
+    nginx_bin.write_text(
+        "#!/bin/sh\n"
+        "printf 'configure arguments: --prefix=/opt/nginx\\t--modules-path=mods\\n'\n",
+        encoding="utf-8",
+    )
+    nginx_bin.chmod(0o755)
+
+    command = f'source "{HELPER}"; markdown_nginx_prefix "{nginx_bin}"'
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "/opt/nginx"
+
+
+def test_canonical_module_wins_across_directories(tmp_path: Path) -> None:
+    """The built module wins even when a longer name sits in an earlier directory."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    prefix = tmp_path / "prefix"
+    (prefix / "conf").mkdir(parents=True)
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    nginx_bin = bin_dir / "nginx"
+    nginx_bin.write_text(
+        "#!/bin/sh\n"
+        f'echo "configure arguments: --prefix={prefix} --modules-path=lib/nginx/modules"\n',
+        encoding="utf-8",
+    )
+    nginx_bin.chmod(0o755)
+    (bin_dir / "ngx_http_markdown-rogue.so").write_bytes(b"not-the-module")
+    modules = prefix / "lib" / "nginx" / "modules"
+    modules.mkdir(parents=True)
+    module = modules / "ngx_http_markdown_filter_module.so"
+    module.write_bytes(b"module-bytes")
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(module)
+
+
+def test_configured_modules_directory_beats_the_binary_directory(
+    tmp_path: Path,
+) -> None:
+    """An explicitly configured modules directory wins over a nearby copy."""
+    bin_dir = tmp_path / "sbin"
+    bin_dir.mkdir()
+    prefix = tmp_path / "prefix"
+    (prefix / "conf").mkdir(parents=True)
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    configured = prefix / "lib" / "nginx" / "modules"
+    configured.mkdir(parents=True)
+    expected = configured / "ngx_http_markdown_filter_module.so"
+    expected.write_bytes(b"configured-module")
+    stale = bin_dir / "ngx_http_markdown_filter_module.so"
+    stale.write_bytes(b"stale-module")
+    nginx_bin = bin_dir / "nginx"
+    nginx_bin.write_text(
+        "#!/bin/sh\n"
+        f'echo "configure arguments: --prefix={prefix} --modules-path=lib/nginx/modules"\n',
+        encoding="utf-8",
+    )
+    nginx_bin.chmod(0o755)
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(expected)
