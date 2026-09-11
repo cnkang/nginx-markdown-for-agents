@@ -694,8 +694,10 @@ def test_module_reached_through_a_symlink_is_loaded(tmp_path: Path) -> None:
     assert (runtime_dir / "modules" / module.name).read_bytes() == b"module-bytes"
 
 
-def test_dangling_module_link_is_not_reported_as_found(tmp_path: Path) -> None:
-    """A link that resolves to nothing must not count as a discovered module."""
+def test_dangling_module_link_is_skipped_for_a_resolvable_one(
+    tmp_path: Path,
+) -> None:
+    """A link that resolves to nothing is skipped, not reported as the module."""
     prefix = tmp_path / "prefix"
     modules = prefix / "modules"
     (prefix / "conf").mkdir(parents=True)
@@ -706,6 +708,10 @@ def test_dangling_module_link_is_not_reported_as_found(tmp_path: Path) -> None:
     (modules / "ngx_http_markdown_filter_module.so").symlink_to(
         tmp_path / "gone.so"
     )
+    versioned = modules / ".ngx_http_markdown_usable.so.1.0"
+    versioned.write_bytes(b"module-bytes")
+    usable = modules / "ngx_http_markdown-usable.so"
+    usable.symlink_to(versioned)
     nginx_bin = _stub_nginx(
         tmp_path,
         f"configure arguments: --prefix={prefix} --modules-path=modules",
@@ -723,8 +729,8 @@ def test_dangling_module_link_is_not_reported_as_found(tmp_path: Path) -> None:
         env=os.environ.copy(),
     )
 
-    assert result.returncode == 1, result.stdout
-    assert result.stdout.strip() == ""
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(usable)
 
 
 def test_dangling_link_does_not_hide_a_usable_module(tmp_path: Path) -> None:
@@ -737,8 +743,10 @@ def test_dangling_link_does_not_hide_a_usable_module(tmp_path: Path) -> None:
     )
     modules.mkdir(parents=True)
     (modules / "ngx_http_markdown-a.so").symlink_to(tmp_path / "missing.so")
+    versioned = modules / ".ngx_http_markdown_b.so.1.0"
+    versioned.write_bytes(b"module-bytes")
     usable = modules / "ngx_http_markdown-b.so"
-    usable.write_bytes(b"module-bytes")
+    usable.symlink_to(versioned)
     nginx_bin = _stub_nginx(
         tmp_path,
         f"configure arguments: --prefix={prefix} --modules-path=modules",
