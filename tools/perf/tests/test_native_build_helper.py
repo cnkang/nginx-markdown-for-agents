@@ -488,8 +488,8 @@ def test_prefix_value_stops_at_any_whitespace(tmp_path: Path) -> None:
     assert result.stdout.strip() == "/opt/nginx"
 
 
-def test_canonical_module_wins_across_directories(tmp_path: Path) -> None:
-    """The built module wins even when a longer name sits in an earlier directory."""
+def test_configured_directory_beats_the_binary_directory(tmp_path: Path) -> None:
+    """The configured directory is searched before the directory holding the binary."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     prefix = tmp_path / "prefix"
@@ -770,3 +770,40 @@ def test_missing_binary_reports_its_validation_failure(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "not executable" in result.stderr
     assert "unbound variable" not in result.stderr
+
+
+def test_configured_directory_wins_over_a_later_canonical_module(
+    tmp_path: Path,
+) -> None:
+    """A module in the configured directory wins even without the canonical name."""
+    prefix = tmp_path / "prefix"
+    (prefix / "conf").mkdir(parents=True)
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    installed = prefix / "modules"
+    installed.mkdir(parents=True)
+    (installed / "ngx_http_markdown_filter_module.so").write_bytes(b"installed")
+    configured = tmp_path / "explicit-modules"
+    configured.mkdir()
+    expected = configured / "ngx_http_markdown-legacy.so"
+    expected.write_bytes(b"configured")
+    nginx_bin = _stub_nginx(
+        tmp_path,
+        f"configure arguments: --prefix={prefix} --modules-path={configured}",
+    )
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(expected)
