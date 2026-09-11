@@ -1256,6 +1256,54 @@ class TestModuleSnippetEdgeCases:
         )
         assert validator._workflow_stages_into_tarball(workflow, source)
 
+    def test_file_removed_after_the_copy_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+            '  rm "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/mod-markdown.conf"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_tree_removed_after_the_copy_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+            '  rm -rf "/tmp/${TARBALL_DIR}"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_single_quoted_reference_is_not_a_staging_root(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            "  mkdir -p '/tmp/${TARBALL_DIR}'\n"
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_quoted_source_operand_still_proves_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  cp "{source}" "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_glob_removal_of_the_tree_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+            '  rm -rf "/tmp/${TARBALL_DIR}/"*\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
     def test_block_scalar_is_scanned_line_by_line(self) -> None:
         source = "packaging/nfpm/modules/mod-markdown.conf"
         workflow = (

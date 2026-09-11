@@ -1567,18 +1567,18 @@ def _names_expected_source(operands: list[str], source_path: str) -> bool:
     return False
 
 
-def _is_staging_command(
+def _staged_destination(
     tokens: list[str], source_path: str, staging_roots: set[str] | None = None
-) -> bool:
-    """True when one command copies ``source_path`` into the tarball tree.
+) -> str | None:
+    """The staged path one command writes, or None when it stages nothing.
 
     The file must appear as an operand before the operand that references the
     staging tree, that reference must be a real expansion, and the staged path
     must be the one the spec installs.
     """
     if not tokens or Path(tokens[0]).name not in _STAGING_COMMANDS:
-        return False
-    operands = [token for token in tokens[1:] if not token.startswith("-")]
+        return None
+    operands = _command_operands(tokens)
     staged_indexes = [
         index
         for index, raw in enumerate(operands)
@@ -1586,8 +1586,68 @@ def _is_staging_command(
         and _destination_matches_source(_unquote_operand(raw), source_path, staging_roots)
     ]
     if not staged_indexes:
+        return None
+    if not _names_expected_source(operands[: staged_indexes[0]], source_path):
+        return None
+
+    staged = _unquote_operand(operands[staged_indexes[0]]).rstrip("/")
+
+    if Path(staged).name != Path(source_path).name:
+        # The command copies into a directory, so the staged file is the source
+        # under that directory.
+        staged = f"{staged}/{Path(source_path).name}"
+
+    return _normalize_shell_path(staged)
+
+
+def _is_staging_command(
+    tokens: list[str], source_path: str, staging_roots: set[str] | None = None
+) -> bool:
+    """True when one command copies ``source_path`` into the tarball tree."""
+    return _staged_destination(tokens, source_path, staging_roots) is not None
+
+
+def _removal_takes_staged(operand: str, staged_path: str) -> bool:
+    """Whether a removal operand takes the staged file away."""
+    target = _normalize_shell_path(staged_path).rstrip("/")
+    # The shell drops `"` anywhere in a word, so a quoted prefix glued to a glob
+    # (`"/tmp/${TARBALL_DIR}/"*`) is one path ending in `*`.
+    removed = _normalize_shell_path(operand).replace('"', "").rstrip("/")
+
+    if removed.endswith("/*"):
+        # A glob removal that clears a directory takes everything inside it.
+        removed = removed[:-2].rstrip("/")
+
+    if target == removed or target.startswith(removed + "/"):
+        return True
+
+    marker = TARBALL_MARKER_PATTERN.search(removed)
+
+    if marker is None or removed[marker.end():].strip("/") != "":
+        # A removal inside the tree, or of something unrelated, takes only what
+        # the operand names.
         return False
-    return _names_expected_source(operands[: staged_indexes[0]], source_path)
+
+    # The whole tree goes, so anything staged inside it goes too.
+    tree_prefix = removed[: marker.start()].rstrip("/")
+    return not tree_prefix or target.startswith(tree_prefix + "/")
+
+
+def _apply_removal(
+    tokens: list[str], roots: set[str], staged: str | None, first_only: bool = False
+) -> tuple[set[str], str | None]:
+    """Retire the roots and the staged path one removal command takes away."""
+    operands = _expanding_operands(tokens)
+
+    if first_only:
+        operands = operands[:1]
+
+    for operand in operands:
+        roots = _roots_removed_by_operand(operand, roots)
+        if staged is not None and _removal_takes_staged(operand, staged):
+            staged = None
+
+    return roots, staged
 
 
 _FOLDED_RUN = re.compile(r"^(\s*)run:\s*>\s*$")
@@ -1634,7 +1694,7 @@ def _staging_roots_in_command(tokens: list[str]) -> set[str]:
 
     roots: set[str] = set()
 
-    for operand in _command_operands(tokens):
+    for operand in _expanding_operands(tokens):
         root = _tree_root_in(operand, recursive)
         if root is not None:
             roots.add(root)
@@ -1665,11 +1725,20 @@ def _creates_the_whole_chain(tokens: list[str]) -> bool | None:
 
 
 def _command_operands(tokens: list[str]) -> list[str]:
-    """The unquoted operands of a command."""
+    """The operands of a command, with their quoting preserved.
+
+    Quoting is preserved so a caller can tell a real expansion from a literal
+    reference the shell would pass through unchanged.
+    """
+    return [token for token in tokens[1:] if not token.startswith("-")]
+
+
+def _expanding_operands(tokens: list[str]) -> list[str]:
+    """The operands whose shell references really expand."""
     return [
-        token.strip('"').strip("'")
-        for token in tokens[1:]
-        if not token.startswith("-")
+        _unquote_operand(raw)
+        for raw in _command_operands(tokens)
+        if not _is_literal_operand(raw)
     ]
 
 
@@ -1729,8 +1798,7 @@ def _roots_after_removal(tokens: list[str], roots: set[str]) -> set[str]:
     if name not in ("rm", "rmdir", "mv"):
         return roots
 
-    operands = [token.strip('"').strip("'") for token in tokens[1:]
-                if not token.startswith("-")]
+    operands = _expanding_operands(tokens)
     if name == "mv":
         # Moving a directory away leaves the source path without it; the
         # destination is not assumed to create anything.
@@ -1771,6 +1839,7 @@ def _step_stages_into_tarball(step: str, source_path: str) -> bool:
     a copy only proves staging against a root an earlier live command created.
     """
     staging_roots: set[str] = set()
+    staged: str | None = None
     directory_changed = False
 
     for tokens, guarded in _shell_commands(step):
@@ -1789,14 +1858,18 @@ def _step_stages_into_tarball(step: str, source_path: str) -> bool:
             staging_roots |= _staging_roots_in_command(tokens)
             continue
 
-        if _is_staging_command(tokens, source_path, staging_roots):
-            return True
+        destination = _staged_destination(tokens, source_path, staging_roots)
+
+        if destination is not None:
+            staged = destination
 
         if name in ("rm", "rmdir", "mv"):
-            staging_roots = _roots_after_removal(tokens, staging_roots)
-            continue
+            staging_roots, staged = _apply_removal(
+                tokens, staging_roots, staged, first_only=(name == "mv")
+            )
 
-    return False
+    # The staged file counts only if it is still there when the step ends.
+    return staged is not None
 
 
 def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
