@@ -304,13 +304,39 @@ markdown_copy_runtime_conf_from_nginx_bin() {
   return 0
 }
 
+markdown_nginx_configure_value() {
+  local nginx_bin="$1"
+  local flag="--$2="
+
+  # `nginx -V` prints the configure line, where a value may be double quoted
+  # because the path contains spaces, and may end in any whitespace.
+  "${nginx_bin}" -V 2>&1 | awk -v flag="${flag}" '
+    { line = line $0 " " }
+    END {
+      rest = line
+      while (match(rest, /--[A-Za-z0-9_-]+=("[^"]*"|[^"[:space:]]*)/)) {
+        token = substr(rest, RSTART, RLENGTH)
+        rest = substr(rest, RSTART + RLENGTH)
+        if (index(token, flag) == 1) {
+          value = substr(token, length(flag) + 1)
+          gsub(/^"|"$/, "", value)
+          gsub(/[[:space:]]+$/, "", value)
+          print value
+          exit
+        }
+      }
+    }
+  '
+  return 0
+}
+
 markdown_nginx_prefix() {
   local nginx_bin="$1"
   local reported
 
   # A binary may live outside the prefix it was configured with, so the
   # reported prefix wins over the directory layout.
-  reported="$("${nginx_bin}" -V 2>&1 | tr ' ' '\n' | sed -n 's/^--prefix=//p' | tail -n1)"
+  reported="$(markdown_nginx_configure_value "${nginx_bin}" prefix)"
   if [[ -n "${reported}" ]]; then
     printf '%s\n' "${reported}"
     return 0
@@ -328,15 +354,9 @@ markdown_nginx_modules_candidates() {
 
   prefix="$(markdown_nginx_prefix "${nginx_bin}")"
 
-  # Installed layout: modules live under the prefix the binary reports.
-  printf '%s\n' "${prefix}/modules"
-
-  # A source tree that was compiled but never installed keeps its dynamic
-  # modules beside the binary in objs/, which is the layout `make modules`
-  # produces and the one the reuse workflow points NGINX_BIN at.
-  printf '%s\n' "$(cd "$(dirname "${nginx_bin}")" && pwd)"
-
-  modules_path="$("${nginx_bin}" -V 2>&1 | tr ' ' '\n' | sed -n 's/^--modules-path=//p' | tail -n1)"
+  # An explicitly configured modules directory describes this installation
+  # better than any directory inferred from the layout, so it is searched first.
+  modules_path="$(markdown_nginx_configure_value "${nginx_bin}" modules-path)"
   if [[ -n "${modules_path}" ]]; then
     # A relative --modules-path is relative to the prefix, not to the caller.
     if [[ "${modules_path}" != /* ]]; then
@@ -345,41 +365,55 @@ markdown_nginx_modules_candidates() {
     printf '%s\n' "${modules_path}"
   fi
 
+  # Installed layout: modules live under the prefix the binary reports.
+  printf '%s\n' "${prefix}/modules"
+
+  # A source tree that was compiled but never installed keeps its dynamic
+  # modules beside the binary in objs/, which is the layout `make modules`
+  # produces and the one the reuse workflow points NGINX_BIN at.
+  printf '%s\n' "$(cd "$(dirname "${nginx_bin}")" && pwd)"
+
   return 0
 }
 
 markdown_find_module_in_dir() {
   local candidate="$1"
-  local module_path
+  local pattern="${2:-ngx_http_markdown*.so}"
 
-  # Prefer the module this project builds: another ngx_http_markdown*.so in the
-  # same directory must not win merely because its name sorts first.
-  module_path="$(
-    find "${candidate}" -maxdepth 1 -type f \
-      -name 'ngx_http_markdown_filter_module.so' | sort | head -n1
-  )"
-  if [[ -z "${module_path}" ]]; then
-    module_path="$(
-      find "${candidate}" -maxdepth 1 -type f -name 'ngx_http_markdown*.so' \
-        | sort | head -n1
-    )"
-  fi
-  printf '%s\n' "${module_path}"
+  find "${candidate}" -maxdepth 1 -type f -name "${pattern}" | sort | head -n1
   return 0
 }
 
 markdown_find_dynamic_markdown_module() {
   local nginx_bin="$1"
   local candidate module_path
+  local -a candidates=()
 
   while IFS= read -r candidate; do
+    candidates+=("${candidate}")
+  done < <(markdown_nginx_modules_candidates "${nginx_bin}")
+
+  # The module this project builds wins wherever it lives: a differently named
+  # match in an earlier directory must not shadow it.
+  for candidate in "${candidates[@]}"; do
+    [[ -d "${candidate}" ]] || continue
+    module_path="$(
+      markdown_find_module_in_dir "${candidate}" 'ngx_http_markdown_filter_module.so'
+    )"
+    if [[ -n "${module_path}" ]]; then
+      printf '%s\n' "${module_path}"
+      return 0
+    fi
+  done
+
+  for candidate in "${candidates[@]}"; do
     [[ -d "${candidate}" ]] || continue
     module_path="$(markdown_find_module_in_dir "${candidate}")"
     if [[ -n "${module_path}" ]]; then
       printf '%s\n' "${module_path}"
       return 0
     fi
-  done < <(markdown_nginx_modules_candidates "${nginx_bin}")
+  done
 
   return 1
 }
