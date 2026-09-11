@@ -292,3 +292,41 @@ def test_module_name_wins_over_a_similar_name(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(module)
+
+
+def test_modules_path_is_relative_to_the_reported_prefix(tmp_path: Path) -> None:
+    """A binary outside its prefix still finds a prefix-relative modules path."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    prefix = tmp_path / "prefix"
+    (prefix / "conf").mkdir(parents=True)
+    (prefix / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    nginx_bin = bin_dir / "nginx"
+    nginx_bin.write_text(
+        "#!/bin/sh\n"
+        'echo "configure arguments: '
+        f'--prefix={prefix} --modules-path=lib/nginx/modules"\n',
+        encoding="utf-8",
+    )
+    nginx_bin.chmod(0o755)
+    modules = prefix / "lib" / "nginx" / "modules"
+    modules.mkdir(parents=True)
+    module = modules / "ngx_http_markdown_filter_module.so"
+    module.write_bytes(b"module-bytes")
+
+    command = (
+        f'source "{HELPER}"; '
+        f'markdown_find_dynamic_markdown_module "{nginx_bin}"'
+    )
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(module)
