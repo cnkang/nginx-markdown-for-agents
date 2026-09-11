@@ -1386,6 +1386,48 @@ ngx_http_markdown_scan_cache_control_headers(ngx_list_t *headers,
 }
 
 /*
+ * Prepare the replacement value for one Cache-Control entry.
+ *
+ * Returns NGX_DECLINED when the entry already satisfies whole-response privacy
+ * and needs no rewrite, NGX_ERROR when preparation fails, or NGX_OK with the
+ * replacement value written to ``value``.
+ */
+static ngx_int_t
+ngx_http_markdown_prepare_entry_value(ngx_http_request_t *r,
+    ngx_table_elt_t *elt, ngx_str_t *value)
+{
+    if (ngx_http_markdown_cache_control_has_directive(
+            &elt->value, &ngx_http_markdown_public_directive))
+    {
+        return ngx_http_markdown_prepare_strip_public_value(r, &elt->value,
+                                                            value);
+    }
+
+    if (ngx_http_markdown_cache_control_has_qualified_directive(
+            &elt->value, &ngx_http_markdown_private_directive))
+    {
+        /* Field-qualified private (private="Set-Cookie") does NOT satisfy
+         * whole-response privacy: strip the qualified form (the strip helper
+         * skips qualified private tokens and appends the bare directive unless
+         * a bare private is already present).  Checked BEFORE the bare-private
+         * test so an entry carrying BOTH forms is still rewritten. */
+        return ngx_http_markdown_prepare_strip_public_value(r, &elt->value,
+                                                            value);
+    }
+
+    if (ngx_http_markdown_cache_control_has_directive(
+            &elt->value, &ngx_http_markdown_private_directive))
+    {
+        /* Bare private already satisfies whole-response privacy. */
+        return NGX_DECLINED;
+    }
+
+    return ngx_http_markdown_prepare_append_private_value(r, &elt->value,
+                                                          value);
+}
+
+
+/*
  * Prepare all Cache-Control rewrites before committing any header mutation.
  *
  * A request may contain more than one Cache-Control field.  Pool allocation
@@ -1438,35 +1480,11 @@ ngx_http_markdown_rewrite_public_entries(ngx_http_request_t *r,
                 return NGX_ERROR;
             }
 
-            if (ngx_http_markdown_cache_control_has_directive(
-                    &elts[i].value, &ngx_http_markdown_public_directive))
-            {
-                rc = ngx_http_markdown_prepare_strip_public_value(
-                    r, &elts[i].value, &updates[update_count].value);
-            } else if (ngx_http_markdown_cache_control_has_qualified_directive(
-                           &elts[i].value,
-                           &ngx_http_markdown_private_directive))
-            {
-                /* Field-qualified private (private="Set-Cookie") does NOT
-                 * satisfy whole-response privacy: strip the qualified
-                 * form (the strip helper skips qualified private tokens
-                 * and appends the bare directive unless a bare private
-                 * is already present).  Checked BEFORE the bare-private
-                 * test so an entry carrying BOTH forms is still
-                 * rewritten. */
-                rc = ngx_http_markdown_prepare_strip_public_value(
-                    r, &elts[i].value, &updates[update_count].value);
-            } else if (ngx_http_markdown_cache_control_has_directive(
-                           &elts[i].value,
-                           &ngx_http_markdown_private_directive))
-            {
-                /* Bare private already satisfies whole-response privacy. */
+            rc = ngx_http_markdown_prepare_entry_value(r, &elts[i],
+                                                       &updates[update_count].value);
+            if (rc == NGX_DECLINED) {
                 continue;
-            } else {
-                rc = ngx_http_markdown_prepare_append_private_value(
-                    r, &elts[i].value, &updates[update_count].value);
             }
-
             if (rc != NGX_OK) {
                 return rc;
             }
