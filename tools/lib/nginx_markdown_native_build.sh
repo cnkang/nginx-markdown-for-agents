@@ -391,7 +391,11 @@ markdown_find_module_in_dir() {
   local candidate="$1"
   local pattern="${2:-ngx_http_markdown*.so}"
 
-  find "${candidate}" -maxdepth 1 -type f -name "${pattern}" | sort | head -n1
+  # The trailing slash makes find follow a modules directory the layout exposes
+  # through a symlink, which a packaged installation may do, and the module
+  # itself may be a symlink too, so links that resolve to a file count as well.
+  find "${candidate%/}/" -maxdepth 1 \( -type f -o -type l \) -name "${pattern}" \
+    | sort | head -n1
   return 0
 }
 
@@ -411,7 +415,7 @@ markdown_find_dynamic_markdown_module() {
     module_path="$(
       markdown_find_module_in_dir "${candidate}" 'ngx_http_markdown_filter_module.so'
     )"
-    if [[ -n "${module_path}" ]]; then
+    if [[ -f "${module_path}" ]]; then
       printf '%s\n' "${module_path}"
       return 0
     fi
@@ -420,7 +424,7 @@ markdown_find_dynamic_markdown_module() {
   for candidate in "${candidates[@]}"; do
     [[ -d "${candidate}" ]] || continue
     module_path="$(markdown_find_module_in_dir "${candidate}")"
-    if [[ -n "${module_path}" ]]; then
+    if [[ -f "${module_path}" ]]; then
       printf '%s\n' "${module_path}"
       return 0
     fi
