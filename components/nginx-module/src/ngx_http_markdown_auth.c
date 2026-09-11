@@ -98,7 +98,7 @@ static ngx_int_t ngx_http_markdown_prepare_strip_public_value(
 static void ngx_http_markdown_scan_cache_control_headers(
     ngx_list_t *headers, ngx_http_markdown_cc_scan_t *scan);
 static ngx_int_t ngx_http_markdown_rewrite_public_entries(
-    ngx_http_request_t *r, ngx_list_t *headers, size_t header_count);
+    ngx_http_request_t *r, const ngx_list_t *headers, size_t header_count);
 static ngx_int_t ngx_http_markdown_replace_malformed_cache_control(
     ngx_http_request_t *r, ngx_list_t *headers,
     ngx_table_elt_t *first_entry);
@@ -1436,11 +1436,11 @@ ngx_http_markdown_prepare_entry_value(ngx_http_request_t *r,
  */
 static ngx_int_t
 ngx_http_markdown_rewrite_public_entries(ngx_http_request_t *r,
-                                         ngx_list_t *headers,
+                                         const ngx_list_t *headers,
                                          size_t header_count)
 {
     ngx_http_markdown_cc_update_t  *updates;
-    ngx_list_part_t                *part;
+    const ngx_list_part_t          *part;
     ngx_table_elt_t                *elts;
     size_t                          visited_count;
     size_t                          update_count;
