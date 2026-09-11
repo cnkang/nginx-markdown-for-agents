@@ -423,15 +423,18 @@ def test_reuse_of_a_binary_outside_its_prefix(tmp_path: Path) -> None:
     runtime_dir = tmp_path / "runtime"
 
     command = (
+        f"unset MODULE_SO; "
         f'source "{HELPER}"; '
         f'markdown_prepare_runtime_reuse "{nginx_bin}" "{runtime_dir}"'
     )
+    env = os.environ.copy()
+    env.pop("MODULE_SO", None)
     result = subprocess.run(
         ["bash", "-c", command],
         check=False,
         capture_output=True,
         text=True,
-        env=os.environ.copy(),
+        env=env,
     )
 
     assert result.returncode == 0, result.stderr
@@ -629,15 +632,18 @@ def test_modules_directory_reached_through_a_symlink_is_searched(
     runtime_dir = tmp_path / "runtime"
 
     command = (
+        f"unset MODULE_SO; "
         f'source "{HELPER}"; '
         f'markdown_prepare_runtime_reuse "{nginx_bin}" "{runtime_dir}"'
     )
+    env = os.environ.copy()
+    env.pop("MODULE_SO", None)
     result = subprocess.run(
         ["bash", "-c", command],
         check=False,
         capture_output=True,
         text=True,
-        env=os.environ.copy(),
+        env=env,
     )
 
     assert result.returncode == 0, result.stderr
@@ -667,15 +673,18 @@ def test_module_reached_through_a_symlink_is_loaded(tmp_path: Path) -> None:
     runtime_dir = tmp_path / "runtime"
 
     command = (
+        f"unset MODULE_SO; "
         f'source "{HELPER}"; '
         f'markdown_prepare_runtime_reuse "{nginx_bin}" "{runtime_dir}"'
     )
+    env = os.environ.copy()
+    env.pop("MODULE_SO", None)
     result = subprocess.run(
         ["bash", "-c", command],
         check=False,
         capture_output=True,
         text=True,
-        env=os.environ.copy(),
+        env=env,
     )
 
     assert result.returncode == 0, result.stderr
