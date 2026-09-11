@@ -1812,3 +1812,56 @@ class TestNginxConfigGeneration:
         assert "refusing to replace" in guard_block, (
             "an unexpected entry must stop the run instead of being deleted"
         )
+
+
+class TestProbeStagingBehaviour:
+    """Run the staging block itself; source assertions cannot catch behaviour."""
+
+    @staticmethod
+    def _block() -> str:
+        text = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+        start = text.index("# Output report")
+        end = text.index("\nfi\n", start) + len("\nfi\n")
+        return text[start:end]
+
+    @staticmethod
+    def _run(tmp_path, hidden_name):
+        probes = tmp_path / "probes"
+        probes.mkdir()
+        (probes / "plain-small.body").write_bytes(b"fresh")
+        (probes / "plain-small.json").write_text("{}", encoding="utf-8")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        dest = out_dir / "module-baseline-probes"
+        dest.mkdir()
+        (dest / hidden_name).write_bytes(b"stale")
+        env = dict(os.environ)
+        env.update(
+            OUTPUT_PATH=str(out_dir / "module-baseline.json"),
+            PROBE_DIR=str(probes),
+            RESOLVED_MKDIR="mkdir",
+            RESOLVED_RM="rm",
+            RESOLVED_CP="cp",
+            SYSTEM_DIRNAME="dirname",
+        )
+        script = f'log() {{ :; }}\n{TestProbeStagingBehaviour._block()}'
+        result = subprocess.run(
+            ["bash", "-c", script], env=env, check=False, capture_output=True, text=True
+        )
+        return result, dest, out_dir
+
+    def test_hidden_unexpected_entry_is_refused(self, tmp_path):
+        result, dest, out_dir = self._run(tmp_path, ".DS_Store")
+        assert result.returncode == 1, result.stdout
+        assert "refusing to replace" in result.stderr
+        assert (dest / ".DS_Store").exists(), "the refused entry must survive"
+        assert not (out_dir / "module-baseline.json").exists(), (
+            "the report must not be written when staging refuses"
+        )
+
+    def test_hidden_artifact_entry_is_replaced(self, tmp_path):
+        result, dest, out_dir = self._run(tmp_path, ".stale.body")
+        assert result.returncode == 0, result.stderr
+        assert not (dest / ".stale.body").exists(), "a stale artifact must go"
+        assert (dest / "plain-small.body").read_bytes() == b"fresh"
+        assert (out_dir / "module-baseline.json").exists()
