@@ -1621,6 +1621,7 @@ def _staging_roots_in_command(tokens: list[str]) -> set[str]:
     if not tokens or Path(tokens[0]).name != "mkdir":
         return roots
 
+    recursive = any(token in ("-p", "--parents") for token in tokens[1:])
     operands = [token.strip('"').strip("'") for token in tokens[1:]
                 if not token.startswith("-")]
 
@@ -1628,7 +1629,18 @@ def _staging_roots_in_command(tokens: list[str]) -> set[str]:
         marker = TARBALL_MARKER_PATTERN.search(operand)
         if marker is None:
             continue
-        roots.add(operand[: marker.start()].rstrip("/"))
+
+        root = operand[: marker.start()].rstrip("/")
+        if recursive:
+            # `mkdir -p` builds the whole chain, so any prefix of the tree is
+            # created including the tree itself.
+            roots.add(root)
+            continue
+
+        if operand[marker.end():].strip("/") == "":
+            # A plain mkdir creates its last component, so the tree itself is
+            # created only when the operand ends at the marker.
+            roots.add(root)
 
     return roots
 
