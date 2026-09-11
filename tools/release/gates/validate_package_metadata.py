@@ -1252,7 +1252,7 @@ TARBALL_MARKER_PATTERN = re.compile(
 )
 
 
-_SIMPLE_VARIABLE_PATTERN = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
+_SIMPLE_VARIABLE_PATTERN = re.compile(r"\$([^\W\d]\w*)", re.ASCII)
 
 
 def _normalize_shell_path(text: str) -> str:
