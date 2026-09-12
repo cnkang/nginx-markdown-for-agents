@@ -134,6 +134,18 @@ def test_valid_matrix_passes(fake_matrix_root: Path) -> None:
     assert validator.main() == 0
 
 
+def test_supported_row_must_be_release_blocking(fake_matrix_root: Path) -> None:
+    """A supported row that does not block a release must fail closed."""
+    source = source_matrix()
+    source["entries"][0]["release_blocking"] = False
+    (fake_matrix_root / "tools/release-matrix.json").write_text(
+        json.dumps(source), encoding="utf-8"
+    )
+    write_matrix(fake_matrix_root, projection.build_projection(source))
+    with pytest.raises(SystemExit, match="supported row must be release-blocking"):
+        validator.main()
+
+
 def test_alias_usage_fails(fake_matrix_root: Path) -> None:
     """Legacy alias keys in the canonical doc must fail closed."""
     doc = {
