@@ -118,6 +118,27 @@ conditional validation, excluded content types, the streaming memory budget,
 and front matter (`markdown_front_matter on` routes to full-buffer). No size
 threshold and no internal candidate boundary takes part in path selection.
 
+### GFM constructs and the streaming path
+
+`markdown_flavor gfm` selects GitHub Flavored Markdown. Both engines emit the
+same representation for the constructs below. The streaming engine falls back to
+the full-buffer engine for the ones it cannot stream, instead of producing a
+different Markdown document.
+
+| Construct | Streaming | Full buffer |
+|-----------|-----------|-------------|
+| Tables (`<table>`) | Falls back before commit | GFM table |
+| Strikethrough (`<del>`, `<s>`, `<strike>`) | `~~text~~` | `~~text~~` |
+| Task list (`<input type="checkbox">`) | `- [x]` / `- [ ]` | `- [x]` / `- [ ]` |
+| Embedded content (`<svg>`, `<math>`, `<canvas>`) | Falls back before commit | Converted or skipped |
+
+A fallback before commit is transparent: the client receives the full-buffer
+result. After a streaming response has committed its headers, a construct that
+requires fallback raises a post-commit error as described above. Under the
+default `commonmark` flavor the two strikethrough and task-list constructs
+contribute their text without markers, and both engines agree without a
+fallback.
+
 ## Related Documentation
 
 - [Rollout Cookbook — Streaming-Focused Rollout](../guides/ROLLOUT_COOKBOOK.md#streaming-focused-rollout)

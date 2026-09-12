@@ -3389,6 +3389,64 @@ mod tests {
     }
 
     #[test]
+    fn test_gfm_strikethrough_elements() {
+        let html =
+            b"<p>Keep <del>removed</del>, <s>also removed</s>, and <strike>third</strike>.</p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::with_options(ConversionOptions {
+            flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
+            ..ConversionOptions::default()
+        });
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(result.contains("~~removed~~"), "got: {result}");
+        assert!(result.contains("~~also removed~~"), "got: {result}");
+        assert!(result.contains("~~third~~"), "got: {result}");
+    }
+
+    #[test]
+    fn test_commonmark_omits_strikethrough_markers() {
+        let html = b"<p>Keep <del>removed</del> text.</p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(result.contains("removed"), "got: {result}");
+        assert!(
+            !result.contains("~~"),
+            "CommonMark has no strikethrough, so no markers may appear: {result}"
+        );
+    }
+
+    #[test]
+    fn test_gfm_task_list_checkboxes() {
+        let html = b"<ul><li><input type=\"checkbox\" checked> done</li>\
+                     <li><input type=\"checkbox\"> todo</li></ul>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::with_options(ConversionOptions {
+            flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
+            ..ConversionOptions::default()
+        });
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(result.contains("[x] "), "checked box: {result}");
+        assert!(result.contains("[ ] "), "unchecked box: {result}");
+    }
+
+    #[test]
+    fn test_commonmark_omits_task_list_markers() {
+        let html = b"<ul><li><input type=\"checkbox\" checked> done</li></ul>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            !result.contains("[x] "),
+            "CommonMark has no task lists: {result}"
+        );
+    }
+
+    #[test]
     fn test_italic_in_heading() {
         let html = b"<h2>Title with <em>italic</em> word</h2>";
         let dom = parse_html(html).expect("Parse failed");

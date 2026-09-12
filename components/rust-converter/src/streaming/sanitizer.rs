@@ -149,6 +149,11 @@ pub struct StreamingSanitizer {
     /// preventing mismatched end tags (e.g. `</div>` inside `<noscript>`)
     /// from prematurely re-enabling content.
     skip_element: Option<String>,
+    /// Whether GitHub Flavored Markdown constructs are emitted.
+    ///
+    /// A checkbox input becomes a task-list marker only under that flavor, so
+    /// the default keeps the control's CommonMark treatment.
+    gfm: bool,
     /// Stack of element names that entered strip mode (tags removed, content kept).
     /// Using a stack instead of a simple counter ensures mismatched end tags
     /// (e.g., `<iframe>...</form>`) don't corrupt the strip state.
@@ -202,6 +207,7 @@ impl StreamingSanitizer {
             prune_depth: 0,
             prune_element: None,
             implied_closures: Vec::new(),
+            gfm: false,
         }
     }
 
@@ -245,6 +251,11 @@ impl StreamingSanitizer {
     /// Elements matching the prune config (nav, footer, aside, etc.) and
     /// their entire subtrees will be suppressed, equivalent to the
     /// full-buffer path's `should_prune_with_config()` behavior.
+    /// Install the Markdown flavor that governs GFM-only constructs.
+    pub fn set_flavor_gfm(&mut self, gfm: bool) {
+        self.gfm = gfm;
+    }
+
     pub fn with_prune_config(prune_config: PruneConfig) -> Self {
         Self {
             prune_config,
@@ -475,6 +486,16 @@ impl StreamingSanitizer {
                 .find(|(name, _)| name == "type")
                 .map(|(_, value)| value.as_str());
             let input_type = normalize_input_type(raw_input_type);
+            /* Under GFM the state machine turns a checkbox into a task-list
+             * marker, so the event passes through instead of being consumed
+             * here.  Every other control keeps the text treatment below. */
+            if self.gfm && input_type == "checkbox" {
+                return Some(SanitizeDecision::Pass(StreamEvent::StartTag {
+                    name: tag.to_string(),
+                    attrs: attrs.to_vec(),
+                    self_closing: effectively_self_closing,
+                }));
+            }
             let text = select_input_control_text(
                 &input_type,
                 attrs

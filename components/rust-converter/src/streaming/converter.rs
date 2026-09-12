@@ -233,13 +233,19 @@ impl StreamingConverter {
         } else {
             None
         };
-        let sanitizer = StreamingSanitizer::with_prune_config(options.prune_config.clone());
+        let mut sanitizer = StreamingSanitizer::with_prune_config(options.prune_config.clone());
 
         // Link and image references resolve through the same shared resolver as
         // the full-buffer engine, so one document cannot produce two different
         // URLs depending on the processing path.
         let mut emitter = IncrementalEmitter::new(&budget);
         emitter.set_url_resolution(options.base_url.as_deref(), options.resolve_relative_urls);
+        let flavor_is_gfm = matches!(
+            options.flavor,
+            crate::converter::MarkdownFlavor::GitHubFlavoredMarkdown
+        );
+        emitter.set_flavor_gfm(flavor_is_gfm);
+        sanitizer.set_flavor_gfm(flavor_is_gfm);
 
         Self {
             options,
