@@ -6,7 +6,7 @@ This document describes the architecture for handling large HTTP responses in `n
 
 Since v0.8.0, the module supports **two conversion engines**:
 
-- **Full-buffer engine** (default for small responses): buffers the complete eligible response body before conversion through FFI. This remains the simplest and most tested path.
+- **Full-buffer engine** (the default path, and the fallback for every ineligible response): buffers the complete eligible response body before conversion through FFI. This remains the simplest and most tested path.
 - **Streaming engine** (enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline. The pipeline runs charset detection, tokenization, sanitization, a state machine, and emission, with per-request memory limits and backpressure.
 
 The legacy incremental path was a stepping stone toward true streaming. The

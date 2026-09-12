@@ -243,11 +243,12 @@ full-buffer and streaming FFI entrypoints.
 
 ### Processing-Path Selection and Defaults
 `markdown_streaming` defaults to `off`. Unset and `off` select bounded
-full-buffer conversion. Explicit `auto` uses response-shape heuristics and safety/resource gates
-(not "ignoring response size"): known responses below the internal 1 MiB
-candidate boundary use bounded full-buffer conversion, ineligible cases
-fall back, and there is no operator-configured threshold (the internal
-1 MiB candidate boundary is an implementation constant, not a directive). The v0.6.x
+full-buffer conversion. Explicit `auto` prefers streaming for every response
+that clears the hard compatibility gates (HEAD, 304, full conditional
+validation, excluded content types, and the streaming budget). Ineligible
+responses fall back to bounded full-buffer conversion. The selection follows
+the policy and those gates only: no size threshold takes part in it, and no
+operator-configured or internal candidate boundary exists. The v0.6.x
 `markdown_streaming_auto_threshold` directive and the v0.9.2-removed
 `markdown_stream_threshold` directive have no replacement.
 

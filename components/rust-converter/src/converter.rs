@@ -123,10 +123,10 @@ mod traversal;
 ///
 /// The threshold is checked against the traversal output length *after*
 /// `traverse_node_with_context` completes — not against the input HTML size,
-/// which is unavailable without an additional DOM walk. 256 KB is chosen to
-/// match the order of magnitude of the fixed internal streaming threshold
-/// (1 MiB), though the two values measure different things (input HTML
-/// vs. intermediate Markdown output).
+/// which is unavailable without an additional DOM walk. 256 KB keeps the
+/// two-pass path for ordinary documents while large intermediate Markdown
+/// output avoids the second full-size allocation. It is unrelated to streaming
+/// selection, which applies no size threshold.
 const LARGE_BODY_THRESHOLD: usize = 256 * 1024; // 256 KB
 
 fn small_normalization_scratch(output: &str) -> Result<usize, ConversionError> {
