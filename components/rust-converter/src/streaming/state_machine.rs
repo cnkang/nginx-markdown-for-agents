@@ -38,6 +38,10 @@ pub enum StructuralContext {
     Bold,
     /// Italic text.
     Italic,
+    /// Strikethrough text (GitHub Flavored Markdown only).
+    Strikethrough,
+    /// Task-list marker for a checkbox input (GitHub Flavored Markdown only).
+    TaskItem(bool),
     /// Table element (triggers fallback).
     Table,
 }
@@ -267,6 +271,22 @@ impl StructuralStateMachine {
                     .unwrap_or_default();
                 StructuralContext::Link(href)
             }
+            "input" => {
+                // A checkbox becomes a GFM task-list marker.  Like <img>, the
+                // element is void, so the context is returned as an immediate
+                // action instead of being pushed onto the stack.  The emitter
+                // writes the marker only under the GFM flavor.
+                let is_checkbox = attrs
+                    .iter()
+                    .any(|(k, v)| k == "type" && v.eq_ignore_ascii_case("checkbox"));
+                if !is_checkbox {
+                    return Ok(StateMachineAction::None);
+                }
+                let checked = attrs.iter().any(|(k, _)| k == "checked");
+                return Ok(StateMachineAction::Enter(StructuralContext::TaskItem(
+                    checked,
+                )));
+            }
             "img" => {
                 let src = attrs
                     .iter()
@@ -334,6 +354,9 @@ impl StructuralStateMachine {
             }
             "strong" | "b" => StructuralContext::Bold,
             "em" | "i" => StructuralContext::Italic,
+            // Strikethrough has no CommonMark equivalent; the emitter writes the
+            // markers only when the configured flavor is GFM.
+            "del" | "s" | "strike" => StructuralContext::Strikethrough,
             "table" | "thead" | "tbody" | "tr" | "th" | "td" => {
                 return Ok(StateMachineAction::FallbackRequired("table".to_string()));
             }
@@ -350,8 +373,8 @@ impl StructuralStateMachine {
             // Structural wrappers and inline elements — pass through
             "html" | "body" | "div" | "span" | "section" | "article" | "main" | "header"
             | "footer" | "nav" | "aside" | "figure" | "figcaption" | "details" | "summary"
-            | "mark" | "time" | "abbr" | "cite" | "dfn" | "sub" | "sup" | "small" | "del"
-            | "ins" | "s" | "br" | "hr" | "wbr" => {
+            | "mark" | "time" | "abbr" | "cite" | "dfn" | "sub" | "sup" | "small" | "ins"
+            | "br" | "hr" | "wbr" => {
                 // Implicit </head>: html5ever's tokenizer (not tree builder)
                 // does not emit an EndTag("head") when <body> appears, so we
                 // must clear in_head here to stop metadata extraction from
@@ -427,7 +450,9 @@ impl StructuralStateMachine {
     fn handle_end_tag(&mut self, name: &str) -> Result<StateMachineAction, ConversionError> {
         match name {
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" | "li" | "pre" | "blockquote" | "a"
-            | "strong" | "b" | "em" | "i" | "code" => self.pop_and_update_derived_state(name),
+            | "strong" | "b" | "em" | "i" | "code" | "del" | "s" | "strike" => {
+                self.pop_and_update_derived_state(name)
+            }
             "ol" | "ul" => self.pop_and_update_derived_state(name),
             "head" => {
                 self.in_head = false;
@@ -762,6 +787,7 @@ fn context_matches_tag(ctx: &StructuralContext, tag: &str) -> bool {
             | (StructuralContext::Link(_), "a")
             | (StructuralContext::Bold, "strong" | "b")
             | (StructuralContext::Italic, "em" | "i")
+            | (StructuralContext::Strikethrough, "del" | "s" | "strike")
     )
 }
 

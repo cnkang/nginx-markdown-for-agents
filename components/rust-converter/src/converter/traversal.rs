@@ -341,6 +341,23 @@ impl MarkdownConverter {
                 .find(|a| a.name.ns.is_empty() && a.name.local.as_ref() == "type")
                 .map(|a| a.value.as_ref());
             let input_type = crate::security::normalize_input_type(raw_input_type);
+            /* GitHub Flavored Markdown represents a checkbox as a task-list
+             * marker.  The marker is emitted only for a checkbox and only in
+             * that flavor; every other control keeps its text form. */
+            if input_type == "checkbox"
+                && matches!(
+                    self.options.flavor,
+                    crate::converter::MarkdownFlavor::GitHubFlavoredMarkdown
+                )
+            {
+                let checked = attrs_borrowed
+                    .iter()
+                    .any(|a| a.name.ns.is_empty() && a.name.local.as_ref() == "checked");
+                /* The marker is Markdown structure, not text: emit it through
+                 * the same path as other structural markers so the list-item
+                 * text escaper cannot turn it into `\[x\]`. */
+                append_str_with_context(output, if checked { "[x] " } else { "[ ] " }, &mut ctx)?;
+            }
             let text = crate::security::select_input_control_text(
                 &input_type,
                 attrs_borrowed
@@ -440,6 +457,9 @@ impl MarkdownConverter {
             }
             "em" | "i" => {
                 self.handle_italic_with_context(node, output, depth, ctx.as_deref_mut())?
+            }
+            "del" | "s" | "strike" => {
+                self.handle_strikethrough_with_context(node, output, depth, ctx.as_deref_mut())?
             }
             "table" => self.handle_table_with_context(node, output, depth, ctx.as_deref_mut())?,
             "script" | "style" | "noscript" => {}

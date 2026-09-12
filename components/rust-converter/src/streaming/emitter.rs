@@ -234,6 +234,12 @@ pub struct IncrementalEmitter {
     base_url: Option<String>,
     /// Whether relative references should be resolved against `base_url`.
     resolve_relative_urls: bool,
+    /// Whether GitHub Flavored Markdown constructs are emitted.
+    ///
+    /// Only GFM defines strikethrough, so a bare emitter (and every existing
+    /// test) keeps the CommonMark representation: the element's text with no
+    /// markers.
+    gfm: bool,
 }
 
 impl IncrementalEmitter {
@@ -283,6 +289,7 @@ impl IncrementalEmitter {
             code_block_buffer: Vec::new(),
             base_url: None,
             resolve_relative_urls: false,
+            gfm: false,
         }
     }
 
@@ -294,6 +301,15 @@ impl IncrementalEmitter {
     pub fn set_url_resolution(&mut self, base_url: Option<&str>, resolve_relative_urls: bool) {
         self.base_url = base_url.map(ToOwned::to_owned);
         self.resolve_relative_urls = resolve_relative_urls;
+    }
+
+    /// Install the Markdown flavor that governs GFM-only constructs.
+    ///
+    /// The streaming converter calls this once at construction so that a
+    /// document rendered by the streaming engine matches the full-buffer
+    /// engine's flavor contract.
+    pub fn set_flavor_gfm(&mut self, gfm: bool) {
+        self.gfm = gfm;
     }
 
     /// Resolve one reference the way every other emitting path does.
@@ -650,6 +666,23 @@ impl IncrementalEmitter {
                     self.write_str("*")?;
                 }
             }
+            StructuralContext::TaskItem(checked) => {
+                // The marker is Markdown structure, so it is written directly
+                // instead of being escaped as ordinary text.  CommonMark has no
+                // task lists, so it appears only under the GFM flavor.
+                if self.gfm {
+                    self.write_str(if *checked { "[x] " } else { "[ ] " })?;
+                }
+            }
+            StructuralContext::Strikethrough => {
+                if self.gfm {
+                    if self.in_link {
+                        self.append_link_text("~~");
+                    } else {
+                        self.write_str("~~")?;
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -900,6 +933,15 @@ impl IncrementalEmitter {
                     self.append_link_text("*");
                 } else {
                     self.write_str("*")?;
+                }
+            }
+            StructuralContext::Strikethrough => {
+                if self.gfm {
+                    if self.in_link {
+                        self.append_link_text("~~");
+                    } else {
+                        self.write_str("~~")?;
+                    }
                 }
             }
             _ => {}
