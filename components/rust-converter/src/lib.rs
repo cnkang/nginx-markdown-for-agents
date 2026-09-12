@@ -53,6 +53,7 @@ pub mod negotiator;
 pub mod parser;
 pub mod security;
 pub mod token_estimator;
+pub(crate) mod url_resolve;
 
 // Streaming conversion API (feature-gated, enabled by default)
 #[cfg(feature = "streaming")]
