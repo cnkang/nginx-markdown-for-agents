@@ -771,8 +771,7 @@ impl IncrementalEmitter {
             && !safe_href.is_empty()
         {
             let resolved = self.resolve_reference(safe_href);
-            let escaped =
-                escape_markdown_destination(resolved.as_deref().unwrap_or(safe_href));
+            let escaped = escape_markdown_destination(resolved.as_deref().unwrap_or(safe_href));
             self.write_str(&format!("[{}]({})", text, escaped))?;
         } else {
             /* `link_text` is assembled from escaped ordinary text plus

@@ -18,7 +18,13 @@ pub(crate) fn resolve_reference(base: &str, reference: &str) -> Option<String> {
     let (scheme, authority, base_path, base_query) = split_absolute(base)?;
 
     if reference.is_empty() {
-        return Some(assemble(&scheme, &authority, &base_path, base_query.as_deref(), None));
+        return Some(assemble(
+            &scheme,
+            &authority,
+            &base_path,
+            base_query.as_deref(),
+            None,
+        ));
     }
 
     let (ref_scheme, ref_rest) = split_scheme(reference);
@@ -116,13 +122,21 @@ fn split_rest(rest: &str) -> (String, String, Option<String>, Option<String>) {
     };
 
     let (without_query, query) = match without_fragment.find('?') {
-        Some(pos) => (&without_fragment[..pos], Some(without_fragment[pos + 1..].to_string())),
+        Some(pos) => (
+            &without_fragment[..pos],
+            Some(without_fragment[pos + 1..].to_string()),
+        ),
         None => (without_fragment, None),
     };
 
     if let Some(body) = without_query.strip_prefix("//") {
         let end = body.find(['/', '?', '#']).unwrap_or(body.len());
-        return (body[..end].to_string(), body[end..].to_string(), query, fragment);
+        return (
+            body[..end].to_string(),
+            body[end..].to_string(),
+            query,
+            fragment,
+        );
     }
 
     (String::new(), without_query.to_string(), query, fragment)
