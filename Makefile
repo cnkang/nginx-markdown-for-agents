@@ -98,7 +98,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         verify-diagnostics-access-phase-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
-        clean help
+        clean help verify-module-version-mismatch-e2e
 
 all: build
 
@@ -1538,6 +1538,11 @@ verify-http2-alpn-e2e:
 
 verify-encoding-chain-e2e:
 	./tools/e2e/verify_encoding_chain_e2e.sh
+
+# Needs only docker: the module built for the pinned NGINX must be refused by an
+# incompatible NGINX with a module-specific version error.
+verify-module-version-mismatch-e2e:
+	./tools/e2e/verify_module_version_mismatch_e2e.sh
 
 verify-streaming-failure-cache-e2e:
 	./tools/e2e/verify_streaming_failure_cache_e2e.sh $(E2E_ARGS)
