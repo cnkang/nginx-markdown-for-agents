@@ -134,7 +134,7 @@ following is true:
 
 - `Content-Length` header is absent.
 - Upstream uses chunked transfer encoding.
-- known `Content-Length` is at or above the internal 1 MiB candidate boundary.
+- the response is eligible for streaming; no size threshold applies.
 
 Absence of `Content-Length` only makes the response a streaming candidate. It
 does not force streaming. The engine MUST still verify content type, feature

@@ -42,7 +42,12 @@ PORT="${PORT:-18088}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --image) IMAGE="$2"; shift 2 ;;
+        --image)
+            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+                echo "ERROR: --image requires a tag argument" >&2
+                exit 1
+            fi
+            IMAGE="$2"; shift 2 ;;
         --help|-h)
             sed -n '12,18p' "$0" | sed 's/^# \{0,1\}//' >&2
             exit 0
