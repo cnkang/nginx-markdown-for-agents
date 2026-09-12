@@ -134,7 +134,7 @@ This assessment rests on:
 - Automatic upstream decompression (gzip, brotli, deflate)
 - Authentication-aware caching (Cache-Control: private)
 - Variable-driven configuration support
-- Bounded streaming preferred for every response that clears the eligibility gates
+- Bounded streaming preferred under `markdown_streaming auto` for every response that clears the eligibility gates
 - Forwarded header trust control with `markdown_trusted_proxies` directive
 
 ## Test Coverage

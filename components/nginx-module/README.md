@@ -54,8 +54,9 @@ For canonical architecture and repository-layout notes, prefer [../../docs/archi
 
 The 0.9.2 release removed the `markdown_stream_threshold` directive, and no
 size threshold replaced it: the `auto` policy prefers streaming for every
-response that clears the eligibility gates, and falls back to the full-buffer
-path when a response is ineligible to stream. Since 0.9.2 the `markdown_streaming off|auto|force`
+response that clears the eligibility gates, converts a response with the
+full-buffer engine when it stays eligible for conversion but cannot stream, and
+forwards a response unchanged when it is not eligible for conversion at all. Since 0.9.2 the `markdown_streaming off|auto|force`
 directive selects the processing path, and `markdown_limits
 streaming_buffer=` controls buffering. `markdown_limits` uses the current
 keys, for example `conversion_memory=` for the full-buffer memory ceiling.

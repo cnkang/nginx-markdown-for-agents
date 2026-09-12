@@ -108,9 +108,10 @@ http {
 ```
 
 - `markdown_streaming off` selects full-buffer conversion. `auto` prefers
-  streaming for every response that clears the cache and eligibility gates and
-  falls back to full-buffer conversion only for ineligible responses. `force`
-  requests streaming after the same checks pass.
+  streaming for every response that clears the eligibility gates; a response
+  that is eligible for conversion but cannot stream is converted with the
+  full-buffer engine, and a response that is not eligible for conversion is
+  forwarded unchanged. `force` requests streaming after the same checks pass.
 - `markdown_limits` bounds conversion memory, time, decompression, streaming
   buffers, and concurrent work.
 - `markdown_accept strict` is a safe default for staged rollout. Use

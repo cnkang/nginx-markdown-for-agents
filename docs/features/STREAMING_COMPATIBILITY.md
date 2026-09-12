@@ -110,7 +110,7 @@ a response-size heuristic. The 0.9.2 default is `off` (bounded full-buffer).
 | Policy | Selection |
 |--------|-----------|
 | `markdown_streaming off` (default) | Always bounded full-buffer conversion. No response streams. |
-| `markdown_streaming auto` | Prefer streaming for every response that clears the hard gates. Ineligible responses fall back to bounded full-buffer conversion. Response size takes no part in the decision. |
+| `markdown_streaming auto` | Prefer streaming for every response that clears the hard gates. A response that stays eligible for conversion but cannot stream falls back to bounded full-buffer conversion; a response that is not eligible for conversion is forwarded unchanged. Response size takes no part in the decision. |
 | `markdown_streaming force` | Require streaming for every compatible response. A combination that can never satisfy it, such as `markdown_streaming force` with `markdown_front_matter on`, is rejected at `nginx -t` time. |
 
 The hard gates apply to every policy: HEAD requests, 304 responses, full
