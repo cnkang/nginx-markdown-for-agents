@@ -31,7 +31,7 @@ operations, architecture, and contributor-facing harness maintenance.
 **Status:** Development release line. 0.9.1 is the latest released patch.
 0.9.2 is the current development line. 0.9.2 is the final pre-1.0 breaking
 release, with the public configuration surface reduced to 20 active directives
-plus five reject-only migration entries, retired profile/conflict FFI snapshots
+and the five removed names dropped from the command table, retired profile/conflict FFI snapshots
 removed, and the bundled FFI ABI at version 3. Development version metadata is
 0.9.2. The release tag, GitHub Release, package assets, and checksums remain
 pending until the blocking gates pass.
@@ -49,7 +49,7 @@ pending until the blocking gates pass.
   `decompression_events_total`, `build_info`).
   This replaces the legacy multi-format, per-path, shadow, and debug families.
 - **Directive convergence and ABI 3**: The release freezes 20 active directives
-  and retains five removed names as reject-only migration entries. The runtime
+  and drops the five removed names from the command table. The runtime
   dynconf subsystem and custom selectors are gone, and the bundled Rust/C FFI
   ABI moves to version 3.
 - **Release-gates-check-092**: Additive on 091, adds public-surface drift

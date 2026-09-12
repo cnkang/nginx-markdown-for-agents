@@ -27,20 +27,19 @@ defaults remain in the [Configuration Guide](../guides/CONFIGURATION.md).
 |-------|--------------------------|
 | `STABLE_FOR_1_0` | Preserve name, accepted values, defaults, inheritance, and wire meaning after the 1.0 freeze. Changes must be additive or follow a later major-version process. |
 | `EXPLICITLY_EXPERIMENTAL` | Usable only with explicit opt-in. No 1.0 compatibility promise until production behavior and tests are complete. |
-| `REMOVE_BEFORE_1_0` | Must not enter the 1.0 compatibility contract. Remove, replace, or keep only as a reject-only migration diagnostic before the freeze. |
+| `REMOVE_BEFORE_1_0` | Must not enter the 1.0 compatibility contract. Remove or replace before the freeze. |
 | `INTERNAL_ONLY` | Repository-private boundary. It is not an operator API or third-party SDK contract. |
 
 ## NGINX Directive Registry
 
 The source of truth is
 `components/nginx-module/src/ngx_http_markdown_config_directives_impl.h`.
-There are 25 `markdown_*` command-table entries: 20 active parser entries and
-5 reject-only migration entries. The command table keeps each of the five
-removed directive names with an error-returning handler
-(`ngx_http_markdown_removed_directive`) that makes `nginx -t` fail with a
-migration message (LTS-R008), so the module never silently ignores a removed
-directive. Other removed directive names are not registered and fail with the
-standard unknown-directive error.
+There are 20 `markdown_*` command-table entries and every one of them is an
+active parser entry. The 0.9.2 removals took the five removed directive names
+(three dynconf directives and two custom-selector directives) out of the table
+as well, so a configuration that still uses one fails `nginx -t` with nginx's
+standard unknown-directive error and the migration table below names the
+replacement path.
 
 Context abbreviations below are `H` = `http`, `S` = `server`, and `L` =
 location. Unless a row says otherwise, active `H/S/L` values use the normal
@@ -60,7 +59,7 @@ value overrides it. `markdown_limits` inherits each key independently.
 | Trusted base-URL proxies | `markdown_trusted_proxies` | H | no trusted proxy. The process-wide CIDR list gates forwarded-header use and is configured only in `http`. | base-URL decision path, handler tests, Rust trusted-proxy tests, and the command-context contract test |
 | Streaming selector | `markdown_streaming` | H/S/L | off (bounded full-buffer). This is the sole processing-path selector: off, auto, or force. | streaming header/body filters; `streaming_config_contract_test.c`, `stream_e2e_test.c`, native chunked E2E |
 | Streaming controls | `markdown_stream_excluded_types` | H/S/L | explicit streaming exclusions; built-in event-stream exclusions remain enforced. | streaming routing and replay/flush paths |
-| Pruning | `markdown_prune_noise` | H/S/L | on. Built-in noise reduction. 0.9.2 (LTS-R009) turned the custom `markdown_prune_selectors` and `markdown_prune_protection_selectors` directives into reject-only entries. | converter pruning path and Rust regression tests |
+| Pruning | `markdown_prune_noise` | H/S/L | on. Built-in noise reduction. 0.9.2 (LTS-R009) removed the custom `markdown_prune_selectors` and `markdown_prune_protection_selectors` directives. | converter pruning path and Rust regression tests |
 | Logs and metrics | `markdown_log_verbosity` | H/S/L | info by default; metrics are Prometheus-only. | production log gating and metrics rendering |
 | Metrics endpoint | `markdown_metrics` | L | no endpoint by default. Installs the handler in the configured location. | `ngx_http_markdown_metrics_handler`; `tools/e2e/verify_metrics_endpoint_e2e.sh` and Rust E2E metrics scenario |
 | Global metrics storage | `markdown_metrics_shm_size` | H | bounded SHM allocation; global and not inherited through S/L. | SHM initialization and metrics unit/E2E tests |
@@ -79,14 +78,13 @@ implementation. There is no experimental or reject-only OTel command-table entry
 NGINX's standard unknown-directive error is the expected migration behavior.
 ADR-0027 records the conditions required for a future 1.x reintroduction.
 
-### Reject-only migration directives
+### Removed directives
 
-There are 5 reject-only migration entries in the final command table. Each
-retains its name with an error-returning handler
-(`ngx_http_markdown_removed_directive`) so a config using it makes `nginx -t`
-fail with a migration message (LTS-R008).
+The five removed directive names are no longer registered, so a configuration
+that still uses one fails `nginx -t` with the standard unknown-directive error.
+The table records what replaced each of them.
 
-| Reject-only directive | Replacement / migration conclusion |
+| Removed directive | Replacement / migration conclusion |
 |-----------------------|------------------------------------|
 | `markdown_dynamic_config`, `markdown_dynamic_config_path`, `markdown_dynconf_dry_run` | 0.9.2 removed dynamic configuration. Use static config validated by `nginx -t` and reload. No replacement directive. |
 | `markdown_prune_selectors`, `markdown_prune_protection_selectors` | 0.9.2 removed the custom selectors. `markdown_prune_noise` still controls built-in noise reduction. |
@@ -214,9 +212,9 @@ also required.
 ## Dynamic Configuration Contract
 
 The 0.9.2 public surface has no runtime dynconf file schema, watcher, staged
-snapshot, or last-known-good state. The old directive names remain in the
-reject-only migration inventory so `nginx -t` can point operators to static
-configuration and a controlled reload or restart.
+snapshot, or last-known-good state. The old directive names are no longer
+registered either, so `nginx -t` rejects them and operators migrate to static
+configuration with a controlled reload or restart.
 
 ## Rust/C FFI Boundary
 
@@ -263,10 +261,9 @@ stay binding regardless.
 The public surface is ready to freeze only when all of the following are true:
 
 - every active directive is either stable or explicitly experimental,
-- removed directives are either absent from the command table (standard
-  NGINX unknown-directive behavior) or retained as one of the five
-  reject-only migration entries handled by
-  `ngx_http_markdown_removed_directive` (LTS-R008),
+- removed directives are absent from the command table, so they fail with the
+  standard NGINX unknown-directive behavior and no reject-only migration entry
+  remains,
 - the diagnostics endpoint and its documentation describe the same wire JSON,
 - the module rejects diagnostics mutation methods and no undocumented rollback API
   or response schema exists. The endpoint exposes read-only state only.

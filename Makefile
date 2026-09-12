@@ -575,7 +575,7 @@ official-feature-manifest-generate:
 
 harness-security-checks:
 	python3 tools/ci/validate_required_workflow_contexts.py
-	python3 tools/harness/check_removed_directive_registry.py
+	python3 tools/harness/check_directive_registry_parity.py
 	bash tools/harness/detect_cwe190_casts.sh
 	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/ --strict
 	bash tools/harness/detect_ffi_fat_pointer_transfer.sh

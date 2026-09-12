@@ -479,53 +479,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NULL
     },
 
-    /*
-     * markdown_prune_selectors <string>   (REMOVED in 0.9.2, LTS-R008/R009)
-     *
-     * Custom prune selectors were removed in 0.9.2.  The directive name stays
-     * registered so a configuration still using it fails `nginx -t` with an
-     * explicit migration message instead of being silently ignored.  Built-in
-     * noise reduction remains controlled by markdown_prune_noise.
-     * The advanced.prune_selectors config field/decode path was removed in
-     * 0.9.2 (LTS-R009), so the offset is 0: ngx_http_markdown_removed_directive
-     * ignores conf/offset and always fails nginx -t (LTS-R008).
-     */
-    {
-        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_SELECTORS),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
-        ngx_http_markdown_removed_directive,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        0,
-        NULL
-    },
-    /* Context above preserves the pre-removal http/server/location surface;
-     * only NGX_CONF_ANY (arg count) + the error handler remain so any usage
-     * reaches ngx_http_markdown_removed_directive, which ignores conf/offset
-     * and always fails nginx -t (LTS-R008). */
-
-    /*
-     * markdown_prune_protection_selectors <string>
-     *                                     (REMOVED in 0.9.2, LTS-R008/R009)
-     *
-     * Custom protection selectors were removed in 0.9.2.  The directive name
-     * stays registered so a configuration still using it fails `nginx -t`
-     * with an explicit migration message instead of being silently ignored.
-     * The advanced.prune_protection_selectors config field/decode path was
-     * removed in 0.9.2 (LTS-R009), so the offset is 0:
-     * ngx_http_markdown_removed_directive ignores conf/offset and always
-     * fails nginx -t (LTS-R008).
-     */
-    {
-        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_PROTECTION_SELECTORS),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
-        ngx_http_markdown_removed_directive,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        0,
-        NULL
-    },
-
 
 
 
@@ -558,57 +511,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NULL
     },
 
-    /*
-     * markdown_dynamic_config on|off   (REMOVED in 0.9.2, LTS-R008)
-     *
-     * The dynamic-config hot-reload subsystem was removed in 0.9.2.  The
-     * directive name stays registered so a configuration still using it fails
-     * `nginx -t` with an explicit migration message instead of being silently
-     * ignored.  Migrate to static config validated by `nginx -t` + reload.
-     * The error handler ignores the configuration offset and always fails.
-     */
-    {
-        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG),
-        NGX_HTTP_MAIN_CONF|NGX_CONF_ANY,
-        ngx_http_markdown_removed_directive,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        0,
-        NULL
-    },
-
-    /*
-     * markdown_dynamic_config_path <path>   (REMOVED in 0.9.2, LTS-R008)
-     *
-     * Removed alongside markdown_dynamic_config.  The directive name stays
-     * registered so a configuration still using it fails `nginx -t` with an
-     * explicit migration message instead of being silently ignored.
-     * The error handler ignores the configuration offset and always fails.
-     */
-    {
-        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG_PATH),
-        NGX_HTTP_MAIN_CONF|NGX_CONF_ANY,
-        ngx_http_markdown_removed_directive,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        0,
-        NULL
-    },
-
-    /*
-     * markdown_dynconf_dry_run on|off   (REMOVED in 0.9.2, LTS-R008)
-     *
-     * Removed alongside the dynamic-config subsystem.  The directive name
-     * stays registered so a configuration still using it fails `nginx -t`
-     * with an explicit migration message instead of being silently ignored.
-     * The error handler ignores the configuration offset and always fails.
-     */
-    {
-        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNCONF_DRY_RUN),
-        NGX_HTTP_MAIN_CONF|NGX_CONF_ANY,
-        ngx_http_markdown_removed_directive,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        0,
-        NULL
-    },
 
     /*
      * markdown_diagnostics on|off

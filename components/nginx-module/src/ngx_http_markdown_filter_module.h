@@ -825,9 +825,9 @@ typedef struct {
     /*
      * Custom prune/protection selectors were removed in 0.9.2 (LTS-R009).
      * Built-in noise reduction is now controlled solely by prune_noise and is
-     * guarded by the fixed regression corpus.  The markdown_prune_selectors /
-     * markdown_prune_protection_selectors directive names remain registered
-     * with an error-returning handler (LTS-R008); no config field backs them.
+     * guarded by the fixed regression corpus.  The removed directive names are
+     * no longer registered: a configuration that still uses one fails
+     * `nginx -t` with nginx's unknown-directive error.
      */
     /*
      * Static explicit block mask (AGENTS.md Rule 71).

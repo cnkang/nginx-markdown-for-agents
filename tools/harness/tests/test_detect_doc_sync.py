@@ -86,8 +86,8 @@ conversion budget; `markdown_limits streaming_buffer=2m` bounds streaming.
         root,
         detector.PUBLIC_INVENTORY_PATH,
         """
-There are 1 `markdown_*` command-table entries: 1 active parser entries and
-0 reject-only migration entries.
+There are 1 `markdown_*` command-table entries and every one of them is an
+active parser entry.
 
 ### Reject-only migration directives
 
@@ -203,7 +203,7 @@ def test_public_inventory_counts_must_match_directive_table(tmp_path: Path) -> N
 
     errors = detector.check_public_config_contract(tmp_path)
 
-    assert any("directive counts" in error for error in errors)
+    assert any("directive count" in error for error in errors)
 
 
 def test_reject_only_otel_directive_requires_reject_only_docs(tmp_path: Path) -> None:
