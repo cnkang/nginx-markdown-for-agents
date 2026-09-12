@@ -43,7 +43,9 @@ PORT="${PORT:-18088}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --image)
-            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+            # A following option is not an image tag, so `--image --help` must
+            # be rejected as a missing value rather than consumed.
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
                 echo "ERROR: --image requires a tag argument" >&2
                 exit 1
             fi

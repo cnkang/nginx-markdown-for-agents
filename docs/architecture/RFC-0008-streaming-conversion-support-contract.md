@@ -129,17 +129,16 @@ active in 0.9.2. Current selection uses `markdown_streaming auto` and a bounded
 internal response-shape heuristic. There is no replacement threshold
 directive.
 
-In `auto` mode, a response becomes a **streaming candidate** when ANY of the
-following is true:
+In `auto` mode, every response that clears the eligibility gates is a
+**streaming candidate**. Response size is not part of the decision and there is
+no internal candidate boundary: an unknown-length response and a response with a
+known `Content-Length` are treated alike.
 
-- `Content-Length` header is absent.
-- Upstream uses chunked transfer encoding.
-- the response is eligible for streaming; no size threshold applies.
-
-Absence of `Content-Length` only makes the response a streaming candidate. It
-does not force streaming. The engine MUST still verify content type, feature
-compatibility, parser readiness, and configured rollout policy before selecting
-true streaming.
+A response that is not eligible for conversion, or that fails the streaming
+gates (content type, feature compatibility, parser readiness, configured rollout
+policy), is not a candidate. The engine MUST verify those gates before selecting
+true streaming, and falls back to bounded full-buffer conversion when a response
+stays eligible for conversion but cannot stream.
 
 Responses below that internal candidate boundary with a known
 `Content-Length` default to the full-buffer path. Missing length and chunked
