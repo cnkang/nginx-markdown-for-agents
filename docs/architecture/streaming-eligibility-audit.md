@@ -21,9 +21,10 @@ conversion:
 7. The bounded streaming buffers and `markdown_limits max_inflight` permit
    the request.
 
-`auto` prefers streaming for every response that clears the hard gates above and
-falls back to full-buffer conversion for ineligible responses. `force` asks for
-streaming after the same gates. Neither policy bypasses cache, encoding, memory,
+`auto` prefers streaming for every response that clears the hard gates above. A
+response that stays eligible for conversion but cannot stream falls back to
+full-buffer conversion; a response that is not eligible for conversion is
+forwarded unchanged. `force` asks for streaming after the same gates. Neither policy bypasses cache, encoding, memory,
 or backpressure safety rules.
 
 ## Configuration ownership

@@ -245,8 +245,10 @@ full-buffer and streaming FFI entrypoints.
 `markdown_streaming` defaults to `off`. Unset and `off` select bounded
 full-buffer conversion. Explicit `auto` prefers streaming for every response
 that clears the hard compatibility gates (HEAD, 304, full conditional
-validation, excluded content types, and the streaming budget). Ineligible
-responses fall back to bounded full-buffer conversion. The selection follows
+validation, excluded content types, and the streaming budget). A response that
+stays eligible for conversion but cannot stream falls back to bounded
+full-buffer conversion; a response that is not eligible for conversion is
+forwarded unchanged. The selection follows
 the policy and those gates only: no size threshold takes part in it, and no
 operator-configured or internal candidate boundary exists. The v0.6.x
 `markdown_streaming_auto_threshold` directive and the v0.9.2-removed

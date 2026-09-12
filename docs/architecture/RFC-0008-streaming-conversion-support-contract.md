@@ -141,15 +141,25 @@ In `auto` mode, every response that clears the eligibility gates is a
 no internal candidate boundary: an unknown-length response and a response with a
 known `Content-Length` are treated alike.
 
-A response that is not eligible for conversion, or that fails a streaming gate,
-is not a candidate. The engine MUST verify the following gates before selecting
-true streaming, and falls back to bounded full-buffer conversion when a response
-stays eligible for conversion but cannot stream:
+A response that is **not eligible for conversion** is never converted at all:
+the module bypasses the filter and forwards the upstream response. A response
+that is eligible for conversion but **not a streaming candidate** is converted
+with the bounded full-buffer engine instead.
 
-- content type and codec support
-- cache validation state
-- feature compatibility and parser readiness
-- configured rollout policy and resource limits
+`ngx_http_markdown_select_processing_path()` decides between the two conversion
+engines on these pre-selection guards alone:
+
+- the configured `markdown_streaming` policy is `auto` or `force`; `off`, unset,
+  and out-of-range values resolve to bounded full-buffer
+- `markdown_front_matter on` requires the full-buffer engine
+- `HEAD` requests and `304 Not Modified` responses
+- a conditional-request policy that needs a complete ETag before the headers
+- content types excluded by the configuration
+
+Everything else is a streaming candidate. Codec routing is applied separately,
+and failures that occur after the streaming path is selected (parser readiness,
+the per-request budget) follow the configured fail-open or error policy rather
+than silently falling back.
 
 ### 2.3 Pre-commit Replay Buffer
 
