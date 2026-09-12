@@ -239,10 +239,7 @@ impl StreamingConverter {
         // the full-buffer engine, so one document cannot produce two different
         // URLs depending on the processing path.
         let mut emitter = IncrementalEmitter::new(&budget);
-        emitter.set_url_resolution(
-            options.base_url.as_deref(),
-            options.resolve_relative_urls,
-        );
+        emitter.set_url_resolution(options.base_url.as_deref(), options.resolve_relative_urls);
 
         Self {
             options,

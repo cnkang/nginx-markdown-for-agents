@@ -16,10 +16,8 @@ fn test_relative_metadata_urls_resolve_against_the_base() {
         <meta property=\"og:image\" content=\"icons/logo.svg\">\
         </head></html>";
     let dom = parse_html(html).unwrap();
-    let extractor = MetadataExtractor::new(
-        Some("https://example.com/docs/page.html".to_string()),
-        true,
-    );
+    let extractor =
+        MetadataExtractor::new(Some("https://example.com/docs/page.html".to_string()), true);
     let metadata = extractor.extract(&dom).unwrap();
 
     assert_eq!(
