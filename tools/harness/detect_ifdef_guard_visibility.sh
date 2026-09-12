@@ -34,6 +34,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 HEADER_FILE="${REPO_ROOT}/components/nginx-module/src/ngx_http_markdown_filter_module.h"
 SRC_DIR="${REPO_ROOT}/components/nginx-module/src"
 GUARD_NAME="MARKDOWN_STREAMING_ENABLED"
+NAME_PREFIX="ngx_http_markdown_"
 
 for arg in "$@"; do
     case "$arg" in
@@ -43,12 +44,16 @@ Usage: $0 [header] [src_dir]
   header  defaults to ${HEADER_FILE}
   src_dir  defaults to ${SRC_DIR}
   --guard=NAME  feature guard to check (default: ${GUARD_NAME})
+  --prefix=STR  function-name prefix to recognise (default: ${NAME_PREFIX})
   --help   show this help
 USAGE
             exit 0
             ;;
         --guard=*)
             GUARD_NAME="${arg#*=}"
+            ;;
+        --prefix=*)
+            NAME_PREFIX="${arg#*=}"
             ;;
         *)
             if [[ ! -f "$arg" ]] && [[ ! -d "$arg" ]]; then
@@ -78,12 +83,12 @@ fi
 # header (prototype style, ending with ';') plus function definitions inside the
 # guard across every .c/.h file in SRC_DIR, so a guarded-only definition behind
 # an unguarded declaration is still collected and checked.
-if ! guarded_funcs=$(python3 - "${HEADER_FILE}" "${GUARD_NAME}" "${SRC_DIR}" <<'PY'
+if ! guarded_funcs=$(python3 - "${HEADER_FILE}" "${GUARD_NAME}" "${SRC_DIR}" "${NAME_PREFIX}" <<'PY'
 import re
 import sys
 import os
 
-header_path, guard_name, src_dir = sys.argv[1:4]
+header_path, guard_name, src_dir, name_prefix = sys.argv[1:5]
 
 def guard_enabled(stack):
     return any(name == guard_name and active for name, active, _ in stack)
@@ -148,7 +153,7 @@ def scan_declarations(path):
             continue
         if stripped.startswith(('//', '/*', '*')):
             continue
-        name = _definition_signature(stripped, line)
+        name = _definition_signature(stripped, line, name_prefix)
         if name is not None:
             if ';' in line:
                 funcs.add(name)
@@ -161,7 +166,7 @@ def scan_declarations(path):
             pending_decl = None
     return funcs
 
-def _definition_signature(stripped, line):
+def _definition_signature(stripped, line, name_prefix):
     """Return the function name when ``line`` begins an nginx-style
     definition signature, else None.
 
@@ -175,7 +180,7 @@ def _definition_signature(stripped, line):
         return None
     m = re.match(
         r'(?:[A-Za-z_][A-Za-z0-9_]*\s+(?:\*\s*)?)*'
-        r'(ngx_http_markdown_\w+)\s*\(',
+        rf'({re.escape(name_prefix)}\w+)\s*\(',
         stripped,
     )
     return m.group(1) if m is not None else None
@@ -207,7 +212,7 @@ def scan_definitions(path):
             elif ';' in line:
                 pending_def = None
             continue
-        name = _definition_signature(stripped, line)
+        name = _definition_signature(stripped, line, name_prefix)
         if name is not None and re.search(r'\)\s*\{\s*$', line.rstrip()):
             # One-line definition: name(args) {
             funcs.add(name)
@@ -247,7 +252,7 @@ def scan_definitions_outside_guard(path):
             elif ';' in line:
                 pending_def = None
             continue
-        name = _definition_signature(stripped, line)
+        name = _definition_signature(stripped, line, name_prefix)
         if name is not None and re.search(r'\)\s*\{\s*$', line.rstrip()):
             funcs.add(name)
         elif name is not None and (
@@ -279,10 +284,17 @@ PY
     exit 1
 fi
 
+if [[ -z "${guarded_funcs//[[:space:]]/}" ]]; then
+    echo "ERROR: no functions found inside #ifdef ${GUARD_NAME} blocks in ${HEADER_FILE} / ${SRC_DIR}; the guard name, header, or --prefix does not match this tree" >&2
+    exit 1
+fi
+
 outside_defs="$(printf '%s\n' "$guarded_funcs" | awk -F'\t' '$1 == "OUTSIDE_DEF" { print $2 }')"
 guarded_funcs="$(printf '%s\n' "$guarded_funcs" | awk -F'\t' '$1 != "OUTSIDE_DEF" { print $1 }')"
 
 if [[ -z "$guarded_funcs" ]]; then
+    # The fail-closed guard above already rejects an empty extraction, so this
+    # branch only reports that every matched definition sits outside the guard.
     echo "OK: no functions found inside #ifdef ${GUARD_NAME} blocks"
     exit 0
 fi

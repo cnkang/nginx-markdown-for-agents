@@ -1281,6 +1281,9 @@ resolve_download_info() {
   fi
 
   if [[ -z "$PYTHON3_BIN" ]]; then
+    # Keep the positional contract: the caller reads six lines (URL, digest,
+    # versions, manifest URL, signature URL, tag) even when this path fails.
+    printf '\n\n\n\n\n\n'
     _json_error_category="$CATEGORY_CONFIG"
     _json_error_message="python3 is required by the installer but was not found."
     _json_suggestions=("Install python3: apt-get install python3 / apk add python3")

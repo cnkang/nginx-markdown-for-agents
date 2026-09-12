@@ -727,6 +727,7 @@ markdown_download_nginx_source() {
     "https://nginx.org/download/nginx-${nginx_version}.tar.gz" \
     -o "${dest_file}" || {
     echo "ERROR: failed to download nginx-${nginx_version}.tar.gz" >&2
+    rm -f "${dest_file}"
     return 1
   }
 
@@ -734,6 +735,7 @@ markdown_download_nginx_source() {
     -f "${dest_file}" \
     -i "nginx-${nginx_version}" || {
     echo "ERROR: checksum verification failed for nginx-${nginx_version}.tar.gz" >&2
+    rm -f "${dest_file}"
     return 1
   }
 

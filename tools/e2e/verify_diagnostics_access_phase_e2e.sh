@@ -134,6 +134,19 @@ stop_case_nginx() {
     wait "${NGINX_PID}" 2>/dev/null || true
     NGINX_PID=""
   fi
+  # The listening socket can outlive the process briefly. Wait for the case
+  # port to become reusable so the next case cannot race the previous bind.
+  local waited=0
+  while [[ "${waited}" -lt 50 ]]; do
+    if ! (exec 3<>"/dev/tcp/127.0.0.1/${PORT}") 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  if [[ "${waited}" -ge 50 ]]; then
+    echo "WARN: port ${PORT} still accepting connections after stop_case_nginx" >&2
+  fi
   return 0
 }
 

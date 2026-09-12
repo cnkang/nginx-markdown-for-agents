@@ -1814,6 +1814,7 @@ class TestNginxConfigGeneration:
         )
 
 
+@requires_bash
 class TestProbeStagingBehaviour:
     """Run the staging block itself; source assertions cannot catch behaviour."""
 
@@ -1846,7 +1847,7 @@ class TestProbeStagingBehaviour:
         )
         script = f'log() {{ :; }}\n{TestProbeStagingBehaviour._block()}'
         result = subprocess.run(
-            ["bash", "-c", script], env=env, check=False, capture_output=True, text=True
+            [BASH_BIN, "-c", script], env=env, check=False, capture_output=True, text=True
         )
         return result, dest, out_dir
 

@@ -5,7 +5,8 @@
 #          to immutable SHA references (40-char hex), not mutable version tags,
 #          and reject network-to-shell execution in workflow script blocks.
 #
-# Arguments: None (scans .github/workflows/ relative to repo root)
+# Arguments: None (scans .github/workflows/ relative to repo root, or the
+#            directory named by MARKDOWN_WORKFLOW_DIR when set)
 #
 # Output: Findings to stderr; exit 0 if clean, exit 1 if violations found.
 #
@@ -17,10 +18,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-WORKFLOW_DIR="${REPO_ROOT}/.github/workflows"
+WORKFLOW_DIR="${MARKDOWN_WORKFLOW_DIR:-${REPO_ROOT}/.github/workflows}"
 VIOLATIONS=0
 
 if [[ ! -d "$WORKFLOW_DIR" ]]; then
+    if [[ -n "${MARKDOWN_WORKFLOW_DIR:-}" ]]; then
+        # An explicit directory that does not exist cannot be audited, so the
+        # detector fails closed instead of reporting a clean scan.
+        echo "  [supply-chain] MARKDOWN_WORKFLOW_DIR is not a directory: $WORKFLOW_DIR" >&2
+        exit 1
+    fi
     echo "  [supply-chain] No workflow directory found at $WORKFLOW_DIR" >&2
     exit 0
 fi
@@ -96,6 +103,13 @@ while IFS= read -r line; do
     action="${ref%%@*}"
     ref="${ref#*@}"                     # ref = first @ after action name
 
+    # A quoted uses value ("owner/repo@ref" or 'owner/repo@ref') must be
+    # unwrapped before the action and ref are compared.
+    action="${action#\"}"; action="${action%\"}"
+    action="${action#\'}"; action="${action%\'}"
+    ref="${ref#\"}"; ref="${ref%\"}"
+    ref="${ref#\'}"; ref="${ref%\'}"
+
     # A well-formed use line is exactly "uses: owner/repo@ref".
     if [[ -z "$action" || "$ref" == "$action" ]]; then
         continue
@@ -129,7 +143,10 @@ done < <(awk '
 
 while IFS= read -r -d '' workflow_file; do
     check_network_to_shell "$workflow_file"
-done < <(find "$WORKFLOW_DIR" -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 | sort -z)
+done < <(find "$WORKFLOW_DIR" -type f \( -name '*.yml' -o -name '*.yaml' \) -print0)
+# The workflow order does not affect the findings, and `sort -z` is a GNU
+# extension: using it made the loop silently see no files on platforms whose
+# sort lacks the flag.
 
 if [[ "$VIOLATIONS" -gt 0 ]]; then
     echo "  [supply-chain] $VIOLATIONS supply-chain violation(s) found" >&2
