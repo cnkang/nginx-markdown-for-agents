@@ -427,6 +427,34 @@ impl MarkdownConverter {
         self.traverse_children(node, output, depth + 1, ctx)
     }
 
+    /// Dispatch the inline-formatting tags, which share one shape: each hands
+    /// off to a context-aware handler.
+    ///
+    /// Returns `None` when the tag is not an inline-formatting element, so the
+    /// caller falls through to the block-level match.  Keeping this group out
+    /// of that match keeps both functions within the project's complexity
+    /// thresholds.
+    fn dispatch_inline_element(
+        &self,
+        node: &Handle,
+        tag_name: &str,
+        output: &mut String,
+        depth: usize,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Option<Result<(), ConversionError>> {
+        let result = match tag_name {
+            "code" => self.handle_inline_code(node, output, depth, ctx),
+            "strong" | "b" => self.handle_bold_with_context(node, output, depth, ctx),
+            "em" | "i" => self.handle_italic_with_context(node, output, depth, ctx),
+            "del" | "s" | "strike" => {
+                self.handle_strikethrough_with_context(node, output, depth, ctx)
+            }
+            _ => return None,
+        };
+
+        Some(result)
+    }
+
     fn dispatch_element(
         &self,
         node: &Handle,
@@ -435,6 +463,13 @@ impl MarkdownConverter {
         depth: usize,
         mut ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        if let Some(result) =
+            self.dispatch_inline_element(node, tag_name, output, depth, ctx.as_deref_mut())
+        {
+            result?;
+            return Ok(());
+        }
+
         match tag_name {
             "h1" => self.handle_heading_with_context(node, 1, output, depth, ctx.as_deref_mut())?,
             "h2" => self.handle_heading_with_context(node, 2, output, depth, ctx.as_deref_mut())?,
@@ -450,16 +485,6 @@ impl MarkdownConverter {
             "li" => self.handle_list_item_with_context(node, output, 0, ctx.as_deref_mut())?,
             "pre" => {
                 self.handle_code_block_with_context(node, output, depth, ctx.as_deref_mut())?
-            }
-            "code" => self.handle_inline_code(node, output, depth, ctx.as_deref_mut())?,
-            "strong" | "b" => {
-                self.handle_bold_with_context(node, output, depth, ctx.as_deref_mut())?
-            }
-            "em" | "i" => {
-                self.handle_italic_with_context(node, output, depth, ctx.as_deref_mut())?
-            }
-            "del" | "s" | "strike" => {
-                self.handle_strikethrough_with_context(node, output, depth, ctx.as_deref_mut())?
             }
             "table" => self.handle_table_with_context(node, output, depth, ctx.as_deref_mut())?,
             "script" | "style" | "noscript" => {}

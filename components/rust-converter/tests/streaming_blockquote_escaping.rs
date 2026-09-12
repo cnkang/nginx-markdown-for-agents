@@ -55,13 +55,11 @@ fn literal_block_markers_inside_a_blockquote_stay_text() {
         )
         .expect("full-buffer conversion");
 
-        for escaped in [expected] {
-            let text = escaped.trim_start_matches("> ");
-            assert!(
-                full.contains(text),
-                "full-buffer output must escape the same marker: expected {text:?}\n--- output ---\n{full}"
-            );
-        }
+        let text = expected.trim_start_matches("> ");
+        assert!(
+            full.contains(text),
+            "full-buffer output must escape the same marker: expected {text:?}\n--- output ---\n{full}"
+        );
     }
 }
 

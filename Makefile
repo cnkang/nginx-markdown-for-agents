@@ -350,6 +350,25 @@ TEST_ALL_CORE := \
 	workflow-context-check \
 	license-check
 
+# ci-local-check runs the same gates CI runs, with the one difference that
+# matters: the writing-style regression compares against the MERGE BASE, not
+# HEAD.  With STYLE_BASE=HEAD (the test-all default) committed work shows an
+# empty diff, so a style regression that CI reports as new looks clean locally.
+ci-local-check:
+	@echo "=== CI-equivalent gates (style regression against the merge base) ==="
+	STYLE_BASE=$${STYLE_BASE:-origin/main} $(MAKE) docs-check
+	$(MAKE) rust-clippy-check
+	$(MAKE) complexity-check
+	$(MAKE) public-surface-drift-check
+	$(MAKE) check-headers
+	$(MAKE) test-all
+	@echo
+	@echo "CI-equivalent gates passed."
+	@echo "Still requires a module-enabled NGINX binary (CI runs these too):"
+	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tests/property/test_log_prefix_preservation.sh"
+	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/ci/verify_real_nginx_ims.sh"
+	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/e2e/verify_encoding_chain_e2e.sh"
+
 test-all:
 	@echo "=== test-all: running all CI-mirrored gates ==="
 	@$(MAKE) $(TEST_ALL_CORE)

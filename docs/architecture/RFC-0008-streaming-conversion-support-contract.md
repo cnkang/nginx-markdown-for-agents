@@ -11,7 +11,7 @@
 > **Which version governs.** This RFC specifies the 0.8.0 contract and its
 > implementation note describes 0.8.0/0.8.1. Section 2.2 carries the **active
 > 0.9.2 contract** for `markdown_streaming auto`: selection follows the policy
-> and the hard eligibility gates, `markdown_stream_threshold` is retired with no
+> and the hard eligibility gates. 0.9.2 retires `markdown_stream_threshold` with no
 > replacement, and no size threshold takes part in the decision. Where the two
 > differ, section 2.2 governs.
 
@@ -139,32 +139,32 @@ replacement threshold directive and no size heuristic.
 In `auto` mode, every response that clears the eligibility gates is a
 **streaming candidate**. Response size is not part of the decision and there is
 no internal candidate boundary: an unknown-length response and a response with a
-known `Content-Length` are treated alike.
+the module treats a known `Content-Length` alike.
 
 A response that is **not eligible for conversion** is never converted at all:
 the module bypasses the filter and forwards the upstream response. A response
-that is eligible for conversion but **not a streaming candidate** is converted
+that is eligible for conversion but **not a streaming candidate**, the module converts it
 with the bounded full-buffer engine instead.
 
 `ngx_http_markdown_select_processing_path()` decides between the two conversion
 engines on these pre-selection guards alone:
 
-- the configured `markdown_streaming` policy is `auto` or `force`; `off`, unset,
+- the configured `markdown_streaming` policy is `auto` or `force`. `off`, unset,
   and out-of-range values resolve to bounded full-buffer
 - `markdown_front_matter on` requires the full-buffer engine
 - `HEAD` requests and `304 Not Modified` responses
 - a conditional-request policy that needs a complete ETag before the headers
 - content types excluded by the configuration
 
-Everything else is a streaming candidate. Codec routing is applied separately.
-Failures that occur after the streaming path is selected fall into two classes,
+Everything else is a streaming candidate. The module applies codec routing separately.
+Failures that occur after the module selects the streaming path fall into two classes,
 checked in this order:
 
 - a capability fallback (`ERROR_STREAMING_FALLBACK`) returns the response to the
   bounded full-buffer engine regardless of the configured error policy
 - a header-snapshot rollback failure also fails closed regardless of policy: the
-  streaming handle is aborted and the response is rejected, because the header
-  state can no longer be restored
+  module aborts the streaming handle and rejects the response, because it can no
+  longer restore the header state
 - every other pre-commit failure follows `markdown_error_policy`: `pass` fails
   open with the original HTML, `fail_closed` rejects the response
 

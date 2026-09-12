@@ -62,6 +62,7 @@ usage() {
   echo >&2 ""
   echo >&2 "Scenarios: plain-small, chunked-medium, gzip-large, large-body, streaming-first, gzip-streaming-first, deflate-streaming-first, brotli-streaming-first"
   exit "$exit_code"
+  return 0
 }
 
 ###############################################################################

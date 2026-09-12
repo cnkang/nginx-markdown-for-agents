@@ -18,6 +18,7 @@ fail() {
 
     printf 'FAIL: %s\n' "$message" >&2
     exit 1
+    return 0
 }
 
 run_detector() {

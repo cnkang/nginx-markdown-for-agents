@@ -456,6 +456,7 @@ echo "==> Running conditional-request validation scenario"
   # Match Accept as a complete comma-separated token so Accept-Encoding in the
   # same header cannot satisfy the check.
   awk '
+    { gsub(/\r/, "") }
     /^[Vv]ary:/ {
       line = tolower($0)
       sub(/^vary:[ \t]*/, "", line)

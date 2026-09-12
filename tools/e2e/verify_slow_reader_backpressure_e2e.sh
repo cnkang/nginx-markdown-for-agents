@@ -60,6 +60,7 @@ WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slow-reader-e2e.XXXXXX")"
 cleanup() {
     docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
     rm -rf "${WORK_DIR}"
+    return 0
 }
 trap cleanup EXIT
 
@@ -144,6 +145,7 @@ fetch() {
     else
         curl -sS -H 'Accept: text/markdown' "${ENDPOINT}"
     fi
+    return 0
 }
 
 echo "=== fast read (no throttle) ===" >&2

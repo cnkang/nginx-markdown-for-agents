@@ -8,7 +8,7 @@ following directives and their JSON file watcher no longer exist:
 - `markdown_dynconf_dry_run`
 
 The names are no longer registered, so `nginx -t` reports NGINX's standard
-`unknown directive` error; `MIGRATION-0.9.2.md` names the replacement for each.
+`unknown directive` error. `MIGRATION-0.9.2.md` names the replacement for each.
 The module does not read a runtime configuration file,
 maintain a last-known-good dynconf snapshot, or expose a dynconf metrics
 family. Configure the static directives in

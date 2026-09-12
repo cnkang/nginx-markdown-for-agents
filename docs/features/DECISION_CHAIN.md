@@ -207,7 +207,7 @@ The registry declares the complete set of 25 reason codes in
 into `reason_code.rs`, C metadata, diagnostics lookup, and release artifacts.
 The projections mirror the
 [Observability Schema v3](../architecture/observability-schema-v3.md)
-description; the diagnostics schema document carries `schema_version 3` on the
+description. The diagnostics schema document carries `schema_version 3` on the
 wire.
 All `as_str()` values are lowercase snake_case. The table below maps the
 high-level decision outcomes described in this document to their reason codes.

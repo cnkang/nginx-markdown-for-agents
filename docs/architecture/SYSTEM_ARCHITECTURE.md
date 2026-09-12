@@ -189,7 +189,7 @@ The architecture supports two conversion engines:
   - larger responses consume more memory
   - conversion cannot start streaming output immediately
   - any response that is eligible to stream should take the streaming engine,
-    regardless of size; ineligible responses pass through
+    regardless of size. Ineligible responses pass through
 
 - **Streaming engine** (enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline. The pipeline runs charset detection, tokenization, sanitization, a state machine, and emission. Tradeoffs:
   - bounded per-request working-set memory (configurable via
@@ -246,13 +246,13 @@ full-buffer and streaming FFI entrypoints.
 full-buffer conversion. Explicit `auto` prefers streaming for every response
 that clears the hard compatibility gates (HEAD, 304, full conditional
 validation, excluded content types, and `markdown_front_matter on`, which
-requires the full-buffer engine because the front matter is assembled from the
-completed metadata set). The streaming budget is enforced at run time, not
-during selection, and a response that exceeds it follows the configured error
+requires the full-buffer engine because the module assembles the front matter
+from the completed metadata set). The module enforces the streaming budget at run time,
+not during selection, and a response that exceeds it follows the configured error
 handling rather than being re-routed. The full-buffer engine is the fallback in
 two cases only: a response that the selection step keeps off the streaming path,
 and a capability fallback while streaming. A response that is not eligible for
-conversion is forwarded unchanged. The selection follows
+conversion passes through unchanged. The selection follows
 the policy and those gates only: no size threshold takes part in it, and no
 operator-configured or internal candidate boundary exists. The v0.6.x
 `markdown_streaming_auto_threshold` directive and the v0.9.2-removed
@@ -369,7 +369,8 @@ v0.9.2 is the final pre-1.0 breaking release. It consolidates the public
 surface before the 1.0 LTS compatibility freeze:
 
 - **Directive consolidation**: The configuration surface shrinks from 63
-  directives to 20 active directives; the five retired names are unregistered,
+  directives to 20 active directives. The module no longer registers the five
+  retired names,
   so NGINX rejects them with its standard unknown-directive error and
   `MIGRATION-0.9.2.md` names the replacement for each. The project removed
   the `markdown_streaming_zero_copy`, per-path metrics, shadow comparison,

@@ -674,13 +674,11 @@ impl IncrementalEmitter {
                     self.write_str(if *checked { "[x] " } else { "[ ] " })?;
                 }
             }
-            StructuralContext::Strikethrough => {
-                if self.gfm {
-                    if self.in_link {
-                        self.append_link_text("~~");
-                    } else {
-                        self.write_str("~~")?;
-                    }
+            StructuralContext::Strikethrough if self.gfm => {
+                if self.in_link {
+                    self.append_link_text("~~");
+                } else {
+                    self.write_str("~~")?;
                 }
             }
             _ => {}
@@ -935,13 +933,11 @@ impl IncrementalEmitter {
                     self.write_str("*")?;
                 }
             }
-            StructuralContext::Strikethrough => {
-                if self.gfm {
-                    if self.in_link {
-                        self.append_link_text("~~");
-                    } else {
-                        self.write_str("~~")?;
-                    }
+            StructuralContext::Strikethrough if self.gfm => {
+                if self.in_link {
+                    self.append_link_text("~~");
+                } else {
+                    self.write_str("~~")?;
                 }
             }
             _ => {}

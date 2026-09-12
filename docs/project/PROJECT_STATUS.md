@@ -262,7 +262,7 @@ The following limitations appear in the documentation:
 1. **Full-Buffer Default**: Unset and `off` select bounded full-buffer conversion, with
    `markdown_streaming off|auto|force`. `off` explicitly selects full-buffer
    conversion. A request that is not eligible for conversion bypasses conversion
-   and is forwarded unchanged; a response that is eligible for conversion but
+   and passes through unchanged. A response that is eligible for conversion but
    cannot stream falls back to full-buffer, and a capability fallback does so
    regardless of policy.
 2. **HTML Input**: Requires HTML input (uncompressed or automatically decompressed)

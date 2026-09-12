@@ -164,7 +164,7 @@ streaming-specific guards AFTER all security checks pass:
 4. conditional_requests full_support -> full-buffer
 5. text/event-stream -> full-buffer (defense-in-depth, already excluded at step 4)
 6. `markdown_stream_excluded_types` match -> full-buffer (defense-in-depth)
-7. `markdown_front_matter on` -> full-buffer (the front matter is assembled from
+7. `markdown_front_matter on` -> full-buffer (the module assembles the front matter from
    the completed metadata set)
 8. Policy == force -> streaming
 9. Policy == auto -> streaming, independent of response size and transfer mode

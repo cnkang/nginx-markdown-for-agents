@@ -15,21 +15,21 @@ stored a SHA-256 digest of the GitHub tag archive in
 `packaging/source-archive-digests.sha256`, then required every tag release to
 find its own entry there and fail closed when it was missing.
 
-That requirement cannot be satisfied. The registry file is part of the tree, so
-committing an entry changes the tree, and a tag archive is generated from the
-tree at that tag. An entry describing a tag's own archive therefore cannot be
-recorded before the tag exists, and the digest recorded afterwards never matches
+No implementation can satisfy that requirement. The registry file is part of the tree, so
+committing an entry changes the tree, and GitHub generates a tag archive from the
+tree at that tag. No one can therefore record an entry describing a tag's own archive before
+the tag exists, and the digest recorded afterwards never matches
 the archive the tag produces. Two independent reviews reached this conclusion
 independently, and the digest requirement in the release-manifest validator had
-to be relaxed as a consequence.
+to make the digest optional as a consequence.
 
 ## Decision
 
 - The pre-release provenance anchor is the **commit identity**. Candidate
   evidence records the commit the release was cut from, and the release gates
   verify it, so an unreviewed commit cannot back a tag.
-- The registry records the digest of the **published** archive, and an entry is
-  created **after** the tag is published, in a later commit. Because the tag's
+- The registry records the digest of the **published** archive. A maintainer
+  creates that entry **after** the tag's publication, in a later commit. Because the tag's
   tree is already fixed at that point, the recorded digest stays valid.
 - The release manifest carries `source.sha256` when the registry has an entry and
   omits it otherwise. The manifest validator treats the field as **optional** for
@@ -45,5 +45,5 @@ to be relaxed as a consequence.
   digest becomes available once the maintainer records it, and later runs of the
   same tag reuse the recorded value.
 - Reviews that expect a fail-closed digest check at tag time will keep reporting
-  this design as a defect. This ADR is the recorded answer: the check was
-  removed deliberately, and re-adding it reintroduces the circularity.
+  this design as a defect. This ADR is the recorded answer: we removed the check deliberately, and
+  re-adding it reintroduces the circularity.
