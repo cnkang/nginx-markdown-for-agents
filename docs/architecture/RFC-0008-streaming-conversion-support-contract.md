@@ -8,6 +8,13 @@
 | Created        | 2026-06-04                |
 | Scope          | True streaming contract, defaults, fallback semantics, support matrix source |
 
+> **Which version governs.** This RFC specifies the 0.8.0 contract and its
+> implementation note describes 0.8.0/0.8.1. Section 2.2 carries the **active
+> 0.9.2 contract** for `markdown_streaming auto`: selection follows the policy
+> and the hard eligibility gates, `markdown_stream_threshold` is retired with no
+> replacement, and no size threshold takes part in the decision. Where the two
+> differ, section 2.2 governs.
+
 ## Implementation Note
 
 The 0.8.0 release implemented RFC-0008, shipping the true streaming contract,
@@ -134,15 +141,15 @@ In `auto` mode, every response that clears the eligibility gates is a
 no internal candidate boundary: an unknown-length response and a response with a
 known `Content-Length` are treated alike.
 
-A response that is not eligible for conversion, or that fails the streaming
-gates (content type, feature compatibility, parser readiness, configured rollout
-policy), is not a candidate. The engine MUST verify those gates before selecting
+A response that is not eligible for conversion, or that fails a streaming gate,
+is not a candidate. The engine MUST verify the following gates before selecting
 true streaming, and falls back to bounded full-buffer conversion when a response
-stays eligible for conversion but cannot stream.
+stays eligible for conversion but cannot stream:
 
-A response that cannot stream still converts through the full-buffer path when
-it stays eligible for conversion. Content type, cache validation, codec support,
-parser readiness, and resource policy gate true streaming.
+- content type and codec support
+- cache validation state
+- feature compatibility and parser readiness
+- configured rollout policy and resource limits
 
 ### 2.3 Pre-commit Replay Buffer
 
