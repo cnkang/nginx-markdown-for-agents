@@ -185,7 +185,7 @@ For non-eligible requests, the module stays out of the way and the original resp
 
 The architecture supports two conversion engines:
 
-- **Full-buffer engine** (default for small responses): buffers the full eligible response before conversion. This makes correctness, deterministic output, and header handling simpler. Tradeoffs:
+- **Full-buffer engine** (the fallback for responses that cannot stream): buffers the full eligible response before conversion. This makes correctness, deterministic output, and header handling simpler. Tradeoffs:
   - larger responses consume more memory
   - conversion cannot start streaming output immediately
   - very large or streaming-style content should use streaming when eligible,

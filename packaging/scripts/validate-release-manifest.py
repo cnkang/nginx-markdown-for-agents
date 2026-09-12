@@ -265,10 +265,16 @@ def validate_manifest(
             # it would describe.  When a digest is present it must be plausible,
             # and the release process compares it against the published archive
             # after publication.
-            if source.get("sha256"):
-                check_no_placeholders(source["sha256"], "source.sha256", errors)
-                if not re.match(r"^[0-9a-f]{64}$", source["sha256"]):
-                    errors.append("source.sha256 is not a 64-char hex string")
+            if "sha256" in source:
+                digest = source["sha256"]
+                if not isinstance(digest, str) or not digest:
+                    errors.append(
+                        "source.sha256 must be a non-empty string when present"
+                    )
+                else:
+                    check_no_placeholders(digest, "source.sha256", errors)
+                    if not re.match(r"^[0-9a-f]{64}$", digest):
+                        errors.append("source.sha256 is not a 64-char hex string")
     elif source and isinstance(source, dict):
         # Non-tag: source is optional; if present and available, validate fields
         if source.get("available", False):
