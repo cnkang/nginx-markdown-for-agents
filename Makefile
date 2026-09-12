@@ -98,7 +98,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         verify-diagnostics-access-phase-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
-        clean help verify-module-version-mismatch-e2e
+        clean help verify-module-version-mismatch-e2e verify-slow-reader-backpressure-e2e \
 
 all: build
 
@@ -1543,6 +1543,11 @@ verify-encoding-chain-e2e:
 # incompatible NGINX with a module-specific version error.
 verify-module-version-mismatch-e2e:
 	./tools/e2e/verify_module_version_mismatch_e2e.sh
+
+# Needs docker and curl: a rate-limited reader must receive a streamed conversion
+# byte-for-byte, which exercises the NGX_AGAIN resume path.
+verify-slow-reader-backpressure-e2e:
+	./tools/e2e/verify_slow_reader_backpressure_e2e.sh
 
 verify-streaming-failure-cache-e2e:
 	./tools/e2e/verify_streaming_failure_cache_e2e.sh $(E2E_ARGS)
