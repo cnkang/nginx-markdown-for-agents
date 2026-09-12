@@ -21,9 +21,10 @@ conversion:
 7. The bounded streaming buffers and `markdown_limits max_inflight` permit
    the request.
 
-`auto` applies the internal bounded response-shape heuristic. `force` asks
-for streaming after the hard gates above. Neither policy bypasses cache,
-encoding, memory, or backpressure safety rules.
+`auto` prefers streaming for every response that clears the hard gates above and
+falls back to full-buffer conversion for ineligible responses. `force` asks for
+streaming after the same gates. Neither policy bypasses cache, encoding, memory,
+or backpressure safety rules.
 
 ## Configuration ownership
 

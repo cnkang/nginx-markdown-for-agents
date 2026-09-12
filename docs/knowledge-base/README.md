@@ -54,9 +54,11 @@ distinct directives with different migration paths.
 
 The five convergence names (`markdown_dynamic_config`,
 `markdown_dynamic_config_path`, `markdown_dynconf_dry_run`,
-`markdown_prune_selectors`, and `markdown_prune_protection_selectors`) remain
-no longer registered at all. They fail `nginx -t` with an
-explicit migration message. They are not active configuration directives.
+`markdown_prune_selectors`, and `markdown_prune_protection_selectors`) are no
+longer registered at all. They fail `nginx -t` with NGINX's standard
+`unknown directive` error, so the replacement for each name comes from
+`MIGRATION-0.9.2.md` rather than from a module message. They are not active
+configuration directives.
 
 ## Contract Loading
 

@@ -9,7 +9,8 @@
 # entry for the tag, the download must match it: a mismatch means the archive
 # changed, which is exactly the drift this registry exists to catch.
 #
-# Run this before tagging, review the diff, and commit the result.
+# Run this after the tag is published, review the diff, and commit the result:
+# the entry lives in a later commit, so the tag's own tree is unaffected.
 #
 # Exit codes:
 #   0  Digest recorded or already matches
