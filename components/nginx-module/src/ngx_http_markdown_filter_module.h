@@ -20,6 +20,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include "markdown_converter.h"
+
 /*
  * Whether a socket address is loopback.
  *
@@ -150,8 +152,6 @@ ngx_http_markdown_peer_is_loopback(ngx_http_request_t *r)
     return ngx_http_markdown_sockaddr_is_loopback(r->connection->sockaddr);
 }
 #endif /* NGX_HTTP_MARKDOWN_TEST_STUBS */
-
-#include "markdown_converter.h"
 
 /*
  * Public module version reported in diagnostics/metrics.  This is the

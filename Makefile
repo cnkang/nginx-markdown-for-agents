@@ -57,7 +57,11 @@ MODULE_SO ?= build/ngx_http_markdown_filter_module.so
 PREFIX ?= /usr
 LIBDIR ?= $(PREFIX)/lib
 DESTDIR ?=
-STYLE_BASE ?= HEAD
+# The writing-style regression compares files changed since STYLE_BASE.  HEAD is
+# wrong for that: a committed change shows an empty diff against HEAD, so a style
+# regression CI reports as new looks clean locally.  Default to the merge base
+# with the main branch, which is what CI compares against.
+STYLE_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
 SCHEMA_RELEASE_VERSION ?= 0.9.2
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
@@ -355,16 +359,13 @@ TEST_ALL_CORE := \
 # HEAD.  With STYLE_BASE=HEAD (the test-all default) committed work shows an
 # empty diff, so a style regression that CI reports as new looks clean locally.
 ci-local-check:
-	@echo "=== CI-equivalent gates (style regression against the merge base) ==="
-	STYLE_BASE=$${STYLE_BASE:-origin/main} $(MAKE) docs-check
-	$(MAKE) rust-clippy-check
-	$(MAKE) complexity-check
-	$(MAKE) public-surface-drift-check
-	$(MAKE) check-headers
-	$(MAKE) test-all
+	@echo "=== CI-equivalent gates ==="
+	@echo "test-all already runs the CI gate set, with the writing-style regression"
+	@echo "based on the merge base (STYLE_BASE=$(STYLE_BASE))."
+	@$(MAKE) test-all
 	@echo
 	@echo "CI-equivalent gates passed."
-	@echo "Still requires a module-enabled NGINX binary (CI runs these too):"
+	@echo "CI-only checks (need a module-enabled NGINX binary):"
 	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tests/property/test_log_prefix_preservation.sh"
 	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/ci/verify_real_nginx_ims.sh"
 	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/e2e/verify_encoding_chain_e2e.sh"

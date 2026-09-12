@@ -158,13 +158,14 @@ _EXPLICIT_IMAGE_ARGS = [
 ]
 
 _CHECK_HELM_STREAMING_DEFAULT = "helm:streaming-default-parity"
+_HELM_ENABLE_MARKDOWN = "markdown.enabled=true"
 
 # Rendering the module configuration needs an enabled chart and the
 # explicit module path the chart requires.
 _STREAMING_DEFAULT_ARGS = [
     *_EXPLICIT_IMAGE_ARGS,
     "--set",
-    "markdown.enabled=true",
+    _HELM_ENABLE_MARKDOWN,
     "--set-string",
     "markdown.loadModule=/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
 ]
@@ -879,7 +880,7 @@ def _validate_missing_module_guard(
         _CHECK_HELM_RENDER_MODULE_MISSING,
         helm,
         chart_dir,
-        [*_EXPLICIT_IMAGE_ARGS, "--set", "markdown.enabled=true"],
+        [*_EXPLICIT_IMAGE_ARGS, "--set", _HELM_ENABLE_MARKDOWN],
     )
     if rendered is None:
         return
@@ -923,7 +924,7 @@ def _module_enabled_args() -> list[str]:
     return [
         *_EXPLICIT_IMAGE_ARGS,
         "--set",
-        "markdown.enabled=true",
+        _HELM_ENABLE_MARKDOWN,
         "--set-string",
         f"markdown.loadModule={HELM_MODULE_LOAD_PATH}",
     ]
