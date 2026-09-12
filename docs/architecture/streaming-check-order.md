@@ -163,9 +163,11 @@ streaming-specific guards AFTER all security checks pass:
 3. 304 Not Modified -> full-buffer
 4. conditional_requests full_support -> full-buffer
 5. text/event-stream -> full-buffer (defense-in-depth, already excluded at step 4)
-6. stream_types exclusion -> full-buffer (defense-in-depth)
-7. Policy == force -> streaming
-8. Auto mode threshold/chunked logic
+6. `markdown_stream_excluded_types` match -> full-buffer (defense-in-depth)
+7. `markdown_front_matter on` -> full-buffer (the front matter is assembled from
+   the completed metadata set)
+8. Policy == force -> streaming
+9. Policy == auto -> streaming, independent of response size and transfer mode
 
 These are path-selection decisions, not security gates -- the security gates
 all executed earlier in the pipeline.
