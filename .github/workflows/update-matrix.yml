@@ -137,6 +137,8 @@ jobs:
           git diff --binary -- \
             tools/release-matrix.json \
             docs/releases/release-matrix.json \
+            README.md \
+            docs/guides/PACKAGE_COMPATIBILITY.md \
             docs/guides/INSTALLATION.md > matrix-update.patch
           git diff --check
 

@@ -562,6 +562,8 @@ test_property11_no_progress_no_false_positives(void)
                 "finish on valid Brotli must return NGX_OK");
 
             if (finish_len > 0) {
+                TEST_ASSERT(result_len + finish_len <= text_len + 256,
+                    "finish output must fit the result buffer");
                 memcpy(result_buf + result_len,
                     finish_out, finish_len);
                 result_len += finish_len;
@@ -716,6 +718,8 @@ test_property11b_single_byte_no_false_positives(void)
                 "finish on valid Brotli must return NGX_OK");
 
             if (finish_len > 0) {
+                TEST_ASSERT(result_len + finish_len <= text_len + 256,
+                    "finish output must fit the result buffer");
                 memcpy(result_buf + result_len,
                     finish_out, finish_len);
                 result_len += finish_len;

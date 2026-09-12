@@ -372,6 +372,12 @@ impl StreamingSanitizer {
                 let Some(safe_url) = sanitize_url_value(&url_value) else {
                     return SanitizeDecision::Skip;
                 };
+                /* An empty destination carries no target, and the full-buffer
+                 * path already refuses to emit one.  Skipping here keeps both
+                 * engines on the same destination policy. */
+                if safe_url.is_empty() {
+                    return SanitizeDecision::Skip;
+                }
                 /* The generated text is emitted through the trusted-text
                  * path, so the label must already be Markdown-safe. Tag
                  * names are internal today, but escaping here keeps every

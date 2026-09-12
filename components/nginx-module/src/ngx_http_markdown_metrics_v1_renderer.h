@@ -446,7 +446,7 @@ ngx_http_markdown_metrics_v1_render_families_8_to_9(
 }
 
 static u_char *
-ngx_http_markdown_metrics_v1_render_families_10_to_11(
+ngx_http_markdown_metrics_v1_render_build_info(
     u_char *p,
     u_char *end,
     const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
@@ -527,7 +527,7 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    return ngx_http_markdown_metrics_v1_render_families_10_to_11(
+    return ngx_http_markdown_metrics_v1_render_build_info(
         p, end, snapshot);
 }
 

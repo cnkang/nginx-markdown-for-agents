@@ -1476,6 +1476,8 @@ test_base_url_decision_failure_propagates(void)
     r.loc_conf = &conf;
     r.main_conf = (void *) &main_conf;
 
+    ngx_memzero(&base_url, sizeof(base_url));
+
     TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
                     == NGX_ERROR,
                 "construct_base_url should fail when the FFI rejects inputs");
