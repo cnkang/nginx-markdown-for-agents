@@ -28,9 +28,9 @@ documentation. Split them.
 > requires the cache validation mode not to be `full`.
 
 **After (2 sentences, 13 + 13 words):**
-> The module selects the streaming engine when the response exceeds the buffer
-> threshold. The policy must permit incremental delivery, and cache
-> validation must not be `full`.
+> The module selects the streaming engine when the policy permits it and the
+> response clears the eligibility gates. Cache validation must not be `full`,
+> and response size takes no part in the decision.
 
 ## 2. Rules at a Glance
 

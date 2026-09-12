@@ -248,10 +248,11 @@ that clears the hard compatibility gates (HEAD, 304, full conditional
 validation, excluded content types, and `markdown_front_matter on`, which
 requires the full-buffer engine because the front matter is assembled from the
 completed metadata set). The streaming budget is enforced at run time, not
-during selection. A response that
-stays eligible for conversion but cannot stream falls back to bounded
-full-buffer conversion; a response that is not eligible for conversion is
-forwarded unchanged. The selection follows
+during selection, and a response that exceeds it follows the configured error
+handling rather than being re-routed. The full-buffer engine is the fallback in
+two cases only: a response that the selection step keeps off the streaming path,
+and a capability fallback while streaming. A response that is not eligible for
+conversion is forwarded unchanged. The selection follows
 the policy and those gates only: no size threshold takes part in it, and no
 operator-configured or internal candidate boundary exists. The v0.6.x
 `markdown_streaming_auto_threshold` directive and the v0.9.2-removed
