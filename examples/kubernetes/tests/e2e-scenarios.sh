@@ -349,7 +349,7 @@ build_configmap_mount_patch() {
 ensure_deployment_configmap_mount() {
     local container_index volume_index mount_index volumes_exist mounts_exist
     local container_names volume_names mount_names volume_configmap volume_path
-    local volume_configmap_exists mount_path mount_read_only
+    local volume_configmap_exists mount_path mount_read_only mount_sub_path
     local name_index object_name
 
     volumes_exist=""
