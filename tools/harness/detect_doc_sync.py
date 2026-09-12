@@ -357,18 +357,28 @@ def _values_streaming_mode_is_valid(values: str) -> bool:
     groups surrounded by optional whitespace: that pattern backtracks
     super-linearly, while a per-line scan stays linear on any input.
     """
-    has_streaming_block = False
-    has_valid_mode = False
+    in_streaming_mapping = False
     for line in values.splitlines():
         if line.rstrip() == "  streaming:":
-            has_streaming_block = True
+            in_streaming_mapping = True
+            continue
+        if in_streaming_mapping and line.strip() and not line.startswith("   "):
+            # A line indented at or below the mapping's own level ends it, so a
+            # `mode:` belonging to a sibling block cannot satisfy the check.
+            in_streaming_mapping = False
+        if not in_streaming_mapping:
             continue
         match = re.match(r"^ {4}mode:", line)
         if match is not None:
-            raw = line[match.end():].strip().strip('"').strip("'")
-            if raw in ("", "off", "auto", "force"):
-                has_valid_mode = True
-    return has_streaming_block and has_valid_mode
+            raw = line[match.end():].strip()
+            # The previous pattern allowed at most one optional quote on each
+            # side; strip exactly that, so `mode: off''` stays rejected.
+            if raw[:1] in ("\"", "'"):
+                raw = raw[1:]
+            if raw[-1:] in ("\"", "'"):
+                raw = raw[:-1]
+            return raw in ("", "off", "auto", "force")
+    return False
 
 
 def _check_chart_contract(template: str, values: str) -> List[str]:

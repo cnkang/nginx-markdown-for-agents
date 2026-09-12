@@ -61,7 +61,7 @@ DESTDIR ?=
 # wrong for that: a committed change shows an empty diff against HEAD, so a style
 # regression CI reports as new looks clean locally.  Default to the merge base
 # with the main branch, which is what CI compares against.
-STYLE_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
+STYLE_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null)
 SCHEMA_RELEASE_VERSION ?= 0.9.2
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
@@ -354,10 +354,10 @@ TEST_ALL_CORE := \
 	workflow-context-check \
 	license-check
 
-# ci-local-check runs the same gates CI runs, with the one difference that
-# matters: the writing-style regression compares against the MERGE BASE, not
-# HEAD.  With STYLE_BASE=HEAD (the test-all default) committed work shows an
-# empty diff, so a style regression that CI reports as new looks clean locally.
+# ci-local-check runs the CI gate set through test-all, so the two entry points
+# cannot drift apart.  The writing-style regression is part of test-all, and
+# STYLE_BASE already defaults to the merge base with origin/main, so committed
+# work is compared the way CI compares it instead of showing an empty diff.
 ci-local-check:
 	@echo "=== CI-equivalent gates ==="
 	@echo "test-all already runs the CI gate set, with the writing-style regression"
@@ -511,8 +511,9 @@ docs-check: docs-check-base
 # style budget is reserved for full Harness and release validation.
 # docs-style-check: advisory scan, never blocks.
 # docs-style-check-regression: files changed since STYLE_BASE (working tree +
-# staged) must have zero warnings. Local invocations default to HEAD; CI must
-# provide the actual fetched comparison base.
+# staged) must have zero warnings. STYLE_BASE defaults to the merge base with
+# the main branch, and the target fails when no base can be resolved, so the
+# gate cannot pass by comparing against an empty diff.
 # docs-style-check-baseline: total warnings must not exceed the retained
 # budget (0, see DEFAULT_BASELINE in check_writing_style.py); the maintained
 # docs now pass the audit clean, so any warning fails this gate.

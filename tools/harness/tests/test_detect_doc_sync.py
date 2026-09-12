@@ -349,3 +349,30 @@ def test_retired_failure_label_is_blocked_in_active_docs(tmp_path: Path) -> None
     errors = detector.check_public_config_contract(tmp_path)
 
     assert any("retired production metric" in error for error in errors)
+
+
+def test_streaming_mode_scan_keeps_the_previous_accepted_language() -> None:
+    """The line scan replaced a pattern; the accepted language must not grow.
+
+    The old pattern allowed at most one optional quote on each side of the
+    value, so `mode: "off"` passed and `mode: off''` did not. Values are also
+    accepted only while the scan is inside the `streaming:` mapping, so a
+    `mode:` belonging to a sibling block cannot satisfy the contract.
+    """
+    accepted = (
+        "markdown:\n  streaming:\n    mode: auto\n",
+        "markdown:\n  streaming:\n    mode:\n",
+        'markdown:\n  streaming:\n    mode: "off"\n',
+        "markdown:\n  streaming:\n    mode: 'force'\n",
+        'markdown:\n  streaming:\n    mode: "off' + "'\n",
+    )
+    rejected = (
+        "markdown:\n  streaming:\n    mode: off''\n",
+        "markdown:\n  streaming:\n    mode: bogus\n",
+        "markdown:\n  other:\n    mode: auto\n",
+        "markdown:\n  streaming:\n    enabled: true\n  other:\n    mode: auto\n",
+    )
+    for values in accepted:
+        assert detector._values_streaming_mode_is_valid(values), values
+    for values in rejected:
+        assert not detector._values_streaming_mode_is_valid(values), values
