@@ -70,8 +70,8 @@ The following patterns alone do **not** constitute true streaming:
 - Receiving input in batches but buffering the complete body internally before
   producing output on finalize.
 - Passing chunked responses through without conversion.
-- Treating a response-shape heuristic as a guarantee that the module will skip
-  conversion. In 0.9.2 the internal heuristic only selects a candidate path.
+- Treating streaming eligibility as a guarantee that the module will skip
+  conversion. In 0.9.2 eligibility only makes a response a streaming candidate.
   Hard eligibility and configured resource limits still decide conversion or
   policy-driven fallback.
 
@@ -117,17 +117,17 @@ markdown_streaming auto;
 | Value  | Behavior |
 |--------|----------|
 | `off`  | Disable true streaming. All convertible responses use the 0.7.x full-buffer path or are skipped per existing policy. |
-| `auto` | The module selects full-buffer or true streaming based on response type, size, transfer mode, feature combination, and risk assessment. |
+| `auto` | The module prefers true streaming for every convertible response that clears the eligibility gates and falls back to full-buffer conversion for the rest. Size and transfer mode take no part in the choice. |
 | `force` | Prefer true streaming. If the response does not meet streaming preconditions, fallback semantics apply — the module does not silently pretend it is streaming. |
 
 **Default (0.9.2 contract)**: unset and `off` select bounded full-buffer conversion. `auto` is an explicit mode. 0.9.2 supersedes the historical 0.8.0 `auto` default.
 
-### 2.2 Automatic Streaming Heuristic (active 0.9.2 contract)
+### 2.2 Automatic Streaming Selection (active 0.9.2 contract)
 
 The retired `markdown_stream_threshold` directive is historical and is not
-active in 0.9.2. Current selection uses `markdown_streaming auto` and a bounded
-internal response-shape heuristic. There is no replacement threshold
-directive.
+active in 0.9.2. Current selection uses `markdown_streaming auto`, which applies
+the hard eligibility gates and a bounded internal pipeline. There is no
+replacement threshold directive and no size heuristic.
 
 In `auto` mode, every response that clears the eligibility gates is a
 **streaming candidate**. Response size is not part of the decision and there is
@@ -140,10 +140,9 @@ policy), is not a candidate. The engine MUST verify those gates before selecting
 true streaming, and falls back to bounded full-buffer conversion when a response
 stays eligible for conversion but cannot stream.
 
-Responses below that internal candidate boundary with a known
-`Content-Length` default to the full-buffer path. Missing length and chunked
-responses are only candidates. Content type, cache validation, codec support,
-parser readiness, and resource policy still gate true streaming.
+A response that cannot stream still converts through the full-buffer path when
+it stays eligible for conversion. Content type, cache validation, codec support,
+parser readiness, and resource policy gate true streaming.
 
 ### 2.3 Pre-commit Replay Buffer
 
