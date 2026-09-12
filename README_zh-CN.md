@@ -100,8 +100,8 @@ http {
 }
 ```
 
-- `markdown_streaming off` 选择全缓冲转换。`auto` 使用有界的响应形态判断。
-  `force` 会在缓存和准入检查通过后请求流式转换。
+- `markdown_streaming off` 选择全缓冲转换。`auto` 对所有通过缓存与准入检查的响应优先流式转换，
+  仅对不具备流式资格的响应回退到全缓冲。`force` 会在同样的检查通过后请求流式转换。
 - `markdown_limits` 限制转换内存、处理时间、解压、流式缓冲区和并发工作量。
 - `markdown_accept strict` 适合分阶段上线。只有在明确需要时才使用
   `wildcard` 或 `force`。

@@ -83,8 +83,9 @@ when the result differs.
 
 ## 0.9.2 configuration essentials
 
-0.9.2 freezes the public configuration at 20 active directives (plus five
-retained reject-only migration names). Configure the
+0.9.2 freezes the public configuration at 20 active directives; the five names
+removed by the convergence are no longer registered and fail `nginx -t` with
+NGINX's standard `unknown directive` error. Configure the
 behavior explicitly so `nginx -T` shows the settings that operators selected.
 
 ```nginx
@@ -106,9 +107,10 @@ http {
 }
 ```
 
-- `markdown_streaming off` selects full-buffer conversion. `auto` uses a
-  bounded response-shape heuristic. `force` requests streaming after the
-  cache and eligibility checks pass.
+- `markdown_streaming off` selects full-buffer conversion. `auto` prefers
+  streaming for every response that clears the cache and eligibility gates and
+  falls back to full-buffer conversion only for ineligible responses. `force`
+  requests streaming after the same checks pass.
 - `markdown_limits` bounds conversion memory, time, decompression, streaming
   buffers, and concurrent work.
 - `markdown_accept strict` is a safe default for staged rollout. Use
@@ -161,8 +163,10 @@ eligibility checks still apply.
 0.9.2 is a breaking release candidate. Read the
 [release notes](docs/releases/0.9.2-release-notes.md) before upgrading.
 
-- 0.9.2 freezes 20 active directives and retains five removed names as
-  reject-only migration entries. Profiles, OTel, per-path metrics, shadow
+- 0.9.2 freezes 20 active directives; the five names removed by the convergence
+  are no longer registered, so `nginx -t` reports NGINX's standard
+  `unknown directive` error and [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)
+  names the replacement for each. Profiles, OTel, per-path metrics, shadow
   mode, and other removed legacy directives are no longer active. Run
   `nginx -t` after migration.
 - The convergence removed runtime dynamic configuration files, watchers,

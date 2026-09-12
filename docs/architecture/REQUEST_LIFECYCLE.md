@@ -51,9 +51,10 @@ configuration lifecycle.
 
 ## Engine selection
 
-`markdown_streaming off` selects bounded full-buffer conversion. `auto` uses a
-bounded internal response-shape heuristic. It does not expose a threshold
-directive. `force` requests streaming after the hard eligibility gates pass.
+`markdown_streaming off` selects bounded full-buffer conversion. `auto` prefers
+streaming for every response that clears the hard eligibility gates and falls
+back to full-buffer conversion for ineligible responses. It exposes no
+threshold directive. `force` requests streaming after the same gates pass.
 
 User-configured streaming exclusions (`markdown_stream_excluded_types`)
 select full-buffer or passthrough, as do built-in hard exclusions (full cache

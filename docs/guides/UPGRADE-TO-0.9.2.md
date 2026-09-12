@@ -10,10 +10,10 @@
 > prefix) or adapt the commands accordingly.
 
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
-0.9.2 is a **breaking release**. The release freezes 20 active directives and
-retains five removed names as reject-only migration entries. Those entries fail
-`nginx -t` with an explicit migration message until migrated. Older names that
-are no longer registered fail with `unknown directive`. Review
+0.9.2 is a **breaking release**. The release freezes 20 active directives; the
+five names it removed are no longer registered, so `nginx -t` fails them with
+NGINX's standard `unknown directive` error, and
+[MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) names the replacement for each. Review
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) and
 [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) before upgrading. If you are running
 0.9.0, complete [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following
@@ -304,8 +304,8 @@ sudo install -m 0755 ngx_http_markdown_filter_module.so \
 
 ### 5. Migrate the configuration
 
-0.9.2 is a breaking configuration release (20 active directives plus five
-reject-only migration entries). Before validating or restarting
+0.9.2 is a breaking configuration release (20 active directives; the five
+removed names are no longer registered). Before validating or restarting
 NGINX, apply the 0.9.2 migration:
 
 ```bash

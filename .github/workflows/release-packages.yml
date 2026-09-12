@@ -1446,38 +1446,22 @@ jobs:
             TAG="${GH_REF_NAME}"
             VERSION="${TAG#v}"
             SOURCE_URL="https://github.com/${GH_REPO}/archive/refs/tags/${TAG}.tar.gz"
-            # Source provenance comes from the checked-in registry, not from a
-            # digest computed here: a value derived from a live download anchors
-            # nothing, and a tag archive is not guaranteed to stay byte-identical.
             SOURCE_IDENTIFIER="source-${TAG}"
             SOURCE_SHA="$(awk -v id="${SOURCE_IDENTIFIER}" '$2 == id { print $1 }' \
               packaging/source-archive-digests.sha256)"
-            if [[ ! "${SOURCE_SHA}" =~ ^[0-9a-f]{64}$ ]]; then
-              echo "ERROR: no recorded source-archive digest for ${SOURCE_IDENTIFIER}." >&2
-              echo "Record it before releasing and commit the registry:" >&2
-              echo "  bash packaging/scripts/record-source-archive-digest.sh ${TAG}" >&2
-              exit 1
-            fi
-            SOURCE_TMP="$(mktemp)"
-            curl -fsSL --retry 3 --max-time 300 -o "${SOURCE_TMP}" "${SOURCE_URL}"
-            # Reuse the repository's fail-closed verifier so the release run
-            # checks the live archive against the recorded digest.
-            if ! bash packaging/scripts/verify-checksum.sh \
-                 -f "${SOURCE_TMP}" -i "${SOURCE_IDENTIFIER}" \
-                 -c packaging/source-archive-digests.sha256; then
-              rm -f "${SOURCE_TMP}"
-              echo "ERROR: the downloaded source archive does not match the recorded digest" >&2
-              echo "for ${SOURCE_IDENTIFIER}; review the archive change before releasing." >&2
-              exit 1
-            fi
-            rm -f "${SOURCE_TMP}"
-            # The registry entry is recorded after the tag is published, so the
-            # first run of a new tag has none yet; the generator accepts a
-            # missing digest and marks the archive's provenance unavailable.
+            # A digest of the tag's own auto-generated archive cannot be required
+            # here: committing the registry entry changes the tree, so the
+            # recorded digest and that archive could never agree. Pre-tag
+            # provenance is the commit identity, which the candidate evidence
+            # names and the release gates verify. The registry entry is recorded
+            # after this run publishes the archive, and the release process
+            # compares a download of that archive against it afterwards.
+            # It is optional here, and its absence is surfaced rather than fatal.
             if [[ -n "${SOURCE_SHA}" ]]; then
               SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
             else
               SOURCE_ARGS=(--source-url "${SOURCE_URL}")
+              echo "::warning title=Source archive digest not recorded::${SOURCE_IDENTIFIER} has no entry in packaging/source-archive-digests.sha256. After this run publishes the archive, record it with: bash packaging/scripts/record-source-archive-digest.sh ${TAG}"
             fi
             VERSION_ARGS=(--version "${VERSION}")
           else

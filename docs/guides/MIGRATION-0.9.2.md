@@ -8,9 +8,9 @@
 
 **0.9.2 is the final breaking release before 1.0.** The configuration surface
 shrank to 20 active directives. The five names removed by the pre-LTS
-convergence remain as reject-only migration entries. `nginx -t` reports an
-explicit migration message for those names. Other retired names are no longer
-registered and produce NGINX's standard "unknown directive" error.
+convergence are no longer registered, so `nginx -t` reports NGINX's standard
+"unknown directive" error for them too, and the replacement table below names
+the migration target for each.
 
 After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
 24 months.
@@ -126,7 +126,7 @@ lowercase implementation events in the structured `event=` field, such as
 | Category | Count | Action |
 |----------|-------|--------|
 | Historical 0.9.0/0.9.1 reject-only removals | 19 | Already removed before 0.9.2; see the historical table below |
-| 0.9.2 convergence reject-only entries | 5 | Remove or replace them. `nginx -t` emits an explicit migration message |
+| 0.9.2 convergence removals | 5 | Remove or replace them. `nginx -t` reports NGINX's standard `unknown directive` error |
 | Active directives retained | 20 | No change needed after migration |
 
 ---
