@@ -594,32 +594,6 @@ test_trusted_proxies_http_only_command_contract(void)
     TEST_PASS("trusted proxies command table is http-only");
 }
 
-static void
-test_dynconf_directives_support_published_contexts(void)
-{
-    static const char *names[] = {
-        "markdown_dynamic_config",
-        "markdown_dynamic_config_path",
-        "markdown_dynconf_dry_run"
-    };
-    ngx_command_t     *cmd;
-
-    TEST_SUBSECTION("dynconf directives enforce the published HTTP-only context");
-
-    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
-        cmd = find_directive(names[i]);
-        TEST_ASSERT(cmd != NULL,
-            "dynconf directive should be registered");
-        TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
-            "dynconf directive should allow HTTP context");
-        TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) == 0,
-            "dynconf directive should reject server context");
-        TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) == 0,
-            "dynconf directive should reject location context");
-    }
-
-    TEST_PASS("dynconf directives enforce HTTP-only context");
-}
 
 static void
 set_arg(ngx_str_t *arg, const char *s)
@@ -1162,7 +1136,6 @@ main(void)
     test_valid_values();
     test_streaming_zero_copy_flag_values();
     test_trusted_proxies_http_only_command_contract();
-    test_dynconf_directives_support_published_contexts();
     test_invalid_values();
     test_streaming_zero_copy_rejects_invalid_value();
     test_allocation_failure();

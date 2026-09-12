@@ -67,45 +67,6 @@ ngx_http_markdown_arg_equals(
 }
 
 /*
- * Error-returning handler for directives removed in the 0.9.2 pre-LTS
- * convergence (LTS-R008).
- *
- * The removed directive NAMES stay registered in the command table so that a
- * configuration still referencing one causes an explicit `nginx -t` failure
- * that names the removed directive and points at the migration path, rather
- * than nginx's generic "unknown directive" error or a silent no-op.  This
- * handler is wired for markdown_dynamic_config, markdown_dynamic_config_path,
- * markdown_dynconf_dry_run, markdown_prune_selectors, and
- * markdown_prune_protection_selectors.
- *
- * The message names the removed directive and includes the "removed", "no
- * longer", "static config", and "nginx -t" migration markers so a deployer
- * upgrading from a Dynconf/custom-selector configuration is never left
- * guessing.  Returns NGX_CONF_ERROR unconditionally regardless of the number
- * of arguments supplied.
- */
-static char *
-ngx_http_markdown_removed_directive(ngx_conf_t *cf,
-    ngx_command_t *cmd, /* NOSONAR: c:S995; NGINX callback signature
-                          * requires mutable command pointer */
-    void *conf)
-{
-    (void) conf;
-
-    if (cf == NULL || cmd == NULL || cmd->name.data == NULL) {
-        return NGX_CONF_ERROR;
-    }
-
-    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-        "markdown: directive \"%V\" was removed in 0.9.2 and is no longer "
-        "supported; migrate to static config validated by \"nginx -t\" plus "
-        "a reload (the dynamic-config and custom-selector features are "
-        "removed)",
-        &cmd->name);
-
-    return NGX_CONF_ERROR;
-}
-
 /*
  * Configuration directive handler: markdown_accept (strict | force).
  *

@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Check removed-directive properties against the production command table.
+"""Check the production command table against the canonical directive inventory.
 
-The C property test intentionally has a small, compilable test harness.  This
-companion check resolves the same ``ngx_string(...)`` entries from the real
-``ngx_http_markdown_filter_commands`` definition, so a stale test inventory
-cannot make a removed directive check pass while the production registry
-changes.
+The module keeps one string per directive in
+``ngx_http_markdown_directive_names.h`` and the production command table in
+``ngx_http_markdown_config_directives_impl.h``.  The two must agree exactly:
+a table entry without a canonical name, a canonical name without an entry, a
+duplicate, or a stale name left behind by a removal all indicate that the
+public directive surface drifted from its single source of truth.
+
+The comparison is derived from those two files, so it keeps working when
+directives are added or removed and never pins a count the sources already
+determine.
 """
 
 from __future__ import annotations
@@ -18,12 +23,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 COMMANDS = ROOT / "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
 NAMES = ROOT / "components/nginx-module/src/ngx_http_markdown_directive_names.h"
-PROPERTY = ROOT / "components/nginx-module/tests/unit/removed_directive_rejection_property_test.c"
 
 
 def _parse_directive_macro(
     line: str, continuation: str | None
 ) -> tuple[str, str] | None:
+    """Return the ``(macro, value)`` pair of a single directive definition."""
     prefix = "#define "
     name_prefix = "NGX_HTTP_MARKDOWN_DIRECTIVE_"
     definition = line.strip()
@@ -92,34 +97,28 @@ def _production_names() -> list[str]:
 def main() -> int:
     production = _production_names()
     macro_values = _macro_values()
-    names = NAMES.read_text(encoding="utf-8")
     macro_names = re.findall(
         r"X\((NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\)",
-        names,
+        NAMES.read_text(encoding="utf-8"),
     )
     try:
         inventory = [macro_values[name] for name in macro_names]
     except KeyError as exc:
         raise AssertionError(f"inventory references undefined name {exc}") from exc
+
+    if len(set(production)) != len(production):
+        duplicates = sorted(
+            name for name in set(production) if production.count(name) > 1
+        )
+        raise AssertionError(f"command table repeats directives: {duplicates}")
     if production != inventory:
         raise AssertionError(
             "production command table differs from the canonical directive inventory:\n"
             f"production={production}\n inventory={inventory}"
         )
-    if len(production) != 25 or len(set(production)) != len(production):
-        raise AssertionError("production command table must contain 25 unique directives")
-    removed = re.findall(
-        r"\"(markdown_[a-z0-9_]+)\"",
-        PROPERTY.read_text(encoding="utf-8"),
-    )
-    # The production-table invariant checks the RAW matches first: an
-    # active name listed among the removed candidates must fail loudly
-    # even before filtering.
-    if any(name in production for name in removed):
-        raise AssertionError("a removed directive is present in the production table")
     print(
-        "removed-directive registry: production ngx_http_markdown_filter_commands "
-        f"matches {len(production)} canonical entries; removed set is absent"
+        "directive registry parity: production ngx_http_markdown_filter_commands "
+        f"matches all {len(production)} canonical entries"
     )
     return 0
 

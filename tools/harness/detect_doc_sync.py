@@ -428,29 +428,35 @@ def _check_public_inventory(directives: str, inventory: str) -> List[str]:
     errors: List[str] = []
     names, rejected = _directive_registry(directives)
     count_match = re.search(
-        r"There are (\d+) `markdown_\*` command-table entries: "
-        r"(\d+) active parser entries and\s+(\d+) reject-only migration entries",
-        inventory,
+        r"There are (\d+) `markdown_\*` command-table entries", inventory
     )
     if count_match is None:
         errors.append(
             f"{PUBLIC_INVENTORY_PATH}: directive registry count statement is missing"
         )
     else:
-        documented = tuple(int(value) for value in count_match.groups())
-        actual = (len(names), len(names) - len(rejected), len(rejected))
-        if documented != actual:
+        documented = int(count_match.group(1))
+        if documented != len(names):
             errors.append(
-                f"{PUBLIC_INVENTORY_PATH}: directive counts {documented} do not "
-                f"match command table {actual}"
+                f"{PUBLIC_INVENTORY_PATH}: directive count {documented} does not "
+                f"match command table {len(names)}"
+            )
+        if not rejected and "active parser entry" not in inventory:
+            errors.append(
+                f"{PUBLIC_INVENTORY_PATH}: the inventory must state that the "
+                "command table holds only active parser entries"
             )
 
-    reject_section = inventory.partition("### Reject-only migration directives")[2]
-    errors.extend(
-        f"{PUBLIC_INVENTORY_PATH}: reject-only directive {name} is missing from the reject-only registry"
-        for name in rejected
-        if f"`{name}`" not in reject_section
-    )
+    if rejected:
+        # No reject-only entry is expected after the 0.9.2 removals; if one is
+        # reintroduced, its name must be listed in the registry section so the
+        # published contract still names every entry the table carries.
+        reject_section = inventory.partition("### Reject-only migration directives")[2]
+        errors.extend(
+            f"{PUBLIC_INVENTORY_PATH}: reject-only directive {name} is missing from the reject-only registry"
+            for name in rejected
+            if f"`{name}`" not in reject_section
+        )
     return errors
 
 

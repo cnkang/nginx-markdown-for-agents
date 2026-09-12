@@ -11,8 +11,11 @@ The pre-LTS 0.9.2 convergence removed the dynamic-configuration (dynconf)
 subsystem: the dynconf source files, schemas, and the ``dynconf_keys``
 inventory group no longer exist, so this gate no longer validates a dynconf
 contract.  The five removed directives (three dynconf directives plus the two
-custom-selector directives) are retained as reject-only migration handlers
-that fail ``nginx -t`` with migration guidance.
+custom-selector directives) are gone from the command table as well, so a
+configuration that still uses one fails ``nginx -t`` with nginx's own
+unknown-directive error.  The inventory therefore declares an empty
+``reject_only_directives`` list, and this gate fails closed if any entry
+reappears.
 """
 
 from __future__ import print_function
@@ -46,28 +49,21 @@ FFI_HEADER_PATH = os.path.join(ROOT, "components", "rust-converter", "include", 
 COMMAND_REGISTRY_ERROR = "ngx_command_t registry is missing or unterminated"
 MIGRATION_PREFIX = "Migration:"
 # Post-convergence target contract (pre-LTS 0.9.2): the dynconf subsystem and
-# the two custom-selector directives were removed. Five directives are retained
-# as reject-only migration handlers, leaving 20 active directives and 10 metric
-# families. See docs/harness/public-surface-inventory.json (schema_version
-# 0.9.3).
+# the two custom-selector directives were removed from the command table, so
+# every remaining name is active: 20 directives and 10 metric families. See
+# docs/harness/public-surface-inventory.json (schema_version 0.9.3).
 INVENTORY_SCHEMA_VERSION = "0.9.3"
 FINAL_DIRECTIVE_COUNT = 20
 FINAL_METRIC_COUNT = 10
-# The removed directives are retained with an error-returning handler so any
-# usage fails nginx -t with migration guidance (LTS-R008).
+# Handler name of the retired 0.9.2 migration entries.  Nothing in the command
+# table may use it any more, so any source entry classified through it is drift.
 REMOVED_DIRECTIVE_HANDLER = "ngx_http_markdown_removed_directive"
-FINAL_REJECT_ONLY_COUNT = 5
+FINAL_REJECT_ONLY_COUNT = 0
 
-# The five convergence removals retained as reject-only migration entries
-# (LTS-R008/R009): three dynconf directives and two custom-selector
-# directives.  The inventory must contain exactly these names.
-REJECT_ONLY_NAMES = frozenset({
-    "markdown_dynamic_config",
-    "markdown_dynamic_config_path",
-    "markdown_dynconf_dry_run",
-    "markdown_prune_selectors",
-    "markdown_prune_protection_selectors",
-})
+# No directive name may remain reject-only: the 0.9.2 removals dropped the
+# dynconf directives and the custom-selector directives from the command table
+# entirely (LTS-R008/R009), leaving no migration entries to declare.
+REJECT_ONLY_NAMES = frozenset()
 
 DIRECTIVE_RE = re.compile(r'ngx_string\("(markdown_[^"\\]+)"\)')
 REASON_CODE_RE = re.compile(r'^\s+(\w+)\s*=\s*(\d+)\s*,', re.MULTILINE)

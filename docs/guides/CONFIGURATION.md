@@ -301,5 +301,9 @@ longer watched.
 `markdown_dynconf_dry_run` — REMOVED. Validate candidate static configuration
 with `nginx -t` before reloading.
 
+These five names are no longer registered, so a configuration that still uses
+one fails `nginx -t` with NGINX's standard `unknown directive` error. There is
+no module-specific migration hint.
+
 For the complete 0.9.2 before/after removal table, see
 [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md#removed-active-directives--beforeafter).

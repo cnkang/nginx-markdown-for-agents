@@ -52,8 +52,9 @@ Migrate error-class integers by their named class and the table above.
 
 The 0.9.2 pre-LTS convergence removed the runtime dynconf subsystem.
 Remove `markdown_dynamic_config`, `markdown_dynamic_config_path`, and
-`markdown_dynconf_dry_run` from every configuration. The names remain
-reject-only migration entries so `nginx -t` reports the required change.
+`markdown_dynconf_dry_run` from every configuration. The names are no longer
+registered, so `nginx -t` reports NGINX's standard `unknown directive` error
+and the replacement table below names the migration target.
 
 There is no JSON watcher, runtime key set, last-known-good dynconf snapshot, or
 `nginx_markdown_dynconf_reloads_total` family in 0.9.2. Move each desired value
