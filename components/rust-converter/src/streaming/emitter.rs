@@ -1146,8 +1146,7 @@ impl IncrementalEmitter {
         self.check_buffer_budget(prefix_size)?;
         for _ in 0..self.blockquote_depth {
             self.buffer.extend_from_slice(b"> ");
-            self.markdown_escape_state.advance('>');
-            self.markdown_escape_state.advance(' ');
+            self.markdown_escape_state.advance_blockquote_marker();
         }
         Ok(())
     }
@@ -1305,8 +1304,7 @@ impl IncrementalEmitter {
             self.check_buffer_budget(prefix_size)?;
             for _ in 0..self.blockquote_depth {
                 self.buffer.extend_from_slice(b"> ");
-                self.markdown_escape_state.advance('>');
-                self.markdown_escape_state.advance(' ');
+                self.markdown_escape_state.advance_blockquote_marker();
             }
         }
         Ok(())
@@ -2704,7 +2702,11 @@ mod tests {
     }
 
     #[test]
-    fn test_blockquote_does_not_over_escape_content() {
+    fn test_blockquote_escapes_literal_block_markers() {
+        // Markdown still recognises block markers after `> `, so a literal `#`
+        // at the start of blockquote content must be escaped; otherwise the
+        // text becomes a heading.  The full-buffer engine escapes it, and the
+        // engines must agree.
         let output = emit_html(&[
             start_tag("blockquote"),
             start_tag("p"),
@@ -2713,13 +2715,13 @@ mod tests {
             end_tag("blockquote"),
         ]);
         assert!(
-            output.contains("> # heading"),
-            "blockquote content must not over-escape a leading '#', got: {}",
+            output.contains("> \\# heading"),
+            "blockquote content must escape a literal leading '#', got: {}",
             output
         );
         assert!(
-            !output.contains("> \\#"),
-            "blockquote content was over-escaped, got: {}",
+            !output.contains("> # heading"),
+            "a literal '#' was emitted unescaped and would become a heading, got: {}",
             output
         );
     }
