@@ -1783,6 +1783,20 @@ test_select_processing_path(void)
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     r.headers_out.content_length_n = 2048;
 
+    /* front matter output is produced by the full-buffer engine only */
+    conf.front_matter = 1;
+    conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+        "auto with front matter should route full-buffer");
+    TEST_ASSERT(selection.reason == NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE,
+        "front matter should preserve not_candidate reason");
+    conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+        "force with front matter should still route full-buffer");
+    conf.front_matter = 0;
+
     /* policy=off should route full-buffer */
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_OFF;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
