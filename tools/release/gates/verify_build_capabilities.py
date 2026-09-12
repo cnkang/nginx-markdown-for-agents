@@ -134,7 +134,9 @@ def _allowed_write_roots() -> set[pathlib.Path]:
     capability reports under the temp dir; on macOS /tmp is a symlink to
     /private/tmp, so the resolved aliases are included).
     """
-    roots = {pathlib.Path.cwd().resolve()}
+    # Resolve the repository root from this module so the allowlist does not
+    # depend on the directory the caller happened to run from.
+    roots = {pathlib.Path(__file__).resolve().parents[3]}
     roots.add(pathlib.Path(tempfile.gettempdir()).resolve())
     # The E2E smoke scripts stage capability reports under the platform
     # temp dir; on macOS /tmp is a symlink to /private/tmp, so include

@@ -1,5 +1,6 @@
 """Contract tests for the module-enabled C coverage runtime."""
 
+import re
 from pathlib import Path
 
 
@@ -11,14 +12,26 @@ STREAMING_FAILURE_CACHE_SCRIPT = (
 
 
 def _conflicting_location_blocks(script: str) -> list[str]:
-    """Return generated locations that violate the streaming/cache contract."""
-    location_blocks = [
-        segment.split("\n        }", 1)[0]
-        for segment in script.split("location ")[1:]
-    ]
+    """Return generated locations that violate the streaming/cache contract.
+
+    Each block is delimited by brace depth rather than a fixed terminator, so a
+    nested block or a differently indented closing brace cannot truncate the
+    text before its directives are read.
+    """
+    blocks: list[str] = []
+    for match in re.finditer(r"location\s+[^\s{]+\s*\{", script):
+        depth = 1
+        index = match.end()
+        while index < len(script) and depth > 0:
+            if script[index] == "{":
+                depth += 1
+            elif script[index] == "}":
+                depth -= 1
+            index += 1
+        blocks.append(script[match.start():index])
     return [
         block
-        for block in location_blocks
+        for block in blocks
         if "markdown_streaming force;" in block
         and "markdown_cache_validation full;" in block
     ]

@@ -6,9 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import subprocess
 import sys
 from typing import Any
+
+# A frozen candidate SHA is exactly 40 lowercase hexadecimal characters.
+SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 for _p in (str(REPO_ROOT), str(REPO_ROOT / "tools")):
@@ -122,8 +126,8 @@ def _candidate_identity_errors(
     if not isinstance(candidate, dict):
         return ["candidate must be an object"]
     source_sha = candidate.get("source_sha")
-    if not isinstance(source_sha, str) or len(source_sha) != 40:
-        return ["candidate.source_sha must be a 40-character SHA"]
+    if not isinstance(source_sha, str) or not SHA_PATTERN.fullmatch(source_sha):
+        return ["candidate.source_sha must be 40 lowercase hexadecimal characters"]
     if not git_head:
         return []
     try:

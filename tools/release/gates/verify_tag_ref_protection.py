@@ -273,7 +273,8 @@ def main() -> int:
     for ruleset in matching:
         print(
             f"OK: ruleset {ruleset.get('name')!r} (id {ruleset.get('id')}) "
-            f"protects {REQUIRED_INCLUDE_PATTERN} tags (deletion + non-fast-forward)"
+            f"protects {REQUIRED_INCLUDE_PATTERN} tags against deletion and "
+            "non-fast-forward updates, with no bypass actors"
         )
     return 0
 
