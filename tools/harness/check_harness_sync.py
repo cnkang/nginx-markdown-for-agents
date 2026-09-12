@@ -1295,10 +1295,20 @@ def check_clusterfuzzlite_build_config() -> CheckResult:
 
 
 def _dockerfile_final_user(content: str) -> str | None:
-    """Return the final Dockerfile USER principal, excluding any group."""
+    """Return the final Dockerfile stage's USER principal, excluding any group.
+
+    The scan stops at the FROM instruction that opens the final stage, so a
+    USER instruction belonging to an earlier stage is never attributed to the
+    image that is actually built.
+    """
     for raw_line in reversed(content.splitlines()):
         parts = raw_line.strip().split(None, 1)
-        if len(parts) == 2 and parts[0].upper() == "USER":
+        if not parts:
+            continue
+        keyword = parts[0].upper()
+        if keyword == "FROM":
+            return None
+        if len(parts) == 2 and keyword == "USER":
             return parts[1].split()[0].split(":", 1)[0].lower()
     return None
 

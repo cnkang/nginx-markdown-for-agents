@@ -66,8 +66,20 @@ http {
 }
 CONF
 
-    if "${nginx_bin}" -t -c "${negative_conf}" >/dev/null 2>&1; then
+    local negative_output
+    if negative_output="$("${nginx_bin}" -t -c "${negative_conf}" 2>&1)"; then
         echo "verify_module_load: directive parsed without load_module" >&2
+        rm -rf "${temp_dir}"
+        return 1
+    fi
+
+    # The failure must come from the unloaded module. Any other configuration
+    # error would otherwise satisfy this negative control.
+    if [[ "${negative_output}" != *"unknown directive"* \
+          || "${negative_output}" != *"markdown_filter"* ]]; then
+        echo "verify_module_load: expected an unknown-directive error for" \
+             "markdown_filter without load_module, got:" >&2
+        printf '%s\n' "${negative_output}" >&2
         rm -rf "${temp_dir}"
         return 1
     fi

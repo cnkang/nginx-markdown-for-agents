@@ -123,7 +123,7 @@ rust-lib-debug:
 	@echo "Building Rust library (debug) for $(RUST_TARGET)..."
 	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --features $(RUST_RELEASE_FEATURES)
 
-copy-headers:
+copy-headers: rust-lib
 	@echo "Copying headers to nginx module source..."
 	cp $(RUST_HEADER) $(NGINX_HEADER)
 
