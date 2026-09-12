@@ -381,13 +381,21 @@ def _values_streaming_mode_is_valid(values: str) -> bool:
         if line.rstrip() == "  streaming:":
             in_streaming_mapping = True
             continue
-        if in_streaming_mapping and line.strip() and not line.startswith("   "):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            # Blank lines and comments carry no indentation of their own, so
+            # they must not be read as the end of the mapping.
+            continue
+        if in_streaming_mapping and not line.startswith("   "):
             in_streaming_mapping = False
         if not in_streaming_mapping:
             continue
         value = _mode_line_value(line)
-        if value is not None:
-            return value in ("", "off", "auto", "force")
+        if value in ("", "off", "auto", "force"):
+            return True
+        # A `mode:` carrying something else is simply not a match; the pattern
+        # this replaced searched the whole block, so keep scanning for a valid
+        # one instead of deciding on the first occurrence.
     return False
 
 
