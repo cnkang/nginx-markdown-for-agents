@@ -378,6 +378,9 @@ def test_streaming_mode_scan_keeps_the_previous_accepted_language() -> None:
         "markdown:\n  streaming:\n    mode: bogus\n",
         "markdown:\n  other:\n    mode: auto\n",
         "markdown:\n  streaming:\n    enabled: true\n  other:\n    mode: auto\n",
+        # A lone CR is not a line boundary for the pattern this replaced, so it
+        # must not become one here either.
+        "markdown:\r  streaming:\r    mode: auto\r",
     )
     for values in accepted:
         assert detector._values_streaming_mode_is_valid(values), values

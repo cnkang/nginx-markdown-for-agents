@@ -377,7 +377,10 @@ def _values_streaming_mode_is_valid(values: str) -> bool:
     block cannot satisfy the contract.
     """
     in_streaming_mapping = False
-    for line in values.splitlines():
+    # Split on "\n" only: `str.splitlines` also breaks on a lone CR (and other
+    # separators) that `re.MULTILINE` never treated as a line boundary, which
+    # would widen the accepted language. Trailing CR from CRLF is trimmed below.
+    for line in values.split("\n"):
         if line.rstrip() == "  streaming:":
             in_streaming_mapping = True
             continue
