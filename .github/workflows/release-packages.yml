@@ -1446,7 +1446,31 @@ jobs:
             TAG="${GH_REF_NAME}"
             VERSION="${TAG#v}"
             SOURCE_URL="https://github.com/${GH_REPO}/archive/refs/tags/${TAG}.tar.gz"
-            SOURCE_SHA="$(curl -fsSL "${SOURCE_URL}" | sha256sum | awk '{print $1}')"
+            # Source provenance comes from the checked-in registry, not from a
+            # digest computed here: a value derived from a live download anchors
+            # nothing, and a tag archive is not guaranteed to stay byte-identical.
+            SOURCE_IDENTIFIER="source-${TAG}"
+            SOURCE_SHA="$(awk -v id="${SOURCE_IDENTIFIER}" '$2 == id { print $1 }' \
+              packaging/source-archive-digests.sha256)"
+            if [[ ! "${SOURCE_SHA}" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "ERROR: no recorded source-archive digest for ${SOURCE_IDENTIFIER}." >&2
+              echo "Record it before releasing and commit the registry:" >&2
+              echo "  bash packaging/scripts/record-source-archive-digest.sh ${TAG}" >&2
+              exit 1
+            fi
+            SOURCE_TMP="$(mktemp)"
+            curl -fsSL --retry 3 --max-time 300 -o "${SOURCE_TMP}" "${SOURCE_URL}"
+            # Reuse the repository's fail-closed verifier so the release run
+            # checks the live archive against the recorded digest.
+            if ! bash packaging/scripts/verify-checksum.sh \
+                 -f "${SOURCE_TMP}" -i "${SOURCE_IDENTIFIER}" \
+                 -c packaging/source-archive-digests.sha256; then
+              rm -f "${SOURCE_TMP}"
+              echo "ERROR: the downloaded source archive does not match the recorded digest" >&2
+              echo "for ${SOURCE_IDENTIFIER}; review the archive change before releasing." >&2
+              exit 1
+            fi
+            rm -f "${SOURCE_TMP}"
             SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
             VERSION_ARGS=(--version "${VERSION}")
           else
