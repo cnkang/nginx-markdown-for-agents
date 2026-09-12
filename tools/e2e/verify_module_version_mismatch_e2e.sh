@@ -66,6 +66,7 @@ run_nginx() {
         -v "${conf}:/etc/nginx/nginx.conf:ro" \
         "${IMAGE}" \
         sh -c 'apk add --no-cache libgcc >/dev/null 2>&1 || true; nginx -t 2>&1'
+        return 0
 }
 
 echo "=== control: ${IMAGE} without the module must pass ===" >&2
@@ -114,7 +115,7 @@ fi
 if [[ "${mismatch_output}" != *"binary compatible"* \
       && "${mismatch_output}" != *"version"* \
       && "${mismatch_output}" != *"signature"* ]]; then
-    echo "ERROR: the failure does not report a version or signature mismatch," \
+    echo "ERROR: the failure does not report a version or signature mismatch," >&2 \
          "so it does not exercise the incompatible-NGINX contract" >&2
     printf '%s\n' "${mismatch_output}" >&2
     exit 1

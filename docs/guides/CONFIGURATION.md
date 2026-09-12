@@ -1,9 +1,9 @@
 # Configuration Reference (0.9.2)
 
 This is the frozen configuration reference. The command table has 20
-active `markdown_*` directives; the five names removed by the convergence are no
-longer registered and fail `nginx -t` with NGINX's standard `unknown directive`
-error. Resource limits use one `markdown_limits`
+active `markdown_*` directives. The module no longer registers the five names
+removed by the convergence, so `nginx -t` fails them with NGINX's standard
+`unknown directive` error. Resource limits use one `markdown_limits`
 directive with bounded key/value entries. Configuration is static in 0.9.2.
 Validate changes with `nginx -t` before a controlled reload.
 
@@ -255,8 +255,8 @@ mapping rows below cover only removals that appeared after that table
 `markdown_parse_timeout`, `markdown_parser_budget`,
 `markdown_stream_threshold`, `markdown_stream_precommit_buffer`,
 `markdown_stream_flush_min`).  `nginx -t` rejects every removed directive with
-NGINX's standard "unknown directive" error, because no removed name is
-registered any more. The migration-guide pointer in the error message exists
+NGINX's standard "unknown directive" error, because the module registers no
+removed name any more. The migration-guide pointer in the error message exists
 only for the 0.9.0 and 0.9.1 removals.
 
 ## Removed directives
@@ -301,7 +301,7 @@ longer watched.
 `markdown_dynconf_dry_run` — REMOVED. Validate candidate static configuration
 with `nginx -t` before reloading.
 
-These five names are no longer registered, so a configuration that still uses
+The module no longer registers these five names, so a configuration that still uses
 one fails `nginx -t` with NGINX's standard `unknown directive` error. There is
 no module-specific migration hint.
 

@@ -67,6 +67,7 @@ cleanup() {
         kind delete cluster --name "${CLUSTER}" >/dev/null 2>&1 || true
     fi
     rm -rf "${WORK_DIR}"
+    return 0
 }
 trap cleanup EXIT
 

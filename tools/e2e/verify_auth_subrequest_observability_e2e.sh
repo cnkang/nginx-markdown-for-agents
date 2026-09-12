@@ -59,6 +59,7 @@ WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/auth-obs-e2e.XXXXXX")"
 cleanup() {
     docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
     rm -rf "${WORK_DIR}"
+    return 0
 }
 trap cleanup EXIT
 

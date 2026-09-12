@@ -39,7 +39,7 @@ removed or not part of the contract.
 
 ### 3. Removed ≠ deprecated
 
-The five convergence names are unregistered; NGINX reports its standard
+The module no longer registers the five convergence names. NGINX reports its standard
 `unknown directive` error for them, as listed below.
 Other removed names fail `nginx -t` with NGINX's standard
 `unknown directive` error. If docs or

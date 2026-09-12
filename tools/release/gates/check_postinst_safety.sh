@@ -513,6 +513,10 @@ check_trusted_path() {
                     extra_path_line=$line_num
                     break
                     ;;
+                *)
+                    # Any other bare line is not the PATH export this pass looks
+                    # for; keep scanning.
+                    ;;
             esac
         done < "$stripped_tmp"
     fi

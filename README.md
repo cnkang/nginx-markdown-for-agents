@@ -83,8 +83,8 @@ when the result differs.
 
 ## 0.9.2 configuration essentials
 
-0.9.2 freezes the public configuration at 20 active directives; the five names
-removed by the convergence are no longer registered and fail `nginx -t` with
+0.9.2 freezes the public configuration at 20 active directives. The five names removed by
+the convergence are no longer registered and fail `nginx -t` with
 NGINX's standard `unknown directive` error. Configure the
 behavior explicitly so `nginx -T` shows the settings that operators selected.
 
@@ -108,10 +108,10 @@ http {
 ```
 
 - `markdown_streaming off` selects full-buffer conversion. `auto` prefers
-  streaming for every response that clears the eligibility gates; a response
-  that is eligible for conversion but cannot stream is converted with the
-  full-buffer engine, and a response that is not eligible for conversion is
-  forwarded unchanged. `force` requests streaming after the same checks pass.
+  streaming for every response that clears the eligibility gates. A response
+  that is eligible for conversion but cannot stream, the module converts with the
+  full-buffer engine instead, and it passes a response that is not eligible for
+  conversion through unchanged. `force` requests streaming after the same checks pass.
 - `markdown_limits` bounds conversion memory, time, decompression, streaming
   buffers, and concurrent work.
 - `markdown_accept strict` is a safe default for staged rollout. Use
@@ -164,7 +164,7 @@ eligibility checks still apply.
 0.9.2 is a breaking release candidate. Read the
 [release notes](docs/releases/0.9.2-release-notes.md) before upgrading.
 
-- 0.9.2 freezes 20 active directives; the five names removed by the convergence
+- 0.9.2 freezes 20 active directives. The five names removed by the convergence
   are no longer registered, so `nginx -t` reports NGINX's standard
   `unknown directive` error and [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)
   names the replacement for each. Profiles, OTel, per-path metrics, shadow
