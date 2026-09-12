@@ -165,8 +165,8 @@ checked in this order:
 - a header-snapshot rollback failure also fails closed regardless of policy: the
   streaming handle is aborted and the response is rejected, because the header
   state can no longer be restored
-- every other pre-commit failure follows `markdown_on_error`: `pass` fails open
-  with the original HTML, `fail_closed` rejects the response
+- every other pre-commit failure follows `markdown_error_policy`: `pass` fails
+  open with the original HTML, `fail_closed` rejects the response
 
 ### 2.3 Pre-commit Replay Buffer
 
