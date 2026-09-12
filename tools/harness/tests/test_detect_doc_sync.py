@@ -365,6 +365,13 @@ def test_streaming_mode_scan_keeps_the_previous_accepted_language() -> None:
         'markdown:\n  streaming:\n    mode: "off"\n',
         "markdown:\n  streaming:\n    mode: 'force'\n",
         'markdown:\n  streaming:\n    mode: "off' + "'\n",
+        # A comment or a blank line between the block and its mode must not be
+        # mistaken for the end of the mapping.
+        "markdown:\n  streaming:\n    # pick a policy\n    mode: auto\n",
+        "markdown:\n  streaming:\n\n    mode: force\n",
+        # The replaced pattern searched the whole block, so a valid mode later
+        # in it still counts even when an earlier value was not one.
+        "markdown:\n  streaming:\n    mode: bogus\n    mode: auto\n",
     )
     rejected = (
         "markdown:\n  streaming:\n    mode: off''\n",
