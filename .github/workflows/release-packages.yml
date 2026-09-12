@@ -1471,7 +1471,14 @@ jobs:
               exit 1
             fi
             rm -f "${SOURCE_TMP}"
-            SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
+            # The registry entry is recorded after the tag is published, so the
+            # first run of a new tag has none yet; the generator accepts a
+            # missing digest and marks the archive's provenance unavailable.
+            if [[ -n "${SOURCE_SHA}" ]]; then
+              SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
+            else
+              SOURCE_ARGS=(--source-url "${SOURCE_URL}")
+            fi
             VERSION_ARGS=(--version "${VERSION}")
           else
             TAG=""

@@ -90,7 +90,7 @@ trap 'rm -f "${TMP_ARCHIVE}"' EXIT
 curl -fsSL --retry 3 --max-time 300 -o "${TMP_ARCHIVE}" "${URL}" \
     || die "download failed: ${URL}"
 
-ACTUAL="$(sha256sum "${TMP_ARCHIVE}" | awk '{print $1}')"
+ACTUAL="$(shasum -a 256 "${TMP_ARCHIVE}" 2>/dev/null | awk '{print $1}' || sha256sum "${TMP_ARCHIVE}" | awk '{print $1}')"
 [[ "${ACTUAL}" =~ ^[0-9a-f]{64}$ ]] || die "unexpected digest shape: ${ACTUAL}"
 
 RECORDED="$(awk -v id="${IDENTIFIER}" '$2 == id { print $1 }' "${REGISTRY}")"
@@ -108,7 +108,7 @@ fi
 TMP_REGISTRY="$(mktemp "${TMPDIR:-/tmp}/source-registry.XXXXXX")"
 trap 'rm -f "${TMP_ARCHIVE}" "${TMP_REGISTRY}"' EXIT
 {
-    grep -v -E "^[0-9a-f]{64}  ${IDENTIFIER}$" "${REGISTRY}" || true
+    awk -v id="${IDENTIFIER}" '$2 != id' "${REGISTRY}" || true
     printf '%s  %s\n' "${ACTUAL}" "${IDENTIFIER}"
 } > "${TMP_REGISTRY}"
 mv "${TMP_REGISTRY}" "${REGISTRY}"
