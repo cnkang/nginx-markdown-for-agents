@@ -35,8 +35,21 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 MODULE_SO="${MODULE_SO:-${REPO_ROOT}/build/ngx_http_markdown_filter_module.so}"
 IMAGE="${IMAGE:-nginx:1.30.4-alpine}"
-CONTAINER="markdown-realip-e2e"
+# A unique suffix keeps concurrent invocations from removing each other's
+# container; the cleanup trap targets only the container this run created.
+CONTAINER="markdown-realip-e2e-$$"
 PORT="${PORT:-18088}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --image) IMAGE="$2"; shift 2 ;;
+        --help|-h)
+            sed -n '12,18p' "$0" | sed 's/^# \{0,1\}//' >&2
+            exit 0
+            ;;
+        *) echo "ERROR: unknown argument: $1" >&2; exit 1 ;;
+    esac
+done
 
 if ! command -v docker >/dev/null 2>&1; then
     echo "SKIP: docker is unavailable" >&2

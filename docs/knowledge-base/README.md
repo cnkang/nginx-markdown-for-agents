@@ -107,6 +107,7 @@ a machine-readable value or count.
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-09-12 | Record that `markdown_prune_selectors` and `markdown_prune_protection_selectors` join the other convergence names as unregistered directives: they fail `nginx -t` with NGINX's standard `unknown directive` error instead of a module migration message. |
 | 0.9.2 | 2026-09-08 | Align the KB with the static 0.9.2 contract: remove active dynconf-key guidance and document the five reject-only migration entries. |
 | 0.9.2 | 2026-08-26 | Synchronize the knowledge-base contract with the current FFI inventory after removing retired exports. |
 | 0.9.2 | 2026-08-12 | Synchronize the knowledge-base contract with the current dynconf and FFI inventory. |

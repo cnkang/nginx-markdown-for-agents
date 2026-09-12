@@ -15,7 +15,8 @@
 # The script downloads the tag archive, requires it to match any existing
 # entry, and writes the reviewed line into this file. Commit the result.
 #
-# The release workflow looks the tag up here and fails closed when the tag has
-# no entry, so a release cannot publish unverified source provenance.
+# The release workflow looks the tag up here and records the digest it finds in
+# the release manifest. It warns, without failing, when the tag has no entry yet,
+# because an entry can only be created after the run publishes the archive.
 #
 # Identifier convention: source-<tag>          (e.g. source-v0.9.2)

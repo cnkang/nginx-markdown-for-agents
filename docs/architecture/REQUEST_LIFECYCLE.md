@@ -53,8 +53,11 @@ configuration lifecycle.
 
 `markdown_streaming off` selects bounded full-buffer conversion. `auto` prefers
 streaming for every response that clears the hard eligibility gates and falls
-back to full-buffer conversion for ineligible responses. It exposes no
-threshold directive. `force` requests streaming after the same gates pass.
+back to bounded full-buffer conversion for responses that stay eligible for
+conversion but cannot stream. Responses that fail the conversion gates
+(method, status, content type, or `Accept`) never convert: they pass through or
+follow the configured rejection path. `auto` exposes no threshold directive.
+`force` requests streaming after the same gates pass.
 
 User-configured streaming exclusions (`markdown_stream_excluded_types`)
 select full-buffer or passthrough, as do built-in hard exclusions (full cache
