@@ -245,8 +245,10 @@ full-buffer and streaming FFI entrypoints.
 `markdown_streaming` defaults to `off`. Unset and `off` select bounded
 full-buffer conversion. Explicit `auto` prefers streaming for every response
 that clears the hard compatibility gates (HEAD, 304, full conditional
-validation, and excluded content types; the streaming budget is enforced at run
-time, not during selection). A response that
+validation, excluded content types, and `markdown_front_matter on`, which
+requires the full-buffer engine because the front matter is assembled from the
+completed metadata set). The streaming budget is enforced at run time, not
+during selection. A response that
 stays eligible for conversion but cannot stream falls back to bounded
 full-buffer conversion; a response that is not eligible for conversion is
 forwarded unchanged. The selection follows
