@@ -1514,7 +1514,7 @@ brew install pcre
 # Update Rust toolchain
 rustup update
 
-# Check Rust version (must be 1.98.0+)
+# Check Rust version (must be 1.98.1, the pinned toolchain; MSRV 1.98)
 rustc --version
 
 # Clean and rebuild

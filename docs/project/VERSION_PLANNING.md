@@ -4,7 +4,7 @@
 
 This document is the active version-planning contract for the final pre-v1.0
 release and the compatibility policy that follows it. Older 0.4.x through
-0.6.x plans describe completed historical work, they no longer define current
+0.6.x plans describe completed historical work. They no longer define current
 compatibility or release scope.
 
 ## Current Release State

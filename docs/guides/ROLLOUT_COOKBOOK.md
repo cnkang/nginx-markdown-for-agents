@@ -1215,7 +1215,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 ```bash
 # Show all eligibility and Accept skip reasons; disabled is intentionally excluded.
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "reason=(not_eligible|skipped_[a-z_]+)" | \
+  grep -E "reason=(not_eligible|skipped_[a-z_]+|bypass_no_transform)" | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 ```
 
@@ -1360,7 +1360,7 @@ Stop expanding rollout scope and investigate if any of the following occur:
 | Trigger | What It Means | How to Detect |
 |---------|---------------|---------------|
 | Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | Decision-log failure outcomes (see command below; the `reason` field carries the underlying cause, not the outcome), or watch the failed `requests_total` series |
-| Repeated internal failure reasons | Internal failure categories appear repeatedly, for example `memory_budget_exceeded` or `ffi_panic` — check the decision logs | Inspect the `category=` field in decision log entries and the NGINX logs; these categories do not appear as `requests_total` reason labels |
+| Repeated internal failure reasons | Internal failure reasons appear repeatedly, for example `memory_budget_exceeded` or `ffi_panic` — check the decision logs | Inspect the `reason=` field for the specific cause and the `category=` field that groups it (for example `resource_limit`); neither appears as a `requests_total` reason label |
 | Conversion latency exceeding `markdown_limits` | Conversions are taking too long — may indicate large pages, resource contention, or converter performance issues | Check latency buckets; look for conversions in the highest `le` bucket or timeouts in logs |
 | Upstream error rate increase | The module may be causing upstream issues (unlikely but possible with decompression or buffering interactions) | Compare upstream 5xx rates before and after enablement |
 | Unexpected `Content-Type` in responses | Converted responses have wrong Content-Type, or non-HTML responses are being processed | `curl -sD - -H "Accept: text/markdown" http://localhost/your-path/` and inspect the response headers (see command below) |

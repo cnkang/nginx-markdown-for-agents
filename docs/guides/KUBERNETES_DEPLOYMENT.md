@@ -324,7 +324,7 @@ the module-build stage.
 
 **Symptom:** Build fails with Rust compiler errors.
 
-**Cause:** Source builds require Rust 1.98.0 or newer (MSRV 1.98).
+**Cause:** Source builds require Rust 1.98.1, the pinned toolchain. The declared MSRV is 1.98.
 Network issues during `rustup` installation can also cause failures.
 
 **Solution:**
