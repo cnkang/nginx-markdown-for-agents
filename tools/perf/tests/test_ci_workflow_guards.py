@@ -728,6 +728,28 @@ def test_harness_tooling_provenance_step_proves_objects_are_present() -> None:
     assert "continue-on-error" not in step, sorted(step)
 
 
+def test_release_source_provenance_reads_the_recorded_registry() -> None:
+    """The release run must take source provenance from recorded metadata.
+
+    Computing the digest from a live download anchors nothing, and a tag
+    archive is not guaranteed to stay byte-identical, so the workflow looks the
+    tag up in packaging/source-archive-digests.sha256, verifies the download
+    against it, and fails closed when the entry is absent.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    workflow = (repo_root / ".github" / "workflows" / "release-packages.yml").read_text(
+        encoding="utf-8")
+    assert "packaging/source-archive-digests.sha256" in workflow
+    assert "record-source-archive-digest.sh" in workflow
+    assert "verify-checksum.sh" in workflow
+    assert (
+        "no recorded source-archive digest for ${SOURCE_IDENTIFIER}" in workflow
+    )
+    assert "| sha256sum | awk" not in workflow, (
+        "the release run must not derive the source digest from a download"
+    )
+
+
 def test_harness_security_checks_step_stays_blocking() -> None:
     """Requirement 3.8: the step running the provenance gate must block.
 
