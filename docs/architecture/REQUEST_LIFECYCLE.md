@@ -4,8 +4,11 @@ This document describes the request path at the frozen release-contract boundary
 The important invariant is that eligibility, engine selection, streaming
 backpressure, and terminal metrics describe one request. Backpressure may
 suspend that same request multiple times, but every event remains associated
-with it. The module records the terminal outcome and attempt metric exactly
-once.
+with it. The module records the terminal outcome exactly once, through
+`nginx_markdown_requests_total`. That counter is distinct from
+`nginx_markdown_conversion_attempts_total`, which counts the point where engine
+selection commits, so one request can contribute an attempt and later a
+terminal outcome in a different category.
 
 ## Lifecycle
 

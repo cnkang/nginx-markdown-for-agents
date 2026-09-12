@@ -162,7 +162,7 @@ expression when you add or rename alert rules.
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
 | Failure rate | > 5% for 10 minutes | Notify team channel |
-| Resource limit rate (nginx_markdown_requests_total{reason=~"memory_budget_exceeded|timeout|budget_exceeded"}) | > 5% for 10 minutes | Notify team channel |
+| Resource limit rate (nginx_markdown_requests_total{outcome="failed_closed",reason=~"memory_budget_exceeded|timeout|budget_exceeded"}) | > 5% for 10 minutes | Notify team channel |
 | Conversion time (p95) | > 200ms for 15 minutes | Notify team channel |
 | Memory usage | > 80% of limit | Notify team channel |
 

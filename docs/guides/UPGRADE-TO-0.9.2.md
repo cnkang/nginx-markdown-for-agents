@@ -344,7 +344,7 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # tree is a disposable copy: edit in place WITHOUT .bak backups, so no
 # stale backup file can be scanned below, counted as a second
 # load_module entry, or loaded by a wildcard include during nginx -t.
-if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${STAGED_ROOT}" 2>/dev/null \
+if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors|markdown_profile|markdown_streaming_zero_copy" "${STAGED_ROOT}" 2>/dev/null \
     | while read -r staged_conf; do
         sudo sed -i -E \
             -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
@@ -352,6 +352,8 @@ if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown
             -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_profile[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_streaming_zero_copy[[:space:]]+[^;]*;||" \
             "${staged_conf}" || exit 1
       done; then
     pipeline_status=(0 0)
