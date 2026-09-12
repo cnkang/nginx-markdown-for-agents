@@ -29,8 +29,17 @@ Publication and artifact availability are separate release gates.
 1. **Stop NGINX gracefully:**
 
    ```bash
-   sudo nginx -s quit
+   # Record whether systemd owns an active NGINX service BEFORE signalling
+   # the master: a unit reports its own state, so the detection has to run
+   # while the service is still active.
+   SYSTEMD_OWNS_NGINX=0
    if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
+     SYSTEMD_OWNS_NGINX=1
+     echo "systemd owns an active nginx unit: prefer 'sudo systemctl stop nginx' so the unit state and the master shutdown stay consistent" >&2
+   fi
+
+   sudo nginx -s quit
+   if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
      # systemd-managed NGINX: wait for a confirmed shutdown.
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
      drain_status=$?
@@ -144,10 +153,18 @@ Publication and artifact availability are separate release gates.
 2. **Restore the matching 0.9.1 configuration, install, validate, and start:**
 
    ```bash
-   # Reuse the guarded shutdown logic from the prebuilt procedure above:
-   # detect whether systemd owns NGINX before invoking systemctl.
-   sudo nginx -s quit
+   # Reuse the guarded shutdown logic from the prebuilt procedure above.
+   # Record whether systemd owns an active NGINX service BEFORE signalling
+   # the master: a unit reports its own state, so the detection has to run
+   # while the service is still active.
+   SYSTEMD_OWNS_NGINX=0
    if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
+     SYSTEMD_OWNS_NGINX=1
+     echo "systemd owns an active nginx unit: prefer 'sudo systemctl stop nginx' so the unit state and the master shutdown stay consistent" >&2
+   fi
+
+   sudo nginx -s quit
+   if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
      drain_status=$?
      # Abort when the drain hit the timeout, and require an explicit
@@ -261,9 +278,17 @@ Key reversions:
 
 ```bash
 # Reuse the guarded shutdown logic from the prebuilt procedure:
-# detect whether systemd owns NGINX before invoking systemctl.
-sudo nginx -s quit
+# Record whether systemd owns an active NGINX service BEFORE signalling
+# the master: a unit reports its own state, so the detection has to run
+# while the service is still active.
+SYSTEMD_OWNS_NGINX=0
 if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
+  SYSTEMD_OWNS_NGINX=1
+  echo "systemd owns an active nginx unit: prefer 'sudo systemctl stop nginx' so the unit state and the master shutdown stay consistent" >&2
+fi
+
+sudo nginx -s quit
+if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
   timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
   drain_status=$?
   # Abort when the drain hit the timeout, and require an explicit

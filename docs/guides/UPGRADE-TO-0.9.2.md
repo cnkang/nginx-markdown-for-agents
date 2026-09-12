@@ -1803,8 +1803,9 @@ if ! curl -fsS --max-time 10 -H 'Accept: text/markdown' \
   exit 1
 fi
 if ! grep -qi '^Content-Type: text/markdown' "${PROBE_HEADERS}"; then
-  echo "ERROR: post-start check failed (probe response is not text/markdown); keeping ${MODULE_BACKUP} for rollback" >&2
-  echo "  Inspect the probe response and verify ${PROBE_PATH} converts before removing the backup." >&2
+  echo "ERROR: post-start check failed (probe response is not text/markdown); restoring the previous module so the migration trap's configuration restore pairs with it" >&2
+  echo "  Inspect the probe response and verify ${PROBE_PATH} converts before retrying the migration." >&2
+  restore_previous_module_and_config || true
   rm -f "${PROBE_BODY}" "${PROBE_HEADERS}"
   exit 1
 fi
