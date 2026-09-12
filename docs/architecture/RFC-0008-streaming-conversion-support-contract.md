@@ -156,10 +156,14 @@ engines on these pre-selection guards alone:
 - a conditional-request policy that needs a complete ETag before the headers
 - content types excluded by the configuration
 
-Everything else is a streaming candidate. Codec routing is applied separately,
-and failures that occur after the streaming path is selected (parser readiness,
-the per-request budget) follow the configured fail-open or error policy rather
-than silently falling back.
+Everything else is a streaming candidate. Codec routing is applied separately.
+Failures that occur after the streaming path is selected fall into two classes,
+checked in this order:
+
+- a capability fallback (`ERROR_STREAMING_FALLBACK`) returns the response to the
+  bounded full-buffer engine regardless of the configured error policy
+- every other pre-commit failure follows `markdown_on_error`: `pass` fails open
+  with the original HTML, `fail_closed` rejects the response
 
 ### 2.3 Pre-commit Replay Buffer
 

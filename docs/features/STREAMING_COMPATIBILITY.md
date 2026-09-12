@@ -114,9 +114,12 @@ a response-size heuristic. The 0.9.2 default is `off` (bounded full-buffer).
 | `markdown_streaming force` | Require streaming for every compatible response. A combination that can never satisfy it, such as `markdown_streaming force` with `markdown_front_matter on`, is rejected at `nginx -t` time. |
 
 The hard gates apply to every policy: HEAD requests, 304 responses, full
-conditional validation, excluded content types, the streaming memory budget,
-and front matter (`markdown_front_matter on` routes to full-buffer). No size
-threshold and no internal candidate boundary takes part in path selection.
+conditional validation, excluded content types, and front matter
+(`markdown_front_matter on` routes to full-buffer). The streaming memory budget
+is not a selection gate: it is enforced while streaming runs, and a response
+that exceeds it follows the configured error handling rather than being
+re-routed. No size threshold and no internal candidate boundary takes part in
+path selection.
 
 ### GFM constructs and the streaming path
 
