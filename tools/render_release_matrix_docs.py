@@ -893,7 +893,13 @@ def generate_release_notes(
 
     # --- Section 4: Changes from previous ---
     if previous_data is not None:
-        changes = _rn_generate_changes(data, entries, previous_data)
+        try:
+            changes = _rn_generate_changes(data, entries, previous_data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SystemExit(
+                "ERROR: the previous release data does not carry the fields the "
+                f"change summary reads: {exc}"
+            ) from exc
         lines.extend(changes)
 
     return "\n".join(lines)
