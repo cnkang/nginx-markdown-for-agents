@@ -165,6 +165,12 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_front_matter on|off
      *
+     * Conflict (config conflict): markdown_streaming force + front_matter on
+     * => error.  The YAML front matter is assembled from the completed
+     * metadata set by the full-buffer converter, so a forced streaming path
+     * would silently drop the configured feature.  With `markdown_streaming
+     * auto` the request routes to the full-buffer engine instead.
+     *
      * Include YAML front matter with metadata (title, description, etc.).
      * Default: off
      * Context: http, server, location

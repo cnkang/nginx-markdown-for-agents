@@ -656,6 +656,25 @@ ngx_http_markdown_select_processing_path(
             NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
     }
 
+    /* Rule 2b: front matter output requires the full-buffer engine.
+     *
+     * The YAML front matter is assembled from the completed metadata set by the
+     * full-buffer converter; the streaming engine emits the body incrementally
+     * and has no equivalent stage, so selecting streaming with
+     * `markdown_front_matter on` would silently drop the configured feature.
+     * The path fails closed to the conversion engine instead. */
+    if (conf->front_matter) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown: streaming skip: "
+            "front matter requires full-buffer");
+        ngx_http_markdown_log_event(
+            r, conf, eff, "eligibility", "streaming_skip_unsupported");
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE);
+    }
+
     /* Rule 3: HEAD request */
     if (r->method == NGX_HTTP_HEAD) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP,

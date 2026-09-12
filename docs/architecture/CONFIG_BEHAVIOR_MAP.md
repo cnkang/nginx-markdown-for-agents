@@ -113,7 +113,7 @@ flowchart LR
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Prepends YAML front matter to the generated Markdown |
+| Behavior | Prepends YAML front matter to the generated Markdown (full-buffer engine only; `markdown_streaming auto` and `force` route to the full-buffer engine, and `force` with this directive on fails `nginx -t`) |
 | Lifecycle impact | Rust conversion options and output rendering path |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/metadata.rs`, `components/rust-converter/src/converter.rs` |
 | Practical note | This changes output shape for downstream consumers and may affect caches or clients that expect plain Markdown only. |
