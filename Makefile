@@ -99,6 +99,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
         clean help verify-module-version-mismatch-e2e verify-slow-reader-backpressure-e2e \
+        verify-helm-cluster-smoke-e2e
 
 all: build
 
@@ -1548,6 +1549,11 @@ verify-module-version-mismatch-e2e:
 # byte-for-byte, which exercises the NGX_AGAIN resume path.
 verify-slow-reader-backpressure-e2e:
 	./tools/e2e/verify_slow_reader_backpressure_e2e.sh
+
+# Needs kind, helm, kubectl, and docker: install the chart into a real cluster
+# and require a converted response through the pod.
+verify-helm-cluster-smoke-e2e:
+	./tools/e2e/verify_helm_cluster_smoke_e2e.sh
 
 verify-streaming-failure-cache-e2e:
 	./tools/e2e/verify_streaming_failure_cache_e2e.sh $(E2E_ARGS)
