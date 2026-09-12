@@ -162,6 +162,9 @@ checked in this order:
 
 - a capability fallback (`ERROR_STREAMING_FALLBACK`) returns the response to the
   bounded full-buffer engine regardless of the configured error policy
+- a header-snapshot rollback failure also fails closed regardless of policy: the
+  streaming handle is aborted and the response is rejected, because the header
+  state can no longer be restored
 - every other pre-commit failure follows `markdown_on_error`: `pass` fails open
   with the original HTML, `fail_closed` rejects the response
 
@@ -344,8 +347,7 @@ the parser allowance.
   maintain Markdown structure.
 - Streaming parser encounters input exceeding its look-behind capacity but
   recoverable via full-buffer.
-- `markdown_streaming auto` and the module assesses streaming risk
-  outweighs benefit.
+- `markdown_streaming auto` and the response is not a streaming candidate.
 
 If the response would exceed the full-buffer **input-size** limit
 (`markdown_limits conversion_memory=`) **and the size is
