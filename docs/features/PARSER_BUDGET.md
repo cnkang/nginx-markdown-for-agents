@@ -163,7 +163,7 @@ parser-working-set ceiling. It does not accumulate all bytes ever received.
 - **Default**: 10 seconds
 - **Enforcement**: Cooperative timeout via `ConversionContext`
 - **Error code**: `ERROR_PARSE_TIMEOUT` (10)
-- **Reason code**: `PARSE_TIMEOUT`
+- **Reason code**: `timeout` (the public lowercase value shared by the metric label)
 - **Fail-open behavior**: Pass-through original content
 
 #### How It Works

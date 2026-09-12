@@ -373,7 +373,7 @@ surface before the 1.0 LTS compatibility freeze:
   decompression_ratio, and max_inflight replace the former standalone
   limit directives.
 - **Metrics freeze**: The production endpoint emits the ten-family v1
-  contract (see [observability-schema-v2.md](observability-schema-v2.md)).
+  contract (see [observability-schema-v3.md](observability-schema-v3.md)).
   Legacy multi-format, per-path, shadow, and debug families no longer exist.
 - **Streaming default**: Unset and `off` use bounded full-buffer conversion.
   Explicit `auto` prefers streaming after safety checks without a size threshold.

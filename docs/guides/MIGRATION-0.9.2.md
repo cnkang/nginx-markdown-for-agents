@@ -305,7 +305,8 @@ stream only when an explicit `auto` or `force` policy permits streaming.
 markdown_stream_threshold 512k;
 
 # AFTER (0.9.2)
-# Remove the directive. The threshold stays fixed at 1 MiB internally.
+# Remove the directive. Streaming selection applies no size threshold, so
+# there is nothing to replace it with.
 ```
 
 ### `markdown_stream_precommit_buffer` → `markdown_limits streaming_buffer=`
