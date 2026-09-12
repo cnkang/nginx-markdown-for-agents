@@ -406,14 +406,39 @@ readonly TRUSTED_NGINX_DESTINATION_ROOTS=(
 #
 # Returns:
 #   0 on success; 1 if the input is empty
+# resolve_trusted_utility — locate a utility in the installer's trusted
+# absolute directories.
+#
+# Used only before cache_trusted_executables() populates the *_BIN variables,
+# so the lookup never consults PATH.  Returns the absolute path on success.
+resolve_trusted_utility() {
+  local name="$1"
+  local dir=""
+
+  [[ "$name" =~ ^[A-Za-z0-9._+-]+$ ]] || return 1
+  for dir in /usr/bin /bin /usr/sbin /sbin; do
+    if [[ -x "${dir}/${name}" ]]; then
+      printf '%s\n' "${dir}/${name}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 canonicalize_path() {
   local path="$1"
   local dir=""
   local file=""
   local target=""
   local i=0
-  local basename_bin="${BASENAME_BIN:-/usr/bin/basename}"
-  local dirname_bin="${DIRNAME_BIN:-/usr/bin/dirname}"
+  local basename_bin="${BASENAME_BIN:-}"
+  local dirname_bin="${DIRNAME_BIN:-}"
+  if [[ -z "$basename_bin" ]]; then
+    basename_bin="$(resolve_trusted_utility basename)" || return 1
+  fi
+  if [[ -z "$dirname_bin" ]]; then
+    dirname_bin="$(resolve_trusted_utility dirname)" || return 1
+  fi
   local readlink_bin="${READLINK_BIN:-}"
 
   if [[ -z "$path" ]] || [[ -z "$readlink_bin" ]]; then
@@ -802,7 +827,11 @@ resolve_trusted_executable() {
     return 1
   fi
   [[ "$candidate" = /* ]] || return 1
-  [[ "$(${BASENAME_BIN:-/usr/bin/basename} "$candidate")" = "$name" ]] || return 1
+  local basename_bin="${BASENAME_BIN:-}"
+  if [[ -z "$basename_bin" ]]; then
+    basename_bin="$(resolve_trusted_utility basename)" || return 1
+  fi
+  [[ "$("$basename_bin" "$candidate")" = "$name" ]] || return 1
   [[ -f "$candidate" ]] && [[ -x "$candidate" ]] || return 1
 
   if ! resolved="$(canonicalize_path "$candidate")"; then

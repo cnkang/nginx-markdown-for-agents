@@ -316,7 +316,7 @@ cleanup() {
   # when run_scenario executed in a command substitution subshell.
   local nginx_pid="$NGINX_PID"
   if [[ -z "$nginx_pid" && -f "$PID_FILE" ]]; then
-    nginx_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    nginx_pid="$("$RESOLVED_CAT" "$PID_FILE" 2>/dev/null || true)"
   fi
   # The PID file initially holds the script's own PID (written during
   # setup); never kill ourselves when NGINX never started.

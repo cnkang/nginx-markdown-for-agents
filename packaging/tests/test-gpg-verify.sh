@@ -103,6 +103,9 @@ esac
 
 check_prerequisites
 
+# Directory holding built RPM artifacts. Override with RPM_ARTIFACT_DIR when
+# the packages were produced somewhere else.
+RPM_ARTIFACT_DIR="${RPM_ARTIFACT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/dist}"
 RPM_DIR=$(mktemp -d)
 trap 'rm -rf "$RPM_DIR"' EXIT
 
@@ -290,7 +293,10 @@ if [[ "$MODE" = "yum" ]] || [ "$MODE" = "both" ]; then
                     fail "RPM package signature check: $(basename "$rpm_file")"
                     echo "$RPM_SIG" >&2
                 fi
-        done < <(find "${RPM_DIR}" -type f -name "*.rpm" -print0 2>/dev/null)
+        # Built RPMs land in dist/ (see .github/workflows/release-rpm.yml), not
+        # in this test's temporary directory, so search the artifact directory.
+        done < <(find "${RPM_ARTIFACT_DIR}" -maxdepth 1 -type f -name "*.rpm" \
+                     -print0 2>/dev/null)
         if [[ "$rpm_files_found" -eq 0 ]]; then
             pass "no local .rpm files to verify (expected in CI)"
         fi

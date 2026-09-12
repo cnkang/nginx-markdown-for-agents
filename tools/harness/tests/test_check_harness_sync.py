@@ -734,3 +734,28 @@ def _write_docker_runtime_fixture(repo: Path) -> None:
         path = repo / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+
+
+def test_final_dockerfile_user_ignores_earlier_stages() -> None:
+    """Only the final stage's USER describes the image that is built."""
+    builder_only = (
+        "FROM debian:bookworm AS builder\n"
+        "USER builder\n"
+        "RUN make\n"
+        "\n"
+        "FROM debian:bookworm\n"
+        "COPY --from=builder /out /out\n"
+    )
+    assert sync._dockerfile_final_user(builder_only) is None
+
+    assert sync._dockerfile_final_user(
+        builder_only.replace("COPY --from=builder /out /out\n", "USER app\n")
+    ) == "app"
+
+    assert sync._dockerfile_final_user(
+        "FROM debian:bookworm\nUSER app:app\n"
+    ) == "app"
+
+
+def test_final_dockerfile_user_returns_none_without_any_user() -> None:
+    assert sync._dockerfile_final_user("FROM debian:bookworm\nRUN true\n") is None
