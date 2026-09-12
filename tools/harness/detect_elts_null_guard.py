@@ -51,7 +51,7 @@ def _function_bodies(text: str):
     # then balance braces with a string/comment-aware scanner.
     func_re = re.compile(
         r"^(?:[A-Za-z_][A-Za-z0-9_ \t*]*\s+)?"
-        r"([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*$",
+        r"([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*\{?\s*$",
         re.MULTILINE,
     )
     for m in func_re.finditer(text):

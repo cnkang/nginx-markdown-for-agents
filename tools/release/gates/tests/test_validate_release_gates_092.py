@@ -48,17 +48,17 @@ impl ReasonCode {{
     if source_edit is not None:
         source = source_edit(source)
     reason_path = tmp_path / validator.REASON_CODE_RELATIVE_PATH
-    reason_path.parent.mkdir(parents=True)
+    reason_path.parent.mkdir(parents=True, exist_ok=True)
     reason_path.write_text(source, encoding="utf-8")
     c_path = tmp_path / validator.REASON_C_RELATIVE_PATH
-    c_path.parent.mkdir(parents=True)
+    c_path.parent.mkdir(parents=True, exist_ok=True)
     c_path.write_text(
         "\n".join(f"static ngx_str_t reason_str_code_{index};"
                   for index in range(count)),
         encoding="utf-8",
     )
     inventory_path = tmp_path / validator.REASON_INVENTORY_RELATIVE_PATH
-    inventory_path.parent.mkdir(parents=True)
+    inventory_path.parent.mkdir(parents=True, exist_ok=True)
     inventory_path.write_text(json.dumps({
         "registry_count": count,
         "reason_codes": [
@@ -94,7 +94,7 @@ def test_version_consistency_fails_when_sources_are_missing(tmp_path: Path) -> N
 def test_version_consistency_reads_the_package_table(tmp_path: Path) -> None:
     """A workspace version must not hide a mismatching package version."""
     cargo_path = tmp_path / "components" / "rust-converter" / "Cargo.toml"
-    cargo_path.parent.mkdir(parents=True)
+    cargo_path.parent.mkdir(parents=True, exist_ok=True)
     cargo_path.write_text(
         "[workspace.package]\nversion = \"0.9.2\"\n\n"
         "[package]\nname = \"fixture\"\nversion = \"0.9.1\"\n",
@@ -115,7 +115,7 @@ def test_version_consistency_rejects_invalid_utf8_cargo_file(
 ) -> None:
     """Invalid Cargo.toml bytes must remain a reported gate mismatch."""
     cargo_path = tmp_path / "components" / "rust-converter" / "Cargo.toml"
-    cargo_path.parent.mkdir(parents=True)
+    cargo_path.parent.mkdir(parents=True, exist_ok=True)
     cargo_path.write_bytes(b"[package]\nversion = \xff\n")
     (tmp_path / "CHANGELOG.md").write_text(
         "## [0.9.2]\n", encoding="utf-8"
