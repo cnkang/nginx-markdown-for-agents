@@ -99,7 +99,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
         clean help verify-module-version-mismatch-e2e verify-slow-reader-backpressure-e2e \
-        verify-helm-cluster-smoke-e2e
+        verify-helm-cluster-smoke-e2e verify-graceful-reload-streaming-e2e
 
 all: build
 
@@ -1554,6 +1554,11 @@ verify-slow-reader-backpressure-e2e:
 # and require a converted response through the pod.
 verify-helm-cluster-smoke-e2e:
 	./tools/e2e/verify_helm_cluster_smoke_e2e.sh
+
+# Needs docker and curl: a reload must land mid-transfer and leave the response
+# complete, which covers graceful worker retirement with an active stream.
+verify-graceful-reload-streaming-e2e:
+	./tools/e2e/verify_graceful_reload_streaming_e2e.sh
 
 verify-streaming-failure-cache-e2e:
 	./tools/e2e/verify_streaming_failure_cache_e2e.sh $(E2E_ARGS)
