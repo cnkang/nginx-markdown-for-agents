@@ -67,7 +67,6 @@ ngx_http_markdown_arg_equals(
 }
 
 /*
-/*
  * Configuration directive handler: markdown_accept (strict | force).
  *
  * The "wildcard" VALUE was removed in the 0.9.2 pre-LTS convergence
