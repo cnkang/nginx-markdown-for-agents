@@ -117,7 +117,7 @@ markdown_streaming auto;
 | Value  | Behavior |
 |--------|----------|
 | `off`  | Disable true streaming. All convertible responses use the 0.7.x full-buffer path or are skipped per existing policy. |
-| `auto` | The module prefers true streaming for every convertible response that clears the eligibility gates and falls back to full-buffer conversion for the rest. Size and transfer mode take no part in the choice. |
+| `auto` | The module prefers true streaming for every convertible response that clears the eligibility gates. A response that stays eligible for conversion but fails a streaming gate falls back to full-buffer conversion; a response that is ineligible for conversion is not converted at all. Size and transfer mode take no part in the choice. |
 | `force` | Prefer true streaming. If the response does not meet streaming preconditions, fallback semantics apply — the module does not silently pretend it is streaming. |
 
 **Default (0.9.2 contract)**: unset and `off` select bounded full-buffer conversion. `auto` is an explicit mode. 0.9.2 supersedes the historical 0.8.0 `auto` default.
