@@ -209,10 +209,12 @@ fn normalize_output(&self, output: String) -> String {
                 .unwrap_or(0)
         };
         let fence_info = fence_line.get(fence_len..).unwrap_or("");
+        // A backtick fence may not carry a backtick in its info string, while
+        // a tilde fence may: the restriction depends on the fence character.
         let is_opening_fence = active_fence.is_none()
             && fence_len >= 3
             && fence_char.is_some()
-            && !fence_info.contains('`');
+            && (fence_char == Some(b'~') || !fence_info.contains('`'));
         let is_closing_fence = active_fence
             .map(|(active_char, active_len)| {
                 fence_char == Some(active_char)

@@ -4,6 +4,7 @@ rules: [61, 62]
 paths:
   - "tools/perf/**"
   - "tools/release/matrix/**"
+  - "perf/baselines/**"
   - "perf/reports/**"
   - ".github/workflows/**"
 ---

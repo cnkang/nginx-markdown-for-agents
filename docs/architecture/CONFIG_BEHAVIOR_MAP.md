@@ -158,23 +158,12 @@ flowchart LR
 | Implementation areas | `components/rust-converter/src/converter.rs`, `components/rust-converter/src/pruning.rs` |
 | Practical note | Disable it when the page's structural content is more important than compact agent-oriented output. |
 
-### `markdown_prune_selectors`
+### Removed custom-selector directives
 
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Adds CSS selectors whose matching subtrees are eligible for noise pruning |
-| Lifecycle impact | Rust DOM traversal before Markdown emission |
-| Implementation areas | `components/rust-converter/src/pruning.rs`, `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h` |
-| Practical note | Keep selectors narrow and validate representative pages because matching removes content from the Markdown representation. |
-
-### `markdown_prune_protection_selectors`
-
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Protects matching subtrees from noise-pruning removal |
-| Lifecycle impact | Rust pruning decision after selector matching |
-| Implementation areas | `components/rust-converter/src/pruning.rs` |
-| Practical note | Use this to retain content nested inside a broad noise selector. |
+0.9.2 removed `markdown_prune_selectors` and
+`markdown_prune_protection_selectors`, and the command table no longer
+registers them, so `nginx -t` fails with the standard unknown-directive error.
+Built-in noise reduction remains controlled by `markdown_prune_noise`.
 
 ### `markdown_metrics_shm_size`
 
@@ -188,8 +177,9 @@ flowchart LR
 ### Removed runtime dynconf directives
 
 The 0.9.2 convergence removed `markdown_dynamic_config`,
-`markdown_dynamic_config_path`, and `markdown_dynconf_dry_run`. The names remain
-reject-only migration entries so `nginx -t` identifies stale configurations.
+`markdown_dynamic_config_path`, and `markdown_dynconf_dry_run`. The command
+table no longer registers the names, so `nginx -t` fails with the standard
+unknown-directive error.
 There is no runtime watcher, dynconf snapshot, or dynconf metrics family in the
 current request lifecycle. Use the static directives in
 [`CONFIGURATION.md`](../guides/CONFIGURATION.md) and apply changes through a
