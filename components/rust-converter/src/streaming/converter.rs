@@ -234,13 +234,23 @@ impl StreamingConverter {
             None
         };
         let sanitizer = StreamingSanitizer::with_prune_config(options.prune_config.clone());
+
+        // Link and image references resolve through the same shared resolver as
+        // the full-buffer engine, so one document cannot produce two different
+        // URLs depending on the processing path.
+        let mut emitter = IncrementalEmitter::new(&budget);
+        emitter.set_url_resolution(
+            options.base_url.as_deref(),
+            options.resolve_relative_urls,
+        );
+
         Self {
             options,
             charset_state: CharsetState::with_sniff_limit(budget.charset_sniff),
             tokenizer: BudgetedStreamingTokenizer::new(budget.total),
             sanitizer,
             state_machine: StructuralStateMachine::new(&budget),
-            emitter: IncrementalEmitter::new(&budget),
+            emitter,
             budget,
             etag_hasher,
             total_markdown_chars: 0,
@@ -1468,7 +1478,7 @@ impl StreamingConverter {
                     self.metadata.image = self.resolve_and_sanitize_metadata_url(&content);
                 }
                 "og:url" if self.metadata.url.is_none() => {
-                    self.metadata.url = Self::sanitize_metadata_url(&content);
+                    self.metadata.url = self.resolve_and_sanitize_metadata_url(&content);
                 }
                 "author" if self.metadata.author.is_none() => {
                     self.metadata.author = Some(content);
@@ -1526,73 +1536,20 @@ impl StreamingConverter {
     /// assert_eq!(conv.resolve_url("https://other.test/x"), "https://other.test/x");
     /// assert_eq!(conv.resolve_url("mailto:a@example.com"), "mailto:a@example.com");
     /// ```
-    fn http_base_url_origin(base: &str) -> &str {
-        let scheme_len = if base.starts_with("https://") { 8 } else { 7 };
-        let authority = &base[scheme_len..];
-        if let Some(path_start) = authority.find('/') {
-            &base[..scheme_len + path_start]
-        } else {
-            base
-        }
-    }
-
-    fn resolve_path_against_base(base: &str, url: &str) -> String {
-        if base.ends_with('/') {
-            return format!("{base}{url}");
-        }
-        let trimmed = base.trim_end_matches('/');
-        let base_dir = match trimmed.rfind('/') {
-            Some(position)
-                if position > 0 && trimmed.as_bytes().get(position - 1) == Some(&b'/') =>
-            {
-                trimmed
-            }
-            Some(position) => &trimmed[..position],
-            None => trimmed,
-        };
-        format!("{base_dir}/{url}")
-    }
-
     fn resolve_url(&self, url: &str) -> String {
-        if !self.options.resolve_relative_urls
-            || url.is_empty()
-            || Self::has_absolute_uri_scheme(url)
-            || url.starts_with("//")
-        {
+        if !self.options.resolve_relative_urls || url.is_empty() {
             return url.to_string();
         }
+
         let Some(base) = self.options.base_url.as_deref() else {
             return url.to_string();
         };
-        if !base.starts_with("http://") && !base.starts_with("https://") {
-            return url.to_string();
-        }
-        if url.starts_with('/') {
-            return format!("{}{}", Self::http_base_url_origin(base), url);
-        }
-        Self::resolve_path_against_base(base, url)
-    }
 
-    /// Detects whether `url` begins with an absolute URI scheme per RFC 3986 §3.
-    ///
-    /// An absolute URI has the form `scheme:hier-part` where `scheme` is
-    /// `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`.  Returns `false` for
-    /// relative paths, fragment-only, and query-only references.
-    fn has_absolute_uri_scheme(url: &str) -> bool {
-        let Some(colon) = url.find(':') else {
-            return false;
-        };
-        if url[..colon].contains('/') {
-            return false;
-        }
-        let mut chars = url[..colon].chars();
-        let Some(first) = chars.next() else {
-            return false;
-        };
-        first.is_ascii_alphabetic()
-            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '+' || ch == '-' || ch == '.')
+        // One shared resolver keeps every emitting path (body links, images,
+        // metadata) producing the same URL for the same reference; a base the
+        // resolver cannot use leaves the reference untouched.
+        crate::url_resolve::resolve_reference(base, url).unwrap_or_else(|| url.to_string())
     }
-
     /// Selects the final metadata URL, preserving document metadata before
     /// falling back to the configured base URL.
     ///
@@ -2114,6 +2071,42 @@ mod tests {
         let mut conv2 = make_converter_with_metadata();
         conv2.feed_chunk(b"<html><head><title>My Page Title</title></head><body><p>Content</p></body></html>").unwrap();
         assert_eq!(conv2.metadata().title.as_deref(), Some("My Page Title"));
+    }
+
+    /// A streaming converter that collects metadata and resolves URLs.
+    fn make_converter_with_base(base: &str) -> StreamingConverter {
+        let opts = ConversionOptions {
+            extract_metadata: true,
+            base_url: Some(base.to_string()),
+            resolve_relative_urls: true,
+            flavor: crate::converter::MarkdownFlavor::CommonMark,
+            ..ConversionOptions::default()
+        };
+        let mut conv = StreamingConverter::new(opts, MemoryBudget::default());
+        conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
+        conv
+    }
+
+    #[test]
+    fn test_relative_metadata_urls_resolve_against_the_base() {
+        // Mirrors the full-buffer metadata test with the same input and base:
+        // a relative `og:url` and `og:image` must resolve identically whatever
+        // the processing path.
+        let html = b"<html><head>\
+            <meta property=\"og:url\" content=\"article\">\
+            <meta property=\"og:image\" content=\"icons/logo.svg\">\
+            </head><body><p>Content</p></body></html>";
+        let mut conv = make_converter_with_base("https://example.com/docs/page.html");
+        conv.feed_chunk(html).unwrap();
+
+        assert_eq!(
+            conv.metadata().url.as_deref(),
+            Some("https://example.com/docs/article")
+        );
+        assert_eq!(
+            conv.metadata().image.as_deref(),
+            Some("https://example.com/docs/icons/logo.svg")
+        );
     }
 
     #[test]

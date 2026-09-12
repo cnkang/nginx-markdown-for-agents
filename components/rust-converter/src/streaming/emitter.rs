@@ -227,6 +227,13 @@ pub struct IncrementalEmitter {
     /// Buffered code block content, accumulated until block ends so fence
     /// length can be chosen after seeing all backtick runs.
     code_block_buffer: Vec<u8>,
+    /// Base URL used to resolve relative link and image references.
+    ///
+    /// The emitter leaves references untouched until the converter installs a
+    /// base, so a bare emitter (and every existing test) keeps its behaviour.
+    base_url: Option<String>,
+    /// Whether relative references should be resolved against `base_url`.
+    resolve_relative_urls: bool,
 }
 
 impl IncrementalEmitter {
@@ -274,7 +281,29 @@ impl IncrementalEmitter {
             code_block_backtick_max: 0,
             code_block_trailing_backticks: 0,
             code_block_buffer: Vec::new(),
+            base_url: None,
+            resolve_relative_urls: false,
         }
+    }
+
+    /// Install the URL resolution policy used for link and image references.
+    ///
+    /// The streaming converter calls this once at construction so that body
+    /// links and images resolve through the same shared resolver as the
+    /// full-buffer engine and the metadata extractors.
+    pub fn set_url_resolution(&mut self, base_url: Option<&str>, resolve_relative_urls: bool) {
+        self.base_url = base_url.map(ToOwned::to_owned);
+        self.resolve_relative_urls = resolve_relative_urls;
+    }
+
+    /// Resolve one reference the way every other emitting path does.
+    fn resolve_reference(&self, url: &str) -> Option<String> {
+        if !self.resolve_relative_urls || url.is_empty() {
+            return None;
+        }
+
+        let base = self.base_url.as_deref()?;
+        crate::url_resolve::resolve_reference(base, url)
     }
 
     /// Dispatches a `StateMachineAction` to the corresponding handler and emits the resulting Markdown fragments.
@@ -604,7 +633,8 @@ impl IncrementalEmitter {
                     self.write_image_alt_fallback(alt.trim())?;
                     return Ok(());
                 };
-                self.write_image_in_place(safe_src, alt)?;
+                let resolved = self.resolve_reference(safe_src);
+                self.write_image_in_place(resolved.as_deref().unwrap_or(safe_src), alt)?;
             }
             StructuralContext::Bold => {
                 if self.in_link {
@@ -740,7 +770,9 @@ impl IncrementalEmitter {
         if let Some(safe_href) = sanitize_url_value(href)
             && !safe_href.is_empty()
         {
-            let escaped = escape_markdown_destination(safe_href);
+            let resolved = self.resolve_reference(safe_href);
+            let escaped =
+                escape_markdown_destination(resolved.as_deref().unwrap_or(safe_href));
             self.write_str(&format!("[{}]({})", text, escaped))?;
         } else {
             /* `link_text` is assembled from escaped ordinary text plus
