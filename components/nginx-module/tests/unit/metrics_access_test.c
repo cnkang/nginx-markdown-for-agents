@@ -255,6 +255,22 @@ static ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 #define NGINX_VERSION "test"
 #endif
 
+/*
+ * The production loopback gate classifies the peer through realip_remote_addr
+ * with a fallback to the socket address.  This stub request carries only a
+ * socket address, so the stub delegates to the shared socket-address predicate
+ * and the access-control cases below keep their expectations.
+ */
+static ngx_inline ngx_flag_t
+ngx_http_markdown_peer_is_loopback(ngx_http_request_t *r)
+{
+    if (r == NULL || r->connection == NULL) {
+        return 0;
+    }
+
+    return ngx_http_markdown_sockaddr_is_loopback(r->connection->sockaddr);
+}
+
 #include "../../src/ngx_http_markdown_metrics_impl.h"
 #undef ngx_slprintf
 
