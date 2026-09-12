@@ -64,8 +64,7 @@ Key characteristics:
 - `markdown_cache_validation ims_only` — avoids ETag computation overhead
   while still supporting `If-Modified-Since` via the upstream's
   `Last-Modified`.
-- `markdown_streaming auto` — prefer streaming for every response that clears
-  the hard gates; nothing about response size takes part in the decision.
+- `markdown_streaming auto` — large responses stream. Small ones buffer.
 - No forced fields — all defaults can be overridden.
 - Values are intentionally close to Config V2 built-in defaults to minimize
   migration surprise.
