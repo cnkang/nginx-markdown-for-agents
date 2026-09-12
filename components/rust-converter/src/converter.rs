@@ -341,37 +341,35 @@ impl<'a> BudgetedMarkdownWriter<'a> {
         // explicitly and check it against the budget before reserving.
         // Geometric growth target (double) keeps repeated small pushes
         // amortized, but is capped by the budget below.
-        let target_capacity = required_len.max(current_capacity.saturating_mul(2));
-        let projected = target_capacity
-            .checked_add(self.ctx.working_set_bytes)
-            .ok_or_else(|| ConversionError::MemoryLimit("working-set size overflow".into()))?;
-        if projected > self.ctx.output_budget {
-            // The geometric target would exceed the budget; fall back to an
-            // exact reservation for the required length.  If even that
-            // exceeds the budget, fail closed with a controlled error.
-            let projected_exact = required_len
-                .checked_add(self.ctx.working_set_bytes)
-                .ok_or_else(|| ConversionError::MemoryLimit("working-set size overflow".into()))?;
-            if projected_exact > self.ctx.output_budget {
-                return Err(ConversionError::MemoryLimit(format!(
-                    "generated Markdown output and working set {} bytes would exceed budget {} bytes",
-                    projected_exact, self.ctx.output_budget
-                )));
-            }
-            let additional_capacity = required_len.saturating_sub(self.output.len());
-            if additional_capacity > 0 {
-                self.output
-                    .try_reserve_exact(additional_capacity)
-                    .map_err(|error| {
-                        ConversionError::MemoryLimit(format!(
-                            "unable to reserve {} bytes for generated Markdown: {}",
-                            additional_capacity, error
-                        ))
-                    })?;
-            }
-            self.record_peak();
-            return Ok(());
+        // `working_set_bytes` covers the live allocations other than this
+        // output buffer, so the remaining headroom is the capacity this buffer
+        // may still hold without exceeding the budget.
+        let headroom = self
+            .ctx
+            .output_budget
+            .checked_sub(self.ctx.working_set_bytes)
+            .ok_or_else(|| {
+                ConversionError::MemoryLimit(format!(
+                    "live working set {} bytes already exceeds budget {} bytes",
+                    self.ctx.working_set_bytes, self.ctx.output_budget
+                ))
+            })?;
+
+        // A required length beyond the headroom cannot be satisfied; fail
+        // closed with a controlled error instead of letting the reservation
+        // fail with an allocator message.
+        if required_len > headroom {
+            return Err(ConversionError::MemoryLimit(format!(
+                "generated Markdown output and working set {} bytes would exceed budget {} bytes",
+                required_len.saturating_add(self.ctx.working_set_bytes),
+                self.ctx.output_budget
+            )));
         }
+
+        // Clamping the geometric target to the headroom keeps repeated small
+        // pushes amortized while the budget lasts, instead of dropping to an
+        // exact reservation as soon as one doubling would overshoot.
+        let target_capacity = required_len.max(current_capacity.saturating_mul(2).min(headroom));
 
         // String::try_reserve takes additional bytes beyond the current
         // length, not beyond the current capacity.  Reserving the capacity
