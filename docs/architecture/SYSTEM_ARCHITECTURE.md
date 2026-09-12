@@ -332,10 +332,11 @@ cannot broaden that boundary.
 ### Static configuration and reload boundary
 
 The 0.9.2 convergence removed the runtime dynconf watcher, dry-run path, and
-last-known-good snapshot. The reject-only directive entries remain solely to
-give `nginx -t` an actionable migration error. NGINX validates configuration
-changes before the normal reload or restart boundary. The request path then
-reads the merged static configuration directly.
+last-known-good snapshot. The five retired directive names are no longer
+registered, so NGINX reports its standard unknown-directive error during
+`nginx -t`. NGINX validates configuration changes before the normal reload or
+restart boundary. The request path then reads the merged static configuration
+directly.
 
 ### Reason Code FFI Accessor (registry projections + FFI)
 The declarative `reason_registry.toml` defines the reason codes. The generated
@@ -362,9 +363,9 @@ v0.9.2 is the final pre-1.0 breaking release. It consolidates the public
 surface before the 1.0 LTS compatibility freeze:
 
 - **Directive consolidation**: The configuration surface shrinks from 63
-  directives to 20 active directives and five reject-only migration entries.
-  The latter retain actionable migration errors for the three dynconf names
-  and two custom-selector names. The project removed
+  directives to 20 active directives; the five retired names are unregistered,
+  so NGINX rejects them with its standard unknown-directive error and
+  `MIGRATION-0.9.2.md` names the replacement for each. The project removed
   the `markdown_streaming_zero_copy`, per-path metrics, shadow comparison,
   profile, and OTel directives. Other removed names fail `nginx -t`
   with the standard `unknown directive` error.

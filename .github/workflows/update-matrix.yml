@@ -51,7 +51,7 @@ jobs:
         id: changes
         run: |
           set -euo pipefail
-          allowed_files=$'tools/release-matrix.json\ndocs/releases/release-matrix.json\ndocs/guides/INSTALLATION.md'
+          allowed_files=$'tools/release-matrix.json\ndocs/releases/release-matrix.json\nREADME.md\ndocs/guides/PACKAGE_COMPATIBILITY.md\ndocs/guides/INSTALLATION.md'
           changed_files="$(git diff --name-only HEAD; git ls-files --others --exclude-standard)"
           if [[ -n "$changed_files" ]]; then
             while IFS= read -r path; do
@@ -182,7 +182,7 @@ jobs:
           git apply --check "${ARTIFACT_DIR}/matrix-update.patch"
           git apply "${ARTIFACT_DIR}/matrix-update.patch"
           git diff --check
-          allowed_files=$'tools/release-matrix.json\ndocs/releases/release-matrix.json\ndocs/guides/INSTALLATION.md'
+          allowed_files=$'tools/release-matrix.json\ndocs/releases/release-matrix.json\nREADME.md\ndocs/guides/PACKAGE_COMPATIBILITY.md\ndocs/guides/INSTALLATION.md'
           changed_files="$(git diff --name-only HEAD; git ls-files --others --exclude-standard)"
           while IFS= read -r path; do
             if [[ -z "$path" ]]; then

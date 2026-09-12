@@ -188,6 +188,16 @@ fi
 # the master is the steady state.
 workers="$(docker exec "${CONTAINER}" sh -c 'ps -o comm= | grep -c "^nginx$"' 2>/dev/null || echo 0)"
 echo "nginx processes after the reload: ${workers}" >&2
+if ! [[ "${workers}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: could not count the nginx processes after the reload (got '${workers}')" >&2
+    exit 1
+fi
+# One master plus one worker is the steady state: the retired worker must exit
+# once its in-flight request finished, and a stuck extra worker would leak.
+if [[ "${workers}" -ne 2 ]]; then
+    echo "ERROR: expected 2 nginx processes after the reload, found ${workers}" >&2
+    exit 1
+fi
 
 echo "PASS: a reload landed mid-transfer and the response stayed complete (${slow_bytes} bytes)" >&2
 exit 0

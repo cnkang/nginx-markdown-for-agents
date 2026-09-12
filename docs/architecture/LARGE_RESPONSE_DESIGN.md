@@ -25,8 +25,9 @@ For background on the existing request lifecycle and buffering model, see:
 ## Design Principles
 
 - **Policy-selected**: `markdown_streaming off` selects bounded full-buffer
-  conversion. `auto` applies the bounded response-shape heuristic. `force`
-  requests streaming after hard eligibility gates
+  conversion. `auto` prefers streaming for every response that clears the hard
+  eligibility gates and falls back to bounded full-buffer only when a response
+  is ineligible for streaming. `force` requests streaming after the same gates
 - **Non-degradation**: introducing the new path must not regress small-response performance or break existing functionality
 - **Semantic equivalence**: for any valid input, the active streaming path must
   produce output equivalent to the full-buffer path
@@ -44,7 +45,7 @@ Response enters the header/body filter chain
         |
         +--- off ----------> Bounded Full-Buffer Path
         |
-        +--- auto ---------> Shape heuristic + eligibility gates
+        +--- auto ---------> Hard eligibility gates
         |                         |
         |                         +--> Streaming Path when eligible
         |                         +--> Bounded Full-Buffer otherwise

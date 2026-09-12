@@ -59,6 +59,9 @@ fi
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/helm-smoke.XXXXXX")"
 cleanup() {
+    if [[ -n "${PF_PID:-}" ]]; then
+        kill "${PF_PID}" >/dev/null 2>&1 || true
+    fi
     if [[ "${KEEP}" -eq 0 ]]; then
         helm uninstall "${RELEASE}" --namespace "${NAMESPACE}" >/dev/null 2>&1 || true
         kind delete cluster --name "${CLUSTER}" >/dev/null 2>&1 || true
@@ -115,9 +118,39 @@ fi
 # The container's root filesystem is read-only, so the document is the one the
 # image already serves rather than a file this check writes.
 
+echo "=== resolving the Service ===" >&2
+SVC="$(kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" \
+    get service -l app.kubernetes.io/instance="${RELEASE}" \
+    -o jsonpath='{.items[0].metadata.name}')"
+if [[ -z "${SVC}" ]]; then
+    echo "ERROR: no Service found for release ${RELEASE}" >&2
+    exit 1
+fi
+
+# Request the Service, not the pod's loopback interface: a forwarding port on
+# the host keeps the Service selector, port, and endpoints in the request path,
+# so a miswired Service fails this smoke instead of silently passing.
+PF_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" \
+    port-forward "service/${SVC}" "${PF_PORT}:8080" >"${WORK_DIR}/port-forward.log" 2>&1 &
+PF_PID=$!
+
+forward_ready=0
+for _ in $(seq 1 60); do
+    if curl -sS -o /dev/null "http://127.0.0.1:${PF_PORT}/" 2>/dev/null; then
+        forward_ready=1
+        break
+    fi
+    sleep 0.5
+done
+if [[ "${forward_ready}" -ne 1 ]]; then
+    echo "ERROR: the Service port-forward never became ready" >&2
+    cat "${WORK_DIR}/port-forward.log" >&2 || true
+    exit 1
+fi
+
 echo "=== requesting the conversion ===" >&2
-BODY="$(kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" exec "${POD}" -- \
-    sh -c 'curl -sS -H "Accept: text/markdown" http://localhost:8080/index.html' 2>/dev/null || true)"
+BODY="$(curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PF_PORT}/index.html")"
 
 if [[ -z "${BODY}" ]]; then
     echo "ERROR: the Service returned no body" >&2
