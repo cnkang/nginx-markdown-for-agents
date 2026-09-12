@@ -365,7 +365,7 @@ test_reason_code_total_count(void)
 
 
 /*
- * Test: code 25 (bypass_no_transform) metric key is markdown_skipped_total
+ * Test: code 23 (bypass_no_transform) metric key is markdown_skipped_total
  */
 static void
 test_bypass_no_transform_metric_key(void)

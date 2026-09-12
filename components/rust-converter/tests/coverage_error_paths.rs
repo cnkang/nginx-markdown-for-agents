@@ -391,6 +391,10 @@ fn test_ffi_header_plan_lifecycle() {
         markdown_build_header_plan(content_type.as_ptr(), content_type.len(), 1, &mut plan);
     }
     assert!(plan.count > 0);
+    assert!(
+        !plan.entries.is_null(),
+        "a non-empty plan must carry entries"
+    );
     let entries = unsafe { std::slice::from_raw_parts(plan.entries, plan.count) };
     assert!(entries.iter().any(|entry| entry.op_type == 0));
     assert!(entries.iter().any(|entry| entry.op_type == 3));

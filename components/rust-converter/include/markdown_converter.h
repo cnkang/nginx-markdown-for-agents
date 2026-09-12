@@ -452,8 +452,8 @@ typedef struct MarkdownOptions {
   /**
    * Non-zero when noise region pruning is enabled at runtime.
    *
-   * When non-zero, structural HTML regions matching the prune selectors
-   * are excluded from output. Protection selectors override prune selectors.
+   * When non-zero, structural HTML regions matching the built-in default
+   * noise-region selector set are excluded from output.
    * Populated from the `markdown_prune_noise` NGINX directive.
    *
    * The four `prune_*` selector fields (`prune_selectors`,

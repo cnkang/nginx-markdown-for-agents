@@ -1028,7 +1028,8 @@ fn host_fallback(
     let scheme = direct_scheme
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .unwrap_or("http");
+        .and_then(validate_proto)
+        .unwrap_or_else(|| "http".to_string());
 
     if let Some(h) = host
         && let Some(valid) = validate_host(h.trim())
