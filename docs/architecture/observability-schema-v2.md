@@ -40,7 +40,10 @@ endpoint. The response has exactly these seven top-level fields:
   `module_metrics` counters used by local performance evidence collection
 - `recent_decisions`: bounded worker-local decision entries
 
-The schema rejects unknown fields and malformed types. The handler is
+The schema rejects unknown top-level fields and malformed types. A release
+publishes additive state inside the optional `extensions` object, which accepts
+any keys. Consumers must ignore keys they do not recognise: a release adds
+state there instead of adding a top-level field. The handler is
 read-only: the endpoint accepts GET and HEAD, HEAD computes the complete body
 length without sending a body, and other methods return 405. The handler
 itself accepts only loopback peers (`127.0.0.1` and `::1`) and denies missing

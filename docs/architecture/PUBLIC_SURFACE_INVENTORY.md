@@ -268,6 +268,7 @@ The public surface is ready to freeze only when all of the following are true:
 - the module rejects diagnostics mutation methods and no undocumented rollback API
   or response schema exists. The endpoint exposes read-only state only.
 - the diagnostics schema contains exactly the seven frozen top-level fields,
+  and any additive state lives in the optional `extensions` object,
 - the metrics catalog, reason-family mapping, and label set match the production
   renderer,
 - OTel is absent from production code and the command table,
