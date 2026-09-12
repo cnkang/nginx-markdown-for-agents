@@ -78,8 +78,9 @@ HTML 响应。如果结果不符合预期，请查看[安装故障排查指南](
 
 ## 0.9.2 配置要点
 
-0.9.2 将公共配置冻结为 20 条有效指令（另保留 5 个仅拒绝的迁移名称）。请显式配置行为，使 `nginx -T`
-能展示运维人员选择的设置。
+0.9.2 将公共配置冻结为 20 条有效指令；本次收敛移除的 5 个名称已不再注册，`nginx -t` 会以
+NGINX 标准的 `unknown directive` 报错，替换目标见 [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)。
+请显式配置行为，使 `nginx -T` 能展示运维人员选择的设置。
 
 ```nginx
 http {
@@ -149,7 +150,8 @@ curl -sS -D - -o /dev/null \
 
 0.9.2 是破坏性发布候选版本。升级前请阅读[发布说明](docs/releases/0.9.2-release-notes.md)。
 
-- 0.9.2 冻结 20 条有效指令，并保留 5 个已移除名称作为仅拒绝的迁移入口。
+- 0.9.2 冻结 20 条有效指令；本次收敛移除的 5 个名称已不再注册，`nginx -t` 会以 NGINX 标准的
+  `unknown directive` 报错，替换目标见 [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)。
   profile、OTel、按路径指标、shadow mode 和其他旧指令不再是有效配置。
   迁移后运行 `nginx -t`。
 - 运行时动态配置文件、watcher、dry-run 提升和 last-known-good 快照已移除。

@@ -65,7 +65,8 @@ value overrides it. `markdown_limits` inherits each key independently.
 | Global metrics storage | `markdown_metrics_shm_size` | H | bounded SHM allocation; global and not inherited through S/L. | SHM initialization and metrics unit/E2E tests |
 | Diagnostics | `markdown_diagnostics` | L | off; the built-in handler permits loopback clients only, while native NGINX access-phase directives may narrow access further. | diagnostics production/access/output tests |
 
-The streaming threshold is an internal 1 MiB heuristic. The module delivers
+The streaming decision exposes no size threshold: the selector streams every
+response that clears the eligibility gates, regardless of its size. The module delivers
 converted output through pool-copied buffers. The 0.9.2 release removed
 zero-copy delivery. Neither zero-copy nor shadow comparison is a public directive.
 0.9.2 (LTS-R006) removed the dynamic-configuration overlay. The module keeps

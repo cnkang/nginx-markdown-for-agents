@@ -98,7 +98,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         verify-diagnostics-access-phase-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
-        clean help verify-module-version-mismatch-e2e verify-slow-reader-backpressure-e2e \
+        clean help verify-module-version-mismatch-e2e verify-slow-reader-backpressure-e2e verify-realip-access-boundary-e2e \
         verify-helm-cluster-smoke-e2e verify-graceful-reload-streaming-e2e \
         verify-auth-subrequest-observability-e2e
 
@@ -1550,6 +1550,12 @@ verify-module-version-mismatch-e2e:
 # byte-for-byte, which exercises the NGX_AGAIN resume path.
 verify-slow-reader-backpressure-e2e:
 	./tools/e2e/verify_slow_reader_backpressure_e2e.sh
+
+# Needs docker and curl: with realip trusted from every source, a non-loopback
+# peer claiming 127.0.0.1 must still be refused at the metrics and diagnostics
+# endpoints, which is the access boundary the module must keep.
+verify-realip-access-boundary-e2e:
+	./tools/e2e/verify_realip_access_boundary_e2e.sh
 
 # Needs kind, helm, kubectl, and docker: install the chart into a real cluster
 # and require a converted response through the pod.
