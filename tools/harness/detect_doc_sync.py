@@ -368,11 +368,12 @@ def _check_chart_contract(template: str, values: str) -> List[str]:
     if any(token in template for token in forbidden_template):
         errors.append(f"{CHART_TEMPLATE_PATH}: legacy streaming engine key is forbidden")
     if re.search(r"(?m)^ {2}streaming:\s*$", values) is None or re.search(
-        r"(?m)^ {4}mode:\s*[\"']?(?:off|auto|force)[\"']?\s*$", values
+        r"(?m)^ {4}mode:\s*[\"']?(?:off|auto|force)?[\"']?\s*$", values
     ) is None:
         errors.append(
             f"{CHART_VALUES_PATH}: markdown.streaming.mode must define an "
-            "off|auto|force policy"
+            "off|auto|force policy, or leave the value empty so the module "
+            "default governs"
         )
     if re.search(r"(?m)^ {4}engine:\s*", values):
         errors.append(f"{CHART_VALUES_PATH}: markdown.streaming.engine is forbidden")

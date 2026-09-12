@@ -65,6 +65,7 @@ HELM_VALUES_REQUIRED_SNIPPETS = [
 ]
 
 
+
 def _helm_limit_key(directive_key: str) -> str:
     return re.sub(
         r"_([a-z])", lambda match: match.group(1).upper(), directive_key
@@ -154,6 +155,18 @@ _EXPLICIT_IMAGE_ARGS = [
     "image.repository=nginx",
     "--set-string",
     "image.tag=1.26.3",
+]
+
+_CHECK_HELM_STREAMING_DEFAULT = "helm:streaming-default-parity"
+
+# Rendering the module configuration needs an enabled chart and the
+# explicit module path the chart requires.
+_STREAMING_DEFAULT_ARGS = [
+    *_EXPLICIT_IMAGE_ARGS,
+    "--set",
+    "markdown.enabled=true",
+    "--set-string",
+    "markdown.loadModule=/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
 ]
 _DIGEST_IMAGE_ARGS = [
     "--set-string",
@@ -750,6 +763,61 @@ def _validate_image_digest_render(
             )
 
 
+def _validate_streaming_default_parity(
+    result: ValidationResult,
+    helm: str,
+    chart_dir: Path,
+) -> None:
+    """Keep the chart default in step with the module default.
+
+    The module resolves an omitted markdown_streaming to bounded full-buffer, so
+    a chart default that rendered the directive would silently give Helm users a
+    different processing path than the same configuration without the chart.
+    """
+    default_render = _run_helm_template(
+        result, _CHECK_HELM_STREAMING_DEFAULT, helm, chart_dir, _STREAMING_DEFAULT_ARGS
+    )
+    if default_render is None:
+        return
+    if default_render.returncode != 0:
+        result.fail(
+            _CHECK_HELM_STREAMING_DEFAULT,
+            "default-values Helm render failed: "
+            f"{_truncate_output(default_render.stdout.strip())}",
+        )
+        return
+    if "markdown_streaming" in default_render.stdout:
+        result.fail(
+            _CHECK_HELM_STREAMING_DEFAULT,
+            "default values must not emit markdown_streaming; the module default "
+            "governs unless an operator sets a mode",
+        )
+        return
+
+    explicit_render = _run_helm_template(
+        result,
+        _CHECK_HELM_STREAMING_DEFAULT,
+        helm,
+        chart_dir,
+        [*_STREAMING_DEFAULT_ARGS, "--set-string", "markdown.streaming.mode=auto"],
+    )
+    if explicit_render is None:
+        return
+    if (
+        explicit_render.returncode != 0
+        or "markdown_streaming auto;" not in explicit_render.stdout
+    ):
+        result.fail(
+            _CHECK_HELM_STREAMING_DEFAULT,
+            "an explicit markdown.streaming.mode must reach the rendered configuration",
+        )
+        return
+    result.pass_(
+        _CHECK_HELM_STREAMING_DEFAULT,
+        "default values leave markdown_streaming unset and an explicit mode renders",
+    )
+
+
 def _validate_rendered_yaml(result: ValidationResult, rendered: str) -> None:
     """Validate Helm output remains parseable YAML."""
     ok, err = try_parse_yaml(rendered)
@@ -1062,6 +1130,7 @@ def validate_helm_render(result: ValidationResult) -> None:
     if _validate_default_helm_template(result, helm, chart_dir) is None:
         return
     _validate_image_digest_render(result, helm, chart_dir)
+    _validate_streaming_default_parity(result, helm, chart_dir)
     _validate_missing_module_guard(result, helm, chart_dir)
     _validate_metrics_without_module_guard(result, helm, chart_dir)
     _validate_module_enabled_render(result, helm, chart_dir)
