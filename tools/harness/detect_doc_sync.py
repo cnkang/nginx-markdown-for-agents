@@ -350,12 +350,31 @@ def _scan_for_pattern(
     return errors
 
 
+def _mode_line_value(line: str) -> str | None:
+    """Return the mode a `mode:` line carries, or None if it is not such a line.
+
+    The previous pattern allowed at most one optional quote on each side of the
+    value, so exactly that is stripped here and `mode: off''` stays rejected.
+    """
+    match = re.match(r"^ {4}mode:", line)
+    if match is None:
+        return None
+    raw = line[match.end():].strip()
+    if raw[:1] in ("\"", "'"):
+        raw = raw[1:]
+    if raw[-1:] in ("\"", "'"):
+        raw = raw[:-1]
+    return raw
+
+
 def _values_streaming_mode_is_valid(values: str) -> bool:
     """Require a `streaming:` block whose `mode:` is empty or a known policy.
 
     Scans lines directly rather than matching a regular expression with optional
     groups surrounded by optional whitespace: that pattern backtracks
-    super-linearly, while a per-line scan stays linear on any input.
+    super-linearly, while a per-line scan stays linear on any input. A `mode:`
+    counts only while the scan is inside the `streaming:` mapping, so a sibling
+    block cannot satisfy the contract.
     """
     in_streaming_mapping = False
     for line in values.splitlines():
@@ -363,21 +382,12 @@ def _values_streaming_mode_is_valid(values: str) -> bool:
             in_streaming_mapping = True
             continue
         if in_streaming_mapping and line.strip() and not line.startswith("   "):
-            # A line indented at or below the mapping's own level ends it, so a
-            # `mode:` belonging to a sibling block cannot satisfy the check.
             in_streaming_mapping = False
         if not in_streaming_mapping:
             continue
-        match = re.match(r"^ {4}mode:", line)
-        if match is not None:
-            raw = line[match.end():].strip()
-            # The previous pattern allowed at most one optional quote on each
-            # side; strip exactly that, so `mode: off''` stays rejected.
-            if raw[:1] in ("\"", "'"):
-                raw = raw[1:]
-            if raw[-1:] in ("\"", "'"):
-                raw = raw[:-1]
-            return raw in ("", "off", "auto", "force")
+        value = _mode_line_value(line)
+        if value is not None:
+            return value in ("", "off", "auto", "force")
     return False
 
 
