@@ -233,7 +233,7 @@ validated reload or restart.
 | Behavior | Enables a dedicated metrics endpoint at a location |
 | Lifecycle impact | Separate location-handler path, not the normal conversion filter chain |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h`, `components/nginx-module/src/ngx_http_markdown_config_directives_impl.h`, `components/nginx-module/src/ngx_http_markdown_metrics_impl.h` |
-| Practical note | The wire format is exclusively Prometheus text 0.0.4 with exactly eleven bounded families; Accept negotiation cannot restore removed JSON or legacy text output. |
+| Practical note | The wire format is exclusively Prometheus text 0.0.4 with exactly ten bounded families; Accept negotiation cannot restore removed JSON or legacy text output. |
 
 ## Transfer and Streaming-Oriented Controls
 
@@ -259,7 +259,7 @@ validated reload or restart.
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Selects the processing path: `off` requires full-buffer, `auto` routes by size/response shape, and `force` prefers streaming for every eligible response |
+| Behavior | Selects the processing path: `off` requires full-buffer, `auto` prefers streaming for every eligible response once the hard gates allow it (no size threshold), and `force` requires streaming for every compatible response |
 | Lifecycle impact | Header-phase routing and body-filter path selection after hard eligibility and cache-validation gates |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_streaming_impl.h` |
 | Practical note | This is the sole public streaming selector in 0.9.2. The removed `markdown_streaming_engine` directive is absent from the command table; using it reports an `unknown directive` error at `nginx -t` time. |

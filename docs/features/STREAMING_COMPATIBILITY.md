@@ -56,10 +56,13 @@ therefore never forces the full-buffer path, and it never produces a 304 for
 converted content.
 
 **Known constraint (user-confirmed):** the same URL can therefore
-yield an ETag for small responses (full-buffer path) and no ETag for large
-responses (streaming path). Clients and caches lose strong validation for
-large pages. This is an accepted trade-off of streaming header commitment.
-A deferred header commit is out of scope for 0.9.2.
+yield an ETag when the full-buffer path serves it and no ETag when the
+streaming path does, because a streaming response commits its headers before
+the converted body exists. The trigger is the selected path, not a response
+size: `markdown_streaming off`, a hard blocker, or an ineligible response keeps
+strong validation, while `auto` or `force` that actually streams gives it up.
+This is an accepted trade-off of streaming header commitment. A deferred
+header commit is out of scope for 0.9.2.
 
 ### Fail-open behavior
 
@@ -101,6 +104,19 @@ Use **auto** to prefer streaming for eligible responses. The module selects
 the processing path from the policy and hard compatibility constraints, not
 a response-size heuristic. The 0.9.2 default is `off` (bounded full-buffer).
 `auto` must be written explicitly to opt in.
+
+### Frozen 0.9.2 selection contract
+
+| Policy | Selection |
+|--------|-----------|
+| `markdown_streaming off` (default) | Always bounded full-buffer conversion. No response streams. |
+| `markdown_streaming auto` | Prefer streaming for every response that clears the hard gates. Ineligible responses fall back to bounded full-buffer conversion. Response size takes no part in the decision. |
+| `markdown_streaming force` | Require streaming for every compatible response. A combination that can never satisfy it, such as `markdown_streaming force` with `markdown_front_matter on`, is rejected at `nginx -t` time. |
+
+The hard gates apply to every policy: HEAD requests, 304 responses, full
+conditional validation, excluded content types, the streaming memory budget,
+and front matter (`markdown_front_matter on` routes to full-buffer). No size
+threshold and no internal candidate boundary takes part in path selection.
 
 ## Related Documentation
 
