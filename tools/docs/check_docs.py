@@ -659,8 +659,8 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
         if not path.name.endswith("-release-checklist.md"):
             continue
         content = path.read_text(encoding="utf-8")
-        history = set(_document_update_table_lines(content))
-        for block in _logical_blocks(content):
+        history = _checklist_history(content)
+        for block in _logical_blocks(content, history):
             if _CHECKLIST_CLAIM_RE.search(block):
                 failures.append(
                     f"{path}: states mutable candidate status; keep the "
@@ -676,13 +676,17 @@ def _flush_task_item(items: list[str], current: list[str]) -> None:
         current.clear()
 
 
-def _checklist_items(content: str) -> list[str]:
+def _checklist_history(content: str) -> set[str]:
+    """Return the lines belonging to the Document Updates history table."""
+    return set(_document_update_table_lines(content))
+
+
+def _checklist_items(content: str, history: set[str]) -> list[str]:
     """Assemble every task item in a checklist, continuation lines included.
 
     A wrapped requirement carries part of its text on the following indented
     lines, and the pinned commit can fall on any of them.
     """
-    history = set(_document_update_table_lines(content))
     items: list[str] = []
     current: list[str] = []
 
@@ -704,21 +708,22 @@ def _checklist_items(content: str) -> list[str]:
 
 def _logical_task_items(files: list[Path]) -> list[tuple[Path, str]]:
     """Return each task item of every checklist as one string."""
-    return [
-        (path, item)
-        for path in files
-        if path.name.endswith("-release-checklist.md")
-        for item in _checklist_items(path.read_text(encoding="utf-8"))
-    ]
+    items: list[tuple[Path, str]] = []
+    for path in files:
+        if not path.name.endswith("-release-checklist.md"):
+            continue
+        content = path.read_text(encoding="utf-8")
+        history = _checklist_history(content)
+        items.extend((path, item) for item in _checklist_items(content, history))
+    return items
 
 
-def _logical_blocks(content: str) -> list[str]:
+def _logical_blocks(content: str, history: set[str]) -> list[str]:
     """Group the prose into blocks so a wrapped sentence reads as one.
 
     A status claim wrapped over two lines has to be judged as the sentence it
     is, not as two fragments that each look harmless.
     """
-    history = set(_document_update_table_lines(content))
     blocks: list[str] = []
     current: list[str] = []
     for _lineno, line in iter_unfenced_lines(content):

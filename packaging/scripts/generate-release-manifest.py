@@ -217,10 +217,22 @@ def source_archive_info(
         return info
 
     if tag:
-        url = f"https://github.com/{repo}/archive/refs/tags/{tag}.tar.gz"
+        # A tag release publishes a canonical bundle, so the manifest has to
+        # describe that bundle and carry its digest; the validator rejects a tag
+        # manifest that names GitHub's auto-generated archive or omits the
+        # digest.
+        url = (
+            f"https://github.com/{repo}/releases/download/{tag}/"
+            f"nginx-markdown-for-agents-source-{tag}.tar.gz"
+        )
         info = {"archive_url": url, "available": True}
-        if source_sha:
-            info["sha256"] = source_sha
+        if not source_sha:
+            raise SystemExit(
+                "a tag manifest needs --source-sha: the release publishes a "
+                "source bundle and validation rejects a tag manifest without "
+                "its digest"
+            )
+        info["sha256"] = source_sha
         return info
 
     return {"available": False}
