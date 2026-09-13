@@ -141,3 +141,17 @@ def test_container_rust_image_at_canonical_version_passes(tmp_path: Path) -> Non
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert not any("rust:" in error for error in errors), errors
+
+
+def test_container_rust_image_without_exact_version_fails(tmp_path: Path) -> None:
+    """A suffixed or floating tag is not the canonical version."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    steps:\n      - run: docker build .\n"
+        "        # image: rust:alpine3.21\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("rust:alpine3.21" in error or "alpine3.21" in error for error in errors), errors

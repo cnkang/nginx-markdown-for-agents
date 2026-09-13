@@ -129,11 +129,19 @@ def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
         body = line[indent:]
         char = body[:1]
         run = len(body) - len(body.lstrip(char)) if char in ("`", "~") else 0
-        if indent <= 3 and run >= 3:
-            if open_char is None:
-                open_char, open_len = char, run
-            elif char == open_char and run >= open_len:
-                open_char, open_len = None, 0
+        trailing = body[run:].strip() if char in ("`", "~") else ""
+        is_fence_line = indent <= 3 and run >= 3
+        # An opening fence may carry an info string; a closing fence may not.
+        if is_fence_line and open_char is None:
+            open_char, open_len = char, run
+            continue
+        if (
+            is_fence_line
+            and not trailing
+            and char == open_char
+            and run >= open_len
+        ):
+            open_char, open_len = None, 0
             continue
         if open_char is None:
             lines.append((line_no, line))

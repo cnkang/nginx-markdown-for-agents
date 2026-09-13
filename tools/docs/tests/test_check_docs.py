@@ -404,3 +404,11 @@ def test_checklist_guard_scans_continuation_lines(tmp_path):
     )
     failures = docs_checker.check_release_checklist_is_static([path])
     assert failures and "names a commit" in failures[0]
+
+
+def test_closing_fence_must_not_carry_trailing_text():
+    """```python cannot close a block the way a bare fence does."""
+    text = "```\ninside\n```python\nstill inside\n```\nafter\n"
+    kept = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
+    assert "still inside" not in kept
+    assert "after" in kept

@@ -129,7 +129,9 @@ def _check_source_bundle(
         return
 
     actual = sha256_file(bundle_path)
-    if sha256_entries.get(bundle_name) != actual:
+    # This comparison needs the checksum data; the presence and URL checks above
+    # do not, which is why they run for every tag release.
+    if sha256_entries and sha256_entries.get(bundle_name) != actual:
         errors.append(
             f"SHA256SUMS digest mismatch for {bundle_name}: "
             f"sha256sums={sha256_entries.get(bundle_name)}, actual={actual}"
@@ -392,6 +394,35 @@ def validate_manifest(
             )
 
     # SHA256SUMS inclusion and digest consistency
+    # The checksum entries are optional: the checks that read them stay
+    # conditional, while the ones that do not must still run.
+    sha256_entries: dict[str, str] = {}
+
+    # The bundle is the provenance artifact for a tag release, so its
+    # presence, its recorded digest and the URL that points at it are
+    # checked for every tag release, not only when a checksum file happens
+    # to be available.  Only the comparison against SHA256SUMS needs the
+    # checksum data.
+    if is_tag_release and isinstance(git, dict):
+        release_tag = git.get("tag", "")
+        if isinstance(release_tag, str) and release_tag:
+            bundle_name = _source_bundle_name(release_tag)
+            repository = git.get("repository")
+            expected_url = (
+                f"https://github.com/{repository}/releases/download/"
+                f"{release_tag}/{bundle_name}"
+                if repository
+                else None
+            )
+            _check_source_bundle(
+                source,
+                bundle_name,
+                expected_url,
+                artifact_dir,
+                sha256_entries,
+                errors,
+            )
+
     if sha256sums_path and sha256sums_path.exists():
         sha256_entries = parse_sha256sums(sha256sums_path, errors)
         if "release-manifest.json" not in sha256_entries:
@@ -410,31 +441,6 @@ def validate_manifest(
                         f"sha256sums={sha256_entries['release-manifest.json']}, "
                         f"actual={actual_manifest_sha}"
                     )
-
-        # The bundle is the provenance artifact for a tag release, so its
-        # presence, its recorded digest and the URL that points at it are
-        # checked for every tag release, not only when a checksum file happens
-        # to be available.  Only the comparison against SHA256SUMS needs the
-        # checksum data.
-        if is_tag_release and isinstance(git, dict):
-            release_tag = git.get("tag", "")
-            if isinstance(release_tag, str) and release_tag:
-                bundle_name = _source_bundle_name(release_tag)
-                repository = git.get("repository")
-                expected_url = (
-                    f"https://github.com/{repository}/releases/download/"
-                    f"{release_tag}/{bundle_name}"
-                    if repository
-                    else None
-                )
-                _check_source_bundle(
-                    source,
-                    bundle_name,
-                    expected_url,
-                    artifact_dir,
-                    sha256_entries,
-                    errors,
-                )
 
         allowed_sha256_names = set(manifest_filenames)
         allowed_sha256_names.add("release-manifest.json")

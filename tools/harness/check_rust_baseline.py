@@ -163,7 +163,7 @@ def _check_observation_workflows(root: Path, exact: str, errors: list[str]) -> N
             )
 
 
-RUST_IMAGE_RE = re.compile(r"rust:(\d+\.\d+\.\d+)")
+RUST_IMAGE_RE = re.compile(r"rust:([A-Za-z0-9._-]+)")
 
 
 def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> None:
@@ -177,11 +177,12 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
     workflows = Path(".github/workflows")
     for path in sorted((root / workflows).glob("*.y*ml")):
         content = path.read_text(encoding="utf-8")
-        for version in sorted(set(RUST_IMAGE_RE.findall(content))):
-            if version != exact:
+        for tag in sorted(set(RUST_IMAGE_RE.findall(content))):
+            if tag != exact:
                 errors.append(
-                    f"{workflows / path.name}: Rust container image pins "
-                    f"{version!r} but rust-toolchain.toml declares {exact!r}"
+                    f"{workflows / path.name}: Rust container image tag "
+                    f"{tag!r} is not the exact version {exact!r} declared by "
+                    "rust-toolchain.toml"
                 )
 
 
