@@ -1788,6 +1788,8 @@ typedef struct {
         ngx_atomic_t  decompression_fullbuffer_total;
         ngx_atomic_t  decompression_budget_exceeded_total;
         ngx_atomic_t  copied_output_total;
+        /* Run-wide conversion peak working set (streaming + full-buffer). */
+        ngx_atomic_t  conversion_peak_memory_bytes;
     } perf;
 
 } ngx_http_markdown_metrics_t;

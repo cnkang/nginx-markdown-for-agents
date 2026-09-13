@@ -47,9 +47,9 @@ path, URI, host, profile, and per-path dimensions are not emitted.
 | `nginx_markdown_output_bytes_total` | counter | — | Converted bytes successfully delivered downstream. |
 | `nginx_markdown_conversion_peak_memory_bytes` | gauge | — | Run-wide high-water mark of the conversion peak working-set estimate (streaming and full-buffer conversions); not process RSS. |
 
-The conversion paths a build compiles in write this gauge. A build without
-streaming support therefore reports `0` for it while still emitting the family,
-because the frozen family list does not vary by build configuration.
+The recorder that maintains this gauge sits outside the streaming feature block,
+so a build without streaming support reports the working set of its full-buffer
+conversions rather than zero.
 
 | `nginx_markdown_streaming_events_total` | counter | `transition`, `reason` | Closed streaming lifecycle transitions. |
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | Decompression completion and failure events. |

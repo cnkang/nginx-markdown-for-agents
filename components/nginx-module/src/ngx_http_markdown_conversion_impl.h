@@ -1219,7 +1219,6 @@ ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
  * gauge field only exists in streaming builds (and core-only test
  * builds stub the metrics pointer as NULL).
  */
-#ifdef MARKDOWN_STREAMING_ENABLED
 static void
 ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_uint_t peak_bytes)
 {
@@ -1228,17 +1227,16 @@ ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_uint_t peak_bytes)
         return;
     }
 
+    /*
+     * The gauge covers every conversion path, so it lives on the metrics struct
+     * itself rather than inside the streaming substructure: a build without
+     * streaming support still publishes the working set of its full-buffer
+     * conversions instead of reporting zero for the whole family.
+     */
     ngx_http_markdown_metrics_update_peak(
-        &ngx_http_markdown_metrics->streaming.last_peak_memory_bytes,
+        &ngx_http_markdown_metrics->perf.conversion_peak_memory_bytes,
         peak_bytes);
 }
-#else
-static void
-ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_uint_t peak_bytes)
-{
-    (void) peak_bytes;
-}
-#endif
 
 /* Update metrics counters after a successful conversion. */
 static void
