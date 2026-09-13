@@ -19,7 +19,12 @@ def _conflicting_location_blocks(script: str) -> list[str]:
     text before its directives are read.
     """
     blocks: list[str] = []
-    for match in re.finditer(r"location\s+[^\s{]+\s*\{", script):
+    # Accept every NGINX location modifier before the URI.  Without them an
+    # exact (`= /x`) or prefix-modified (`^~ /x`, `~ /x`, `~* /x`) location is
+    # silently skipped, and a conflicting block inside one would go unreported.
+    for match in re.finditer(
+        r"location\s+(?:=\s+|\^~\s+|~\*\s+|~\s+)?[^\s{]+\s*\{", script
+    ):
         depth = 1
         index = match.end()
         while index < len(script) and depth > 0:
