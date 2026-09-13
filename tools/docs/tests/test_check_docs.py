@@ -374,3 +374,21 @@ def test_checklist_guard_ignores_tilde_fenced_examples(tmp_path):
         encoding="utf-8",
     )
     assert docs_checker.check_release_checklist_is_static([path]) == []
+
+def test_iter_unfenced_lines_respects_fence_run_rules():
+    """A longer fence closes a shorter one; four leading spaces is not a fence."""
+    text = "```\ninner\n````\nstill inside\n```\nafter\n"
+    kept = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
+    assert "still inside" in kept  # the 4-backtick run does not close a 3 run
+    assert "after" not in kept  # the 4 run opened a new block
+    indented = "    ```\nnot a fence\n"
+    kept2 = [line for _n, line in docs_checker.iter_unfenced_lines(indented)]
+    assert "    ```" in kept2 and "not a fence" in kept2
+
+
+def test_checklist_guard_accepts_plus_markers(tmp_path):
+    """`+ [ ]` is a valid task-list marker and must be scanned like the others."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text("+ [ ] certified at 1234567\n", encoding="utf-8")
+    failures = docs_checker.check_release_checklist_is_static([path])
+    assert failures and "names a commit" in failures[0]
