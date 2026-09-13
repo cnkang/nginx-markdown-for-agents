@@ -139,26 +139,25 @@ jobs:
           mkdir -p rc-evidence
           : > rc-evidence/results.tsv
 
-          run_check() {
-            local name="$1"
-            shift
-            local status=0
+          for spec in \
+            "realip_access_boundary|verify-realip-access-boundary-e2e" \
+            "slow_reader_backpressure|verify-slow-reader-backpressure-e2e" \
+            "graceful_reload_streaming|verify-graceful-reload-streaming-e2e" \
+            "module_version_mismatch|verify-module-version-mismatch-e2e" \
+            "auth_subrequest_observability|verify-auth-subrequest-observability-e2e" \
+            "helm_cluster_smoke|verify-helm-cluster-smoke-e2e"
+          do
+            name="${spec%%|*}"
+            target="${spec##*|}"
+            status=0
             echo "=== ${name} ===" >&2
-            "$@" || status=$?
+            make "${target}" || status=$?
             if [[ "${status}" -eq 0 ]]; then
               printf '%s\tPASS\n' "${name}" >> rc-evidence/results.tsv
             else
               printf '%s\tFAIL\n' "${name}" >> rc-evidence/results.tsv
             fi
-            return 0
-          }
-
-          run_check realip_access_boundary make verify-realip-access-boundary-e2e
-          run_check slow_reader_backpressure make verify-slow-reader-backpressure-e2e
-          run_check graceful_reload_streaming make verify-graceful-reload-streaming-e2e
-          run_check module_version_mismatch make verify-module-version-mismatch-e2e
-          run_check auth_subrequest_observability make verify-auth-subrequest-observability-e2e
-          run_check helm_cluster_smoke make verify-helm-cluster-smoke-e2e
+          done
 
           echo "=== collected results ==="
           cat rc-evidence/results.tsv
