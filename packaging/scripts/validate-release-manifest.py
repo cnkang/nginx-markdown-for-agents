@@ -86,6 +86,49 @@ def parse_sha256sums(path: Path, errors: list[str]) -> dict[str, str]:
     return entries
 
 
+def _source_bundle_name(tag: str) -> str:
+    """Name of the source bundle the release workflow publishes for a tag."""
+    return f"nginx-markdown-for-agents-source-{tag}.tar.gz"
+
+
+def _check_source_bundle(
+    source,
+    bundle_name: str,
+    artifact_dir: Path,
+    sha256_entries: dict[str, str],
+    errors: list[str],
+) -> None:
+    """Check the published source bundle and the digests that describe it.
+
+    Allowing the name in SHA256SUMS is not enough: the bundle is the provenance
+    artifact, so its on-disk digest must match both the signed checksum file and
+    the manifest.  A manifest that records a digest without publishing the
+    artifact is exactly the gap this check exists to close.
+    """
+    bundle_path = artifact_dir / bundle_name
+    recorded = source.get("sha256") if isinstance(source, dict) else None
+
+    if not bundle_path.is_file():
+        if recorded:
+            errors.append(
+                f"{bundle_name} is missing from the artifact directory while "
+                "the manifest records source.sha256"
+            )
+        return
+
+    actual = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+    if sha256_entries.get(bundle_name) != actual:
+        errors.append(
+            f"SHA256SUMS digest mismatch for {bundle_name}: "
+            f"sha256sums={sha256_entries.get(bundle_name)}, actual={actual}"
+        )
+    if recorded != actual:
+        errors.append(
+            f"source.sha256 does not match the published bundle: "
+            f"manifest={recorded}, actual={actual}"
+        )
+
+
 def validate_manifest(
     manifest_path: Path,
     artifact_dir: Path,
@@ -371,37 +414,10 @@ def validate_manifest(
                 # commit and publishes it, so the signed checksum file covers
                 # it.  Without this entry every tag release fails the reverse
                 # scan below with "Unexpected file in SHA256SUMS".
-                bundle_name = f"nginx-markdown-for-agents-source-{tag}.tar.gz"
+                bundle_name = _source_bundle_name(tag)
                 allowed_sha256_names.add(bundle_name)
-                # Allowing the name is not enough: the bundle is the provenance
-                # artifact, so its on-disk digest must match both the signed
-                # checksum file and the manifest's source.sha256.
-                bundle_path = artifact_dir / bundle_name
-                recorded = source.get("sha256") if isinstance(source, dict) else None
-                if bundle_path.is_file():
-                    actual_bundle = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
-                    if sha256_entries.get(bundle_name) != actual_bundle:
-                        errors.append(
-                            f"SHA256SUMS digest mismatch for {bundle_name}: "
-                            f"sha256sums={sha256_entries.get(bundle_name)}, "
-                            f"actual={actual_bundle}"
-                        )
-                    if recorded != actual_bundle:
-                        errors.append(
-                            f"source.sha256 does not match the published bundle: "
-                            f"manifest={recorded}, actual={actual_bundle}"
-                        )
-                elif recorded:
-                    # The manifest claims provenance.  Publishing that claim
-                    # without the artifact it describes is exactly the gap this
-                    # check exists to close.
-                    errors.append(
-                        f"{bundle_name} is missing from the artifact directory "
-                        "while the manifest records source.sha256"
-                    )
-            elif require_bootstrap_assets:
-                errors.append(
-                    "git.tag must be a semantic release tag to validate bootstrap assets"
+                _check_source_bundle(
+                    source, bundle_name, artifact_dir, sha256_entries, errors
                 )
 
         allowed_sha256_names.update(bootstrap_filenames)
