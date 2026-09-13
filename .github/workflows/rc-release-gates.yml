@@ -126,7 +126,12 @@ jobs:
 
           # A truncated evidence file must not read as success: assert that the
           # loop wrote one line per check before anything judges the contents.
-          test "$(wc -l < rc-evidence/results.tsv)" -eq 6
+          # This step runs without `set -e`, so the check fails explicitly.
+          rows="$(wc -l < rc-evidence/results.tsv)"
+          if [ "${rows}" -ne 6 ]; then
+            echo "::error::expected 6 evidence rows, found ${rows}"
+            exit 1
+          fi
 
           echo "=== collected results ==="
           cat rc-evidence/results.tsv

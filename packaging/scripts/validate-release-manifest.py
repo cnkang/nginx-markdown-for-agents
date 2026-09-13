@@ -94,6 +94,7 @@ def _source_bundle_name(tag: str) -> str:
 def _check_source_bundle(
     source,
     bundle_name: str,
+    expected_url: str | None,
     artifact_dir: Path,
     sha256_entries: dict[str, str],
     errors: list[str],
@@ -107,6 +108,17 @@ def _check_source_bundle(
     """
     bundle_path = artifact_dir / bundle_name
     recorded = source.get("sha256") if isinstance(source, dict) else None
+
+    # The URL is part of the provenance claim: a link to a differently named or
+    # differently tagged artifact would describe something other than the bundle
+    # whose digest the manifest records.
+    if expected_url is not None:
+        actual_url = source.get("archive_url") if isinstance(source, dict) else None
+        if actual_url != expected_url:
+            errors.append(
+                "source.archive_url does not point at the published bundle: "
+                f"expected={expected_url}, actual={actual_url}"
+            )
 
     if not bundle_path.is_file():
         if recorded:
@@ -416,8 +428,20 @@ def validate_manifest(
                 # scan below with "Unexpected file in SHA256SUMS".
                 bundle_name = _source_bundle_name(tag)
                 allowed_sha256_names.add(bundle_name)
+                repository = (manifest.get("git") or {}).get("repository")
+                expected_url = (
+                    f"https://github.com/{repository}/releases/download/"
+                    f"{tag}/{bundle_name}"
+                    if repository
+                    else None
+                )
                 _check_source_bundle(
-                    source, bundle_name, artifact_dir, sha256_entries, errors
+                    source,
+                    bundle_name,
+                    expected_url,
+                    artifact_dir,
+                    sha256_entries,
+                    errors,
                 )
 
         allowed_sha256_names.update(bootstrap_filenames)

@@ -460,6 +460,10 @@ class TestValidateManifest(unittest.TestCase):
         # name for this tag.
         (self.artifact_dir / "nginx-markdown-for-agents-source-v0.8.3.tar.gz").unlink()
         manifest["source"]["sha256"] = sha256_bytes(b"fake-bundle")
+        manifest["source"]["archive_url"] = (
+            "https://github.com/cnkang/nginx-markdown-for-agents/releases/"
+            f"download/{tag}/{bundle_name}"
+        )
         self.manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
         installer = f"nginx-markdown-for-agents-installer-{tag}.sh"
@@ -673,6 +677,29 @@ class TestValidateManifest(unittest.TestCase):
         self.sha256sums_path.write_text("\n".join(entries) + "\n")
         errors = self._validate()
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_source_url_pointing_elsewhere_is_rejected(self):
+        """An archive_url that names another artifact must not pass.
+
+        The URL is part of the provenance claim: pointing it at the generated
+        tag archive describes different bytes than the bundle whose digest the
+        manifest records."""
+        manifest = self._make_valid_manifest()
+        manifest["workflow"]["ref_type"] = "tag"
+        manifest["source"]["archive_url"] = (
+            "https://github.com/cnkang/nginx-markdown-for-agents/archive/"
+            "refs/tags/v0.8.3.tar.gz"
+        )
+        self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        self._make_sha256sums()
+        errors = self._validate()
+        self.assertTrue(
+            any(
+                "archive_url does not point at the published bundle" in e
+                for e in errors
+            ),
+            f"Expected a URL-mismatch error, got: {errors}",
+        )
 
     def test_tag_missing_source_sha_is_rejected(self):
         """Tag release without source.sha256 must fail validation.
