@@ -182,3 +182,17 @@ def test_container_rust_image_without_exact_version_fails(tmp_path: Path) -> Non
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert any("rust:alpine3.21" in error or "alpine3.21" in error for error in errors), errors
+
+
+def test_interpolation_before_the_version_is_rejected(tmp_path: Path) -> None:
+    """A variable ahead of RUST_VERSION could stand in for another version."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "env:\n  RUST_VERSION: 1.97.0\n"
+        "jobs:\n  build:\n    steps:\n      - run: docker run rust:${MATRIX}${RUST_VERSION}\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("cannot resolve" in error for error in errors), errors

@@ -113,6 +113,28 @@ def get_git_tracked_paths() -> set[str]:
         return set()
 
 
+def _fence_marker(line: str) -> tuple[str, int, str] | None:
+    """Return the fence marker a line carries, or None when it carries none.
+
+    A fence is three or more backticks or tildes with at most three leading
+    spaces.  A backtick fence may carry an info string, but not one containing a
+    backtick, so such a line is ordinary text.  The third element is whatever
+    follows the run, which a closing fence must leave empty.
+    """
+    indent = len(line) - len(line.lstrip(" "))
+    body = line[indent:]
+    char = body[:1]
+    if char not in ("`", "~") or indent > 3:
+        return None
+    run = len(body) - len(body.lstrip(char))
+    if run < 3:
+        return None
+    trailing = body[run:].strip()
+    if char == "`" and "`" in trailing:
+        return None
+    return char, run, trailing
+
+
 def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
     """Extract lines that are outside fenced code blocks.
 
@@ -124,31 +146,22 @@ def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
     lines: list[tuple[int, str]] = []
     open_char: str | None = None
     open_len = 0
+
     for line_no, line in enumerate(text.splitlines(), 1):
-        indent = len(line) - len(line.lstrip(" "))
-        body = line[indent:]
-        char = body[:1]
-        run = len(body) - len(body.lstrip(char)) if char in ("`", "~") else 0
-        trailing = body[run:].strip() if char in ("`", "~") else ""
-        is_fence_line = indent <= 3 and run >= 3
-        if char == "`" and "`" in trailing:
-            # CommonMark: a backtick fence's info string cannot contain a
-            # backtick, so this line is ordinary text.
-            is_fence_line = False
-        # An opening fence may carry an info string; a closing fence may not.
-        if is_fence_line and open_char is None:
-            open_char, open_len = char, run
-            continue
-        if (
-            is_fence_line
-            and not trailing
-            and char == open_char
-            and run >= open_len
-        ):
-            open_char, open_len = None, 0
-            continue
+        marker = _fence_marker(line)
+        if marker is not None:
+            char, run, trailing = marker
+            if open_char is None:
+                open_char, open_len = char, run
+                continue
+            if char == open_char and not trailing and run >= open_len:
+                open_char, open_len = None, 0
+                continue
+            if char == open_char:
+                continue
         if open_char is None:
             lines.append((line_no, line))
+
     return lines
 
 
@@ -647,10 +660,8 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
             continue
         content = path.read_text(encoding="utf-8")
         history = set(_document_update_table_lines(content))
-        for _lineno, line in iter_unfenced_lines(content):
-            if not line.strip() or line in history:
-                continue
-            if _CHECKLIST_CLAIM_RE.search(line):
+        for block in _logical_blocks(content):
+            if _CHECKLIST_CLAIM_RE.search(block):
                 failures.append(
                     f"{path}: states mutable candidate status; keep the "
                     "checklist to requirements"
@@ -699,6 +710,26 @@ def _logical_task_items(files: list[Path]) -> list[tuple[Path, str]]:
         if path.name.endswith("-release-checklist.md")
         for item in _checklist_items(path.read_text(encoding="utf-8"))
     ]
+
+
+def _logical_blocks(content: str) -> list[str]:
+    """Group the prose into blocks so a wrapped sentence reads as one.
+
+    A status claim wrapped over two lines has to be judged as the sentence it
+    is, not as two fragments that each look harmless.
+    """
+    history = set(_document_update_table_lines(content))
+    blocks: list[str] = []
+    current: list[str] = []
+    for _lineno, line in iter_unfenced_lines(content):
+        if not line.strip() or line in history:
+            _flush_task_item(blocks, current)
+            continue
+        if _is_task_list_line(line) or line[:1] not in (" ", "\t"):
+            _flush_task_item(blocks, current)
+        current.append(line.strip())
+    _flush_task_item(blocks, current)
+    return blocks
 
 
 def main() -> int:

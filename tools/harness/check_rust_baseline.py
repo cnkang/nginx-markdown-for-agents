@@ -177,9 +177,9 @@ def _image_version(tag: str) -> str | None:
 def _image_tag_error(path: Path, tag: str, exact: str) -> str | None:
     """Return the complaint about one image tag, or None when it is fine."""
     if "$" in tag:
-        # Only the checked variable may stand in for the version; any other
-        # interpolation leaves the version unknown.
-        if "${RUST_VERSION}" in tag:
+        # The version position must be the variable this check reads; an
+        # earlier interpolation could stand in for a different version.
+        if tag.startswith("${RUST_VERSION}"):
             return None
         return (
             f"{path}: Rust image tag {tag!r} interpolates a value this check "
