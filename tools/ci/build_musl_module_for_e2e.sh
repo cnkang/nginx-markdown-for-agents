@@ -10,10 +10,10 @@
 #     rust:<version>-alpine<release> sh /src/tools/ci/build_musl_module_for_e2e.sh
 set -eux
 
-apk add --no-cache build-base brotli-dev curl gzip openssl-dev pcre-dev perl zlib-dev
+apk add --no-cache bash build-base brotli-dev curl gzip openssl-dev pcre-dev perl zlib-dev
 
 curl -fsSL -o /tmp/nginx.tar.gz "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
-sh /src/packaging/scripts/verify-checksum.sh \
+bash /src/packaging/scripts/verify-checksum.sh \
   -f /tmp/nginx.tar.gz -c /src/packaging/checksums.sha256 -i "nginx-${NGINX_VERSION}"
 
 tar xzf /tmp/nginx.tar.gz -C /tmp

@@ -3148,7 +3148,7 @@ test_commit_feed_and_finalize_core_paths(void)
         "finalize should succeed when final body and terminal buffer send");
     TEST_ASSERT(metrics.streaming.succeeded_total >= 1,
         "successful finalize should increment success metrics");
-    TEST_ASSERT(metrics.streaming.last_peak_memory_bytes == 128,
+    TEST_ASSERT(metrics.perf.conversion_peak_memory_bytes == 128,
         "finalize should store peak memory gauge from result");
     TEST_ASSERT(g_info_log_count == 1,
         "finalize should emit one info-level ETag summary");
