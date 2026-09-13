@@ -166,21 +166,27 @@ fn merge(base_path: &str, path: &str) -> String {
 }
 
 /// Remove `.` and `..` segments (RFC 3986 section 5.2.4).
+///
+/// The trailing slashes belong to the path: `/a//` keeps both of them, and the
+/// dot-suffix forms `/a/.` and `/a/..` end in exactly one.  Counting the run
+/// first keeps every trailing slash, which re-attaching a single one cannot.
 fn remove_dot_segments(path: &str) -> String {
     let absolute = path.starts_with('/');
-    let trailing_slash = path.ends_with('/') || path.ends_with("/.") || path.ends_with("/..");
-    let parts: Vec<&str> = path.split('/').collect();
-    let last_index = parts.len().saturating_sub(1);
+    let dot_suffix = path.ends_with("/.") || path.ends_with("/..");
+    let trailing_slashes = if dot_suffix {
+        1
+    } else {
+        path.len() - path.trim_end_matches('/').len()
+    };
+    let body = &path[..path.len().saturating_sub(trailing_slashes)];
+
     let mut segments: Vec<&str> = Vec::new();
 
-    for (index, segment) in parts.iter().enumerate() {
-        match *segment {
+    for (index, segment) in body.split('/').enumerate() {
+        match segment {
+            // The leading empty piece marks the root, not a segment.
+            "" if index == 0 && absolute => continue,
             "." => continue,
-            // The leading empty piece marks the root and the trailing one stands
-            // for the final slash, which the trailing_slash branch re-adds.  Any
-            // other empty piece is a real empty segment and must survive, as
-            // RFC 3986 section 5.2.4 requires: `/a//b` stays `/a//b`.
-            "" if (index == 0 && absolute) || index == last_index => continue,
             ".." => {
                 if segments.pop().is_none() && !absolute {
                     continue;
@@ -197,7 +203,9 @@ fn remove_dot_segments(path: &str) -> String {
         result.push('/');
     }
     result.push_str(&joined);
-    if trailing_slash && !result.ends_with('/') {
+    // The body never ends in a slash once the trailing run is removed, so these
+    // are the only trailing slashes on the result: append every one of them.
+    for _ in 0..trailing_slashes {
         result.push('/');
     }
     if result.is_empty() {
@@ -243,9 +251,14 @@ mod tests {
             // base scheme (RFC 3986 section 5.2).
             ("//cdn.example.com/a.js", "https://cdn.example.com/a.js"),
             ("//cdn.example.com", "https://cdn.example.com"),
-            // Empty segments are preserved (section 5.2.4).
+            // Empty segments are preserved (section 5.2.4), including a run of
+            // trailing slashes: `/a//` keeps both of them.
             ("/a//b", "https://example.com/a//b"),
             ("/a//b/./c", "https://example.com/a//b/c"),
+            ("/a//", "https://example.com/a//"),
+            ("/a///", "https://example.com/a///"),
+            ("/a/b//", "https://example.com/a/b//"),
+            ("//cdn.example.com/a//", "https://cdn.example.com/a//"),
             // absolute path
             ("/hero.png", "https://example.com/hero.png"),
             // relative paths, including dot segments
