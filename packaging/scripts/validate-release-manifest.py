@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import json
 import re
 import sys
@@ -86,6 +87,26 @@ def parse_sha256sums(path: Path, errors: list[str]) -> dict[str, str]:
     return entries
 
 
+def sha256_no_follow(path: Path) -> str:
+    """Hash a file without following a symlink at the final component.
+
+    The containment check resolves the path, so re-opening by name leaves a
+    window in which the entry could be replaced; opening the descriptor once
+    closes it.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    digest = hashlib.sha256()
+    fd = os.open(path, flags)
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            for chunk in iter(lambda: handle.read(64 * 1024), b""):
+                digest.update(chunk)
+    except BaseException:
+        os.close(fd)
+        raise
+    return digest.hexdigest()
+
+
 def _source_bundle_name(tag: str) -> str:
     """Name of the source bundle the release workflow publishes for a tag."""
     return f"nginx-markdown-for-agents-source-{tag}.tar.gz"
@@ -140,7 +161,11 @@ def _check_source_bundle(
             )
         return
 
-    actual = sha256_file(bundle_path)
+    try:
+        actual = sha256_no_follow(bundle_path)
+    except OSError as exc:
+        errors.append(f"{bundle_name} cannot be read safely ({exc})")
+        return
     # This comparison needs the checksum data; the presence and URL checks above
     # do not, which is why they run for every tag release.
     if sha256_entries and sha256_entries.get(bundle_name) != actual:

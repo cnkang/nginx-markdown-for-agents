@@ -211,6 +211,14 @@ def source_archive_info(
 ) -> dict:
     """Build source archive section."""
     if source_url:
+        if tag and not source_sha:
+            print(
+                f"ERROR: --source-url with --tag needs --source-sha: {tag} "
+                "publishes a source bundle and validation rejects a tag manifest "
+                "without its digest",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
         info: dict = {"archive_url": source_url, "available": True}
         if source_sha:
             info["sha256"] = source_sha

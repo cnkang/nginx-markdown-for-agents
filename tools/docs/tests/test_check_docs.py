@@ -480,3 +480,13 @@ def test_heading_ends_the_task_item(tmp_path):
         encoding="utf-8",
     )
     assert docs_checker.check_release_checklist_is_static([path]) == []
+
+
+def test_blank_line_ends_the_task_item(tmp_path):
+    """Prose a blank line below an item is not part of that item."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text(
+        "- [ ] publish the release\n\nThe baseline anchors at 1234567.\n",
+        encoding="utf-8",
+    )
+    assert docs_checker.check_release_checklist_is_static([path]) == []

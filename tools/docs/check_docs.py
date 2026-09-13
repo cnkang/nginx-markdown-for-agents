@@ -633,8 +633,9 @@ def _is_task_list_line(line: str) -> bool:
     if stripped[:1] not in ("-", "*", "+"):
         return False
     rest = stripped[1:].lstrip(" \t")
+    gap = len(stripped) - 1 - len(rest)
     # A list marker may be followed by one to four spaces.
-    if len(stripped) - 1 - len(rest) not in (1, 2, 3, 4):
+    if gap not in (1, 2, 3, 4):
         return False
     return rest[:1] == "[" and rest[1:2] in (" ", "x", "X") and rest[2:3] == "]"
 
@@ -649,17 +650,18 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
     legitimately records commit identifiers as history.
     """
     failures: list[str] = []
-    for path, item in _logical_task_items(files):
-        if _CHECKLIST_SHA_RE.search(item):
-            failures.append(
-                f"{path}: a requirement names a commit; bind status to the "
-                "candidate-bound release evidence instead"
-            )
     for path in files:
         if not path.name.endswith("-release-checklist.md"):
             continue
         content = path.read_text(encoding="utf-8")
-        for block in _logical_blocks(content, _checklist_history(content)):
+        history = _checklist_history(content)
+        for item in _checklist_items(content, history):
+            if _CHECKLIST_SHA_RE.search(item):
+                failures.append(
+                    f"{path}: a requirement names a commit; bind status to the "
+                    "candidate-bound release evidence instead"
+                )
+        for block in _logical_blocks(content, history):
             if _CHECKLIST_CLAIM_RE.search(block):
                 failures.append(
                     f"{path}: states mutable candidate status; keep the "
@@ -702,6 +704,9 @@ def _checklist_items(content: str, history: set[str]) -> list[str]:
 
     for _lineno, line in iter_unfenced_lines(content):
         if not line.strip() or line in history:
+            # A blank line ends the item: CommonMark starts a new paragraph, so
+            # prose below the item is not part of it.
+            _flush_task_item(items, current)
             continue
         if _is_task_list_line(line):
             _flush_task_item(items, current)
@@ -716,18 +721,6 @@ def _checklist_items(content: str, history: set[str]) -> list[str]:
             continue
 
     _flush_task_item(items, current)
-    return items
-
-
-def _logical_task_items(files: list[Path]) -> list[tuple[Path, str]]:
-    """Return each task item of every checklist as one string."""
-    items: list[tuple[Path, str]] = []
-    for path in files:
-        if not path.name.endswith("-release-checklist.md"):
-            continue
-        content = path.read_text(encoding="utf-8")
-        history = _checklist_history(content)
-        items.extend((path, item) for item in _checklist_items(content, history))
     return items
 
 

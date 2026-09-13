@@ -135,6 +135,21 @@ class TestGenerateManifest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--source-sha", result.stderr)
 
+    def test_tag_with_source_url_and_no_digest_fails(self):
+        """The explicit URL path must enforce the digest for a tag too."""
+        self._write_package(
+            "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
+        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--tag", "v0.8.3",
+            "--commit", "abc1234",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-url", "https://example.com/bundle.tar.gz",
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--source-sha", result.stderr)
+
     def test_no_packages_fails(self):
         result = self._run_generate([
             "--version", "0.8.3",

@@ -183,38 +183,52 @@ def _env_keys(mapping: object) -> set[str]:
     return {str(key) for key in mapping}
 
 
-def _job_env_names(job: object) -> set[str]:
-    """Return the names a job makes visible to its steps."""
-    if not isinstance(job, dict):
-        return set()
-    names = _env_keys(job.get("env"))
-    steps = job.get("steps")
-    if isinstance(steps, list):
-        for step in steps:
-            names |= _env_keys(step.get("env") if isinstance(step, dict) else None)
-    return names
-
-
-def _declared_env_names(content: str) -> set[str]:
-    """Return the environment names a workflow makes visible to its steps.
-
-    Only `env:` mappings count.  An arbitrary uppercase key such as a job name
-    or a workflow input is not an environment variable, and treating it as one
-    would let an undeclared interpolation pass the image check.
-    """
+def _workflow_document(content: str) -> dict:
+    """Parse a workflow, returning an empty mapping when it does not parse."""
     try:
         document = yaml.safe_load(content)
     except yaml.YAMLError:
-        return set()
-    if not isinstance(document, dict):
-        return set()
+        return {}
+    return document if isinstance(document, dict) else {}
 
-    names = _env_keys(document.get("env"))
+
+def _step_environments(content: str) -> list[tuple[set[str], str]]:
+    """Return (visible env names, run script) for every step in a workflow.
+
+    A step sees the workflow's `env`, its job's `env` and its own, and nothing
+    else.  Resolving the names per step keeps a variable declared in an
+    unrelated job from satisfying the image check.
+    """
+    document = _workflow_document(content)
+    if not document:
+        return []
+
+    workflow_env = _env_keys(document.get("env"))
     jobs = document.get("jobs")
-    if isinstance(jobs, dict):
-        for job in jobs.values():
-            names |= _job_env_names(job)
-    return names
+    if not isinstance(jobs, dict):
+        return []
+    found: list[tuple[set[str], str]] = []
+    for job in jobs.values():
+        found.extend(_job_step_environments(job, workflow_env))
+    return found
+
+
+def _job_step_environments(job: object, inherited: set[str]) -> list[tuple[set[str], str]]:
+    """Return (visible env names, run script) for each step of one job."""
+    if not isinstance(job, dict):
+        return []
+    job_env = inherited | _env_keys(job.get("env"))
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return []
+    found: list[tuple[set[str], str]] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        run = step.get("run")
+        if isinstance(run, str):
+            found.append((job_env | _env_keys(step.get("env")), run))
+    return found
 
 
 
@@ -230,6 +244,16 @@ def _tag_variables(tag: str) -> list[str] | None:
     if "$" in re.sub(r"\$\{[A-Za-z0-9_]+\}", "", tag):
         return None
     return names
+
+
+def _step_tag_errors(path: Path, visible: set[str], run: str, exact: str) -> list[str]:
+    """Return the complaints for the Rust image tags one step script names."""
+    errors: list[str] = []
+    for tag in sorted(set(RUST_IMAGE_RE.findall(run))):
+        complaint = _image_tag_error(path, tag, exact, visible)
+        if complaint is not None:
+            errors.append(complaint)
+    return errors
 
 
 def _image_tag_error(
@@ -285,19 +309,19 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
     workflows = Path(".github/workflows")
     for path in sorted((root / workflows).glob("*.y*ml")):
         content = path.read_text(encoding="utf-8")
-        declared_names = _declared_env_names(content)
         for declared in sorted(set(RUST_VERSION_ENV_RE.findall(content))):
             if declared != exact:
                 errors.append(
                     f"{workflows / path.name}: RUST_VERSION is {declared!r} but "
                     f"rust-toolchain.toml declares {exact!r}"
                 )
-        for tag in sorted(set(RUST_IMAGE_RE.findall(content))):
-            complaint = _image_tag_error(
-                workflows / path.name, tag, exact, declared_names
+        # Each interpolation is judged against the environment visible where it
+        # appears, so a name declared in an unrelated job or step cannot satisfy
+        # the check.
+        for visible, run in _step_environments(content):
+            errors.extend(
+                _step_tag_errors(workflows / path.name, visible, run, exact)
             )
-            if complaint is not None:
-                errors.append(complaint)
 
 
 def _check_workflow_inventory(root: Path, errors: list[str]) -> None:

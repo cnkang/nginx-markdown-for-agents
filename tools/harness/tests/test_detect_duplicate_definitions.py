@@ -46,3 +46,29 @@ def test_unique_names_pass(tmp_path: Path) -> None:
     )
 
     assert detector.collect_errors(tmp_path) == []
+
+
+def test_duplicate_assignment_is_reported(tmp_path: Path) -> None:
+    """A second binding of the same top-level name is dead code too."""
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "dupe.py").write_text(
+        "FOO = 1\n\n\nFOO = 2\n",
+        encoding="utf-8",
+    )
+
+    errors = detector.collect_errors(tmp_path)
+
+    assert any("FOO" in error for error in errors), errors
+
+
+def test_annotated_assignment_counts(tmp_path: Path) -> None:
+    """An annotated binding is a binding as well."""
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "dupe.py").write_text(
+        "BAR: int = 1\n\n\nBAR = 2\n",
+        encoding="utf-8",
+    )
+
+    errors = detector.collect_errors(tmp_path)
+
+    assert any("BAR" in error for error in errors), errors
