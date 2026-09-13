@@ -412,3 +412,25 @@ def test_closing_fence_must_not_carry_trailing_text():
     kept = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
     assert "still inside" not in kept
     assert "after" in kept
+
+
+def test_backtick_info_string_with_backtick_is_not_a_fence():
+    """A backtick fence's info string cannot contain a backtick."""
+    text = "```foo`bar\nstill text\n"
+    kept = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
+    assert "still text" in kept
+
+
+def test_task_marker_with_extra_spaces_is_recognised():
+    """CommonMark allows one to four spaces after a list marker."""
+    assert docs_checker._is_task_list_line("-  [ ] item")
+    assert docs_checker._is_task_list_line("- [ ] item")
+    assert not docs_checker._is_task_list_line("-     [ ] item")
+
+
+def test_checklist_guard_sees_a_pinned_commit_after_extra_spaces(tmp_path):
+    """A wider marker must not become a way to hide a pinned commit."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text("-  [ ] certified at 1234567\n", encoding="utf-8")
+    failures = docs_checker.check_release_checklist_is_static([path])
+    assert failures and "names a commit" in failures[0]

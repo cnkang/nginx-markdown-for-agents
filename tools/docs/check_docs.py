@@ -131,6 +131,10 @@ def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
         run = len(body) - len(body.lstrip(char)) if char in ("`", "~") else 0
         trailing = body[run:].strip() if char in ("`", "~") else ""
         is_fence_line = indent <= 3 and run >= 3
+        if char == "`" and "`" in trailing:
+            # CommonMark: a backtick fence's info string cannot contain a
+            # backtick, so this line is ordinary text.
+            is_fence_line = False
         # An opening fence may carry an info string; a closing fence may not.
         if is_fence_line and open_char is None:
             open_char, open_len = char, run
@@ -613,30 +617,13 @@ _CHECKLIST_CLAIM_RE = re.compile(
 def _is_task_list_line(line: str) -> bool:
     """True for a Markdown task-list item, whatever marker it uses."""
     stripped = line.lstrip()
-    return (
-        len(stripped) > 5
-        and stripped[0] in "-*+"
-        and stripped[1] == " "
-        and stripped[2] == "["
-        and stripped[3] in " xX"
-        and stripped[4] == "]"
-    )
-
-
-def _checklist_line_failures(path: Path, line: str) -> list[str]:
-    """Failures a single checklist line contributes."""
-    found: list[str] = []
-    if _is_task_list_line(line) and _CHECKLIST_SHA_RE.search(line):
-        found.append(
-            f"{path}: a requirement names a commit; bind status to the "
-            "candidate-bound release evidence instead"
-        )
-    if _CHECKLIST_CLAIM_RE.search(line):
-        found.append(
-            f"{path}: states mutable candidate status; keep the "
-            "checklist to requirements"
-        )
-    return found
+    if stripped[:1] not in ("-", "*", "+"):
+        return False
+    rest = stripped[1:].lstrip(" \t")
+    # A list marker may be followed by one to four spaces.
+    if len(stripped) - 1 - len(rest) not in (1, 2, 3, 4):
+        return False
+    return rest[:1] == "[" and rest[1:2] in (" ", "x", "X") and rest[2:3] == "]"
 
 
 def check_release_checklist_is_static(files: list[Path]) -> list[str]:
