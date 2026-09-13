@@ -697,6 +697,25 @@ class TestValidateManifest(unittest.TestCase):
             f"Expected a URL-mismatch error without SHA256SUMS, got: {errors}",
         )
 
+    def test_source_bundle_outside_the_artifact_dir_is_rejected(self):
+        """A traversing bundle name must not be inspected from outside."""
+        manifest = self._make_valid_manifest()
+        manifest["workflow"]["ref_type"] = "tag"
+        manifest["source"]["archive_url"] = (
+            "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/"
+            "v0.8.3/../../etc/passwd"
+        )
+        self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        self._make_sha256sums()
+        errors = self._validate()
+        self.assertTrue(
+            any(
+                "archive_url" in e or "outside the artifact directory" in e
+                for e in errors
+            ),
+            f"Expected a containment or URL error, got: {errors}",
+        )
+
     def test_source_url_pointing_elsewhere_is_rejected(self):
         """An archive_url that names another artifact must not pass.
 

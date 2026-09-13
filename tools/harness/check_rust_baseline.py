@@ -174,17 +174,30 @@ def _image_version(tag: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _image_tag_error(path: Path, tag: str, exact: str) -> str | None:
+DECLARED_NAME_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*:", re.MULTILINE)
+
+
+def _tag_variables(tag: str) -> list[str]:
+    """Return the variable names a tag interpolates, in order."""
+    return re.findall(r"\$\{([A-Za-z0-9_]+)\}", tag)
+
+
+def _image_tag_error(
+    path: Path, tag: str, exact: str, declared: set[str]
+) -> str | None:
     """Return the complaint about one image tag, or None when it is fine."""
     if "$" in tag:
-        # The version position must be the variable this check reads; an
-        # earlier interpolation could stand in for a different version.
-        if tag.startswith("${RUST_VERSION}"):
-            return None
-        return (
-            f"{path}: Rust image tag {tag!r} interpolates a value this check "
-            f"cannot resolve ({exact!r} expected)"
-        )
+        names = _tag_variables(tag)
+        # The version position has to be the variable this check reads, and any
+        # other interpolation has to be a declared value: an undeclared one
+        # could stand in for a different version.  A declared suffix such as an
+        # Alpine release is fine, because it does not carry the Rust version.
+        if not names or names[0] != "RUST_VERSION" or any(n not in declared for n in names[1:]):
+            return (
+                f"{path}: Rust image tag {tag!r} interpolates a value this check "
+                f"cannot resolve ({exact!r} expected)"
+            )
+        return None
 
     version = _image_version(tag)
     if version is None:
@@ -212,6 +225,7 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
     workflows = Path(".github/workflows")
     for path in sorted((root / workflows).glob("*.y*ml")):
         content = path.read_text(encoding="utf-8")
+        declared_names = set(DECLARED_NAME_RE.findall(content))
         for declared in sorted(set(RUST_VERSION_ENV_RE.findall(content))):
             if declared != exact:
                 errors.append(
@@ -219,7 +233,9 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
                     f"rust-toolchain.toml declares {exact!r}"
                 )
         for tag in sorted(set(RUST_IMAGE_RE.findall(content))):
-            complaint = _image_tag_error(workflows / path.name, tag, exact)
+            complaint = _image_tag_error(
+                workflows / path.name, tag, exact, declared_names
+            )
             if complaint is not None:
                 errors.append(complaint)
 

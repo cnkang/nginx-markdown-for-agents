@@ -196,3 +196,33 @@ def test_interpolation_before_the_version_is_rejected(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert any("cannot resolve" in error for error in errors), errors
+
+
+def test_declared_suffix_variable_is_accepted(tmp_path: Path) -> None:
+    """A declared suffix such as an Alpine release does not carry the version."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "env:\n  RUST_VERSION: 1.97.0\n  ALPINE_VERSION: 3.21\n"
+        "jobs:\n  build:\n    steps:\n"
+        "      - run: docker run rust:${RUST_VERSION}-alpine${ALPINE_VERSION}\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert not any("rust:" in error for error in errors), errors
+
+
+def test_undeclared_suffix_variable_is_rejected(tmp_path: Path) -> None:
+    """An undeclared interpolation could stand in for another version."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "env:\n  RUST_VERSION: 1.97.0\n"
+        "jobs:\n  build:\n    steps:\n"
+        "      - run: docker run rust:${RUST_VERSION}-${SNEAKY}\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("cannot resolve" in error for error in errors), errors
