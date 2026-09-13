@@ -55,14 +55,26 @@ jobs:
 
       - name: Install cluster tooling
         run: |
+          # Each tool is fetched at a pinned version and checked against the
+          # digest its vendor publishes, so nothing unpinned reaches a shell.
           set -euo pipefail
+
           curl -fsSLo /tmp/kind "https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64"
+          echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  /tmp/kind" \
+            | sha256sum -c -
           sudo install -m 0755 /tmp/kind /usr/local/bin/kind
-          curl -fsSL "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3" \
-            | bash -s -- --version v3.19.0
-          curl -fsSLo /tmp/kubectl \
-            "https://dl.k8s.io/release/v1.34.1/bin/linux/amd64/kubectl"
+
+          curl -fsSLo /tmp/helm.tgz "https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz"
+          echo "a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496  /tmp/helm.tgz" \
+            | sha256sum -c -
+          tar -xzf /tmp/helm.tgz -C /tmp
+          sudo install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+
+          curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/v1.34.1/bin/linux/amd64/kubectl"
+          echo "7721f265e18709862655affba5343e85e1980639395d5754473dafaadcaa69e3  /tmp/kubectl" \
+            | sha256sum -c -
           sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+        shell: bash
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
