@@ -497,6 +497,10 @@ impl IncrementalEmitter {
         self.buffer
             .capacity()
             .saturating_add(self.flushed.capacity())
+            // The resolved base URL is cloned into an owned String by
+            // `set_url_resolution`, so its capacity is physical heap the emitter
+            // retains for as long as it lives.
+            .saturating_add(self.base_url.as_ref().map_or(0, String::capacity))
             .saturating_add(self.resident_collector_bytes())
     }
 

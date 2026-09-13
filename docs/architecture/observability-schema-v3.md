@@ -40,8 +40,9 @@ endpoint. The response has exactly these seven top-level fields:
   `module_metrics` counters used by local performance evidence collection
 - `recent_decisions`: bounded worker-local decision entries
 
-The schema rejects unknown top-level fields and malformed types. A release
-publishes additive state inside the optional `extensions` object, which accepts
+The schema rejects unknown top-level fields and malformed types. The permitted
+top-level fields are the ones this schema names, plus the optional `extensions`
+object. A release publishes additive state inside `extensions`, which accepts
 any keys. Consumers must ignore keys they do not recognise: a release adds
 state there instead of adding a top-level field. The handler is
 read-only: the endpoint accepts GET and HEAD, HEAD computes the complete body
@@ -85,7 +86,7 @@ nginx_markdown_conversion_duration_seconds
 nginx_markdown_input_bytes_total
 nginx_markdown_output_bytes_total
 nginx_markdown_streaming_events_total
-nginx_markdown_streaming_peak_memory_bytes
+nginx_markdown_conversion_peak_memory_bytes
 nginx_markdown_decompression_events_total
 nginx_markdown_build_info
 ```

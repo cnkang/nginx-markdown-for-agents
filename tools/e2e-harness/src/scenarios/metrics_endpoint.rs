@@ -19,7 +19,7 @@ const METRIC_FAMILIES: [&str; 10] = [
     "nginx_markdown_conversion_duration_seconds",
     "nginx_markdown_input_bytes_total",
     "nginx_markdown_output_bytes_total",
-    "nginx_markdown_streaming_peak_memory_bytes",
+    "nginx_markdown_conversion_peak_memory_bytes",
     "nginx_markdown_streaming_events_total",
     "nginx_markdown_decompression_events_total",
     "nginx_markdown_build_info",

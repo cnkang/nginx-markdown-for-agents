@@ -119,7 +119,7 @@ REQUIRED_SCENARIO_FIELDS = (
 CANDIDATE_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 AB_PCT_LINE_RE = re.compile(r"^\s*(?P<pct>\d+)%\s+(?P<ms>[0-9.]+)\s*(?:ms)?$")
 PEAK_MEMORY_METRIC_RE = re.compile(
-    r"^nginx_markdown_streaming_peak_memory_bytes\s+(?P<bytes>\d+)$",
+    r"^nginx_markdown_conversion_peak_memory_bytes\s+(?P<bytes>\d+)$",
     re.ASCII,
 )
 

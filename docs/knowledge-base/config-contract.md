@@ -46,7 +46,7 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 | `nginx_markdown_conversion_duration_seconds` | histogram | `engine` | bounded |
 | `nginx_markdown_input_bytes_total` | counter | — | fixed |
 | `nginx_markdown_output_bytes_total` | counter | — | fixed |
-| `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | fixed |
+| `nginx_markdown_conversion_peak_memory_bytes` | gauge | — | fixed |
 | `nginx_markdown_streaming_events_total` | counter | `reason`, `transition` | bounded |
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | bounded |
 | `nginx_markdown_build_info` | gauge | `features`, `nginx_version`, `version` | bounded |

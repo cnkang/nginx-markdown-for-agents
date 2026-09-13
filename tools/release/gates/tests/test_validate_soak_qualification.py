@@ -189,12 +189,12 @@ def test_rss_evidence_requires_samples_and_nonnegative_values() -> None:
 
 def test_peak_memory_metric_parser_requires_positive_gauge() -> None:
     body = (
-        "# TYPE nginx_markdown_streaming_peak_memory_bytes gauge\n"
-        "nginx_markdown_streaming_peak_memory_bytes 65536\n"
+        "# TYPE nginx_markdown_conversion_peak_memory_bytes gauge\n"
+        "nginx_markdown_conversion_peak_memory_bytes 65536\n"
     )
     assert validator._parse_peak_memory_metric(body) == 65536
     assert validator._parse_peak_memory_metric(
-        "nginx_markdown_streaming_peak_memory_bytes 0\n"
+        "nginx_markdown_conversion_peak_memory_bytes 0\n"
     ) is None
     assert validator._parse_peak_memory_metric("other_metric 65536\n") is None
 
@@ -495,7 +495,7 @@ def test_peak_memory_request_selects_prometheus(monkeypatch: pytest.MonkeyPatch)
     def open_metrics(request, timeout):
         assert request.get_header('Accept') == 'text/plain'
         assert timeout == 5
-        response = io.BytesIO(b'nginx_markdown_streaming_peak_memory_bytes 65536\n')
+        response = io.BytesIO(b'nginx_markdown_conversion_peak_memory_bytes 65536\n')
         response.status = 200
         return response
 

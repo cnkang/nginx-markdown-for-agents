@@ -815,7 +815,7 @@
     {
       "bounded_cardinality": "fixed",
       "labels": [],
-      "name": "nginx_markdown_streaming_peak_memory_bytes",
+      "name": "nginx_markdown_conversion_peak_memory_bytes",
       "order": 6,
       "type": "gauge"
     },
