@@ -64,7 +64,7 @@
  * cbindgen-generated header via
  * `tools/release/gates/compute_abi_fingerprints.py`.
  */
-#define MARKDOWN_HEADER_HASH 16965254938510075598ull
+#define MARKDOWN_HEADER_HASH 1182724715411348115ull
 
 /**
  * SHA-256 truncated hash of the sorted exported symbol name set.
