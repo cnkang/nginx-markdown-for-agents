@@ -607,7 +607,16 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
             if not line.strip() or line in history:
                 continue
             # A requirement must not pin a commit; prose may record history.
-            if line.lstrip().startswith(("- [ ]", "- [x]")) and sha_re.search(line):
+            stripped = line.lstrip()
+            is_task = (
+                len(stripped) > 5
+                and stripped[0] in "-*"
+                and stripped[1] == " "
+                and stripped[2] == "["
+                and stripped[3] in " xX"
+                and stripped[4] == "]"
+            )
+            if is_task and sha_re.search(line):
                 failures.append(
                     f"{path}: a requirement names a commit; bind status to the "
                     "candidate-bound release evidence instead"

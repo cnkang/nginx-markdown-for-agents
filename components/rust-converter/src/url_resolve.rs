@@ -172,13 +172,19 @@ fn merge(base_path: &str, path: &str) -> String {
 /// first keeps every trailing slash, which re-attaching a single one cannot.
 fn remove_dot_segments(path: &str) -> String {
     let absolute = path.starts_with('/');
+    // A trailing dot segment keeps the segment in the body so the rules below
+    // drop it (or pop for `..`), and it implies exactly one trailing slash.
     let dot_suffix = path.ends_with("/.") || path.ends_with("/..");
     let trailing_slashes = if dot_suffix {
         1
     } else {
         path.len() - path.trim_end_matches('/').len()
     };
-    let body = &path[..path.len().saturating_sub(trailing_slashes)];
+    let body = if dot_suffix {
+        path
+    } else {
+        &path[..path.len().saturating_sub(trailing_slashes)]
+    };
 
     let mut segments: Vec<&str> = Vec::new();
 
@@ -202,12 +208,19 @@ fn remove_dot_segments(path: &str) -> String {
     if absolute {
         result.push('/');
     }
-    result.push_str(&joined);
-    // The body never ends in a slash once the trailing run is removed, so these
-    // are the only trailing slashes on the result: append every one of them.
-    for _ in 0..trailing_slashes {
+    result.push_str(joined.trim_end_matches('/'));
+
+    // Append the trailing run, counting the slash the root already carries: an
+    // absolute path with an empty body already ends in one, and `/a/..` must
+    // come out as `/`, not `//`.
+    let mut remaining = trailing_slashes;
+    if result.ends_with('/') && remaining > 0 {
+        remaining -= 1;
+    }
+    for _ in 0..remaining {
         result.push('/');
     }
+
     if result.is_empty() {
         result.push('/');
     }
@@ -258,6 +271,11 @@ mod tests {
             ("/a//", "https://example.com/a//"),
             ("/a///", "https://example.com/a///"),
             ("/a/b//", "https://example.com/a/b//"),
+            // A trailing dot segment resolves to one slash, and `..` climbs.
+            ("/a/.", "https://example.com/a/"),
+            ("/a/b/.", "https://example.com/a/b/"),
+            ("/a/..", "https://example.com/"),
+            ("/a/b/..", "https://example.com/a/"),
             ("//cdn.example.com/a//", "https://cdn.example.com/a//"),
             // absolute path
             ("/hero.png", "https://example.com/hero.png"),
