@@ -19,17 +19,31 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = ("tools", "packaging")
 
 
+BINDING_TARGET_TYPES = (ast.Name, ast.Tuple, ast.List, ast.Starred)
+
+
+def _is_binding_target(target: ast.AST) -> bool:
+    """True for a target that binds a name rather than assigning to an attribute."""
+    return isinstance(target, BINDING_TARGET_TYPES)
+
+
+BINDING_TARGET_GETTERS = {
+    ast.Assign: lambda node: list(node.targets),
+    ast.AnnAssign: lambda node: [node.target],
+    ast.For: lambda node: [node.target],
+    ast.AsyncFor: lambda node: [node.target],
+    ast.With: lambda node: [
+        item.optional_vars for item in node.items if item.optional_vars is not None
+    ],
+}
+
+
 def _bound_targets(node: ast.AST) -> list[ast.AST]:
     """Return the binding targets a top-level statement introduces."""
-    if isinstance(node, ast.Assign):
-        return list(node.targets)
-    if isinstance(node, ast.AnnAssign):
-        return [node.target]
-    if isinstance(node, (ast.For, ast.AsyncFor)):
-        return [node.target]
-    if isinstance(node, ast.With):
-        return [item.optional_vars for item in node.items if item.optional_vars is not None]
-    return []
+    getter = BINDING_TARGET_GETTERS.get(type(node))
+    if getter is None:
+        return []
+    return [target for target in getter(node) if _is_binding_target(target)]
 
 
 def _bound_names(node: ast.AST) -> list[str]:
