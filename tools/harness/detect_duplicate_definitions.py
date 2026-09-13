@@ -38,6 +38,18 @@ BINDING_TARGET_GETTERS = {
 }
 
 
+def _imported_names(node: ast.AST) -> list[str]:
+    """Return the names a top-level import binds."""
+    if isinstance(node, ast.Import):
+        # `import a.b` binds `a` at runtime, but two different submodules of the
+        # same package are both legitimate, so the module path is the identity
+        # that matters here.
+        return [alias.asname or alias.name for alias in node.names]
+    if isinstance(node, ast.ImportFrom):
+        return [alias.asname or alias.name for alias in node.names if alias.name != "*"]
+    return []
+
+
 def _bound_targets(node: ast.AST) -> list[ast.AST]:
     """Return the binding targets a top-level statement introduces."""
     getter = BINDING_TARGET_GETTERS.get(type(node))
@@ -65,6 +77,7 @@ def duplicate_names(path: Path) -> list[str]:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.append(node.name)
         else:
+            names.extend(_imported_names(node))
             names.extend(_bound_names(node))
 
     return sorted(name for name, count in Counter(names).items() if count > 1)

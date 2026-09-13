@@ -209,11 +209,13 @@ def _declared_version_values(document: dict) -> list[str]:
                 mappings.append(job["env"])
     for visible, _run in _step_visible_envs(document):
         mappings.append(visible)
+    # A version may be written unquoted, in which case YAML hands back a number
+    # rather than a string; compare whatever was recorded as text.
     return [
-        value
+        str(value)
         for mapping in mappings
         for value in [mapping.get("RUST_VERSION")]
-        if isinstance(value, str)
+        if value is not None
     ]
 
 
@@ -230,7 +232,10 @@ def _job_images(job: dict, visible: dict) -> list[tuple[str, set[str]]]:
     names = {str(key) for key in visible}
     images: list[tuple[str, set[str]]] = []
     container = job.get("container")
-    if isinstance(container, dict) and isinstance(container.get("image"), str):
+    if isinstance(container, str):
+        # `container: rust:1.99` names the image directly.
+        images.append((container, names))
+    elif isinstance(container, dict) and isinstance(container.get("image"), str):
         images.append((container["image"], names))
     services = job.get("services")
     if isinstance(services, dict):
