@@ -327,3 +327,14 @@ def test_release_checklist_preamble_must_stay_static(tmp_path: Path) -> None:
     assert docs_checker.check_release_checklist_is_static([static]) == [], (
         "a requirements-only preamble must pass"
     )
+
+
+def test_release_checklist_guard_rejects_explicit_status_fields(tmp_path: Path) -> None:
+    """Explicit status fields and candidate-passed claims must also be rejected."""
+    for body in (
+        "# 0.9.5 Release Checklist\n\n**Status:** candidate passed all required gates.\n\n## Pre-Release\n",
+        "# 0.9.6 Release Checklist\n\nStatus: all required gates passed\n\n## Pre-Release\n",
+    ):
+        path = tmp_path / f"{abs(hash(body))}-release-checklist.md"
+        path.write_text(body, encoding="utf-8")
+        assert docs_checker.check_release_checklist_is_static([path]), body

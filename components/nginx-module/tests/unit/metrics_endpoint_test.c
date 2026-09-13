@@ -76,7 +76,7 @@ handle_metrics_request(const char *method, const char *remote_addr, const char *
              "# HELP nginx_markdown_output_bytes_total output bytes\n"
              "# TYPE nginx_markdown_output_bytes_total counter\n"
              "nginx_markdown_output_bytes_total 0\n"
-             "# HELP nginx_markdown_conversion_peak_memory_bytes peak streaming memory\n"
+             "# HELP nginx_markdown_conversion_peak_memory_bytes conversion peak memory\n"
              "# TYPE nginx_markdown_conversion_peak_memory_bytes gauge\n"
              "nginx_markdown_conversion_peak_memory_bytes %lu\n"
              "# HELP nginx_markdown_streaming_events_total streaming events\n"
