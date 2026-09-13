@@ -698,22 +698,26 @@ class TestValidateManifest(unittest.TestCase):
         )
 
     def test_source_bundle_outside_the_artifact_dir_is_rejected(self):
-        """A traversing bundle name must not be inspected from outside."""
+        """Containment is checked on the resolved path, not through the URL.
+
+        The bundle name here stays a valid URL segment and an ordinary file name,
+        so only the containment rule can reject it: it is a symlink that leaves
+        the artifact directory.
+        """
         manifest = self._make_valid_manifest()
         manifest["workflow"]["ref_type"] = "tag"
-        manifest["source"]["archive_url"] = (
-            "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/"
-            "v0.8.3/../../etc/passwd"
-        )
+        outside = self.artifact_dir.parent / "outside-bundle.tar.gz"
+        outside.write_bytes(b"elsewhere")
+        link = self.artifact_dir / "nginx-markdown-for-agents-source-v0.8.3.tar.gz"
+        if link.exists():
+            link.unlink()
+        link.symlink_to(outside)
         self.manifest_path.write_text(json.dumps(manifest, indent=2))
         self._make_sha256sums()
         errors = self._validate()
         self.assertTrue(
-            any(
-                "archive_url" in e or "outside the artifact directory" in e
-                for e in errors
-            ),
-            f"Expected a containment or URL error, got: {errors}",
+            any("outside the artifact directory" in e for e in errors),
+            f"Expected a containment error, got: {errors}",
         )
 
     def test_source_url_pointing_elsewhere_is_rejected(self):

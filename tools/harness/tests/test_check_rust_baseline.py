@@ -271,3 +271,17 @@ def test_job_level_env_is_a_declared_variable(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert not any("rust:" in error for error in errors), errors
+
+
+def test_undeclared_version_variable_is_rejected(tmp_path: Path) -> None:
+    """The version variable has to be declared, not merely named."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    steps:\n"
+        "      - run: docker run rust:${RUST_VERSION}-alpine3.21\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("cannot resolve" in error for error in errors), errors
