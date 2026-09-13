@@ -2,10 +2,18 @@
 # record-source-archive-digest.sh — Record a release tag's source-archive digest.
 #
 # Usage:
-#   record-source-archive-digest.sh TAG [--repo OWNER/REPO] [--registry FILE] [-h]
+#   record-source-archive-digest.sh TAG [--repo OWNER/REPO] [--registry FILE]
+#                                       [--github-archive] [-h]
 #
-# Records the SHA256 of https://github.com/OWNER/REPO/archive/refs/tags/TAG.tar.gz
-# in the checked-in registry as "source-TAG".  When the registry already holds an
+# Records the SHA256 of the release's published source bundle,
+# https://github.com/OWNER/REPO/releases/download/TAG/nginx-markdown-for-agents-source-TAG.tar.gz,
+# in the checked-in registry as "source-TAG".  The release workflow builds that
+# bundle from the released commit and records the same digest in the manifest, so
+# the registry then audits what was actually published.
+#
+# Pass --github-archive to record GitHub's auto-generated tag archive instead.
+# Use it only for a release published before the workflow built its own bundle;
+# a digest of that archive can never agree with what the workflow publishes.  When the registry already holds an
 # entry for the tag, the download must match it: a mismatch means the archive
 # changed, which is exactly the drift this registry exists to catch.
 #
@@ -46,6 +54,7 @@ TAG=""
 REPO="${DEFAULT_REPO}"
 REGISTRY="${DEFAULT_REGISTRY}"
 REFRESH=0
+GITHUB_ARCHIVE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -67,6 +76,10 @@ while [[ $# -gt 0 ]]; do
             REFRESH=1
             shift
             ;;
+        --github-archive)
+            GITHUB_ARCHIVE=1
+            shift
+            ;;
         -*)
             die "unknown option: $1"
             ;;
@@ -83,7 +96,11 @@ done
 [[ -f "${REGISTRY}" ]] || die "registry not found: ${REGISTRY}"
 
 IDENTIFIER="source-${TAG}"
-URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
+if [[ "${GITHUB_ARCHIVE}" -eq 1 ]]; then
+    URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
+else
+    URL="https://github.com/${REPO}/releases/download/${TAG}/nginx-markdown-for-agents-source-${TAG}.tar.gz"
+fi
 
 info "downloading ${URL}"
 TMP_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/source-archive-${TAG}.XXXXXX.tar.gz")"

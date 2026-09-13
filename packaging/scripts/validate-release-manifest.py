@@ -367,6 +367,13 @@ def validate_manifest(
                     f"nginx-markdown-for-agents-installer-{tag}.sh",
                     "nginx-markdown-for-agents-release.asc",
                 }
+                # The release workflow builds this bundle from the released
+                # commit and publishes it, so the signed checksum file covers
+                # it.  Without this entry every tag release fails the reverse
+                # scan below with "Unexpected file in SHA256SUMS".
+                allowed_sha256_names.add(
+                    f"nginx-markdown-for-agents-source-{tag}.tar.gz"
+                )
             elif require_bootstrap_assets:
                 errors.append(
                     "git.tag must be a semantic release tag to validate bootstrap assets"

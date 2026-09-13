@@ -937,5 +937,71 @@ class TestValidateManifest(unittest.TestCase):
         )
 
 
+    def test_tag_release_accepts_the_published_source_bundle(self):
+        """The real tag pipeline puts the source bundle in SHA256SUMS.
+
+        The workflow builds the bundle from the released commit and publishes
+        it, and the checksum sweep covers every tarball, so the signed checksum
+        file lists a name that is not a package. The reverse scan must allow it
+        for a tag release, or every tag release fails validation.
+        """
+        fname = "nginx-module-markdown-for-agents_0.9.2_nginx-1.30.4_amd64.deb"
+        (self.artifact_dir / fname).write_bytes(b"fake-content")
+        bundle = "nginx-markdown-for-agents-source-v0.9.2.tar.gz"
+        (self.artifact_dir / bundle).write_bytes(b"fake-bundle")
+        manifest = {
+            "schema_version": 1,
+            "project": "nginx-markdown-for-agents",
+            "version": "0.9.2",
+            "git": {
+                "repository": "cnkang/nginx-markdown-for-agents",
+                "tag": "v0.9.2",
+                "commit": "deadbeef12345678",
+            },
+            "source": {
+                "available": True,
+                "archive_url": (
+                    "https://github.com/cnkang/nginx-markdown-for-agents/releases/"
+                    "download/v0.9.2/nginx-markdown-for-agents-source-v0.9.2.tar.gz"
+                ),
+                "sha256": sha256_bytes(b"fake-bundle"),
+            },
+            "packages": [
+                {
+                    "filename": fname,
+                    "format": "deb",
+                    "version": "0.9.2",
+                    "nginx_version": "1.30.4",
+                    "arch": "amd64",
+                    "sha256": sha256_bytes(b"fake-content"),
+                }
+            ],
+            "integrity": {
+                "checksums": "SHA256SUMS",
+                "signature": "SHA256SUMS.asc",
+                "signature_available": True,
+                "signature_type": "gpg-detached-ascii-armored",
+                "signed_file": "SHA256SUMS",
+            },
+            "workflow": {
+                "provider": "github-actions",
+                "workflow": "release-packages.yml",
+                "ref_type": "tag",
+            },
+        }
+        self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        entries = []
+        for f in sorted(self.artifact_dir.iterdir()):
+            entries.append(f"{sha256_bytes(f.read_bytes())}  {f.name}")
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+
+        errors = self._validate()
+
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+
 if __name__ == "__main__":
     unittest.main()
