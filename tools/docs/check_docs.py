@@ -592,7 +592,9 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
     sha_re = re.compile(r"\b[0-9a-f]{7,40}\b")
     claim_re = re.compile(
         r"current (?:head|candidate)s?\b|have not certified|has not certified"
-        r"|latest workflow|as of this (?:commit|writing)",
+        r"|latest workflow|as of this (?:commit|writing)"
+        r"|\*{0,2}status:?\*{0,2}\s|candidate (?:passed|passes|satisfied)"
+        r"|all required gates (?:passed|are green)",
         re.IGNORECASE,
     )
     for path in files:
