@@ -218,6 +218,12 @@ fn remove_dot_segments(path: &str) -> String {
         for _ in 0..trailing_slashes {
             result.push('/');
         }
+    } else if absolute {
+        // Every segment was empty, so the path is a run of slashes: keep the
+        // run rather than collapsing it to the root.
+        for _ in 1..trailing_slashes {
+            result.push('/');
+        }
     }
 
     if result.is_empty() {

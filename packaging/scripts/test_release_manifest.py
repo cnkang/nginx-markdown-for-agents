@@ -678,6 +678,25 @@ class TestValidateManifest(unittest.TestCase):
         errors = self._validate()
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
+    def test_source_bundle_checked_without_checksum_file(self):
+        """A tag release with no SHA256SUMS must still be checked."""
+        manifest = self._make_valid_manifest()
+        manifest["workflow"]["ref_type"] = "tag"
+        # Point the URL at something else, and give the validator no checksum
+        # file at all: the mismatch must still be reported.
+        manifest["source"]["archive_url"] = (
+            "https://github.com/cnkang/nginx-markdown-for-agents/archive/"
+            "refs/tags/v0.8.3.tar.gz"
+        )
+        self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        if self.sha256sums_path.exists():
+            self.sha256sums_path.unlink()
+        errors = self._validate()
+        self.assertTrue(
+            any("archive_url does not point at the published bundle" in e for e in errors),
+            f"Expected a URL-mismatch error without SHA256SUMS, got: {errors}",
+        )
+
     def test_source_url_pointing_elsewhere_is_rejected(self):
         """An archive_url that names another artifact must not pass.
 
