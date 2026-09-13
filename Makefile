@@ -644,6 +644,7 @@ harness-security-checks:
 	python3 tools/harness/detect_baseline_hand_edit.py
 	python3 tools/harness/detect_scratch_files.py
 	PYTHONPATH=. python3 tools/harness/detect_workflow_env_liveness.py
+	python3 tools/harness/detect_duplicate_definitions.py
 
 release-supply-chain-check:
 	@echo "=== Release Supply-Chain Contracts ==="

@@ -711,38 +711,6 @@ def _logical_task_items(files: list[Path]) -> list[tuple[Path, str]]:
     ]
 
 
-def check_release_checklist_is_static(files: list[Path]) -> list[str]:
-    """A release checklist states requirements, never the state of a candidate.
-
-    A checklist that names the head of the day goes stale with the next commit,
-    and a stale checklist read as certification is worse than no checklist.  The
-    scan covers the whole document, because status text drifts wherever it sits,
-    but it ignores fenced code blocks and the Document Updates table, which
-    legitimately records commit identifiers as history.
-    """
-    failures: list[str] = []
-    for path, item in _logical_task_items(files):
-        if _CHECKLIST_SHA_RE.search(item):
-            failures.append(
-                f"{path}: a requirement names a commit; bind status to the "
-                "candidate-bound release evidence instead"
-            )
-    for path in files:
-        if not path.name.endswith("-release-checklist.md"):
-            continue
-        content = path.read_text(encoding="utf-8")
-        history = set(_document_update_table_lines(content))
-        for _lineno, line in iter_unfenced_lines(content):
-            if not line.strip() or line in history:
-                continue
-            if _CHECKLIST_CLAIM_RE.search(line):
-                failures.append(
-                    f"{path}: states mutable candidate status; keep the "
-                    "checklist to requirements"
-                )
-    return failures
-
-
 def main() -> int:
     """Entry point: run all doc consistency checks and print a report.
 
