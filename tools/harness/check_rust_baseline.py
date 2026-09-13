@@ -163,6 +163,28 @@ def _check_observation_workflows(root: Path, exact: str, errors: list[str]) -> N
             )
 
 
+RUST_IMAGE_RE = re.compile(r"rust:(\d+\.\d+\.\d+)")
+
+
+def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> None:
+    """Check the Rust version baked into any container image a workflow names.
+
+    A workflow that installs Rust inside a container never declares an action
+    toolchain, so the inventory check above cannot see it.  The image tag is
+    then the only record of the version, and it has to agree with
+    rust-toolchain.toml like every other declaration.
+    """
+    workflows = Path(".github/workflows")
+    for path in sorted((root / workflows).glob("*.y*ml")):
+        content = path.read_text(encoding="utf-8")
+        for version in sorted(set(RUST_IMAGE_RE.findall(content))):
+            if version != exact:
+                errors.append(
+                    f"{workflows / path.name}: Rust container image pins "
+                    f"{version!r} but rust-toolchain.toml declares {exact!r}"
+                )
+
+
 def _check_workflow_inventory(root: Path, errors: list[str]) -> None:
     """Reject newly added Rust-installing workflows outside the frozen policy."""
     workflow_dir = root / ".github" / "workflows"
@@ -247,6 +269,7 @@ def collect_errors(root: Path = REPO_ROOT) -> tuple[str | None, str | None, list
         errors,
     )
     _check_workflow_inventory(root, errors)
+    _check_rust_container_images(root, exact, errors)
     _check_release_dockerfiles(root, errors)
     _check_current_docs(root, exact, msrv, errors)
     return exact, msrv, errors

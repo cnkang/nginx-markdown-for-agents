@@ -114,3 +114,30 @@ def test_floating_canonical_toolchain_fails(tmp_path: Path) -> None:
     assert exact is None
     assert msrv is None
     assert any("exact MAJOR.MINOR.PATCH" in error for error in errors)
+
+def test_container_rust_image_drift_fails(tmp_path: Path) -> None:
+    """An image tag is a version declaration the inventory check cannot see."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    steps:\n      - run: docker build .\n"
+        "        # image: rust:1.99.9-alpine3.21\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("rust:1.99.9" in error or "1.99.9" in error for error in errors), errors
+
+
+def test_container_rust_image_at_canonical_version_passes(tmp_path: Path) -> None:
+    """The canonical version in an image tag raises no error."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    steps:\n      - run: docker build .\n"
+        "        # image: rust:1.97.0-alpine3.21\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert not any("rust:" in error for error in errors), errors

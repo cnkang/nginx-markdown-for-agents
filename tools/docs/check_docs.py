@@ -638,6 +638,12 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
     legitimately records commit identifiers as history.
     """
     failures: list[str] = []
+    for path, item in _logical_task_items(files):
+        if _CHECKLIST_SHA_RE.search(item):
+            failures.append(
+                f"{path}: a requirement names a commit; bind status to the "
+                "candidate-bound release evidence instead"
+            )
     for path in files:
         if not path.name.endswith("-release-checklist.md"):
             continue
@@ -646,8 +652,45 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
         for _lineno, line in iter_unfenced_lines(content):
             if not line.strip() or line in history:
                 continue
-            failures.extend(_checklist_line_failures(path, line))
+            if _CHECKLIST_CLAIM_RE.search(line):
+                failures.append(
+                    f"{path}: states mutable candidate status; keep the "
+                    "checklist to requirements"
+                )
     return failures
+
+
+def _logical_task_items(files: list[Path]) -> list[tuple[Path, str]]:
+    """Return each task item as one string, continuation lines included.
+
+    A requirement wrapped over several lines pins its commit on whichever line
+    it happens to fall, so the guard has to look at the whole item and not at
+    the single line that carries the marker.
+    """
+    items: list[tuple[Path, str]] = []
+    for path in files:
+        if not path.name.endswith("-release-checklist.md"):
+            continue
+        content = path.read_text(encoding="utf-8")
+        history = set(_document_update_table_lines(content))
+        current: list[str] = []
+        for _lineno, line in iter_unfenced_lines(content):
+            if line in history or not line.strip():
+                continue
+            if _is_task_list_line(line):
+                if current:
+                    items.append((path, " ".join(current)))
+                current = [line]
+            elif current and line[:1] in (" ", "\t"):
+                # An indented line continues the item that is already open.
+                current.append(line.strip())
+            else:
+                if current:
+                    items.append((path, " ".join(current)))
+                current = []
+        if current:
+            items.append((path, " ".join(current)))
+    return items
 
 
 def main() -> int:
