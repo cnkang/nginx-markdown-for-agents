@@ -430,9 +430,11 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
                 )
         # A job may run the module inside its own container, or a service may,
         # so those images are checked against the environment of that job.
-        for image, visible in _container_images(document):
+        for image, _visible in _container_images(document):
+            # A declarative image is not shell-expanded, so the version must be
+            # literal: a `${...}` name is part of the image string GitHub pulls.
             errors.extend(
-                _step_tag_errors(workflows / path.name, visible, image, exact)
+                _step_tag_errors(workflows / path.name, set(), image, exact)
             )
         # Each interpolation is judged against the environment visible where it
         # appears, so a name declared in an unrelated job or step cannot satisfy
@@ -442,9 +444,10 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
                 _step_tag_errors(workflows / path.name, visible, run, exact)
             )
         # A step may run a container action, which pins its image in `uses`.
-        for visible, image in _step_docker_images(document):
+        for _visible, image in _step_docker_images(document):
+            # Same reasoning as the container images above.
             errors.extend(
-                _step_tag_errors(workflows / path.name, visible, image, exact)
+                _step_tag_errors(workflows / path.name, set(), image, exact)
             )
 
 
