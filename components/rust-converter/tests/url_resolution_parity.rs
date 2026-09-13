@@ -43,7 +43,7 @@ const EXPECTED: &[&str] = &[
     "https://example.com/docs/page.html?print=1",
     "https://example.com/docs/icons/logo.svg",
     "https://example.com/hero.png",
-    "//cdn.example.com/a.js",
+    "https://cdn.example.com/a.js",
     "https://other.example/x",
     "mailto:user@example.com",
     "https://example.com/hero.png",
@@ -141,6 +141,7 @@ fn relative_references_stay_untouched_without_a_base() {
         "?print=1",
         "icons/logo.svg",
         "/hero.png",
+        // No base is configured, so a network-path reference stays as written.
         "//cdn.example.com/a.js",
         "https://other.example/x",
         "mailto:user@example.com",
