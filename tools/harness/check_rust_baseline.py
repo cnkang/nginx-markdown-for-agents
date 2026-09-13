@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import re
+
+import yaml
 import sys
 import tomllib
 from pathlib import Path
@@ -174,7 +176,33 @@ def _image_version(tag: str) -> str | None:
     return match.group(1) if match else None
 
 
-DECLARED_NAME_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*:", re.MULTILINE)
+def _declared_env_names(content: str) -> set[str]:
+    """Return the environment names a workflow makes visible to its steps.
+
+    Only `env:` mappings count.  An arbitrary uppercase key such as a job name
+    or a workflow input is not an environment variable, and treating it as one
+    would let an undeclared interpolation pass the image check.
+    """
+    names: set[str] = set()
+    try:
+        document = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return names
+    if not isinstance(document, dict):
+        return names
+
+    def collect(mapping: object) -> None:
+        if isinstance(mapping, dict):
+            names.update(str(key) for key in mapping)
+
+    collect(document.get("env"))
+    jobs = document.get("jobs")
+    if isinstance(jobs, dict):
+        for job in jobs.values():
+            if isinstance(job, dict):
+                collect(job.get("env"))
+    return names
+
 
 
 def _tag_variables(tag: str) -> list[str]:
@@ -230,7 +258,7 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
     workflows = Path(".github/workflows")
     for path in sorted((root / workflows).glob("*.y*ml")):
         content = path.read_text(encoding="utf-8")
-        declared_names = set(DECLARED_NAME_RE.findall(content))
+        declared_names = _declared_env_names(content)
         for declared in sorted(set(RUST_VERSION_ENV_RE.findall(content))):
             if declared != exact:
                 errors.append(

@@ -725,7 +725,8 @@ def _logical_blocks(content: str) -> list[str]:
         if not line.strip() or line in history:
             _flush_task_item(blocks, current)
             continue
-        if _is_task_list_line(line) or line[:1] not in (" ", "\t"):
+        if _is_task_list_line(line):
+            # A task item stands on its own.
             _flush_task_item(blocks, current)
         current.append(line.strip())
     _flush_task_item(blocks, current)
