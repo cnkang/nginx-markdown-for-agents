@@ -191,6 +191,37 @@ def _workflow_document(content: str) -> dict:
     return document if isinstance(document, dict) else {}
 
 
+def _step_docker_images(document: dict) -> list[tuple[set[str], str]]:
+    """Return (visible env names, image) for every `docker://` action image."""
+    inherited = document.get("env")
+    inherited = inherited if isinstance(inherited, dict) else {}
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
+    found: list[tuple[set[str], str]] = []
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        found.extend(_job_docker_images(job, _job_env(job, inherited)))
+    return found
+
+
+def _job_docker_images(job: dict, job_env: dict) -> list[tuple[set[str], str]]:
+    """Return the `docker://` images one job's steps run."""
+    found: list[tuple[set[str], str]] = []
+    for step in job.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        uses = step.get("uses")
+        if not (isinstance(uses, str) and uses.startswith("docker://")):
+            continue
+        visible = dict(job_env)
+        if isinstance(step.get("env"), dict):
+            visible.update(step["env"])
+        found.append(({str(key) for key in visible}, uses[len("docker://") :]))
+    return found
+
+
 def _declared_version_values(document: dict) -> list[str]:
     """Return every `RUST_VERSION` value the workflow declares.
 
@@ -409,6 +440,11 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
         for visible, run in _step_environments(content):
             errors.extend(
                 _step_tag_errors(workflows / path.name, visible, run, exact)
+            )
+        # A step may run a container action, which pins its image in `uses`.
+        for visible, image in _step_docker_images(document):
+            errors.extend(
+                _step_tag_errors(workflows / path.name, visible, image, exact)
             )
 
 

@@ -13,7 +13,8 @@
 #
 # Pass --github-archive to record GitHub's auto-generated tag archive instead.
 # Use it only for a release published before the workflow built its own bundle;
-# a digest of that archive can never agree with what the workflow publishes.  When the registry already holds an
+# a digest of that archive can never agree with what the workflow publishes.
+# When the registry already holds an
 # entry for the tag, the download must match it: a mismatch means the archive
 # changed, which is exactly the drift this registry exists to catch.
 #
