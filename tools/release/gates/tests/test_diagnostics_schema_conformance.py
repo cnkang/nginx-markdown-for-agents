@@ -10,6 +10,10 @@ configuration hot-reload feature was removed and the ``configuration``
 object now carries only ``static_digest``, ``effective``, and
 ``effective_sources``.  The diagnostics endpoint itself is retained.
 
+The seven top-level fields are frozen.  Additive state is published inside the
+optional ``extensions`` container, which accepts any keys, so consumers can
+ignore what they do not recognise without a schema version bump.
+
 Validates: Requirements 4.3
 """
 
@@ -21,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 import jsonschema
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 # --- Load the published schema ---
@@ -74,7 +78,7 @@ from diagnostics_strategy_helpers import (  # noqa: E402
 
 
 class TestTopLevelStructure:
-    """Verify exactly 7 top-level fields and no forbidden fields."""
+    """Verify the seven frozen fields plus the optional additive container."""
 
     @settings(max_examples=100)
     @given(doc=_valid_diagnostics())
@@ -112,6 +116,27 @@ class TestTopLevelStructure:
     def test_no_forbidden_top_level_fields(self, doc, forbidden):
         """Documents with forbidden fields must be rejected by the schema."""
         doc[forbidden] = {"some": "value"}
+        _invalid(doc)
+
+    @settings(max_examples=50)
+    @given(doc=_valid_diagnostics(), payload=st.dictionaries(
+        st.text(min_size=1, max_size=12),
+        st.one_of(st.integers(), st.text(), st.dictionaries(
+            st.text(min_size=1, max_size=8), st.integers(), max_size=3)),
+        min_size=1, max_size=4,
+    ))
+    def test_extensions_container_accepts_unknown_keys(self, doc, payload):
+        """Additive state may be published under extensions with any keys."""
+        doc["extensions"] = payload
+        _validate(doc)
+
+    @settings(max_examples=50)
+    @given(doc=_valid_diagnostics(), added=st.text(
+        alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=12))
+    def test_unknown_top_level_field_is_still_rejected(self, doc, added):
+        """A new top-level field must fail: additive state belongs in extensions."""
+        assume(added not in doc)
+        doc[added] = {"some": "value"}
         _invalid(doc)
 
 

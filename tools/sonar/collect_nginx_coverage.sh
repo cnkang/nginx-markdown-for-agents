@@ -561,13 +561,16 @@ http {
             markdown_log_verbosity debug;
         }
 
-        # Streaming with front_matter enabled (exercises conversion options)
+        # Streaming with conversion options.  Front matter is deliberately
+        # absent: 0.9.2 rejects `markdown_front_matter on` together with
+        # `markdown_streaming force`, because the full-buffer engine assembles
+        # the front matter.  The /full-options location below covers front
+        # matter on the full-buffer path.
         location /streaming-front-matter {
             root html;
             markdown_filter on;
-            markdown_streaming force;
+            markdown_streaming auto;
             markdown_cache_validation off;
-            markdown_front_matter on;
             markdown_log_verbosity debug;
         }
 

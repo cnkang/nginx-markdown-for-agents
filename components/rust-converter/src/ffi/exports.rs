@@ -77,7 +77,8 @@ use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
 use super::options::{required_bytes, required_ref};
 use crate::decision::conditional::{
-    CacheValidation, ConditionalInput, ConditionalOutcome, decide_conditional,
+    CacheValidation, ConditionalHeader, ConditionalInput, ConditionalOutcome, ConditionalReason,
+    decide_conditional,
 };
 use crate::decision::eligibility::{Eligibility, EligibilityInput, decide_eligibility};
 use crate::forwarded::{BaseUrlInput, BaseUrlReason, BaseUrlSource, decide_base_url, parse_cidr};
@@ -447,14 +448,20 @@ pub unsafe extern "C" fn markdown_decide_conditional(
     if out.is_null() {
         return;
     }
-    let out_ref = unsafe { &mut *out };
-
-    // Fail-open default written before the catch_unwind block: proceed with
-    // no header evaluated. ConditionalReason::NoHeaders == 0,
-    // ConditionalOutcome::Proceed == 1, ConditionalHeader::None == 0.
-    out_ref.outcome = ConditionalOutcome::Proceed.as_u8();
-    out_ref.reason = 0;
-    out_ref.evaluated_header = 0;
+    // Fail-open default written before the catch_unwind block: proceed with no
+    // header evaluated.  `ptr::write` initialises the caller's storage without
+    // first forming a reference to uninitialised memory, and the typed
+    // discriminants keep the values aligned with their definitions.
+    unsafe {
+        core::ptr::write(
+            out,
+            FFIConditionalDecision {
+                outcome: ConditionalOutcome::Proceed.as_u8(),
+                reason: ConditionalReason::NoHeaders.as_u8(),
+                evaluated_header: ConditionalHeader::None.as_u8(),
+            },
+        );
+    }
 
     if input.is_null() {
         return;
@@ -479,6 +486,9 @@ pub unsafe extern "C" fn markdown_decide_conditional(
     }));
 
     if let Ok(decision) = outcome {
+        // The storage is initialised above, so a plain reference is sound here.
+        let out_ref = unsafe { &mut *out };
+
         out_ref.outcome = decision.outcome.as_u8();
         out_ref.reason = decision.reason.as_u8();
         out_ref.evaluated_header = decision.evaluated_header.as_u8();

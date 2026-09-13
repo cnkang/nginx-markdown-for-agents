@@ -64,7 +64,7 @@
  * cbindgen-generated header via
  * `tools/release/gates/compute_abi_fingerprints.py`.
  */
-#define MARKDOWN_HEADER_HASH 7679801668970012595
+#define MARKDOWN_HEADER_HASH 16965254938510075598ull
 
 /**
  * SHA-256 truncated hash of the sorted exported symbol name set.
@@ -557,12 +557,20 @@ typedef struct MarkdownResult {
    */
   uintptr_t error_len;
   /**
-   * Peak working-set memory estimate during streaming conversion (bytes).
+   * Peak working-set memory estimate during conversion (bytes).
    *
-   * This is derived from converter-owned resident state and is not
-   * a process RSS/high-water-mark measurement.
-   * Populated by `markdown_streaming_finalize` from
-   * `StreamingStats.peak_memory_estimate`.
+   * This is the peak of the converter-tracked working set (retained
+   * output capacity plus transient scratch), NOT a total conversion
+   * memory peak: parser/DOM allocations and process RSS are not
+   * included.  The field is populated by both the streaming path
+   * (`markdown_streaming_finalize` from
+   * `StreamingStats.peak_memory_estimate`) and the full-buffer path.
+   * Metric publication of the run-wide high-water gauge
+   * (`nginx_markdown_streaming_peak_memory_bytes`) happens only in
+   * streaming builds: the full-buffer path's
+   * `ngx_http_markdown_metrics_record_conversion_peak()` is a no-op
+   * when `MARKDOWN_STREAMING_ENABLED` is undefined, so the field
+   * value and the gauge publication are distinct concerns.
    */
   uintptr_t peak_memory_estimate;
 } MarkdownResult;

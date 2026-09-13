@@ -449,6 +449,21 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * upper key was not explicit, the lower value is clamped down to the
      * upper bound instead of failing the config.
      */
+    /*
+     * markdown_front_matter on needs the full-buffer conversion engine, which
+     * owns the YAML assembly; markdown_streaming force demands the streaming
+     * engine for every compatible response.  The pair cannot both be honoured,
+     * so fail nginx -t instead of silently dropping one of them.
+     */
+    if (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE
+        && conf->front_matter)
+    {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "markdown_streaming force conflicts with markdown_front_matter on: "
+            "front matter is produced by the full-buffer engine");
+        return NGX_CONF_ERROR;
+    }
+
     if (conf->limits.parser_timeout > conf->limits.conversion_timeout) {
         if (conf->limits.parser_timeout_explicit
             && conf->limits.conversion_timeout_explicit)

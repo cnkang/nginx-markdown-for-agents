@@ -18,12 +18,18 @@ conversion:
 5. The response is not listed by `markdown_stream_excluded_types`.
 6. If compressed, `markdown_auto_decompress` is `on` and the selected build
    path supports the encoding.
-7. The bounded streaming buffers and `markdown_limits max_inflight` permit
-   the request.
+7. `markdown_front_matter` is `off`. Front matter requires the full-buffer
+   engine.
 
-`auto` applies the internal bounded response-shape heuristic. `force` asks
-for streaming after the hard gates above. Neither policy bypasses cache,
-encoding, memory, or backpressure safety rules.
+The bounded streaming buffers and `markdown_limits max_inflight` are not
+selection gates: the module enforces them while streaming runs, and exceeding them
+follows the configured error handling.
+
+`auto` prefers streaming for every response that clears the hard gates above. A
+response that stays eligible for conversion but cannot stream falls back to
+full-buffer conversion. A response that is not eligible for conversion passes
+through unchanged. `force` asks for streaming after the same gates. Neither policy bypasses cache, encoding, memory,
+or backpressure safety rules.
 
 ## Configuration ownership
 

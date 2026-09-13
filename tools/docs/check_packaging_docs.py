@@ -129,7 +129,7 @@ def _validate_single_sop(heading: str, sop: str) -> list[str]:
                 rf"[ \t]*:?\*\*",
                 sop_lower,
             )
-            or re.search(rf"(?<!\w){re.escape(label)}[ \t]*:", sop_lower)
+            or re.search(rf"^[ \t]*{re.escape(label)}[ \t]*:", sop_lower, re.MULTILINE)
         )
 
     if not has_label("symptom"):

@@ -21,6 +21,8 @@
 #include "ngx_http_markdown_stream_postcommit.h"
 #include "ngx_http_markdown_stream_commit.h"
 
+#include "ngx_http_markdown_metrics_peak_impl.h"
+
 typedef struct {
     ngx_flag_t  main_terminal;
     ngx_flag_t  subrequest_terminal;
@@ -652,6 +654,25 @@ ngx_http_markdown_select_processing_path(
         return ngx_http_markdown_path_selection(
             NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
             NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
+    }
+
+    /* Rule 2b: front matter output requires the full-buffer engine.
+     *
+     * The YAML front matter is assembled from the completed metadata set by the
+     * full-buffer converter; the streaming engine emits the body incrementally
+     * and has no equivalent stage, so selecting streaming with
+     * `markdown_front_matter on` would silently drop the configured feature.
+     * The path fails closed to the conversion engine instead. */
+    if (conf->front_matter) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown: streaming skip: "
+            "front matter requires full-buffer");
+        ngx_http_markdown_log_event(
+            r, conf, eff, "eligibility", "streaming_skip_unsupported");
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE);
     }
 
     /* Rule 3: HEAD request */
@@ -1753,8 +1774,17 @@ ngx_http_markdown_streaming_resume_failure(
     }
     /* For a pending abort, category metrics were recorded before the
      * terminal send.  The definitive downstream failure is therefore
-     * recorded below without reclassifying the original error. */
-    ngx_http_markdown_streaming_record_postcommit_failure(r, ctx, conf);
+     * recorded below without reclassifying the original error.
+     *
+     * A pending FAIL-OPEN delivery is not a conversion failure: the
+     * request already failed open to the original HTML, and the resume
+     * failure is a downstream transport error.  Recording failed_closed
+     * here would misclassify the request as a conversion failure, so
+     * skip the request-level failure record for fail-open deliveries
+     * (with or without data) and let the downstream error propagate. */
+    if (!pending.failopen) {
+        ngx_http_markdown_streaming_record_postcommit_failure(r, ctx, conf);
+    }
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
     return downstream_rc;
 }
@@ -3617,8 +3647,16 @@ ngx_http_markdown_streaming_record_finalize_stats(
         ctx->streaming.output.bytes);
 
     if (ngx_http_markdown_metrics != NULL) {
-        ngx_http_markdown_metrics->streaming.last_peak_memory_bytes =
-            (ngx_atomic_t) peak_memory_bytes;
+        /*
+         * High-water mark semantics: the gauge reflects the largest
+         * conversion working-set estimate observed since process start
+         * (streaming AND full-buffer conversions), so monitoring and the
+         * soak qualification gate can read a run-wide peak rather than
+         * only the most recent streaming sample.
+         */
+        ngx_http_markdown_metrics_update_peak(
+            &ngx_http_markdown_metrics->streaming.last_peak_memory_bytes,
+            peak_memory_bytes);
     }
 }
 
@@ -4013,6 +4051,141 @@ ngx_http_markdown_streaming_clone_chain_links(
     return head;
 }
 
+/*
+ * Deep-clone a chain into request pool memory: each link AND its
+ * ngx_buf_t are newly allocated, and the buf data (pos..last) is copied
+ * into request-pool memory.  The clone therefore has INDEPENDENT pos/last
+ * pointers, so advancing pos on the original chain (abandon_input) can
+ * never corrupt a pending_output that references the clone.
+ *
+ * Terminal flags (last_buf / last_in_chain) and the memory flag are
+ * preserved.  Payload buffers (pos < last) are copied into pool memory
+ * and are memory-backed; zero-length buffers keep VALID shared bounds
+ * (pos == last) and control sentinels (NULL pos/last) stay non-memory,
+ * so downstream sizing logic never sees invalid bounds.
+ *
+ * Returns the head of the cloned chain, or NULL on allocation failure.
+ */
+static ngx_chain_t *
+ngx_http_markdown_streaming_clone_chain_deep(
+    ngx_http_request_t *r,
+    ngx_chain_t *in)
+{
+    ngx_chain_t  *head = NULL;
+    ngx_chain_t  **tail = &head;
+    ngx_chain_t  *cl;
+    ngx_buf_t    *b;
+
+    for (; in != NULL; in = in->next) {
+        if (in->buf == NULL) {
+            continue;
+        }
+        cl = ngx_alloc_chain_link(r->pool);
+        if (cl == NULL) {
+            return NULL;
+        }
+        b = ngx_calloc_buf(r->pool);
+        if (b == NULL) {
+            return NULL;
+        }
+        /* A file-backed buffer cannot be deep-cloned by copying payload
+         * bytes (the data lives in the file, not in pos..last).  The
+         * ngx_file_t reference is owned by the original producer, but
+         * NGINX's filter-chain contract keeps file buffers valid for the
+         * request lifetime (the write filter reads them synchronously),
+         * so the clone may retain the file reference with its exact
+         * file_pos/file_last window.  Refusing the clone (the previous
+         * behavior) made the fail-open continuation path return
+         * NGX_ERROR and TRUNCATE a pass-through response once fail-open
+         * had already forwarded headers or prior body data — worse than
+         * the retained reference, which follows the same lifetime rule
+         * as every other file buffer in the chain. */
+        if (in->buf->in_file) {
+            b->in_file = 1;
+            b->file = in->buf->file;
+            b->file_pos = in->buf->file_pos;
+            b->file_last = in->buf->file_last;
+            b->pos = in->buf->pos;
+            b->last = in->buf->last;
+            /* Preserve terminal/control flags exactly like the
+             * memory-buffer branch below: a final file buffer must keep
+             * its last_buf/last_in_chain markers and flush/sync
+             * semantics, or the terminal could be lost or duplicated. */
+            b->last_buf = in->buf->last_buf;
+            b->last_in_chain = in->buf->last_in_chain;
+            b->flush = in->buf->flush;
+            b->sync = in->buf->sync;
+            /* The clone references the SAME file window, so the file
+             * coordinates and the in_file marker are preserved.  The
+             * start/end bounds stay NULL (file buffers do not use
+             * them), and mmap/recycled/last_shadow/temp_file describe
+             * the ORIGINAL buffer's backing storage and must not be
+             * transferred to the clone.  tag and shadow are
+             * request-owned and remain valid for the clone's
+             * lifetime. */
+            b->tag = in->buf->tag;
+            b->shadow = in->buf->shadow;
+            cl->buf = b;
+            cl->next = NULL;
+            *tail = cl;
+            tail = &cl->next;
+            continue;
+        }
+        if (in->buf->pos != NULL && in->buf->last != NULL
+            && in->buf->last > in->buf->pos)
+        {
+            b->pos = ngx_pnalloc(r->pool, in->buf->last - in->buf->pos);
+            if (b->pos == NULL) {
+                return NULL;
+            }
+            ngx_memcpy(b->pos, in->buf->pos, in->buf->last - in->buf->pos);
+            b->last = b->pos + (in->buf->last - in->buf->pos);
+            /* Payload bytes were copied: the clone is memory-backed. */
+            b->memory = 1;
+            b->temporary = in->buf->temporary;
+        } else if (in->buf->pos != NULL && in->buf->last != NULL
+                   && in->buf->last == in->buf->pos)
+        {
+            /* A zero-length buffer keeps VALID bounds (pos == last):
+             * downstream sizing logic must not see NULL pointers.  It
+             * stays non-memory (no payload was copied). */
+            b->pos = in->buf->pos;
+            b->last = in->buf->last;
+        } else {
+            b->pos = NULL;
+            b->last = NULL;
+            /* An empty control buffer (flush/sync sentinel) stays a
+             * NON-memory buffer: no payload was copied, and
+             * ngx_http_write_filter accepts it via its preserved
+             * flush/sync flags below.  memory/temporary are NOT set. */
+        }
+        b->last_buf = in->buf->last_buf;
+        b->last_in_chain = in->buf->last_in_chain;
+        b->flush = in->buf->flush;
+        b->sync = in->buf->sync;
+        /* Preserve only metadata that describes the request-level
+         * relationship, not the source storage layout.  The clone owns
+         * freshly allocated storage, so its bounds must be rebased onto
+         * that allocation; copying the source start/end would break the
+         * start <= pos <= last <= end invariant because those pointers
+         * refer to the ORIGINAL arena.  mmap/recycled/last_shadow/
+         * temp_file likewise describe the original backing storage and
+         * must not be transferred.  tag and shadow are request-owned
+         * and remain valid for the clone's lifetime because the clone
+         * is a pass-through copy of the same request-owned buffer. */
+        b->start = b->pos;
+        b->end = b->last;
+        b->tag = in->buf->tag;
+        b->shadow = in->buf->shadow;
+        cl->buf = b;
+        cl->next = NULL;
+        *tail = cl;
+        tail = &cl->next;
+    }
+
+    return head;
+}
+
 
 /*
  * Send a fail-open output chain downstream with backpressure and
@@ -4125,6 +4298,10 @@ ngx_http_markdown_streaming_send_failopen_chain(
 }
 
 
+static void
+ngx_http_markdown_streaming_failopen_mark_chain_forwarded(
+    ngx_http_markdown_ctx_t *ctx);
+
 static ngx_int_t
 ngx_http_markdown_streaming_failopen_passthrough(
     ngx_http_request_t *r,
@@ -4165,7 +4342,24 @@ ngx_http_markdown_streaming_failopen_passthrough(
              * fail closed directly instead. */
             return NGX_ERROR;
         }
-        return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, cloned);
+        rc = ngx_http_markdown_streaming_send_failopen_chain(r, ctx, cloned);
+        if (rc == NGX_AGAIN) {
+            /* Downstream owns the chain as pending_output (the RETAIN
+             * disposition is already set): the delivery is NOT
+             * confirmed, so the per-invocation marker stays clear and
+             * the caller must propagate the backpressure.  body_filter
+             * re-enters through resume_pending() once the write event
+             * drains the retained output. */
+            return NGX_AGAIN;
+        }
+        if (rc == NGX_OK || rc == NGX_DONE) {
+            /* The CURRENT input chain was forwarded downstream.  Mark it
+             * so body_filter consumes this chain without re-forwarding,
+             * while future input chains (failopen_active) continue via
+             * continue_failopen_input instead of being dropped. */
+            ngx_http_markdown_streaming_failopen_mark_chain_forwarded(ctx);
+        }
+        return rc;
     }
 
     /*
@@ -4206,9 +4400,65 @@ ngx_http_markdown_streaming_failopen_passthrough(
         *tail = cloned;
     }
 
-    return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, head);
+    rc = ngx_http_markdown_streaming_send_failopen_chain(r, ctx, head);
+    if (rc == NGX_AGAIN) {
+        /* Downstream owns the replay-prefix chain as pending_output (the
+         * RETAIN disposition is already set): the delivery is NOT
+         * confirmed, so the per-invocation marker stays clear and the
+         * caller must propagate the backpressure.  body_filter re-enters
+         * through resume_pending() once the write event drains the
+         * retained output. */
+        return NGX_AGAIN;
+    }
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        /* The CURRENT input chain was forwarded downstream (replay
+         * prefix + cloned input).  Mark it so body_filter consumes this
+         * chain without re-forwarding, while future input chains
+         * (failopen_active) continue via continue_failopen_input. */
+        ngx_http_markdown_streaming_failopen_mark_chain_forwarded(ctx);
+    }
+    return rc;
 }
 
+
+/*
+ * Deliver a fail-open passthrough after a pre-commit enqueue failure and
+ * normalize the result.  A successful delivery reports NGX_DONE or NGX_OK and
+ * marks the context, so the body filter does not treat it as a streaming
+ * fallback and re-enter full-buffer processing.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_failopen_after_enqueue_error(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *cl)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_streaming_failopen_passthrough(r, ctx, cl);
+    if (rc == NGX_DONE) {
+        rc = NGX_OK;
+    }
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        ctx->failopen_completed = 1;
+    }
+
+    return rc;
+}
+
+/*
+ * Mark that the CURRENT input chain was forwarded downstream by a
+ * fail-open entry point.  body_filter consumes this marker so the same
+ * chain is not re-forwarded, while future input chains (failopen_active)
+ * continue through continue_failopen_input instead of being dropped by
+ * the failopen_completed latch.
+ */
+static void
+ngx_http_markdown_streaming_failopen_mark_chain_forwarded(
+    ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx != NULL) {
+        ctx->streaming.completion.failopen_chain_forwarded = 1;
+    }
+}
 
 /*
  * Handle the result of process_chunk within the body filter loop.
@@ -4405,6 +4655,13 @@ ngx_http_markdown_streaming_ensure_handle(
         rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, in);
 
+        if (rc == NGX_DONE) {
+            /* Normalize NGX_DONE: the body filter must not treat a
+             * successful fail-open delivery as a streaming fallback
+             * and re-enter full-buffer processing. */
+            rc = NGX_OK;
+        }
+
         /*
          * Only latch failopen_completed on confirmed downstream
          * delivery (NGX_OK/NGX_DONE).  NGX_AGAIN means the chain is
@@ -4524,14 +4781,42 @@ ngx_http_markdown_streaming_continue_failopen_input(
         }
     }
 
+    /* Deep-clone the chain into request-pool memory before handing off:
+     * body-filter input links are transient (owned by the filter chain
+     * invocation), and send_failopen_chain stores the chain as
+     * pending_output on NGX_AGAIN, which outlives this invocation.  The
+     * deep clone copies the buf DATA (not just the links), so the pending
+     * delivery has independent pos/last pointers: abandoning the ORIGINAL
+     * chain (advancing its pos) can never truncate the pending output,
+     * and NGINX cannot re-submit the same buffers for a duplicate
+     * forward. */
+    ngx_chain_t  *original_chain = input_chain;
+    {
+        ngx_chain_t  *cloned;
+
+        cloned = ngx_http_markdown_streaming_clone_chain_deep(r, input_chain);
+        if (cloned == NULL && input_chain != NULL) {
+            return NGX_ERROR;
+        }
+        input_chain = cloned;
+    }
+
     rc = ngx_http_markdown_streaming_send_failopen_chain(
         r, ctx, input_chain);
     if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
+        /* NGX_AGAIN: the CLONE is now pending_output-owned by downstream
+         * and must never be advanced.  Abandon the ORIGINAL chain
+         * (advance its pos) so NGINX does not re-submit the same buffers
+         * on the next body-filter invocation — the clone has independent
+         * data, so the pending delivery stays intact, and re-submitting
+         * the original would enqueue it into pending_input and forward
+         * the same bytes a second time after the drain. */
+        ngx_http_markdown_streaming_abandon_input(original_chain);
         ngx_http_markdown_streaming_sync_buffered(r, ctx);
         return rc;
     }
 
-    ngx_http_markdown_streaming_abandon_input(input_chain);
+    ngx_http_markdown_streaming_abandon_input(original_chain);
     if (last_buf) {
         ctx->streaming.completion.upstream_terminal_seen = 0;
         /*
@@ -4551,6 +4836,16 @@ ngx_http_markdown_streaming_continue_failopen_input(
         ctx->streaming.completion.upstream_terminal_seen = 0;
         return ngx_http_markdown_streaming_send_output(
             r, ctx, NULL, 0, /* last_buf */ 1);
+    }
+
+    /* Normalize NGX_DONE for a NON-terminal chain: the downstream
+     * filter confirmed delivery, but this chain carried no terminal
+     * marker, so the body filter must not treat the return as a
+     * terminal completion (mirrors the failopen_passthrough
+     * normalization).  A terminal chain keeps NGX_DONE so the caller
+     * can observe the confirmed terminal delivery. */
+    if (rc == NGX_DONE && !last_buf) {
+        rc = NGX_OK;
     }
 
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
@@ -4918,6 +5213,14 @@ ngx_http_markdown_streaming_append_replay_chunk(
     if (rc == NGX_DECLINED && !ctx->eligible) {
         rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, cl);
+        if (rc == NGX_DONE) {
+            /* Normalize: NGX_DONE from fail-open delivery must not be
+             * interpreted by the body filter as a streaming fallback
+             * (which would re-enter full-buffer processing and forward
+             * the same bytes again).  Mirrors the normalization in
+             * handle_chunk_result. */
+            rc = NGX_OK;
+        }
         /* Only set latch on successful delivery, not NGX_AGAIN (Rule 47) */
         if (rc == NGX_OK) {
             ctx->failopen_completed = 1;
@@ -4961,25 +5264,59 @@ ngx_http_markdown_streaming_handle_consumed_again(
         return NGX_AGAIN;
     }
 
-    /* CONSUMED: advance pos so NGINX releases the busy buffer. */
-    cl->buf->pos = cl->buf->last;
-
+    /* CONSUMED: advance pos so NGINX releases the busy buffer.  This
+     * happens only AFTER the remainder enqueue succeeds: on enqueue
+     * failure the current buffer must stay unconsumed so the pre-commit
+     * error policy can fail open with the original content intact. */
     if (cl->next != NULL) {
         uint32_t  enqueue_error = ERROR_SUCCESS;
 
         rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
             r, ctx, conf, cl->next, &enqueue_error);
         if (rc != NGX_OK) {
-            if (ctx->streaming.pending_output != NULL
-                && ctx->streaming.commit_state
+            if (ctx->stream_sm.headers_committed
+                || ctx->streaming.commit_state
                    == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
             {
+                /* The header block was already mutated and accepted
+                 * (queued by the write filter) — this is a post-commit
+                 * enqueue failure, so precommit_error() would re-enter
+                 * pre-commit handling, duplicate counters/logs, or select
+                 * fail-open against committed Markdown-contract headers.
+                 * Route through the post-commit error handler instead
+                 * (mirrors enqueue_with_pending_header's guard; the
+                 * committed state applies whether the backpressure came
+                 * from pending_output or pending_header_output).
+                 *
+                 * Pass the FULL chain (cl, not cl->next): the current
+                 * buffer was already consumed by Rust (CONSUMED
+                 * disposition) but its pos was not advanced because the
+                 * remainder enqueue failed, so it must be abandoned
+                 * together with the remainder to avoid re-submitting
+                 * already-consumed bytes on the next body-filter call. */
                 return ngx_http_markdown_streaming_defer_postcommit_error(
-                    r, ctx, enqueue_error, cl->next);
+                    r, ctx, enqueue_error, cl);
+            }
+
+            /*
+             * Pre-commit enqueue failure: route through the single
+             * pre-commit error policy handler so fail-open/fail-closed
+             * semantics, reason codes, and metrics are applied uniformly
+             * (the previous code returned NGX_ERROR directly, bypassing
+             * the policy).  The current buffer is still unconsumed, so a
+             * fail-open passthrough forwards the original content.
+             */
+            rc = ngx_http_markdown_streaming_precommit_error(
+                r, ctx, conf, enqueue_error);
+            if (rc == NGX_DECLINED && !ctx->eligible) {
+                rc = ngx_http_markdown_streaming_failopen_after_enqueue_error(
+                    r, ctx, cl);
             }
             return rc;
         }
     }
+
+    cl->buf->pos = cl->buf->last;
 
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
     return NGX_AGAIN;
@@ -5056,6 +5393,11 @@ ngx_http_markdown_streaming_process_chain(
         }
 
         if (ctx->failopen_completed) {
+            /* Fail-open already forwarded the original response
+             * (including any terminal buffer) downstream.  Stop
+             * processing successor links: the current chain was
+             * delivered, and continuing would replay already-forwarded
+             * bytes or double-advance shared buffers. */
             return NGX_OK;
         }
 
@@ -5063,6 +5405,15 @@ ngx_http_markdown_streaming_process_chain(
             r, ctx, conf, cl);
         if (rc != NGX_OK) {
             return rc;
+        }
+
+        if (ctx->failopen_completed) {
+            /* append_replay_chunk can itself route through the
+             * pre-commit error policy (replay-buffer limit exceeded)
+             * and fail-open, forwarding the current chain downstream.
+             * Stop here: advancing pos or processing successor links
+             * would corrupt the already-forwarded chain. */
+            return NGX_OK;
         }
 
         /* Mark buffer as consumed */
@@ -5135,8 +5486,21 @@ ngx_http_markdown_streaming_finalize_on_last_buf(
          */
         rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, in);
-        if (rc == NGX_OK) {
+        if (rc == NGX_DONE) {
+            /* Normalize NGX_DONE: the body filter must not treat a
+             * successful fail-open delivery as a streaming fallback
+             * and re-enter full-buffer processing. */
+            rc = NGX_OK;
+        }
+        if (rc == NGX_OK || rc == NGX_DONE) {
             ctx->failopen_completed = 1;
+            /* Consume the per-invocation marker: this finalization path
+             * returns directly (it does not pass through the body
+             * filter's marker consumption at the failopen_completed
+             * latch), so a residual marker would make the next
+             * body-filter invocation with a NEW chain treat it as
+             * already forwarded and silently drop it. */
+            ctx->streaming.completion.failopen_chain_forwarded = 0;
         }
     }
 
@@ -5198,8 +5562,19 @@ ngx_http_markdown_streaming_enqueue_with_pending_header(
              * the request terminates with an error. */
             return NGX_ERROR;
         }
-        return ngx_http_markdown_streaming_failopen_passthrough(
+        rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, in);
+        if (rc == NGX_DONE) {
+            rc = NGX_OK;
+        }
+        if (rc == NGX_OK) {
+            /* The current chain was delivered by fail-open.  Consume
+             * the per-invocation marker so the next body-filter
+             * invocation with a NEW chain routes through
+             * continue_failopen_input instead of being swallowed by
+             * the failopen_completed latch. */
+            ctx->streaming.completion.failopen_chain_forwarded = 0;
+        }
     }
     return rc;
 }
@@ -5306,8 +5681,22 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
         rc = ngx_http_markdown_streaming_precommit_error(
             r, ctx, conf, enqueue_error);
         if (rc == NGX_DECLINED && !ctx->eligible) {
-            return ngx_http_markdown_streaming_failopen_passthrough(
+            rc = ngx_http_markdown_streaming_failopen_passthrough(
                 r, ctx, in);
+            if (rc == NGX_DONE) {
+                /* Normalize NGX_DONE: the body filter must not treat a
+                 * successful fail-open delivery as a streaming fallback
+                 * and re-enter full-buffer processing. */
+                rc = NGX_OK;
+            }
+            if (rc == NGX_OK) {
+                /* The current chain was delivered by fail-open.  Consume
+                 * the per-invocation marker so the next body-filter
+                 * invocation with a NEW chain routes through
+                 * continue_failopen_input instead of being swallowed by
+                 * the failopen_completed latch. */
+                ctx->streaming.completion.failopen_chain_forwarded = 0;
+            }
         }
         return rc;
     }
@@ -5387,8 +5776,23 @@ ngx_http_markdown_streaming_body_filter(
      * terminal buffer) has therefore already been forwarded
      * downstream — falling through to the generic passthrough below
      * would resubmit the same `in` chain a second time.
+     *
+     * failopen_chain_forwarded is a per-invocation marker: it is set
+     * only when THIS call's input chain was the one delivered.  A
+     * later invocation with a NEW input chain must NOT be swallowed by
+     * the failopen_completed latch — it routes through
+     * continue_failopen_input so a non-terminal fail-open delivery
+     * does not truncate the response.
      */
     if (ctx->failopen_completed) {
+        if (ctx->streaming.completion.failopen_chain_forwarded) {
+            ctx->streaming.completion.failopen_chain_forwarded = 0;
+            return NGX_OK;
+        }
+        if (ctx->streaming.completion.failopen_active) {
+            return ngx_http_markdown_streaming_continue_failopen_input(
+                r, ctx, in);
+        }
         return NGX_OK;
     }
 
@@ -5419,6 +5823,9 @@ ngx_http_markdown_streaming_body_filter(
      * rather than the local variable, so re-entries also skip.
      */
     if (ctx->failopen_completed) {
+        if (ctx->streaming.completion.failopen_chain_forwarded) {
+            ctx->streaming.completion.failopen_chain_forwarded = 0;
+        }
         return NGX_OK;
     }
 

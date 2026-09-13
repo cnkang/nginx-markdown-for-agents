@@ -4,8 +4,11 @@ This document describes the request path at the frozen release-contract boundary
 The important invariant is that eligibility, engine selection, streaming
 backpressure, and terminal metrics describe one request. Backpressure may
 suspend that same request multiple times, but every event remains associated
-with it. The module records the terminal outcome and attempt metric exactly
-once.
+with it. The module records the terminal outcome exactly once, through
+`nginx_markdown_requests_total`. That counter is distinct from
+`nginx_markdown_conversion_attempts_total`, which counts the point where engine
+selection commits, so one request can contribute an attempt and later a
+terminal outcome in a different category.
 
 ## Lifecycle
 
@@ -48,9 +51,13 @@ configuration lifecycle.
 
 ## Engine selection
 
-`markdown_streaming off` selects bounded full-buffer conversion. `auto` uses a
-bounded internal response-shape heuristic. It does not expose a threshold
-directive. `force` requests streaming after the hard eligibility gates pass.
+`markdown_streaming off` selects bounded full-buffer conversion. `auto` prefers
+streaming for every response that clears the hard eligibility gates and falls
+back to bounded full-buffer conversion for responses that stay eligible for
+conversion but cannot stream. Responses that fail the conversion gates
+(method, status, content type, or `Accept`) never convert: they pass through or
+follow the configured rejection path. `auto` exposes no threshold directive.
+`force` requests streaming after the same gates pass.
 
 User-configured streaming exclusions (`markdown_stream_excluded_types`)
 select full-buffer or passthrough, as do built-in hard exclusions (full cache

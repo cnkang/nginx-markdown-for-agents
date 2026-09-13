@@ -257,6 +257,20 @@ impl FrameScanState {
         matches!(self, Self::Data)
     }
 
+    /// Return whether this state is a token START (entered from html5ever's
+    /// Data state via `from_data`).  A transition INTO one of these states
+    /// from a non-Data state means the previous token was abandoned and a
+    /// new token begins at this character (e.g. `<<` or `&<`), so the span
+    /// must restart at the current character instead of accumulating.
+    fn is_token_start(self) -> bool {
+        matches!(
+            self,
+            Self::TagOpen
+                | Self::CharacterReference(CharacterReferenceState::Start)
+                | Self::CarriageReturn
+        )
+    }
+
     /// Advance the conservative state machine by one Unicode scalar value.
     fn advance(self, ch: char) -> Self {
         match self {
@@ -568,6 +582,12 @@ fn next_token_span(
     if next_state.is_data() {
         0
     } else if state.is_data() {
+        char_len
+    } else if next_state.is_token_start() {
+        // The previous token was abandoned mid-way and a new token starts
+        // at this character (e.g. `<<` or `&<`): restart the span at the
+        // current character instead of accumulating the abandoned token's
+        // bytes into the new one.
         char_len
     } else {
         current.saturating_add(char_len)

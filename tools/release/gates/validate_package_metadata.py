@@ -25,6 +25,14 @@ import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+# The names the validators compare against repeat across the spec, workflow, and
+# packaging checks, so each one lives here once.
+DOCKERFILE_GLIBC = "Dockerfile.glibc"
+DOCKERFILE_MUSL = "Dockerfile.musl"
+MODULE_SNIPPET_NAME = "mod-markdown.conf"
+RPM_SECTION_INSTALL = "%install"
+RPM_SECTION_PREUN = "%preun"
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 NFPM_CONFIG = PROJECT_ROOT / "packaging" / "nfpm" / "nfpm.yaml"
@@ -61,8 +69,8 @@ PACKAGE_REMOVAL_GUARD_TEST = (
     PROJECT_ROOT / "packaging" / "tests" / "test-package-removal-guard.sh"
 )
 RELEASE_DOCKERFILES = [
-    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc",
-    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl",
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_GLIBC,
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_MUSL,
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.install-example",
 ]
 CANONICAL_MODULE_SO = "ngx_http_markdown_filter_module.so"
@@ -106,13 +114,14 @@ NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN = (
     r"\s+packager: deb"
 )
 RPM_REQUIRED_FIELDS = ["Name", "Version", "Requires"]
-RPM_REQUIRED_SECTIONS = ["%post", "%preun", "%changelog"]
+RPM_REQUIRED_SECTIONS = ["%post", RPM_SECTION_PREUN, "%changelog"]
 MODULE_NAME_SURFACES = [
     NFPM_CONFIG,
     RPM_SPEC,
     PROJECT_ROOT / "packaging" / "rpm" / "nginx-markdown-module.spec",
     PROJECT_ROOT / "packaging" / "snippets" / "mod-markdown-for-agents.conf",
-    PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / "mod-markdown.conf",
+    PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / MODULE_SNIPPET_NAME,
+    PROJECT_ROOT / "packaging" / "nfpm" / "modules" / MODULE_SNIPPET_NAME,
     NFPM_POSTINSTALL,
     SMOKE_TEST_BASIC,
     PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-diagnostics.sh",
@@ -124,6 +133,64 @@ MODULE_NAME_SURFACES = [
     RELEASE_PACKAGES_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
 ]
+
+# NGINX dynamic modules load only through a main-context load_module directive,
+# and a RELATIVE path in that directive resolves against the nginx prefix (not
+# against --modules-path).  Each package family ships its snippet in the
+# directory that family's layout uses, with the directive form that resolves
+# there:
+#   DEB -> /usr/share/nginx/modules-available (the operator symlinks it into
+#          /etc/nginx/modules-enabled/, which Debian's nginx.conf includes at
+#          the top level); the snippet uses the absolute modules path because
+#          this project installs the .so only in the compiled modules directory.
+#   RPM -> /usr/share/nginx/modules, shipped with the directive commented out
+#          so no include mechanism can load the module without an operator
+#          decision; the relative form resolves through the /etc/nginx/modules
+#          symlink nginx.org packages ship.
+NFPM_RPM_ONLY_MODULES_PATTERN = (
+    r'src: "\./packaging/nfpm/modules/mod-markdown\.conf"\n'
+    r'\s+dst: "/usr/share/nginx/modules/mod-markdown\.conf"\n'
+    r"\s+type: config\|noreplace\n"
+    r"\s+packager: rpm"
+)
+DEB_MODULE_SNIPPET = (
+    PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / MODULE_SNIPPET_NAME
+)
+RPM_MODULE_SNIPPET = PROJECT_ROOT / "packaging" / "nfpm" / "modules" / MODULE_SNIPPET_NAME
+
+# Snippet paths shared by the RPM spec checks.
+SNIPPET_INSTALL_SOURCE = f"packaging/nfpm/modules/{MODULE_SNIPPET_NAME}"
+SNIPPET_INSTALL_DESTINATION = (
+    "%{buildroot}/usr/share/nginx/modules/" + MODULE_SNIPPET_NAME
+)
+# load_module with a RELATIVE path is resolved against the NGINX prefix, not
+# against --modules-path.  Debian/Ubuntu distribution packages populate the
+# prefix-relative directory as well (which is why their snippets use the
+# relative form), but this project ships the module only in the compiled
+# modules directory — so the DEB snippet must use the absolute path.  nginx.org
+# packages ship /etc/nginx/modules as a symlink to their modules directory, so
+# the relative form is correct for the RPM snippet.
+MODULE_SNIPPET_DEB_LOAD_LINE = (
+    "load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;"
+)
+MODULE_SNIPPET_RPM_LOAD_LINE = (
+    "load_module modules/ngx_http_markdown_filter_module.so;"
+)
+MODULE_SNIPPET_INACTIVE_LOAD_LINE = f"#{MODULE_SNIPPET_RPM_LOAD_LINE}"
+
+# A dynamic module only loads into a core binary built with a matching configure
+# signature.  Official nginx.org binaries (and every distribution package this
+# project targets) build with --with-compat, which relaxes that check to the
+# module API version — so a release module MUST be configured with
+# --with-compat or the package installs cleanly and then fails to load with
+# "module ... is not binary compatible".
+WITH_COMPAT_BUILD_SURFACES = [
+    RELEASE_PACKAGES_WORKFLOW,
+    RELEASE_RPM_WORKFLOW,
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_GLIBC,
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_MUSL,
+]
+WITH_COMPAT_FLAG = "--with-compat"
 RELEASE_VERSION_SURFACES = [
     RELEASE_PACKAGES_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
@@ -145,12 +212,7 @@ ARCH_RUNNER_SNIPPET = (
     "'ubuntu-24.04' }}"
 )
 STANDALONE_CONTAINER_BASH_SHELL = "defaults:\n      run:\n        shell: bash"
-STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET = (
-    "packaging/nfpm/scripts/render-nfpm-config.sh \\\n"
-    "            packaging/nfpm/scripts/preremove.sh \\\n"
-    "            \"/tmp/${TARBALL_DIR}/preremove.sh\" \\\n"
-    "            \"${NGINX_VERSION}\""
-)
+STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET = '          mkdir -p "${RUNNER_TEMP:-/tmp}/markdown-render"\n          packaging/nfpm/scripts/render-nfpm-config.sh \\\n            packaging/nfpm/scripts/preremove.sh \\\n            "${RUNNER_TEMP:-/tmp}/markdown-render/preremove.sh" \\\n            "${NGINX_VERSION}"\n          cp "${RUNNER_TEMP:-/tmp}/markdown-render/preremove.sh" "/tmp/${TARBALL_DIR}/preremove.sh"'
 STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     "INPUT_VERSION: ${{ inputs.version }}",
     "NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}",
@@ -270,7 +332,7 @@ RPM_FORCE_REMOVE_INSTRUCTION_SNIPPETS = [
     "sudo tee /etc/nginx/markdown-module-force-remove >/dev/null",
 ]
 RPM_PREUN_SNIPPETS = [
-    "%preun",
+    RPM_SECTION_PREUN,
     "if [ \"$1\" -eq 0 ]; then",
     "/bin/bash /usr/libexec/nginx-markdown-for-agents/preremove.sh remove",
     "install -m 0755 preremove.sh",
@@ -278,7 +340,7 @@ RPM_PREUN_SNIPPETS = [
 ]
 RELEASE_BUILD_GLIBC_SNIPPETS = {
     RELEASE_PACKAGES_WORKFLOW: ["container: almalinux@sha256:"],
-    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc": [
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_GLIBC: [
         "AlmaLinux 9 manifest",
         "ARG OS_BASE=almalinux@sha256:",
         "dnf install -y",
@@ -287,7 +349,7 @@ RELEASE_BUILD_GLIBC_SNIPPETS = {
         "COPY rust-toolchain.toml /src/rust-toolchain.toml",
         "rustup toolchain install",
     ],
-    PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl": [
+    PROJECT_ROOT / "tools" / "build_release" / DOCKERFILE_MUSL: [
         "install-verified-rustup.sh",
         "--libc musl",
         "--toolchain none",
@@ -760,9 +822,16 @@ def validate_nfpm_deb_dependency_contract(
             ],
         )
 
-    versions = sorted(
-        set(_extract_matrix_versions() if nginx_versions is None else nginx_versions)
-    )
+    try:
+        versions = sorted(
+            set(_extract_matrix_versions() if nginx_versions is None else nginx_versions)
+        )
+    except (RuntimeError, OSError) as exc:
+        # A malformed or unreadable release matrix must not crash the
+        # whole gate run: record the standard validation failure and let
+        # main continue with the remaining validators, exiting through
+        # the usual FAIL path.
+        return False, [f"release matrix unreadable: {exc}"]
     if not versions:
         return False, ["no release-blocking NGINX versions found in release matrix"]
 
@@ -827,6 +896,83 @@ def validate_nfpm_config(result: ValidationResult) -> None:
             "nfpm:modules-available:deb-only",
             "modules-available snippet must be limited to packager: deb",
         )
+    if re.search(NFPM_RPM_ONLY_MODULES_PATTERN, content):
+        result.pass_(
+            "nfpm:modules:rpm-only",
+            "module snippet is packaged at the RPM-family path for RPM only",
+        )
+    else:
+        result.fail(
+            "nfpm:modules:rpm-only",
+            "RPM packages must ship the module snippet at "
+            f"/usr/share/nginx/modules/{MODULE_SNIPPET_NAME} with packager: rpm",
+        )
+
+
+def _spec_installs_snippet(install_body: str) -> bool:
+    """True when one install command ships the snippet to its packaged path.
+
+    The command is parsed (options and inline comments removed) and the
+    destination must be the operand that receives the file, so a comment or a
+    trailing argument cannot stand in for the real destination.
+    """
+    for tokens, guarded in _shell_commands(install_body):
+        if guarded or Path(tokens[0]).name != "install":
+            continue
+        sources, destination = _parse_install_operands(tokens[1:])
+        if (
+            SNIPPET_INSTALL_SOURCE in sources
+            and destination == SNIPPET_INSTALL_DESTINATION
+        ):
+            return True
+    return False
+
+
+def validate_rpm_spec_snippet(result: ValidationResult) -> None:
+    """The RPM spec must install and ship the module loader snippet.
+
+    The nFPM entry alone is not enough: the spec-driven RPM build ships its own
+    file list, so an omission there drops the snippet from that artifact.
+    """
+    spec = read_safe(RPM_SPEC)
+    if not spec:
+        result.fail("rpm:modules:snippet", f"{RPM_SPEC} not found")
+    else:
+        install_body = _spec_section(spec, RPM_SECTION_INSTALL)
+        files_body = _spec_section(spec, "%files")
+        install_ok = _spec_installs_snippet(install_body)
+        destination_ok = True
+        files_ok = re.search(
+            r"^%config\(noreplace\) /usr/share/nginx/modules/mod-markdown\.conf$",
+            files_body,
+            re.MULTILINE,
+        )
+        if install_ok and destination_ok:
+            result.pass_(
+                "rpm:modules:install",
+                "the RPM spec %install installs the module snippet from "
+                f"packaging/nfpm/modules/{MODULE_SNIPPET_NAME} into "
+                "%{buildroot}/usr/share/nginx/modules/",
+            )
+        else:
+            result.fail(
+                "rpm:modules:install",
+                "the RPM spec %install section must install packaging/nfpm/"
+                f"modules/{MODULE_SNIPPET_NAME} into "
+                "%{buildroot}/usr/share/nginx/modules/",
+            )
+        if files_ok:
+            result.pass_(
+                "rpm:modules:files",
+                "the RPM spec %files section ships the snippet as "
+                "%config(noreplace)",
+            )
+        else:
+            result.fail(
+                "rpm:modules:files",
+                "the RPM spec %files section must list "
+                f"%config(noreplace) /usr/share/nginx/modules/{MODULE_SNIPPET_NAME}",
+            )
 
 
 def validate_rpm_spec(result: ValidationResult) -> None:
@@ -907,6 +1053,978 @@ def validate_module_filename_consistency(result: ValidationResult) -> None:
                 f"module-name:missing:{rel}",
                 f"{rel} does not reference {CANONICAL_MODULE_SO}",
             )
+
+
+def _logical_lines(content: str) -> list[str]:
+    """Return complete logical lines (comments kept, continuations joined)."""
+    lines: list[str] = []
+    buffer = ""
+    for raw in content.splitlines():
+        line = raw.rstrip("\r")
+        # A trailing backslash continues a command, never a comment: joining a
+        # comment with the following line would hide that line from the checks.
+        if line.endswith("\\") and not line.lstrip().startswith("#"):
+            buffer += line[:-1] + " "
+            continue
+        lines.append((buffer + line).rstrip())
+        buffer = ""
+    if buffer:
+        lines.append(buffer.rstrip())
+    return lines
+
+
+# RPM section headers, so a %files entry such as `%config(noreplace) ...` is
+# not mistaken for the start of a new section.
+RPM_SECTIONS = frozenset(
+    {
+        "%prep",
+        "%build",
+        RPM_SECTION_INSTALL,
+        "%check",
+        "%files",
+        "%changelog",
+        "%pre",
+        "%post",
+        RPM_SECTION_PREUN,
+        "%postun",
+        "%pretrans",
+        "%posttrans",
+        "%clean",
+        "%description",
+        "%generate_buildrequires",
+        "%sourcelist",
+        "%patchlist",
+    }
+)
+
+
+def _spec_section(content: str, section: str) -> str:
+    """Return the body of one RPM ``%section`` (empty when absent)."""
+    body: list[str] = []
+    inside = False
+    for line in content.splitlines():
+        first = line.strip().split()[0] if line.strip() else ""
+        if first in RPM_SECTIONS or first.startswith("%package"):
+            inside = first == section
+            continue
+        if inside:
+            body.append(line)
+    return "\n".join(body)
+
+
+def _check_snippet_load_form(
+    result: ValidationResult,
+    family: str,
+    rel: str,
+    content: str,
+    expected_line: str,
+    ships_active: bool,
+) -> None:
+    """The snippet must load the module with the form its family resolves."""
+    check_id = f"snippet:{family}:load-module-form"
+    # Match a COMPLETE logical line: a substring hit inside a comment (for
+    # example prose quoting the directive) must not satisfy the contract.
+    live = [
+        line.strip()
+        for line in _logical_lines(content)
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    commented = [
+        line.strip()
+        for line in _logical_lines(content)
+        if line.lstrip().startswith("#") and line.lstrip()[1:].strip() != ""
+    ]
+    if expected_line in live and expected_line not in commented:
+        result.pass_(
+            check_id,
+            f"{rel} uses the load_module form that resolves on {family}",
+        )
+    elif f"#{expected_line}" in commented and expected_line not in live and not ships_active:
+        result.pass_(
+            check_id,
+            f"{rel} ships the loader directive as a complete commented line",
+        )
+    else:
+        result.fail(
+            check_id,
+            f"{rel} must load the module with '{expected_line}' as a complete "
+            "line (live for DEB, commented for RPM)",
+        )
+
+
+def _check_snippet_guidance(
+    result: ValidationResult, family: str, rel: str, content: str
+) -> None:
+    """The snippet must tell the operator where load_module belongs."""
+    check_id = f"snippet:{family}:main-context-guidance"
+    lowered = content.lower()
+    if "main context" in lowered and "top level" in lowered:
+        result.pass_(
+            check_id,
+            f"{rel} tells the operator load_module belongs at the top level "
+            "(main context) of nginx.conf",
+        )
+    else:
+        result.fail(
+            check_id,
+            f"{rel} must document that load_module belongs in the main "
+            "context (top level of nginx.conf, before events/http)",
+        )
+
+
+def _check_snippet_directives(
+    result: ValidationResult, family: str, rel: str, content: str, expected_line: str
+) -> None:
+    """A loader snippet carries no active directive besides load_module."""
+    check_id = f"snippet:{family}:only-load-module-directive"
+    # Reject every live (non-comment, non-blank) line except the loader
+    # directive itself — block-form directives such as `http {` do not end in a
+    # semicolon and would slip past a semicolon-only scan.
+    live_lines = [
+        line.strip()
+        for line in content.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    unexpected = [item for item in live_lines if item != expected_line]
+    if unexpected:
+        result.fail(
+            check_id,
+            f"{rel} must only carry the load_module directive; found "
+            f"{unexpected} (conversion directives belong to the operator's "
+            "location blocks)",
+        )
+    else:
+        result.pass_(
+            check_id,
+            f"{rel} carries no active directives besides load_module",
+        )
+
+
+def _check_snippet_opt_in(
+    result: ValidationResult,
+    family: str,
+    rel: str,
+    content: str,
+    expected_line: str,
+    ships_active: bool,
+) -> None:
+    """No include mechanism may load the module without an operator decision."""
+    check_id = f"snippet:{family}:opt-in-loading"
+    # Any uncommented loader directive counts as active, at any indentation:
+    # a snippet carrying both the commented form and an indented live directive
+    # would otherwise pass as opt-in.
+    logical = [line.strip() for line in _logical_lines(content)]
+    active_line = any(
+        line == expected_line for line in logical if not line.startswith("#")
+    )
+    inactive_line = f"#{expected_line}"
+    if ships_active and active_line:
+        result.pass_(
+            check_id,
+            f"{rel} ships the active directive activated by an explicit "
+            "operator symlink",
+        )
+    elif not ships_active and inactive_line in logical and not active_line:
+        result.pass_(
+            check_id,
+            f"{rel} ships the directive commented out so no include mechanism "
+            "can load it without an operator decision",
+        )
+    elif ships_active:
+        result.fail(
+            check_id,
+            f"{rel} must ship the active load_module directive for the "
+            "symlink-based activation flow",
+        )
+    else:
+        result.fail(
+            check_id,
+            f"{rel} must keep load_module commented out: an active directive "
+            "could be loaded by an include mechanism without an operator "
+            "decision",
+        )
+
+
+# A shell variable reference to the staging tree, but not a longer name such as
+# $NOT_TARBALL_DIR: the reference must end at a non-identifier character.
+TARBALL_MARKER_PATTERN = re.compile(
+    r"(?:^|/)(\$\{TARBALL_DIR\}|\$TARBALL_DIR)(?=/|$)"
+)
+
+
+_SIMPLE_VARIABLE_PATTERN = re.compile(r"\$([^\W\d]\w*)", re.ASCII)
+
+
+def _normalize_shell_path(text: str) -> str:
+    """Collapse ``$NAME`` and ``${NAME}`` so equivalent references compare equal."""
+    return _SIMPLE_VARIABLE_PATTERN.sub(r"${\1}", text)
+
+
+# install(1) options that consume the following token as their argument.
+_INSTALL_VALUE_OPTIONS = frozenset(
+    {
+        "-m",
+        "--mode",
+        "-o",
+        "--owner",
+        "-g",
+        "--group",
+        "-t",
+        "--target-directory",
+        "-S",
+        "--suffix",
+    }
+)
+
+
+def _strip_inline_comment(tokens: list[str]) -> list[str]:
+    """Drop the tokens that follow an inline shell comment marker."""
+    for index, token in enumerate(tokens):
+        if token.startswith("#"):
+            return tokens[:index]
+    return tokens
+
+
+def _parse_install_operands(tokens: list[str]) -> tuple[list[str], str | None]:
+    """Return (sources, destination) for an install(1) argument list.
+
+    install(1) reads ``install [OPTION]... SOURCE... DEST``; with ``-t DIR`` the
+    destination is the option argument and every operand is a source.  The
+    destination is reported separately so a caller can require it to be the
+    operand that actually receives the file.
+    """
+    index = 0
+    target_directory = False
+    while index < len(tokens) and tokens[index].startswith("-"):
+        option = tokens[index]
+        index += 1
+        # ``--option=value`` carries its value inside the same token.
+        name, separator, _ = option.partition("=")
+        if separator:
+            if name == "--target-directory":
+                target_directory = True
+            continue
+        if option in _INSTALL_VALUE_OPTIONS:
+            if option in ("-t", "--target-directory"):
+                target_directory = True
+            index += 1
+    operands = [token.strip('"').strip("'") for token in tokens[index:]]
+    if target_directory:
+        return operands, None
+    if len(operands) < 2:
+        return [], None
+    return operands[:-1], operands[-1]
+
+
+# A workflow step starts a fresh shell in the checkout directory.
+_STEP_BOUNDARY_PATTERN = re.compile(r"^\s*-\s|^\s*run:")
+
+# A function definition opens a group whose body does not run until the
+# function is called, so its commands are never a live install.
+_FUNCTION_DEFINITION = re.compile(r"^([^\W\d]\w*)\s*\(\s*\)$", re.ASCII)
+_SEPARATOR_TOKENS = (";", "&&", "||")
+_SEPARATOR_SPLIT = re.compile(r"(&&|\|\||;)")
+
+# Tokens that prefix a command without being the command itself.
+_COMMAND_PREFIXES = frozenset({"(", "{", "!"})
+_GUARD_OPENERS = frozenset({"if", "while", "until", "for", "case"})
+_GUARD_CLOSERS = frozenset({"fi", "done", "esac"})
+_SHELL_KEYWORDS = frozenset(
+    {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for"}
+)
+
+
+def _strip_guard_keywords(
+    tokens: list[str], pending_guard: bool
+) -> tuple[list[str], bool, int]:
+    """Strip leading shell keywords and report guard state and depth change.
+
+    Keywords are read positionally, so a word such as ``fi`` used as an
+    argument is not mistaken for a guard boundary, while a definition written as
+    ``f() { if false; then ...; fi; }`` still opens a group whose body does not
+    run.
+    """
+    depth_delta = 0
+    while tokens:
+        head = tokens[0]
+        if head in _GUARD_OPENERS or head == "function":
+            depth_delta += 1
+            pending_guard = True
+        elif head in _GUARD_CLOSERS or head == "}":
+            depth_delta -= 1
+        elif _FUNCTION_DEFINITION.match(head) or head in _SHELL_KEYWORDS or head in _COMMAND_PREFIXES:
+            # A definition skeleton, a connective such as `then`, or a prefix
+            # such as `(` and `{`: step over it and keep reading, because a
+            # guard may follow on the same command.
+            pass
+        else:
+            break
+        tokens = tokens[1:]
+    return tokens, pending_guard, depth_delta
+
+
+def _line_commands(line: str) -> list[tuple[list[str], bool]]:
+    """Return (tokens, follows_conditional_operator) for each command on a line.
+
+    The line comment is removed FIRST, because everything after an unquoted ``#``
+    belongs to the comment, separators and installs included.  Separators are
+    then honored even when they are glued to the previous word.
+    """
+    commands: list[tuple[list[str], bool]] = []
+    current: list[str] = []
+    separator_guard = False
+    for token in _strip_inline_comment(line.split()):
+        for piece in _SEPARATOR_SPLIT.split(token):
+            if piece in _SEPARATOR_TOKENS:
+                if current:
+                    commands.append((current, separator_guard))
+                    current = []
+                separator_guard = piece in ("&&", "||")
+                continue
+            if piece:
+                current.append(piece)
+    if current:
+        commands.append((current, separator_guard))
+    return commands
+
+
+def _function_definition(tokens: list[str]) -> str | None:
+    """Return the function name when these tokens open a definition.
+
+    The parentheses may be written apart from the name (``stage ()``) and the
+    opening brace may follow on the same line.
+    """
+    if not tokens:
+        return None
+    single = _FUNCTION_DEFINITION.match(tokens[0])
+    if single:
+        return single.group(1)
+    joined = " ".join(tokens[:3])
+    spaced = re.match(r"^([^\W\d]\w*)\s*\(\s*\)", joined, re.ASCII)
+    return spaced.group(1) if spaced else None
+
+
+def _is_definition_line(name: str | None, tokens: list[str]) -> bool:
+    """True when these tokens are only a function definition, which runs nothing."""
+    if name is None:
+        return False
+    return all(set(token) <= set("(){") for token in tokens[1:])
+
+
+def _scan_shell_commands(body: str) -> list[tuple[list[str], bool]]:
+    """Return (tokens, guarded) for every command in a shell body.
+
+    A command counts as guarded when a shell guard wraps it or when it appears
+    after a function definition, because that body is never proven to run:
+    modelling call liveness, scopes, and brace nesting in a static check produced
+    more wrong verdicts than it prevented (each model accepted a shape it should
+    have rejected, or rejected one it should have accepted).  The repository's
+    packaging surfaces install their files from the top level, so the rule costs
+    them nothing, and a spec that hides its install inside a function body is
+    rejected loudly instead of being trusted.
+    """
+    commands: list[tuple[list[str], bool]] = []
+    guard_depth = 0
+    inside_function = False
+    for line in _logical_lines(body):
+        pending_guard = guard_depth > 0
+        for tokens, separator_guard in _line_commands(line):
+            definition = _function_definition(tokens)
+            pending_guard = pending_guard or separator_guard
+            tokens, pending_guard, depth_delta = _strip_guard_keywords(
+                tokens, pending_guard
+            )
+            if definition:
+                inside_function = True
+            if tokens and not _is_definition_line(definition, tokens):
+                commands.append(
+                    (tokens, pending_guard or guard_depth > 0 or inside_function)
+                )
+            guard_depth = max(0, guard_depth + depth_delta)
+            pending_guard = False
+    return commands
+
+
+def _shell_commands(body: str) -> list[tuple[list[str], bool]]:
+    """Return (tokens, guarded) for every command in a shell body."""
+    return _scan_shell_commands(body)
+
+
+def _spec_install_sources(spec: str) -> list[str]:
+    """Return the source paths of every install command in %install.
+
+    Parsed deterministically (no pattern matching) so that a hostile spec cannot
+    trigger backtracking and so that quoted paths, continuation lines, and
+    option arguments stay unambiguous.
+    """
+    body = _spec_section(spec, RPM_SECTION_INSTALL)
+    sources: list[str] = []
+    for tokens, _guarded in _shell_commands(body):
+        if Path(tokens[0]).name != "install":
+            continue
+        for source in _parse_install_operands(tokens[1:])[0]:
+            if source.startswith(("/", "%{buildroot}")):
+                continue
+            sources.append(source)
+    return sources
+
+
+# Commands that copy a file into the rpmbuild tree.  A staging proof must come
+# from one of these, so a mention of the tarball directory inside another
+# command (rm, echo, chmod, a shell test) cannot satisfy the contract.
+_STAGING_COMMANDS = frozenset({"cp", "install", "mv", "rsync"})
+
+
+def _is_literal_operand(raw_token: str) -> bool:
+    """True when the shell would pass this operand through without expanding it.
+
+    A single-quoted operand and a backslash-escaped ``$`` both suppress the
+    variable expansion that would make the operand point at the staging tree.
+    """
+    return raw_token.startswith("'") or "\\$" in raw_token
+
+
+def _unquote_operand(raw_token: str) -> str:
+    """Drop the double quotes the shell would remove from an operand."""
+    return raw_token.strip('"')
+
+
+def _normalize_operand(raw_token: str) -> str | None:
+    """Return a repository-relative operand, or None when it cannot be one.
+
+    Absolute and parent-relative operands never name a path inside the
+    repository, and only one explicit ``./`` prefix is removed so that a name
+    such as ``.foo`` keeps its leading dot.
+    """
+    operand = _unquote_operand(raw_token)
+    if operand.startswith(("/", "..")):
+        return None
+    if "/../" in operand or operand.endswith("/.."):
+        return None
+    if operand.startswith("./"):
+        operand = operand[2:]
+    return operand.rstrip("/")
+
+
+def _destination_matches_source(
+    destination: str, source_path: str, staging_roots: set[str] | None = None
+) -> bool:
+    """True when the staged destination is where the spec expects to find it.
+
+    The destination must keep the file's name and sit either in the tarball root
+    (for a spec that names a bare file) or in the directory that mirrors the
+    source's repository directory, so a temporary staging directory does not
+    stand in for the final path.
+    """
+    marker = TARBALL_MARKER_PATTERN.search(destination)
+    if not marker:
+        return False
+    prefix = _normalize_shell_path(destination[: marker.start()].strip('"').strip())
+    if ".." in prefix.split("/"):
+        return False
+    # The tarball tree lives directly under the root the workflow creates for it,
+    # so a destination naming another directory copies the file where the archive
+    # step never looks. A caller that knows the step passes its roots; a direct
+    # caller only states that the tree sits under an absolute path.
+    if staging_roots is None:
+        # A direct caller states the weaker shape: an absolute path or the tree
+        # itself.
+        if prefix and not prefix.startswith("/"):
+            return False
+    elif prefix not in staging_roots:
+        # The workflow path requires the tree's own root, so an empty prefix
+        # only counts when a live command created the tree at the destination.
+        return False
+    suffix = destination[marker.end() :].strip('"').lstrip("/")
+    if ".." in suffix.split("/"):
+        return False
+    source_name = Path(source_path).name
+    source_dir = str(Path(source_path).parent)
+    if source_dir == ".":
+        return suffix in ("", source_name)
+    return suffix in (source_dir, source_dir + "/", f"{source_dir}/{source_name}")
+
+
+def _names_expected_source(operands: list[str], source_path: str) -> bool:
+    """True when one operand names the spec source or its built artifact.
+
+    A spec that names a bare file installs an artifact the workflow builds
+    elsewhere, for example build/<module>.so, so the matching basename counts;
+    a directory-qualified source must match its repository path.
+    """
+    for raw in operands:
+        if _is_literal_operand(raw):
+            continue
+        normalized = _normalize_operand(raw)
+        if normalized is None:
+            continue
+        if normalized == source_path:
+            return True
+        if "/" not in source_path and Path(normalized).name == source_path:
+            return True
+    return False
+
+
+def _staged_destination(
+    tokens: list[str], source_path: str, staging_roots: set[str] | None = None
+) -> str | None:
+    """The staged path one command writes, or None when it stages nothing.
+
+    The file must appear as an operand before the operand that references the
+    staging tree, that reference must be a real expansion, and the staged path
+    must be the one the spec installs.
+    """
+    if not tokens or Path(tokens[0]).name not in _STAGING_COMMANDS:
+        return None
+    operands = _command_operands(tokens)
+    staged_indexes = [
+        index
+        for index, raw in enumerate(operands)
+        if not _is_literal_operand(raw)
+        and _destination_matches_source(_unquote_operand(raw), source_path, staging_roots)
+    ]
+    if not staged_indexes:
+        return None
+    if not _names_expected_source(operands[: staged_indexes[0]], source_path):
+        return None
+
+    staged = _unquote_operand(operands[staged_indexes[0]]).rstrip("/")
+
+    if Path(staged).name != Path(source_path).name:
+        # The command copies into a directory, so the staged file is the source
+        # under that directory.
+        staged = f"{staged}/{Path(source_path).name}"
+
+    return _normalize_shell_path(staged)
+
+
+def _is_staging_command(
+    tokens: list[str], source_path: str, staging_roots: set[str] | None = None
+) -> bool:
+    """True when one command copies ``source_path`` into the tarball tree."""
+    return _staged_destination(tokens, source_path, staging_roots) is not None
+
+
+def _removal_takes_staged(operand: str, staged_path: str) -> bool:
+    """Whether a removal operand takes the staged file away."""
+    target = _normalize_shell_path(staged_path).rstrip("/")
+    # The shell drops `"` anywhere in a word, so a quoted prefix glued to a glob
+    # (`"/tmp/${TARBALL_DIR}/"*`) is one path ending in `*`.
+    removed = _normalize_shell_path(operand).replace('"', "").rstrip("/")
+
+    if removed.endswith("/*"):
+        # A glob removal that clears a directory takes everything inside it.
+        removed = removed[:-2].rstrip("/")
+
+    if target == removed or target.startswith(removed + "/"):
+        return True
+
+    marker = TARBALL_MARKER_PATTERN.search(removed)
+
+    if marker is None or removed[marker.end():].strip("/") != "":
+        # A removal inside the tree, or of something unrelated, takes only what
+        # the operand names.
+        return False
+
+    # The whole tree goes, so anything staged inside it goes too.
+    tree_prefix = removed[: marker.start()].rstrip("/")
+    return not tree_prefix or target.startswith(tree_prefix + "/")
+
+
+def _apply_removal(
+    tokens: list[str], roots: set[str], staged: str | None, first_only: bool = False
+) -> tuple[set[str], str | None]:
+    """Retire the roots and the staged path one removal command takes away."""
+    operands = _expanding_operands(tokens)
+
+    if first_only:
+        operands = operands[:1]
+
+    for operand in operands:
+        roots = _roots_removed_by_operand(operand, roots)
+        if staged is not None and _removal_takes_staged(operand, staged):
+            staged = None
+
+    return roots, staged
+
+
+_FOLDED_RUN = re.compile(r"^(\s*)run:\s*>\s*$")
+
+
+def _split_workflow_steps(workflow: str) -> list[str]:
+    """Return the shell body of each workflow step.
+
+    Every step runs in its own shell, so directory and function state do not
+    carry across the boundary.
+    """
+    if any(_FOLDED_RUN.match(line) for line in _logical_lines(workflow)):
+        # A folded scalar (`run: >`) is not modelled: YAML rejoins its lines, and
+        # a check that reads them separately accepts commands the shell never
+        # runs.  The repository's workflows use `run: |`, so an unverifiable
+        # folded step fails the gate instead of passing on a guess.
+        return []
+    steps: list[str] = []
+    current: list[str] = []
+    for line in _logical_lines(workflow):
+        if _STEP_BOUNDARY_PATTERN.match(line) and current:
+            steps.append("\n".join(current))
+            current = []
+        current.append(line)
+    if current:
+        steps.append("\n".join(current))
+    return steps
+
+
+def _staging_roots_in_command(tokens: list[str]) -> set[str]:
+    """Roots one ``mkdir`` command creates for the tarball tree.
+
+    The root is the text before the marker, or the empty string when the
+    command creates the tree itself.  A guarded command never runs, so it
+    records nothing.
+    """
+    if not tokens:
+        return set()
+
+    recursive = _creates_the_whole_chain(tokens)
+
+    if recursive is None:
+        return set()
+
+    roots: set[str] = set()
+
+    for operand in _expanding_operands(tokens):
+        root = _tree_root_in(operand, recursive)
+        if root is not None:
+            roots.add(root)
+
+    return roots
+
+
+def _creates_the_whole_chain(tokens: list[str]) -> bool | None:
+    """Whether the command creates every directory leading to its operand.
+
+    `mkdir -p` (including bundled forms such as `-pv`) and `install -d` build the
+    whole chain; a plain `mkdir` creates only its last component.  Returns None
+    for a command that creates nothing.
+    """
+    name = Path(tokens[0]).name
+
+    if name == "mkdir":
+        return _has_parents_flag(tokens)
+
+    if name == "install":
+        return any(
+            token in ("-d", "--directory")
+            for token in tokens[1:]
+            if token.startswith("-")
+        )
+
+    return None
+
+
+def _command_operands(tokens: list[str]) -> list[str]:
+    """The operands of a command, with their quoting preserved.
+
+    Quoting is preserved so a caller can tell a real expansion from a literal
+    reference the shell would pass through unchanged.
+    """
+    return [token for token in tokens[1:] if not token.startswith("-")]
+
+
+def _expanding_operands(tokens: list[str]) -> list[str]:
+    """The operands whose shell references really expand."""
+    return [
+        _unquote_operand(raw)
+        for raw in _command_operands(tokens)
+        if not _is_literal_operand(raw)
+    ]
+
+
+def _tree_root_in(operand: str, recursive: bool) -> str | None:
+    """The tree root one operand places, or None when it places none.
+
+    A plain `mkdir` creates its last component, so the tree itself must be the
+    operand's last component for the command to vouch for it.
+    """
+    marker = TARBALL_MARKER_PATTERN.search(operand)
+
+    if marker is None:
+        return None
+
+    if not recursive and operand[marker.end():].strip("/") != "":
+        return None
+
+    return _normalize_shell_path(operand[: marker.start()].rstrip("/"))
+
+
+def _has_parents_flag(tokens: list[str]) -> bool:
+    """Whether a command carries ``mkdir``'s parent-creating flag.
+
+    The flag may be standalone, spelled out, or bundled with other short
+    options such as ``-pv``.
+    """
+    for token in tokens[1:]:
+        if token == "--parents":
+            return True
+        if token.startswith("-") and not token.startswith("--") and "p" in token[1:]:
+            return True
+    return False
+
+
+def _removes_directories(tokens: list[str]) -> bool:
+    """Whether an ``rm`` command carries a recursive flag."""
+    return any(
+        (token.startswith("-") and "r" in token[1:].lower())
+        or token == "--recursive"
+        for token in tokens[1:]
+    )
+
+
+def _roots_after_removal(tokens: list[str], roots: set[str]) -> set[str]:
+    """The roots a live removal command leaves behind.
+
+    A removal of the tarball tree, of a parent directory, or of the tree itself
+    retires the roots it covers, so a later copy cannot be proven against a root
+    that no longer exists.  Unrelated roots are kept.
+    """
+    name = Path(tokens[0]).name
+
+    if name == "rm" and not _removes_directories(tokens):
+        # A plain rm cannot take a directory away.
+        return roots
+
+    if name not in ("rm", "rmdir", "mv"):
+        return roots
+
+    operands = _expanding_operands(tokens)
+    if name == "mv":
+        # Moving a directory away leaves the source path without it; the
+        # destination is not assumed to create anything.
+        operands = operands[:1]
+
+    for operand in operands:
+        roots = _roots_removed_by_operand(operand, roots)
+
+    return roots
+
+
+def _roots_removed_by_operand(operand: str, roots: set[str]) -> set[str]:
+    """The roots one removal operand takes away."""
+    marker = TARBALL_MARKER_PATTERN.search(operand)
+
+    if marker is not None:
+        if operand[marker.end():].strip("/") != "":
+            # The command removes a child of the tree, so the tree itself
+            # survives and the roots that place it stay valid.
+            return roots
+
+        # Removing the tree itself retires the root that places it there.
+        parent = _normalize_shell_path(operand[: marker.start()].rstrip("/"))
+        return {root for root in roots if root not in ("", parent)}
+
+    path = _normalize_shell_path(operand.rstrip("/"))
+    return {
+        root
+        for root in roots
+        if root != path and not root.startswith(path + "/")
+    }
+
+
+def _step_stages_into_tarball(step: str, source_path: str) -> bool:
+    """Whether one step stages the source against a root it created first.
+
+    Roots exist from the command that creates them until the end of the step, so
+    a copy only proves staging against a root an earlier live command created.
+    """
+    staging_roots: set[str] = set()
+    staged: str | None = None
+    directory_changed = False
+
+    for tokens, guarded in _shell_commands(step):
+        name = Path(tokens[0]).name
+
+        if name in ("cd", "pushd"):
+            # A guarded change may or may not run: assume it does, because a
+            # missed change would let a relative path pass as staged.
+            directory_changed = True
+            continue
+
+        if guarded or directory_changed:
+            continue
+
+        if name in ("mkdir", "install"):
+            staging_roots |= _staging_roots_in_command(tokens)
+            continue
+
+        destination = _staged_destination(tokens, source_path, staging_roots)
+
+        if destination is not None:
+            staged = destination
+
+        if name in ("rm", "rmdir", "mv"):
+            staging_roots, staged = _apply_removal(
+                tokens, staging_roots, staged, first_only=(name == "mv")
+            )
+
+    # The staged file counts only if it is still there when the step ends.
+    return staged is not None
+
+
+def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
+    """Return True when a live workflow command copies ``source`` into the tarball.
+
+    Only an unguarded command proves staging, and within one step a ``cd``
+    invalidates the relative repository paths that follow it.
+    """
+    source_path = source.lstrip("./")
+    return any(
+        _step_stages_into_tarball(step, source_path)
+        for step in _split_workflow_steps(workflow)
+    )
+
+
+def validate_rpm_spec_sources_are_staged(result: ValidationResult) -> None:
+    """Every file the RPM spec installs must reach the rpmbuild tarball.
+
+    rpmbuild builds from the source tarball that release-rpm.yml assembles, not
+    from the repository checkout: a spec line that installs a path the workflow
+    never copies fails the release build, and only at release time.  Cross-check
+    the spec's %install sources against the workflow's tarball staging commands.
+    """
+    spec = read_safe(RPM_SPEC)
+    workflow = read_safe(RELEASE_RPM_WORKFLOW)
+    if not spec:
+        result.fail("rpm-spec-sources:spec-missing", f"{RPM_SPEC} not found")
+        return
+    if not workflow:
+        result.fail(
+            "rpm-spec-sources:workflow-missing", f"{RELEASE_RPM_WORKFLOW} not found"
+        )
+        return
+
+    sources = _spec_install_sources(spec)
+    if not sources:
+        result.fail(
+            "rpm-spec-sources:none-parsed",
+            "no install sources parsed from the RPM spec %install section "
+            "(parser or spec shape changed)",
+        )
+        return
+
+    for source in sources:
+        check_id = f"rpm-spec-sources:{Path(source).name}"
+        if _workflow_stages_into_tarball(workflow, source):
+            result.pass_(
+                check_id,
+                f"release-rpm.yml copies {source} into the rpmbuild tarball",
+            )
+        else:
+            result.fail(
+                check_id,
+                f"the RPM spec installs {source}, but release-rpm.yml never "
+                "copies it into the rpmbuild source tarball",
+            )
+
+
+def _dynamic_module_configure_invocations(content: str) -> list[str]:
+    """Return joined shell commands that configure a dynamic module build.
+
+    Shell line continuations are joined first so a configure invocation split
+    across several lines is examined as one command; comment lines are dropped
+    so a commented flag cannot satisfy the check.
+    """
+    joined: list[str] = []
+    buffer = ""
+    for raw in content.splitlines():
+        line = raw.rstrip()
+        stripped = line.lstrip()
+        if not buffer and stripped.startswith("#"):
+            continue
+        if line.endswith("\\"):
+            buffer += line[:-1] + " "
+            continue
+        candidate = buffer + line
+        buffer = ""
+        if "--add-dynamic-module" in candidate:
+            joined.append(candidate)
+    if buffer and "--add-dynamic-module" in buffer:
+        joined.append(buffer)
+    return joined
+
+
+def validate_module_build_compat(result: ValidationResult) -> None:
+    """Every module build surface must configure with ``--with-compat``.
+
+    nginx refuses to load a dynamic module whose configure signature differs
+    from the core binary (``module ... is not binary compatible``).
+    ``--with-compat`` reduces that signature to the dynamic-module API version,
+    which is what lets the release artifacts load into nginx.org and
+    distribution binaries.  Dropping the flag still builds and packages
+    successfully, so the failure only appears on a target host — hence this
+    static guard on every build surface.
+    """
+    for path in WITH_COMPAT_BUILD_SURFACES:
+        rel = path.relative_to(PROJECT_ROOT)
+        content = read_safe(path)
+        check_id = f"build-compat:{rel}"
+        if not content:
+            result.fail(check_id, f"{rel} not found")
+            continue
+        invocations = _dynamic_module_configure_invocations(content)
+        if not invocations:
+            result.fail(
+                check_id,
+                f"{rel} has no --add-dynamic-module configure invocation to "
+                "check (parser or build shape changed)",
+            )
+            continue
+        missing = [line for line in invocations if WITH_COMPAT_FLAG not in line]
+        if missing:
+            result.fail(
+                check_id,
+                f"{rel} builds the dynamic module without {WITH_COMPAT_FLAG}: "
+                f"{missing[0].strip()} — the artifact will not load into an "
+                "nginx.org/distribution binary",
+            )
+        else:
+            result.pass_(
+                check_id,
+                f"{rel} configures every module build with {WITH_COMPAT_FLAG}",
+            )
+
+
+def validate_module_snippet_best_practices(result: ValidationResult) -> None:
+    """Check the shipped module snippets follow NGINX dynamic-module practice.
+
+    NGINX documents that a dynamic module is loaded with a ``load_module``
+    directive in the MAIN context (top level of nginx.conf, before the events
+    and http blocks).  A relative path there is resolved against the NGINX
+    prefix — not against --modules-path — so the snippet must use the form
+    that resolves on its own family: DEB ships the module only in
+    /usr/lib/nginx/modules (absolute path), while nginx.org RPM packages ship
+    /etc/nginx/modules as a symlink to their modules directory (relative
+    form).  The snippets must also document that main-context placement, carry
+    no configuration directives, and never load the module silently.
+    """
+    expectations = (
+        ("deb", DEB_MODULE_SNIPPET, True, MODULE_SNIPPET_DEB_LOAD_LINE),
+        ("rpm", RPM_MODULE_SNIPPET, False, MODULE_SNIPPET_RPM_LOAD_LINE),
+    )
+    for family, path, ships_active, expected_line in expectations:
+        rel = path.relative_to(PROJECT_ROOT)
+        content = read_safe(path)
+        if not content:
+            result.fail(f"snippet:{family}:exists", f"{rel} not found")
+            continue
+        result.pass_(f"snippet:{family}:exists", f"{rel} present")
+        _check_snippet_load_form(
+            result, family, str(rel), content, expected_line, ships_active
+        )
+        _check_snippet_guidance(result, family, str(rel), content)
+        _check_snippet_directives(result, family, str(rel), content, expected_line)
+        _check_snippet_opt_in(
+            result, family, str(rel), content, expected_line, ships_active
+        )
 
 
 def checksum_identifiers() -> set[str]:
@@ -1129,6 +2247,11 @@ def _extract_matrix_entry_versions(
     """Extract valid NGINX versions from release matrix entries."""
     versions: set[str] = set()
     for entry in entries:
+        if not isinstance(entry, dict):
+            raise RuntimeError(
+                "Malformed release matrix: entries must be objects, "
+                f"got {type(entry).__name__}"
+            )
         version = version_from_entry(entry)
         if version is not None:
             versions.add(version)
@@ -1146,6 +2269,18 @@ def _extract_matrix_versions() -> set[str]:
         raise RuntimeError(
             f"Malformed release matrix at {RELEASE_MATRIX}: {exc}"
         ) from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"Malformed release matrix at {RELEASE_MATRIX}: "
+            f"top-level JSON value is {type(data).__name__}, expected object"
+        )
+    for key in ("entries", "matrix"):
+        value = data.get(key, [])
+        if not isinstance(value, list):
+            raise RuntimeError(
+                f"Malformed release matrix at {RELEASE_MATRIX}: "
+                f"{key} must be a list, got {type(value).__name__}"
+            )
     versions.update(
         _extract_matrix_entry_versions(
             data.get("entries", []),
@@ -1183,7 +2318,15 @@ def extract_nginx_versions(content: str) -> set[str]:
     versions: set[str] = set()
 
     if "tools/release-matrix.json" in content:
-        versions.update(_extract_matrix_versions())
+        # A malformed matrix must not abort version extraction: fall back to the
+        # in-file version surfaces so the checksum check still runs, and let the
+        # matrix validator report the malformed data as its own failure.
+        try:
+            versions.update(_extract_matrix_versions())
+        except (RuntimeError, OSError, ValueError, KeyError, TypeError):
+            # Keep the line-based fallback available for versions declared
+            # directly in the file when the matrix cannot be read.
+            pass
 
     for raw_line in content.splitlines():
         line = _strip_unquoted_comment(raw_line).strip()
@@ -1579,7 +2722,7 @@ def validate_release_rust_build_invariants(result: ValidationResult) -> None:
 
     for symbol in RETIRED_RELEASE_FFI_SYMBOLS:
         sid = f"rust-build-invariant:retired:{symbol}"
-        pattern = rf"(?<![A-Za-z0-9_]){re.escape(symbol)}(?![A-Za-z0-9_])"
+        pattern = rf"(?<!\w){re.escape(symbol)}(?!\w)"
         if re.search(pattern, content):
             result.fail(
                 sid,
@@ -1637,6 +2780,10 @@ def main() -> int:
     validate_rpm_spec(result)
     validate_nginx_dependency_constraints(result)
     validate_module_filename_consistency(result)
+    validate_module_snippet_best_practices(result)
+    validate_module_build_compat(result)
+    validate_rpm_spec_sources_are_staged(result)
+    validate_rpm_spec_snippet(result)
     validate_release_versions_have_checksums(result)
     validate_release_artifact_flow(result)
     validate_standalone_workflow_packaging(result)

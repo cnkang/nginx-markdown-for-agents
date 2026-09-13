@@ -12,7 +12,146 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+/* The peer helpers below classify socket addresses, so the socket types and
+ * byte-order helpers must be visible wherever this header is included.  NGINX
+ * pulls these in through ngx_config.h; the unit-test stubs do not, and the
+ * module's own test builds include this header directly. */
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
 #include "markdown_converter.h"
+
+/*
+ * Whether a socket address is loopback.
+ *
+ * Accepts the whole 127.0.0.0/8 range, `::1`, and IPv4-mapped IPv6 addresses
+ * whose embedded IPv4 address is loopback.
+ */
+static ngx_inline ngx_flag_t
+ngx_http_markdown_sockaddr_is_loopback(const struct sockaddr *sa)
+{
+    if (sa == NULL) {
+        return 0;
+    }
+
+#if (NGX_HAVE_UNIX_DOMAIN)
+    if (sa->sa_family == AF_UNIX) {
+        return 1;
+    }
+#endif
+
+    if (sa->sa_family == AF_INET) {
+        const struct sockaddr_in *sin = (const struct sockaddr_in *) sa;
+
+        return (ntohl(sin->sin_addr.s_addr) & 0xff000000U) == 0x7f000000U;
+    }
+
+#if (NGX_HAVE_INET6)
+    if (sa->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *sin6 = (const struct sockaddr_in6 *) sa;
+        uint32_t                   v4;
+
+        if (IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
+            return 1;
+        }
+
+        if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
+            v4 = ((uint32_t) sin6->sin6_addr.s6_addr[12] << 24)
+                 | ((uint32_t) sin6->sin6_addr.s6_addr[13] << 16)
+                 | ((uint32_t) sin6->sin6_addr.s6_addr[14] << 8)
+                 | (uint32_t) sin6->sin6_addr.s6_addr[15];
+
+            return (v4 & 0xff000000U) == 0x7f000000U;
+        }
+    }
+#endif
+
+    return 0;
+}
+
+
+/*
+ * Whether the request arrived over a loopback peer.
+ *
+ * NGINX's realip module rewrites `c->sockaddr` when it accepts a forwarding
+ * header, so reading the socket address directly would let a trusted proxy's
+ * `X-Forwarded-For: 127.0.0.1` present a remote request as local.  The public
+ * `realip_remote_addr` variable holds the peer that actually opened the
+ * connection (the kernel-provided address, equal to the socket address when
+ * realip did not rewrite it), so the decision is made from that peer and falls
+ * back to the socket address only when the variable is unavailable.  A peer
+ * that matches neither a loopback literal nor the UNIX-domain case is not
+ * loopback, so an unrecognised value cannot broaden access.
+ */
+#if defined(NGX_HTTP_MARKDOWN_TEST_STUBS)
+/*
+ * Unit-test stub build: `ngx_http_request_t` is incomplete there and the stubs
+ * omit NGINX's HTTP variable API, so only the declaration is provided.  A test
+ * that exercises a loopback gate defines this function against the stub request
+ * it already builds; the production build uses the realip-aware implementation
+ * below, and the realip behaviour itself is covered by the native end-to-end
+ * suite.
+ */
+static ngx_inline ngx_flag_t
+ngx_http_markdown_peer_is_loopback(ngx_http_request_t *r);
+#else
+static ngx_inline ngx_flag_t
+ngx_http_markdown_peer_is_loopback(ngx_http_request_t *r)
+{
+    static ngx_str_t           realip_remote_addr =
+        ngx_string("realip_remote_addr");
+    static u_char              v4_mapped_prefix[] = "::ffff:127.";
+    ngx_http_variable_value_t *value;
+
+    if (r == NULL || r->connection == NULL) {
+        return 0;
+    }
+
+#if (NGX_HAVE_UNIX_DOMAIN)
+    if (r->connection->sockaddr != NULL
+        && r->connection->sockaddr->sa_family == AF_UNIX)
+    {
+        /* A UNIX-domain peer is local by construction; realip only rewrites
+         * IP peers. */
+        return 1;
+    }
+#endif
+
+    value = ngx_http_get_variable(
+        r, &realip_remote_addr,
+        ngx_hash_key_lc(realip_remote_addr.data, realip_remote_addr.len));
+
+    if (value != NULL && value->valid && !value->not_found
+        && value->data != NULL && value->len > 0)
+    {
+        /* IPv4 loopback: the whole 127.0.0.0/8 range. */
+        if (value->len >= 4 && ngx_strncmp(value->data, "127.", 4) == 0) {
+            return 1;
+        }
+
+        if (value->data[0] == ':') {
+            if (value->len == 3
+                && ngx_strncmp(value->data, "::1", 3) == 0)
+            {
+                return 1;
+            }
+
+            if (value->len >= 10
+                && ngx_strncasecmp(value->data, v4_mapped_prefix, 10) == 0)
+            {
+                return 1;
+            }
+        }
+
+        /* The peer that opened the connection is remote. */
+        return 0;
+    }
+
+    /* No realip module in play: the socket address is the transport peer. */
+    return ngx_http_markdown_sockaddr_is_loopback(r->connection->sockaddr);
+}
+#endif /* NGX_HTTP_MARKDOWN_TEST_STUBS */
 
 /*
  * Public module version reported in diagnostics/metrics.  This is the
@@ -155,6 +294,7 @@ struct ngx_http_markdown_effective_conf_s {
     ngx_uint_t   error_status;
     size_t       memory_budget;   /* effective conversion_memory projection (frozen public limit) */
     size_t       streaming_buffer;
+
 #ifdef MARKDOWN_STREAMING_ENABLED
     size_t       streaming_budget;
 #endif
@@ -356,6 +496,8 @@ typedef struct {
     ngx_http_markdown_stream_reason_e  reason;
 } ngx_http_markdown_path_selection_t;
 
+
+
 static ngx_inline ngx_http_markdown_path_selection_t
 ngx_http_markdown_path_selection(ngx_uint_t path,
     ngx_http_markdown_stream_reason_e reason)
@@ -367,6 +509,8 @@ ngx_http_markdown_path_selection(ngx_uint_t path,
 
     return selection;
 }
+
+
 
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
@@ -681,9 +825,9 @@ typedef struct {
     /*
      * Custom prune/protection selectors were removed in 0.9.2 (LTS-R009).
      * Built-in noise reduction is now controlled solely by prune_noise and is
-     * guarded by the fixed regression corpus.  The markdown_prune_selectors /
-     * markdown_prune_protection_selectors directive names remain registered
-     * with an error-returning handler (LTS-R008); no config field backs them.
+     * guarded by the fixed regression corpus.  The removed directive names are
+     * no longer registered: a configuration that still uses one fails
+     * `nginx -t` with nginx's unknown-directive error.
      */
     /*
      * Static explicit block mask (AGENTS.md Rule 71).
@@ -1332,6 +1476,15 @@ typedef struct {
              * bypasses Rust and continues directly downstream. */
             ngx_flag_t                    failopen_active;
 
+            /* One-shot per-invocation marker: the fail-open entry point
+             * (ensure_handle / pre-commit error handler) already
+             * forwarded the CURRENT input chain downstream.  body_filter
+             * consumes it so the next invocation routes future input
+             * through continue_failopen_input instead of dropping it
+             * (a non-terminal fail-open delivery must not truncate the
+             * response). */
+            ngx_flag_t                    failopen_chain_forwarded;
+
             /* Fail-open mode selected and future input could not be
              * retained behind pending output (budget/allocation).
              * After pending output drains, abort without a clean last_buf;
@@ -1558,7 +1711,7 @@ typedef struct {
         ngx_atomic_t  precommit_reject_total;    /* Pre-Commit fail-closed */
         ngx_atomic_t  budget_exceeded_total;     /* Memory budget exceeded */
         ngx_atomic_t  last_ttfb_ms;              /* Last streaming TTFB (milliseconds) */
-        ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak estimate (bytes; not RSS) */
+        ngx_atomic_t  last_peak_memory_bytes;    /* Run-wide conversion peak estimate (bytes; not RSS); high-water mark across streaming + full-buffer */
 
         /* Fallback/failure counters */
         ngx_atomic_t  streaming_fallback_precommit_pass;  /* Pre-commit HTML pass-through */

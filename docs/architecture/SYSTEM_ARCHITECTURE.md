@@ -185,11 +185,11 @@ For non-eligible requests, the module stays out of the way and the original resp
 
 The architecture supports two conversion engines:
 
-- **Full-buffer engine** (default for small responses): buffers the full eligible response before conversion. This makes correctness, deterministic output, and header handling simpler. Tradeoffs:
+- **Full-buffer engine** (the fallback for responses that cannot stream): buffers the full eligible response before conversion. This makes correctness, deterministic output, and header handling simpler. Tradeoffs:
   - larger responses consume more memory
   - conversion cannot start streaming output immediately
-  - very large or streaming-style content should use streaming when eligible,
-    or passthrough when ineligible
+  - any response that is eligible to stream should take the streaming engine,
+    regardless of size. Ineligible responses pass through
 
 - **Streaming engine** (enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline. The pipeline runs charset detection, tokenization, sanitization, a state machine, and emission. Tradeoffs:
   - bounded per-request working-set memory (configurable via
@@ -243,8 +243,18 @@ full-buffer and streaming FFI entrypoints.
 
 ### Processing-Path Selection and Defaults
 `markdown_streaming` defaults to `off`. Unset and `off` select bounded
-full-buffer conversion. Explicit `auto` prefers streaming after safety checks,
-regardless of response size. The v0.6.x
+full-buffer conversion. Explicit `auto` prefers streaming for every response
+that clears the hard compatibility gates (HEAD, 304, full conditional
+validation, excluded content types, and `markdown_front_matter on`, which
+requires the full-buffer engine because the module assembles the front matter
+from the completed metadata set). The module enforces the streaming budget at run time,
+not during selection, and a response that exceeds it follows the configured error
+handling rather than being re-routed. The full-buffer engine is the fallback in
+two cases only: a response that the selection step keeps off the streaming path,
+and a capability fallback while streaming. A response that is not eligible for
+conversion passes through unchanged. The selection follows
+the policy and those gates only: no size threshold takes part in it, and no
+operator-configured or internal candidate boundary exists. The v0.6.x
 `markdown_streaming_auto_threshold` directive and the v0.9.2-removed
 `markdown_stream_threshold` directive have no replacement.
 
@@ -328,10 +338,11 @@ cannot broaden that boundary.
 ### Static configuration and reload boundary
 
 The 0.9.2 convergence removed the runtime dynconf watcher, dry-run path, and
-last-known-good snapshot. The reject-only directive entries remain solely to
-give `nginx -t` an actionable migration error. NGINX validates configuration
-changes before the normal reload or restart boundary. The request path then
-reads the merged static configuration directly.
+last-known-good snapshot. The five retired directive names are no longer
+registered, so NGINX reports its standard unknown-directive error during
+`nginx -t`. NGINX validates configuration changes before the normal reload or
+restart boundary. The request path then reads the merged static configuration
+directly.
 
 ### Reason Code FFI Accessor (registry projections + FFI)
 The declarative `reason_registry.toml` defines the reason codes. The generated
@@ -358,9 +369,10 @@ v0.9.2 is the final pre-1.0 breaking release. It consolidates the public
 surface before the 1.0 LTS compatibility freeze:
 
 - **Directive consolidation**: The configuration surface shrinks from 63
-  directives to 20 active directives and five reject-only migration entries.
-  The latter retain actionable migration errors for the three dynconf names
-  and two custom-selector names. The project removed
+  directives to 20 active directives. The module no longer registers the five
+  retired names,
+  so NGINX rejects them with its standard unknown-directive error and
+  `MIGRATION-0.9.2.md` names the replacement for each. The project removed
   the `markdown_streaming_zero_copy`, per-path metrics, shadow comparison,
   profile, and OTel directives. Other removed names fail `nginx -t`
   with the standard `unknown directive` error.
@@ -369,7 +381,7 @@ surface before the 1.0 LTS compatibility freeze:
   decompression_ratio, and max_inflight replace the former standalone
   limit directives.
 - **Metrics freeze**: The production endpoint emits the ten-family v1
-  contract (see [observability-schema-v2.md](observability-schema-v2.md)).
+  contract (see [observability-schema-v3.md](observability-schema-v3.md)).
   Legacy multi-format, per-path, shadow, and debug families no longer exist.
 - **Streaming default**: Unset and `off` use bounded full-buffer conversion.
   Explicit `auto` prefers streaming after safety checks without a size threshold.

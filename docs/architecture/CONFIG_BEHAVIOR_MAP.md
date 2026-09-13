@@ -113,7 +113,7 @@ flowchart LR
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Prepends YAML front matter to the generated Markdown |
+| Behavior | Prepends YAML front matter to the generated Markdown (full-buffer engine only; `markdown_streaming auto` and `force` route to the full-buffer engine, and `force` with this directive on fails `nginx -t`) |
 | Lifecycle impact | Rust conversion options and output rendering path |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/metadata.rs`, `components/rust-converter/src/converter.rs` |
 | Practical note | This changes output shape for downstream consumers and may affect caches or clients that expect plain Markdown only. |
@@ -158,23 +158,12 @@ flowchart LR
 | Implementation areas | `components/rust-converter/src/converter.rs`, `components/rust-converter/src/pruning.rs` |
 | Practical note | Disable it when the page's structural content is more important than compact agent-oriented output. |
 
-### `markdown_prune_selectors`
+### Removed custom-selector directives
 
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Adds CSS selectors whose matching subtrees are eligible for noise pruning |
-| Lifecycle impact | Rust DOM traversal before Markdown emission |
-| Implementation areas | `components/rust-converter/src/pruning.rs`, `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h` |
-| Practical note | Keep selectors narrow and validate representative pages because matching removes content from the Markdown representation. |
-
-### `markdown_prune_protection_selectors`
-
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Protects matching subtrees from noise-pruning removal |
-| Lifecycle impact | Rust pruning decision after selector matching |
-| Implementation areas | `components/rust-converter/src/pruning.rs` |
-| Practical note | Use this to retain content nested inside a broad noise selector. |
+0.9.2 removed `markdown_prune_selectors` and
+`markdown_prune_protection_selectors`, and the command table no longer
+registers them, so `nginx -t` fails with the standard unknown-directive error.
+Built-in noise reduction remains controlled by `markdown_prune_noise`.
 
 ### `markdown_metrics_shm_size`
 
@@ -188,8 +177,9 @@ flowchart LR
 ### Removed runtime dynconf directives
 
 The 0.9.2 convergence removed `markdown_dynamic_config`,
-`markdown_dynamic_config_path`, and `markdown_dynconf_dry_run`. The names remain
-reject-only migration entries so `nginx -t` identifies stale configurations.
+`markdown_dynamic_config_path`, and `markdown_dynconf_dry_run`. The command
+table no longer registers the names, so `nginx -t` fails with the standard
+unknown-directive error.
 There is no runtime watcher, dynconf snapshot, or dynconf metrics family in the
 current request lifecycle. Use the static directives in
 [`CONFIGURATION.md`](../guides/CONFIGURATION.md) and apply changes through a
@@ -233,7 +223,7 @@ validated reload or restart.
 | Behavior | Enables a dedicated metrics endpoint at a location |
 | Lifecycle impact | Separate location-handler path, not the normal conversion filter chain |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h`, `components/nginx-module/src/ngx_http_markdown_config_directives_impl.h`, `components/nginx-module/src/ngx_http_markdown_metrics_impl.h` |
-| Practical note | The wire format is exclusively Prometheus text 0.0.4 with exactly eleven bounded families; Accept negotiation cannot restore removed JSON or legacy text output. |
+| Practical note | The wire format is exclusively Prometheus text 0.0.4 with exactly ten bounded families; Accept negotiation cannot restore removed JSON or legacy text output. |
 
 ## Transfer and Streaming-Oriented Controls
 
@@ -259,7 +249,7 @@ validated reload or restart.
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Selects the processing path: `off` requires full-buffer, `auto` routes by size/response shape, and `force` prefers streaming for every eligible response |
+| Behavior | Selects the processing path: `off` requires full-buffer, `auto` prefers streaming for every eligible response once the hard gates allow it (no size threshold), and `force` requires streaming for every compatible response |
 | Lifecycle impact | Header-phase routing and body-filter path selection after hard eligibility and cache-validation gates |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_streaming_impl.h` |
 | Practical note | This is the sole public streaming selector in 0.9.2. The removed `markdown_streaming_engine` directive is absent from the command table; using it reports an `unknown directive` error at `nginx -t` time. |

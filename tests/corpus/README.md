@@ -11,6 +11,7 @@ tests/corpus/
 ├── malformed/       # Invalid HTML to test error handling
 ├── edge-cases/      # Boundary conditions and unusual inputs
 ├── encoding/        # Character encoding test cases
+├── brotli/          # Brotli-compressed fixtures for decompression paths
 ├── streaming/       # Streaming-specific edge cases and flush-boundary fixtures
 ├── benchmark/       # Benchmark corpus fixtures
 ├── large/           # Large-document fixtures

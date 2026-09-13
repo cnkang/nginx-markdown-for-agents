@@ -96,7 +96,10 @@ fi
 # Remove the bad file for next test
 rm -f "${src_dir}/bad.c"
 
-# Test 3: No guarded functions -> PASS
+# Test 3: A tree with no guarded functions is a detector error, not a pass.
+# The detector fails closed here on purpose: an empty extraction means the
+# guard name, header, or prefix does not match the tree, and a silent pass would
+# hide a real out-of-guard reference.
 cat >"${src_dir}/no_guard.h" <<'H'
 const ngx_str_t *ngx_http_markdown_reason_all(void);
 H
@@ -104,10 +107,11 @@ H
 output_file="${tmp_dir}/noguard.out"
 bash "${DETECTOR}" "${src_dir}/no_guard.h" "${src_dir}" >"${output_file}" 2>&1
 exit_code=$?
-if [[ ${exit_code} -eq 0 ]]; then
-    pass "no guarded functions passes"
+if [[ ${exit_code} -ne 0 ]] && grep -q "no functions found inside #ifdef" "${output_file}"; then
+    pass "no guarded functions fails closed with the mismatch diagnostic"
 else
-    fail "no guarded functions passes" "exit code ${exit_code}"
+    fail "no guarded functions fails closed with the mismatch diagnostic" \
+        "exit code ${exit_code}"
     cat "${output_file}" >&2
 fi
 

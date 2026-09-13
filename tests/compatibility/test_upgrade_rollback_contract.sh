@@ -166,20 +166,29 @@ CONFIG
         echo "FAIL: old-release dynconf directive was accepted" >&2
         return 1
     fi
-    # The rejection must BOTH name the removed directive AND carry a
-    # migration signal.  A generic unknown-directive error alone (which
-    # merely echoes the directive name) is not actionable guidance.
+    # 0.9.2 removed these names from the command table, so NGINX reports its own
+    # unknown-directive error and names the directive that failed.  The module
+    # no longer emits a migration message of its own: the replacement for each
+    # retired name lives in docs/guides/MIGRATION-0.9.2.md, which the release
+    # notes and the breaking-changes guide both point at.  This check therefore
+    # asserts the rejection names the directive, and that a migration path is
+    # documented, not that NGINX itself carries it.
     if ! grep -Eiq 'markdown_dynamic_config' "${output}"; then
         echo "FAIL: migration failure did not name markdown_dynamic_config" >&2
         cat "${output}" >&2
         return 1
     fi
-    if ! grep -Eiq 'removed|migrat|no longer|static config' "${output}"; then
-        echo "FAIL: migration failure lacked an actionable migration signal" >&2
+    if ! grep -Eiq 'unknown directive' "${output}"; then
+        echo "FAIL: migration failure was not the standard unknown-directive error" >&2
         cat "${output}" >&2
         return 1
     fi
-    echo "PASS: old-release configuration is rejected with migration guidance"
+    guide="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/docs/guides/MIGRATION-0.9.2.md"
+    if [[ ! -f "${guide}" ]] || ! grep -q 'markdown_dynamic_config' "${guide}"; then
+        echo "FAIL: the migration guide does not name markdown_dynamic_config" >&2
+        return 1
+    fi
+    echo "PASS: old-release configuration is rejected, and the migration guide carries the replacement"
     return 0
 }
 

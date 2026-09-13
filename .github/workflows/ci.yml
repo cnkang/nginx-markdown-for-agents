@@ -199,7 +199,11 @@ jobs:
               - 'components/nginx-module/**'
               - 'components/rust-converter/**'
               - 'docs/harness/**'
-              - 'tools/complexity/baseline.json'
+              # tools/complexity/** and tools/build_release/** decide the
+              # complexity thresholds and the release build flags this job
+              # checks, so a change there must re-run the gate.
+              - 'tools/complexity/**'
+              - 'tools/build_release/**'
               - '.github/workflows/**'
             contract_gates:
               - 'schemas/**'
@@ -209,6 +213,9 @@ jobs:
               - 'tools/release/gates/**'
               - 'tools/harness/**'
               - 'tools/reason-codegen/**'
+              # Package metadata and the shipped module snippets are validated
+              # by this job, so packaging changes must trigger it.
+              - 'packaging/**'
             workflows:
               - '.github/workflows/**'
 
@@ -273,7 +280,15 @@ jobs:
       - name: Install test dependencies
         run: >-
           python3 -m pip install --upgrade pip &&
-          python3 -m pip install pytest==8.3.5 PyYAML==6.0.2
+          python3 -m pip install pytest==8.3.5 PyYAML==6.0.2 lizard==1.23.0 complexipy==6.0.1
+
+      - name: Install shellcheck
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          fi
+          shellcheck --version
 
       - name: Run regex safety detector
         run: make regex-security-check
@@ -289,6 +304,12 @@ jobs:
 
       - name: Run Python complexity detector
         run: PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
+
+      - name: Run full complexity check (lizard C/Rust, complexipy, shellcheck)
+        # Mirrors `make complexity-check` from the local gate set: the C and Rust
+        # CCN/length/parameter thresholds plus the shellcheck sweep.  Running it
+        # on pull requests keeps a complexity violation from reaching a release.
+        run: make complexity-check
 
       - name: Run repository harness checks
         run: make harness-check
@@ -453,11 +474,9 @@ jobs:
         run: make rust-fmt-check
 
       - name: Clippy (deny warnings)
-        working-directory: components/rust-converter
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Clippy corpus tool
-        run: cargo clippy --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all-targets -- -D warnings
+        # The make target lists every crate that must stay lint-clean, so the
+        # workflow cannot drift behind it.
+        run: make rust-clippy-check
 
       - name: Run Rust unit tests
         # Streaming tests are included by the all-features Rust test target.
@@ -564,6 +583,13 @@ jobs:
           bash tools/harness/detect_version_consistency.sh
           make reason-codegen-check
           PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py
+          # Package metadata + shipped module-snippet contract: validates the nFPM
+          # layout for both package families, the RPM snippet path, that each
+          # snippet loads the module with the form that resolves on its family,
+          # and that no snippet loads a third-party module without an explicit
+          # operator decision.  Cheap and static, so it runs on every pull
+          # request instead of only at release time.
+          PYTHONPATH=. python3 tools/release/gates/validate_package_metadata.py
           make reason-codegen-generate
           make reason-codegen-check
           PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py

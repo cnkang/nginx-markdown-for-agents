@@ -17,7 +17,7 @@ from tools.release.gates import validate_release_matrix_schema as validator
 def test_support_metadata_constraints_match_legacy_and_canonical(legacy):
     """Both row spellings enforce provenance, enums, and support consistency."""
     schema = json.loads((Path(__file__).resolve().parents[4]
-                         / "schemas/release-matrix.schema.json").read_text())
+                         / "schemas/release-matrix.schema.json").read_text(encoding="utf-8"))
     entry = {
         "nginx_version": "1.30.4", "os": "linux", "libc": "glibc",
         "target": "x86_64-unknown-linux-gnu", "artifact_type": "dynamic-module",

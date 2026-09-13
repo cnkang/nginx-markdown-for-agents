@@ -6,7 +6,9 @@ This document describes the architecture for handling large HTTP responses in `n
 
 Since v0.8.0, the module supports **two conversion engines**:
 
-- **Full-buffer engine** (default for small responses): buffers the complete eligible response body before conversion through FFI. This remains the simplest and most tested path.
+- **Full-buffer engine**: the default path, and the fallback for responses that
+  stay eligible for conversion but cannot stream. It buffers the complete
+  eligible response body before conversion through FFI. This remains the simplest and most tested path.
 - **Streaming engine** (enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline. The pipeline runs charset detection, tokenization, sanitization, a state machine, and emission, with per-request memory limits and backpressure.
 
 The legacy incremental path was a stepping stone toward true streaming. The
@@ -25,8 +27,11 @@ For background on the existing request lifecycle and buffering model, see:
 ## Design Principles
 
 - **Policy-selected**: `markdown_streaming off` selects bounded full-buffer
-  conversion. `auto` applies the bounded response-shape heuristic. `force`
-  requests streaming after hard eligibility gates
+  conversion. `auto` prefers streaming for every response that clears the hard
+  eligibility gates and falls back to bounded full-buffer only when a response
+  stays eligible for conversion but cannot stream; a response that is not
+  eligible for conversion passes through unchanged. `force` requests streaming
+  after the same gates
 - **Non-degradation**: introducing the new path must not regress small-response performance or break existing functionality
 - **Semantic equivalence**: for any valid input, the active streaming path must
   produce output equivalent to the full-buffer path
@@ -44,7 +49,7 @@ Response enters the header/body filter chain
         |
         +--- off ----------> Bounded Full-Buffer Path
         |
-        +--- auto ---------> Shape heuristic + eligibility gates
+        +--- auto ---------> Hard eligibility gates
         |                         |
         |                         +--> Streaming Path when eligible
         |                         +--> Bounded Full-Buffer otherwise
@@ -126,6 +131,11 @@ or FFI exports. Use `markdown_streaming` and
 
 ## Historical pre-0.9.0 threshold router
 
+> ⚠️ **HISTORICAL** — every directive and path-selection rule documented under this
+> heading belongs to the retired pre-0.9.0 threshold router. 0.9.2 removed
+> `markdown_large_body_threshold`, so select paths with `markdown_streaming` and read
+> each "full-buffer path" or "incremental path" label here as pre-0.9.0 wording.
+
 > ⚠️ **RETIRED IN 0.9.0, REMOVED IN 0.9.2** — The `markdown_large_body_threshold`
 > directive was a **reject-only stub** in 0.9.0 and 0.9.1. The 0.9.2 release
 > deleted the stub, so setting it in `nginx.conf` now fails `nginx -t`
@@ -200,7 +210,12 @@ default = []
 incremental = []
 ```
 
-The `incremental` feature is off by default. When disabled, the module exports no incremental-only symbols and the legacy `markdown_convert()` ABI remains unchanged.
+The `incremental` feature is off by default. The 0.9.2 release removed the incremental exports entirely: no `markdown_incremental_*` symbols are built or exported. The legacy `markdown_convert()` ABI remains unchanged.
+
+> **Historical note**: the Rust `IncrementalConverter` interface and the
+> incremental FFI API sections below describe the REMOVED 0.8.x design. This
+> document keeps them for historical reference only. They are not part of the
+> 0.9.2 build. Users must not use them as an API contract.
 
 ### Rust Interface
 
@@ -229,9 +244,11 @@ Finalized --> [*]       (result returned)
 Error --> [*]
 ```
 
-### FFI Functions
+### FFI Functions (historical)
 
-The build exports these functions only when you enable the `incremental` feature:
+0.8.x builds exported these functions only with the `incremental` feature.
+0.9.2 REMOVES them, and this document keeps them below for historical
+reference only:
 
 | FFI Function | Purpose |
 |-------------|---------|
@@ -252,7 +269,7 @@ HEAD requests, 304 responses, and fail-open replays always use the full-buffer p
 | 304 Not Modified | Full-buffer path | No body conversion needed; conditional logic operates on cached state |
 | Fail-open replay | Full-buffer path | The module is replaying already-buffered original HTML; incremental processing does not apply |
 
-When `markdown_large_body_threshold` is set to `off`, all requests follow the full-buffer path. The runtime behavior is identical to a build that does not include this feature.
+The retired router selects a path as follows.
 
 ## Non-Degradation Guarantees
 

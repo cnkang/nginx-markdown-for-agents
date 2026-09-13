@@ -1249,3 +1249,35 @@ def test_canonical_dynamic_entry_existing_row_preserves_arch_key():
     # must be retained on existing rows (CRITICAL regression: it was
     # previously dropped, producing schema-invalid rows).
     assert row["support_tier"] == "supported"
+
+def test_is_dynamic_module_entry_requires_agreeing_artifact_type():
+    """Merged rows never count as dynamic-module rows against their own type.
+
+    The identity's libc field selects the dynamic-module OS set, but a row that
+    explicitly declares a different artifact type must stay out of the dynamic
+    replacements (it would otherwise be canonicalized and could displace a real
+    row).  Rows without the field stay eligible for older matrix inputs.
+    """
+    assert um._is_dynamic_module_entry(
+        {"nginx": "1.26.3", "os_type": "glibc", "arch": "x86_64"}
+    )
+    assert um._is_dynamic_module_entry(
+        {
+            "nginx": "1.26.3",
+            "os_type": "glibc",
+            "arch": "x86_64",
+            "artifact_type": "dynamic-module",
+        }
+    )
+    assert not um._is_dynamic_module_entry(
+        {
+            "nginx": "1.26.3",
+            "os_type": "glibc",
+            "arch": "x86_64",
+            "artifact_type": "source-archive",
+        }
+    )
+    assert not um._is_dynamic_module_entry(
+        {"artifact_type": "source-archive", "name": "source"}
+    )
+    assert not um._is_dynamic_module_entry(None)

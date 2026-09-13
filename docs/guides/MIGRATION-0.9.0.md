@@ -330,9 +330,9 @@ jq empty dashboard.json
 | `markdown_decompress_max_size` | `markdown_limits decompressed_size=` key | Removed directive (0.9.x) |
 | `markdown_parse_timeout` | `markdown_limits parser_timeout=` key | Removed directive (0.9.x) |
 | `markdown_parser_budget` | `markdown_limits parser_budget=` key | Removed directive (0.9.x) |
-| `markdown_stream_threshold` | _(no replacement)_ | Internal 1 MiB routing heuristic |
+| `markdown_stream_threshold` | _(no replacement)_ | No replacement: streaming selection applies no size threshold |
 | `markdown_stream_flush_min` | _(no replacement)_ | Internal flush heuristic |
-| `markdown_streaming_auto_threshold` | `markdown_streaming off\|auto\|force` (0.9.0-era pair: `markdown_streaming_engine on\|off` plus the auto threshold, both later consolidated — the engine selector was removed in 0.9.1 and the auto threshold is an internal heuristic with no replacement directive, mirroring `markdown_stream_threshold` above) | Removed directive; explicit policy replaces the heuristic |
+| `markdown_streaming_auto_threshold` | `markdown_streaming off\|auto\|force` (0.9.0-era pair: `markdown_streaming_engine on\|off` plus the auto threshold, both later consolidated — the engine selector was removed in 0.9.1 and the auto threshold was removed with no replacement, because streaming selection applies no size threshold) | Removed directive; an explicit policy replaces the threshold |
 | `markdown_stream_precommit_buffer` | `markdown_limits streaming_buffer=` key | Removed directive (0.9.x) |
 | _(new)_ | `markdown_profile balanced\|strict_cache\|streaming_first` | One-line production defaults |
 | _(new)_ | `markdown_limits memory=64m timeout=5s max_inflight=64` | Key-value resource limits |

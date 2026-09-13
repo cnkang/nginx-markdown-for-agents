@@ -255,6 +255,19 @@ impl Default for MarkdownTextEscapeState {
 }
 
 impl MarkdownTextEscapeState {
+    /// Record a blockquote marker written at the start of a line.
+    ///
+    /// Markdown still recognises block markers after `> `, so the line prefix
+    /// stays active and the marker's visible columns count as indent, kept
+    /// inside the range where block markers are escaped.  Feeding the marker
+    /// characters through `advance` would clear the prefix and let the next
+    /// literal `-`, `#`, or `1.` start a list or heading.
+    pub(crate) fn advance_blockquote_marker(&mut self) {
+        self.line_prefix = true;
+        self.indent = (self.indent + 2).min(3);
+        self.ordered_digits = false;
+    }
+
     pub(crate) fn advance(&mut self, ch: char) {
         if ch == '\n' {
             self.line_prefix = true;

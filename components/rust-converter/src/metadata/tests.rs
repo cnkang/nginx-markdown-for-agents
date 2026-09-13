@@ -7,6 +7,30 @@ use crate::parser::parse_html;
 use super::{MetadataExtractor, PageMetadata};
 
 #[test]
+fn test_relative_metadata_urls_resolve_against_the_base() {
+    // A relative `og:url` and `og:image` must become absolute against the
+    // configured base; the streaming converter asserts the same values for the
+    // same input so the two engines cannot drift apart.
+    let html = b"<html><head>\
+        <meta property=\"og:url\" content=\"article\">\
+        <meta property=\"og:image\" content=\"icons/logo.svg\">\
+        </head></html>";
+    let dom = parse_html(html).unwrap();
+    let extractor =
+        MetadataExtractor::new(Some("https://example.com/docs/page.html".to_string()), true);
+    let metadata = extractor.extract(&dom).unwrap();
+
+    assert_eq!(
+        metadata.url.as_deref(),
+        Some("https://example.com/docs/article")
+    );
+    assert_eq!(
+        metadata.image.as_deref(),
+        Some("https://example.com/docs/icons/logo.svg")
+    );
+}
+
+#[test]
 fn test_extract_title_from_title_tag() {
     let html = b"<html><head><title>Test Title</title></head></html>";
     let dom = parse_html(html).unwrap();

@@ -134,7 +134,12 @@ Verification:
 - `python3 -m pytest tools/harness/tests/test_detect_e2e_streaming_config.py -q`
 - `bash tools/harness/tests/test_detect_e2e_streaming_config.sh`
 - Visual inspection: every location block with `markdown_cache_validation full`
-  must have either `markdown_streaming off` or a comment explaining why `auto`
-  is intentional.
+  must have either `markdown_streaming off` or a documented-intent comment that
+  the detector recognises. `detect_e2e_streaming_config.py` accepts a comment
+  whose wording includes one of: `intentional`, `deliberately`,
+  `runtime block`/`runtime_block`/`runtime-block`, `forces full-buffer`,
+  `selects the full-buffer`, `out of the streaming path`,
+  `validates the runtime block`, `full-buffer path in auto`,
+  `keeps ... out of the streaming`, or `bypasses streaming`.
 - Visual inspection: location path names match the declared `markdown_streaming`
   mode.

@@ -30,10 +30,10 @@ markdown_etag_policy, markdown_conditional_requests, markdown_on_wildcard,
 markdown_trust_forwarded_headers, markdown_forwarded_headers,
 markdown_large_body_threshold, markdown_streaming_engine,
 markdown_memory_budget) get excluded. This historical list predates the
-0.9.2 convergence. The binary retains five reject-only migration entries:
+0.9.2 convergence. The binary no longer registers the five convergence names
 `markdown_dynamic_config`, `markdown_dynamic_config_path`,
 `markdown_dynconf_dry_run`, `markdown_prune_selectors`, and
-`markdown_prune_protection_selectors`. Other removed names produce the
+`markdown_prune_protection_selectors`. They and other removed names produce the
 standard unknown-directive error.
 
 ### Core Conversion Directives
@@ -142,13 +142,15 @@ Reject-only OTel names (not active profile fields):
 | `markdown_prune_noise` | on | http, server, location | on\|off |
 The 0.9.2 convergence removed the custom selector directives. The module
 controls built-in noise reduction with `markdown_prune_noise`. The command
-table keeps the removed names as reject-only migration entries.
+table does not keep the removed names, so `nginx -t` reports NGINX's standard
+`unknown directive` error for them.
 
 ### Runtime configuration
 
 The 0.9.2 contract has no runtime configuration watcher or dynconf fields.
-The command table keeps the removed directive names only as reject-only
-migration entries so `nginx -t` reports an actionable error. All effective values come
+The command table no longer holds the removed directive names, so `nginx -t`
+reports NGINX's standard `unknown directive` error and
+`MIGRATION-0.9.2.md` names the replacement for each. All effective values come
 from static NGINX configuration and the request filter variable.
 
 ### LLM / Token Estimation

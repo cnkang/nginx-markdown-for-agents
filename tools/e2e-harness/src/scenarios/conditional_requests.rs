@@ -16,6 +16,10 @@
 //! 9. 304 response contains Vary: Accept
 //! 10. HEAD request describes the Markdown representation (Content-Type
 //!     text/markdown, Vary: Accept, no fabricated Content-Length/ETag)
+//! 11. Duplicate same-name request headers (X-Test: A + X-Test: B) survive
+//!     the conditional capture/shadow/restore lifecycle intact, verified
+//!     against the upstream header echo under both the conversion
+//!     (/md/echo-headers) and auth-deny (/md-deny/echo-headers) locations.
 
 use crate::assertions;
 use crate::http;
@@ -286,12 +290,92 @@ fn append_head_case(
     }
 }
 
+fn append_echo_headers_case(
+    url: &str,
+    location_tag: &str,
+    headers: &[(&str, &str)],
+    assertions: &mut Vec<AssertionResult>,
+) {
+    /*
+     * Duplicate same-name request headers must survive the module's
+     * conditional capture/shadow/restore intact.  The fixture echoes the
+     * upstream-received headers back in the body; a name-based restore
+     * would have collapsed A/B into B/B.  Assert PRESENCE of both values
+     * (HTTP header ordering is not guaranteed through NGINX forwarding).
+     */
+    let resp = match http::get_with_header_pairs(url, headers) {
+        Ok(resp) => resp,
+        Err(e) => {
+            assertions.push(AssertionResult {
+                name: format!("case11_{location_tag}_duplicate_header_echo_request"),
+                passed: false,
+                expected: "upstream echo reachable".to_string(),
+                actual: format!("request failed: {e}"),
+                message: None,
+            });
+            return;
+        }
+    };
+    assertions.push(assertions::assert_status(
+        &format!("case11_{location_tag}_duplicate_header_echo_status"),
+        resp.status,
+        200,
+    ));
+    let body = resp.body.clone();
+    let count_a = body.lines().filter(|l| *l == "x-test: A").count();
+    let count_b = body.lines().filter(|l| *l == "x-test: B").count();
+    let count_inm = body
+        .lines()
+        .filter(|l| l.starts_with("if-none-match:"))
+        .count();
+    // count_inm_value is intentionally kept: it distinguishes "no
+    // if-none-match line at all" from "an if-none-match line with a
+    // DIFFERENT value" in the failure message, so a regression that
+    // forwards a mangled validator is diagnosable at a glance.
+    let count_inm_value = body
+        .lines()
+        .filter(|l| *l == "if-none-match: \"non-matching-etag-99999\"")
+        .count();
+    assertions.push(AssertionResult {
+        name: format!("case11_{location_tag}_duplicate_header_a_preserved"),
+        passed: count_a == 1,
+        expected: "exactly one x-test: A line in upstream echo".to_string(),
+        actual: if count_a == 1 {
+            "present exactly once".to_string()
+        } else {
+            format!("count={count_a} (restore collapsed or duplicated the entry?)")
+        },
+        message: None,
+    });
+    assertions.push(AssertionResult {
+        name: format!("case11_{location_tag}_duplicate_header_b_preserved"),
+        passed: count_b == 1,
+        expected: "exactly one x-test: B line in upstream echo".to_string(),
+        actual: if count_b == 1 {
+            "present exactly once".to_string()
+        } else {
+            format!("count={count_b} (restore collapsed or duplicated the entry?)")
+        },
+        message: None,
+    });
+    assertions.push(AssertionResult {
+        name: format!("case11_{location_tag}_conditional_header_suppressed_upstream"),
+        passed: count_inm == 0 && count_inm_value == 0,
+        expected: "no if-none-match line in upstream echo (validator suppressed)".to_string(),
+        actual: if count_inm == 0 {
+            "absent (suppressed as designed)".to_string()
+        } else {
+            format!("count={count_inm} value_count={count_inm_value} (validator leaked upstream?)")
+        },
+        message: None,
+    });
+}
+
 /// Run the conditional-requests scenario.
 pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     const SCENARIO: &str = "conditional-requests";
     let start = std::time::Instant::now();
     let mut assertions = Vec::new();
-
     if let Err(report) = common::ensure_reuse_nginx_binary(&ctx, SCENARIO, start) {
         return Ok(report);
     }
@@ -316,6 +400,39 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
 
     append_if_none_match_cases(&url, &headers, &response_etag, &mut assertions);
     append_if_modified_since_cases(&url, &headers, &mut assertions);
+
+    /*
+     * Duplicate-header survival through the conditional lifecycle:
+     * - /md/html with If-None-Match: preaccess capture -> suppress ->
+     *   shadow install -> upstream request -> restore (identity map).
+     *   Upstream (fixture /echo-headers) echoes the X-Test pair back.
+     * - /force/html: header filter runs restore on the forwarded
+     *   response; still exercises the shadow path on the request side.
+     * Assert both A and B survive in upstream order, proving the
+     * shadow->original identity map keeps duplicates intact.
+     */
+    append_echo_headers_case(
+        &format!("{base_url}/md/echo-headers"),
+        "md",
+        &[
+            ("Accept", "text/markdown"),
+            ("If-None-Match", "\"non-matching-etag-99999\""),
+            ("X-Test", "A"),
+            ("X-Test", "B"),
+        ],
+        &mut assertions,
+    );
+    append_echo_headers_case(
+        &format!("{base_url}/md-deny/echo-headers"),
+        "md_deny",
+        &[
+            ("Accept", "text/markdown"),
+            ("If-None-Match", "\"non-matching-etag-99999\""),
+            ("X-Test", "A"),
+            ("X-Test", "B"),
+        ],
+        &mut assertions,
+    );
 
     append_head_case(&url, &headers, &mut assertions);
 

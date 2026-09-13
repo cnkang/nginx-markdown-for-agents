@@ -1,0 +1,19 @@
+Tables Test
+
+# Table Examples
+
+## Simple Table
+
+ Name Age City Alice 30 New York Bob 25 London Charlie 35 Tokyo
+
+## Table with Alignment
+
+ Left Center Right Text 123 $99.99
+
+## Table without thead
+
+ **Header 1** **Header 2** Data 1 Data 2
+
+## Table with Complex Content
+
+ Feature Description Status `markdown_filter` Enable/disable conversion ✓ Implemented `markdown_max_size` Maximum response size ✓ Implemented

@@ -29,8 +29,17 @@ Publication and artifact availability are separate release gates.
 1. **Stop NGINX gracefully:**
 
    ```bash
-   sudo nginx -s quit
+   # Record whether systemd owns an active NGINX service BEFORE signalling
+   # the master: a unit reports its own state, so the detection has to run
+   # while the service is still active.
+   SYSTEMD_OWNS_NGINX=0
    if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
+     SYSTEMD_OWNS_NGINX=1
+     echo "systemd owns an active nginx unit: prefer 'sudo systemctl stop nginx' so the unit state and the master shutdown stay consistent" >&2
+   fi
+
+   sudo nginx -s quit
+   if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
      # systemd-managed NGINX: wait for a confirmed shutdown.
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
      drain_status=$?
@@ -144,10 +153,18 @@ Publication and artifact availability are separate release gates.
 2. **Restore the matching 0.9.1 configuration, install, validate, and start:**
 
    ```bash
-   # Reuse the guarded shutdown logic from the prebuilt procedure above:
-   # detect whether systemd owns NGINX before invoking systemctl.
-   sudo nginx -s quit
+   # Reuse the guarded shutdown logic from the prebuilt procedure above.
+   # Record whether systemd owns an active NGINX service BEFORE signalling
+   # the master: a unit reports its own state, so the detection has to run
+   # while the service is still active.
+   SYSTEMD_OWNS_NGINX=0
    if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
+     SYSTEMD_OWNS_NGINX=1
+     echo "systemd owns an active nginx unit: prefer 'sudo systemctl stop nginx' so the unit state and the master shutdown stay consistent" >&2
+   fi
+
+   sudo nginx -s quit
+   if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
      drain_status=$?
      # Abort when the drain hit the timeout, and require an explicit
@@ -261,9 +278,17 @@ Key reversions:
 
 ```bash
 # Reuse the guarded shutdown logic from the prebuilt procedure:
-# detect whether systemd owns NGINX before invoking systemctl.
-sudo nginx -s quit
+# Record whether systemd owns an active NGINX service BEFORE signalling
+# the master: a unit reports its own state, so the detection has to run
+# while the service is still active.
+SYSTEMD_OWNS_NGINX=0
 if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
+  SYSTEMD_OWNS_NGINX=1
+  echo "systemd owns an active nginx unit: prefer 'sudo systemctl stop nginx' so the unit state and the master shutdown stay consistent" >&2
+fi
+
+sudo nginx -s quit
+if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
   timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
   drain_status=$?
   # Abort when the drain hit the timeout, and require an explicit
@@ -302,6 +327,39 @@ if [[ -z "${CONFIG_DIR}" || "${CONFIG_DIR}" == / \
 fi
 # Swap the configuration tree atomically, keeping the current tree for
 # rollback of this rollback.
+# Preserve the live 0.9.1 module BEFORE touching the configuration so a
+# failure at any later step can restore the exact pre-rollback binary.
+# Guard BOTH commands: a failed backup must abort before any
+# configuration change, or the recovery path would reference a backup
+# that does not exist.
+sudo cp -a -- "$MODULES_DIR/ngx_http_markdown_filter_module.so" \
+    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" || {
+  sudo rm -f -- "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" 2>/dev/null || true
+  echo "ERROR: could not back up the 0.9.1 module; aborting before any configuration change" >&2
+  exit 1
+}
+# Never overwrite an existing backup silently: an older backup may hold a
+# different module than the one running now, and replacing it would destroy
+# the only copy.  Compare first and abort when they differ.
+if [ -e "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak" ] \
+    && ! sudo cmp -s "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak" \
+        "$MODULES_DIR/ngx_http_markdown_filter_module.so"; then
+  sudo rm -f -- "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" 2>/dev/null || true
+  echo "ERROR: an existing backup $MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak differs from the live module; preserve or remove it before re-running the rollback" >&2
+  exit 1
+fi
+if [ -e "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak" ]; then
+  # Identical content: the existing backup already captures this module, so
+  # keep it and drop the temporary copy.
+  sudo rm -f -- "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" 2>/dev/null || true
+else
+  sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" \
+      "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak" || {
+  sudo rm -f -- "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak.tmp" 2>/dev/null || true
+  echo "ERROR: could not finalize the 0.9.1 module backup; aborting before any configuration change" >&2
+  exit 1
+}
+fi
 sudo cp -a -- "${CONFIG_090}" "${CONFIG_DIR}.restore-0.9.0"
 sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.pre-0.9.0"
 if ! sudo mv -- "${CONFIG_DIR}.restore-0.9.0" "${CONFIG_DIR}"; then
@@ -309,13 +367,69 @@ if ! sudo mv -- "${CONFIG_DIR}.restore-0.9.0" "${CONFIG_DIR}"; then
   exit 1
 fi
 sudo cp -a -- "${MODULE_090}" \
-    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" && \
+    "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" || {
+  # The 0.9.0 configuration is already active; a module staging failure
+  # must restore the 0.9.1 configuration before exiting so the pair
+  # stays consistent (0.9.1 module + 0.9.1 config).  Check EACH move
+  # independently: if either fails, report manual recovery instead of
+  # claiming the pair was restored.
+  if ! sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed" 2>/dev/null; then
+    echo "ERROR: could not stage the 0.9.0 module AND could not move the active 0.9.0 tree aside. The 0.9.1 module is still installed and the 0.9.0 tree is still active at ${CONFIG_DIR}; NGINX remains stopped. Recover with: sudo mv -- \"${CONFIG_DIR}\" \"${CONFIG_DIR}.restore-failed\" && sudo mv -- \"${CONFIG_DIR}.pre-0.9.0\" \"${CONFIG_DIR}\"" >&2
+    exit 1
+  fi
+  if ! sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}" 2>/dev/null; then
+    echo "ERROR: could not stage the 0.9.0 module AND could not restore the 0.9.1 tree; NGINX remains stopped. The 0.9.1 tree is at ${CONFIG_DIR}.pre-0.9.0; restore manually with: sudo mv -- \"${CONFIG_DIR}.pre-0.9.0\" \"${CONFIG_DIR}\"" >&2
+    exit 1
+  fi
+  echo "ERROR: could not stage the 0.9.0 module; the 0.9.1 module/configuration pair was restored. NGINX remains stopped. Verify with: sudo nginx -t, then start NGINX" >&2
+  exit 1
+}
 sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \
-    "$MODULES_DIR/ngx_http_markdown_filter_module.so"
+    "$MODULES_DIR/ngx_http_markdown_filter_module.so" || {
+  if ! sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed" 2>/dev/null; then
+    echo "ERROR: could not replace the active module with the 0.9.0 module AND could not move the active 0.9.0 tree aside. The 0.9.1 module is still installed and the 0.9.0 tree is still active at ${CONFIG_DIR}; NGINX remains stopped. Recover with: sudo mv -- \"${CONFIG_DIR}\" \"${CONFIG_DIR}.restore-failed\" && sudo mv -- \"${CONFIG_DIR}.pre-0.9.0\" \"${CONFIG_DIR}\"" >&2
+    exit 1
+  fi
+  if ! sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}" 2>/dev/null; then
+    echo "ERROR: could not replace the active module with the 0.9.0 module AND could not restore the 0.9.1 tree; NGINX remains stopped. The 0.9.1 tree is at ${CONFIG_DIR}.pre-0.9.0; restore manually with: sudo mv -- \"${CONFIG_DIR}.pre-0.9.0\" \"${CONFIG_DIR}\"" >&2
+    exit 1
+  fi
+  echo "ERROR: could not replace the active module with the 0.9.0 module; the 0.9.1 module/configuration pair was restored. NGINX remains stopped. Verify with: sudo nginx -t, then start NGINX" >&2
+  exit 1
+}
 if ! sudo nginx -t; then
   echo "ERROR: 0.9.0 module fails nginx -t; restoring the 0.9.1 tree and module" >&2
-  sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed"
-  sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}"
+  # Stage the 0.9.1 module restore FIRST and verify the copy fully
+  # succeeds, so a failure here cannot leave the 0.9.1 configuration
+  # paired with the 0.9.0 module.
+  sudo cp -a -- "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak" \
+      "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore-failed" || {
+    echo "ERROR: 0.9.1 module restore copy failed; NGINX remains stopped. Restore manually from $MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak and ${CONFIG_DIR}.pre-0.9.0" >&2
+    exit 1
+  }
+  sudo mv -f -- "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore-failed" \
+      "$MODULES_DIR/ngx_http_markdown_filter_module.so" || {
+    echo "ERROR: 0.9.1 module restore replace failed; NGINX remains stopped. Restore manually from $MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak and ${CONFIG_DIR}.pre-0.9.0" >&2
+    exit 1
+  }
+  # Module is back to 0.9.1; now restore the 0.9.1 configuration tree.
+  # Guard BOTH moves: a failure in either must not leave the active
+  # module and configuration tree inconsistent.
+  sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed" || {
+    echo "ERROR: could not move the active configuration tree aside; NGINX remains stopped. Restore manually from $MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-0.9.0.bak and ${CONFIG_DIR}.pre-0.9.0" >&2
+    exit 1
+  }
+  sudo mv -- "${CONFIG_DIR}.pre-0.9.0" "${CONFIG_DIR}" || {
+    # The 0.9.1 configuration restore failed.  The active tree was
+    # moved to ${CONFIG_DIR}.restore-failed at this point — and that
+    # tree is the 0.9.0 configuration, NOT the 0.9.1 tree.  Restoring
+    # it would pair the 0.9.0 configuration with the already-restored
+    # 0.9.1 module.  Fail closed instead: the 0.9.1 tree is still at
+    # ${CONFIG_DIR}.pre-0.9.0 and the module is 0.9.1, so the operator
+    # can complete the pair manually.
+    echo "ERROR: 0.9.1 configuration restore failed; NGINX remains stopped. The 0.9.1 tree is at ${CONFIG_DIR}.pre-0.9.0 and the 0.9.1 module is installed; restore manually with: sudo mv -- \"${CONFIG_DIR}.pre-0.9.0\" \"${CONFIG_DIR}\"" >&2
+    exit 1
+  }
   exit 1
 fi
 sudo nginx

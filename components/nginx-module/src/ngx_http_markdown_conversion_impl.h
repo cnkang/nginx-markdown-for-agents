@@ -15,6 +15,8 @@
 #include <limits.h>
 #include "ngx_http_markdown_diagnostics.h"
 
+#include "ngx_http_markdown_metrics_peak_impl.h"
+
 /* The 412 status constant is used by the conditional-result resolver.
  * Production builds get it from ngx_http.h; standalone test binaries that
  * include this implementation header without NGINX headers need a fallback. */
@@ -1208,6 +1210,35 @@ ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/*
+ * Publish a conversion's peak working-set estimate into the shared
+ * run-wide high-water gauge (streaming.last_peak_memory_bytes).  The
+ * gauge keeps the run-wide maximum across both streaming and full-buffer
+ * conversions so the soak qualification gate can observe a per-request
+ * peak for every engine.  Guarded by MARKDOWN_STREAMING_ENABLED: the
+ * gauge field only exists in streaming builds (and core-only test
+ * builds stub the metrics pointer as NULL).
+ */
+#ifdef MARKDOWN_STREAMING_ENABLED
+static void
+ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_uint_t peak_bytes)
+{
+    if (ngx_http_markdown_metrics == NULL || peak_bytes <= 0) {
+        return;
+    }
+
+    ngx_http_markdown_metrics_update_peak(
+        &ngx_http_markdown_metrics->streaming.last_peak_memory_bytes,
+        peak_bytes);
+}
+#else
+static void
+ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_uint_t peak_bytes)
+{
+    (void) peak_bytes;
+}
+#endif
+
 /* Update metrics counters after a successful conversion. */
 static void
 ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
@@ -1219,6 +1250,15 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
     ctx->conversion.output_bytes = result->markdown_len;
     ngx_http_markdown_record_conversion_latency_for_path(
         ctx->processing_path, elapsed_ms);
+
+    /*
+     * Publish the full-buffer conversion's peak working-set estimate into
+     * the shared run-wide high-water gauge (same field the streaming path
+     * updates), so the soak qualification gate can observe a per-request
+     * peak for full-buffer responses too, not only streaming ones.
+     */
+    ngx_http_markdown_metrics_record_conversion_peak(
+        result->peak_memory_estimate);
 }
 
 /* Record converted bytes and outcome only after downstream accepts the body. */

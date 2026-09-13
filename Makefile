@@ -57,7 +57,11 @@ MODULE_SO ?= build/ngx_http_markdown_filter_module.so
 PREFIX ?= /usr
 LIBDIR ?= $(PREFIX)/lib
 DESTDIR ?=
-STYLE_BASE ?= HEAD
+# The writing-style regression compares files changed since STYLE_BASE.  HEAD is
+# wrong for that: a committed change shows an empty diff against HEAD, so a style
+# regression CI reports as new looks clean locally.  Default to the merge base
+# with the main branch, which is what CI compares against.
+STYLE_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null)
 SCHEMA_RELEASE_VERSION ?= 0.9.2
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
@@ -98,7 +102,9 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         verify-diagnostics-access-phase-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
-        clean help
+        clean help verify-module-version-mismatch-e2e verify-slow-reader-backpressure-e2e verify-realip-access-boundary-e2e \
+        verify-helm-cluster-smoke-e2e verify-graceful-reload-streaming-e2e \
+        verify-auth-subrequest-observability-e2e
 
 all: build
 
@@ -123,7 +129,7 @@ rust-lib-debug:
 	@echo "Building Rust library (debug) for $(RUST_TARGET)..."
 	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --features $(RUST_RELEASE_FEATURES)
 
-copy-headers:
+copy-headers: rust-lib
 	@echo "Copying headers to nginx module source..."
 	cp $(RUST_HEADER) $(NGINX_HEADER)
 
@@ -156,12 +162,14 @@ rust-fmt-check:
 	@echo "=== Rust Formatting Check ==="
 	cd $(RUST_DIR) && cargo fmt --all -- --check
 	cargo fmt --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all -- --check
+	cargo fmt --manifest-path tools/e2e-harness/Cargo.toml --all -- --check
 	@echo "  Rust Formatting Check: PASSED"
 
 rust-clippy-check:
 	@echo "=== Rust Clippy Check ==="
 	cargo clippy --manifest-path $(RUST_DIR)/Cargo.toml --all-targets --all-features -- -D warnings
 	cargo clippy --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all-targets -- -D warnings
+	cargo clippy --manifest-path tools/e2e-harness/Cargo.toml --all-targets -- -D warnings
 	@echo "  Rust Clippy Check: PASSED"
 
 test-rust: rust-fmt-check
@@ -346,6 +354,22 @@ TEST_ALL_CORE := \
 	workflow-context-check \
 	license-check
 
+# ci-local-check runs the CI gate set through test-all, so the two entry points
+# cannot drift apart.  The writing-style regression is part of test-all, and
+# STYLE_BASE already defaults to the merge base with origin/main, so committed
+# work is compared the way CI compares it instead of showing an empty diff.
+ci-local-check:
+	@echo "=== CI-equivalent gates ==="
+	@echo "test-all already runs the CI gate set, with the writing-style regression"
+	@echo "based on the merge base (STYLE_BASE=$(STYLE_BASE))."
+	@$(MAKE) test-all
+	@echo
+	@echo "CI-equivalent gates passed."
+	@echo "CI-only checks (need a module-enabled NGINX binary):"
+	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tests/property/test_log_prefix_preservation.sh"
+	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/ci/verify_real_nginx_ims.sh"
+	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/e2e/verify_encoding_chain_e2e.sh"
+
 test-all:
 	@echo "=== test-all: running all CI-mirrored gates ==="
 	@$(MAKE) $(TEST_ALL_CORE)
@@ -487,8 +511,9 @@ docs-check: docs-check-base
 # style budget is reserved for full Harness and release validation.
 # docs-style-check: advisory scan, never blocks.
 # docs-style-check-regression: files changed since STYLE_BASE (working tree +
-# staged) must have zero warnings. Local invocations default to HEAD; CI must
-# provide the actual fetched comparison base.
+# staged) must have zero warnings. STYLE_BASE defaults to the merge base with
+# the main branch, and the target fails when no base can be resolved, so the
+# gate cannot pass by comparing against an empty diff.
 # docs-style-check-baseline: total warnings must not exceed the retained
 # budget (0, see DEFAULT_BASELINE in check_writing_style.py); the maintained
 # docs now pass the audit clean, so any warning fails this gate.
@@ -573,7 +598,7 @@ official-feature-manifest-generate:
 
 harness-security-checks:
 	python3 tools/ci/validate_required_workflow_contexts.py
-	python3 tools/harness/check_removed_directive_registry.py
+	python3 tools/harness/check_directive_registry_parity.py
 	bash tools/harness/detect_cwe190_casts.sh
 	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/ --strict
 	bash tools/harness/detect_ffi_fat_pointer_transfer.sh
@@ -684,6 +709,7 @@ security-actionlint:
 	fi; \
 	actionlint -color -shellcheck= $$workflow_files
 
+security-shellcheck: SHELL := /bin/bash
 security-shellcheck:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "ERROR: shellcheck not found. Install from https://www.shellcheck.net/ or your package manager." >&2; exit 127; }
 	@tmp_files=$$(mktemp); \
@@ -1535,6 +1561,37 @@ verify-http2-alpn-e2e:
 
 verify-encoding-chain-e2e:
 	./tools/e2e/verify_encoding_chain_e2e.sh
+
+# Needs only docker: the module built for the pinned NGINX must be refused by an
+# incompatible NGINX with a module-specific version error.
+verify-module-version-mismatch-e2e:
+	./tools/e2e/verify_module_version_mismatch_e2e.sh
+
+# Needs docker and curl: a rate-limited reader must receive a streamed conversion
+# byte-for-byte, which exercises the NGX_AGAIN resume path.
+verify-slow-reader-backpressure-e2e:
+	./tools/e2e/verify_slow_reader_backpressure_e2e.sh
+
+# Needs docker and curl: with realip trusted from every source, a non-loopback
+# peer claiming 127.0.0.1 must still be refused at the metrics and diagnostics
+# endpoints, which is the access boundary the module must keep.
+verify-realip-access-boundary-e2e:
+	./tools/e2e/verify_realip_access_boundary_e2e.sh
+
+# Needs kind, helm, kubectl, and docker: install the chart into a real cluster
+# and require a converted response through the pod.
+verify-helm-cluster-smoke-e2e:
+	./tools/e2e/verify_helm_cluster_smoke_e2e.sh
+
+# Needs docker and curl: a reload must land mid-transfer and leave the response
+# complete, which covers graceful worker retirement with an active stream.
+verify-graceful-reload-streaming-e2e:
+	./tools/e2e/verify_graceful_reload_streaming_e2e.sh
+
+# Needs docker and curl: an auth subrequest must be accounted for as its own
+# decision-chain request, and a denial must convert nothing.
+verify-auth-subrequest-observability-e2e:
+	./tools/e2e/verify_auth_subrequest_observability_e2e.sh
 
 verify-streaming-failure-cache-e2e:
 	./tools/e2e/verify_streaming_failure_cache_e2e.sh $(E2E_ARGS)

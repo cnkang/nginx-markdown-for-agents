@@ -227,6 +227,19 @@ pub struct IncrementalEmitter {
     /// Buffered code block content, accumulated until block ends so fence
     /// length can be chosen after seeing all backtick runs.
     code_block_buffer: Vec<u8>,
+    /// Base URL used to resolve relative link and image references.
+    ///
+    /// The emitter leaves references untouched until the converter installs a
+    /// base, so a bare emitter (and every existing test) keeps its behaviour.
+    base_url: Option<String>,
+    /// Whether relative references should be resolved against `base_url`.
+    resolve_relative_urls: bool,
+    /// Whether GitHub Flavored Markdown constructs are emitted.
+    ///
+    /// Only GFM defines strikethrough, so a bare emitter (and every existing
+    /// test) keeps the CommonMark representation: the element's text with no
+    /// markers.
+    gfm: bool,
 }
 
 impl IncrementalEmitter {
@@ -274,7 +287,39 @@ impl IncrementalEmitter {
             code_block_backtick_max: 0,
             code_block_trailing_backticks: 0,
             code_block_buffer: Vec::new(),
+            base_url: None,
+            resolve_relative_urls: false,
+            gfm: false,
         }
+    }
+
+    /// Install the URL resolution policy used for link and image references.
+    ///
+    /// The streaming converter calls this once at construction so that body
+    /// links and images resolve through the same shared resolver as the
+    /// full-buffer engine and the metadata extractors.
+    pub fn set_url_resolution(&mut self, base_url: Option<&str>, resolve_relative_urls: bool) {
+        self.base_url = base_url.map(ToOwned::to_owned);
+        self.resolve_relative_urls = resolve_relative_urls;
+    }
+
+    /// Install the Markdown flavor that governs GFM-only constructs.
+    ///
+    /// The streaming converter calls this once at construction so that a
+    /// document rendered by the streaming engine matches the full-buffer
+    /// engine's flavor contract.
+    pub fn set_flavor_gfm(&mut self, gfm: bool) {
+        self.gfm = gfm;
+    }
+
+    /// Resolve one reference the way every other emitting path does.
+    fn resolve_reference(&self, url: &str) -> Option<String> {
+        if !self.resolve_relative_urls || url.is_empty() {
+            return None;
+        }
+
+        let base = self.base_url.as_deref()?;
+        crate::url_resolve::resolve_reference(base, url)
     }
 
     /// Dispatches a `StateMachineAction` to the corresponding handler and emits the resulting Markdown fragments.
@@ -604,7 +649,8 @@ impl IncrementalEmitter {
                     self.write_image_alt_fallback(alt.trim())?;
                     return Ok(());
                 };
-                self.write_image_in_place(safe_src, alt)?;
+                let resolved = self.resolve_reference(safe_src);
+                self.write_image_in_place(resolved.as_deref().unwrap_or(safe_src), alt)?;
             }
             StructuralContext::Bold => {
                 if self.in_link {
@@ -618,6 +664,21 @@ impl IncrementalEmitter {
                     self.append_link_text("*");
                 } else {
                     self.write_str("*")?;
+                }
+            }
+            StructuralContext::TaskItem(checked) => {
+                // The marker is Markdown structure, so it is written directly
+                // instead of being escaped as ordinary text.  CommonMark has no
+                // task lists, so it appears only under the GFM flavor.
+                if self.gfm {
+                    self.write_str(if *checked { "[x] " } else { "[ ] " })?;
+                }
+            }
+            StructuralContext::Strikethrough if self.gfm => {
+                if self.in_link {
+                    self.append_link_text("~~");
+                } else {
+                    self.write_str("~~")?;
                 }
             }
             _ => {}
@@ -740,7 +801,8 @@ impl IncrementalEmitter {
         if let Some(safe_href) = sanitize_url_value(href)
             && !safe_href.is_empty()
         {
-            let escaped = escape_markdown_destination(safe_href);
+            let resolved = self.resolve_reference(safe_href);
+            let escaped = escape_markdown_destination(resolved.as_deref().unwrap_or(safe_href));
             self.write_str(&format!("[{}]({})", text, escaped))?;
         } else {
             /* `link_text` is assembled from escaped ordinary text plus
@@ -869,6 +931,13 @@ impl IncrementalEmitter {
                     self.append_link_text("*");
                 } else {
                     self.write_str("*")?;
+                }
+            }
+            StructuralContext::Strikethrough if self.gfm => {
+                if self.in_link {
+                    self.append_link_text("~~");
+                } else {
+                    self.write_str("~~")?;
                 }
             }
             _ => {}
@@ -1115,8 +1184,7 @@ impl IncrementalEmitter {
         self.check_buffer_budget(prefix_size)?;
         for _ in 0..self.blockquote_depth {
             self.buffer.extend_from_slice(b"> ");
-            self.markdown_escape_state.advance('>');
-            self.markdown_escape_state.advance(' ');
+            self.markdown_escape_state.advance_blockquote_marker();
         }
         Ok(())
     }
@@ -1274,8 +1342,7 @@ impl IncrementalEmitter {
             self.check_buffer_budget(prefix_size)?;
             for _ in 0..self.blockquote_depth {
                 self.buffer.extend_from_slice(b"> ");
-                self.markdown_escape_state.advance('>');
-                self.markdown_escape_state.advance(' ');
+                self.markdown_escape_state.advance_blockquote_marker();
             }
         }
         Ok(())
@@ -2673,7 +2740,11 @@ mod tests {
     }
 
     #[test]
-    fn test_blockquote_does_not_over_escape_content() {
+    fn test_blockquote_escapes_literal_block_markers() {
+        // Markdown still recognises block markers after `> `, so a literal `#`
+        // at the start of blockquote content must be escaped; otherwise the
+        // text becomes a heading.  The full-buffer engine escapes it, and the
+        // engines must agree.
         let output = emit_html(&[
             start_tag("blockquote"),
             start_tag("p"),
@@ -2682,13 +2753,13 @@ mod tests {
             end_tag("blockquote"),
         ]);
         assert!(
-            output.contains("> # heading"),
-            "blockquote content must not over-escape a leading '#', got: {}",
+            output.contains("> \\# heading"),
+            "blockquote content must escape a literal leading '#', got: {}",
             output
         );
         assert!(
-            !output.contains("> \\#"),
-            "blockquote content was over-escaped, got: {}",
+            !output.contains("> # heading"),
+            "a literal '#' was emitted unescaped and would become a heading, got: {}",
             output
         );
     }

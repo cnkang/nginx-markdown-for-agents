@@ -141,6 +141,43 @@ def test_empty_image_render_rejects_unrelated_helm_failure(
     assert result.has_failures
 
 
+def test_chart_default_leaves_the_streaming_directive_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The chart default must not override the module's frozen streaming default."""
+    responses = iter(
+        [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="markdown_filter on;\n"),
+            subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="markdown_filter on;\nmarkdown_streaming auto;\n",
+            ),
+        ]
+    )
+    monkeypatch.setattr(validator, "_run_helm_template", lambda *args: next(responses))
+    result = ValidationResult()
+    validator._validate_streaming_default_parity(
+        result, "helm", Path("charts/nginx-markdown")
+    )
+    assert all(status == "PASS" for status, _, _ in result.results)
+
+
+def test_chart_default_rejects_a_rendered_streaming_directive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A chart default that renders markdown_streaming must fail closed."""
+    rendered = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="markdown_streaming auto;\n"
+    )
+    monkeypatch.setattr(validator, "_run_helm_template", lambda *args: rendered)
+    result = ValidationResult()
+    validator._validate_streaming_default_parity(
+        result, "helm", Path("charts/nginx-markdown")
+    )
+    assert any(status == "FAIL" for status, _, _ in result.results)
+
+
 def test_helm_module_enablement_requires_explicit_module_path() -> None:
     """markdown.enabled=true must fail clearly when loadModule is absent."""
     assert (

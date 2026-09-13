@@ -544,6 +544,46 @@ test_merge_conf_default_cache_validation(void)
 }
 
 /*
+ * Verify that merge_conf rejects markdown_streaming force combined with
+ * markdown_front_matter on: the front matter is assembled by the full-buffer
+ * engine, so the pair cannot both be honoured and nginx -t must fail instead
+ * of silently dropping one of them.
+ */
+static void
+test_merge_conf_rejects_force_with_front_matter(void)
+{
+    ngx_conf_t                  cf;
+    ngx_http_markdown_conf_t   *parent;
+    ngx_http_markdown_conf_t   *child;
+    char                       *rc;
+
+    TEST_SUBSECTION("merge_conf front matter requires the full-buffer engine");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    cf.log = &g_log;
+
+    parent = ngx_http_markdown_create_conf(&cf);
+    child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(parent != NULL && child != NULL,
+        "create_conf should allocate merge inputs");
+
+    child->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+    child->front_matter = 1;
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "force with front matter on must fail nginx -t");
+
+    /* The same pair with the full-buffer default policy stays valid. */
+    child->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_OFF;
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "front matter with the full-buffer policy must merge cleanly");
+
+    TEST_PASS("merge_conf front matter conflict covered");
+}
+
+/*
  * Verify merge_conf inheritance and override semantics:
  *  - child fields at their unset sentinels inherit from parent;
  *  - child with a static enabled_source clears the complex pointer;
@@ -621,7 +661,7 @@ test_merge_conf(void)
     parent.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     parent.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     parent.decompress.auto_decompress = 0;
-    parent.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+    parent.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
     parent.advanced.prune_noise = 1;
     parent.limits.conversion_timeout = 30000;
     parent.limits.parser_timeout = 10000;
@@ -679,7 +719,7 @@ test_merge_conf(void)
     TEST_ASSERT(child.max_size == 64 * 1024 * 1024,
         "child should inherit max_size from conversion_memory");
     TEST_ASSERT(child.timeout == 30000, "child should inherit timeout");
-    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_AUTO,
         "child should inherit streaming policy");
     TEST_ASSERT(child.stream.budget == 2 * 1024 * 1024,
         "child should inherit stream budget from streaming_buffer");
@@ -1662,6 +1702,7 @@ main(void)
     test_main_conf_create_and_init();
     test_create_conf_defaults();
     test_merge_conf_default_cache_validation();
+    test_merge_conf_rejects_force_with_front_matter();
     test_merge_conf();
     test_static_block_mask_propagates_from_parent();
     test_static_per_level_inheritance_chain();

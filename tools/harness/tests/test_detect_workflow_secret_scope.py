@@ -17,7 +17,7 @@ from pathlib import Path
 TOOLS_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(TOOLS_DIR))
 
-import harness.detect_workflow_secret_scope as secret_scope_module
+import harness.detect_workflow_secret_scope as secret_scope_module  # noqa: E402
 from harness.detect_workflow_secret_scope import (  # noqa: E402
     check_sonar_token_steps,
     find_broad_env_secrets,

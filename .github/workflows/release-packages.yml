@@ -37,7 +37,7 @@
 #     environment to the exact 40-character SHA approved by the release owner.
 #     Tag releases ALWAYS run the signing job; no repository variable needed.
 #
-# GPG Signing Policy (0.8.x release line):
+# GPG Signing Policy (0.9.x / pre-1.0 release line):
 #   Tag releases: signing is MANDATORY. The integrity-signing job always runs
 #   for tag pushes and the publish job requires signing to succeed. If GPG
 #   secrets are missing, the pipeline fails early with a clear preflight error.
@@ -666,7 +666,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # Package Job: Generate .deb/.rpm via nFPM (matrix)
   # Consumes the compiled .so from the build job and produces distribution
-  # packages following 0.8.x release package naming and layout conventions.
+  # packages following 0.9.x release package naming and layout conventions.
   # ─────────────────────────────────────────────────────────────────────────────
   package:
     name: Package - nginx-${{ matrix.nginx_version }} - ${{ matrix.arch }}
@@ -752,7 +752,7 @@ jobs:
               ;;
           esac
 
-          # Artifact filenames per 0.8.x release package naming and layout conventions
+          # Artifact filenames per 0.9.x release package naming and layout conventions
           RPM_NGINX_EVR="1:${NGINX_VERSION}"
           DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
           RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
@@ -1446,8 +1446,23 @@ jobs:
             TAG="${GH_REF_NAME}"
             VERSION="${TAG#v}"
             SOURCE_URL="https://github.com/${GH_REPO}/archive/refs/tags/${TAG}.tar.gz"
-            SOURCE_SHA="$(curl -fsSL "${SOURCE_URL}" | sha256sum | awk '{print $1}')"
-            SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
+            SOURCE_IDENTIFIER="source-${TAG}"
+            SOURCE_SHA="$(awk -v id="${SOURCE_IDENTIFIER}" '$2 == id { print $1 }' \
+              packaging/source-archive-digests.sha256)"
+            # A digest of the tag's own auto-generated archive cannot be required
+            # here: committing the registry entry changes the tree, so the
+            # recorded digest and that archive could never agree. Pre-tag
+            # provenance is the commit identity, which the candidate evidence
+            # names and the release gates verify. The registry entry is recorded
+            # after this run publishes the archive, and the release process
+            # compares a download of that archive against it afterwards.
+            # It is optional here, and its absence is surfaced rather than fatal.
+            if [[ -n "${SOURCE_SHA}" ]]; then
+              SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
+            else
+              SOURCE_ARGS=(--source-url "${SOURCE_URL}")
+              echo "::warning title=Source archive digest not recorded::${SOURCE_IDENTIFIER} has no entry in packaging/source-archive-digests.sha256. After this run publishes the archive, record it with: bash packaging/scripts/record-source-archive-digest.sh ${TAG}"
+            fi
             VERSION_ARGS=(--version "${VERSION}")
           else
             TAG=""

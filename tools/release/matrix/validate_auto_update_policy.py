@@ -56,6 +56,14 @@ def validate_policy(matrix: dict[str, Any], diff: dict[str, Any]) -> list[str]:
             violations.append(f"entries[{index}] is not an object")
             continue
         version = entry.get("nginx_version", entry.get("nginx"))
+        # A malformed version value (dict/list) must not reach set
+        # membership: it would raise TypeError and crash the gate.
+        if not isinstance(version, str) or not version:
+            violations.append(
+                f"entries[{index}] nginx version {version!r} "
+                "must be a non-empty string"
+            )
+            continue
         if version not in added_set:
             continue
         matched_versions.add(version)

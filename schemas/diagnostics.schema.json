@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "diagnostics.schema.json",
   "title": "nginx-markdown-for-agents Diagnostics Endpoint Schema v3",
-  "description": "JSON Schema for the diagnostics endpoint response body. Defines exactly 7 top-level fields with strict typing, nullability, and bounds, plus bounded module evidence counters and explicit error provenance. Version 3 removes the dynconf diagnostic state block after the dynamic-configuration hot-reload feature was removed; the endpoint itself is retained.",
+  "description": "JSON Schema for the diagnostics endpoint response body. Defines seven frozen top-level fields with strict typing, nullability, and bounds, plus the optional additive `extensions` container. Version 3 removes the dynconf diagnostic state block after the dynamic-configuration hot-reload feature was removed; the endpoint itself is retained. Additive state is published inside `extensions` so the frozen field set stays fixed and consumers can ignore keys they do not recognise.",
   "type": "object",
   "required": [
     "schema_version",
@@ -24,6 +24,11 @@
       "type": "string",
       "description": "Module version string (semver).",
       "minLength": 1
+    },
+    "extensions": {
+      "type": "object",
+      "description": "Optional additive extension container. A 0.9.x release publishes new optional state here instead of adding a top-level field, so the seven frozen top-level fields and this container are the whole contract. Consumers MUST ignore keys they do not recognise. The container is absent when the build publishes no extension.",
+      "additionalProperties": true
     },
     "worker": {
       "type": "object",

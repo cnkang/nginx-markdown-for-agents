@@ -177,9 +177,11 @@ Not all requests are eligible for conversion. The module checks:
 ### Response Size
 - The module uses the selected `markdown_streaming off|auto|force` mode:
   - **Full-buffer engine**: Responses within `markdown_limits conversion_memory=<size>` are eligible for conversion.
-  - **Streaming engine**: `auto` uses the internal bounded routing heuristic.
-    `force` selects streaming where the request is otherwise eligible. The
-    working buffer stays bounded by `markdown_limits streaming_buffer=<size>`.
+  - **Streaming engine**: `auto` prefers streaming for every response that
+    clears the eligibility gates, falling back to the full-buffer engine when a
+    response stays eligible for conversion but cannot stream. `force` selects
+    streaming where the request is otherwise eligible. The working buffer stays
+    bounded by `markdown_limits streaming_buffer=<size>`.
     `conversion_memory` remains the hard cumulative input limit for the
     streaming path: the total bytes buffered across the request (pending
     input plus replay window) never exceeds it, so a large response that

@@ -782,6 +782,7 @@ ngx_http_markdown_stream_commit_remove_representation_metadata(
     static u_char  hdr_repr_digest[] = "Repr-Digest";
     static u_char  hdr_last_modified[] = "Last-Modified";
     static u_char  hdr_trailer[] = "Trailer";
+    static u_char  hdr_content_location[] = "Content-Location";
 
     /* Accept-Ranges: clear the typed field and invalidate list entries. */
     r->allow_ranges = 0;
@@ -812,6 +813,13 @@ ngx_http_markdown_stream_commit_remove_representation_metadata(
     r->headers_out.last_modified = NULL;
     (void) ngx_http_markdown_stream_commit_invalidate_header(
         r, hdr_last_modified, sizeof(hdr_last_modified) - 1);
+
+    /* Content-Location: the source HTML representation's location is
+     * stale once the body is converted to Markdown; a client resolving
+     * it would fetch the original HTML.  Clear it so the converted
+     * response never advertises the source representation. */
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_content_location, sizeof(hdr_content_location) - 1);
 
     /* Upstream trailers describe the HTML body; the streamed Markdown
      * body replaces it, so the Trailer declaration must not be

@@ -123,10 +123,10 @@ mod traversal;
 ///
 /// The threshold is checked against the traversal output length *after*
 /// `traverse_node_with_context` completes — not against the input HTML size,
-/// which is unavailable without an additional DOM walk. 256 KB is chosen to
-/// match the order of magnitude of the fixed internal streaming threshold
-/// (1 MiB), though the two values measure different things (input HTML
-/// vs. intermediate Markdown output).
+/// which is unavailable without an additional DOM walk. 256 KB keeps the
+/// two-pass path for ordinary documents while large intermediate Markdown
+/// output avoids the second full-size allocation. It is unrelated to streaming
+/// selection, which applies no size threshold.
 const LARGE_BODY_THRESHOLD: usize = 256 * 1024; // 256 KB
 
 fn small_normalization_scratch(output: &str) -> Result<usize, ConversionError> {
@@ -290,6 +290,16 @@ pub struct ConversionContext {
     /// temporary buffers under the same budget, so allocation failures surface
     /// as a controlled `MemoryLimit` error instead of an allocator abort.
     working_set_bytes: usize,
+    /// High-water mark of `working_set_bytes` across the whole conversion.
+    ///
+    /// Exported through the FFI as `MarkdownResult.peak_memory_estimate`.
+    /// This is the peak of the converter-tracked working set (retained
+    /// output capacity plus transient scratch), NOT a total conversion
+    /// memory peak: parser/DOM allocations and process RSS are not
+    /// included.  A positive sample certifies a per-request peak for the
+    /// soak qualification gate across both full-buffer and streaming
+    /// paths.
+    peak_working_set_bytes: usize,
 }
 
 /// Fallible Markdown output writer bound to one conversion budget.
@@ -315,7 +325,10 @@ impl<'a> BudgetedMarkdownWriter<'a> {
         // Fast path: the current capacity already covers the required length.
         // Do NOT grow geometrically on every call — that would double the
         // buffer on each small push and balloon a small output toward the
-        // budget ceiling.
+        // budget ceiling.  Peak accounting is NOT updated here: the
+        // retained capacity was recorded when the writer was created
+        // (budgeted_writer) and after every growth, so per-push bookkeeping
+        // would only add hot-path overhead.
         let current_capacity = self.output.capacity();
         if required_len <= current_capacity {
             return Ok(());
@@ -328,36 +341,35 @@ impl<'a> BudgetedMarkdownWriter<'a> {
         // explicitly and check it against the budget before reserving.
         // Geometric growth target (double) keeps repeated small pushes
         // amortized, but is capped by the budget below.
-        let target_capacity = required_len.max(current_capacity.saturating_mul(2));
-        let projected = target_capacity
-            .checked_add(self.ctx.working_set_bytes)
-            .ok_or_else(|| ConversionError::MemoryLimit("working-set size overflow".into()))?;
-        if projected > self.ctx.output_budget {
-            // The geometric target would exceed the budget; fall back to an
-            // exact reservation for the required length.  If even that
-            // exceeds the budget, fail closed with a controlled error.
-            let projected_exact = required_len
-                .checked_add(self.ctx.working_set_bytes)
-                .ok_or_else(|| ConversionError::MemoryLimit("working-set size overflow".into()))?;
-            if projected_exact > self.ctx.output_budget {
-                return Err(ConversionError::MemoryLimit(format!(
-                    "generated Markdown output and working set {} bytes would exceed budget {} bytes",
-                    projected_exact, self.ctx.output_budget
-                )));
-            }
-            let additional_capacity = required_len.saturating_sub(self.output.len());
-            if additional_capacity > 0 {
-                self.output
-                    .try_reserve_exact(additional_capacity)
-                    .map_err(|error| {
-                        ConversionError::MemoryLimit(format!(
-                            "unable to reserve {} bytes for generated Markdown: {}",
-                            additional_capacity, error
-                        ))
-                    })?;
-            }
-            return Ok(());
+        // `working_set_bytes` covers the live allocations other than this
+        // output buffer, so the remaining headroom is the capacity this buffer
+        // may still hold without exceeding the budget.
+        let headroom = self
+            .ctx
+            .output_budget
+            .checked_sub(self.ctx.working_set_bytes)
+            .ok_or_else(|| {
+                ConversionError::MemoryLimit(format!(
+                    "live working set {} bytes already exceeds budget {} bytes",
+                    self.ctx.working_set_bytes, self.ctx.output_budget
+                ))
+            })?;
+
+        // A required length beyond the headroom cannot be satisfied; fail
+        // closed with a controlled error instead of letting the reservation
+        // fail with an allocator message.
+        if required_len > headroom {
+            return Err(ConversionError::MemoryLimit(format!(
+                "generated Markdown output and working set {} bytes would exceed budget {} bytes",
+                required_len.saturating_add(self.ctx.working_set_bytes),
+                self.ctx.output_budget
+            )));
         }
+
+        // Clamping the geometric target to the headroom keeps repeated small
+        // pushes amortized while the budget lasts, instead of dropping to an
+        // exact reservation as soon as one doubling would overshoot.
+        let target_capacity = required_len.max(current_capacity.saturating_mul(2).min(headroom));
 
         // String::try_reserve takes additional bytes beyond the current
         // length, not beyond the current capacity.  Reserving the capacity
@@ -376,7 +388,23 @@ impl<'a> BudgetedMarkdownWriter<'a> {
                     ))
                 })?;
         }
+        self.record_peak();
         Ok(())
+    }
+
+    /// Record the combined peak (retained output capacity + transient
+    /// scratch) so the exported peak_memory_estimate reflects the full
+    /// converter-tracked working set, not just the scratch component.
+    /// Called after every capacity growth and when the writer is created,
+    /// never on the per-push fast path.
+    fn record_peak(&mut self) {
+        let combined = self
+            .output
+            .capacity()
+            .saturating_add(self.ctx.working_set_bytes);
+        if combined > self.ctx.peak_working_set_bytes {
+            self.ctx.peak_working_set_bytes = combined;
+        }
     }
 
     fn remaining(&self) -> usize {
@@ -446,6 +474,7 @@ impl ConversionContext {
             input_size_hint: 0,
             output_budget: DEFAULT_FULL_BUFFER_OUTPUT_BUDGET,
             working_set_bytes: 0,
+            peak_working_set_bytes: 0,
         }
     }
 
@@ -521,7 +550,16 @@ impl ConversionContext {
             )));
         }
         self.working_set_bytes = projected;
+        if projected > self.peak_working_set_bytes {
+            self.peak_working_set_bytes = projected;
+        }
         Ok(())
+    }
+
+    /// Current high-water mark of the transient working set across this
+    /// conversion (bytes), used for per-request peak reporting.
+    pub(crate) fn peak_working_set(&self) -> usize {
+        self.peak_working_set_bytes
     }
 
     /// Release a previously reserved transient working-set charge.
@@ -555,6 +593,14 @@ impl ConversionContext {
         &'a mut self,
         output: &'a mut String,
     ) -> BudgetedMarkdownWriter<'a> {
+        // Record the combined peak at creation: a writer operating on an
+        // already-capacity-backed String may never grow, and the exported
+        // peak must be nonzero for the soak qualification gate to accept
+        // the observation as conversion evidence.
+        let combined = output.capacity().saturating_add(self.working_set_bytes);
+        if combined > self.peak_working_set_bytes {
+            self.peak_working_set_bytes = combined;
+        }
         BudgetedMarkdownWriter { output, ctx: self }
     }
 
@@ -961,54 +1007,14 @@ impl MarkdownConverter {
         if !self.options.resolve_relative_urls || url.is_empty() {
             return url.to_string();
         }
-        if Self::has_absolute_uri_scheme(url) || url.starts_with("//") {
-            return url.to_string();
-        }
 
         let Some(base) = self.options.base_url.as_ref() else {
             return url.to_string();
         };
-        if !base.starts_with("http://") && !base.starts_with("https://") {
-            return url.to_string();
-        }
 
-        if url.starts_with('/') {
-            return Self::resolve_origin_relative(base, url);
-        }
-
-        Self::resolve_path_relative(base, url)
-    }
-
-    fn resolve_origin_relative(base: &str, url: &str) -> String {
-        let after_scheme = base
-            .strip_prefix("https://")
-            .or_else(|| base.strip_prefix("http://"))
-            .unwrap_or(base);
-        let origin = if let Some(pos) = after_scheme.find('/') {
-            let scheme_len = if base.starts_with("https://") { 8 } else { 7 };
-            &base[..scheme_len + pos]
-        } else {
-            base
-        };
-        format!("{}{}", origin, url)
-    }
-
-    fn resolve_path_relative(base: &str, url: &str) -> String {
-        if base.ends_with('/') {
-            return format!("{}{}", base, url);
-        }
-
-        let trimmed = base.trim_end_matches('/');
-        let base_dir = if let Some(pos) = trimmed.rfind('/') {
-            if pos > 0 && trimmed.as_bytes().get(pos - 1) == Some(&b'/') {
-                trimmed
-            } else {
-                &trimmed[..pos]
-            }
-        } else {
-            trimmed
-        };
-        format!("{}/{}", base_dir, url)
+        // Shared with the streaming engine and the metadata extractor so one
+        // document cannot produce two different URLs for the same reference.
+        crate::url_resolve::resolve_reference(base, url).unwrap_or_else(|| url.to_string())
     }
 
     fn has_absolute_uri_scheme(url: &str) -> bool {
@@ -3380,6 +3386,64 @@ mod tests {
         assert!(result.contains("*First*"));
         assert!(result.contains("*second*"));
         assert!(result.contains("and"));
+    }
+
+    #[test]
+    fn test_gfm_strikethrough_elements() {
+        let html =
+            b"<p>Keep <del>removed</del>, <s>also removed</s>, and <strike>third</strike>.</p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::with_options(ConversionOptions {
+            flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
+            ..ConversionOptions::default()
+        });
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(result.contains("~~removed~~"), "got: {result}");
+        assert!(result.contains("~~also removed~~"), "got: {result}");
+        assert!(result.contains("~~third~~"), "got: {result}");
+    }
+
+    #[test]
+    fn test_commonmark_omits_strikethrough_markers() {
+        let html = b"<p>Keep <del>removed</del> text.</p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(result.contains("removed"), "got: {result}");
+        assert!(
+            !result.contains("~~"),
+            "CommonMark has no strikethrough, so no markers may appear: {result}"
+        );
+    }
+
+    #[test]
+    fn test_gfm_task_list_checkboxes() {
+        let html = b"<ul><li><input type=\"checkbox\" checked> done</li>\
+                     <li><input type=\"checkbox\"> todo</li></ul>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::with_options(ConversionOptions {
+            flavor: MarkdownFlavor::GitHubFlavoredMarkdown,
+            ..ConversionOptions::default()
+        });
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(result.contains("[x] "), "checked box: {result}");
+        assert!(result.contains("[ ] "), "unchecked box: {result}");
+    }
+
+    #[test]
+    fn test_commonmark_omits_task_list_markers() {
+        let html = b"<ul><li><input type=\"checkbox\" checked> done</li></ul>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(
+            !result.contains("[x] "),
+            "CommonMark has no task lists: {result}"
+        );
     }
 
     #[test]

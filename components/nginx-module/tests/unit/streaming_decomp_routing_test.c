@@ -27,7 +27,7 @@
 typedef intptr_t        ngx_int_t;
 typedef uintptr_t       ngx_uint_t;
 typedef int             ngx_flag_t;
-typedef volatile long   ngx_atomic_t;
+typedef volatile unsigned long  ngx_atomic_t;   /* mirrors nginx */
 typedef long            ngx_atomic_int_t;
 typedef unsigned long   ngx_atomic_uint_t;
 

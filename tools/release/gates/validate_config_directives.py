@@ -119,6 +119,7 @@ EXPECTED_H_SOURCES = [
     "ngx_http_markdown_lifecycle_impl.h",
     "ngx_http_markdown_metrics_impl.h",
     "ngx_http_markdown_metrics_v1_renderer.h",
+    "ngx_http_markdown_metrics_peak_impl.h",
     "ngx_http_markdown_module_state_impl.h",
     "ngx_http_markdown_payload_impl.h",
     "ngx_http_markdown_postcommit_metrics_impl.h",

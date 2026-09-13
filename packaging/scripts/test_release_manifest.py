@@ -658,8 +658,10 @@ class TestValidateManifest(unittest.TestCase):
         errors = self._validate()
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
-    def test_tag_missing_source_sha_fails(self):
-        """Tag release without source.sha256 should fail validation."""
+    def test_tag_missing_source_sha_is_allowed(self):
+        """Tag release without source.sha256 passes: the digest is recorded
+        after publication, because an entry describing a tag's own archive
+        cannot exist before the tag does (see ADR-0028)."""
         fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
         path = self.artifact_dir / fname
         path.write_bytes(b"fake-content")
@@ -702,8 +704,59 @@ class TestValidateManifest(unittest.TestCase):
         }
         self.manifest_path.write_text(json.dumps(manifest, indent=2))
         errors = self._validate()
-        self.assertTrue(any("source.sha256" in e for e in errors),
-                        f"Expected source.sha256 error, got: {errors}")
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_tag_malformed_source_sha_fails(self):
+        """A present but malformed source.sha256 must still be rejected, so an
+        omitted digest and an invalid one are not conflated."""
+        fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
+        path = self.artifact_dir / fname
+        path.write_bytes(b"fake-content")
+        for bad in ("", "not-a-digest", "A" * 64):
+            with self.subTest(bad=bad):
+                manifest = {
+                    "schema_version": 1,
+                    "project": "nginx-markdown-for-agents",
+                    "version": "0.8.3",
+                    "git": {
+                        "repository": "cnkang/nginx-markdown-for-agents",
+                        "tag": "v0.8.3",
+                        "commit": "deadbeef12345678",
+                    },
+                    "source": {
+                        "available": True,
+                        "archive_url": "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz",
+                        "sha256": bad,
+                    },
+                    "packages": [
+                        {
+                            "filename": fname,
+                            "format": "deb",
+                            "version": "0.8.3",
+                            "nginx_version": "1.28.0",
+                            "arch": "amd64",
+                            "sha256": sha256_bytes(b"fake-content"),
+                        }
+                    ],
+                    "integrity": {
+                        "checksums": "SHA256SUMS",
+                        "signature": "SHA256SUMS.asc",
+                        "signature_available": True,
+                        "signature_type": "gpg-detached-ascii-armored",
+                        "signed_file": "SHA256SUMS",
+                    },
+                    "workflow": {
+                        "provider": "github-actions",
+                        "workflow": "release-packages.yml",
+                        "ref_type": "tag",
+                    },
+                }
+                self.manifest_path.write_text(json.dumps(manifest, indent=2))
+                errors = self._validate()
+                self.assertTrue(
+                    any("source.sha256" in e for e in errors),
+                    f"Expected a source.sha256 error for {bad!r}, got: {errors}",
+                )
 
     def test_tag_valid_source_sha_passes(self):
         """Tag release with valid source.sha256 should pass validation."""

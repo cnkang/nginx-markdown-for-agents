@@ -56,7 +56,7 @@ def _workflow_publish_body() -> str:
     # Stop at the next top-level job marker so a later job cannot leak
     # into the publish job's own configuration.  MULTILINE makes `$`
     # match the end of any line, not only the end of the whole text.
-    next_job = re.search(r"\n  [a-z][a-z0-9-]*:$", rest, flags=re.MULTILINE)
+    next_job = re.search(r"\n  [A-Za-z0-9_-]+:$", rest, flags=re.MULTILINE)
     if next_job is not None:
         rest = rest[: next_job.start()]
     return rest

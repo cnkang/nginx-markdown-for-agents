@@ -259,12 +259,22 @@ def validate_manifest(
                 errors.append("source.archive_url is required for tag releases")
             else:
                 check_no_placeholders(source["archive_url"], "source.archive_url", errors)
-            if "sha256" not in source or not source["sha256"]:
-                errors.append("source.sha256 is required for tag releases")
-            else:
-                check_no_placeholders(source["sha256"], "source.sha256", errors)
-                if not re.match(r"^[0-9a-f]{64}$", source["sha256"]):
-                    errors.append("source.sha256 is not a 64-char hex string")
+            # The digest is optional for tag releases on purpose: a digest of
+            # the tag's own auto-generated archive cannot be recorded before the
+            # tag exists, because committing the registry entry changes the tree
+            # it would describe.  When a digest is present it must be plausible,
+            # and the release process compares it against the published archive
+            # after publication.
+            if "sha256" in source:
+                digest = source["sha256"]
+                if not isinstance(digest, str) or not digest:
+                    errors.append(
+                        "source.sha256 must be a non-empty string when present"
+                    )
+                else:
+                    check_no_placeholders(digest, "source.sha256", errors)
+                    if not re.match(r"^[0-9a-f]{64}$", digest):
+                        errors.append("source.sha256 is not a 64-char hex string")
     elif source and isinstance(source, dict):
         # Non-tag: source is optional; if present and available, validate fields
         if source.get("available", False):

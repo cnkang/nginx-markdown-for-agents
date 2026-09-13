@@ -1783,6 +1783,20 @@ test_select_processing_path(void)
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     r.headers_out.content_length_n = 2048;
 
+    /* front matter output is produced by the full-buffer engine only */
+    conf.front_matter = 1;
+    conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+        "auto with front matter should route full-buffer");
+    TEST_ASSERT(selection.reason == NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE,
+        "front matter should preserve not_candidate reason");
+    conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
+    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+        "force with front matter should still route full-buffer");
+    conf.front_matter = 0;
+
     /* policy=off should route full-buffer */
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_OFF;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
@@ -4525,22 +4539,38 @@ test_streaming_gap_branches(void)
     ctx.eligible = 1;
     ctx.streaming.handle = NULL;
     ctx.headers_forwarded = 0;
+    ctx.failopen_completed = 0;
     g_prepare_options_rc = NGX_ERROR;
     g_forward_headers_rc = NGX_OK;
     g_next_body_filter_rc = NGX_DONE;
     rc = ngx_http_markdown_streaming_ensure_handle(&r, &ctx, &conf, &in);
-    TEST_ASSERT(rc == NGX_DONE,
-        "ensure_handle should passthrough when init declines");
+    /* A confirmed downstream delivery of the fail-open body is
+     * normalized to NGX_OK: the body filter must not treat it as a
+     * streaming fallback and re-enter full-buffer processing.  The
+     * failopen_completed latch is what tells the caller the body was
+     * already delivered. */
+    TEST_ASSERT(rc == NGX_OK,
+        "ensure_handle should normalize NGX_DONE to NGX_OK when init declines");
+    TEST_ASSERT(ctx.failopen_completed == 1,
+        "ensure_handle should latch failopen_completed on confirmed delivery");
 
     ctx.eligible = 1;
     ctx.streaming.handle = NULL;
+    ctx.headers_forwarded = 0;
+    ctx.failopen_completed = 0;
     g_prepare_options_rc = NGX_OK;
     g_new_with_code_rc = ERROR_SUCCESS;
     g_new_with_code_null_handle = 0;
     g_pool_cleanup_fail_once = 1;
     rc = ngx_http_markdown_streaming_ensure_handle(&r, &ctx, &conf, &in);
-    TEST_ASSERT(rc == NGX_DONE,
+    /* The cleanup-allocation failure declines the handle, so the chain
+     * is delivered through the shared fail-open passthrough: a
+     * confirmed delivery normalizes to NGX_OK and latches
+     * failopen_completed for the caller. */
+    TEST_ASSERT(rc == NGX_OK,
         "cleanup allocation failure should follow PASS policy");
+    TEST_ASSERT(ctx.failopen_completed == 1,
+        "cleanup allocation failure fail-open should latch failopen_completed");
 
     ctx.eligible = 1;
     ctx.streaming.handle = NULL;
@@ -4586,12 +4616,22 @@ test_streaming_gap_branches(void)
     ctx.eligible = 1;
     ctx.streaming.handle = NULL;
     ctx.headers_forwarded = 0;
+    ctx.failopen_completed = 0;
     g_prepare_options_rc = NGX_ERROR;
     g_forward_headers_rc = NGX_OK;
     g_next_body_filter_rc = NGX_DONE;
+    g_next_body_filter_calls = 0;
     rc = ngx_http_markdown_streaming_body_filter(&r, &in);
-    TEST_ASSERT(rc == NGX_DONE,
-        "body_filter should return non-OK ensure_handle result");
+    /* ensure_handle delivered the chain through the fail-open
+     * passthrough and normalized the confirmed delivery to NGX_OK, so
+     * the body filter must NOT fall through into a second generic
+     * passthrough of the same chain: exactly one downstream call. */
+    TEST_ASSERT(rc == NGX_OK,
+        "body_filter should normalize a fail-open delivery to NGX_OK");
+    TEST_ASSERT(g_next_body_filter_calls == 1,
+        "body_filter must not resubmit the chain already delivered by fail-open");
+    TEST_ASSERT(ctx.failopen_completed == 1,
+        "body_filter fail-open delivery should latch failopen_completed");
 
     ctx.eligible = 1;
     ctx.headers_forwarded = 1;
@@ -5467,6 +5507,9 @@ test_failopen_init_failure_latches_mode(void)
         "fail-open continuation must not duplicate failure metrics");
     TEST_ASSERT(metrics.results.failopen_count == 1,
         "fail-open delivery must count after pending output drains");
+    TEST_ASSERT(ctx.streaming.completion.failopen_chain_forwarded == 0,
+        "no residual fail-open chain marker may survive the continuation "
+        "(a stale marker would swallow the next body-filter chain)");
 
     TEST_PASS("init-failure init-failure failopen_active latch covered");
 }
@@ -7282,6 +7325,138 @@ test_finalize_pending_result_keeps_buffered_liveness(void)
 }
 
 /*
+ * Regression: the fail-open deep clone must produce independent buffers
+ * whose bounds match their own allocation, without inheriting the source
+ * buffer's backing-storage ownership flags.
+ *
+ * Failure chain being guarded against:
+ *   fail-open deep clone of an upstream chain
+ *   -> clone inherits the source start/end (pointers into the ORIGINAL
+ *      arena), breaking the start <= pos <= last <= end invariant
+ *   -> clone inherits mmap/recycled/last_shadow/temp_file, misdescribing
+ *      the freshly allocated copy as mmap'd / recycled / a temp file
+ *   -> downstream (or a later filter) reasons about the wrong arena and
+ *      the wrong storage lifetime.
+ */
+static void
+test_clone_chain_deep_rebases_bounds_and_drops_source_ownership(void)
+{
+    ngx_http_request_t  r;
+    ngx_pool_t          pool;
+    ngx_buf_t           src_mem;
+    ngx_buf_t           src_file;
+    ngx_chain_t         in1;
+    ngx_chain_t         in2;
+    ngx_chain_t        *cloned;
+    u_char              payload[] = "clone-payload";
+    u_char              foreign_arena[64];
+    int                 tag_marker = 7;
+    int                 shadow_marker = 9;
+    int                 file_marker = 11;
+
+    memset(&r, 0, sizeof(r));
+    memset(&pool, 0, sizeof(pool));
+    memset(&src_mem, 0, sizeof(src_mem));
+    memset(&src_file, 0, sizeof(src_file));
+    memset(&in1, 0, sizeof(in1));
+    memset(&in2, 0, sizeof(in2));
+    r.pool = &pool;
+
+    /* Source: a memory buffer that lies about its bounds (start/end
+     * point into an unrelated arena) and carries storage-ownership
+     * flags that must NOT reach the clone. */
+    src_mem.pos = payload;
+    src_mem.last = payload + sizeof(payload) - 1;
+    src_mem.start = foreign_arena;
+    src_mem.end = foreign_arena + sizeof(foreign_arena);
+    src_mem.temporary = 1;
+    src_mem.memory = 1;
+    src_mem.mmap = 1;
+    src_mem.recycled = 1;
+    src_mem.last_shadow = 1;
+    src_mem.temp_file = 1;
+    src_mem.flush = 1;
+    src_mem.tag = &tag_marker;
+    src_mem.shadow = &shadow_marker;
+
+    /* Source: a file-backed buffer with the same ownership flags. */
+    src_file.in_file = 1;
+    src_file.file = &file_marker;
+    src_file.file_pos = 128;
+    src_file.file_last = 256;
+    src_file.start = foreign_arena;
+    src_file.end = foreign_arena + sizeof(foreign_arena);
+    src_file.mmap = 1;
+    src_file.recycled = 1;
+    src_file.last_shadow = 1;
+    src_file.temp_file = 1;
+    src_file.last_buf = 1;
+    src_file.tag = &tag_marker;
+    src_file.shadow = &shadow_marker;
+
+    in1.buf = &src_mem;
+    in1.next = &in2;
+    in2.buf = &src_file;
+    in2.next = NULL;
+
+    cloned = ngx_http_markdown_streaming_clone_chain_deep(&r, &in1);
+    TEST_ASSERT(cloned != NULL && cloned->buf != NULL,
+        "clone: memory-backed chain must clone");
+    TEST_ASSERT(cloned->next != NULL && cloned->next->buf != NULL,
+        "clone: file-backed link must clone");
+
+    /* Memory link: payload copied into independent storage. */
+    TEST_ASSERT(cloned->buf->pos != src_mem.pos,
+        "clone: memory payload must be copied, not aliased");
+    TEST_ASSERT(cloned->buf->last - cloned->buf->pos == sizeof(payload) - 1,
+        "clone: copied payload length must match the source");
+    TEST_ASSERT(memcmp(cloned->buf->pos, payload, sizeof(payload) - 1) == 0,
+        "clone: copied payload bytes must match the source");
+    TEST_ASSERT(cloned->buf->start == cloned->buf->pos
+                    && cloned->buf->end == cloned->buf->last,
+        "clone: bounds must be rebased onto the clone's own allocation");
+    TEST_ASSERT(cloned->buf->memory == 1,
+        "clone: copied payload must remain a memory buffer");
+    TEST_ASSERT(cloned->buf->mmap == 0 && cloned->buf->recycled == 0
+                    && cloned->buf->last_shadow == 0
+                    && cloned->buf->temp_file == 0,
+        "clone: source storage-ownership flags must not be transferred");
+    TEST_ASSERT(cloned->buf->flush == 1,
+        "clone: control flags must be preserved");
+    TEST_ASSERT(cloned->buf->tag == &tag_marker
+                    && cloned->buf->shadow == &shadow_marker,
+        "clone: request-owned tag/shadow must be preserved");
+
+    /* File link: same file window, no ownerless bounds, no ownership
+     * flags. */
+    TEST_ASSERT(cloned->next->buf->in_file == 1,
+        "clone: file-backed link must stay file-backed");
+    TEST_ASSERT(cloned->next->buf->file == &file_marker
+                    && cloned->next->buf->file_pos == 128
+                    && cloned->next->buf->file_last == 256,
+        "clone: file window must be preserved");
+    TEST_ASSERT(cloned->next->buf->start == NULL
+                    && cloned->next->buf->end == NULL,
+        "clone: file-backed clone must not inherit foreign bounds");
+    TEST_ASSERT(cloned->next->buf->mmap == 0
+                    && cloned->next->buf->recycled == 0
+                    && cloned->next->buf->temp_file == 0,
+        "clone: file clone must not inherit storage-ownership flags");
+    TEST_ASSERT(cloned->next->buf->last_buf == 1,
+        "clone: terminal flag must be preserved on the file link");
+    TEST_ASSERT(cloned->next->next == NULL,
+        "clone: chain length must match the source");
+
+    ngx_free(cloned->buf->pos);
+    ngx_free(cloned->buf);
+    ngx_free(cloned->next->buf);
+    ngx_free((void *) cloned->next);
+    ngx_free((void *) cloned);
+
+    TEST_PASS("clone_chain_deep rebases bounds and drops source ownership");
+}
+
+/*
  * Test entry point.  Runs all streaming_impl unit test functions in
  * sequence.  Prints a banner before and after the test run.  Returns 0
  * on success; individual test assertions abort via TEST_ASSERT on failure.
@@ -7341,6 +7516,7 @@ main(void)
     test_streaming_stage_handler_failure_category_routing();
     test_abandon_pending_after_fatal_releases_pending_header_output();
     test_finalize_pending_result_keeps_buffered_liveness();
+    test_clone_chain_deep_rebases_bounds_and_drops_source_ownership();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

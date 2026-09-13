@@ -3,6 +3,13 @@
 The canonical routing source is [routing-manifest.json](routing-manifest.json).
 This page is the readable overlay, not the machine-owned truth.
 
+The resolver's `stop-and-confirm` policy applies to unresolved concrete contract
+conflicts after checking existing user authorization. Warnings alone do not
+require a pause. Resolve them from current evidence or pause only work that
+depends on missing information. Explicit rule-revision requests may update rules
+and affected consumers while preserving runtime correctness. Skills and optional
+specs do not expand the authorized task scope.
+
 ## Verification Families
 
 | Family | Phase | Main commands or workflow paths |

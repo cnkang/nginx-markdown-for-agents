@@ -128,6 +128,10 @@ class ThirdPartyNoticesTests(unittest.TestCase):
         self.assertIn("regex", output)
         self.assertIn("1.13.0", output)
 
+    @unittest.skipUnless(
+        checker.resolve_approved_executable("cargo"),
+        "cargo is required to compare an e2e lock against its manifest",
+    )
     def test_missing_e2e_lock_fails(self) -> None:
         """A checked-in e2e manifest without its lock file is a gate failure."""
         e2e_dir = self.root / "tools" / "e2e-harness"
@@ -148,6 +152,10 @@ class ThirdPartyNoticesTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("Cargo.lock missing", output)
 
+    @unittest.skipUnless(
+        checker.resolve_approved_executable("cargo"),
+        "cargo is required to compare an e2e lock against its manifest",
+    )
     def test_stale_e2e_lock_fails(self) -> None:
         """An e2e lock that Cargo would update must fail the locked check."""
         e2e_dir = self.root / "tools" / "e2e-harness"

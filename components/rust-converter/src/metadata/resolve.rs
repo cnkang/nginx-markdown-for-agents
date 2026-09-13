@@ -47,96 +47,12 @@ impl MetadataExtractor {
             return url.to_string();
         }
 
-        if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("//") {
-            return url.to_string();
-        }
-
-        let Some(ref base) = self.base_url else {
+        let Some(base) = self.base_url.as_deref() else {
             return url.to_string();
         };
 
-        if !self.is_valid_base_url(base) {
-            return url.to_string();
-        }
-
-        if url.starts_with('/') {
-            return format!("{}{}", self.get_origin(base), url);
-        }
-
-        let base_dir = self.get_base_directory(base);
-        format!("{}/{}", base_dir.trim_end_matches('/'), url)
-    }
-
-    /// Validate whether `url` has an absolute HTTP(S)-style base form.
-    ///
-    /// # Arguments
-    ///
-    /// * `url` - URL string to validate
-    ///
-    /// # Returns
-    ///
-    /// `true` if the URL starts with `http://` or `https://`.
-    fn is_valid_base_url(&self, url: &str) -> bool {
-        url.starts_with("http://") || url.starts_with("https://")
-    }
-
-    /// Extract scheme + authority origin from an absolute URL string.
-    ///
-    /// For `https://example.com/path/page`, returns `https://example.com`.
-    /// If the URL has no path component after the authority, the full URL
-    /// is returned.
-    ///
-    /// # Arguments
-    ///
-    /// * `url` - An absolute URL with `http://` or `https://` scheme
-    ///
-    /// # Returns
-    ///
-    /// The origin portion (scheme + authority) of the URL.
-    fn get_origin(&self, url: &str) -> String {
-        let after_scheme = if let Some(stripped) = url.strip_prefix("https://") {
-            stripped
-        } else if let Some(stripped) = url.strip_prefix("http://") {
-            stripped
-        } else {
-            return url.to_string();
-        };
-
-        if let Some(pos) = after_scheme.find('/') {
-            let scheme_len = if url.starts_with("https://") { 8 } else { 7 };
-            url[..scheme_len + pos].to_string()
-        } else {
-            url.to_string()
-        }
-    }
-
-    /// Return the directory prefix used for relative-path resolution.
-    ///
-    /// For `https://example.com/dir/page`, returns `https://example.com/dir`.
-    /// Trailing slashes are stripped before the last path segment is removed.
-    /// If the URL has no path after the authority, the full URL is returned.
-    ///
-    /// # Arguments
-    ///
-    /// * `url` - An absolute URL string
-    ///
-    /// # Returns
-    ///
-    /// The URL with the last path segment removed, suitable for joining
-    /// with a relative path.
-    fn get_base_directory(&self, url: &str) -> String {
-        if url.ends_with('/') {
-            return url.to_string();
-        }
-        let trimmed = url.trim_end_matches('/');
-
-        if let Some(pos) = trimmed.rfind('/') {
-            if pos > 0 && trimmed.chars().nth(pos - 1) == Some('/') {
-                return trimmed.to_string();
-            }
-            trimmed[..pos].to_string()
-        } else {
-            trimmed.to_string()
-        }
+        // One shared resolver serves the body emitters and every metadata
+        // field, so the same reference cannot resolve differently by path.
+        crate::url_resolve::resolve_reference(base, url).unwrap_or_else(|| url.to_string())
     }
 }

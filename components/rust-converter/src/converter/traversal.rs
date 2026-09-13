@@ -341,6 +341,23 @@ impl MarkdownConverter {
                 .find(|a| a.name.ns.is_empty() && a.name.local.as_ref() == "type")
                 .map(|a| a.value.as_ref());
             let input_type = crate::security::normalize_input_type(raw_input_type);
+            /* GitHub Flavored Markdown represents a checkbox as a task-list
+             * marker.  The marker is emitted only for a checkbox and only in
+             * that flavor; every other control keeps its text form. */
+            if input_type == "checkbox"
+                && matches!(
+                    self.options.flavor,
+                    crate::converter::MarkdownFlavor::GitHubFlavoredMarkdown
+                )
+            {
+                let checked = attrs_borrowed
+                    .iter()
+                    .any(|a| a.name.ns.is_empty() && a.name.local.as_ref() == "checked");
+                /* The marker is Markdown structure, not text: emit it through
+                 * the same path as other structural markers so the list-item
+                 * text escaper cannot turn it into `\[x\]`. */
+                append_str_with_context(output, if checked { "[x] " } else { "[ ] " }, &mut ctx)?;
+            }
             let text = crate::security::select_input_control_text(
                 &input_type,
                 attrs_borrowed
@@ -410,6 +427,34 @@ impl MarkdownConverter {
         self.traverse_children(node, output, depth + 1, ctx)
     }
 
+    /// Dispatch the inline-formatting tags, which share one shape: each hands
+    /// off to a context-aware handler.
+    ///
+    /// Returns `None` when the tag is not an inline-formatting element, so the
+    /// caller falls through to the block-level match.  Keeping this group out
+    /// of that match keeps both functions within the project's complexity
+    /// thresholds.
+    fn dispatch_inline_element(
+        &self,
+        node: &Handle,
+        tag_name: &str,
+        output: &mut String,
+        depth: usize,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Option<Result<(), ConversionError>> {
+        let result = match tag_name {
+            "code" => self.handle_inline_code(node, output, depth, ctx),
+            "strong" | "b" => self.handle_bold_with_context(node, output, depth, ctx),
+            "em" | "i" => self.handle_italic_with_context(node, output, depth, ctx),
+            "del" | "s" | "strike" => {
+                self.handle_strikethrough_with_context(node, output, depth, ctx)
+            }
+            _ => return None,
+        };
+
+        Some(result)
+    }
+
     fn dispatch_element(
         &self,
         node: &Handle,
@@ -418,6 +463,13 @@ impl MarkdownConverter {
         depth: usize,
         mut ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        if let Some(result) =
+            self.dispatch_inline_element(node, tag_name, output, depth, ctx.as_deref_mut())
+        {
+            result?;
+            return Ok(());
+        }
+
         match tag_name {
             "h1" => self.handle_heading_with_context(node, 1, output, depth, ctx.as_deref_mut())?,
             "h2" => self.handle_heading_with_context(node, 2, output, depth, ctx.as_deref_mut())?,
@@ -433,13 +485,6 @@ impl MarkdownConverter {
             "li" => self.handle_list_item_with_context(node, output, 0, ctx.as_deref_mut())?,
             "pre" => {
                 self.handle_code_block_with_context(node, output, depth, ctx.as_deref_mut())?
-            }
-            "code" => self.handle_inline_code(node, output, depth, ctx.as_deref_mut())?,
-            "strong" | "b" => {
-                self.handle_bold_with_context(node, output, depth, ctx.as_deref_mut())?
-            }
-            "em" | "i" => {
-                self.handle_italic_with_context(node, output, depth, ctx.as_deref_mut())?
             }
             "table" => self.handle_table_with_context(node, output, depth, ctx.as_deref_mut())?,
             "script" | "style" | "noscript" => {}

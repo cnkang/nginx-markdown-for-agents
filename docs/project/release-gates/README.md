@@ -33,9 +33,12 @@ All five P0 sub-specs must ship in 0.4.0. The P1 sub-spec ships if ready. Otherw
 The four `*-0-5-0` stamped templates (`dod-template-0-5-0.md`,
 `boundary-description-template-0-5-0.md`, `risk-register-template-0-5-0.md`,
 `scope-creep-evaluation-0-5-0.md`) moved here from `docs/project/` on
-2026-07-09 so that all release-gate artifacts colocate in one directory. They
-stay retained for historical reference. The unstamped `*.md` templates above are
-the active ones consumed by tooling.
+2026-07-09 so that all release-gate artifacts colocate in one directory.
+`scope-creep-evaluation-0-5-0.md` remains an ACTIVE workflow containing the
+current streaming evidence requirements. Only the genuinely archived
+templates (`dod-template-0-5-0.md`, `boundary-description-template-0-5-0.md`,
+`risk-register-template-0-5-0.md`) are historical. The unstamped `*.md`
+templates above are the active ones consumed by tooling.
 
 ## Usage
 

@@ -39,7 +39,8 @@ removed or not part of the contract.
 
 ### 3. Removed ≠ deprecated
 
-Five convergence names remain reject-only migration entries, as listed below.
+The module no longer registers the five convergence names. NGINX reports its standard
+`unknown directive` error for them, as listed below.
 Other removed names fail `nginx -t` with NGINX's standard
 `unknown directive` error. If docs or
 configs reference a removed directive, they are stale. Migration and removal
@@ -53,9 +54,11 @@ distinct directives with different migration paths.
 
 The five convergence names (`markdown_dynamic_config`,
 `markdown_dynamic_config_path`, `markdown_dynconf_dry_run`,
-`markdown_prune_selectors`, and `markdown_prune_protection_selectors`) remain
-registered only as reject-only migration entries. They fail `nginx -t` with an
-explicit migration message. They are not active configuration directives.
+`markdown_prune_selectors`, and `markdown_prune_protection_selectors`) are no
+longer registered at all. They fail `nginx -t` with NGINX's standard
+`unknown directive` error, so the replacement for each name comes from
+`MIGRATION-0.9.2.md` rather than from a module message. They are not active
+configuration directives.
 
 ## Contract Loading
 
@@ -84,7 +87,7 @@ a machine-readable value or count.
 | Architecture / ADRs | `docs/architecture/ADR/` (0025 drift gate, 0026 historical dynconf restore, 0027 OTel removal) |
 | Release notes & checklist | `docs/releases/0.9.2-release-notes.md`, `docs/releases/0.9.2-release-checklist.md` |
 | History of changes | `CHANGELOG.md` (L3 — never copied here) |
-| Metrics & diagnostics schema | `docs/architecture/observability-schema-v2.md` |
+| Metrics & diagnostics schema | `docs/architecture/observability-schema-v3.md` |
 | Historical dynconf semantics | `docs/architecture/ADR/0026-dynconf-file-restore-contract.md` (pre-0.9.2 only) |
 | Project status & version planning | `docs/project/PROJECT_STATUS.md`, `docs/project/VERSION_PLANNING.md` |
 
@@ -104,6 +107,7 @@ a machine-readable value or count.
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-09-12 | Record that `markdown_prune_selectors` and `markdown_prune_protection_selectors` join the other convergence names as unregistered directives: they fail `nginx -t` with NGINX's standard `unknown directive` error instead of a module migration message. |
 | 0.9.2 | 2026-09-08 | Align the KB with the static 0.9.2 contract: remove active dynconf-key guidance and document the five reject-only migration entries. |
 | 0.9.2 | 2026-08-26 | Synchronize the knowledge-base contract with the current FFI inventory after removing retired exports. |
 | 0.9.2 | 2026-08-12 | Synchronize the knowledge-base contract with the current dynconf and FFI inventory. |

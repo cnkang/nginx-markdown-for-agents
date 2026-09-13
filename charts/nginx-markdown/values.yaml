@@ -123,8 +123,12 @@ markdown:
 
   # Streaming configuration
   streaming:
-    # Processing-path policy: off | auto | force
-    mode: "auto"
+    # Processing-path policy: "" (leave the module default) | off | auto | force
+    #
+    # An empty value omits the directive, so the module's own default governs
+    # (0.9.2 resolves an omitted markdown_streaming to bounded full-buffer).
+    # Set a mode explicitly to choose a path in the chart.
+    mode: ""
 
   # Noise pruning
   prune:

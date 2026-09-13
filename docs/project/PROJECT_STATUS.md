@@ -31,7 +31,7 @@ operations, architecture, and contributor-facing harness maintenance.
 **Status:** Development release line. 0.9.1 is the latest released patch.
 0.9.2 is the current development line. 0.9.2 is the final pre-1.0 breaking
 release, with the public configuration surface reduced to 20 active directives
-plus five reject-only migration entries, retired profile/conflict FFI snapshots
+and the five removed names dropped from the command table, retired profile/conflict FFI snapshots
 removed, and the bundled FFI ABI at version 3. Development version metadata is
 0.9.2. The release tag, GitHub Release, package assets, and checksums remain
 pending until the blocking gates pass.
@@ -49,7 +49,7 @@ pending until the blocking gates pass.
   `decompression_events_total`, `build_info`).
   This replaces the legacy multi-format, per-path, shadow, and debug families.
 - **Directive convergence and ABI 3**: The release freezes 20 active directives
-  and retains five removed names as reject-only migration entries. The runtime
+  and drops the five removed names from the command table. The runtime
   dynconf subsystem and custom selectors are gone, and the bundled Rust/C FFI
   ABI moves to version 3.
 - **Release-gates-check-092**: Additive on 091, adds public-surface drift
@@ -134,7 +134,7 @@ This assessment rests on:
 - Automatic upstream decompression (gzip, brotli, deflate)
 - Authentication-aware caching (Cache-Control: private)
 - Variable-driven configuration support
-- Bounded large-response streaming selected by the internal response-shape heuristic
+- Bounded streaming preferred under `markdown_streaming auto` for every response that clears the eligibility gates
 - Forwarded header trust control with `markdown_trusted_proxies` directive
 
 ## Test Coverage
@@ -261,8 +261,10 @@ The following limitations appear in the documentation:
 
 1. **Full-Buffer Default**: Unset and `off` select bounded full-buffer conversion, with
    `markdown_streaming off|auto|force`. `off` explicitly selects full-buffer
-   conversion and ineligible or failed streaming requests follow fallback
-   policy.
+   conversion. A request that is not eligible for conversion bypasses conversion
+   and passes through unchanged. A response that is eligible for conversion but
+   cannot stream falls back to full-buffer, and a capability fallback does so
+   regardless of policy.
 2. **HTML Input**: Requires HTML input (uncompressed or automatically decompressed)
 3. **Conversion Fidelity**: Some complex HTML structures may not convert perfectly to Markdown
 4. **Performance Overhead**: Large documents incur conversion overhead (mitigated by caching)
@@ -370,6 +372,14 @@ See `examples/docker/` for Docker build examples.
 
 | Entry | Workflow |
 |-------|----------|
+| 1.24.0 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
+| 1.24.0 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
+| 1.24.0 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.24.0 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.24.0 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.24.0 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.24.0 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.24.0 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 alpine3.20 musl amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
@@ -378,14 +388,26 @@ See `examples/docker/` for Docker build examples.
 | 1.26.3 debian12 glibc amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
 | 1.26.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 debian12 glibc arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.26.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.26.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.26.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.28.3 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.28.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.28.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.28.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.28.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.30.4 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.4 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.4 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.4 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 <!-- END:release-matrix:status-matrix -->
 
 ## Summary

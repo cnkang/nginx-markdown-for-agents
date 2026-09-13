@@ -45,7 +45,7 @@ path, URI, host, profile, and per-path dimensions are not emitted.
 | `nginx_markdown_conversion_duration_seconds` | histogram | `engine` | Conversion duration with ten fixed boundaries, `_bucket`, `_sum`, and `_count`. |
 | `nginx_markdown_input_bytes_total` | counter | — | Input bytes read for conversion. |
 | `nginx_markdown_output_bytes_total` | counter | — | Converted bytes successfully delivered downstream. |
-| `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | Peak working-set estimate from the most recent streaming conversion; not process RSS. |
+| `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | Run-wide high-water mark of the conversion peak working-set estimate (streaming and full-buffer conversions); not process RSS. |
 | `nginx_markdown_streaming_events_total` | counter | `transition`, `reason` | Closed streaming lifecycle transitions. |
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | Decompression completion and failure events. |
 | `nginx_markdown_build_info` | gauge | `version`, `nginx_version`, `features` | Build identity; value is always `1`. |
