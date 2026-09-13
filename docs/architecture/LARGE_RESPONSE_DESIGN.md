@@ -269,7 +269,6 @@ HEAD requests, 304 responses, and fail-open replays always use the full-buffer p
 | 304 Not Modified | Full-buffer path | No body conversion needed; conditional logic operates on cached state |
 | Fail-open replay | Full-buffer path | The module is replaying already-buffered original HTML; incremental processing does not apply |
 
-The retired router selects a path as follows.
 
 ## Non-Degradation Guarantees
 

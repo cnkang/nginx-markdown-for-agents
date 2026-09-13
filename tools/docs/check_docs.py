@@ -580,6 +580,43 @@ def check_metric_family_count(files: list[Path]) -> list[str]:
     return failures
 
 
+def check_release_checklist_is_static(files: list[Path]) -> list[str]:
+    """A release checklist states requirements, never the state of a candidate.
+
+    A checklist that names the head of the day goes stale with the next commit,
+    and a stale checklist read as certification is worse than no checklist.  The
+    status preamble must therefore avoid commit identifiers and current-state
+    claims; the Document Updates table below still records history.
+    """
+    failures: list[str] = []
+    sha_re = re.compile(r"\b[0-9a-f]{7,40}\b")
+    claim_re = re.compile(
+        r"current (?:head|candidate)s?\b|have not certified|has not certified"
+        r"|latest workflow|as of this (?:commit|writing)",
+        re.IGNORECASE,
+    )
+    for path in files:
+        if not path.name.endswith("-release-checklist.md"):
+            continue
+        preamble: list[str] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("## "):
+                break
+            preamble.append(line)
+        text = "\n".join(preamble)
+        if sha_re.search(text):
+            failures.append(
+                f"{path}: the status preamble names a commit; bind status to the "
+                "candidate-bound release evidence instead"
+            )
+        if claim_re.search(text):
+            failures.append(
+                f"{path}: the status preamble states mutable candidate status; "
+                "keep the checklist to requirements"
+            )
+    return failures
+
+
 def main() -> int:
     """Entry point: run all doc consistency checks and print a report.
 
@@ -616,6 +653,7 @@ def main() -> int:
     failures.extend(check_duplicate_sync())
     failures.extend(check_document_updates_order(files))
     failures.extend(check_metric_family_count(files))
+    failures.extend(check_release_checklist_is_static(files))
 
     if failures:
         print("Documentation checks failed:")
@@ -633,6 +671,7 @@ def main() -> int:
     print("- Unreleased/stable release status consistency: OK")
     print("- Duplicate canonical/mirror sync: OK")
     print("- Document Updates chronological order (descending): OK")
+    print("- Release checklist states requirements only: OK")
     return 0
 
 

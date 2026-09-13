@@ -386,7 +386,10 @@ if [[ "${staged_loads}" -ne 1 ]]; then
     echo "ERROR: expected exactly one Markdown load_module entry in the staged config tree, found ${staged_loads}" >&2
     exit 1
 fi
-sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
+# Validate with the staged prefix as well as the staged file, so every
+# relative include resolves inside the staged tree and the active tree stays
+# untouched.
+sudo nginx -t -p "${STAGED_ROOT}/" -c "${STAGED_ROOT}/nginx.conf"
 # Staged validation succeeded.  Apply the SAME migration to the ACTIVE
 # tree now (before the module swap): remove the five retired
 # directives.  The active load_module entry stays as-is — it already
@@ -1213,7 +1216,10 @@ if [[ "${staged_loads}" -ne 1 ]]; then
     echo "ERROR: expected exactly one Markdown load_module entry in the staged config tree, found ${staged_loads}" >&2
     exit 1
 fi
-sudo nginx -t -c "${STAGED_ROOT}/nginx.conf"
+# Validate with the staged prefix as well as the staged file, so every
+# relative include resolves inside the staged tree and the active tree stays
+# untouched.
+sudo nginx -t -p "${STAGED_ROOT}/" -c "${STAGED_ROOT}/nginx.conf"
 # Staged validation succeeded.  Apply the SAME migration to the ACTIVE
 # tree now (before the module swap): remove the five retired directives
 # directives.  The active load_module entry stays as-is — it already

@@ -291,3 +291,39 @@ def test_malformed_unreleased_heading_after_valid_fails_closed(tmp_path):
     errors = check_status(changelog, project_status)
 
     assert any("malformed unreleased heading" in error for error in errors)
+
+
+def test_release_checklist_preamble_must_stay_static(tmp_path: Path) -> None:
+    """The checklist guard must reject mutable status and accept requirements."""
+    mutable = tmp_path / "0.9.2-release-checklist.md"
+    mutable.write_text(
+        "# 0.9.2 Release Checklist\n\n"
+        "**Current status:** remote workflows have not certified the current head.\n\n"
+        "## Pre-Release\n",
+        encoding="utf-8",
+    )
+    assert docs_checker.check_release_checklist_is_static([mutable]), (
+        "a preamble claiming current-head state must be rejected"
+    )
+
+    pinned = tmp_path / "0.9.3-release-checklist.md"
+    pinned.write_text(
+        "# 0.9.3 Release Checklist\n\n"
+        "Bind the checks to f26e81897aedc48f79cf23943ee33496157ed0a9.\n\n"
+        "## Pre-Release\n",
+        encoding="utf-8",
+    )
+    assert docs_checker.check_release_checklist_is_static([pinned]), (
+        "a commit identifier in the preamble must be rejected"
+    )
+
+    static = tmp_path / "0.9.4-release-checklist.md"
+    static.write_text(
+        "# 0.9.4 Release Checklist\n\n"
+        "**This checklist states requirements, not status.**\n\n"
+        "## Pre-Release\n",
+        encoding="utf-8",
+    )
+    assert docs_checker.check_release_checklist_is_static([static]) == [], (
+        "a requirements-only preamble must pass"
+    )
