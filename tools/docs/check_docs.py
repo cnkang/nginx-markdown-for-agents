@@ -135,6 +135,22 @@ def _fence_marker(line: str) -> tuple[str, int, str] | None:
     return char, run, trailing
 
 
+def _next_fence_state(
+    marker: tuple[str, int, str], open_char: str | None, open_len: int
+) -> tuple[str | None, int]:
+    """Return the fence state after a marker line.
+
+    A marker outside a block opens one; a marker of the same character, at least
+    as long, with nothing after the run, closes it.
+    """
+    char, run, trailing = marker
+    if open_char is None:
+        return char, run
+    if char == open_char and not trailing and run >= open_len:
+        return None, 0
+    return open_char, open_len
+
+
 def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
     """Extract lines that are outside fenced code blocks.
 
@@ -149,18 +165,11 @@ def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
 
     for line_no, line in enumerate(text.splitlines(), 1):
         marker = _fence_marker(line)
-        if marker is not None:
-            char, run, trailing = marker
+        if marker is None:
             if open_char is None:
-                open_char, open_len = char, run
-                continue
-            if char == open_char and not trailing and run >= open_len:
-                open_char, open_len = None, 0
-                continue
-            if char == open_char:
-                continue
-        if open_char is None:
-            lines.append((line_no, line))
+                lines.append((line_no, line))
+            continue
+        open_char, open_len = _next_fence_state(marker, open_char, open_len)
 
     return lines
 
@@ -682,12 +691,17 @@ def _checklist_history(content: str) -> set[str]:
     return set(_document_update_table_lines(content))
 
 
+THEMATIC_BREAK_RE = re.compile(r"^(?:-{3,}|\*{3,}|_{3,})\s*$")
+
+
 def _starts_block(line: str) -> bool:
     """True when a line opens a new Markdown block rather than continuing one."""
     stripped = line.lstrip()
     if stripped[:1] in ("#", ">", "|"):
         return True
     if stripped[:3] in ("```", "~~~"):
+        return True
+    if THEMATIC_BREAK_RE.match(stripped):
         return True
     # A list marker of any kind opens a new block.
     return bool(re.match(r"[-*+]\s", stripped)) or bool(re.match(r"\d+[.)]\s", stripped))

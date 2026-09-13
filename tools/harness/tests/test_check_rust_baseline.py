@@ -285,3 +285,45 @@ def test_undeclared_version_variable_is_rejected(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert any("cannot resolve" in error for error in errors), errors
+
+
+def test_inline_rust_version_mapping_is_checked(tmp_path: Path) -> None:
+    """An inline `env:` mapping declares the version too."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    env: {RUST_VERSION: 1.99.0}\n    steps:\n"
+        "      - run: echo hi\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("RUST_VERSION is '1.99.0'" in error for error in errors), errors
+
+
+def test_job_container_image_is_checked(tmp_path: Path) -> None:
+    """A job that runs in a Rust container must pin the canonical version."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    container:\n      image: rust:1.99.9-alpine3.21\n"
+        "    steps:\n      - run: echo hi\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("1.99.9" in error for error in errors), errors
+
+
+def test_service_image_is_checked(tmp_path: Path) -> None:
+    """A service image is a version declaration as well."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    services:\n      runner:\n"
+        "        image: rust:1.99.9-alpine3.21\n    steps:\n      - run: echo hi\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("1.99.9" in error for error in errors), errors
