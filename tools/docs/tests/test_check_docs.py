@@ -349,3 +349,28 @@ def test_release_checklist_guard_rejects_explicit_status_fields(tmp_path: Path) 
         path = tmp_path / f"{abs(hash(body))}-release-checklist.md"
         path.write_text(body, encoding="utf-8")
         assert docs_checker.check_release_checklist_is_static([path]), body
+
+def test_iter_unfenced_lines_skips_tilde_fences():
+    """Tilde fences are as valid as backtick fences and must be skipped too."""
+    text = "before\n~~~\n- [ ] 1234567\nafter\n~~~\nreally after\n"
+    kept = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
+    assert "- [ ] 1234567" not in kept
+    assert "really after" in kept
+
+
+def test_iter_unfenced_lines_needs_a_matching_closer():
+    """A block opened with ``` is not closed by ~~~."""
+    text = "~~~\nhidden\n```\nstill hidden\n~~~\nvisible\n"
+    kept = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
+    assert "hidden" not in kept and "still hidden" not in kept
+    assert "visible" in kept
+
+
+def test_checklist_guard_ignores_tilde_fenced_examples(tmp_path):
+    """A fenced example may show a commit-bound requirement without failing."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text(
+        "# Checklist\n\n~~~\n- [ ] certified at 1234567\n~~~\n\n- [ ] publish\n",
+        encoding="utf-8",
+    )
+    assert docs_checker.check_release_checklist_is_static([path]) == []

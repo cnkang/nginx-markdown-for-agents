@@ -116,17 +116,22 @@ def get_git_tracked_paths() -> set[str]:
 def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
     """Extract lines that are outside fenced code blocks.
 
-    Returns a list of ``(line_number, line_text)`` tuples for lines not
-    inside `````...``` `` blocks, useful for checking Markdown structural
-    rules without false positives from code samples.
+    Returns a list of ``(line_number, line_text)`` tuples for lines not inside
+    a fenced code block.  Both fence styles count: backticks and tildes are
+    equally valid in Markdown, and a block opened with one must be closed with
+    the same marker, so the opener is remembered rather than toggled.
     """
     lines: list[tuple[int, str]] = []
-    in_fence = False
+    open_fence: str | None = None
     for line_no, line in enumerate(text.splitlines(), 1):
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
+        marker = line.strip()[:3]
+        if marker in ("```", "~~~"):
+            if open_fence is None:
+                open_fence = marker
+            elif marker == open_fence:
+                open_fence = None
             continue
-        if not in_fence:
+        if open_fence is None:
             lines.append((line_no, line))
     return lines
 
