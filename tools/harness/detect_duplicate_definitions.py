@@ -19,6 +19,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = ("tools", "packaging")
 
 
+def _bound_names(node: ast.AST) -> list[str]:
+    """Return the top-level names an assignment binds, if it binds any."""
+    if isinstance(node, ast.Assign):
+        return [t.id for t in node.targets if isinstance(t, ast.Name)]
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        return [node.target.id]
+    return []
+
+
 def duplicate_names(path: Path) -> list[str]:
     """Return the top-level names this file defines more than once."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -27,6 +36,8 @@ def duplicate_names(path: Path) -> list[str]:
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.append(node.name)
+        else:
+            names.extend(_bound_names(node))
 
     return sorted(name for name, count in Counter(names).items() if count > 1)
 
