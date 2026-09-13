@@ -644,7 +644,7 @@ def check_metric_family_count(files: list[Path]) -> list[str]:
     return failures
 
 
-_CHECKLIST_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
+_CHECKLIST_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b", re.IGNORECASE)
 _CHECKLIST_CLAIM_RE = re.compile(
     r"current (?:head|candidate|branch head)s?\b|have not certified"
     r"|has not certified"
@@ -725,7 +725,12 @@ THEMATIC_BREAK_RE = re.compile(r"^(?:-{3,}|\*{3,}|_{3,})\s*$")
 def _starts_block(line: str) -> bool:
     """True when a line opens a new Markdown block rather than continuing one."""
     stripped = line.lstrip()
-    if stripped[:1] in ("#", ">", "|"):
+    # `#not-a-heading` is ordinary text: an ATX heading needs the space.  A table
+    # row is not treated as a boundary either, because a table is only a table
+    # once its delimiter row appears, which a single line cannot show.
+    if stripped.startswith("# ") or stripped.rstrip() == "#":
+        return True
+    if stripped[:1] == ">":
         return True
     if stripped[:3] in ("```", "~~~"):
         return True

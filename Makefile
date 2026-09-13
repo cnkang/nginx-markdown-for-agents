@@ -541,6 +541,7 @@ release-notes:
 
 harness-check:
 	python3 tools/harness/check_harness_sync.py
+	python3 tools/harness/detect_continuation_comments.py
 	python3 tools/harness/detect_duplicate_definitions.py
 	python3 tools/harness/detect_public_surface_drift.py
 
