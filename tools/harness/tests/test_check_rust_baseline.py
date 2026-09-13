@@ -385,3 +385,17 @@ def test_unquoted_version_value_is_checked(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert any("1.99" in error for error in errors), errors
+
+
+def test_docker_action_image_is_checked(tmp_path: Path) -> None:
+    """A step may run a container action through `uses: docker://`."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    steps:\n"
+        "      - uses: docker://rust:1.99.9-alpine3.21\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("1.99.9" in error for error in errors), errors

@@ -79,7 +79,7 @@ trap cleanup EXIT
 # A runtime image that carries the module, so the smoke exercises this build
 # rather than a previously published image.
 cat > "${WORK_DIR}/Dockerfile" <<DOCKERFILE
-FROM nginx:1.30.4-alpine3.21
+FROM nginx:1.30.4-alpine3.24
 RUN apk add --no-cache libgcc curl
 COPY ngx_http_markdown_filter_module.so ${MODULE_PATH_IN_IMAGE}
 DOCKERFILE

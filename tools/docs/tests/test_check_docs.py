@@ -379,8 +379,8 @@ def test_iter_unfenced_lines_respects_fence_run_rules():
     """A longer fence closes a shorter one; four leading spaces is not a fence."""
     text = "```\ninner\n````\nstill inside\n```\nafter\n"
     kept = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
-    assert "still inside" in kept  # the 4-backtick run does not close a 3 run
-    assert "after" not in kept  # the 4 run opened a new block
+    assert "still inside" in kept  # the 4-backtick run closed the 3 run
+    assert "after" not in kept  # the 4 run then opened a new block
     indented = "    ```\nnot a fence\n"
     kept2 = [line for _n, line in docs_checker.iter_unfenced_lines(indented)]
     assert "    ```" in kept2 and "not a fence" in kept2
@@ -487,6 +487,16 @@ def test_blank_line_ends_the_task_item(tmp_path):
     path = tmp_path / "0.9.2-release-checklist.md"
     path.write_text(
         "- [ ] publish the release\n\nThe baseline anchors at 1234567.\n",
+        encoding="utf-8",
+    )
+    assert docs_checker.check_release_checklist_is_static([path]) == []
+
+
+def test_fence_block_ends_a_task_item(tmp_path):
+    """A fenced example after an item is not read as its continuation."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text(
+        "- [ ] publish\n```text\ncommit 1234567\n```\n\nplain prose\n",
         encoding="utf-8",
     )
     assert docs_checker.check_release_checklist_is_static([path]) == []

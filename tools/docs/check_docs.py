@@ -135,6 +135,27 @@ def _fence_marker(line: str) -> tuple[str, int, str] | None:
     return char, run, trailing
 
 
+def iter_lines_with_fences(text: str) -> list[tuple[int, str, bool]]:
+    """Return every line, marking the fence markers themselves.
+
+    `iter_unfenced_lines` deliberately hides fenced blocks, but a caller that
+    assembles multi-line items has to know where a block starts so it can end that
+    block there.
+    """
+    found: list[tuple[int, str, bool]] = []
+    open_char: str | None = None
+    open_len = 0
+    for line_no, line in enumerate(text.splitlines(), 1):
+        marker = _fence_marker(line)
+        if marker is None:
+            if open_char is None:
+                found.append((line_no, line, False))
+            continue
+        open_char, open_len = _next_fence_state(marker, open_char, open_len)
+        found.append((line_no, line, True))
+    return found
+
+
 def _next_fence_state(
     marker: tuple[str, int, str], open_char: str | None, open_len: int
 ) -> tuple[str | None, int]:
@@ -716,7 +737,11 @@ def _checklist_items(content: str, history: set[str]) -> list[str]:
     items: list[str] = []
     current: list[str] = []
 
-    for _lineno, line in iter_unfenced_lines(content):
+    for _lineno, line, is_fence in iter_lines_with_fences(content):
+        if is_fence:
+            # A fenced block ends whatever was open; its contents are not prose.
+            _flush_task_item(items, current)
+            continue
         if not line.strip() or line in history:
             # A blank line ends the item: CommonMark starts a new paragraph, so
             # prose below the item is not part of it.
@@ -746,7 +771,11 @@ def _logical_blocks(content: str, history: set[str]) -> list[str]:
     """
     blocks: list[str] = []
     current: list[str] = []
-    for _lineno, line in iter_unfenced_lines(content):
+    for _lineno, line, is_fence in iter_lines_with_fences(content):
+        if is_fence:
+            # A fenced block ends whatever was open; its contents are not prose.
+            _flush_task_item(blocks, current)
+            continue
         if not line.strip() or line in history:
             _flush_task_item(blocks, current)
             continue
