@@ -357,3 +357,31 @@ def test_version_text_outside_env_is_not_a_declaration(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert not any("9.9.9" in error for error in errors), errors
+
+
+def test_string_container_is_checked(tmp_path: Path) -> None:
+    """`container:` may name the image directly as a string."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    container: rust:1.99.9-alpine3.21\n"
+        "    steps:\n      - run: echo hi\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("1.99.9" in error for error in errors), errors
+
+
+def test_unquoted_version_value_is_checked(tmp_path: Path) -> None:
+    """An unquoted version arrives as a number, not as a string."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    env:\n      RUST_VERSION: 1.99\n    steps:\n"
+        "      - run: echo hi\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("1.99" in error for error in errors), errors

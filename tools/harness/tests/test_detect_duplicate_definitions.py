@@ -85,3 +85,27 @@ def test_attribute_assignment_is_not_a_binding(tmp_path: Path) -> None:
     errors = detector.collect_errors(tmp_path)
 
     assert errors == [], errors
+
+
+def test_duplicate_import_is_reported(tmp_path: Path) -> None:
+    """The same module imported twice binds the name twice."""
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "dupe.py").write_text(
+        "import json\n\n\nimport json\n",
+        encoding="utf-8",
+    )
+
+    errors = detector.collect_errors(tmp_path)
+
+    assert any("json" in error for error in errors), errors
+
+
+def test_distinct_submodules_are_not_duplicates(tmp_path: Path) -> None:
+    """Importing different submodules of one package is legitimate."""
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "ok.py").write_text(
+        "import urllib.error\nimport urllib.parse\nimport urllib.request\n",
+        encoding="utf-8",
+    )
+
+    assert detector.collect_errors(tmp_path) == []
