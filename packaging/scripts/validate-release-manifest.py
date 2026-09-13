@@ -134,8 +134,12 @@ def _check_source_bundle(
     # The name comes from the manifest, so the resolved path has to stay inside
     # the artifact directory: a traversal or an escaping symlink must not make
     # these checks read something else.
-    root = artifact_dir.resolve()
-    resolved = bundle_path.resolve()
+    try:
+        root = artifact_dir.resolve()
+        resolved = bundle_path.resolve()
+    except (OSError, RuntimeError) as exc:
+        errors.append(f"{bundle_name} cannot be resolved ({exc})")
+        return
     if not resolved.is_relative_to(root):
         errors.append(
             f"{bundle_name} resolves outside the artifact directory and is not "

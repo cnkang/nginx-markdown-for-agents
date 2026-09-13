@@ -210,6 +210,19 @@ def source_archive_info(
     repo: str, tag: str | None, source_url: str | None, source_sha: str | None
 ) -> dict:
     """Build source archive section."""
+    if source_url and tag:
+        # The validator requires the canonical release-download URL for a tag, so
+        # a supplied URL is replaced by the one the release publishes.
+        canonical = (
+            f"https://github.com/{repo}/releases/download/{tag}/"
+            f"nginx-markdown-for-agents-source-{tag}.tar.gz"
+        )
+        if source_url != canonical:
+            print(
+                f"NOTE: --source-url replaced by the canonical bundle URL for {tag}",
+                file=sys.stderr,
+            )
+        source_url = canonical
     if source_url:
         if tag and not source_sha:
             print(
