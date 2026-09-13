@@ -371,9 +371,34 @@ def validate_manifest(
                 # commit and publishes it, so the signed checksum file covers
                 # it.  Without this entry every tag release fails the reverse
                 # scan below with "Unexpected file in SHA256SUMS".
-                allowed_sha256_names.add(
-                    f"nginx-markdown-for-agents-source-{tag}.tar.gz"
-                )
+                bundle_name = f"nginx-markdown-for-agents-source-{tag}.tar.gz"
+                allowed_sha256_names.add(bundle_name)
+                # Allowing the name is not enough: the bundle is the provenance
+                # artifact, so its on-disk digest must match both the signed
+                # checksum file and the manifest's source.sha256.
+                bundle_path = artifact_dir / bundle_name
+                recorded = source.get("sha256") if isinstance(source, dict) else None
+                if bundle_path.is_file():
+                    actual_bundle = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+                    if sha256_entries.get(bundle_name) != actual_bundle:
+                        errors.append(
+                            f"SHA256SUMS digest mismatch for {bundle_name}: "
+                            f"sha256sums={sha256_entries.get(bundle_name)}, "
+                            f"actual={actual_bundle}"
+                        )
+                    if recorded != actual_bundle:
+                        errors.append(
+                            f"source.sha256 does not match the published bundle: "
+                            f"manifest={recorded}, actual={actual_bundle}"
+                        )
+                elif recorded:
+                    # The manifest claims provenance.  Publishing that claim
+                    # without the artifact it describes is exactly the gap this
+                    # check exists to close.
+                    errors.append(
+                        f"{bundle_name} is missing from the artifact directory "
+                        "while the manifest records source.sha256"
+                    )
             elif require_bootstrap_assets:
                 errors.append(
                     "git.tag must be a semantic release tag to validate bootstrap assets"

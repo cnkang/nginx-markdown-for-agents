@@ -784,6 +784,11 @@ class TestValidateManifest(unittest.TestCase):
         fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
         path = self.artifact_dir / fname
         path.write_bytes(b"fake-content")
+        # The pipeline publishes a bundle for the tag, so the artifact and the
+        # digest it records have to agree.
+        (self.artifact_dir / "nginx-markdown-for-agents-source-v0.8.3.tar.gz").write_bytes(
+            b"fake-bundle"
+        )
         manifest = {
             "schema_version": 1,
             "project": "nginx-markdown-for-agents",
@@ -795,8 +800,11 @@ class TestValidateManifest(unittest.TestCase):
             },
             "source": {
                 "available": True,
-                "archive_url": "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz",
-                "sha256": "a" * 64,
+                "archive_url": (
+                    "https://github.com/cnkang/nginx-markdown-for-agents/releases/"
+                    "download/v0.8.3/nginx-markdown-for-agents-source-v0.8.3.tar.gz"
+                ),
+                "sha256": sha256_bytes(b"fake-bundle"),
             },
             "packages": [
                 {
