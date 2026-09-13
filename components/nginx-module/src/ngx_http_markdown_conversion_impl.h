@@ -1212,7 +1212,7 @@ ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
 
 /*
  * Publish a conversion's peak working-set estimate into the shared
- * run-wide high-water gauge (streaming.last_peak_memory_bytes).  The
+ * run-wide high-water gauge (perf.conversion_peak_memory_bytes).  The
  * gauge keeps the run-wide maximum across both streaming and full-buffer
  * conversions so the soak qualification gate can observe a per-request
  * peak for every engine.  Guarded by MARKDOWN_STREAMING_ENABLED: the

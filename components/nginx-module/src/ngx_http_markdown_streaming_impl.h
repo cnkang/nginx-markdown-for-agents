@@ -3655,7 +3655,7 @@ ngx_http_markdown_streaming_record_finalize_stats(
          * only the most recent streaming sample.
          */
         ngx_http_markdown_metrics_update_peak(
-            &ngx_http_markdown_metrics->streaming.last_peak_memory_bytes,
+            &ngx_http_markdown_metrics->perf.conversion_peak_memory_bytes,
             peak_memory_bytes);
     }
 }

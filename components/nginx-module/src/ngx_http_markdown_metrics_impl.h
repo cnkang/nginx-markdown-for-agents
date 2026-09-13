@@ -415,7 +415,7 @@ ngx_http_markdown_collect_streaming_snapshot(
         metrics->streaming.budget_exceeded_total;
     snapshot->streaming.last_ttfb_ms = metrics->streaming.last_ttfb_ms;
     snapshot->streaming.last_peak_memory_bytes =
-        metrics->streaming.last_peak_memory_bytes;
+        metrics->perf.conversion_peak_memory_bytes;
     snapshot->streaming.engine_choice.streaming =
         metrics->streaming.engine_choice.streaming;
     snapshot->streaming.engine_choice.full_buffer =
