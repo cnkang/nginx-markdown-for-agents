@@ -61,12 +61,16 @@ IMAGE="nginx:${INCOMPATIBLE_TAG}"
 run_nginx() {
     local label="$1"
     local conf="$2"
+    local status=0
     docker run --rm \
         -v "${MODULE_DIR}:/module:ro" \
         -v "${conf}:/etc/nginx/nginx.conf:ro" \
         "${IMAGE}" \
-        sh -c 'apk add --no-cache libgcc >/dev/null 2>&1 || true; nginx -t 2>&1'
-        return 0
+        sh -c 'apk add --no-cache libgcc >/dev/null 2>&1 || true; nginx -t 2>&1' \
+        || status=$?
+    # Return the loader's own status: the mismatch case is judged by whether
+    # nginx -t fails, so swallowing it here would make the check meaningless.
+    return "${status}"
 }
 
 echo "=== control: ${IMAGE} without the module must pass ===" >&2

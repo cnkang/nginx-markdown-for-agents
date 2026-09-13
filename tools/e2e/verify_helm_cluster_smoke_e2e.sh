@@ -35,6 +35,7 @@ MODULE_PATH_IN_IMAGE="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
 RELEASE="markdown-smoke"
 NAMESPACE="markdown-smoke"
 KEEP=0
+CREATED_CLUSTER=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -64,7 +65,11 @@ cleanup() {
     fi
     if [[ "${KEEP}" -eq 0 ]]; then
         helm uninstall "${RELEASE}" --namespace "${NAMESPACE}" >/dev/null 2>&1 || true
-        kind delete cluster --name "${CLUSTER}" >/dev/null 2>&1 || true
+        # Delete only a cluster this run created.  Reusing an existing cluster
+        # is supported, and removing the user's would be destructive.
+        if [[ "${CREATED_CLUSTER}" -eq 1 ]]; then
+            kind delete cluster --name "${CLUSTER}" >/dev/null 2>&1 || true
+        fi
     fi
     rm -rf "${WORK_DIR}"
     return 0
@@ -86,9 +91,21 @@ docker build -q -t "${IMAGE_REF}" "${WORK_DIR}" >&2
 if ! kind get clusters 2>/dev/null | grep -qx "${CLUSTER}"; then
     echo "=== creating kind cluster ${CLUSTER} ===" >&2
     kind create cluster --name "${CLUSTER}" --wait 180s >&2
+    CREATED_CLUSTER=1
 fi
 
 echo "=== loading ${IMAGE_REF} into cluster ===" >&2
+# Split the tag at the LAST colon so a registry port survives:
+#   registry:5000/name:tag -> repository registry:5000/name, tag tag
+# A reference with no tag, or one whose "tag" part still contains a slash, is
+# rejected rather than silently mis-derived.
+IMAGE_REPO="${IMAGE_REF%:*}"
+IMAGE_TAG="${IMAGE_REF##*:}"
+if [[ "${IMAGE_REPO}" == "${IMAGE_REF}" || "${IMAGE_TAG}" == */* || -z "${IMAGE_REPO}" || -z "${IMAGE_TAG}" ]]; then
+    echo "ERROR: unsupported image reference (expected [registry[:port]/]name[:tag]): ${IMAGE_REF}" >&2
+    exit 1
+fi
+
 kind load docker-image "${IMAGE_REF}" --name "${CLUSTER}" >&2
 
 echo "=== installing ${RELEASE} ===" >&2
@@ -96,8 +113,8 @@ kubectl create namespace "${NAMESPACE}" >/dev/null 2>&1 || true
 helm upgrade --install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --kube-context "kind-${CLUSTER}" \
     --namespace "${NAMESPACE}" \
-    --set image.repository="${IMAGE_REF%%:*}" \
-    --set image.tag="${IMAGE_REF##*:}" \
+    --set image.repository="${IMAGE_REPO}" \
+    --set image.tag="${IMAGE_TAG}" \
     --set image.pullPolicy=IfNotPresent \
     --set markdown.enabled=true \
     --set markdown.loadModule="${MODULE_PATH_IN_IMAGE}" \
