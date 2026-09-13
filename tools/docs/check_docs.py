@@ -599,10 +599,13 @@ def check_metric_family_count(files: list[Path]) -> list[str]:
 
 _CHECKLIST_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
 _CHECKLIST_CLAIM_RE = re.compile(
-    r"current (?:head|candidate)s?\b|have not certified|has not certified"
+    r"current (?:head|candidate|branch head)s?\b|have not certified"
+    r"|has not certified"
     r"|latest workflow|as of this (?:commit|writing)"
     r"|\*{0,2}status:?\*{0,2}\s|candidate (?:passed|passes|satisfied)"
-    r"|all required gates (?:passed|are green)",
+    r"|all required gates (?:passed|are green)"
+    r"|remote workflows? (?:have|has) (?:passed|certified)"
+    r"|workflow (?:set|suite) (?:is )?(?:passing|green|certified)",
     re.IGNORECASE,
 )
 

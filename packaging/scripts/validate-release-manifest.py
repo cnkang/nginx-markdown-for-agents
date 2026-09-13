@@ -394,9 +394,12 @@ def validate_manifest(
             )
 
     # SHA256SUMS inclusion and digest consistency
-    # The checksum entries are optional: the checks that read them stay
-    # conditional, while the ones that do not must still run.
+    # Parse the checksum file first: the source-bundle check below compares
+    # against it when it is available, and the rest of the checksum validation
+    # reads the same mapping.
     sha256_entries: dict[str, str] = {}
+    if sha256sums_path and sha256sums_path.exists():
+        sha256_entries = parse_sha256sums(sha256sums_path, errors)
 
     # The bundle is the provenance artifact for a tag release, so its
     # presence, its recorded digest and the URL that points at it are
@@ -424,7 +427,6 @@ def validate_manifest(
             )
 
     if sha256sums_path and sha256sums_path.exists():
-        sha256_entries = parse_sha256sums(sha256sums_path, errors)
         if "release-manifest.json" not in sha256_entries:
             errors.append("release-manifest.json not found in SHA256SUMS")
 
