@@ -649,12 +649,19 @@ _CHECKLIST_CLAIM_RE = re.compile(
     r"current (?:head|candidate|branch head)s?\b|have not certified"
     r"|has not certified"
     r"|latest workflow|as of this (?:commit|writing)"
-    r"|\*{0,2}status:?\*{0,2}\s|candidate (?:passed|passes|satisfied)"
+    r"|\*{0,2}status:\*{0,2}\s|candidate (?:passed|passes|satisfied)"
     r"|all required gates (?:passed|are green)"
     r"|remote workflows? (?:have|has) (?:passed|certified)"
     r"|workflow (?:set|suite) (?:is )?(?:passing|green|certified)",
     re.IGNORECASE,
 )
+
+
+def _list_item_indent(line: str) -> int | None:
+    """Return the indentation of a task-list item, or None when it is not one."""
+    if not _is_task_list_line(line):
+        return None
+    return len(line) - len(line.lstrip())
 
 
 def _is_task_list_line(line: str) -> bool:
@@ -736,6 +743,7 @@ def _checklist_items(content: str, history: set[str]) -> list[str]:
     """
     items: list[str] = []
     current: list[str] = []
+    current_indent = 0
 
     for _lineno, line, is_fence in iter_lines_with_fences(content):
         if is_fence:
@@ -747,8 +755,15 @@ def _checklist_items(content: str, history: set[str]) -> list[str]:
             # prose below the item is not part of it.
             _flush_task_item(items, current)
             continue
-        if _is_task_list_line(line):
+        indent = _list_item_indent(line)
+        if indent is not None:
+            if current and indent > current_indent:
+                # A nested item is part of the requirement above it; only a
+                # sibling or outer item ends the one that is open.
+                current.append(line.strip())
+                continue
             _flush_task_item(items, current)
+            current_indent = indent
             current.append(line)
         elif current and not _starts_block(line):
             # A lazy, unindented continuation belongs to the open item, because

@@ -500,3 +500,24 @@ def test_fence_block_ends_a_task_item(tmp_path):
         encoding="utf-8",
     )
     assert docs_checker.check_release_checklist_is_static([path]) == []
+
+
+def test_checklist_keeps_a_nested_item_with_its_requirement(tmp_path):
+    """A nested item belongs to the requirement above it, not to the next one."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text(
+        "- [ ] publish the bundle\n  - [ ] nested detail\n- [ ] next step\n",
+        encoding="utf-8",
+    )
+    assert docs_checker.check_release_checklist_is_static([path]) == []
+    assert docs_checker._checklist_items(path.read_text(), set()) == [
+        "- [ ] publish the bundle - [ ] nested detail",
+        "- [ ] next step",
+    ]
+
+
+def test_status_claim_requires_the_colon(tmp_path):
+    """Prose like "status rewrite" is not a release claim."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text("status rewrite planned\n", encoding="utf-8")
+    assert docs_checker.check_release_checklist_is_static([path]) == []

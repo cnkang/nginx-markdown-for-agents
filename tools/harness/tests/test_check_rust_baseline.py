@@ -414,3 +414,45 @@ def test_container_image_is_not_shell_expanded(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert any("RUST_VERSION" in error for error in errors), errors
+
+
+def test_version_interpolation_rejects_a_trailing_word(tmp_path: Path) -> None:
+    """`${RUST_VERSION}evil` would claim a version the check never saw."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "env:\n  RUST_VERSION: \"1.98.1\"\njobs:\n  build:\n    steps:\n"
+        "      - run: docker run --rm rust:${RUST_VERSION}evil cargo build\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("${RUST_VERSION}evil" in error for error in errors), errors
+
+
+def test_bare_rust_image_is_rejected(tmp_path: Path) -> None:
+    """A tagless reference floats to `latest`, which is not the frozen version."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    container:\n      image: rust\n    steps:\n"
+        "      - run: cargo build\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("carries no version tag" in error for error in errors), errors
+
+
+def test_uses_step_environment_is_read(tmp_path: Path) -> None:
+    """A `uses` step has no `run`, but its `env` can still declare the version."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
+        "        env:\n          RUST_VERSION: \"1.99.9\"\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("1.99.9" in error for error in errors), errors

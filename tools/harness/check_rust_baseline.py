@@ -166,6 +166,8 @@ def _check_observation_workflows(root: Path, exact: str, errors: list[str]) -> N
 
 
 RUST_IMAGE_RE = re.compile(r"(?<![\w.-])rust:([A-Za-z0-9._${}-]+)")
+# A bare `rust` reference carries no version at all, so it floats.
+BARE_RUST_IMAGE_RE = re.compile(r"(?<![\w.-])rust(?:$|:(?P<tag>[A-Za-z0-9._${}-]*))")
 IMAGE_VERSION_RE = re.compile(r"^(\d+\.\d+\.\d+)(?:-|$)")
 
 
@@ -173,13 +175,6 @@ def _image_version(tag: str) -> str | None:
     """Return the version part of a Rust image tag, if it has one."""
     match = IMAGE_VERSION_RE.match(tag)
     return match.group(1) if match else None
-
-
-def _env_keys(mapping: object) -> set[str]:
-    """Return the environment names an `env:` mapping declares."""
-    if not isinstance(mapping, dict):
-        return set()
-    return {str(key) for key in mapping}
 
 
 def _workflow_document(content: str) -> dict:
@@ -334,9 +329,10 @@ def _job_step_envs(job: object, inherited: dict) -> list[tuple[dict, str]]:
         visible = dict(job_env)
         if isinstance(step.get("env"), dict):
             visible.update(step["env"])
+        # Every step is inspected, including a `uses` step: its `env` can still
+        # declare the version the images are compared against.
         run = step.get("run")
-        if isinstance(run, str):
-            found.append((visible, run))
+        found.append((visible, run if isinstance(run, str) else ""))
     return found
 
 
@@ -365,6 +361,33 @@ def _step_tag_errors(path: Path, visible: set[str], run: str, exact: str) -> lis
     return errors
 
 
+def _is_clean_version_suffix(remainder: str) -> bool:
+    """Say whether what follows `${RUST_VERSION}` still spells the version.
+
+    A suffix has to be an operating-system or variant part, which starts with a
+    hyphen.  Anything else (`${RUST_VERSION}evil`) would let the tag claim a
+    version the check never saw.
+    """
+    return remainder == "" or remainder.startswith("-")
+
+
+def _bare_image_error(path: Path, image: str, exact: str) -> str | None:
+    """Return a complaint when a declarative image names `rust` with no tag.
+
+    Docker resolves a tagless reference to `latest`, so the floating tag would
+    follow whatever Rust release is current.  Only the structured `container`,
+    `services` and `uses: docker://` fields are judged this way: a bare `rust`
+    inside a `run:` script is usually a tool or manifest name, not an image.
+    """
+    stripped = image.strip()
+    if BARE_RUST_IMAGE_RE.match(stripped):
+        return (
+            f"{path}: Rust image {stripped!r} carries no version tag, so it "
+            f"floats to whatever `latest` points at ({exact!r} expected)"
+        )
+    return None
+
+
 def _image_tag_error(
     path: Path, tag: str, exact: str, declared: set[str]
 ) -> str | None:
@@ -384,6 +407,7 @@ def _image_tag_error(
             not names
             or names[0] != "RUST_VERSION"
             or not tag.startswith("${RUST_VERSION}")
+            or not _is_clean_version_suffix(tag[len("${RUST_VERSION}") :])
             or any(name not in declared for name in names)
         ):
             return (
@@ -404,6 +428,28 @@ def _image_tag_error(
             f"rust-toolchain.toml declares {exact!r}"
         )
     return None
+
+
+def _image_field_errors(
+    document: dict,
+    path: Path,
+    exact: str,
+    images: list[str],
+) -> list[str]:
+    """Return the complaints about every declarative image field.
+
+    A declarative image is not shell-expanded, so the version must be literal: a
+    `${...}` name is part of the image string GitHub pulls, and a tagless
+    reference floats to `latest`.
+    """
+    _ = document
+    found: list[str] = []
+    for image in images:
+        bare = _bare_image_error(path, image, exact)
+        if bare is not None:
+            found.append(bare)
+        found.extend(_step_tag_errors(path, set(), image, exact))
+    return found
 
 
 def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> None:
@@ -430,12 +476,14 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
                 )
         # A job may run the module inside its own container, or a service may,
         # so those images are checked against the environment of that job.
-        for image, _visible in _container_images(document):
-            # A declarative image is not shell-expanded, so the version must be
-            # literal: a `${...}` name is part of the image string GitHub pulls.
-            errors.extend(
-                _step_tag_errors(workflows / path.name, set(), image, exact)
+        errors.extend(
+            _image_field_errors(
+                document,
+                workflows / path.name,
+                exact,
+                [image for image, _visible in _container_images(document)],
             )
+        )
         # Each interpolation is judged against the environment visible where it
         # appears, so a name declared in an unrelated job or step cannot satisfy
         # the check.
@@ -444,11 +492,14 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
                 _step_tag_errors(workflows / path.name, visible, run, exact)
             )
         # A step may run a container action, which pins its image in `uses`.
-        for _visible, image in _step_docker_images(document):
-            # Same reasoning as the container images above.
-            errors.extend(
-                _step_tag_errors(workflows / path.name, set(), image, exact)
+        errors.extend(
+            _image_field_errors(
+                document,
+                workflows / path.name,
+                exact,
+                [image for _visible, image in _step_docker_images(document)],
             )
+        )
 
 
 def _check_workflow_inventory(root: Path, errors: list[str]) -> None:
