@@ -165,8 +165,8 @@ def _check_observation_workflows(root: Path, exact: str, errors: list[str]) -> N
             )
 
 
-RUST_IMAGE_RE = re.compile(r"rust:([A-Za-z0-9._${}-]+)")
-IMAGE_VERSION_RE = re.compile(r"^(\d+\.\d+\.\d+)")
+RUST_IMAGE_RE = re.compile(r"(?<![\w.-])rust:([A-Za-z0-9._${}-]+)")
+IMAGE_VERSION_RE = re.compile(r"^(\d+\.\d+\.\d+)(?:-|$)")
 
 
 def _image_version(tag: str) -> str | None:

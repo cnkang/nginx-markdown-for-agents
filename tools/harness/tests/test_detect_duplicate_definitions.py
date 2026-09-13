@@ -48,63 +48,11 @@ def test_unique_names_pass(tmp_path: Path) -> None:
     assert detector.collect_errors(tmp_path) == []
 
 
-def test_duplicate_assignment_is_reported(tmp_path: Path) -> None:
-    """A second binding of the same top-level name is dead code too."""
+def test_rebinding_is_not_reported(tmp_path: Path) -> None:
+    """Rebinding a name is ordinary Python, not a duplicate definition."""
     (tmp_path / "tools").mkdir()
-    (tmp_path / "tools" / "dupe.py").write_text(
-        "FOO = 1\n\n\nFOO = 2\n",
-        encoding="utf-8",
-    )
-
-    errors = detector.collect_errors(tmp_path)
-
-    assert any("FOO" in error for error in errors), errors
-
-
-def test_annotated_assignment_counts(tmp_path: Path) -> None:
-    """An annotated binding is a binding as well."""
-    (tmp_path / "tools").mkdir()
-    (tmp_path / "tools" / "dupe.py").write_text(
-        "BAR: int = 1\n\n\nBAR = 2\n",
-        encoding="utf-8",
-    )
-
-    errors = detector.collect_errors(tmp_path)
-
-    assert any("BAR" in error for error in errors), errors
-
-
-def test_attribute_assignment_is_not_a_binding(tmp_path: Path) -> None:
-    """`config.value = 1` assigns to an attribute, not to `config`."""
-    (tmp_path / "tools").mkdir()
-    (tmp_path / "tools" / "attr.py").write_text(
-        "config = {}\n\n\nconfig.value = 1\n",
-        encoding="utf-8",
-    )
-
-    errors = detector.collect_errors(tmp_path)
-
-    assert errors == [], errors
-
-
-def test_duplicate_import_is_reported(tmp_path: Path) -> None:
-    """The same module imported twice binds the name twice."""
-    (tmp_path / "tools").mkdir()
-    (tmp_path / "tools" / "dupe.py").write_text(
-        "import json\n\n\nimport json\n",
-        encoding="utf-8",
-    )
-
-    errors = detector.collect_errors(tmp_path)
-
-    assert any("json" in error for error in errors), errors
-
-
-def test_distinct_submodules_are_not_duplicates(tmp_path: Path) -> None:
-    """Importing different submodules of one package is legitimate."""
-    (tmp_path / "tools").mkdir()
-    (tmp_path / "tools" / "ok.py").write_text(
-        "import urllib.error\nimport urllib.parse\nimport urllib.request\n",
+    (tmp_path / "tools" / "rebind.py").write_text(
+        "import urllib.error\nimport urllib.parse\n\nvalue = 1\nvalue = value + 1\n",
         encoding="utf-8",
     )
 

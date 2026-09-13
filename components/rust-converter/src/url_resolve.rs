@@ -178,39 +178,43 @@ fn remove_last_segment(output: &mut String) {
 }
 
 fn remove_dot_segments(path: &str) -> String {
-    // The literal algorithm of RFC 3986 section 5.2.4.  It moves one segment
-    // per iteration between the input and the output buffer, so an empty
-    // segment is carried across exactly as the grammar describes rather than
-    // being reconstructed from the joined result.
-    let mut input = path.to_string();
+    // The algorithm of RFC 3986 section 5.2.4, driven by an offset into the
+    // input rather than by rewriting it: each step consumes a prefix or moves
+    // one segment to the output, so nothing is reallocated per iteration.
+    let mut rest = path;
     let mut output = String::new();
 
-    while !input.is_empty() {
-        if let Some(rest) = input.strip_prefix("../") {
-            input = rest.to_string();
-        } else if let Some(rest) = input.strip_prefix("./") {
-            input = rest.to_string();
-        } else if let Some(rest) = input.strip_prefix("/./") {
-            input = format!("/{rest}");
-        } else if input == "/." {
-            input = "/".to_string();
-        } else if let Some(rest) = input.strip_prefix("/../") {
-            input = format!("/{rest}");
+    while !rest.is_empty() {
+        let consumed = if let Some(r) = rest.strip_prefix("../") {
+            rest.len() - r.len()
+        } else if let Some(r) = rest.strip_prefix("./") {
+            rest.len() - r.len()
+        } else if let Some(r) = rest.strip_prefix("/./") {
+            rest.len() - r.len() - 1
+        } else if rest == "/." {
+            // The RFC replaces the whole input with `/`, so the loop continues
+            // with that rather than consuming the dot.
+            rest = "/";
+            continue;
+        } else if let Some(r) = rest.strip_prefix("/../") {
             remove_last_segment(&mut output);
-        } else if input == "/.." {
-            input = "/".to_string();
+            rest.len() - r.len() - 1
+        } else if rest == "/.." {
             remove_last_segment(&mut output);
-        } else if input == "." || input == ".." {
-            input.clear();
+            rest = "/";
+            continue;
+        } else if rest == "." || rest == ".." {
+            rest.len()
         } else {
-            let start = usize::from(input.starts_with('/'));
-            let end = match input[start..].find('/') {
+            let start = usize::from(rest.starts_with('/'));
+            let end = match rest[start..].find('/') {
                 Some(index) => start + index,
-                None => input.len(),
+                None => rest.len(),
             };
-            output.push_str(&input[..end]);
-            input.replace_range(..end, "");
-        }
+            output.push_str(&rest[..end]);
+            end
+        };
+        rest = &rest[consumed..];
     }
 
     output
