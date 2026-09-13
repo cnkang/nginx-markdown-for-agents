@@ -109,6 +109,18 @@ def _check_source_bundle(
     bundle_path = artifact_dir / bundle_name
     recorded = source.get("sha256") if isinstance(source, dict) else None
 
+    # The name comes from the manifest, so the resolved path has to stay inside
+    # the artifact directory: a traversal or an escaping symlink must not make
+    # these checks read something else.
+    root = artifact_dir.resolve()
+    resolved = bundle_path.resolve()
+    if not resolved.is_relative_to(root):
+        errors.append(
+            f"{bundle_name} resolves outside the artifact directory and is not "
+            "inspected"
+        )
+        return
+
     # The URL is part of the provenance claim: a link to a differently named or
     # differently tagged artifact would describe something other than the bundle
     # whose digest the manifest records.
