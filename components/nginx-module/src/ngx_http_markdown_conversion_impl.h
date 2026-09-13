@@ -1223,7 +1223,8 @@ ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
 static void
 ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_uint_t peak_bytes)
 {
-    if (ngx_http_markdown_metrics == NULL || peak_bytes <= 0) {
+    /* peak_bytes is unsigned, so <= 0 means exactly zero. */
+    if (ngx_http_markdown_metrics == NULL || peak_bytes == 0) {
         return;
     }
 

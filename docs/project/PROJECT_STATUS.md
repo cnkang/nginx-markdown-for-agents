@@ -45,7 +45,7 @@ pending until the blocking gates pass.
   metrics endpoint (`requests_total`, `conversion_attempts_total`,
   `conversion_deliveries_total`, `conversion_duration_seconds`,
   `input_bytes_total`, `output_bytes_total`,
-  `streaming_events_total`, `streaming_peak_memory_bytes`,
+  `streaming_events_total`, `conversion_peak_memory_bytes`,
   `decompression_events_total`, `build_info`).
   This replaces the legacy multi-format, per-path, shadow, and debug families.
 - **Directive convergence and ABI 3**: The release freezes 20 active directives

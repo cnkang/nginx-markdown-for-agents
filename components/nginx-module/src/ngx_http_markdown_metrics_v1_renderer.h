@@ -22,7 +22,7 @@
  *   4. nginx_markdown_conversion_duration_seconds (histogram)
  *   5. nginx_markdown_input_bytes_total (counter)
  *   6. nginx_markdown_output_bytes_total (counter)
- *   7. nginx_markdown_streaming_peak_memory_bytes (gauge)
+ *   7. nginx_markdown_conversion_peak_memory_bytes (gauge)
  *   8. nginx_markdown_streaming_events_total (counter)
  *   9. nginx_markdown_decompression_events_total (counter)
  *  10. nginx_markdown_build_info (gauge)
@@ -86,7 +86,7 @@ typedef struct {
 
     ngx_atomic_uint_t output_bytes;
 
-    ngx_atomic_uint_t streaming_peak_memory_bytes;
+    ngx_atomic_uint_t conversion_peak_memory_bytes;
 
     struct {
         ngx_atomic_uint_t commit;
@@ -341,13 +341,13 @@ ngx_http_markdown_metrics_v1_render_families_4_to_7(
     }
 
     p = ngx_slprintf(p, end,
-        "# HELP nginx_markdown_streaming_peak_memory_bytes "
+        "# HELP nginx_markdown_conversion_peak_memory_bytes "
         "Run-wide high-water mark of the conversion peak working-set "
         "estimate (streaming and full-buffer); not process RSS.\n"
-        "# TYPE nginx_markdown_streaming_peak_memory_bytes gauge\n"
-        "nginx_markdown_streaming_peak_memory_bytes %uA\n"
+        "# TYPE nginx_markdown_conversion_peak_memory_bytes gauge\n"
+        "nginx_markdown_conversion_peak_memory_bytes %uA\n"
         "\n",
-        snapshot->streaming_peak_memory_bytes);
+        snapshot->conversion_peak_memory_bytes);
     if (p >= end) {
         return NULL;
     }
