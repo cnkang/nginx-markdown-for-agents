@@ -1455,9 +1455,11 @@ jobs:
             digest="$(shasum -a 256 "${bundle}" | awk '{print $1}')"
           fi
           test -n "${digest}"
-          echo "SOURCE_SHA=${digest}" >> "${GITHUB_ENV}"
-          echo "SOURCE_BUNDLE_NAME=$(basename "${bundle}")" >> "${GITHUB_ENV}"
-          echo "SOURCE_URL=https://github.com/${GH_REPO}/releases/download/${RELEASE_TAG}/$(basename "${bundle}")" >> "${GITHUB_ENV}"
+          {
+            echo "SOURCE_SHA=${digest}"
+            echo "SOURCE_BUNDLE_NAME=$(basename "${bundle}")"
+            echo "SOURCE_URL=https://github.com/${GH_REPO}/releases/download/${RELEASE_TAG}/$(basename "${bundle}")"
+          } >> "${GITHUB_ENV}"
         shell: bash
 
       - name: Generate release manifest
