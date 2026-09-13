@@ -163,26 +163,49 @@ def _check_observation_workflows(root: Path, exact: str, errors: list[str]) -> N
             )
 
 
-RUST_IMAGE_RE = re.compile(r"rust:([A-Za-z0-9._-]+)")
+RUST_IMAGE_RE = re.compile(r"rust:([A-Za-z0-9._${}-]+)")
+RUST_VERSION_ENV_RE = re.compile(r"^\s*RUST_VERSION:\s*['\"]?([^'\"\s#]+)", re.MULTILINE)
+IMAGE_VERSION_RE = re.compile(r"^(\d+\.\d+\.\d+)")
+
+
+def _image_version(tag: str) -> str | None:
+    """Return the version part of a Rust image tag, if it has one."""
+    match = IMAGE_VERSION_RE.match(tag)
+    return match.group(1) if match else None
 
 
 def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> None:
-    """Check the Rust version baked into any container image a workflow names.
+    """Check every way a workflow can pin the Rust version for a container.
 
-    A workflow that installs Rust inside a container never declares an action
-    toolchain, so the inventory check above cannot see it.  The image tag is
-    then the only record of the version, and it has to agree with
-    rust-toolchain.toml like every other declaration.
+    A workflow that installs Rust inside an image never declares an action
+    toolchain, so the inventory check above cannot see it.  Two forms remain: a
+    container image tag, and a `RUST_VERSION` variable that the tag interpolates.
+    The version part of a tag must equal the canonical version; an operating
+    system suffix such as `-alpine3.21` is not a version and does not matter.
     """
     workflows = Path(".github/workflows")
     for path in sorted((root / workflows).glob("*.y*ml")):
         content = path.read_text(encoding="utf-8")
-        for tag in sorted(set(RUST_IMAGE_RE.findall(content))):
-            if tag != exact:
+        for declared in sorted(set(RUST_VERSION_ENV_RE.findall(content))):
+            if declared != exact:
                 errors.append(
-                    f"{workflows / path.name}: Rust container image tag "
-                    f"{tag!r} is not the exact version {exact!r} declared by "
-                    "rust-toolchain.toml"
+                    f"{workflows / path.name}: RUST_VERSION is {declared!r} but "
+                    f"rust-toolchain.toml declares {exact!r}"
+                )
+        for tag in sorted(set(RUST_IMAGE_RE.findall(content))):
+            if "$" in tag:
+                # Interpolated: the variable check above covers it.
+                continue
+            version = _image_version(tag)
+            if version is None:
+                errors.append(
+                    f"{workflows / path.name}: Rust image tag {tag!r} carries no "
+                    f"exact MAJOR.MINOR.PATCH version ({exact!r} expected)"
+                )
+            elif version != exact:
+                errors.append(
+                    f"{workflows / path.name}: Rust image tag {tag!r} pins "
+                    f"{version!r} but rust-toolchain.toml declares {exact!r}"
                 )
 
 

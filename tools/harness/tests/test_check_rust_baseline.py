@@ -115,6 +115,33 @@ def test_floating_canonical_toolchain_fails(tmp_path: Path) -> None:
     assert msrv is None
     assert any("exact MAJOR.MINOR.PATCH" in error for error in errors)
 
+def test_container_rust_version_variable_drift_fails(tmp_path: Path) -> None:
+    """The interpolated form is checked through its variable."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "env:\n  RUST_VERSION: 1.99.0\n"
+        "jobs:\n  build:\n    steps:\n      - run: docker run rust:${RUST_VERSION}\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("RUST_VERSION is '1.99.0'" in error for error in errors), errors
+
+
+def test_os_suffixed_image_tag_is_accepted(tmp_path: Path) -> None:
+    """An OS suffix is not part of the version and must not be flagged."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    steps:\n      - run: docker run rust:1.97.0-alpine3.21\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert not any("rust:" in error for error in errors), errors
+
+
 def test_container_rust_image_drift_fails(tmp_path: Path) -> None:
     """An image tag is a version declaration the inventory check cannot see."""
     _write_valid_fixture(tmp_path)
