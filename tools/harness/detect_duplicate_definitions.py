@@ -19,13 +19,27 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = ("tools", "packaging")
 
 
-def _bound_names(node: ast.AST) -> list[str]:
-    """Return the top-level names an assignment binds, if it binds any."""
+def _bound_targets(node: ast.AST) -> list[ast.AST]:
+    """Return the binding targets a top-level statement introduces."""
     if isinstance(node, ast.Assign):
-        return [t.id for t in node.targets if isinstance(t, ast.Name)]
-    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-        return [node.target.id]
+        return list(node.targets)
+    if isinstance(node, ast.AnnAssign):
+        return [node.target]
+    if isinstance(node, (ast.For, ast.AsyncFor)):
+        return [node.target]
+    if isinstance(node, ast.With):
+        return [item.optional_vars for item in node.items if item.optional_vars is not None]
     return []
+
+
+def _bound_names(node: ast.AST) -> list[str]:
+    """Return the top-level names a binding statement introduces."""
+    return [
+        child.id
+        for target in _bound_targets(node)
+        for child in ast.walk(target)
+        if isinstance(child, ast.Name)
+    ]
 
 
 def duplicate_names(path: Path) -> list[str]:

@@ -192,42 +192,104 @@ def _workflow_document(content: str) -> dict:
     return document if isinstance(document, dict) else {}
 
 
-def _step_environments(content: str) -> list[tuple[set[str], str]]:
-    """Return (visible env names, run script) for every step in a workflow.
+def _declared_version_values(document: dict) -> list[str]:
+    """Return every `RUST_VERSION` value the workflow declares.
 
-    A step sees the workflow's `env`, its job's `env` and its own, and nothing
-    else.  Resolving the names per step keeps a variable declared in an
-    unrelated job from satisfying the image check.
+    Reading the parsed document covers inline mappings (`env: {RUST_VERSION: …}`)
+    that a line pattern would miss.
     """
-    document = _workflow_document(content)
-    if not document:
-        return []
+    values: list[str] = []
+    for visible, _run in _step_visible_envs(document):
+        value = visible.get("RUST_VERSION")
+        if isinstance(value, str):
+            values.append(value)
+    return values
 
-    workflow_env = _env_keys(document.get("env"))
+
+def _job_env(job: dict, inherited: dict) -> dict:
+    """Return the environment a job adds to the one it inherits."""
+    merged = dict(inherited)
+    if isinstance(job.get("env"), dict):
+        merged.update(job["env"])
+    return merged
+
+
+def _job_images(job: dict, visible: dict) -> list[tuple[str, set[str]]]:
+    """Return the images a job runs as its own container, with its environment."""
+    names = {str(key) for key in visible}
+    images: list[tuple[str, set[str]]] = []
+    container = job.get("container")
+    if isinstance(container, dict) and isinstance(container.get("image"), str):
+        images.append((container["image"], names))
+    services = job.get("services")
+    if isinstance(services, dict):
+        for service in services.values():
+            if isinstance(service, dict) and isinstance(service.get("image"), str):
+                images.append((service["image"], names))
+    return images
+
+
+def _container_images(document: dict) -> list[tuple[str, set[str]]]:
+    """Return every job or service container image, with the environment it sees."""
+    inherited = document.get("env")
+    inherited = inherited if isinstance(inherited, dict) else {}
     jobs = document.get("jobs")
     if not isinstance(jobs, dict):
         return []
-    found: list[tuple[set[str], str]] = []
+    found: list[tuple[str, set[str]]] = []
     for job in jobs.values():
-        found.extend(_job_step_environments(job, workflow_env))
+        if isinstance(job, dict):
+            found.extend(_job_images(job, _job_env(job, inherited)))
     return found
 
 
-def _job_step_environments(job: object, inherited: set[str]) -> list[tuple[set[str], str]]:
-    """Return (visible env names, run script) for each step of one job."""
+def _step_visible_envs(document: dict) -> list[tuple[dict, str]]:
+    """Return (visible env mapping, run script) for every step in a workflow.
+
+    A step sees the workflow's `env`, its job's `env` and its own, and nothing
+    else.  Resolving them per step keeps a variable declared in an unrelated job
+    from satisfying the image check.
+    """
+    workflow_env = document.get("env")
+    workflow_env = workflow_env if isinstance(workflow_env, dict) else {}
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
+    found: list[tuple[dict, str]] = []
+    for job in jobs.values():
+        found.extend(_job_step_envs(job, workflow_env))
+    return found
+
+
+def _step_environments(content: str) -> list[tuple[set[str], str]]:
+    """Return (visible env names, run script) for every step in a workflow."""
+    document = _workflow_document(content)
+    if not document:
+        return []
+    return [
+        ({str(key) for key in mapping}, run)
+        for mapping, run in _step_visible_envs(document)
+    ]
+
+
+def _job_step_envs(job: object, inherited: dict) -> list[tuple[dict, str]]:
+    """Return (visible env mapping, run script) for each step of one job."""
     if not isinstance(job, dict):
         return []
-    job_env = inherited | _env_keys(job.get("env"))
+    job_env = _job_env(job, inherited)
     steps = job.get("steps")
     if not isinstance(steps, list):
         return []
-    found: list[tuple[set[str], str]] = []
+    found: list[tuple[dict, str]] = []
     for step in steps:
         if not isinstance(step, dict):
             continue
+        visible = dict(job_env)
+        if isinstance(step.get("env"), dict):
+            visible.update(step["env"])
         run = step.get("run")
         if isinstance(run, str):
-            found.append((job_env | _env_keys(step.get("env")), run))
+            found.append((visible, run))
     return found
 
 
@@ -309,12 +371,21 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
     workflows = Path(".github/workflows")
     for path in sorted((root / workflows).glob("*.y*ml")):
         content = path.read_text(encoding="utf-8")
-        for declared in sorted(set(RUST_VERSION_ENV_RE.findall(content))):
+        document = _workflow_document(content)
+        declared_values = set(RUST_VERSION_ENV_RE.findall(content))
+        declared_values.update(_declared_version_values(document))
+        for declared in sorted(declared_values):
             if declared != exact:
                 errors.append(
                     f"{workflows / path.name}: RUST_VERSION is {declared!r} but "
                     f"rust-toolchain.toml declares {exact!r}"
                 )
+        # A job may run the module inside its own container, or a service may,
+        # so those images are checked against the environment of that job.
+        for image, visible in _container_images(document):
+            errors.extend(
+                _step_tag_errors(workflows / path.name, visible, image, exact)
+            )
         # Each interpolation is judged against the environment visible where it
         # appears, so a name declared in an unrelated job or step cannot satisfy
         # the check.
