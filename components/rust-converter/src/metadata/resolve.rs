@@ -11,7 +11,7 @@
 //! | Input URL | Base URL | Result |
 //! |----------|----------|--------|
 //! | `https://example.com/page` | any | `https://example.com/page` (already absolute) |
-//! | `//example.com/page` | any | `//example.com/page` (protocol-relative) |
+//! | `//example.com/page` | `https://host/` | `https://example.com/page` (network-path) |
 //! | `/path/to/page` | `https://host/` | `https://host/path/to/page` |
 //! | `relative/path` | `https://host/dir/` | `https://host/dir/relative/path` |
 //! | empty string | any | empty string (no resolution) |
@@ -28,8 +28,10 @@ impl MetadataExtractor {
     /// Resolve relative URL to absolute URL.
     ///
     /// If URL resolution is disabled (`resolve_urls == false`) or the URL is
-    /// empty, the input is returned unchanged. Already-absolute URLs (with
-    /// `http://`, `https://`, or `//` prefix) are also returned unchanged.
+    /// empty, the input is returned unchanged, and so are URLs that carry their
+    /// own scheme. A network-path reference (`//example.com/page`) keeps its
+    /// authority and inherits the base scheme, which is what RFC 3986 section
+    /// 5.2 requires.
     ///
     /// For relative URLs, the base URL's origin (scheme + authority) or
     /// directory prefix is used to construct the absolute form.
