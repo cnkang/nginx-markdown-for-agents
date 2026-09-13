@@ -319,12 +319,14 @@ fn test_resolve_absolute_url() {
 }
 
 #[test]
-fn test_resolve_protocol_relative_url() {
+fn test_resolve_network_path_url_inherits_the_base_scheme() {
+    // A network-path reference keeps its authority and takes the base scheme,
+    // so the emitted metadata URL is fetchable rather than scheme-relative.
     let extractor = MetadataExtractor::new(Some("https://example.com/page".to_string()), true);
 
     assert_eq!(
         extractor.resolve_url("//cdn.example.com/image.jpg"),
-        "//cdn.example.com/image.jpg"
+        "https://cdn.example.com/image.jpg"
     );
 }
 

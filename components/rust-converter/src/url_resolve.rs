@@ -7,10 +7,12 @@
 //! from producing different URLs depending on the processing path.
 //!
 //! Implements the reference-resolution algorithm of RFC 3986 section 5.2:
-//! reference forms (absolute with scheme, protocol-relative, absolute path,
-//! relative path, query-only, fragment-only), path merging (5.2.3), and
-//! dot-segment removal (5.2.4). Only `http`/`https` bases are resolved;
-//! any other base returns `None` so the caller can keep the original text.
+//! reference forms (absolute with scheme, network-path, absolute path, relative
+//! path, query-only, fragment-only), path merging (5.2.3), and dot-segment
+//! removal (5.2.4), which preserves empty segments. A network-path reference
+//! keeps its own authority and inherits the base scheme. Only `http`/`https`
+//! bases are resolved; any other base returns `None` so the caller can keep the
+//! original text.
 
 /// Resolve `reference` against `base`, or return `None` when the base cannot
 /// be used (not an absolute `http`/`https` URL, or malformed).
@@ -40,10 +42,23 @@ pub(crate) fn resolve_reference(base: &str, reference: &str) -> Option<String> {
     let (ref_authority, path, query, fragment) = split_rest(ref_rest);
 
     if !ref_authority.is_empty() {
-        // Protocol-relative references are already absolute in the sense the
-        // module documents, so they pass through unchanged rather than
-        // inheriting the base scheme.
-        return Some(reference.to_string());
+        // A network-path reference keeps its own authority and inherits the base
+        // scheme (RFC 3986 section 5.2, second reference form), so
+        // `//cdn.example.com/x` becomes `https://cdn.example.com/x`. Emitting it
+        // unchanged would hand a Markdown consumer a scheme-relative string it
+        // cannot fetch or compare.
+        let target_path = if path.is_empty() {
+            String::new()
+        } else {
+            remove_dot_segments(&path)
+        };
+        return Some(assemble(
+            &scheme,
+            &ref_authority,
+            &target_path,
+            query.as_deref(),
+            fragment.as_deref(),
+        ));
     }
 
     // Every other form keeps the base authority: only the base is a full URL.
@@ -154,11 +169,18 @@ fn merge(base_path: &str, path: &str) -> String {
 fn remove_dot_segments(path: &str) -> String {
     let absolute = path.starts_with('/');
     let trailing_slash = path.ends_with('/') || path.ends_with("/.") || path.ends_with("/..");
+    let parts: Vec<&str> = path.split('/').collect();
+    let last_index = parts.len().saturating_sub(1);
     let mut segments: Vec<&str> = Vec::new();
 
-    for segment in path.split('/') {
-        match segment {
-            "" | "." => continue,
+    for (index, segment) in parts.iter().enumerate() {
+        match *segment {
+            "." => continue,
+            // The leading empty piece marks the root and the trailing one stands
+            // for the final slash, which the trailing_slash branch re-adds.  Any
+            // other empty piece is a real empty segment and must survive, as
+            // RFC 3986 section 5.2.4 requires: `/a//b` stays `/a//b`.
+            "" if (index == 0 && absolute) || index == last_index => continue,
             ".." => {
                 if segments.pop().is_none() && !absolute {
                     continue;
@@ -217,9 +239,13 @@ mod tests {
             ("https://other.example/x", "https://other.example/x"),
             ("mailto:user@example.com", "mailto:user@example.com"),
             ("tel:+1234", "tel:+1234"),
-            // Protocol-relative references pass through unchanged, matching
-            // the documented resolution rules for metadata and body URLs.
-            ("//cdn.example.com/a.js", "//cdn.example.com/a.js"),
+            // A network-path reference keeps its own authority and inherits the
+            // base scheme (RFC 3986 section 5.2).
+            ("//cdn.example.com/a.js", "https://cdn.example.com/a.js"),
+            ("//cdn.example.com", "https://cdn.example.com"),
+            // Empty segments are preserved (section 5.2.4).
+            ("/a//b", "https://example.com/a//b"),
+            ("/a//b/./c", "https://example.com/a//b/c"),
             // absolute path
             ("/hero.png", "https://example.com/hero.png"),
             // relative paths, including dot segments
