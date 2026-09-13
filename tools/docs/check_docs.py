@@ -659,8 +659,7 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
         if not path.name.endswith("-release-checklist.md"):
             continue
         content = path.read_text(encoding="utf-8")
-        history = _checklist_history(content)
-        for block in _logical_blocks(content, history):
+        for block in _logical_blocks(content, _checklist_history(content)):
             if _CHECKLIST_CLAIM_RE.search(block):
                 failures.append(
                     f"{path}: states mutable candidate status; keep the "
@@ -681,6 +680,17 @@ def _checklist_history(content: str) -> set[str]:
     return set(_document_update_table_lines(content))
 
 
+def _starts_block(line: str) -> bool:
+    """True when a line opens a new Markdown block rather than continuing one."""
+    stripped = line.lstrip()
+    if stripped[:1] in ("#", ">", "|"):
+        return True
+    if stripped[:3] in ("```", "~~~"):
+        return True
+    # A list marker of any kind opens a new block.
+    return bool(re.match(r"[-*+]\s", stripped)) or bool(re.match(r"\d+[.)]\s", stripped))
+
+
 def _checklist_items(content: str, history: set[str]) -> list[str]:
     """Assemble every task item in a checklist, continuation lines included.
 
@@ -696,11 +706,14 @@ def _checklist_items(content: str, history: set[str]) -> list[str]:
         if _is_task_list_line(line):
             _flush_task_item(items, current)
             current.append(line)
-        elif current and line[:1] in (" ", "\t"):
-            # An indented line continues the item that is already open.
+        elif current and not _starts_block(line):
+            # A lazy, unindented continuation belongs to the open item, because
+            # CommonMark reads it as part of the same paragraph.  A line that
+            # opens another block ends the item instead.
             current.append(line.strip())
         else:
             _flush_task_item(items, current)
+            continue
 
     _flush_task_item(items, current)
     return items

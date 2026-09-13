@@ -459,3 +459,24 @@ def test_wrapped_prose_claim_is_rejected(tmp_path):
     )
     failures = docs_checker.check_release_checklist_is_static([path])
     assert failures and "mutable candidate status" in failures[0]
+
+
+def test_lazy_continuation_commit_is_rejected(tmp_path):
+    """An unindented continuation belongs to the item and is scanned."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text(
+        "- [ ] evidence passes the validator.\ncommit 1234567\n",
+        encoding="utf-8",
+    )
+    failures = docs_checker.check_release_checklist_is_static([path])
+    assert failures and "names a commit" in failures[0]
+
+
+def test_heading_ends_the_task_item(tmp_path):
+    """A heading opens a new block, so its text is not part of the item."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text(
+        "- [ ] publish the release\n\n## Verification Record\n\ncommit 1234567\n",
+        encoding="utf-8",
+    )
+    assert docs_checker.check_release_checklist_is_static([path]) == []

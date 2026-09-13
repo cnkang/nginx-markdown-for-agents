@@ -170,66 +170,50 @@ fn merge(base_path: &str, path: &str) -> String {
 /// The trailing slashes belong to the path: `/a//` keeps both of them, and the
 /// dot-suffix forms `/a/.` and `/a/..` end in exactly one.  Counting the run
 /// first keeps every trailing slash, which re-attaching a single one cannot.
+fn remove_last_segment(output: &mut String) {
+    match output.rfind('/') {
+        Some(index) => output.truncate(index),
+        None => output.clear(),
+    }
+}
+
 fn remove_dot_segments(path: &str) -> String {
-    let absolute = path.starts_with('/');
-    // A trailing dot segment keeps the segment in the body so the rules below
-    // drop it (or pop for `..`), and it implies exactly one trailing slash.
-    let dot_suffix = path.ends_with("/.") || path.ends_with("/..");
-    let trailing_slashes = if dot_suffix {
-        1
-    } else {
-        path.len() - path.trim_end_matches('/').len()
-    };
-    let body = if dot_suffix {
-        path
-    } else {
-        &path[..path.len().saturating_sub(trailing_slashes)]
-    };
+    // The literal algorithm of RFC 3986 section 5.2.4.  It moves one segment
+    // per iteration between the input and the output buffer, so an empty
+    // segment is carried across exactly as the grammar describes rather than
+    // being reconstructed from the joined result.
+    let mut input = path.to_string();
+    let mut output = String::new();
 
-    let mut segments: Vec<&str> = Vec::new();
-
-    for (index, segment) in body.split('/').enumerate() {
-        match segment {
-            // The leading empty piece marks the root, not a segment.
-            "" if index == 0 && absolute => continue,
-            "." => continue,
-            ".." => {
-                if segments.pop().is_none() && !absolute {
-                    continue;
-                }
-            }
-            other => segments.push(other),
+    while !input.is_empty() {
+        if let Some(rest) = input.strip_prefix("../") {
+            input = rest.to_string();
+        } else if let Some(rest) = input.strip_prefix("./") {
+            input = rest.to_string();
+        } else if let Some(rest) = input.strip_prefix("/./") {
+            input = format!("/{rest}");
+        } else if input == "/." {
+            input = "/".to_string();
+        } else if let Some(rest) = input.strip_prefix("/../") {
+            input = format!("/{rest}");
+            remove_last_segment(&mut output);
+        } else if input == "/.." {
+            input = "/".to_string();
+            remove_last_segment(&mut output);
+        } else if input == "." || input == ".." {
+            input.clear();
+        } else {
+            let start = usize::from(input.starts_with('/'));
+            let end = match input[start..].find('/') {
+                Some(index) => start + index,
+                None => input.len(),
+            };
+            output.push_str(&input[..end]);
+            input.replace_range(..end, "");
         }
     }
 
-    let joined = segments.join("/");
-
-    let mut result = String::new();
-    if absolute {
-        result.push('/');
-    }
-    // Keep whatever trailing slash the segments themselves carry: `/a//.` drops
-    // the dot segment but keeps both slashes, so trimming here would lose one.
-    result.push_str(&joined);
-
-    // Append the run the trailing slashes represent, except for the root, which
-    // already carries the single slash `/a/..` must resolve to.
-    if !(absolute && joined.is_empty()) {
-        for _ in 0..trailing_slashes {
-            result.push('/');
-        }
-    } else if absolute {
-        // Every segment was empty, so the path is a run of slashes: keep the
-        // run rather than collapsing it to the root.
-        for _ in 1..trailing_slashes {
-            result.push('/');
-        }
-    }
-
-    if result.is_empty() {
-        result.push('/');
-    }
-    result
+    output
 }
 
 /// Reassemble a resolved URL.
@@ -279,6 +263,8 @@ mod tests {
             // A trailing dot segment resolves to one slash, and `..` climbs.
             ("/a/.", "https://example.com/a/"),
             ("/a//.", "https://example.com/a//"),
+            // A `..` that climbs away leaves the empty segment `//` created.
+            ("/a/..//.", "https://example.com//"),
             ("/a///.", "https://example.com/a///"),
             ("/a/b/.", "https://example.com/a/b/"),
             ("/a/..", "https://example.com/"),

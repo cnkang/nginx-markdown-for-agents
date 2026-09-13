@@ -1215,9 +1215,9 @@ ngx_http_markdown_validate_conversion_result(ngx_http_request_t *r,
  * run-wide high-water gauge (perf.conversion_peak_memory_bytes).  The
  * gauge keeps the run-wide maximum across both streaming and full-buffer
  * conversions so the soak qualification gate can observe a per-request
- * peak for every engine.  Guarded by MARKDOWN_STREAMING_ENABLED: the
- * gauge field only exists in streaming builds (and core-only test
- * builds stub the metrics pointer as NULL).
+ * peak for every engine.  The gauge field is part of the always-present perf
+ * group, so every build records it (core-only test builds stub the metrics
+ * pointer as NULL).
  */
 static void
 ngx_http_markdown_metrics_record_conversion_peak(ngx_atomic_uint_t peak_bytes)

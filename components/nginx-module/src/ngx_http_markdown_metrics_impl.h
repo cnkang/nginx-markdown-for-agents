@@ -171,7 +171,6 @@ typedef struct {
         ngx_atomic_uint_t precommit_reject_total;
         ngx_atomic_uint_t budget_exceeded_total;
         ngx_atomic_uint_t last_ttfb_ms;
-        ngx_atomic_uint_t last_peak_memory_bytes;
 
         /* Fallback/failure counters */
         ngx_atomic_uint_t streaming_fallback_precommit_pass;
@@ -414,8 +413,6 @@ ngx_http_markdown_collect_streaming_snapshot(
     snapshot->streaming.budget_exceeded_total =
         metrics->streaming.budget_exceeded_total;
     snapshot->streaming.last_ttfb_ms = metrics->streaming.last_ttfb_ms;
-    snapshot->streaming.last_peak_memory_bytes =
-        metrics->perf.conversion_peak_memory_bytes;
     snapshot->streaming.engine_choice.streaming =
         metrics->streaming.engine_choice.streaming;
     snapshot->streaming.engine_choice.full_buffer =
