@@ -226,3 +226,18 @@ def test_undeclared_suffix_variable_is_rejected(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert any("cannot resolve" in error for error in errors), errors
+
+
+def test_prefix_before_the_version_is_rejected(tmp_path: Path) -> None:
+    """A prefix ahead of the version interpolation is not a version pin."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "env:\n  RUST_VERSION: 1.97.0\n"
+        "jobs:\n  build:\n    steps:\n"
+        "      - run: docker run rust:prefix${RUST_VERSION}-alpine3.21\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("cannot resolve" in error for error in errors), errors

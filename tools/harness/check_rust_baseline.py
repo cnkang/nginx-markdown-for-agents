@@ -192,7 +192,12 @@ def _image_tag_error(
         # other interpolation has to be a declared value: an undeclared one
         # could stand in for a different version.  A declared suffix such as an
         # Alpine release is fine, because it does not carry the Rust version.
-        if not names or names[0] != "RUST_VERSION" or any(n not in declared for n in names[1:]):
+        if (
+            not names
+            or names[0] != "RUST_VERSION"
+            or not tag.startswith("${RUST_VERSION}")
+            or any(n not in declared for n in names[1:])
+        ):
             return (
                 f"{path}: Rust image tag {tag!r} interpolates a value this check "
                 f"cannot resolve ({exact!r} expected)"
