@@ -328,6 +328,10 @@ class TestValidateManifest(unittest.TestCase):
                     "sha256": sha256_bytes(b"fake-content"),
                 }
             ]
+        # The tag pipeline publishes a source bundle built from the released
+        # commit, so a valid tag fixture carries that artifact and its digest.
+        bundle_name = "nginx-markdown-for-agents-source-v0.8.3.tar.gz"
+        (self.artifact_dir / bundle_name).write_bytes(b"fake-bundle")
         manifest = {
             "schema_version": 1,
             "project": "nginx-markdown-for-agents",
@@ -338,8 +342,11 @@ class TestValidateManifest(unittest.TestCase):
                 "commit": "abc1234def567890",
             },
             "source": {
-                "archive_url": "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz",
-                "sha256": "a" * 64,
+                "archive_url": (
+                    "https://github.com/cnkang/nginx-markdown-for-agents/releases/"
+                    "download/v0.8.3/nginx-markdown-for-agents-source-v0.8.3.tar.gz"
+                ),
+                "sha256": sha256_bytes(b"fake-bundle"),
                 "available": True,
             },
             "packages": packages,
@@ -444,6 +451,15 @@ class TestValidateManifest(unittest.TestCase):
         manifest = self._make_valid_manifest()
         tag = "v0.8.3-rc.1+build.7"
         manifest["git"]["tag"] = tag
+        # The published bundle is named for the tag, so a pre-release tag needs
+        # its own artifact and digest.
+        bundle_name = f"nginx-markdown-for-agents-source-{tag}.tar.gz"
+        (self.artifact_dir / bundle_name).write_bytes(b"fake-bundle")
+        # The helper's bundle belongs to the other tag, and the checksum sweep
+        # covers every tarball, so it would land in SHA256SUMS as an unexpected
+        # name for this tag.
+        (self.artifact_dir / "nginx-markdown-for-agents-source-v0.8.3.tar.gz").unlink()
+        manifest["source"]["sha256"] = sha256_bytes(b"fake-bundle")
         self.manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
         installer = f"nginx-markdown-for-agents-installer-{tag}.sh"
