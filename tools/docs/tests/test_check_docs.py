@@ -447,3 +447,15 @@ def test_claim_split_across_lines_is_rejected(tmp_path):
     )
     failures = docs_checker.check_release_checklist_is_static([path])
     assert failures and "mutable candidate status" in failures[0]
+
+
+def test_wrapped_prose_claim_is_rejected(tmp_path):
+    """A status claim wrapped without indentation is still one sentence."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text(
+        "Publish the release. The current branch head\n"
+        "has the full remote workflow set passing.\n",
+        encoding="utf-8",
+    )
+    failures = docs_checker.check_release_checklist_is_static([path])
+    assert failures and "mutable candidate status" in failures[0]

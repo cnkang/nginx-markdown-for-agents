@@ -241,3 +241,33 @@ def test_prefix_before_the_version_is_rejected(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert any("cannot resolve" in error for error in errors), errors
+
+
+def test_job_name_is_not_a_declared_environment_variable(tmp_path: Path) -> None:
+    """An uppercase job key must not count as an environment name."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "env:\n  RUST_VERSION: 1.97.0\n"
+        "jobs:\n  SNEAKY:\n    steps:\n"
+        "      - run: docker run rust:${RUST_VERSION}-${SNEAKY}\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("cannot resolve" in error for error in errors), errors
+
+
+def test_job_level_env_is_a_declared_variable(tmp_path: Path) -> None:
+    """A job's own env mapping is visible to its steps."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "env:\n  RUST_VERSION: 1.97.0\n"
+        "jobs:\n  build:\n    env:\n      ALPINE_VERSION: 3.21\n    steps:\n"
+        "      - run: docker run rust:${RUST_VERSION}-alpine${ALPINE_VERSION}\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert not any("rust:" in error for error in errors), errors
