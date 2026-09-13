@@ -224,7 +224,7 @@ def _image_tag_error(
             not names
             or names[0] != "RUST_VERSION"
             or not tag.startswith("${RUST_VERSION}")
-            or any(n not in declared for n in names[1:])
+            or any(name not in declared for name in names)
         ):
             return (
                 f"{path}: Rust image tag {tag!r} interpolates a value this check "
