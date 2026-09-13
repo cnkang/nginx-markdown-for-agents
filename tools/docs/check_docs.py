@@ -585,8 +585,9 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
 
     A checklist that names the head of the day goes stale with the next commit,
     and a stale checklist read as certification is worse than no checklist.  The
-    status preamble must therefore avoid commit identifiers and current-state
-    claims; the Document Updates table below still records history.
+    scan covers the whole document, because status text drifts wherever it sits,
+    but it ignores fenced code blocks and the Document Updates table, which
+    legitimately records commit identifiers as history.
     """
     failures: list[str] = []
     sha_re = re.compile(r"\b[0-9a-f]{7,40}\b")
@@ -600,22 +601,22 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
     for path in files:
         if not path.name.endswith("-release-checklist.md"):
             continue
-        preamble: list[str] = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if line.startswith("## "):
-                break
-            preamble.append(line)
-        text = "\n".join(preamble)
-        if sha_re.search(text):
-            failures.append(
-                f"{path}: the status preamble names a commit; bind status to the "
-                "candidate-bound release evidence instead"
-            )
-        if claim_re.search(text):
-            failures.append(
-                f"{path}: the status preamble states mutable candidate status; "
-                "keep the checklist to requirements"
-            )
+        content = path.read_text(encoding="utf-8")
+        history = set(_document_update_table_lines(content))
+        for _lineno, line in iter_unfenced_lines(content):
+            if not line.strip() or line in history:
+                continue
+            # A requirement must not pin a commit; prose may record history.
+            if line.lstrip().startswith(("- [ ]", "- [x]")) and sha_re.search(line):
+                failures.append(
+                    f"{path}: a requirement names a commit; bind status to the "
+                    "candidate-bound release evidence instead"
+                )
+            if claim_re.search(line):
+                failures.append(
+                    f"{path}: states mutable candidate status; keep the "
+                    "checklist to requirements"
+                )
     return failures
 
 
