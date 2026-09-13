@@ -380,7 +380,10 @@ def _bare_image_error(path: Path, image: str, exact: str) -> str | None:
     inside a `run:` script is usually a tool or manifest name, not an image.
     """
     stripped = image.strip()
-    if BARE_RUST_IMAGE_RE.match(stripped):
+    match = BARE_RUST_IMAGE_RE.match(stripped)
+    # A tag is a version someone wrote down; `_image_tag_error` judges it.  Only a
+    # reference with no tag at all floats to `latest` and belongs here.
+    if match is not None and not match.group("tag"):
         return (
             f"{path}: Rust image {stripped!r} carries no version tag, so it "
             f"floats to whatever `latest` points at ({exact!r} expected)"
@@ -463,7 +466,9 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
     """
     workflows = Path(".github/workflows")
     for path in sorted((root / workflows).glob("*.y*ml")):
-        content = path.read_text(encoding="utf-8")
+        content = _read_text(root, workflows / path.name, errors)
+        if content is None:
+            continue
         document = _workflow_document(content)
         # The parsed document is authoritative: a line pattern would also match
         # a `RUST_VERSION:` that is not an environment declaration at all.

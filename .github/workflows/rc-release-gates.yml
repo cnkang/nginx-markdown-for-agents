@@ -82,6 +82,8 @@ jobs:
         run: |
           # The container work lives in a repository script so the command needs
           # no nested quoting, and so the same steps can be exercised locally.
+          # The image tag keeps the version visible to the baseline check while
+          # the digest, refreshed with the version, is what Docker resolves.
           set -euo pipefail
           mkdir -p build
           docker run --rm \
@@ -91,7 +93,7 @@ jobs:
             -e RUST_TARGET=x86_64-unknown-linux-musl \
             -e NGX_MARKDOWN_BROTLI_STREAMING \
             -e NGX_MARKDOWN_RUST_FEATURES \
-            "rust:${RUST_VERSION}-alpine${ALPINE_VERSION}" \
+            "rust:${RUST_VERSION}-alpine${ALPINE_VERSION}@sha256:88a07cc2e9b783133cddf0ea84e759a1185eb6e7ff104deea18e985d84503af7" \
             sh /src/tools/ci/build_musl_module_for_e2e.sh
           test -s build/ngx_http_markdown_filter_module.so
         shell: bash
