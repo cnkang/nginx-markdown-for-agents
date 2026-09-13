@@ -50,7 +50,7 @@ path, URI, host, profile, and per-path dimensions are not emitted.
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | Decompression completion and failure events. |
 | `nginx_markdown_build_info` | gauge | `version`, `nginx_version`, `features` | Build identity; value is always `1`. |
 
-The recorder that maintains this gauge sits outside the streaming feature block,
+The recorder that maintains the `nginx_markdown_conversion_peak_memory_bytes` gauge sits outside the streaming feature block,
 so a build without streaming support reports the working set of its full-buffer
 conversions rather than zero.
 

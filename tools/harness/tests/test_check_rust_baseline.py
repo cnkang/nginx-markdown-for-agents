@@ -399,3 +399,18 @@ def test_docker_action_image_is_checked(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert any("1.99.9" in error for error in errors), errors
+
+
+def test_container_image_is_not_shell_expanded(tmp_path: Path) -> None:
+    """A declarative image is literal, so a declared version cannot satisfy it."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "env:\n  RUST_VERSION: \"1.98.1\"\njobs:\n  build:\n    container:\n"
+        "      image: rust:${RUST_VERSION}-alpine3.21\n    steps:\n"
+        "      - run: cargo build\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("RUST_VERSION" in error for error in errors), errors
