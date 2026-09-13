@@ -176,6 +176,16 @@ def _image_version(tag: str) -> str | None:
 
 def _image_tag_error(path: Path, tag: str, exact: str) -> str | None:
     """Return the complaint about one image tag, or None when it is fine."""
+    if "$" in tag:
+        # Only the checked variable may stand in for the version; any other
+        # interpolation leaves the version unknown.
+        if "${RUST_VERSION}" in tag:
+            return None
+        return (
+            f"{path}: Rust image tag {tag!r} interpolates a value this check "
+            f"cannot resolve ({exact!r} expected)"
+        )
+
     version = _image_version(tag)
     if version is None:
         return (
@@ -209,9 +219,6 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
                     f"rust-toolchain.toml declares {exact!r}"
                 )
         for tag in sorted(set(RUST_IMAGE_RE.findall(content))):
-            if "$" in tag:
-                # Interpolated: the variable check above covers it.
-                continue
             complaint = _image_tag_error(workflows / path.name, tag, exact)
             if complaint is not None:
                 errors.append(complaint)
