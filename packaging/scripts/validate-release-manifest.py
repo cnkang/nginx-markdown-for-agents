@@ -462,6 +462,10 @@ def validate_manifest(
         bootstrap_filenames: set[str] = set()
         if is_tag_release and isinstance(git, dict):
             tag = git.get("tag", "")
+            if isinstance(tag, str) and tag:
+                # The bundle is published for every tag, so the reverse scan
+                # must allow its name whatever the tag looks like.
+                allowed_sha256_names.add(_source_bundle_name(tag))
             if isinstance(tag, str) and SEMVER_TAG_RE.fullmatch(tag):
                 bootstrap_filenames = {
                     f"nginx-markdown-for-agents-installer-{tag}.sh",
@@ -471,7 +475,6 @@ def validate_manifest(
                 # commit and publishes it, so the signed checksum file covers
                 # it.  Without this entry every tag release fails the reverse
                 # scan below with "Unexpected file in SHA256SUMS".
-                allowed_sha256_names.add(_source_bundle_name(tag))
 
         allowed_sha256_names.update(bootstrap_filenames)
 

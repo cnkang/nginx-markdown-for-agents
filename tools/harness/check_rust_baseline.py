@@ -176,6 +176,25 @@ def _image_version(tag: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _env_keys(mapping: object) -> set[str]:
+    """Return the environment names an `env:` mapping declares."""
+    if not isinstance(mapping, dict):
+        return set()
+    return {str(key) for key in mapping}
+
+
+def _job_env_names(job: object) -> set[str]:
+    """Return the names a job makes visible to its steps."""
+    if not isinstance(job, dict):
+        return set()
+    names = _env_keys(job.get("env"))
+    steps = job.get("steps")
+    if isinstance(steps, list):
+        for step in steps:
+            names |= _env_keys(step.get("env") if isinstance(step, dict) else None)
+    return names
+
+
 def _declared_env_names(content: str) -> set[str]:
     """Return the environment names a workflow makes visible to its steps.
 
@@ -183,24 +202,18 @@ def _declared_env_names(content: str) -> set[str]:
     or a workflow input is not an environment variable, and treating it as one
     would let an undeclared interpolation pass the image check.
     """
-    names: set[str] = set()
     try:
         document = yaml.safe_load(content)
     except yaml.YAMLError:
-        return names
+        return set()
     if not isinstance(document, dict):
-        return names
+        return set()
 
-    def collect(mapping: object) -> None:
-        if isinstance(mapping, dict):
-            names.update(str(key) for key in mapping)
-
-    collect(document.get("env"))
+    names = _env_keys(document.get("env"))
     jobs = document.get("jobs")
     if isinstance(jobs, dict):
         for job in jobs.values():
-            if isinstance(job, dict):
-                collect(job.get("env"))
+            names |= _job_env_names(job)
     return names
 
 

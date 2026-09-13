@@ -21,10 +21,7 @@ SCAN_ROOTS = ("tools", "packaging")
 
 def duplicate_names(path: Path) -> list[str]:
     """Return the top-level names this file defines more than once."""
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except SyntaxError as exc:
-        return [f"<syntax error: {exc}>"]
+    tree = ast.parse(path.read_text(encoding="utf-8"))
 
     names: list[str] = []
     for node in tree.body:
@@ -41,7 +38,12 @@ def collect_errors(root: Path = REPO_ROOT) -> list[str]:
         for path in sorted((root / scan_root).rglob("*.py")):
             if ".venv" in path.parts or "build" in path.parts:
                 continue
-            for name in duplicate_names(path):
+            try:
+                names = duplicate_names(path)
+            except (SyntaxError, UnicodeDecodeError, OSError) as exc:
+                errors.append(f"{path.relative_to(root)}: cannot parse ({exc})")
+                continue
+            for name in names:
                 errors.append(
                     f"{path.relative_to(root)}: top-level name {name!r} is defined "
                     "more than once; the earlier definition is dead code"

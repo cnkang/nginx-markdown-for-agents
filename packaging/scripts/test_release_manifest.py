@@ -68,6 +68,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--tag", "v0.8.3",
             "--commit", "abc1234def5678",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -102,6 +103,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--tag", "v0.8.3",
             "--commit", "abc1234",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -119,10 +121,25 @@ class TestGenerateManifest(unittest.TestCase):
             self.assertIn(pkg["arch"], ("amd64", "arm64"))
             self.assertIn(pkg["rpm_arch"], ("x86_64", "aarch64"))
 
+    def test_tag_without_source_digest_fails(self):
+        """A tag manifest has to carry the published bundle's digest."""
+        self._write_package(
+            "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
+        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--tag", "v0.8.3",
+            "--commit", "abc1234",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--source-sha", result.stderr)
+
     def test_no_packages_fails(self):
         result = self._run_generate([
             "--version", "0.8.3",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertNotEqual(result.returncode, 0)
 
@@ -131,6 +148,7 @@ class TestGenerateManifest(unittest.TestCase):
         result = self._run_generate([
             "--version", "0.8.3",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertNotEqual(result.returncode, 0)
 
@@ -140,6 +158,7 @@ class TestGenerateManifest(unittest.TestCase):
         )
         result = self._run_generate([
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid semantic version", result.stderr)
@@ -153,6 +172,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--tag", "v1.2.3-alpha+001",
             "--commit", "abc1234",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -167,6 +187,7 @@ class TestGenerateManifest(unittest.TestCase):
         )
         result = self._run_generate([
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid semantic version", result.stderr)
@@ -179,6 +200,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--version", "1.2.3-alpha+001",
             "--tag", "v1.2.3",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("does not match", result.stderr)
@@ -203,6 +225,7 @@ class TestGenerateManifest(unittest.TestCase):
         result = self._run_generate([
             "--version", "0.8.3",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
             "--no-source",
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -217,6 +240,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--version", "0.8.3",
             "--commit", "deadbeef",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ]
         r1 = self._run_generate(args)
         r2 = self._run_generate(args)
@@ -267,6 +291,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--tag", "v0.8.3",
             "--commit", "abc1234def5678",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
