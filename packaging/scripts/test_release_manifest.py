@@ -658,10 +658,12 @@ class TestValidateManifest(unittest.TestCase):
         errors = self._validate()
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
-    def test_tag_missing_source_sha_is_allowed(self):
-        """Tag release without source.sha256 passes: the digest is recorded
-        after publication, because an entry describing a tag's own archive
-        cannot exist before the tag does (see ADR-0028)."""
+    def test_tag_missing_source_sha_is_rejected(self):
+        """Tag release without source.sha256 must fail validation.
+
+        The workflow builds the source bundle from the released commit and
+        records its digest, so a tag manifest without one means provenance was
+        lost and the release must not be published (see ADR-0028)."""
         fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
         path = self.artifact_dir / fname
         path.write_bytes(b"fake-content")
@@ -677,7 +679,7 @@ class TestValidateManifest(unittest.TestCase):
             "source": {
                 "available": True,
                 "archive_url": "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz",
-                # sha256 missing
+                # sha256 deliberately missing
             },
             "packages": [
                 {
@@ -704,7 +706,10 @@ class TestValidateManifest(unittest.TestCase):
         }
         self.manifest_path.write_text(json.dumps(manifest, indent=2))
         errors = self._validate()
-        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+        self.assertTrue(
+            any("source.sha256 is required for tag releases" in e for e in errors),
+            f"Expected a required-digest error, got: {errors}",
+        )
 
     def test_tag_malformed_source_sha_fails(self):
         """A present but malformed source.sha256 must still be rejected, so an

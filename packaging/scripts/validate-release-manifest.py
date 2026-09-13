@@ -259,17 +259,20 @@ def validate_manifest(
                 errors.append("source.archive_url is required for tag releases")
             else:
                 check_no_placeholders(source["archive_url"], "source.archive_url", errors)
-            # The digest is optional for tag releases on purpose: a digest of
-            # the tag's own auto-generated archive cannot be recorded before the
-            # tag exists, because committing the registry entry changes the tree
-            # it would describe.  When a digest is present it must be plausible,
-            # and the release process compares it against the published archive
-            # after publication.
-            if "sha256" in source:
+            # The digest is required for tag releases.  The release workflow
+            # builds the source bundle from the released commit and records its
+            # digest, so provenance is self-contained and no longer depends on a
+            # registry entry that can only be written after the tag exists.
+            if "sha256" not in source:
+                errors.append(
+                    "source.sha256 is required for tag releases: the release "
+                    "workflow builds the source bundle from the released commit"
+                )
+            else:
                 digest = source["sha256"]
                 if not isinstance(digest, str) or not digest:
                     errors.append(
-                        "source.sha256 must be a non-empty string when present"
+                        "source.sha256 must be a non-empty string for tag releases"
                     )
                 else:
                     check_no_placeholders(digest, "source.sha256", errors)

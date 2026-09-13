@@ -1430,6 +1430,36 @@ jobs:
           test -s artifacts/nginx-markdown-for-agents-release.asc
         shell: bash
 
+      - name: Build canonical source bundle
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_SHA: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          bundle="artifacts/nginx-markdown-for-agents-source-${RELEASE_TAG}.tar.gz"
+          # The bundle is built from the exact commit being released, so its
+          # digest is reproducible and does not depend on the byte stability of
+          # an archive GitHub generates on our behalf.  `git archive` stamps
+          # every entry with the commit timestamp and `gzip -n` drops the
+          # archive name and timestamp, so the same commit always yields the
+          # same bytes.
+          git archive --format=tar \
+            --prefix="nginx-markdown-for-agents-${RELEASE_TAG}/" \
+            "${GH_SHA}" | gzip -n > "${bundle}"
+          test -s "${bundle}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            digest="$(sha256sum "${bundle}" | awk '{print $1}')"
+          else
+            digest="$(shasum -a 256 "${bundle}" | awk '{print $1}')"
+          fi
+          test -n "${digest}"
+          echo "SOURCE_SHA=${digest}" >> "${GITHUB_ENV}"
+          echo "SOURCE_BUNDLE_NAME=$(basename "${bundle}")" >> "${GITHUB_ENV}"
+          echo "SOURCE_URL=https://github.com/${GH_REPO}/releases/download/${RELEASE_TAG}/$(basename "${bundle}")" >> "${GITHUB_ENV}"
+        shell: bash
+
       - name: Generate release manifest
         env:
           GH_EVENT_NAME: ${{ github.event_name }}
@@ -1445,24 +1475,24 @@ jobs:
           if [[ "${GH_EVENT_NAME}" == "push" && "${GH_REF_TYPE}" == "tag" ]]; then
             TAG="${GH_REF_NAME}"
             VERSION="${TAG#v}"
-            SOURCE_URL="https://github.com/${GH_REPO}/archive/refs/tags/${TAG}.tar.gz"
             SOURCE_IDENTIFIER="source-${TAG}"
-            SOURCE_SHA="$(awk -v id="${SOURCE_IDENTIFIER}" '$2 == id { print $1 }' \
+            RECORDED_SHA="$(awk -v id="${SOURCE_IDENTIFIER}" '$2 == id { print $1 }' \
               packaging/source-archive-digests.sha256)"
-            # A digest of the tag's own auto-generated archive cannot be required
-            # here: committing the registry entry changes the tree, so the
-            # recorded digest and that archive could never agree. Pre-tag
-            # provenance is the commit identity, which the candidate evidence
-            # names and the release gates verify. The registry entry is recorded
-            # after this run publishes the archive, and the release process
-            # compares a download of that archive against it afterwards.
-            # It is optional here, and its absence is surfaced rather than fatal.
-            if [[ -n "${SOURCE_SHA}" ]]; then
-              SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
-            else
-              SOURCE_ARGS=(--source-url "${SOURCE_URL}")
-              echo "::warning title=Source archive digest not recorded::${SOURCE_IDENTIFIER} has no entry in packaging/source-archive-digests.sha256. After this run publishes the archive, record it with: bash packaging/scripts/record-source-archive-digest.sh ${TAG}"
+            # The digest comes from the bundle this run built from the released
+            # commit, so provenance is self-contained: immutable SHA -> bundle
+            # -> SHA-256 -> manifest -> signed sums.  The registry under
+            # packaging/ is an audit record, not a prerequisite, and it cannot
+            # be one: its entry is committed after the tag, and a rerun of that
+            # tag checks out a tree that does not contain it.
+            if [[ -z "${SOURCE_SHA:-}" || -z "${SOURCE_URL:-}" ]]; then
+              echo "::error title=Source bundle missing::the source bundle step did not produce a digest, so no tag release can be published with provenance"
+              exit 1
             fi
+            if [[ -n "${RECORDED_SHA}" && "${RECORDED_SHA}" != "${SOURCE_SHA}" ]]; then
+              echo "::error title=Source digest disagreement::packaging/source-archive-digests.sha256 holds ${RECORDED_SHA} for ${SOURCE_IDENTIFIER} but this release built ${SOURCE_SHA}"
+              exit 1
+            fi
+            SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
             VERSION_ARGS=(--version "${VERSION}")
           else
             TAG=""
@@ -1518,6 +1548,15 @@ jobs:
         with:
           name: release-manifest
           path: artifacts/release-manifest.json
+          if-no-files-found: error
+          retention-days: 5
+
+      - name: Upload canonical source bundle
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: source-bundle
+          path: artifacts/nginx-markdown-for-agents-source-*.tar.gz
           if-no-files-found: error
           retention-days: 5
 
@@ -1812,6 +1851,12 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-manifest
+          path: release-assets/
+
+      - name: Download canonical source bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: source-bundle
           path: release-assets/
 
       - name: List release assets
