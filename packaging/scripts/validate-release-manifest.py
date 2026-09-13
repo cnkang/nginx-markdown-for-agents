@@ -128,7 +128,7 @@ def _check_source_bundle(
             )
         return
 
-    actual = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+    actual = sha256_file(bundle_path)
     if sha256_entries.get(bundle_name) != actual:
         errors.append(
             f"SHA256SUMS digest mismatch for {bundle_name}: "
@@ -411,6 +411,31 @@ def validate_manifest(
                         f"actual={actual_manifest_sha}"
                     )
 
+        # The bundle is the provenance artifact for a tag release, so its
+        # presence, its recorded digest and the URL that points at it are
+        # checked for every tag release, not only when a checksum file happens
+        # to be available.  Only the comparison against SHA256SUMS needs the
+        # checksum data.
+        if is_tag_release and isinstance(git, dict):
+            release_tag = git.get("tag", "")
+            if isinstance(release_tag, str) and release_tag:
+                bundle_name = _source_bundle_name(release_tag)
+                repository = git.get("repository")
+                expected_url = (
+                    f"https://github.com/{repository}/releases/download/"
+                    f"{release_tag}/{bundle_name}"
+                    if repository
+                    else None
+                )
+                _check_source_bundle(
+                    source,
+                    bundle_name,
+                    expected_url,
+                    artifact_dir,
+                    sha256_entries,
+                    errors,
+                )
+
         allowed_sha256_names = set(manifest_filenames)
         allowed_sha256_names.add("release-manifest.json")
 
@@ -426,23 +451,7 @@ def validate_manifest(
                 # commit and publishes it, so the signed checksum file covers
                 # it.  Without this entry every tag release fails the reverse
                 # scan below with "Unexpected file in SHA256SUMS".
-                bundle_name = _source_bundle_name(tag)
-                allowed_sha256_names.add(bundle_name)
-                repository = (manifest.get("git") or {}).get("repository")
-                expected_url = (
-                    f"https://github.com/{repository}/releases/download/"
-                    f"{tag}/{bundle_name}"
-                    if repository
-                    else None
-                )
-                _check_source_bundle(
-                    source,
-                    bundle_name,
-                    expected_url,
-                    artifact_dir,
-                    sha256_entries,
-                    errors,
-                )
+                allowed_sha256_names.add(_source_bundle_name(tag))
 
         allowed_sha256_names.update(bootstrap_filenames)
 

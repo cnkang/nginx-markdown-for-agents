@@ -208,17 +208,16 @@ fn remove_dot_segments(path: &str) -> String {
     if absolute {
         result.push('/');
     }
-    result.push_str(joined.trim_end_matches('/'));
+    // Keep whatever trailing slash the segments themselves carry: `/a//.` drops
+    // the dot segment but keeps both slashes, so trimming here would lose one.
+    result.push_str(&joined);
 
-    // Append the trailing run, counting the slash the root already carries: an
-    // absolute path with an empty body already ends in one, and `/a/..` must
-    // come out as `/`, not `//`.
-    let mut remaining = trailing_slashes;
-    if result.ends_with('/') && remaining > 0 {
-        remaining -= 1;
-    }
-    for _ in 0..remaining {
-        result.push('/');
+    // Append the run the trailing slashes represent, except for the root, which
+    // already carries the single slash `/a/..` must resolve to.
+    if !(absolute && joined.is_empty()) {
+        for _ in 0..trailing_slashes {
+            result.push('/');
+        }
     }
 
     if result.is_empty() {
@@ -273,6 +272,8 @@ mod tests {
             ("/a/b//", "https://example.com/a/b//"),
             // A trailing dot segment resolves to one slash, and `..` climbs.
             ("/a/.", "https://example.com/a/"),
+            ("/a//.", "https://example.com/a//"),
+            ("/a///.", "https://example.com/a///"),
             ("/a/b/.", "https://example.com/a/b/"),
             ("/a/..", "https://example.com/"),
             ("/a/b/..", "https://example.com/a/"),

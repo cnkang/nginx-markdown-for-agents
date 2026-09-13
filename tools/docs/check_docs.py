@@ -122,16 +122,20 @@ def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
     the same marker, so the opener is remembered rather than toggled.
     """
     lines: list[tuple[int, str]] = []
-    open_fence: str | None = None
+    open_char: str | None = None
+    open_len = 0
     for line_no, line in enumerate(text.splitlines(), 1):
-        marker = line.strip()[:3]
-        if marker in ("```", "~~~"):
-            if open_fence is None:
-                open_fence = marker
-            elif marker == open_fence:
-                open_fence = None
+        indent = len(line) - len(line.lstrip(" "))
+        body = line[indent:]
+        char = body[:1]
+        run = len(body) - len(body.lstrip(char)) if char in ("`", "~") else 0
+        if indent <= 3 and run >= 3:
+            if open_char is None:
+                open_char, open_len = char, run
+            elif char == open_char and run >= open_len:
+                open_char, open_len = None, 0
             continue
-        if open_fence is None:
+        if open_char is None:
             lines.append((line_no, line))
     return lines
 
@@ -600,7 +604,7 @@ def _is_task_list_line(line: str) -> bool:
     stripped = line.lstrip()
     return (
         len(stripped) > 5
-        and stripped[0] in "-*"
+        and stripped[0] in "-*+"
         and stripped[1] == " "
         and stripped[2] == "["
         and stripped[3] in " xX"
