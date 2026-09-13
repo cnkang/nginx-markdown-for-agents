@@ -580,6 +580,45 @@ def check_metric_family_count(files: list[Path]) -> list[str]:
     return failures
 
 
+_CHECKLIST_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
+_CHECKLIST_CLAIM_RE = re.compile(
+    r"current (?:head|candidate)s?\b|have not certified|has not certified"
+    r"|latest workflow|as of this (?:commit|writing)"
+    r"|\*{0,2}status:?\*{0,2}\s|candidate (?:passed|passes|satisfied)"
+    r"|all required gates (?:passed|are green)",
+    re.IGNORECASE,
+)
+
+
+def _is_task_list_line(line: str) -> bool:
+    """True for a Markdown task-list item, whatever marker it uses."""
+    stripped = line.lstrip()
+    return (
+        len(stripped) > 5
+        and stripped[0] in "-*"
+        and stripped[1] == " "
+        and stripped[2] == "["
+        and stripped[3] in " xX"
+        and stripped[4] == "]"
+    )
+
+
+def _checklist_line_failures(path: Path, line: str) -> list[str]:
+    """Failures a single checklist line contributes."""
+    found: list[str] = []
+    if _is_task_list_line(line) and _CHECKLIST_SHA_RE.search(line):
+        found.append(
+            f"{path}: a requirement names a commit; bind status to the "
+            "candidate-bound release evidence instead"
+        )
+    if _CHECKLIST_CLAIM_RE.search(line):
+        found.append(
+            f"{path}: states mutable candidate status; keep the "
+            "checklist to requirements"
+        )
+    return found
+
+
 def check_release_checklist_is_static(files: list[Path]) -> list[str]:
     """A release checklist states requirements, never the state of a candidate.
 
@@ -590,14 +629,6 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
     legitimately records commit identifiers as history.
     """
     failures: list[str] = []
-    sha_re = re.compile(r"\b[0-9a-f]{7,40}\b")
-    claim_re = re.compile(
-        r"current (?:head|candidate)s?\b|have not certified|has not certified"
-        r"|latest workflow|as of this (?:commit|writing)"
-        r"|\*{0,2}status:?\*{0,2}\s|candidate (?:passed|passes|satisfied)"
-        r"|all required gates (?:passed|are green)",
-        re.IGNORECASE,
-    )
     for path in files:
         if not path.name.endswith("-release-checklist.md"):
             continue
@@ -606,26 +637,7 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
         for _lineno, line in iter_unfenced_lines(content):
             if not line.strip() or line in history:
                 continue
-            # A requirement must not pin a commit; prose may record history.
-            stripped = line.lstrip()
-            is_task = (
-                len(stripped) > 5
-                and stripped[0] in "-*"
-                and stripped[1] == " "
-                and stripped[2] == "["
-                and stripped[3] in " xX"
-                and stripped[4] == "]"
-            )
-            if is_task and sha_re.search(line):
-                failures.append(
-                    f"{path}: a requirement names a commit; bind status to the "
-                    "candidate-bound release evidence instead"
-                )
-            if claim_re.search(line):
-                failures.append(
-                    f"{path}: states mutable candidate status; keep the "
-                    "checklist to requirements"
-                )
+            failures.extend(_checklist_line_failures(path, line))
     return failures
 
 
