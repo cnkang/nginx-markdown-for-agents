@@ -72,3 +72,16 @@ def test_annotated_assignment_counts(tmp_path: Path) -> None:
     errors = detector.collect_errors(tmp_path)
 
     assert any("BAR" in error for error in errors), errors
+
+
+def test_attribute_assignment_is_not_a_binding(tmp_path: Path) -> None:
+    """`config.value = 1` assigns to an attribute, not to `config`."""
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "attr.py").write_text(
+        "config = {}\n\n\nconfig.value = 1\n",
+        encoding="utf-8",
+    )
+
+    errors = detector.collect_errors(tmp_path)
+
+    assert errors == [], errors

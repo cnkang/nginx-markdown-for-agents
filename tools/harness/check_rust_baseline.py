@@ -166,7 +166,6 @@ def _check_observation_workflows(root: Path, exact: str, errors: list[str]) -> N
 
 
 RUST_IMAGE_RE = re.compile(r"rust:([A-Za-z0-9._${}-]+)")
-RUST_VERSION_ENV_RE = re.compile(r"^\s*RUST_VERSION:\s*['\"]?([^'\"\s#]+)", re.MULTILINE)
 IMAGE_VERSION_RE = re.compile(r"^(\d+\.\d+\.\d+)")
 
 
@@ -196,14 +195,26 @@ def _declared_version_values(document: dict) -> list[str]:
     """Return every `RUST_VERSION` value the workflow declares.
 
     Reading the parsed document covers inline mappings (`env: {RUST_VERSION: …}`)
-    that a line pattern would miss.
+    that a line pattern would miss, and the workflow and job levels are read
+    directly so a job that only calls a reusable workflow is included too.
     """
-    values: list[str] = []
+    mappings: list[dict] = []
+    for candidate in (document.get("env"),):
+        if isinstance(candidate, dict):
+            mappings.append(candidate)
+    jobs = document.get("jobs")
+    if isinstance(jobs, dict):
+        for job in jobs.values():
+            if isinstance(job, dict) and isinstance(job.get("env"), dict):
+                mappings.append(job["env"])
     for visible, _run in _step_visible_envs(document):
-        value = visible.get("RUST_VERSION")
-        if isinstance(value, str):
-            values.append(value)
-    return values
+        mappings.append(visible)
+    return [
+        value
+        for mapping in mappings
+        for value in [mapping.get("RUST_VERSION")]
+        if isinstance(value, str)
+    ]
 
 
 def _job_env(job: dict, inherited: dict) -> dict:
@@ -372,8 +383,9 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
     for path in sorted((root / workflows).glob("*.y*ml")):
         content = path.read_text(encoding="utf-8")
         document = _workflow_document(content)
-        declared_values = set(RUST_VERSION_ENV_RE.findall(content))
-        declared_values.update(_declared_version_values(document))
+        # The parsed document is authoritative: a line pattern would also match
+        # a `RUST_VERSION:` that is not an environment declaration at all.
+        declared_values = set(_declared_version_values(document))
         for declared in sorted(declared_values):
             if declared != exact:
                 errors.append(

@@ -98,12 +98,13 @@ def sha256_no_follow(path: Path) -> str:
     digest = hashlib.sha256()
     fd = os.open(path, flags)
     try:
-        with os.fdopen(fd, "rb") as handle:
-            for chunk in iter(lambda: handle.read(64 * 1024), b""):
-                digest.update(chunk)
-    except BaseException:
+        handle = os.fdopen(fd, "rb")
+    except OSError:
         os.close(fd)
         raise
+    with handle:
+        for chunk in iter(lambda: handle.read(64 * 1024), b""):
+            digest.update(chunk)
     return digest.hexdigest()
 
 

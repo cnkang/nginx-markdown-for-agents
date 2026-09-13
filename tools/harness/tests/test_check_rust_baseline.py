@@ -327,3 +327,33 @@ def test_service_image_is_checked(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert any("1.99.9" in error for error in errors), errors
+
+
+def test_job_without_steps_still_declares_a_version(tmp_path: Path) -> None:
+    """A job that only calls a reusable workflow still carries its env."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  reuse:\n    uses: owner/repo/.github/workflows/x.yml\n"
+        "    env:\n      RUST_VERSION: 1.99.0\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("RUST_VERSION is '1.99.0'" in error for error in errors), errors
+
+
+def test_version_text_outside_env_is_not_a_declaration(tmp_path: Path) -> None:
+    """A `RUST_VERSION:` that is not an env key must not be read as one."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "env:\n  RUST_VERSION: 1.97.0\n"
+        "jobs:\n  build:\n    steps:\n"
+        "      - run: |\n          echo RUST_VERSION: 9.9.9\n"
+        "      - run: docker run rust:${RUST_VERSION}\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert not any("9.9.9" in error for error in errors), errors
