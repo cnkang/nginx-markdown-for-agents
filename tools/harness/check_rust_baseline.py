@@ -218,9 +218,18 @@ def _declared_env_names(content: str) -> set[str]:
 
 
 
-def _tag_variables(tag: str) -> list[str]:
-    """Return the variable names a tag interpolates, in order."""
-    return re.findall(r"\$\{([A-Za-z0-9_]+)\}", tag)
+def _tag_variables(tag: str) -> list[str] | None:
+    """Return the names a tag interpolates, or None when a `$` is not an exact
+    `${NAME}` token.
+
+    A bare `$NAME` and a doubled `${{NAME}}` are both valid GitHub expressions,
+    so a token this pattern does not recognise has to count as unresolvable
+    rather than being ignored.
+    """
+    names = re.findall(r"\$\{([A-Za-z0-9_]+)\}", tag)
+    if "$" in re.sub(r"\$\{[A-Za-z0-9_]+\}", "", tag):
+        return None
+    return names
 
 
 def _image_tag_error(
@@ -229,6 +238,11 @@ def _image_tag_error(
     """Return the complaint about one image tag, or None when it is fine."""
     if "$" in tag:
         names = _tag_variables(tag)
+        if names is None:
+            return (
+                f"{path}: Rust image tag {tag!r} interpolates a value this check "
+                f"cannot resolve ({exact!r} expected)"
+            )
         # The version position has to be the variable this check reads, and any
         # other interpolation has to be a declared value: an undeclared one
         # could stand in for a different version.  A declared suffix such as an

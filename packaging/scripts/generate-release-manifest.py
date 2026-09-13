@@ -296,10 +296,8 @@ def build_manifest(
     repository = repo or gi["repository"]
     commit_sha = gi["commit"]
 
-    # Tag / version
-    tag_version = None
-    if tag:
-        tag_version = validate_version(version_from_tag(tag), "--tag")
+    # Tag / version.  `tag_version` was validated above for
+    # `expected_package_version`; reuse it rather than computing it twice.
     if version and tag_version and version != tag_version:
         print(
             f"ERROR: --version {version} does not match --tag {tag}",
@@ -332,6 +330,15 @@ def build_manifest(
 
     # Source archive
     if no_source:
+        if tag:
+            # A tag release publishes a source bundle, so marking the source
+            # unavailable describes a manifest the validator rejects.
+            print(
+                "ERROR: --no-source is not valid with --tag: a tag release "
+                "publishes a source bundle",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
         source: dict = {"available": False}
     else:
         source = source_archive_info(repository, tag, source_url, source_sha)

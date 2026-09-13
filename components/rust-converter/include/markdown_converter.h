@@ -64,7 +64,7 @@
  * cbindgen-generated header via
  * `tools/release/gates/compute_abi_fingerprints.py`.
  */
-#define MARKDOWN_HEADER_HASH 1182724715411348115
+#define MARKDOWN_HEADER_HASH 14024450584578707741ull
 
 /**
  * SHA-256 truncated hash of the sorted exported symbol name set.
@@ -566,8 +566,8 @@ typedef struct MarkdownResult {
    * (`markdown_streaming_finalize` from
    * `StreamingStats.peak_memory_estimate`) and the full-buffer path.
    * Metric publication of the run-wide high-water gauge
-   * (`nginx_markdown_conversion_peak_memory_bytes`) happens only in
-   * streaming builds: the full-buffer path's
+   * (`nginx_markdown_conversion_peak_memory_bytes`) is recorded in every
+   * build, streaming or not: the full-buffer path's
    * `ngx_http_markdown_metrics_record_conversion_peak()` is a no-op
    * when `MARKDOWN_STREAMING_ENABLED` is undefined, so the field
    * value and the gauge publication are distinct concerns.
