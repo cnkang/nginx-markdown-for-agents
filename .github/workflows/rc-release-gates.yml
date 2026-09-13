@@ -1,0 +1,200 @@
+name: Release Candidate Gates
+
+# Real-NGINX end-to-end checks that are too heavy for pull-request CI: they need
+# Docker, and one of them needs a real Kubernetes cluster.  They run for a
+# release candidate instead, and the job writes candidate-bound evidence so a
+# specific commit carries machine-verifiable PASS records for each check.
+#
+# The steps below only reference workflow-level constants and GitHub-provided
+# env values (GITHUB_SHA, GITHUB_REPOSITORY, GITHUB_REF, GITHUB_RUN_ID), never
+# event payload text, so no untrusted input reaches a shell.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The module is loaded into the container images the checks default to, so the
+  # build version must match them.
+  NGINX_VERSION: "1.30.4"
+  RUST_FEATURES: streaming,prune_noise_regions
+
+jobs:
+  real-nginx-e2e:
+    name: Real-NGINX E2E gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            curl \
+            docker.io \
+            openssl \
+            pkg-config \
+            python3 \
+            rsync \
+            zlib1g-dev
+
+      - name: Install cluster tooling
+        run: |
+          set -euo pipefail
+          curl -fsSLo /tmp/kind "https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64"
+          sudo install -m 0755 /tmp/kind /usr/local/bin/kind
+          curl -fsSL "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3" \
+            | bash -s -- --version v3.19.0
+          curl -fsSLo /tmp/kubectl \
+            "https://dl.k8s.io/release/v1.34.1/bin/linux/amd64/kubectl"
+          sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.98.1
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            components/rust-converter -> target
+          cache-bin: false
+
+      - name: Download and verify NGINX source
+        run: |
+          set -euo pipefail
+          tarball="nginx-${NGINX_VERSION}.tar.gz"
+          curl -fsSL -o "${tarball}" "https://nginx.org/download/${tarball}"
+          packaging/scripts/verify-checksum.sh -f "${tarball}" -i "nginx-${NGINX_VERSION}"
+          tar xzf "${tarball}"
+          echo "NGINX_SRC=${GITHUB_WORKSPACE}/nginx-${NGINX_VERSION}" >> "${GITHUB_ENV}"
+        shell: bash
+
+      - name: Build Rust converter
+        working-directory: components/rust-converter
+        run: cargo build --release --locked --features "${RUST_FEATURES}"
+        shell: bash
+
+      - name: Configure NGINX with the dynamic module
+        env:
+          NGX_MARKDOWN_BROTLI_STREAMING: "on"
+          NGX_MARKDOWN_RUST_FEATURES: ${{ env.RUST_FEATURES }}
+        run: |
+          cd "${NGINX_SRC}"
+          ./configure \
+            --with-compat \
+            --add-dynamic-module="${GITHUB_WORKSPACE}/components/nginx-module"
+        shell: bash
+
+      - name: Build NGINX and the dynamic module
+        run: |
+          cd "${NGINX_SRC}"
+          make -j"$(nproc)" build
+          test -x "${NGINX_SRC}/objs/nginx"
+          test -f "${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so"
+        shell: bash
+
+      - name: Stage the module where the checks look for it
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cp "${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" \
+            build/ngx_http_markdown_filter_module.so
+          test -s build/ngx_http_markdown_filter_module.so
+        shell: bash
+
+      - name: Run the real-NGINX end-to-end checks
+        run: |
+          # No `set -e`: every check runs, and the job fails after collecting all
+          # results, so one failure does not hide the state of the others.
+          set -uo pipefail
+          mkdir -p rc-evidence
+          : > rc-evidence/results.tsv
+
+          run_check() {
+            local name="$1"
+            shift
+            local status=0
+            echo "=== ${name} ===" >&2
+            "$@" || status=$?
+            if [[ "${status}" -eq 0 ]]; then
+              printf '%s\tPASS\n' "${name}" >> rc-evidence/results.tsv
+            else
+              printf '%s\tFAIL\n' "${name}" >> rc-evidence/results.tsv
+            fi
+            return 0
+          }
+
+          run_check realip_access_boundary make verify-realip-access-boundary-e2e
+          run_check slow_reader_backpressure make verify-slow-reader-backpressure-e2e
+          run_check graceful_reload_streaming make verify-graceful-reload-streaming-e2e
+          run_check module_version_mismatch make verify-module-version-mismatch-e2e
+          run_check auth_subrequest_observability make verify-auth-subrequest-observability-e2e
+          run_check helm_cluster_smoke make verify-helm-cluster-smoke-e2e
+
+          echo "=== collected results ==="
+          cat rc-evidence/results.tsv
+        shell: bash
+
+      - name: Write candidate-bound evidence
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          results = pathlib.Path("rc-evidence/results.tsv")
+          evidence = {
+              "candidate_sha": os.environ["GITHUB_SHA"],
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "ref": os.environ["GITHUB_REF"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "checks": {},
+          }
+          for line in results.read_text(encoding="utf-8").splitlines():
+              name, _, outcome = line.partition("\t")
+              if name:
+                  evidence["checks"][name] = outcome
+
+          pathlib.Path("rc-evidence/release-evidence.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+        shell: bash
+
+      - name: Upload candidate-bound evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rc-release-evidence
+          path: rc-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Fail closed on any non-PASS check
+        run: |
+          set -euo pipefail
+          if grep -qv $'\tPASS$' rc-evidence/results.tsv; then
+            echo "::error title=Release candidate gate failed::at least one real-NGINX check did not pass for ${GITHUB_SHA}"
+            exit 1
+          fi
+          echo "all real-NGINX checks passed for ${GITHUB_SHA}"
+        shell: bash

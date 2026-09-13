@@ -148,7 +148,11 @@ slow_pid=$!
 # client has received part of the body before signalling the master.
 in_flight=0
 for _ in $(seq 1 100); do
-    if [[ -s "${slow}" ]]; then
+    # Both halves matter: bytes on the wire, and a reader still waiting for
+    # more.  A finished transfer would prove nothing about a reload landing
+    # while the response is in flight.
+    if [[ -s "${slow}" ]] && kill -0 "${slow_pid}" 2>/dev/null \
+        && [[ "$(wc -c < "${slow}" | tr -d ' ')" -lt "${baseline_bytes}" ]]; then
         in_flight=1
         break
     fi
