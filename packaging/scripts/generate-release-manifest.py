@@ -18,7 +18,8 @@ Options:
     --ref-type T GitHub ref type (tag or branch)
     --repo REPO  GitHub repository (owner/repo format)
     --source-url URL   Source archive URL
-    --source-sha S     Source archive SHA-256 (omit to leave unavailable)
+    --source-sha S     Source archive SHA-256 (required with --tag; omit only
+                       for --no-source dispatches)
     --no-source        Mark source as unavailable (dispatch without tag)
 
 Exit codes:
