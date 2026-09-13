@@ -101,7 +101,7 @@ echo "=== loading ${IMAGE_REF} into cluster ===" >&2
 # rejected rather than silently mis-derived.
 IMAGE_REPO="${IMAGE_REF%:*}"
 IMAGE_TAG="${IMAGE_REF##*:}"
-if [[ "${IMAGE_REPO}" == "${IMAGE_REF}" || "${IMAGE_TAG}" == */* || -z "${IMAGE_REPO}" || -z "${IMAGE_TAG}" ]]; then
+if [[ "${IMAGE_REPO}" == "${IMAGE_REF}" || "${IMAGE_TAG}" == */* || -z "${IMAGE_REPO}" || -z "${IMAGE_TAG}" || "${IMAGE_REF}" == *"@"* ]]; then
     echo "ERROR: unsupported image reference (expected [registry[:port]/]name[:tag]): ${IMAGE_REF}" >&2
     exit 1
 fi

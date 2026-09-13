@@ -309,12 +309,23 @@ def test_release_checklist_preamble_must_stay_static(tmp_path: Path) -> None:
     pinned = tmp_path / "0.9.3-release-checklist.md"
     pinned.write_text(
         "# 0.9.3 Release Checklist\n\n"
-        "Bind the checks to f26e81897aedc48f79cf23943ee33496157ed0a9.\n\n"
+        "- [ ] Candidate f26e81897aedc48f79cf23943ee33496157ed0a9 passed CI\n\n"
         "## Pre-Release\n",
         encoding="utf-8",
     )
     assert docs_checker.check_release_checklist_is_static([pinned]), (
-        "a commit identifier in the preamble must be rejected"
+        "a requirement pinning a commit must be rejected"
+    )
+
+    history = tmp_path / "0.9.7-release-checklist.md"
+    history.write_text(
+        "# 0.9.7 Release Checklist\n\n"
+        "Historical note: the rc6 tip 54eb5602 was the PR base.\n\n"
+        "## Pre-Release\n",
+        encoding="utf-8",
+    )
+    assert docs_checker.check_release_checklist_is_static([history]) == [], (
+        "prose that records history may name a commit"
     )
 
     static = tmp_path / "0.9.4-release-checklist.md"
