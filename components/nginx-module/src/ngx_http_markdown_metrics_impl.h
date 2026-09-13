@@ -634,10 +634,16 @@ ngx_http_markdown_metrics_to_v1(
     /* Preserve byte and streaming gauges after the histogram conversion. */
     v1->input_bytes = snapshot->input_bytes;
     v1->output_bytes = snapshot->output_bytes;
+    /*
+     * The conversion peak is a conversion-wide gauge, not a streaming one, so it
+     * is populated in every build from the field the recorder maintains.
+     */
+    if (ngx_http_markdown_metrics != NULL) {
+        v1->conversion_peak_memory_bytes =
+            ngx_http_markdown_metrics->perf.conversion_peak_memory_bytes;
+    }
 #ifdef MARKDOWN_STREAMING_ENABLED
     v1->output_bytes += snapshot->streaming.selection.output_bytes_total;
-    v1->conversion_peak_memory_bytes =
-        snapshot->streaming.last_peak_memory_bytes;
 #endif
 #ifdef MARKDOWN_STREAMING_ENABLED
     v1->streaming_events.commit = snapshot->streaming.commit_total;
