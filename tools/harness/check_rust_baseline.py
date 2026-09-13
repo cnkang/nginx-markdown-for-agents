@@ -174,6 +174,22 @@ def _image_version(tag: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _image_tag_error(path: Path, tag: str, exact: str) -> str | None:
+    """Return the complaint about one image tag, or None when it is fine."""
+    version = _image_version(tag)
+    if version is None:
+        return (
+            f"{path}: Rust image tag {tag!r} carries no exact MAJOR.MINOR.PATCH "
+            f"version ({exact!r} expected)"
+        )
+    if version != exact:
+        return (
+            f"{path}: Rust image tag {tag!r} pins {version!r} but "
+            f"rust-toolchain.toml declares {exact!r}"
+        )
+    return None
+
+
 def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> None:
     """Check every way a workflow can pin the Rust version for a container.
 
@@ -196,17 +212,9 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
             if "$" in tag:
                 # Interpolated: the variable check above covers it.
                 continue
-            version = _image_version(tag)
-            if version is None:
-                errors.append(
-                    f"{workflows / path.name}: Rust image tag {tag!r} carries no "
-                    f"exact MAJOR.MINOR.PATCH version ({exact!r} expected)"
-                )
-            elif version != exact:
-                errors.append(
-                    f"{workflows / path.name}: Rust image tag {tag!r} pins "
-                    f"{version!r} but rust-toolchain.toml declares {exact!r}"
-                )
+            complaint = _image_tag_error(workflows / path.name, tag, exact)
+            if complaint is not None:
+                errors.append(complaint)
 
 
 def _check_workflow_inventory(root: Path, errors: list[str]) -> None:
