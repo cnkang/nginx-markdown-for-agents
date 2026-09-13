@@ -28,4 +28,5 @@ cd "/tmp/nginx-${NGINX_VERSION}"
 ./configure --with-compat --add-dynamic-module=/src/components/nginx-module
 make -j"$(nproc)" build
 test -f objs/ngx_http_markdown_filter_module.so
+mkdir -p /src/build
 cp objs/ngx_http_markdown_filter_module.so /src/build/ngx_http_markdown_filter_module.so

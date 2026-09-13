@@ -434,3 +434,16 @@ def test_checklist_guard_sees_a_pinned_commit_after_extra_spaces(tmp_path):
     path.write_text("-  [ ] certified at 1234567\n", encoding="utf-8")
     failures = docs_checker.check_release_checklist_is_static([path])
     assert failures and "names a commit" in failures[0]
+
+
+def test_claim_split_across_lines_is_rejected(tmp_path):
+    """A wrapped status claim must be judged as one sentence."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text(
+        "- [ ] The suite is recorded. The current branch\n"
+        "      head has the full remote workflow set\n"
+        "      passing.\n",
+        encoding="utf-8",
+    )
+    failures = docs_checker.check_release_checklist_is_static([path])
+    assert failures and "mutable candidate status" in failures[0]
