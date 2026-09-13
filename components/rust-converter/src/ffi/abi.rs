@@ -56,7 +56,7 @@ pub const MARKDOWN_ABI_VERSION: u32 = 3;
 /// Regenerated for ABI 3 (dynconf/selector removal, 0.9.2) from the
 /// cbindgen-generated header via
 /// `tools/release/gates/compute_abi_fingerprints.py`.
-pub const MARKDOWN_HEADER_HASH: u64 = 0xeb70b17b15d5a6ce;
+pub const MARKDOWN_HEADER_HASH: u64 = 0x1069e1dcc12b1a93;
 
 /// SHA-256 truncated hash of the sorted exported symbol name set.
 ///
