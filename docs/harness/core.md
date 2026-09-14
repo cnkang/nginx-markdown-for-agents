@@ -116,6 +116,29 @@ statuses whenever possible. Public manifests should fail clearly. Optional local
 inputs and user-local state should degrade explicitly instead of crashing with a
 raw traceback.
 
+## Rule-to-check wiring
+
+The rule mapping checks static invocation paths, not just names in files.
+Commit hooks and enabled workflow run steps supply actual commands. The push
+entry reaches the shared gate declaration through `pre-push-check`. The runner
+and checker validate the same gate data before using it. CI path filters must
+include the declaration and its tests.
+
+The resolver follows literal root Make targets, dependencies, recursive Make
+calls and finite variable lists. It does not certify compound shell scripts,
+subdirectory Make calls or dynamic target expressions. Put a required check in
+an explicit direct step when the resolver cannot verify its path. A missing path fails
+the mapping. It must not become a guessed edge.
+
+A `save` mapping describes the optional editor adapter for the commit checks.
+It does not prove that contributors installed an editor adapter or Git hook. CI mappings
+prove configured calls, which can be conditional. Separate routing tests verify
+path-filter coverage. Neither result means the runtime gate has passed.
+
+Wiring regressions use repository fixtures. Keep detectors and targets present,
+remove one invocation, and require FAIL. Restore that invocation and require
+PASS. Do not replace the resolver's output in these tests.
+
 ## Conflict Protocol
 
 - The user task and bound spec set the goal.

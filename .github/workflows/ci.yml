@@ -198,6 +198,7 @@ jobs:
               # this file, so a change to it has to select the harness job.
               - '.pre-commit-config.yaml'
               - 'tools/ci/pre_push_profile.py'
+              - 'tools/ci/pre_push_gates.py'
               - 'tools/ci/test_pre_push_profile.py'
               - 'tools/sonar/**'
               - 'tools/e2e/**'
