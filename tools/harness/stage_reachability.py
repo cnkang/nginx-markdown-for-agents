@@ -13,6 +13,7 @@ import shlex
 VARIABLE = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_]*)\)")
 ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*[:?+]?=\s*(.*)$")
 TARGET = re.compile(r"^([A-Za-z0-9_.-]+):\s*([^=]*)$")
+CONDITIONAL_START = re.compile(r"^(?:ifeq|ifneq|ifdef|ifndef)\b")
 
 
 def command_words(line: str) -> list[str]:
@@ -28,12 +29,21 @@ def command_words(line: str) -> list[str]:
     return words
 
 
+def _defines_or_braces(words: list[str]) -> bool:
+    """Recognise a shell function definition, whose body never runs on its own."""
+    if not words:
+        return False
+    if words[0].endswith("()") or "{" in words or "}" in words:
+        return True
+    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\(\)", words[0])) if len(words) > 1 else False
+
+
 def literal_script_lines(script: str) -> list[str]:
     """Refuse compound scripts rather than treating dormant bodies as calls."""
     lines = script.replace("\\\n", " ").splitlines()
     for line in lines:
         words = command_words(line)
-        if "<<" in line or (words and words[0] in {
+        if "<<" in line or _defines_or_braces(words) or (words and words[0] in {
             "if", "for", "while", "until", "case", "function", "exit", "return",
         }):
             return []
@@ -70,7 +80,23 @@ def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
     nodes: dict[str, list[str]] = {}
     variables = {"MAKE": "make"}
     current: str | None = None
+    conditionals = 0
     for line in text.replace("\\\n", " ").splitlines():
+        stripped = line.strip()
+        if CONDITIONAL_START.match(stripped):
+            conditionals += 1
+            current = None
+            continue
+        if stripped.startswith("endif"):
+            conditionals = max(0, conditionals - 1)
+            current = None
+            continue
+        if stripped.startswith("else"):
+            current = None
+            continue
+        if conditionals:
+            # A branch this cannot evaluate is not positive evidence.
+            continue
         if line.startswith("\t"):
             if current is not None:
                 nodes[current].append(line.strip().lstrip("@-+"))
@@ -90,6 +116,13 @@ def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
     return nodes, variables
 
 
+def _runs_profile(words: list[str], profile: str) -> bool:
+    """True only for the invocation that runs gates, not a listing mode."""
+    if words[:2] != ["python3", profile]:
+        return False
+    return all(not word.startswith("-") for word in words[2:])
+
+
 def reachable_commands(makefile: str, entries: list[str], profile: str,
                        gates: list[str]) -> str:
     """Follow only targets called by entries, including the push profile gates."""
@@ -105,7 +138,7 @@ def reachable_commands(makefile: str, entries: list[str], profile: str,
             continue
         # Canonical quoting preserves comments/arguments when the caller parses.
         reached.append(shlex.join(words))
-        if words[:2] == ["python3", profile] and not profile_seen:
+        if _runs_profile(words, profile) and not profile_seen:
             profile_seen = True
             pending.extend(gates)
         for target in make_targets(line):

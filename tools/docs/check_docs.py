@@ -732,7 +732,7 @@ def _starts_block(line: str) -> bool:
         return True
     if stripped.startswith(">"):
         return True
-    if stripped[:3] in ("```", "~~~"):
+    if _fence_marker(line) is not None:
         return True
     if THEMATIC_BREAK_RE.match(stripped):
         return True
