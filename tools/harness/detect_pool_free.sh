@@ -107,6 +107,9 @@ fi
 while IFS= read -r -d '' src_file; do
     [[ -z "$src_file" ]] && continue
 
+    # An empty file has nothing to scan and is not an unreadable file.
+    [[ -s "$src_file" ]] || continue
+
     if ! grep -qI '' "$src_file" 2>/dev/null; then
         echo "ERROR: cannot read ${src_file} as text; it was not scanned" >&2
         unreadable=$((unreadable + 1))

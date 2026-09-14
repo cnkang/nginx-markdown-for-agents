@@ -644,7 +644,7 @@ def check_metric_family_count(files: list[Path]) -> list[str]:
     return failures
 
 
-_CHECKLIST_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b", re.IGNORECASE)
+_CHECKLIST_SHA_RE = re.compile(r"\b(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b", re.IGNORECASE)
 _CHECKLIST_CLAIM_RE = re.compile(
     r"current (?:head|candidate|branch head)s?\b|have not certified"
     r"|has not certified"

@@ -105,11 +105,12 @@ def _command_continues_after(lines: list[str], opened: int, comment: int) -> boo
 
 
 def _workflow_runs(path: Path) -> list[tuple[str, str]]:
-    """Return (name, script) for every `run:` script in a workflow."""
-    try:
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
-        return []
+    """Return (name, script) for every `run:` script in a workflow.
+
+    Reading failures propagate: a workflow this cannot parse is not a workflow
+    without `run:` steps, and treating it as one would skip its commands.
+    """
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
         return []
     jobs = document.get("jobs")
@@ -138,7 +139,14 @@ def collect_errors(root: Path) -> list[str]:
     errors: list[str] = []
     workflow_dir = root / ".github/workflows"
     for path in sorted(workflow_dir.glob("*.y*ml")):
-        for name, script in _workflow_runs(path):
+        try:
+            runs = _workflow_runs(path)
+        except (OSError, yaml.YAMLError) as exc:
+            # Its commands are unknown rather than absent, so this is reported
+            # once for the workflow instead of being skipped.
+            errors.append(f"{path.relative_to(root)}: cannot be read: {exc}")
+            continue
+        for name, script in runs:
             for line in scan_shell_text(script):
                 errors.append(
                     f"{path.relative_to(root)} ({name}): a comment on a continued "
