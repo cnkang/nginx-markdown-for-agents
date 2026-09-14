@@ -75,6 +75,43 @@ def _expand(text: str, variables: dict[str, str]) -> str:
     return ""
 
 
+def _conditional_delta(line: str) -> int | None:
+    """Depth change a Make conditional makes, or None for an ordinary line."""
+    stripped = line.strip()
+    if CONDITIONAL_START.match(stripped):
+        return 1
+    if stripped.startswith("endif"):
+        return -1
+    if stripped.startswith("else"):
+        return 0
+    return None
+
+
+def _consume_make_line(
+    line: str,
+    nodes: dict[str, list[str]],
+    variables: dict[str, str],
+    current: str | None,
+) -> str | None:
+    """Read one recipe, assignment or target line; return its target."""
+    if line.startswith("\t"):
+        if current is not None:
+            nodes[current].append(line.strip().lstrip("@-+"))
+        return current
+    assignment = ASSIGNMENT.fullmatch(line)
+    if assignment:
+        variables[assignment[1]] = assignment[2]
+        return None
+    target = TARGET.fullmatch(line)
+    if target:
+        nodes.setdefault(target[1], [])
+        nodes[target[1]].append("make " + target[2].strip())
+        return target[1]
+    if line.strip() and not line.startswith("#"):
+        return None
+    return current
+
+
 def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
     """Collect target dependencies and recipes from the root Makefile."""
     nodes: dict[str, list[str]] = {}
@@ -82,37 +119,15 @@ def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
     current: str | None = None
     conditionals = 0
     for line in text.replace("\\\n", " ").splitlines():
-        stripped = line.strip()
-        if CONDITIONAL_START.match(stripped):
-            conditionals += 1
-            current = None
-            continue
-        if stripped.startswith("endif"):
-            conditionals = max(0, conditionals - 1)
-            current = None
-            continue
-        if stripped.startswith("else"):
+        delta = _conditional_delta(line)
+        if delta is not None:
+            conditionals = max(0, conditionals + delta)
             current = None
             continue
         if conditionals:
             # A branch this cannot evaluate is not positive evidence.
             continue
-        if line.startswith("\t"):
-            if current is not None:
-                nodes[current].append(line.strip().lstrip("@-+"))
-            continue
-        assignment = ASSIGNMENT.fullmatch(line)
-        if assignment:
-            variables[assignment[1]] = assignment[2]
-            current = None
-            continue
-        target = TARGET.fullmatch(line)
-        if target:
-            current = target[1]
-            nodes.setdefault(current, [])
-            nodes[current].append("make " + target[2].strip())
-        elif line.strip() and not line.startswith("#"):
-            current = None
+        current = _consume_make_line(line, nodes, variables, current)
     return nodes, variables
 
 
