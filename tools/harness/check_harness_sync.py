@@ -941,6 +941,17 @@ def _workflow_run_text() -> str:
     return "\n".join(commands)
 
 
+def _defaults_directory(scope: object) -> object:
+    """Read `defaults.run.working-directory` from a workflow or a job."""
+    if not isinstance(scope, dict):
+        return None
+    defaults = scope.get("defaults")
+    if not isinstance(defaults, dict):
+        return None
+    run = defaults.get("run")
+    return run.get("working-directory") if isinstance(run, dict) else None
+
+
 def _document_run_commands(document: object) -> list[str]:
     """Return the `run` values of one workflow document."""
     if not isinstance(document, dict):
@@ -948,13 +959,15 @@ def _document_run_commands(document: object) -> list[str]:
     jobs = document.get("jobs")
     if not isinstance(jobs, dict):
         return []
+    workflow_directory = _defaults_directory(document)
     commands: list[str] = []
     for job in jobs.values():
         if not isinstance(job, dict) or job.get("if") is False:
             continue
-        commands.extend(
-            _enabled_step_commands(job.get("steps", []), job.get("working-directory"))
-        )
+        directory = job.get("working-directory", _defaults_directory(job))
+        if directory is None:
+            directory = workflow_directory
+        commands.extend(_enabled_step_commands(job.get("steps", []), directory))
     return commands
 
 

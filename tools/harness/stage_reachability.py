@@ -115,40 +115,87 @@ def _conditional_delta(line: str) -> int | None:
     return None
 
 
+def _consume_recipe(line: str, nodes: dict[str, list[str]], current: str | None) -> str | None:
+    """Record a recipe line, dropping one whose exit status Make would ignore."""
+    if current is None:
+        return current
+    recipe = line.strip()
+    if not recipe.startswith("-"):
+        # A leading `-` tells Make to ignore the status, so the command is not
+        # what fails a build and cannot be blocking evidence.
+        nodes[current].append(recipe.lstrip("@+"))
+    return current
+
+
+def _drop(name: str, variables: dict[str, str], simple: set[str]) -> None:
+    """Forget a variable whose value cannot be known from here."""
+    variables.pop(name, None)
+    simple.discard(name)
+
+
+def _apply_assignment(
+    assignment: "re.Match[str]", variables: dict[str, str], simple: set[str]
+) -> None:
+    """Apply one assignment the way Make would, flavor included."""
+    name, operator, value = assignment[1], assignment[2], assignment[3]
+    if operator == "?=":
+        if name not in variables:
+            variables[name] = value
+            simple.discard(name)
+        return
+    if operator == "=":
+        variables[name] = value
+        simple.discard(name)
+        return
+    expanded = _expand(value, variables)
+    if VARIABLE.search(expanded):
+        # A later assignment must not fill a reference that is open here.
+        _drop(name, variables, simple)
+        return
+    if operator == ":=":
+        variables[name] = expanded
+        simple.add(name)
+        return
+    if name in simple:
+        # Appending to a simple variable expands the tail right here.
+        variables[name] = variables.get(name, "") + " " + expanded
+        return
+    _drop(name, variables, simple)
+
+
+def _record_target(line: str, nodes: dict[str, list[str]], variables: dict[str, str]) -> str | None:
+    """Record a target declaration, expanding its prerequisites where it is read."""
+    target = TARGET.fullmatch(line)
+    if target is None:
+        return None
+    name, prerequisites = target[1], target[2]
+    existing = nodes.get(name, [])
+    if any(not item.startswith("make ") for item in existing):
+        # Make keeps the last recipe for a target and drops the earlier one.
+        nodes[name] = [item for item in existing if item.startswith("make ")]
+    nodes.setdefault(name, [])
+    nodes[name].append("make " + _expand(prerequisites.strip(), variables))
+    return name
+
+
 def _consume_make_line(
     line: str,
     nodes: dict[str, list[str]],
     variables: dict[str, str],
+    simple: set[str],
     current: str | None,
 ) -> str | None:
     """Read one recipe, assignment or target line; return its target."""
     if line.startswith("\t"):
-        if current is not None:
-            nodes[current].append(line.strip().lstrip("@-+"))
-        return current
+        return _consume_recipe(line, nodes, current)
     assignment = ASSIGNMENT.fullmatch(line)
     if assignment:
-        name, operator, value = assignment[1], assignment[2], assignment[3]
-        if operator == "?=":
-            # A conditional assignment leaves an existing value alone.
-            variables.setdefault(name, value)
-        elif operator == ":=":
-            # A simple assignment is expanded where it is written.
-            variables[name] = _expand(value, variables)
-        elif operator == "+=":
-            variables[name] = variables.get(name, "") + " " + value
-        else:
-            variables[name] = value
+        _apply_assignment(assignment, variables, simple)
         return None
-    target = TARGET.fullmatch(line)
-    if target:
-        nodes.setdefault(target[1], [])
-        nodes[target[1]].append("make " + target[2].strip())
-        return target[1]
-    if line.strip() and not line.startswith("#"):
-        return None
-    return current
-
+    recorded = _record_target(line, nodes, variables)
+    if recorded is not None:
+        return recorded
+    return None if line.strip() and not line.startswith("#") else current
 
 def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
     """Collect target dependencies and recipes from the root Makefile."""
@@ -156,6 +203,7 @@ def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
     variables = {"MAKE": "make"}
     current: str | None = None
     conditionals = 0
+    simple: set[str] = set()
     unknown: set[str] = set()
     for line in text.replace("\\\n", " ").splitlines():
         delta = _conditional_delta(line)
@@ -170,7 +218,7 @@ def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
             if poisoned:
                 unknown.add(poisoned[1])
             continue
-        current = _consume_make_line(line, nodes, variables, current)
+        current = _consume_make_line(line, nodes, variables, simple, current)
     for name in unknown:
         variables.pop(name, None)
     return nodes, variables

@@ -233,3 +233,48 @@ def test_a_directory_change_makes_a_script_uncertain() -> None:
 
     assert reach.literal_script_lines(script) == []
     assert reach.literal_script_lines("make root\n") == ["make root"]
+
+
+def test_an_append_to_a_simple_variable_expands_now() -> None:
+    """`+=` on a simple variable must not pick up a later assignment."""
+    makefile = (
+        "LIST :=\nLIST += $(LATER)\n"
+        "root:\n\tpython3 $(LIST)\n"
+        "LATER := " + CHECK + "\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+    assert CHECK not in reached
+
+
+def test_prerequisites_expand_where_they_are_read() -> None:
+    """The value at the declaration decides, as Make reads it there."""
+    makefile = (
+        "LIST = other\nroot: $(LIST)\n"
+        "other:\n\t@true\n"
+        "checked:\n\tpython3 " + CHECK + "\n"
+        "LIST = checked\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+    assert CHECK not in reached
+
+
+def test_the_last_recipe_wins() -> None:
+    """Make drops an overridden recipe instead of running both."""
+    overridden = f"root:\n\tpython3 {CHECK}\nroot:\n\t@echo OTHER\n"
+    only = f"root:\n\tpython3 {CHECK}\n"
+
+    assert CHECK in reach.reachable_commands(only, ["make root"], PROFILE, [])
+    assert CHECK not in reach.reachable_commands(overridden, ["make root"], PROFILE, [])
+
+
+def test_an_ignored_failure_is_not_blocking_evidence() -> None:
+    """A recipe prefixed with `-` cannot fail the build."""
+    ignored = f"root:\n\t-python3 {CHECK}\n"
+    blocking = f"root:\n\tpython3 {CHECK}\n"
+
+    assert CHECK in reach.reachable_commands(blocking, ["make root"], PROFILE, [])
+    assert CHECK not in reach.reachable_commands(ignored, ["make root"], PROFILE, [])
