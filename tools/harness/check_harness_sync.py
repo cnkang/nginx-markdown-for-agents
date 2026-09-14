@@ -950,19 +950,36 @@ def _document_run_commands(document: object) -> list[str]:
 
 
 def _profile_gate_text() -> str:
-    """Return the commands the push profile actually runs.
+    """Return the commands the push profile runs, from its declaration.
 
-    Only the command lists are read, so a comment naming a target is not a gate.
+    The executor and this check read the same table, so a gate that is removed
+    from the list is removed from both.
     """
-    path = REPO_ROOT / PUSH_PROFILE
+    path = REPO_ROOT / "tools/ci/pre_push_gates.py"
     if not path.exists():
         return ""
-    lines = [
-        line.strip()
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip().startswith('["make')
-    ]
-    return "\n".join(lines)
+    try:
+        gate_module = _load_gate_declaration(path)
+    except (OSError, ValueError):
+        return ""
+    commands: list[str] = []
+    for gate in gate_module.GATES:
+        command = gate.get("command")
+        if isinstance(command, list):
+            commands.append(" ".join(str(part) for part in command))
+    return "\n".join(commands)
+
+
+def _load_gate_declaration(path: Path) -> object:
+    """Import the gate declaration module without touching sys.path."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("pre_push_gates", path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _stage_entry_ok(stage: str) -> bool:
