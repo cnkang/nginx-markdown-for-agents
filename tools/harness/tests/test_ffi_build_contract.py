@@ -145,9 +145,16 @@ def test_release_build_identity_is_embedded_and_matches_rustc(
     if shutil.which("rustc") is None:
         pytest.skip("rustc is required for release identity validation")
 
-    rust_version = subprocess.check_output(
-        ["rustc", "-Vv"], text=True
-    ).split("release: ", 1)[1].splitlines()[0]
+    rustc_info = subprocess.run(["rustc", "-Vv"], capture_output=True, text=True)
+    if rustc_info.returncode != 0:
+        # The shim resolves the toolchain pinned by `rust-toolchain.toml`, which
+        # needs it installed.  Reporting the reason here beats a bare
+        # CalledProcessError that says nothing about what is missing.
+        pytest.fail(
+            "rustc is present but not usable, so the release identity cannot be "
+            f"validated: {rustc_info.stderr.strip() or rustc_info.stdout.strip()}"
+        )
+    rust_version = rustc_info.stdout.split("release: ", 1)[1].splitlines()[0]
     source_sha = "a" * 40
     manifest_digest = f"sha256:{'b' * 64}"
     result = _run_module_config(

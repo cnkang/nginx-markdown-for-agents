@@ -74,18 +74,33 @@ def _indent(line: str) -> int:
     return len(line) - len(line.lstrip())
 
 
+def _continuation_start(lines: list[str], comment: int) -> int:
+    """Return the first line of the continuation run that ends at the comment.
+
+    A command may span several continued lines, and each of them is indented
+    more deeply than the first.  Walking back to where the run begins gives the
+    indentation the whole command is compared against.
+    """
+    start = comment - 1
+    while start > 0 and _ends_with_continuation(lines[start - 1]):
+        start -= 1
+    return start
+
+
 def _command_continues_after(lines: list[str], opened: int, comment: int) -> bool:
     """True when the command still has content after the comment line.
 
     Only the rest of this command can be lost.  The command ends where the
-    indentation drops to the level the continued line started at, which is not
-    always column one: inside a function or a `run:` block every line is
-    indented, and an unrelated command there would be a false report.
+    indentation drops to the level the command starts at, which is not always
+    column one: inside a function or a `run:` block every line is indented, and
+    an unrelated command there would be a false report.
     """
+    _ = opened
+    start = _continuation_start(lines, comment)
     for candidate in lines[comment + 1 :]:
         if not candidate.strip():
             continue
-        return _indent(candidate) > _indent(lines[opened])
+        return _indent(candidate) > _indent(lines[start])
     return False
 
 
