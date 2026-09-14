@@ -38,11 +38,30 @@ def _defines_or_braces(words: list[str]) -> bool:
     return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\(\)", words[0])) if len(words) > 1 else False
 
 
+def _leaves_quote_open(line: str) -> bool:
+    """True when the line ends inside a quote, so its text spans lines."""
+    single = double = False
+    escaped = False
+    for char in line:
+        if escaped:
+            escaped = False
+        elif char == "\\" and not single:
+            escaped = True
+        elif char == "'" and not double:
+            single = not single
+        elif char == '"' and not single:
+            double = not double
+    return single or double
+
+
 def literal_script_lines(script: str) -> list[str]:
     """Refuse compound scripts rather than treating dormant bodies as calls."""
     lines = script.replace("\\\n", " ").splitlines()
     for line in lines:
         words = command_words(line)
+        if _leaves_quote_open(line):
+            # Quoted text is data; a call written inside it never runs.
+            return []
         if "<<" in line or _defines_or_braces(words) or (words and words[0] in {
             "if", "for", "while", "until", "case", "function", "exit", "return",
         }):
@@ -56,7 +75,12 @@ def make_targets(line: str) -> list[str]:
     if not words or words[0] not in {"make", "$(MAKE)"}:
         return []
     targets = words[1:]
-    if not targets or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", x) for x in targets):
+    if not targets:
+        return []
+    if any(word.startswith("-") for word in targets):
+        # -n and -q print or probe without running a recipe: not evidence.
+        return []
+    if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", x) for x in targets):
         return []
     return targets
 
@@ -118,6 +142,7 @@ def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
     variables = {"MAKE": "make"}
     current: str | None = None
     conditionals = 0
+    unknown: set[str] = set()
     for line in text.replace("\\\n", " ").splitlines():
         delta = _conditional_delta(line)
         if delta is not None:
@@ -125,9 +150,15 @@ def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
             current = None
             continue
         if conditionals:
-            # A branch this cannot evaluate is not positive evidence.
+            # The branch cannot be evaluated, so a variable it assigns may hold
+            # either value; drop it rather than letting the outside value decide.
+            poisoned = ASSIGNMENT.fullmatch(line.strip())
+            if poisoned:
+                unknown.add(poisoned[1])
             continue
         current = _consume_make_line(line, nodes, variables, current)
+    for name in unknown:
+        variables.pop(name, None)
     return nodes, variables
 
 
