@@ -264,6 +264,34 @@ fi
 
 rm -f "${src_dir}/split_impl.c" "${src_dir}/split_call.c" "${src_dir}/split_header.h"
 
+# Test: a wide guarded surface must still be recognised as non-empty.  The
+# emptiness test once went through `grep -q` in a pipe, and under
+# `set -o pipefail` the writer's SIGPIPE reads as a failed search, which the
+# fail-closed guard then reports as "no functions found".  Small fixtures cannot
+# reach that path, so this case builds a large one.
+large_header="${src_dir}/large_header.h"
+{
+    printf '#ifndef LARGE_H\n#define LARGE_H\n#ifdef MARKDOWN_STREAMING_ENABLED\n'
+    i=0
+    while [[ $i -lt 4000 ]]; do
+        printf 'void ngx_http_markdown_large_%d(void);\n' "$i"
+        i=$((i + 1))
+    done
+    printf '#endif\n#endif\n'
+} >"${large_header}"
+
+output_file="${tmp_dir}/large.out"
+bash "${DETECTOR}" "${large_header}" "${src_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 0 ]]; then
+    pass "large: a wide guarded surface is still recognised"
+else
+    fail "large: a wide guarded surface is still recognised" \
+        "exit code ${exit_code}"
+    tail -3 "${output_file}" >&2
+fi
+rm -f "${large_header}"
+
 printf '\n%d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ ${FAIL_COUNT} -gt 0 ]]; then
     exit 1
