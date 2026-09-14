@@ -55,7 +55,9 @@ repos:
         files: ^(tools/|packaging/|\.github/|Makefile|components/)
       - id: detect-pool-free
         name: detect pool/free mismatch
-        entry: tools/harness/detect_pool_free.sh
+        # The detector reads one directory argument.  Naming it here keeps the
+        # scan complete even though pre-commit passes no filenames.
+        entry: tools/harness/detect_pool_free.sh components/nginx-module/src
         language: script
         # The detector reads one directory argument.  Without this, pre-commit
         # appends the changed filenames and the detector scans only the first.
