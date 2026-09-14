@@ -833,7 +833,7 @@ def _is_invoked(path: str, wiring: str) -> bool:
     not a gate.  The mapping has to name something an entry point executes, or a
     directory whose run covers it.
     """
-    stripped = path.lstrip("./")
+    stripped = path.removeprefix("./")
     parent = str(Path(stripped).parent)
     for line in wiring.splitlines():
         if _line_runs(line, stripped, parent):
