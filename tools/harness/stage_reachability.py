@@ -38,7 +38,7 @@ def _defines_or_braces(words: list[str]) -> bool:
     return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\(\)", words[0])) if len(words) > 1 else False
 
 
-def _leaves_quote_open(line: str) -> bool:
+def _quote_spans_lines(line: str) -> bool:
     """True when the line ends inside a quote, so its text spans lines."""
     single = double = False
     escaped = False
@@ -59,7 +59,7 @@ def literal_script_lines(script: str) -> list[str]:
     lines = script.replace("\\\n", " ").splitlines()
     for line in lines:
         words = command_words(line)
-        if _leaves_quote_open(line):
+        if _quote_spans_lines(line):
             # Quoted text is data; a call written inside it never runs.
             return []
         if "<<" in line or _defines_or_braces(words) or (words and words[0] in {
