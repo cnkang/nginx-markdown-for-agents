@@ -284,7 +284,10 @@ PY
     exit 1
 fi
 
-if [[ -z "${guarded_funcs//[[:space:]]/}" ]]; then
+# A pattern substitution over this variable is quadratic in bash 3.2, and the
+# extraction is large enough to notice: the check for "no non-whitespace
+# character" runs through grep instead, which reads it once.
+if ! printf '%s' "${guarded_funcs}" | grep -q '[^[:space:]]'; then
     echo "ERROR: no functions found inside #ifdef ${GUARD_NAME} blocks in ${HEADER_FILE} / ${SRC_DIR}; the guard name, header, or --prefix does not match this tree" >&2
     exit 1
 fi
