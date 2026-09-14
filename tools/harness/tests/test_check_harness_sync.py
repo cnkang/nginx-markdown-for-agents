@@ -879,9 +879,9 @@ def test_running_an_interpreter_against_a_directory_is_not_an_invocation() -> No
     """`python3 tools/harness` executes nothing from the directory."""
     wiring = "check:\n\tpython3 tools/harness\n"
 
-    assert "tools/harness/detect_pool_free.sh" and sync._is_invoked(
-        "tools/harness/detect_pool_free.sh", wiring
-    ) is False
+    detector = "tools/harness/detect_pool_free.sh"
+
+    assert sync._is_invoked(detector, wiring) is False
 
 
 def test_a_test_runner_directory_does_cover_the_files_under_it() -> None:

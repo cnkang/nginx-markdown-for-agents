@@ -164,7 +164,7 @@ def _run(gate: Gate) -> Outcome:
         return Outcome(gate, "BLOCKED", "NGINX_BIN is not set")
 
     command = " ".join(gate.command)
-    print(f"", flush=True)
+    print(flush=True)
     print(f"── {gate.name}: {command}", flush=True)
     process = subprocess.Popen(
         gate.command,

@@ -782,10 +782,13 @@ def _check_harness_docs(manifest: dict) -> CheckResult:
 RULE_CHECK_STAGES = {"save", "commit", "push", "ci"}
 
 
+PRECOMMIT_CONFIG = ".pre-commit-config.yaml"
+PUSH_PROFILE = "tools/ci/pre_push_profile.py"
+
 WIRING_FILES = (
     "Makefile",
-    ".pre-commit-config.yaml",
-    "tools/ci/pre_push_profile.py",
+    PRECOMMIT_CONFIG,
+    PUSH_PROFILE,
 )
 
 
@@ -951,7 +954,7 @@ def _profile_gate_text() -> str:
 
     Only the command lists are read, so a comment naming a target is not a gate.
     """
-    path = REPO_ROOT / "tools/ci/pre_push_profile.py"
+    path = REPO_ROOT / PUSH_PROFILE
     if not path.exists():
         return ""
     lines = [
@@ -985,7 +988,7 @@ def _stage_entry_ok(stage: str) -> bool:
 
 def _stage_config_text() -> str:
     """Return the pre-commit configuration."""
-    return (REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    return (REPO_ROOT / PRECOMMIT_CONFIG).read_text(encoding="utf-8")
 
 
 def _workflow_files() -> list[Path]:
