@@ -25,6 +25,7 @@ on:
       - ".sonarcloud.properties"
       - "Makefile"
       - ".gitattributes"
+      - ".pre-commit-config.yaml"
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
@@ -56,6 +57,7 @@ on:
       - ".sonarcloud.properties"
       - "Makefile"
       - ".gitattributes"
+      - ".pre-commit-config.yaml"
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
@@ -192,6 +194,11 @@ jobs:
               - '.gitattributes'
               - '.sonarcloud.properties'
               - 'tools/harness/**'
+              # The hooks are part of the harness surface: the wiring tests read
+              # this file, so a change to it has to select the harness job.
+              - '.pre-commit-config.yaml'
+              - 'tools/ci/pre_push_profile.py'
+              - 'tools/ci/test_pre_push_profile.py'
               - 'tools/sonar/**'
               - 'tools/e2e/**'
               - 'tools/e2e-harness/**'

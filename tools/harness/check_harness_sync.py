@@ -782,8 +782,101 @@ def _check_harness_docs(manifest: dict) -> CheckResult:
 RULE_CHECK_STAGES = {"save", "commit", "push", "ci"}
 
 
-def _rule_check_entry_problems(entry: dict, agents: str) -> list[str]:
-    """Return the problems with one mapping entry, empty when it is sound."""
+WIRING_FILES = (
+    "Makefile",
+    ".pre-commit-config.yaml",
+    "tools/ci/pre_push_profile.py",
+)
+
+
+INTERPRETERS = ("python3", "python", "bash", "sh")
+
+
+def _invocation_target(parts: list[str]) -> str | None:
+    """Return the path an entry line runs, if the line runs a path at all."""
+    while parts and "=" in parts[0] and not parts[0].startswith("-"):
+        parts = parts[1:]
+    if not parts or parts[0] not in INTERPRETERS:
+        return None
+    rest = parts[1:]
+    if rest[:1] == ["-m"]:
+        rest = rest[2:]
+    return rest[0].rstrip("/") if rest else None
+
+
+def _is_invoked(path: str, wiring: str) -> bool:
+    """True when an entry point runs a path, rather than only mentioning it.
+
+    A file listed as an argument, named in a comment or kept in a variable is
+    not a gate.  The mapping has to name something an entry point executes, or a
+    directory whose run covers it.
+    """
+    stripped = path.lstrip("./")
+    parent = str(Path(stripped).parent)
+    for line in wiring.splitlines():
+        text = line.strip()
+        if not text or text.startswith("#"):
+            continue
+        if text.startswith(("entry:", "entry :")):
+            if text.split(":", 1)[1].strip() == stripped:
+                return True
+        target = _invocation_target(text.split())
+        if target is None:
+            continue
+        if target == stripped or target == parent or stripped.startswith(target + "/"):
+            return True
+    return False
+
+
+def _wiring_text() -> str:
+    """Return the text of the files that invoke checks and tests."""
+    return "\n".join(
+        (REPO_ROOT / name).read_text(encoding="utf-8")
+        for name in WIRING_FILES
+        if (REPO_ROOT / name).exists()
+    )
+
+
+def _stage_problems(stages: object, rule: str) -> list[str]:
+    """Return the problems with an entry's stage list."""
+    if (
+        not isinstance(stages, list)
+        or not stages
+        or not all(isinstance(stage, str) and stage for stage in stages)
+    ):
+        return [f"rule {rule}: stage must be a non-empty list of names"]
+    if not set(stages) <= RULE_CHECK_STAGES:
+        return [f"rule {rule}: unknown stage {stages!r}"]
+    return []
+
+
+def _mapping_shape_problems(entry: dict, rule: str) -> list[str]:
+    """Return the problems with an entry's field types and emptiness."""
+    problems = _stage_problems(entry["stage"], rule)
+    files = entry["files"]
+    if (
+        not isinstance(files, list)
+        or not files
+        or not all(isinstance(item, str) and item for item in files)
+    ):
+        problems.append(f"rule {rule}: files must be a non-empty list of patterns")
+    if not isinstance(entry["blocking"], bool):
+        problems.append(f"rule {rule}: blocking must be a boolean")
+    for key in ("check", "summary", "not_covered"):
+        if not isinstance(entry[key], str) or not entry[key].strip():
+            problems.append(f"rule {rule}: {key} must be a non-empty string")
+    if entry["test"] is not None and not isinstance(entry["test"], str):
+        problems.append(f"rule {rule}: test must be a path or null")
+    return problems
+
+
+def _rule_check_entry_problems(entry: dict, agents: str, wiring: str) -> list[str]:
+    """Return the problems with one mapping entry, empty when it is sound.
+
+    A path that merely exists is not wiring: the entry has to name a check that
+    an entry point actually invokes, and a test that something runs.  That is the
+    drift this mapping exists to catch.
+    """
     required = {
         "rule", "summary", "check", "files", "stage", "blocking", "test", "not_covered",
     }
@@ -792,17 +885,24 @@ def _rule_check_entry_problems(entry: dict, agents: str) -> list[str]:
     if missing:
         return [f"rule {rule}: missing {', '.join(missing)}"]
 
-    problems: list[str] = []
+    problems = _mapping_shape_problems(entry, rule)
     if f"| {rule} |" not in agents:
         problems.append(f"rule {rule}: not in the AGENTS.md rule table")
-    stages = entry["stage"]
-    if not isinstance(stages, list) or not set(stages) <= RULE_CHECK_STAGES:
-        problems.append(f"rule {rule}: unknown stage {stages!r}")
-    if not (REPO_ROOT / entry["check"]).exists():
-        problems.append(f"rule {rule}: check {entry['check']} does not exist")
+
+    check = entry["check"]
+    if isinstance(check, str) and check.strip():
+        if not (REPO_ROOT / check).is_file():
+            problems.append(f"rule {rule}: check {check} is not a repository file")
+        elif not _is_invoked(check, wiring):
+            problems.append(
+                f"rule {rule}: nothing invokes {check}; the mapping would claim a "
+                f"gate that never runs"
+            )
     test = entry["test"]
-    if test is not None and not (REPO_ROOT / test).exists():
+    if isinstance(test, str) and test.strip() and not (REPO_ROOT / test).is_file():
         problems.append(f"rule {rule}: test {test} does not exist")
+    elif isinstance(test, str) and test.strip() and not _is_invoked(test, wiring):
+        problems.append(f"rule {rule}: nothing runs {test}")
     return problems
 
 
@@ -817,12 +917,13 @@ def _check_rule_checks(manifest: dict) -> CheckResult:
         return _result("rule-checks", FAIL, "rule_checks missing from the manifest")
 
     agents = AGENTS_PATH.read_text(encoding="utf-8") if AGENTS_PATH.exists() else ""
+    wiring = _wiring_text()
     problems: list[str] = []
     for entry in entries:
         if not isinstance(entry, dict):
             problems.append("an entry is not an object")
             continue
-        problems.extend(_rule_check_entry_problems(entry, agents))
+        problems.extend(_rule_check_entry_problems(entry, agents, wiring))
 
     if problems:
         return _result("rule-checks", FAIL, "; ".join(problems[:4]))
