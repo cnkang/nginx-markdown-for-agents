@@ -899,18 +899,36 @@ def test_a_check_only_passed_as_an_argument_is_not_invoked() -> None:
 
 
 @pytest.mark.parametrize("stage", ["save", "commit", "push", "ci"])
-def test_a_stage_does_not_read_the_whole_makefile(stage: str) -> None:
-    """A stage resolves to its own targets, not to every command in the file.
+def test_a_broken_entry_point_fails_the_mapping(monkeypatch, stage: str) -> None:
+    """Keeping the detector and the target but cutting the call must fail.
 
-    This is the guard for the mapping's core property: a command parked under a
-    target the stage does not call cannot claim the stage.  Putting the whole
-    Makefile back into scope fails here.
+    Each case removes the call while leaving the names behind: an empty recipe,
+    a workflow that only mentions the target in a comment, and a hook list with
+    nothing in it.
     """
-    wiring = sync._stage_wiring(stage)
-    whole = sync._makefile_text()
+    entry = _rule_check_entry(stage=[stage])
+    monkeypatch.setattr(sync, "_make_recipe", lambda target: "@true")
+    monkeypatch.setattr(sync, "_workflow_run_text", lambda: "# make harness-security-checks")
+    monkeypatch.setattr(sync, "_precommit_hook_entries", list)
+    monkeypatch.setattr(sync, "_stage_wiring", lambda _stage: "")
 
-    assert wiring and wiring != whole
-    assert len(wiring) < len(whole)
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
+    assert stage in result.detail
+
+
+@pytest.mark.parametrize("stage", ["save", "commit", "push", "ci"])
+def test_a_comment_naming_a_target_is_not_an_entry_point(monkeypatch, stage: str) -> None:
+    """Parsed fields carry the call; a comment that names one does not."""
+    entry = _rule_check_entry(stage=[stage])
+    monkeypatch.setattr(sync, "_precommit_hook_entries", list)
+    monkeypatch.setattr(sync, "_workflow_run_text", lambda: "# make harness-quick-checks")
+    monkeypatch.setattr(sync, "_make_recipe", lambda target: "# make harness-security-checks")
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
 
 
 @pytest.mark.parametrize("stage", ["save", "commit", "push", "ci"])
