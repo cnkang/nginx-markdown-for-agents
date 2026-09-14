@@ -287,3 +287,24 @@ def test_the_ignored_status_prefix_survives_other_prefixes() -> None:
 
     for makefile in recipes:
         assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_a_conditional_assignment_invalidates_the_earlier_value() -> None:
+    """A branch assignment must not leave the outside value in place."""
+    makefile = (
+        "LIST := checked\n"
+        "ifeq (1,1)\nLIST := other\nendif\n"
+        "root: $(LIST)\n"
+        "checked:\n\tpython3 " + CHECK + "\n"
+        "other:\n\t@true\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+    assert CHECK not in reached
+
+
+def test_an_operator_glued_to_an_operand_is_not_a_plain_command() -> None:
+    """`||true` reaches the tokenizer as one word."""
+    assert reach.command_words("python3 tools/harness/detect_example.py ||true") == []
+    assert reach.command_words("make root") == ["make", "root"]

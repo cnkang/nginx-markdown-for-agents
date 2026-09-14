@@ -30,6 +30,14 @@ def command_words(line: str) -> list[str]:
         words.pop(0)
     if any(word in {";", "&&", "||", "|", "&", ">", ">>", "<"} for word in words):
         return []
+    for word in words:
+        if re.fullmatch(r"[;&|<>]+", word):
+            continue
+        if re.search(r"[;&|<>]", word):
+            # An operator glued to an operand (`||true`) never runs alone, so
+            # the line is not a plain command.  Standalone operators are already
+            # refused above.
+            return []
     return words
 
 
@@ -63,6 +71,9 @@ def literal_script_lines(script: str) -> list[str]:
     lines = script.replace("\\\n", " ").splitlines()
     for line in lines:
         words = command_words(line)
+        if not words and line.strip() and not line.startswith("#"):
+            # A line that carries no plain command is not evidence either.
+            return []
         if _quote_spans_lines(line):
             # Quoted text is data; a call written inside it never runs.
             return []
@@ -206,7 +217,6 @@ def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
     current: str | None = None
     conditionals = 0
     simple: set[str] = set()
-    unknown: set[str] = set()
     for line in text.replace("\\\n", " ").splitlines():
         delta = _conditional_delta(line)
         if delta is not None:
@@ -215,14 +225,14 @@ def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
             continue
         if conditionals:
             # The branch cannot be evaluated, so a variable it assigns may hold
-            # either value; drop it rather than letting the outside value decide.
+            # either value.  It is dropped here, before any later declaration
+            # could expand a dependency with the value from outside the branch.
             poisoned = ASSIGNMENT.fullmatch(line.strip())
             if poisoned:
-                unknown.add(poisoned[1])
+                variables.pop(poisoned[1], None)
+                simple.discard(poisoned[1])
             continue
         current = _consume_make_line(line, nodes, variables, simple, current)
-    for name in unknown:
-        variables.pop(name, None)
     return nodes, variables
 
 
