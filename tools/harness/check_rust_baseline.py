@@ -347,8 +347,8 @@ def _tag_variables(tag: str) -> list[str] | None:
     so a token this pattern does not recognise has to count as unresolvable
     rather than being ignored.
     """
-    names = re.findall(r"\$\{([A-Za-z0-9_]+)\}", tag)
-    if "$" in re.sub(r"\$\{[A-Za-z0-9_]+\}", "", tag):
+    names = re.findall(r"\$\{(\w+)\}", tag)
+    if "$" in re.sub(r"\$\{\w+\}", "", tag):
         return None
     return names
 
