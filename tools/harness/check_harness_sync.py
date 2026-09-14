@@ -894,16 +894,91 @@ def _make_recipe(target: str) -> str:
     return ""
 
 
+def _precommit_hook_entries() -> list[str]:
+    """Return the `entry` values of the configured hooks.
+
+    Parsed, not searched: a comment that mentions a command is not a hook, and a
+    hook with no step is not an entry point.
+    """
+    import yaml
+
+    try:
+        config = yaml.safe_load(_stage_config_text()) or {}
+    except yaml.YAMLError:
+        return []
+    entries: list[str] = []
+    for repo in config.get("repos", []) or []:
+        if not isinstance(repo, dict):
+            continue
+        for hook in repo.get("hooks", []) or []:
+            if isinstance(hook, dict) and isinstance(hook.get("entry"), str):
+                entries.append(hook["entry"])
+    return entries
+
+
+def _workflow_run_text() -> str:
+    """Return the shell commands the workflows actually run.
+
+    Only `run` values are collected, so a comment that names a target is not an
+    invocation.
+    """
+    import yaml
+
+    commands: list[str] = []
+    for path in _workflow_files():
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        commands.extend(_document_run_commands(document))
+    return "\n".join(commands)
+
+
+def _document_run_commands(document: object) -> list[str]:
+    """Return the `run` values of one workflow document."""
+    if not isinstance(document, dict):
+        return []
+    commands: list[str] = []
+    for job in (document.get("jobs") or {}).values():
+        for step in (job or {}).get("steps", []) or []:
+            if isinstance(step, dict) and isinstance(step.get("run"), str):
+                commands.append(step["run"])
+    return commands
+
+
+def _profile_gate_text() -> str:
+    """Return the commands the push profile actually runs.
+
+    Only the command lists are read, so a comment naming a target is not a gate.
+    """
+    path = REPO_ROOT / "tools/ci/pre_push_profile.py"
+    if not path.exists():
+        return ""
+    lines = [
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith('["make')
+    ]
+    return "\n".join(lines)
+
+
 def _stage_entry_ok(stage: str) -> bool:
     """True when the stage's own entry point calls its declared targets."""
     if stage in {"save", "commit"}:
-        return "entry: make harness-quick-checks" in _stage_config_text()
-    if stage == "push":
-        return "pre-push-check:" in _makefile_text()
-    if stage == "ci":
+        entries = _precommit_hook_entries()
+        target = RULE_CHECK_STAGE_TARGETS[stage][0]
         return any(
-            "harness-security-checks" in (REPO_ROOT / path).read_text(encoding="utf-8")
-            for path in _workflow_files()
+            entry.strip() == f"make {target}" or entry.strip().endswith(target)
+            for entry in entries
+        )
+    if stage == "push":
+        # The push stage is run through the profile, so the target has to call it.
+        return "pre_push_profile.py" in _make_recipe("pre-push-check")
+    if stage == "ci":
+        run_text = _workflow_run_text()
+        return any(
+            f"make {target}" in run_text
+            for target in RULE_CHECK_STAGE_TARGETS["ci"]
         )
     return False
 
@@ -927,11 +1002,13 @@ def _stage_wiring(stage: str) -> str:
     """
     parts = [_make_recipe(target) for target in RULE_CHECK_STAGE_TARGETS.get(stage, ())]
     if stage in {"save", "commit"}:
-        parts.append(_stage_config_text())
+        # Rendered the way the configuration writes them, so the invocation check
+        # reads each hook's entry as the command it is.
+        parts.append("\n".join(f"entry: {entry}" for entry in _precommit_hook_entries()))
+    if stage == "ci":
+        parts.append(_workflow_run_text())
     if stage == "push":
-        profile = REPO_ROOT / "tools/ci/pre_push_profile.py"
-        if profile.exists():
-            parts.append(profile.read_text(encoding="utf-8"))
+        parts.append(_profile_gate_text())
     return "\n".join(parts)
 
 
