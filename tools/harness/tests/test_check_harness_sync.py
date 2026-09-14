@@ -864,12 +864,11 @@ def test_rule_checks_reject_an_empty_files_list() -> None:
 def test_profile_cannot_pass_when_the_change_set_is_unknown(monkeypatch) -> None:
     """A failed diff must not be read as "no C changes"."""
     repo_root = Path(__file__).resolve().parents[3]
-    sys.path.insert(0, str(repo_root / "tools/ci"))
+    monkeypatch.syspath_prepend(str(repo_root / "tools/ci"))
     import pre_push_profile as profile
 
     monkeypatch.setattr(profile, "_git", lambda args: (128, ""))
     assert profile._changed_files("origin/main") is None
 
-    monkeypatch.setattr(sys, "argv", ["prog"])
     monkeypatch.setattr(profile, "_merge_base", lambda base: "deadbeef")
     assert profile.main(["prog"]) == 2
