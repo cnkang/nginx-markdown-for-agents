@@ -333,12 +333,16 @@ def validate_manifest(
                 elif "sha256" in pkg:
                     # Same single-open reader as the bundle: resolving and then
                     # reopening by name leaves a window for a swap.
-                    actual_sha = sha256_no_follow(fpath)
-                    if actual_sha != pkg["sha256"]:
-                        errors.append(
-                            f"{prefix}: SHA256 mismatch for {fname}: "
-                            f"manifest={pkg['sha256']}, actual={actual_sha}"
-                        )
+                    try:
+                        actual_sha = sha256_no_follow(fpath)
+                    except OSError as exc:
+                        errors.append(f"{prefix}: cannot read {fname}: {exc}")
+                    else:
+                        if actual_sha != pkg["sha256"]:
+                            errors.append(
+                                f"{prefix}: SHA256 mismatch for {fname}: "
+                                f"manifest={pkg['sha256']}, actual={actual_sha}"
+                            )
 
             if "format" in pkg and pkg["format"] not in ("deb", "rpm", "dynamic-module"):
                 errors.append(f"{prefix}: unexpected format: {pkg['format']}")

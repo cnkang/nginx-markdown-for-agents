@@ -352,9 +352,9 @@ def test_release_checklist_guard_rejects_explicit_status_fields(tmp_path: Path) 
 
 def test_iter_unfenced_lines_skips_tilde_fences():
     """Tilde fences are as valid as backtick fences and must be skipped too."""
-    text = "before\n~~~\n- [ ] 1234567\nafter\n~~~\nreally after\n"
+    text = "before\n~~~\n- [ ] abc1234\nafter\n~~~\nreally after\n"
     kept = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
-    assert "- [ ] 1234567" not in kept
+    assert "- [ ] abc1234" not in kept
     assert "really after" in kept
 
 
@@ -371,7 +371,7 @@ def test_checklist_guard_ignores_tilde_fenced_examples(tmp_path):
     """A fenced example may show a commit-bound requirement without failing."""
     path = tmp_path / "0.9.2-release-checklist.md"
     path.write_text(
-        "# Checklist\n\n~~~\n- [ ] certified at 1234567\n~~~\n\n- [ ] publish\n",
+        "# Checklist\n\n~~~\n- [ ] certified at abc1234\n~~~\n\n- [ ] publish\n",
         encoding="utf-8",
     )
     assert docs_checker.check_release_checklist_is_static([path]) == []
@@ -391,7 +391,7 @@ def test_iter_unfenced_lines_respects_fence_run_rules():
 def test_checklist_guard_accepts_plus_markers(tmp_path):
     """`+ [ ]` is a valid task-list marker and must be scanned like the others."""
     path = tmp_path / "0.9.2-release-checklist.md"
-    path.write_text("+ [ ] certified at 1234567\n", encoding="utf-8")
+    path.write_text("+ [ ] certified at abc1234\n", encoding="utf-8")
     failures = docs_checker.check_release_checklist_is_static([path])
     assert failures
     assert "names a commit" in failures[0]
@@ -435,7 +435,7 @@ def test_task_marker_with_extra_spaces_is_recognised():
 def test_checklist_guard_sees_a_pinned_commit_after_extra_spaces(tmp_path):
     """A wider marker must not become a way to hide a pinned commit."""
     path = tmp_path / "0.9.2-release-checklist.md"
-    path.write_text("-  [ ] certified at 1234567\n", encoding="utf-8")
+    path.write_text("-  [ ] certified at abc1234\n", encoding="utf-8")
     failures = docs_checker.check_release_checklist_is_static([path])
     assert failures
     assert "names a commit" in failures[0]
@@ -472,7 +472,7 @@ def test_lazy_continuation_commit_is_rejected(tmp_path):
     """An unindented continuation belongs to the item and is scanned."""
     path = tmp_path / "0.9.2-release-checklist.md"
     path.write_text(
-        "- [ ] evidence passes the validator.\ncommit 1234567\n",
+        "- [ ] evidence passes the validator.\ncommit abc1234\n",
         encoding="utf-8",
     )
     failures = docs_checker.check_release_checklist_is_static([path])
@@ -484,7 +484,7 @@ def test_heading_ends_the_task_item(tmp_path):
     """A heading opens a new block, so its text is not part of the item."""
     path = tmp_path / "0.9.2-release-checklist.md"
     path.write_text(
-        "- [ ] publish the release\n\n## Verification Record\n\ncommit 1234567\n",
+        "- [ ] publish the release\n\n## Verification Record\n\ncommit abc1234\n",
         encoding="utf-8",
     )
     assert docs_checker.check_release_checklist_is_static([path]) == []
@@ -494,7 +494,7 @@ def test_blank_line_ends_the_task_item(tmp_path):
     """Prose a blank line below an item is not part of that item."""
     path = tmp_path / "0.9.2-release-checklist.md"
     path.write_text(
-        "- [ ] publish the release\n\nThe baseline anchors at 1234567.\n",
+        "- [ ] publish the release\n\nThe baseline anchors at abc1234.\n",
         encoding="utf-8",
     )
     assert docs_checker.check_release_checklist_is_static([path]) == []
@@ -504,7 +504,7 @@ def test_fence_block_ends_a_task_item(tmp_path):
     """A fenced example after an item is not read as its continuation."""
     path = tmp_path / "0.9.2-release-checklist.md"
     path.write_text(
-        "- [ ] publish\n```text\ncommit 1234567\n```\n\nplain prose\n",
+        "- [ ] publish\n```text\ncommit abc1234\n```\n\nplain prose\n",
         encoding="utf-8",
     )
     assert docs_checker.check_release_checklist_is_static([path]) == []
@@ -534,6 +534,6 @@ def test_status_claim_requires_the_colon(tmp_path):
 def test_a_second_level_heading_ends_a_task_item(tmp_path):
     """Every ATX level opens a block, not only the first."""
     path = tmp_path / "0.9.2-release-checklist.md"
-    path.write_text("- [ ] publish\n## Section\ncommit 1234567\n", encoding="utf-8")
+    path.write_text("- [ ] publish\n## Section\ncommit abc1234\n", encoding="utf-8")
     assert docs_checker.check_release_checklist_is_static([path]) == []
     assert docs_checker._checklist_items(path.read_text(), set()) == ["- [ ] publish"]
