@@ -24,6 +24,9 @@ from collections import deque
 import subprocess
 import sys
 from dataclasses import dataclass
+
+import pre_push_gates
+from pre_push_gates import GATES
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -121,33 +124,15 @@ def is_c_build_change(changed: list[str]) -> bool:
 
 
 def _gates() -> list[Gate]:
-    """Return the gates the profile selects from."""
+    """Return the gates the profile selects from, as the shared declaration."""
     return [
-        Gate("local gate set (test-all)", ["make", "test-all"]),
         Gate(
-            "real GCC C unit suite",
-            ["make", "test-c-unit-gcc"],
-            needs_c_change=True,
-            reason="macOS gcc is an Apple clang alias, so GCC-only failures need "
-            "the container",
-        ),
-        Gate(
-            "security static analysis",
-            ["make", "security-static"],
-            reason="the workflow that runs these checks is separate from CI",
-        ),
-        Gate(
-            "module end-to-end checks",
-            ["make", "test-all-e2e"],
-            requires_nginx=True,
-            reason="needs a module-enabled NGINX binary",
-        ),
-        Gate(
-            "coverage gate",
-            ["make", "test-all-coverage"],
-            requires_nginx=True,
-            reason="needs a module-enabled NGINX binary",
-        ),
+            str(entry["name"]),
+            [str(part) for part in entry["command"]],  # type: ignore[union-attr]
+            needs_c_change=bool(entry["needs_c_change"]),
+            requires_nginx=bool(entry["requires_nginx"]),
+        )
+        for entry in GATES
     ]
 
 
