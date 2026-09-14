@@ -66,6 +66,10 @@ repos:
         entry: tools/harness/detect_backpressure_resume.sh
         language: script
         pass_filenames: false
+        # The detector's rule ("an NGX_AGAIN return without nearby resume state")
+        # is a bounded pattern, and its analysis covers the .c translation units.
+        # A header edit still runs it; whether a header-held helper needs its own
+        # state belongs to the state-transition tests, not to this pattern.
         files: ^components/nginx-module/src/.*\.(c|h)$
       - id: detect-decompression-budget
         name: detect decompression budget enforcement

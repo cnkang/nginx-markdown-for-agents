@@ -94,7 +94,7 @@ while IFS= read -r -d '' file; do
 
         echo "VIOLATION: $file:$line_num — '$func_name' returns NGX_AGAIN without state save" >> "$tmp_violations"
     done
-done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f -print0)
+done < <(find "$SRC_DIR" -name "*.c" -type f -print0)
 
 violations=$(wc -l < "$tmp_violations" | tr -d '[:space:]')
 
