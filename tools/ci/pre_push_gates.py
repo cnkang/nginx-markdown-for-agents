@@ -54,22 +54,27 @@ def validate_gates(value: object) -> list[dict]:
     names: set[str] = set()
     result: list[dict] = []
     for entry in value:
-        if not isinstance(entry, dict):
-            raise ValueError("each gate must be an object")
-        name = entry.get("name")
-        if not isinstance(name, str) or not name.strip() or name in names:
-            raise ValueError("gate names must be non-empty and unique")
-        command = entry.get("command")
-        if not isinstance(command, list) or not command or not all(
-            isinstance(part, str) and part.strip() for part in command
-        ):
-            raise ValueError(f"{name}: command must be a non-empty string list")
-        for flag in ("needs_c_change", "requires_nginx"):
-            if not isinstance(entry.get(flag), bool):
-                raise ValueError(f"{name}: {flag} must be a boolean")
-        names.add(name)
-        result.append(dict(entry, command=list(command)))
+        result.append(_validated_gate(entry, names))
     return result
+
+
+def _validated_gate(entry: object, names: set[str]) -> dict:
+    """Return one validated gate, recording its name for the uniqueness check."""
+    if not isinstance(entry, dict):
+        raise ValueError("each gate must be an object")
+    name = entry.get("name")
+    if not isinstance(name, str) or not name.strip() or name in names:
+        raise ValueError("gate names must be non-empty and unique")
+    command = entry.get("command")
+    if not isinstance(command, list) or not command or not all(
+        isinstance(part, str) and part.strip() for part in command
+    ):
+        raise ValueError(f"{name}: command must be a non-empty string list")
+    for flag in ("needs_c_change", "requires_nginx"):
+        if not isinstance(entry.get(flag), bool):
+            raise ValueError(f"{name}: {flag} must be a boolean")
+    names.add(name)
+    return dict(entry, command=list(command))
 
 
 def load_gates(path: Path) -> list[dict]:
