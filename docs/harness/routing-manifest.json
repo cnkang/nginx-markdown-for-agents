@@ -892,5 +892,95 @@
       "id": "sync-docs-or-contract",
       "default_route": "cheap-blockers-first"
     }
+  ],
+  "rule_checks": [
+    {
+      "rule": "43",
+      "summary": "pool/free mismatch",
+      "check": "tools/harness/detect_pool_free.sh",
+      "files": [
+        "components/nginx-module/src/**"
+      ],
+      "stage": [
+        "commit"
+      ],
+      "blocking": true,
+      "test": "tools/harness/tests/test_harness_wiring.py",
+      "not_covered": "readers follow allocation and free text in one file; a pointer handed to another translation unit is not followed"
+    },
+    {
+      "rule": "56",
+      "summary": "orphan comment closers",
+      "check": "tools/harness/detect_orphan_comment_close.py",
+      "files": [
+        "components/nginx-module/src/**"
+      ],
+      "stage": [
+        "save",
+        "commit"
+      ],
+      "blocking": true,
+      "test": null,
+      "not_covered": "a closer built by a macro expansion is not judged; the check reads the source text"
+    },
+    {
+      "rule": "57",
+      "summary": "#ifdef guard visibility",
+      "check": "tools/harness/detect_ifdef_guard_visibility.sh",
+      "files": [
+        "components/nginx-module/src/**"
+      ],
+      "stage": [
+        "push",
+        "ci"
+      ],
+      "blocking": true,
+      "test": "tools/harness/tests/test_detect_ifdef_guard_visibility.sh",
+      "not_covered": "the scan takes about a minute, so it is a push-time check and not a commit-time one"
+    },
+    {
+      "rule": "58",
+      "summary": "workflow input injection",
+      "check": "tools/harness/detect_workflow_input_injection.sh",
+      "files": [
+        ".github/workflows/**"
+      ],
+      "stage": [
+        "save",
+        "commit"
+      ],
+      "blocking": true,
+      "test": null,
+      "not_covered": "the check reads run blocks; an input routed through a composite action is not traced"
+    },
+    {
+      "rule": "64",
+      "summary": "NGX_AGAIN call-site audit",
+      "check": "tools/harness/detect_ngx_again_call_sites.sh",
+      "files": [
+        "components/nginx-module/src/**"
+      ],
+      "stage": [
+        "push",
+        "ci"
+      ],
+      "blocking": true,
+      "test": null,
+      "not_covered": "branches are judged by text; whether a resume restores the right chain is a state-transition question"
+    },
+    {
+      "rule": "66",
+      "summary": "real GCC before pushing C changes",
+      "check": "tools/ci/pre_push_profile.py",
+      "files": [
+        "components/nginx-module/**"
+      ],
+      "stage": [
+        "push"
+      ],
+      "blocking": true,
+      "test": "tools/ci/test_pre_push_profile.py",
+      "not_covered": "the gate is selected from the change set; a push that changes no C file reports it as NOT_RUN rather than passed"
+    }
   ]
 }

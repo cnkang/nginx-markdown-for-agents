@@ -759,3 +759,74 @@ def test_final_dockerfile_user_ignores_earlier_stages() -> None:
 
 def test_final_dockerfile_user_returns_none_without_any_user() -> None:
     assert sync._dockerfile_final_user("FROM debian:bookworm\nRUN true\n") is None
+
+
+def _rule_check_entry(**overrides: object) -> dict:
+    """Return one manifest entry, with the fields a valid one carries."""
+    entry = {
+        "rule": "56",
+        "summary": "orphan comment closers",
+        "check": "tools/harness/detect_orphan_comment_close.py",
+        "files": ["components/nginx-module/src/**"],
+        "stage": ["save", "commit"],
+        "blocking": True,
+        "test": None,
+        "not_covered": "a closer built by a macro expansion is not judged",
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_rule_checks_accept_a_complete_mapping() -> None:
+    """A mapping that names an existing check passes."""
+    result = sync._check_rule_checks({"rule_checks": [_rule_check_entry()]})
+
+    assert result.status == sync.PASS
+
+
+def test_rule_checks_reject_a_missing_check_script() -> None:
+    """A mapping that points at a script nobody wrote is not wired."""
+    entry = _rule_check_entry(check="tools/harness/does_not_exist.sh")
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
+    assert "does not exist" in result.detail
+
+
+def test_rule_checks_reject_a_missing_test_entry() -> None:
+    """A test path that does not exist is not evidence."""
+    entry = _rule_check_entry(test="tools/harness/tests/test_nope.py")
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
+
+
+def test_rule_checks_reject_an_unknown_stage() -> None:
+    """A stage nobody runs would never gate anything."""
+    entry = _rule_check_entry(stage=["whenever"])
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
+
+
+def test_rule_checks_reject_a_rule_absent_from_agents_md() -> None:
+    """A rule number that AGENTS.md dropped cannot be routed to a check."""
+    entry = _rule_check_entry(rule="9999")
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
+
+
+def test_rule_checks_reject_a_mapping_without_not_covered() -> None:
+    """The mapping has to say what it does not cover."""
+    entry = _rule_check_entry()
+    del entry["not_covered"]
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
+    assert "not_covered" in result.detail

@@ -779,6 +779,56 @@ def _check_harness_docs(manifest: dict) -> CheckResult:
     return _result("harness-docs", PASS, "README, core, and summary expose the manifest contract")
 
 
+RULE_CHECK_STAGES = {"save", "commit", "push", "ci"}
+
+
+def _rule_check_entry_problems(entry: dict, agents: str) -> list[str]:
+    """Return the problems with one mapping entry, empty when it is sound."""
+    required = {
+        "rule", "summary", "check", "files", "stage", "blocking", "test", "not_covered",
+    }
+    rule = str(entry.get("rule", "?"))
+    missing = sorted(required - set(entry))
+    if missing:
+        return [f"rule {rule}: missing {', '.join(missing)}"]
+
+    problems: list[str] = []
+    if f"| {rule} |" not in agents:
+        problems.append(f"rule {rule}: not in the AGENTS.md rule table")
+    stages = entry["stage"]
+    if not isinstance(stages, list) or not set(stages) <= RULE_CHECK_STAGES:
+        problems.append(f"rule {rule}: unknown stage {stages!r}")
+    if not (REPO_ROOT / entry["check"]).exists():
+        problems.append(f"rule {rule}: check {entry['check']} does not exist")
+    test = entry["test"]
+    if test is not None and not (REPO_ROOT / test).exists():
+        problems.append(f"rule {rule}: test {test} does not exist")
+    return problems
+
+
+def _check_rule_checks(manifest: dict) -> CheckResult:
+    """Verify that every rule-to-check mapping names something that exists.
+
+    An entry that points at a missing script, a stage nobody runs, or a rule
+    number that AGENTS.md no longer lists claims a rule is wired when it is not.
+    """
+    entries = manifest.get("rule_checks")
+    if not isinstance(entries, list) or not entries:
+        return _result("rule-checks", FAIL, "rule_checks missing from the manifest")
+
+    agents = AGENTS_PATH.read_text(encoding="utf-8") if AGENTS_PATH.exists() else ""
+    problems: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            problems.append("an entry is not an object")
+            continue
+        problems.extend(_rule_check_entry_problems(entry, agents))
+
+    if problems:
+        return _result("rule-checks", FAIL, "; ".join(problems[:4]))
+    return _result("rule-checks", PASS, f"{len(entries)} rule(s) mapped to an existing check")
+
+
 def _check_agents_map() -> CheckResult:
     """Verify that AGENTS.md references the harness entrypoints and Codex-first semantics.
 
@@ -1617,6 +1667,7 @@ def collect_results(full: bool = False) -> list[CheckResult]:
         _check_risk_pack_docs(manifest),
         _check_harness_docs(manifest),
         _check_agents_map(),
+        _check_rule_checks(manifest),
         _check_e2e_harness_contract(),
         _check_e2e_migration_policy(),
         _check_recent_analysis_reports(),

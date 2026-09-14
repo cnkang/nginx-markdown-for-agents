@@ -288,7 +288,6 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Flag clearing after gated op succeeds [29]
 - NUL-terminate ngx_str_t before C API calls; length-bounded matching [30]
 - Cross-TU field visibility: shared headers for multi-file consumers; sentinel consistency [30]
-- Snapshot race: read active_snapshot once at header_filter entry; bind via helper [34]
 - effective_conf NULL-safe access; cross-TU field visibility; sentinel consistency [45]
 - NGX_DONE terminal: return immediately after finalize_request; callers check NGX_DONE [39]
 - Multi-step header modification atomic: abort on first failure; no partial apply [39]
