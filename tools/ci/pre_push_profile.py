@@ -25,8 +25,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-import pre_push_gates
-from pre_push_gates import GATES
+from pre_push_gates import GATES, validate_gates
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -127,12 +126,12 @@ def _gates() -> list[Gate]:
     """Return the gates the profile selects from, as the shared declaration."""
     return [
         Gate(
-            str(entry["name"]),
-            [str(part) for part in entry["command"]],  # type: ignore[union-attr]
-            needs_c_change=bool(entry["needs_c_change"]),
-            requires_nginx=bool(entry["requires_nginx"]),
+            entry["name"],
+            entry["command"],
+            needs_c_change=entry["needs_c_change"],
+            requires_nginx=entry["requires_nginx"],
         )
-        for entry in GATES
+        for entry in validate_gates(GATES)
     ]
 
 
@@ -228,7 +227,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--list", action="store_true", help="list the gates")
     args = parser.parse_args(argv[1:])
 
-    gates = _gates()
+    try:
+        gates = _gates()
+    except ValueError as exc:
+        print(f"ERROR: invalid gate declaration: {exc}", file=sys.stderr)
+        return 2
     if args.list:
         for gate in gates:
             marker = " (only when C changed)" if gate.needs_c_change else ""
