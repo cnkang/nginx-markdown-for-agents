@@ -8,6 +8,8 @@ adapter drift detection under both quick and full modes.
 from __future__ import annotations
 
 import json
+
+import pytest
 import subprocess
 from pathlib import Path
 
@@ -896,11 +898,39 @@ def test_a_check_only_passed_as_an_argument_is_not_invoked() -> None:
     assert sync._is_invoked("tools/harness/detect_pool_free.sh", wiring) is False
 
 
-def test_a_stage_without_an_entry_point_fails_the_mapping() -> None:
-    """The declared stage has to reach the check it maps."""
-    entry = _rule_check_entry(stage=["ci"])
+@pytest.mark.parametrize("stage", ["save", "commit", "push", "ci"])
+def test_a_stage_does_not_read_the_whole_makefile(stage: str) -> None:
+    """A stage resolves to its own targets, not to every command in the file.
 
-    result = sync._check_rule_checks({"rule_checks": [entry]})
+    This is the guard for the mapping's core property: a command parked under a
+    target the stage does not call cannot claim the stage.  Putting the whole
+    Makefile back into scope fails here.
+    """
+    wiring = sync._stage_wiring(stage)
+    whole = sync._makefile_text()
 
-    status = result.status
-    assert status in {sync.PASS, sync.FAIL}
+    assert wiring and wiring != whole
+    assert len(wiring) < len(whole)
+
+
+@pytest.mark.parametrize("stage", ["save", "commit", "push", "ci"])
+def test_every_stage_resolves_to_its_declared_targets(stage: str) -> None:
+    """Each stage resolves to recipes, and to nothing when it declares none."""
+    wiring = sync._stage_wiring(stage)
+
+    for target in sync.RULE_CHECK_STAGE_TARGETS[stage]:
+        recipe = sync._make_recipe(target)
+        assert recipe, f"{target} has no recipe"
+        assert recipe.splitlines()[0] in wiring
+
+
+def test_every_declared_stage_in_the_manifest_is_reachable() -> None:
+    """The mapping the repository ships reaches its checks, stage by stage."""
+    manifest = json.loads(
+        (Path(__file__).resolve().parents[3] / "docs/harness/routing-manifest.json")
+        .read_text(encoding="utf-8")
+    )
+
+    result = sync._check_rule_checks(manifest)
+
+    assert result.status == sync.PASS, result.detail
