@@ -28,7 +28,7 @@ def test_a_comment_line_with_a_trailing_backslash_is_not_a_continuation() -> Non
 
 def test_an_escaped_backslash_does_not_continue() -> None:
     """An even number of trailing backslashes is an escaped backslash."""
-    script = "printf 'a\\\\'\n  # a note\n  more\n"
+    script = "printf 'a'\\\\\n  # a note\n  more\n"
 
     assert detect(script) == []
 
