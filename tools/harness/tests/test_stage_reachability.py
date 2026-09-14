@@ -205,3 +205,31 @@ def test_an_option_makes_an_invocation_uncertain() -> None:
 def test_quoted_text_is_not_a_call() -> None:
     """A call written inside a multi-line string never runs."""
     assert reach.literal_script_lines('printf \'%s\\n\' "\nmake root\n"') == []
+
+
+def test_a_conditional_assignment_keeps_the_earlier_value() -> None:
+    """`?=` cannot replace a value that is already set."""
+    makefile = (
+        "LIST := checked\nLIST ?= other\n"
+        "root:\n\t@$(MAKE) $(LIST)\n"
+        "checked:\n\tpython3 " + CHECK + "\n"
+        "other:\n\t@true\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+    assert CHECK in reached
+
+
+def test_make_flags_from_the_environment_are_refused() -> None:
+    """`MAKEFLAGS` can carry -n, which prints a recipe instead of running it."""
+    assert reach.make_targets("MAKEFLAGS=-n make root") == []
+    assert reach.make_targets("make root") == ["root"]
+
+
+def test_a_directory_change_makes_a_script_uncertain() -> None:
+    """A script that moves elsewhere does not run the root repository's work."""
+    script = "cd components/nginx-module\nmake root\n"
+
+    assert reach.literal_script_lines(script) == []
+    assert reach.literal_script_lines("make root\n") == ["make root"]

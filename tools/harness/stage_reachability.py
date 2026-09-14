@@ -11,7 +11,7 @@ import shlex
 
 
 VARIABLE = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_]*)\)")
-ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*[:?+]?=\s*(.*)$")
+ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*([:?+]?=)\s*(.*)$")
 TARGET = re.compile(r"^([A-Za-z0-9_.-]+):\s*([^=]*)$")
 CONDITIONAL_START = re.compile(r"^(?:ifeq|ifneq|ifdef|ifndef)\b")
 
@@ -23,6 +23,10 @@ def command_words(line: str) -> list[str]:
     except ValueError:
         return []
     while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+        name = words[0].split("=", 1)[0]
+        if name in {"MAKEFLAGS", "GNUMAKEFLAGS", "MFLAGS"}:
+            # Those carry options such as -n that decide whether a recipe runs.
+            return []
         words.pop(0)
     if any(word in {";", "&&", "||", "|", "&", ">", ">>", "<"} for word in words):
         return []
@@ -62,7 +66,7 @@ def literal_script_lines(script: str) -> list[str]:
         if _quote_spans_lines(line):
             # Quoted text is data; a call written inside it never runs.
             return []
-        if "<<" in line or _defines_or_braces(words) or (words and words[0] in {
+        if "<<" in line or (words and words[0] in {"cd", "pushd"}) or _defines_or_braces(words) or (words and words[0] in {
             "if", "for", "while", "until", "case", "function", "exit", "return",
         }):
             return []
@@ -124,7 +128,17 @@ def _consume_make_line(
         return current
     assignment = ASSIGNMENT.fullmatch(line)
     if assignment:
-        variables[assignment[1]] = assignment[2]
+        name, operator, value = assignment[1], assignment[2], assignment[3]
+        if operator == "?=":
+            # A conditional assignment leaves an existing value alone.
+            variables.setdefault(name, value)
+        elif operator == ":=":
+            # A simple assignment is expanded where it is written.
+            variables[name] = _expand(value, variables)
+        elif operator == "+=":
+            variables[name] = variables.get(name, "") + " " + value
+        else:
+            variables[name] = value
         return None
     target = TARGET.fullmatch(line)
     if target:
