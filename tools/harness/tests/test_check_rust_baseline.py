@@ -456,3 +456,17 @@ def test_uses_step_environment_is_read(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert any("1.99.9" in error for error in errors), errors
+
+
+def test_qualified_tagless_image_is_rejected(tmp_path: Path) -> None:
+    """A registry-qualified reference with no tag floats just the same."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    container:\n      image: docker.io/library/rust\n"
+        "    steps:\n      - run: cargo build\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("carries no version tag" in error for error in errors), errors

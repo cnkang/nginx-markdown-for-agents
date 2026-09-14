@@ -380,7 +380,7 @@ def _bare_image_error(path: Path, image: str, exact: str) -> str | None:
     inside a `run:` script is usually a tool or manifest name, not an image.
     """
     stripped = image.strip()
-    match = BARE_RUST_IMAGE_RE.match(stripped)
+    match = BARE_RUST_IMAGE_RE.search(stripped)
     # A tag is a version someone wrote down; `_image_tag_error` judges it.  Only a
     # reference with no tag at all floats to `latest` and belongs here.
     if match is not None and not match.group("tag"):
