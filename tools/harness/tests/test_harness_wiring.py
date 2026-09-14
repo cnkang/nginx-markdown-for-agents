@@ -98,11 +98,12 @@ def test_c_hooks_also_fire_for_header_implementations(hook_id: str) -> None:
     ],
 )
 def test_a_missing_directory_is_not_reported_as_a_clean_scan(
-    command: list[str], detector: str
+    command: list[str], detector: str, tmp_path: Path
 ) -> None:
     """Cannot-scan is exit 2, which is distinct from a clean run (0)."""
+    missing = tmp_path / "missing-harness-wiring-check"
     result = subprocess.run(
-        command + [str(Path("/nonexistent-harness-wiring-check"))],
+        command + [str(missing)],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
