@@ -8,6 +8,7 @@ uses when it cannot scan at all.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -130,3 +131,52 @@ def test_the_harness_sync_self_tests_run_in_the_aggregate_entry() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 
     assert 'not check_harness_sync' not in makefile
+
+
+def test_pool_free_enumeration_failure_is_not_a_clean_scan(tmp_path: Path) -> None:
+    """A failed `find` must not read as a tree without violations."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "find").write_text("#!/bin/sh\nexit 42\n", encoding="utf-8")
+    (fake_bin / "find").chmod(0o755)
+
+    env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}")
+    result = subprocess.run(
+        ["bash", "tools/harness/detect_pool_free.sh", str(tmp_path)],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=False, env=env,
+    )
+
+    assert result.returncode == 2, result.stderr
+    assert "PASS" not in result.stderr
+
+
+def test_pool_free_parse_failure_is_not_a_clean_scan(tmp_path: Path) -> None:
+    """A failing parser must report the file instead of skipping it."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "awk").write_text("#!/bin/sh\nexit 42\n", encoding="utf-8")
+    (fake_bin / "awk").chmod(0o755)
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "sample.c").write_text("void f(void) {}\n", encoding="utf-8")
+
+    env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}")
+    result = subprocess.run(
+        ["bash", "tools/harness/detect_pool_free.sh", str(src)],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=False, env=env,
+    )
+
+    assert result.returncode == 2, result.stderr
+
+
+def test_orphan_detector_refuses_a_file_argument(tmp_path: Path) -> None:
+    """A file argument scans nothing, which must not look like a clean run."""
+    a_file = tmp_path / "sample.c"
+    a_file.write_text("int x;\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, "tools/harness/detect_orphan_comment_close.py", str(a_file)],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=False,
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr

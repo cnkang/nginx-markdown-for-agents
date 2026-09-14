@@ -203,6 +203,14 @@ def main() -> None:
     if not src_dir.exists():
         print(f"ERROR: directory not found: {src_dir}", file=sys.stderr)
         sys.exit(2)
+    if not src_dir.is_dir():
+        # The interface takes a directory; a file argument would scan nothing and
+        # report success, which reads as "no findings".
+        print(
+            f"ERROR: {src_dir} is not a directory; pass the source directory",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     sys.exit(_report(*_collect(src_dir)))
 
 

@@ -87,6 +87,15 @@ is_allowlisted() {
 }
 
 # ── Main scan loop ──
+# Enumerate first, and stop when the listing itself fails: an empty list from a
+# failed find is not a clean tree.
+file_list="${TMPDIR:-/tmp}/markdown-pool-free-files.$$"
+if ! find "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \) -print | sort >"$file_list"; then
+    echo "ERROR: cannot enumerate ${SRC_DIR}; the scan did not run" >&2
+    rm -f "$file_list"
+    exit 2
+fi
+
 while IFS= read -r src_file; do
     [[ -z "$src_file" ]] && continue
 
@@ -106,17 +115,11 @@ while IFS= read -r src_file; do
     #   - Both sides are reduced to a canonical token form so that
     #     "ctx->buffer.data" on the alloc side matches the same string
     #     on the free side.
-    while IFS=: read -r free_line free_var; do
-        [[ -z "$free_line" ]] && continue
-
-        if is_allowlisted "$src_file" "$free_line"; then
-            echo "  ALLOWED ${src_file}:${free_line} — ngx_free(${free_var}) on pool-allocated pointer (allow-pool-free)" >&2
-            continue
-        fi
-
-        echo "  ERROR   ${src_file}:${free_line} — ngx_free(${free_var}) called on pointer allocated with ngx_palloc/ngx_pcalloc/ngx_pnalloc (Rule 43: do not explicitly free pool memory; if a resizable heap buffer is intended, use ngx_alloc/ngx_free consistently)" >&2
-        violations=$((violations + 1))
-    done < <(awk '
+    awk_out="${TMPDIR:-/tmp}/markdown-pool-free-awk.$$"
+    # The parser runs to a file so its exit status can be checked: a
+    # process substitution would hide the failure and the loop would read
+    # nothing, which reads as a clean tree.
+    if ! awk '
         function normalize_lvalue(s,   parts, lhs, t, ch, out, i, n, depth, start, n2) {
             # s is a line like "    ctx->buffer.data = ngx_palloc(...);"
             # or "    ngx_free(ctx->buffer.data);"
@@ -267,9 +270,27 @@ while IFS= read -r src_file; do
                 func_start = NR
             }
         }
-    ' "$src_file" 2>/dev/null || true)
+    ' "$src_file" >"$awk_out" 2>/dev/null; then
+        echo "ERROR: cannot parse ${src_file}; it was not scanned" >&2
+        unreadable=$((unreadable + 1))
+        rm -f "$awk_out"
+        continue
+    fi
+    while IFS=: read -r free_line free_var; do
+        [[ -z "$free_line" ]] && continue
 
-done < <(find "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \) 2>/dev/null | sort)
+        if is_allowlisted "$src_file" "$free_line"; then
+            echo "  ALLOWED ${src_file}:${free_line} — ngx_free(${free_var}) on pool-allocated pointer (allow-pool-free)" >&2
+            continue
+        fi
+
+        echo "  ERROR   ${src_file}:${free_line} — ngx_free(${free_var}) called on pointer allocated with ngx_palloc/ngx_pcalloc/ngx_pnalloc (Rule 43: do not explicitly free pool memory; if a resizable heap buffer is intended, use ngx_alloc/ngx_free consistently)" >&2
+        violations=$((violations + 1))
+    done < "$awk_out"
+    rm -f "$awk_out"
+
+done < "$file_list"
+rm -f "$file_list"
 
 echo "" >&2
 echo "=== Summary ===" >&2

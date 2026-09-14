@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ class Gate:
     name: str
     command: list[str]
     needs_c_change: bool = False
+    requires_nginx: bool = False
     reason: str = ""
 
 
@@ -63,10 +65,16 @@ def _merge_base(base: str) -> str | None:
     return out.strip() if status == 0 and out.strip() else None
 
 
-def _changed_files(base: str) -> list[str]:
-    """Return the files changed since the merge base."""
-    status, out = _git(["diff", "--name-only", f"{base}..HEAD"])
-    return out.split() if status == 0 else []
+def _changed_files(base: str) -> list[str] | None:
+    """Return the files changed since the merge base, or None when unknown.
+
+    A failed diff is not an empty change set: treating it that way would skip
+    every gate that depends on the change set and still report a pass.
+    """
+    status, out = _git(["diff", "--name-only", "-z", f"{base}..HEAD"])
+    if status != 0:
+        return None
+    return [name for name in out.split("\0") if name]
 
 
 def _gates() -> list[Gate]:
@@ -80,11 +88,32 @@ def _gates() -> list[Gate]:
             reason="macOS gcc is an Apple clang alias, so GCC-only failures need "
             "the container",
         ),
+        Gate(
+            "security static analysis",
+            ["make", "security-static"],
+            reason="the workflow that runs these checks is separate from CI",
+        ),
+        Gate(
+            "module end-to-end checks",
+            ["make", "test-all-e2e"],
+            requires_nginx=True,
+            reason="needs a module-enabled NGINX binary",
+        ),
+        Gate(
+            "coverage gate",
+            ["make", "test-all-coverage"],
+            requires_nginx=True,
+            reason="needs a module-enabled NGINX binary",
+        ),
     ]
 
 
 def _run(gate: Gate) -> Outcome:
     """Run one gate and record its outcome."""
+    if gate.requires_nginx and not os.environ.get("NGINX_BIN"):
+        # A required gate without its environment is not a pass and not a
+        # not-selected check: the profile cannot claim to have completed.
+        return Outcome(gate, "BLOCKED", "NGINX_BIN is not set")
     result = subprocess.run(
         gate.command,
         cwd=REPO_ROOT,
@@ -100,8 +129,11 @@ def _run(gate: Gate) -> Outcome:
 
 def _select(gates: list[Gate], changed: list[str]) -> list[Outcome]:
     """Return an outcome for every gate, running the selected ones."""
+    # The GCC gate also guards the C build configuration: the test Makefile and
+    # the build scripts change compiler flags, so a source-suffix test is not
+    # enough to decide that the gate can be skipped.
     c_changed = any(
-        path.endswith((".c", ".h")) and "nginx-module" in path for path in changed
+        path.startswith(("components/nginx-module/", "tools/ci/")) for path in changed
     )
     outcomes: list[Outcome] = []
     for gate in gates:
@@ -127,11 +159,18 @@ def _report(outcomes: list[Outcome], base: str) -> int:
             line += f"  ({outcome.detail})"
         print(line)
     failed = [outcome for outcome in outcomes if outcome.status == "FAIL"]
+    blocked = [outcome for outcome in outcomes if outcome.status == "BLOCKED"]
     not_run = [outcome for outcome in outcomes if outcome.status == "NOT_RUN"]
     print()
     if failed:
         print(f"FAIL: {len(failed)} selected gate(s) failed; the profile did not pass.")
         return 1
+    if blocked:
+        print(
+            f"INCOMPLETE: {len(blocked)} required gate(s) had no environment to "
+            f"run in; the profile cannot claim to have passed."
+        )
+        return 2
     if not_run:
         print(
             f"NOTE: {len(not_run)} gate(s) NOT_RUN.  The profile passed for the "
@@ -164,7 +203,16 @@ def main(argv: list[str]) -> int:
         )
         return 2
 
-    return _report(_select(gates, _changed_files(base)), base)
+    changed = _changed_files(base)
+    if changed is None:
+        print(
+            f"ERROR: cannot read the diff against {args.base}, so the change set "
+            f"is unknown",
+            file=sys.stderr,
+        )
+        return 2
+
+    return _report(_select(gates, changed), base)
 
 
 if __name__ == "__main__":

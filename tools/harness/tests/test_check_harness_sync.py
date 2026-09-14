@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from tools.harness import check_harness_sync as sync
@@ -791,7 +792,7 @@ def test_rule_checks_reject_a_missing_check_script() -> None:
     result = sync._check_rule_checks({"rule_checks": [entry]})
 
     assert result.status == sync.FAIL
-    assert "does not exist" in result.detail
+    assert "not a repository file" in result.detail
 
 
 def test_rule_checks_reject_a_missing_test_entry() -> None:
@@ -830,3 +831,45 @@ def test_rule_checks_reject_a_mapping_without_not_covered() -> None:
 
     assert result.status == sync.FAIL
     assert "not_covered" in result.detail
+
+
+def test_rule_checks_require_the_check_to_be_invoked() -> None:
+    """A path that merely exists is not wiring."""
+    entry = _rule_check_entry(check="README.md")
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == "FAIL"
+    assert "nothing invokes" in result.detail
+
+
+def test_rule_checks_reject_a_non_string_stage_entry() -> None:
+    """A malformed stage entry is a structured failure, not a traceback."""
+    entry = _rule_check_entry(stage=[{}])
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == "FAIL"
+
+
+def test_rule_checks_reject_an_empty_files_list() -> None:
+    """The mapping has to say which files the rule covers."""
+    entry = _rule_check_entry(files=[])
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == "FAIL"
+
+
+def test_profile_cannot_pass_when_the_change_set_is_unknown(monkeypatch) -> None:
+    """A failed diff must not be read as "no C changes"."""
+    repo_root = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(repo_root / "tools/ci"))
+    import pre_push_profile as profile
+
+    monkeypatch.setattr(profile, "_git", lambda args: (128, ""))
+    assert profile._changed_files("origin/main") is None
+
+    monkeypatch.setattr(sys, "argv", ["prog"])
+    monkeypatch.setattr(profile, "_merge_base", lambda base: "deadbeef")
+    assert profile.main(["prog"]) == 2
