@@ -47,7 +47,17 @@ SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
 
+# Exit convention: 0 = the scan completed and found nothing, 1 = violations
+# found, 2 = the scan could not be completed.  A missing directory is not a clean
+# result, and a file that cannot be read is not a file without violations.
+if [[ ! -d "$SRC_DIR" ]]; then
+    echo "ERROR: cannot scan '${SRC_DIR}': not a directory" >&2
+    exit 2
+fi
+
 violations=0
+scanned=0
+unreadable=0
 
 echo "=== Pool-Free Mismatch Detection (Rule 43) ===" >&2
 echo "Scanning: ${SRC_DIR}" >&2
@@ -81,8 +91,11 @@ while IFS= read -r src_file; do
     [[ -z "$src_file" ]] && continue
 
     if ! grep -qI '' "$src_file" 2>/dev/null; then
+        echo "ERROR: cannot read ${src_file} as text; it was not scanned" >&2
+        unreadable=$((unreadable + 1))
         continue
     fi
+    scanned=$((scanned + 1))
 
     # awk function-scoped analysis.  The key normalization is:
     #   - pool allocation LHS: capture the full lvalue expression to the
@@ -260,8 +273,14 @@ done < <(find "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \) 2>/dev/null | 
 
 echo "" >&2
 echo "=== Summary ===" >&2
+echo "  Files scanned: ${scanned}" >&2
 echo "  Violations: ${violations}" >&2
 echo "" >&2
+
+if [[ "$unreadable" -gt 0 ]]; then
+    echo "FAIL: ${unreadable} file(s) could not be read, so the scan is incomplete." >&2
+    exit 2
+fi
 
 if [[ "$violations" -gt 0 ]]; then
     echo "FAIL: ${violations} pool-free mismatch(es) found — do not explicitly free pool memory with ngx_free; if a resizable heap buffer is intended, allocate with ngx_alloc and free with ngx_free consistently (Rule 43)." >&2
