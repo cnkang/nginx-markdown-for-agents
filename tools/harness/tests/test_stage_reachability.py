@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from tools.harness import check_harness_sync as sync
+from tools.harness import stage_reachability as reach
 
 
 CHECK = "tools/harness/detect_example.py"
@@ -139,3 +140,34 @@ def test_dormant_or_nonblocking_workflow_commands_do_not_certify(repo, body):
 def test_recursive_variables_cannot_certify(repo, definition):
     write(repo / "Makefile", MAKEFILE.replace("LIST := checked", definition))
     assert verdict("commit").status == sync.FAIL
+
+
+def test_a_defined_function_is_not_a_call_site() -> None:
+    """A shell function that never runs cannot certify the checks in its body."""
+    script = "noop() {\n  make root\n}\ntrue"
+
+    assert reach.literal_script_lines(script) == []
+
+
+def test_a_conditional_branch_is_not_evidence() -> None:
+    """A target inside a branch that cannot be evaluated certifies nothing."""
+    makefile = (
+        "root:\n\t@true\n"
+        "ifeq (1,0)\nhidden:\n\tpython3 " + CHECK + "\nendif\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["root"], PROFILE, [])
+
+    assert "hidden" not in reached
+    assert CHECK not in reached
+
+
+def test_a_listing_invocation_does_not_expand_gates() -> None:
+    """Only the invocation that runs the gates may expand them."""
+    makefile = f"root:\n\tpython3 {PROFILE} --list\n"
+
+    reached = reach.reachable_commands(
+        makefile, ["root"], PROFILE, ["make harness-security-checks"]
+    )
+
+    assert "harness-security-checks" not in reached

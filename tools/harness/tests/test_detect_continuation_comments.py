@@ -96,3 +96,10 @@ def test_a_sibling_command_after_a_multi_line_continuation_is_not() -> None:
     script = "docker run --rm \\\n  -v /a:/a \\\n  # a note\necho unrelated\n"
 
     assert detect(script) == []
+
+
+def test_a_backslash_escaping_a_space_does_not_continue() -> None:
+    """The backslash escapes the space, so the next line stands on its own."""
+    script = "echo 'a'\\ \n  # a note\n  more\n"
+
+    assert detect(script) == []

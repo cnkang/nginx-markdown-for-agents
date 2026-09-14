@@ -537,3 +537,9 @@ def test_a_second_level_heading_ends_a_task_item(tmp_path):
     path.write_text("- [ ] publish\n## Section\ncommit abc1234\n", encoding="utf-8")
     assert docs_checker.check_release_checklist_is_static([path]) == []
     assert docs_checker._checklist_items(path.read_text(), set()) == ["- [ ] publish"]
+
+
+def test_an_invalid_fence_does_not_open_a_block() -> None:
+    """A run of backticks only opens a block when it is a real fence."""
+    assert docs_checker._starts_block("```bad`info") is False
+    assert docs_checker._starts_block("```python") is True
