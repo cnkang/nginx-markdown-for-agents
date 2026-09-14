@@ -285,12 +285,16 @@ PY
 fi
 
 # A pattern substitution over this variable is quadratic in bash 3.2, and the
-# extraction is large enough to notice: the check for "no non-whitespace
-# character" runs through grep instead, which reads it once.
-if ! printf '%s' "${guarded_funcs}" | grep -q '[^[:space:]]'; then
-    echo "ERROR: no functions found inside #ifdef ${GUARD_NAME} blocks in ${HEADER_FILE} / ${SRC_DIR}; the guard name, header, or --prefix does not match this tree" >&2
-    exit 1
-fi
+# extraction is large enough to notice.  A glob match answers the same question
+# without a pipe: `grep -q` leaves early, and under `set -o pipefail` the broken
+# pipe on the writer would look like a failed search.
+case "${guarded_funcs}" in
+    *[![:space:]]*) ;;
+    *)
+        echo "ERROR: no functions found inside #ifdef ${GUARD_NAME} blocks in ${HEADER_FILE} / ${SRC_DIR}; the guard name, header, or --prefix does not match this tree" >&2
+        exit 1
+        ;;
+esac
 
 outside_defs="$(printf '%s\n' "$guarded_funcs" | awk -F'\t' '$1 == "OUTSIDE_DEF" { print $2 }')"
 guarded_funcs="$(printf '%s\n' "$guarded_funcs" | awk -F'\t' '$1 != "OUTSIDE_DEF" { print $1 }')"
