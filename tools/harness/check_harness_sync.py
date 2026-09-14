@@ -848,7 +848,11 @@ def _line_runs(line: str, stripped: str, parent: str) -> bool:
         return False
     if text.startswith(("entry:", "entry :")):
         return text.split(":", 1)[1].strip() == stripped
-    parts = text.split()
+    from tools.harness.stage_reachability import command_words
+
+    parts = command_words(text)
+    if parts and parts[0] == stripped:
+        return True
     # A plain interpreter run reaches the file it names and nothing else: a
     # directory argument executes no file from that directory.
     if _invocation_target(parts) == stripped:
@@ -863,38 +867,9 @@ def _line_runs(line: str, stripped: str, parent: str) -> bool:
     return False
 
 
-# A stage is a list of Make targets its entry points call.  A command that sits
-# under some other target is not reachable from the stage, which is the drift
-# this mapping exists to catch.
-RULE_CHECK_STAGE_TARGETS = {
-    "save": ("harness-quick-checks",),
-    "commit": ("harness-quick-checks",),
-    "push": ("harness-security-checks", "pre-push-check"),
-    "ci": ("harness-security-checks", "harness-check"),
-}
-
-
 def _makefile_text() -> str:
-    """Return the root Makefile."""
+    """Return the root Makefile without evaluating its recipes."""
     return (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-
-
-def _make_recipe(target: str) -> str:
-    """Return the recipe lines of one Make target, without its dependencies."""
-    text = _makefile_text()
-    lines = text.splitlines()
-    for index, line in enumerate(lines):
-        if not line.startswith(f"{target}:") and line.strip() != f"{target}:":
-            continue
-        recipe: list[str] = []
-        for follower in lines[index + 1 :]:
-            if follower.startswith("\t"):
-                recipe.append(follower.lstrip("\t"))
-                continue
-            if follower.strip() and not follower.startswith("#"):
-                break
-        return "\n".join(recipe)
-    return ""
 
 
 def _precommit_hook_entries() -> list[str]:
@@ -909,14 +884,35 @@ def _precommit_hook_entries() -> list[str]:
         config = yaml.safe_load(_stage_config_text()) or {}
     except yaml.YAMLError:
         return []
+    if not isinstance(config, dict):
+        return []
+    return _enabled_hook_entries(config)
+
+
+def _enabled_hook_entries(config: dict) -> list[str]:
+    """Select only hooks enabled for the commit adapter."""
     entries: list[str] = []
-    for repo in config.get("repos", []) or []:
-        if not isinstance(repo, dict):
+    repos = config.get("repos", [])
+    if not isinstance(repos, list):
+        return entries
+    for repo in repos:
+        if not isinstance(repo, dict) or not isinstance(repo.get("hooks"), list):
             continue
-        for hook in repo.get("hooks", []) or []:
-            if isinstance(hook, dict) and isinstance(hook.get("entry"), str):
-                entries.append(hook["entry"])
+        for hook in repo["hooks"]:
+            entry = _commit_hook_entry(hook, config.get("default_stages", ["pre-commit"]))
+            if entry is not None:
+                entries.append(entry)
     return entries
+
+
+def _commit_hook_entry(hook: object, default_stages: object) -> str | None:
+    """Return a well-formed commit hook command, or no evidence."""
+    if not isinstance(hook, dict) or not isinstance(hook.get("entry"), str):
+        return None
+    stages = hook.get("stages", default_stages)
+    if isinstance(stages, list) and "pre-commit" in stages:
+        return hook["entry"]
+    return None
 
 
 def _workflow_run_text() -> str:
@@ -941,66 +937,38 @@ def _document_run_commands(document: object) -> list[str]:
     """Return the `run` values of one workflow document."""
     if not isinstance(document, dict):
         return []
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
     commands: list[str] = []
-    for job in (document.get("jobs") or {}).values():
-        for step in (job or {}).get("steps", []) or []:
-            if isinstance(step, dict) and isinstance(step.get("run"), str):
-                commands.append(step["run"])
+    for job in jobs.values():
+        if not isinstance(job, dict) or job.get("if") is False:
+            continue
+        commands.extend(_enabled_step_commands(job.get("steps", [])))
+    return commands
+
+
+def _enabled_step_commands(steps: object) -> list[str]:
+    """Extract enabled run steps; unsupported structures provide no evidence."""
+    if not isinstance(steps, list):
+        return []
+    commands: list[str] = []
+    for step in steps:
+        if not isinstance(step, dict) or step.get("if") is False:
+            continue
+        if isinstance(step.get("run"), str):
+            from tools.harness.stage_reachability import literal_script_lines
+
+            commands.extend(literal_script_lines(step["run"]))
     return commands
 
 
 def _profile_gate_text() -> str:
-    """Return the commands the push profile runs, from its declaration.
+    """Read validated shared data without executing the declaration module."""
+    from tools.ci.pre_push_gates import load_gates
 
-    The executor and this check read the same table, so a gate that is removed
-    from the list is removed from both.
-    """
-    path = REPO_ROOT / "tools/ci/pre_push_gates.py"
-    if not path.exists():
-        return ""
-    try:
-        gate_module = _load_gate_declaration(path)
-    except (OSError, ValueError):
-        return ""
-    commands: list[str] = []
-    for gate in gate_module.GATES:
-        command = gate.get("command")
-        if isinstance(command, list):
-            commands.append(" ".join(str(part) for part in command))
-    return "\n".join(commands)
-
-
-def _load_gate_declaration(path: Path) -> object:
-    """Import the gate declaration module without touching sys.path."""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("pre_push_gates", path)
-    if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _stage_entry_ok(stage: str) -> bool:
-    """True when the stage's own entry point calls its declared targets."""
-    if stage in {"save", "commit"}:
-        entries = _precommit_hook_entries()
-        target = RULE_CHECK_STAGE_TARGETS[stage][0]
-        return any(
-            entry.strip() == f"make {target}" or entry.strip().endswith(target)
-            for entry in entries
-        )
-    if stage == "push":
-        # The push stage is run through the profile, so the target has to call it.
-        return "pre_push_profile.py" in _make_recipe("pre-push-check")
-    if stage == "ci":
-        run_text = _workflow_run_text()
-        return any(
-            f"make {target}" in run_text
-            for target in RULE_CHECK_STAGE_TARGETS["ci"]
-        )
-    return False
+    gates = load_gates(REPO_ROOT / "tools/ci/pre_push_gates.py")
+    return "\n".join(shlex.join(gate["command"]) for gate in gates)
 
 
 def _stage_config_text() -> str:
@@ -1014,22 +982,25 @@ def _workflow_files() -> list[Path]:
 
 
 def _stage_wiring(stage: str) -> str:
-    """Return everything a stage can reach.
+    """Resolve actual stage entries, never inserting expected targets as edges.
 
-    The recipes of the declared targets, plus the entry points that call the
-    detectors directly: the hooks for the pre-commit stages, and the profile for
-    the push stage.
+    Save denotes the optional editor adapter for the same quick hooks. This
+    proves configured commands, not installation of an editor or Git hook.
+    CI edges may be conditional; trigger coverage is checked separately.
     """
-    parts = [_make_recipe(target) for target in RULE_CHECK_STAGE_TARGETS.get(stage, ())]
+    from tools.harness.stage_reachability import reachable_commands
+
+    gates: list[str] = []
     if stage in {"save", "commit"}:
-        # Rendered the way the configuration writes them, so the invocation check
-        # reads each hook's entry as the command it is.
-        parts.append("\n".join(f"entry: {entry}" for entry in _precommit_hook_entries()))
-    if stage == "ci":
-        parts.append(_workflow_run_text())
-    if stage == "push":
-        parts.append(_profile_gate_text())
-    return "\n".join(parts)
+        entries = _precommit_hook_entries()
+    elif stage == "ci":
+        entries = _workflow_run_text().splitlines()
+    elif stage == "push":
+        entries = ["make pre-push-check"]
+        gates = _profile_gate_text().splitlines()
+    else:
+        return ""
+    return reachable_commands(_makefile_text(), entries, PUSH_PROFILE, gates)
 
 
 def _wiring_text() -> str:
@@ -1122,12 +1093,14 @@ def _stage_wiring_problems(stages: object, rule: str, check: object) -> list[str
         return []
     problems: list[str] = []
     for stage in stages:
-        if not isinstance(stage, str) or stage not in RULE_CHECK_STAGE_TARGETS:
+        if not isinstance(stage, str) or stage not in RULE_CHECK_STAGES:
             continue
-        if not _stage_entry_ok(stage):
-            problems.append(f"rule {rule}: the {stage} entry point calls no target")
+        try:
+            wiring = _stage_wiring(stage)
+        except (OSError, ValueError, SyntaxError) as exc:
+            problems.append(f"rule {rule}: cannot verify {stage}: {exc}")
             continue
-        if not _is_invoked(check, _stage_wiring(stage)):
+        if not _is_invoked(check, wiring):
             problems.append(f"rule {rule}: no {stage} entry point runs {check}")
     return problems
 

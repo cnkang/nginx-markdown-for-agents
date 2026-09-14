@@ -50,3 +50,34 @@ def test_c_changes_select_the_gcc_gate() -> None:
     )
 
     assert outcomes[0].status == "PASS"
+
+
+def test_shared_declaration_is_strict() -> None:
+    """Invalid data cannot become a different command or selection condition."""
+    import pytest
+    from pre_push_gates import validate_gates
+
+    valid = dict(name="gate", command=["true"], needs_c_change=False, requires_nginx=False)
+    assert validate_gates([valid]) == [valid]
+    for invalid in ([], [dict(valid, command="make")],
+                    [dict(valid, needs_c_change="false")], [valid, valid],
+                    [dict(valid, command=[])], [dict(valid, requires_nginx=None)]):
+        with pytest.raises(ValueError):
+            validate_gates(invalid)
+
+
+def test_main_executes_shared_gate_and_propagates_failure(monkeypatch, capsys):
+    """A real subprocess proves the runner consumes the declaration."""
+    import sys
+    command = [sys.executable, "-c", "import sys; print('gate executed'); sys.exit(7)"]
+    monkeypatch.setattr(profile, "GATES", [dict(name="probe", command=command,
+                         needs_c_change=False, requires_nginx=False)])
+    monkeypatch.setattr(profile, "_merge_base", lambda base: "base")
+    monkeypatch.setattr(profile, "_changed_files", lambda base: [])
+    assert profile.main(["prog"]) == 1
+    assert "gate executed" in capsys.readouterr().out
+
+
+def test_invalid_declaration_reports_incomplete(monkeypatch):
+    monkeypatch.setattr(profile, "GATES", [])
+    assert profile.main(["prog"]) == 2
