@@ -487,14 +487,15 @@ ngx_http_markdown_metrics_v1_render_build_info(
 /*
  * Render the 10 frozen metric families in Prometheus text 0.0.4 format.
  *
- * Writes HELP, TYPE, and metric lines for all 11 families into the
+ * Writes HELP, TYPE, and metric lines for all 10 families into the
  * buffer between p and end. Returns a pointer past the last byte
  * written, or NULL if the buffer is exhausted.
  *
  * Parameters:
  *   p        - Start of writable buffer region
  *   end      - One past the end of the buffer
- *   snapshot - v1 metrics snapshot (exactly 11 families)
+ *   snapshot - v1 metrics snapshot (11 fields, 10 families: the two
+ *              conversion durations share one histogram)
  *
  * Returns:
  *   Pointer past the last byte written, or NULL on buffer overflow
