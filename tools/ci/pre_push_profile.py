@@ -99,6 +99,27 @@ def _changed_files(base: str) -> list[str] | None:
     return [name for name in out.split("\0") if name]
 
 
+C_BUILD_PREFIXES = ("components/nginx-module/",)
+C_BUILD_FILES = ("Makefile",)
+C_BUILD_SUFFIXES = (".sh", ".mk")
+
+
+def is_c_build_change(changed: list[str]) -> bool:
+    """True when the change can alter how the C module is built or tested.
+
+    The module's own tree counts, as does the root Makefile, which carries the
+    GCC container command and the C test entry.  Build scripts count too, but an
+    unrelated tool change does not: running the container for every edit under
+    tools would make the gate noise.
+    """
+    for path in changed:
+        if path.startswith(C_BUILD_PREFIXES) or path in C_BUILD_FILES:
+            return True
+        if path.startswith("tools/ci/") and path.endswith(C_BUILD_SUFFIXES):
+            return True
+    return False
+
+
 def _gates() -> list[Gate]:
     """Return the gates the profile selects from."""
     return [
@@ -169,9 +190,7 @@ def _select(gates: list[Gate], changed: list[str]) -> list[Outcome]:
     # The GCC gate also guards the C build configuration: the test Makefile and
     # the build scripts change compiler flags, so a source-suffix test is not
     # enough to decide that the gate can be skipped.
-    c_changed = any(
-        path.startswith(("components/nginx-module/", "tools/ci/")) for path in changed
-    )
+    c_changed = is_c_build_change(changed)
     outcomes: list[Outcome] = []
     for gate in gates:
         if gate.needs_c_change and not c_changed:

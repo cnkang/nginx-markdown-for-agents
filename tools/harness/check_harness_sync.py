@@ -800,8 +800,27 @@ def _invocation_target(parts: list[str]) -> str | None:
         return None
     rest = parts[1:]
     if rest[:1] == ["-m"]:
-        rest = rest[2:]
+        return None
     return rest[0].rstrip("/") if rest else None
+
+
+def _discovery_target(parts: list[str]) -> str | None:
+    """Return the directory a test runner discovers, when one is named.
+
+    Only a runner with a discovery mechanism covers the files under a directory;
+    running an interpreter against a directory executes nothing.
+    """
+    while parts and "=" in parts[0] and not parts[0].startswith("-"):
+        parts = parts[1:]
+    if len(parts) < 3 or parts[0] not in INTERPRETERS or parts[1] != "-m":
+        return None
+    if parts[2] not in {"pytest", "unittest"}:
+        return None
+    for token in parts[3:]:
+        if token.startswith("-"):
+            continue
+        return token.rstrip("/")
+    return None
 
 
 def _is_invoked(path: str, wiring: str) -> bool:
@@ -814,18 +833,49 @@ def _is_invoked(path: str, wiring: str) -> bool:
     stripped = path.lstrip("./")
     parent = str(Path(stripped).parent)
     for line in wiring.splitlines():
-        text = line.strip()
-        if not text or text.startswith("#"):
-            continue
-        if text.startswith(("entry:", "entry :")):
-            if text.split(":", 1)[1].strip() == stripped:
-                return True
-        target = _invocation_target(text.split())
-        if target is None:
-            continue
-        if target == stripped or target == parent or stripped.startswith(target + "/"):
+        if _line_runs(line, stripped, parent):
             return True
     return False
+
+
+def _line_runs(line: str, stripped: str, parent: str) -> bool:
+    """True when one entry line runs the path, directly or by discovery."""
+    text = line.strip()
+    if not text or text.startswith("#"):
+        return False
+    if text.startswith(("entry:", "entry :")):
+        return text.split(":", 1)[1].strip() == stripped
+    parts = text.split()
+    # A plain interpreter run reaches the file it names and nothing else: a
+    # directory argument executes no file from that directory.
+    if _invocation_target(parts) == stripped:
+        return True
+    discovered = _discovery_target(parts)
+    if discovered is not None and (
+        discovered == stripped
+        or discovered == parent
+        or stripped.startswith(discovered + "/")
+    ):
+        return True
+    return False
+
+
+RULE_CHECK_STAGE_ENTRY_FILES = {
+    "save": (".pre-commit-config.yaml", "Makefile"),
+    "commit": (".pre-commit-config.yaml", "Makefile"),
+    "push": ("Makefile", "tools/ci/pre_push_profile.py"),
+    "ci": ("Makefile",),
+}
+
+
+def _stage_wiring(stage: str) -> str:
+    """Return the text of the files that carry a stage's entry points."""
+    names = RULE_CHECK_STAGE_ENTRY_FILES.get(stage, ())
+    return "\n".join(
+        (REPO_ROOT / name).read_text(encoding="utf-8")
+        for name in names
+        if (REPO_ROOT / name).exists()
+    )
 
 
 def _wiring_text() -> str:
@@ -903,6 +953,25 @@ def _rule_check_entry_problems(entry: dict, agents: str, wiring: str) -> list[st
         problems.append(f"rule {rule}: test {test} does not exist")
     elif isinstance(test, str) and test.strip() and not _is_invoked(test, wiring):
         problems.append(f"rule {rule}: nothing runs {test}")
+
+    problems.extend(_stage_wiring_problems(entry["stage"], rule, check))
+    return problems
+
+
+def _stage_wiring_problems(stages: object, rule: str, check: object) -> list[str]:
+    """Return the stages whose entry points do not reach the check.
+
+    The declared stages have to reach the check, not just the tree: a check
+    named under a target nobody calls would never gate anything.
+    """
+    if not isinstance(check, str) or not check.strip() or not isinstance(stages, list):
+        return []
+    problems: list[str] = []
+    for stage in stages:
+        if not isinstance(stage, str) or stage not in RULE_CHECK_STAGE_ENTRY_FILES:
+            continue
+        if not _is_invoked(check, _stage_wiring(stage)):
+            problems.append(f"rule {rule}: no {stage} entry point runs {check}")
     return problems
 
 
