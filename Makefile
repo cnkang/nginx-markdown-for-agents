@@ -362,6 +362,7 @@ TEST_ALL_CORE := \
 # The profile a push has to complete.  Gates are selected from the change set and
 # each one is reported as PASS, FAIL or NOT_RUN, so a gate that did not run is
 # never counted as a pass.
+.PHONY: pre-push-check
 pre-push-check:
 	python3 tools/ci/pre_push_profile.py $(if $(BASE),--base $(BASE),)
 
@@ -563,6 +564,7 @@ schema-drift-check:
 	python3 tools/release/gates/generate_schema_artifacts.py --check --version "$(SCHEMA_RELEASE_VERSION)"
 	python3 tools/release/gates/validate_schema_drift.py --version "$(SCHEMA_RELEASE_VERSION)"
 
+.PHONY: harness-quick-checks
 harness-quick-checks:
 	@echo "=== Harness quick checks (save time and commit time) ==="
 	python3 tools/harness/detect_orphan_comment_close.py
