@@ -45,23 +45,34 @@ repos:
   # C code quality
   - repo: local
     hooks:
+      - id: harness-quick-checks
+        name: harness quick checks (comments, workflow inputs, continuations)
+        entry: make harness-quick-checks
+        language: system
+        # The checks scan the tree, so they take no filename arguments.
+        pass_filenames: false
+        always_run: true
+        files: ^(tools/|packaging/|\.github/|Makefile|components/)
       - id: detect-pool-free
         name: detect pool/free mismatch
         entry: tools/harness/detect_pool_free.sh
         language: script
-        files: ^components/nginx-module/src/.*\.c$
+        # The detector reads one directory argument.  Without this, pre-commit
+        # appends the changed filenames and the detector scans only the first.
+        pass_filenames: false
+        files: ^components/nginx-module/src/.*\.(c|h)$
       - id: detect-backpressure-resume
         name: detect backpressure resume patterns
         entry: tools/harness/detect_backpressure_resume.sh
         language: script
         pass_filenames: false
-        files: ^components/nginx-module/src/.*\.c$
+        files: ^components/nginx-module/src/.*\.(c|h)$
       - id: detect-decompression-budget
         name: detect decompression budget enforcement
         entry: tools/harness/detect_decompression_budget.sh
         language: script
         pass_filenames: false
-        files: ^components/nginx-module/src/.*decomp.*\.c$
+        files: ^components/nginx-module/src/.*decomp.*\.(c|h)$
 
   # Write-time hygiene gates (2026-08-21 remediation, Rules 61/63/70/13)
   - repo: local

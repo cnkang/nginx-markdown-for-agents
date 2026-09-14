@@ -90,13 +90,17 @@ def _handle_normal(content: str, i: int, length: int) -> tuple[int, bool, bool, 
     return i + 1, False, False, None, 0
 
 
-def _scan_file(path: Path) -> list[tuple[int, str]]:
-    """Return a list of (line_number, line_text) for orphan */ found."""
+def _scan_file(path: Path) -> tuple[list[tuple[int, str]], str | None]:
+    """Return the orphan */ closers in a file, and why it could not be read.
+
+    A file that cannot be read is not a file without findings, so the reason
+    travels back to the caller instead of being folded into an empty result.
+    """
     findings: list[tuple[int, str]] = []
     try:
         content = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return findings
+    except (OSError, UnicodeDecodeError) as exc:
+        return findings, str(exc)
 
     in_block_comment = False
     in_string = False
@@ -128,29 +132,56 @@ def _scan_file(path: Path) -> list[tuple[int, str]]:
             line_text = lines[line_num - 1] if 0 < line_num <= len(lines) else ""
             findings.append((line_num, line_text))
 
-    return findings
+    return findings, None
 
 
-def main() -> None:
-    if len(sys.argv) > 1:
-        src_dir = Path(validate_read_path(sys.argv[1]))
-    else:
-        src_dir = Path(__file__).resolve().parents[2] / "components" / "nginx-module" / "src"
+def _resolve_src_dir(arguments: list[str]) -> Path:
+    """Return the directory to scan, refusing inputs that cannot be read."""
+    if not arguments:
+        return (
+            Path(__file__).resolve().parents[2] / "components" / "nginx-module" / "src"
+        )
+    try:
+        return Path(validate_read_path(arguments[0]))
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: cannot scan {arguments[0]}: {exc}", file=sys.stderr)
+        sys.exit(2)
 
-    if not src_dir.exists():
-        print(f"ERROR: directory not found: {src_dir}", file=sys.stderr)
-        sys.exit(1)
 
+def _collect(src_dir: Path) -> tuple[list[str], list[str], int]:
+    """Return the findings, the unreadable files, and how many files were read."""
     all_findings: list[str] = []
-
+    unreadable: list[str] = []
+    scanned = 0
     for path in sorted(src_dir.rglob("*")):
         if path.suffix not in C_EXTENSIONS or not path.is_file():
             continue
-        findings = _scan_file(path)
+        findings, error = _scan_file(path)
+        if error is not None:
+            unreadable.append(f"{path}: {error}")
+            continue
+        scanned += 1
         for line_num, line_text in findings:
             all_findings.append(
-                f"{path}: {line_num}: orphan */ without matching /*\n  {line_text.strip()}"
+                f"{path}: {line_num}: orphan */ without matching /*\n  "
+                f"{line_text.strip()}"
             )
+    return all_findings, unreadable, scanned
+
+
+def _report(all_findings: list[str], unreadable: list[str], scanned: int) -> int:
+    """Print the result and return the exit code."""
+    if unreadable:
+        print(
+            f"FAIL: {len(unreadable)} file(s) could not be read, so the scan "
+            f"is incomplete",
+            file=sys.stderr,
+        )
+        for entry in unreadable:
+            print(f"  ERROR: {entry}", file=sys.stderr)
+        return 2
+
+    print(f"Scanned {scanned} file(s)", file=sys.stderr)
 
     if all_findings:
         print(
@@ -159,10 +190,20 @@ def main() -> None:
         )
         for finding in all_findings:
             print(f"  ERROR: {finding}", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     print("OK: no orphan comment closers found")
-    sys.exit(0)
+    return 0
+
+
+def main() -> None:
+    # Exit convention: 0 = the scan completed and found nothing, 1 = orphan
+    # closers found, 2 = the scan could not be completed.
+    src_dir = _resolve_src_dir(sys.argv[1:])
+    if not src_dir.exists():
+        print(f"ERROR: directory not found: {src_dir}", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(_report(*_collect(src_dir)))
 
 
 if __name__ == "__main__":

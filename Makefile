@@ -358,14 +358,24 @@ TEST_ALL_CORE := \
 # cannot drift apart.  The writing-style regression is part of test-all, and
 # STYLE_BASE already defaults to the merge base with origin/main, so committed
 # work is compared the way CI compares it instead of showing an empty diff.
+
+# The profile a push has to complete.  Gates are selected from the change set and
+# each one is reported as PASS, FAIL or NOT_RUN, so a gate that did not run is
+# never counted as a pass.
+pre-push-check:
+	python3 tools/ci/pre_push_profile.py $(if $(BASE),--base $(BASE),)
+
 ci-local-check:
 	@echo "=== CI-equivalent gates ==="
 	@echo "test-all already runs the CI gate set, with the writing-style regression"
 	@echo "based on the merge base (STYLE_BASE=$(STYLE_BASE))."
 	@$(MAKE) test-all
 	@echo
-	@echo "CI-equivalent gates passed."
-	@echo "CI-only checks (need a module-enabled NGINX binary):"
+	@echo "The local gate set passed.  This profile does not run the real-GCC C"
+	@echo "suite, the security workflows, or the runtime checks that need a"
+	@echo "module-enabled NGINX: use \`make pre-push-check\` for the profile a"
+	@echo "push has to complete, and report what ran as PASS / FAIL / NOT_RUN."
+	@echo "Checks that need a module-enabled NGINX binary:"
 	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tests/property/test_log_prefix_preservation.sh"
 	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/ci/verify_real_nginx_ims.sh"
 	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/e2e/verify_encoding_chain_e2e.sh"
@@ -553,6 +563,12 @@ schema-drift-check:
 	python3 tools/release/gates/generate_schema_artifacts.py --check --version "$(SCHEMA_RELEASE_VERSION)"
 	python3 tools/release/gates/validate_schema_drift.py --version "$(SCHEMA_RELEASE_VERSION)"
 
+harness-quick-checks:
+	@echo "=== Harness quick checks (save time and commit time) ==="
+	python3 tools/harness/detect_orphan_comment_close.py
+	bash tools/harness/detect_workflow_input_injection.sh
+	python3 tools/harness/detect_continuation_comments.py
+
 harness-check-full:
 	$(MAKE) docs-check-base
 	$(MAKE) docs-style-check-baseline
@@ -666,6 +682,7 @@ complexity-check:
 test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
 	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_validate_required_workflow_contexts.py -q --tb=short
+	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_pre_push_profile.py -q --tb=short
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
 	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	bash tools/harness/tests/test_detect_volatile_atomic.sh
@@ -689,7 +706,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_decompression_budget.sh
 	bash tools/harness/tests/test_detect_shell_hygiene.sh
 	bash tools/harness/tests/test_check_postinst_safety.sh
-	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
+	python3 -m pytest tools/harness/tests/ -q --tb=short
 
 workflow-context-check:
 	python3 tools/ci/validate_required_workflow_contexts.py
