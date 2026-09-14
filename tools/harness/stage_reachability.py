@@ -120,10 +120,12 @@ def _consume_recipe(line: str, nodes: dict[str, list[str]], current: str | None)
     if current is None:
         return current
     recipe = line.strip()
-    if not recipe.startswith("-"):
-        # A leading `-` tells Make to ignore the status, so the command is not
-        # what fails a build and cannot be blocking evidence.
-        nodes[current].append(recipe.lstrip("@+"))
+    dropped = recipe.lstrip("@-+")
+    if "-" in recipe[: len(recipe) - len(dropped)]:
+        # Make's prefixes come in any order; a `-` among them means the status
+        # is ignored, so the command cannot be blocking evidence.
+        return current
+    nodes[current].append(dropped)
     return current
 
 

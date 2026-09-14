@@ -278,3 +278,12 @@ def test_an_ignored_failure_is_not_blocking_evidence() -> None:
 
     assert CHECK in reach.reachable_commands(blocking, ["make root"], PROFILE, [])
     assert CHECK not in reach.reachable_commands(ignored, ["make root"], PROFILE, [])
+
+
+def test_the_ignored_status_prefix_survives_other_prefixes() -> None:
+    """Make's @, - and + prefixes come in any order."""
+    recipes = [f"root:\n\t-python3 {CHECK}\n", f"root:\n\t@-python3 {CHECK}\n",
+               f"root:\n\t-@python3 {CHECK}\n"]
+
+    for makefile in recipes:
+        assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
