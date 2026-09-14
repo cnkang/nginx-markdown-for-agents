@@ -406,14 +406,19 @@ def test_container_image_is_not_shell_expanded(tmp_path: Path) -> None:
     _write_valid_fixture(tmp_path)
     _write(
         tmp_path / ".github/workflows/container-build.yml",
-        "env:\n  RUST_VERSION: \"1.98.1\"\njobs:\n  build:\n    container:\n"
+        # The declaration matches the fixture's toolchain, so a version-drift
+        # complaint cannot stand in for the interpolation one.
+        "env:\n  RUST_VERSION: \"1.97.0\"\njobs:\n  build:\n    container:\n"
         "      image: rust:${RUST_VERSION}-alpine3.21\n    steps:\n"
         "      - run: cargo build\n",
     )
 
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
-    assert any("RUST_VERSION" in error for error in errors), errors
+    # The declaration matches the canonical version, so the only way this test
+    # can pass is the interpolation complaint itself.
+    assert any("cannot resolve" in error for error in errors), errors
+    assert not any("declares" in error for error in errors), errors
 
 
 def test_version_interpolation_rejects_a_trailing_word(tmp_path: Path) -> None:
@@ -465,6 +470,21 @@ def test_qualified_tagless_image_is_rejected(tmp_path: Path) -> None:
         tmp_path / ".github/workflows/container-build.yml",
         "jobs:\n  build:\n    container:\n      image: docker.io/library/rust\n"
         "    steps:\n      - run: cargo build\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("carries no version tag" in error for error in errors), errors
+
+
+def test_digest_only_image_is_rejected(tmp_path: Path) -> None:
+    """A digest pins bytes but names no version, so the check cannot see it."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs:\n  build:\n    container:\n      image: rust@sha256:"
+        + "a" * 64
+        + "\n    steps:\n      - run: cargo build\n",
     )
 
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)

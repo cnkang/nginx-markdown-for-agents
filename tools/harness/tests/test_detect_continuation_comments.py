@@ -68,3 +68,17 @@ def test_an_unrelated_command_below_is_not_swallowed() -> None:
     script = "echo a \\\n  # a note\necho unrelated\n"
 
     assert detect(script) == []
+
+
+def test_a_sibling_command_inside_a_function_is_not_swallowed() -> None:
+    """The boundary is the continued line's indent, not column one."""
+    script = "build() {\n  docker run --rm \\\n    # a note\n  echo unrelated\n}\n"
+
+    assert detect(script) == []
+
+
+def test_a_deeper_continuation_inside_a_function_is_reported() -> None:
+    """A deeper line belongs to the command, so the comment does swallow it."""
+    script = "build() {\n  docker run --rm \\\n    # a note\n    rust:1.97.0 sh /src/b.sh\n}\n"
+
+    assert detect(script) == [3]

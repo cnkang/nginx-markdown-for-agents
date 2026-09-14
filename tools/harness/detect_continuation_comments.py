@@ -64,22 +64,28 @@ def scan_shell_text(text: str) -> list[int]:
         comment = index + 1
         if comment >= len(lines) or not _is_comment(lines[comment]):
             continue
-        if _command_continues_after(lines, comment):
+        if _command_continues_after(lines, index, comment):
             findings.append(comment + 1)
     return findings
 
 
-def _command_continues_after(lines: list[str], comment: int) -> bool:
+def _indent(line: str) -> int:
+    """Return how far a line's content is indented."""
+    return len(line) - len(line.lstrip())
+
+
+def _command_continues_after(lines: list[str], opened: int, comment: int) -> bool:
     """True when the command still has content after the comment line.
 
-    Only the rest of this command can be lost.  The command ends at the first
-    later line that starts in column one, so an unrelated command below is not
-    part of what the comment swallowed.
+    Only the rest of this command can be lost.  The command ends where the
+    indentation drops to the level the continued line started at, which is not
+    always column one: inside a function or a `run:` block every line is
+    indented, and an unrelated command there would be a false report.
     """
     for candidate in lines[comment + 1 :]:
         if not candidate.strip():
             continue
-        return candidate[:1].isspace()
+        return _indent(candidate) > _indent(lines[opened])
     return False
 
 

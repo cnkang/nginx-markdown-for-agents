@@ -167,7 +167,9 @@ def _check_observation_workflows(root: Path, exact: str, errors: list[str]) -> N
 
 RUST_IMAGE_RE = re.compile(r"(?<![\w.-])rust:([A-Za-z0-9._${}-]+)")
 # A bare `rust` reference carries no version at all, so it floats.
-BARE_RUST_IMAGE_RE = re.compile(r"(?<![\w.-])rust(?:$|:(?P<tag>[A-Za-z0-9._${}-]*))")
+BARE_RUST_IMAGE_RE = re.compile(
+    r"(?<![\w.-])rust(?:$|@|:(?P<tag>[A-Za-z0-9._${}-]*))"
+)
 IMAGE_VERSION_RE = re.compile(r"^(\d+\.\d+\.\d+)(?:-|$)")
 
 
