@@ -443,6 +443,19 @@ def validate_manifest(
     if sha256sums_path and sha256sums_path.exists():
         sha256_entries = parse_sha256sums(sha256sums_path, errors)
 
+    # A tag that is not a semantic release tag cannot name the bootstrap assets
+    # at all, so a strict run has to refuse instead of finding nothing to check.
+    # This stands outside the checksum-file branch: the requirement is about the
+    # tag, not about which files happen to be present.
+    if require_bootstrap_assets and is_tag_release and isinstance(git, dict):
+        required_tag = git.get("tag", "")
+        if not (
+            isinstance(required_tag, str) and SEMVER_TAG_RE.fullmatch(required_tag)
+        ):
+            errors.append(
+                "git.tag must be a semantic release tag to validate bootstrap assets"
+            )
+
     # The bundle is the provenance artifact for a tag release, so its
     # presence, its recorded digest and the URL that points at it are
     # checked for every tag release, not only when a checksum file happens

@@ -161,8 +161,8 @@ def test_container_rust_image_at_canonical_version_passes(tmp_path: Path) -> Non
     _write_valid_fixture(tmp_path)
     _write(
         tmp_path / ".github/workflows/container-build.yml",
-        "jobs:\n  build:\n    steps:\n      - run: docker build .\n"
-        "        # image: rust:1.97.0-alpine3.21\n",
+        "jobs:\n  build:\n    steps:\n"
+        "      - run: docker run rust:1.97.0-alpine3.21 sh -c build\n",
     )
 
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
