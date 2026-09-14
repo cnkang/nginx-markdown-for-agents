@@ -58,9 +58,12 @@ def _validated_ref(ref: str) -> str:
     against the characters a ref can contain before use: a value that does not
     look like a ref is a mistake, not something to hand to a subprocess.
     """
-    if not ref or REF_RE.fullmatch(ref) is None:
+    match = REF_RE.fullmatch(ref or "")
+    if match is None:
         raise ValueError(f"not a ref: {ref!r}")
-    return ref
+    # The value handed on is the text the pattern accepted, not the raw
+    # argument, so a rejected or altered string cannot travel further.
+    return match.group(0)
 
 
 def _git(args: list[str]) -> tuple[int, str]:
@@ -77,7 +80,7 @@ def _git(args: list[str]) -> tuple[int, str]:
 
 def _merge_base(base: str) -> str | None:
     """Return the merge base with a base ref, or None when it is unknown."""
-    status, out = _git(["merge-base", _validated_ref(base), "HEAD"])
+    status, out = _git(["merge-base", "--end-of-options", _validated_ref(base), "HEAD"])
     return out.strip() if status == 0 and out.strip() else None
 
 
@@ -87,7 +90,9 @@ def _changed_files(base: str) -> list[str] | None:
     A failed diff is not an empty change set: treating it that way would skip
     every gate that depends on the change set and still report a pass.
     """
-    status, out = _git(["diff", "--name-only", "-z", f"{_validated_ref(base)}..HEAD"])
+    status, out = _git(
+        ["diff", "--name-only", "-z", "--end-of-options", f"{_validated_ref(base)}..HEAD"]
+    )
     if status != 0:
         return None
     return [name for name in out.split("\0") if name]
