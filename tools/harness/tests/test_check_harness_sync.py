@@ -923,3 +923,20 @@ def test_a_step_running_elsewhere_does_not_certify() -> None:
     assert sync._enabled_step_commands(steps) == ["make root"]
     assert sync._enabled_step_commands(steps, "packaging") == []
     assert sync._enabled_step_commands([{"run": "make root", "working-directory": "tools"}]) == []
+
+
+def test_default_working_directories_are_read() -> None:
+    """`defaults.run.working-directory` decides where a step's commands reach."""
+    steps = [{"run": "make root"}]
+    workflow_default = {
+        "defaults": {"run": {"working-directory": "packaging"}},
+        "jobs": {"j": {"steps": steps}},
+    }
+    job_default = {
+        "jobs": {"j": {"defaults": {"run": {"working-directory": "tools"}}, "steps": steps}}
+    }
+    plain = {"jobs": {"j": {"steps": steps}}}
+
+    assert sync._document_run_commands(plain) == ["make root"]
+    assert sync._document_run_commands(workflow_default) == []
+    assert sync._document_run_commands(job_default) == []
