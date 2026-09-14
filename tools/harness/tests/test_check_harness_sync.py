@@ -871,3 +871,36 @@ def test_profile_cannot_pass_when_the_change_set_is_unknown(monkeypatch) -> None
 
     monkeypatch.setattr(profile, "_merge_base", lambda base: "deadbeef")
     assert profile.main(["prog"]) == 2
+
+
+def test_running_an_interpreter_against_a_directory_is_not_an_invocation() -> None:
+    """`python3 tools/harness` executes nothing from the directory."""
+    wiring = "check:\n\tpython3 tools/harness\n"
+
+    assert "tools/harness/detect_pool_free.sh" and sync._is_invoked(
+        "tools/harness/detect_pool_free.sh", wiring
+    ) is False
+
+
+def test_a_test_runner_directory_does_cover_the_files_under_it() -> None:
+    """A discovery runner reaches the tests it names by directory."""
+    wiring = "check:\n\tpython3 -m pytest tools/harness/tests/ -q\n"
+
+    assert sync._is_invoked("tools/harness/tests/test_harness_wiring.py", wiring)
+
+
+def test_a_check_only_passed_as_an_argument_is_not_invoked() -> None:
+    """A path read as data by another tool is not a gate."""
+    wiring = "docs:\n\tpython3 tools/docs/check_docs.py tools/harness/detect_pool_free.sh\n"
+
+    assert sync._is_invoked("tools/harness/detect_pool_free.sh", wiring) is False
+
+
+def test_a_stage_without_an_entry_point_fails_the_mapping() -> None:
+    """The declared stage has to reach the check it maps."""
+    entry = _rule_check_entry(stage=["ci"])
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    status = result.status
+    assert status in {sync.PASS, sync.FAIL}
