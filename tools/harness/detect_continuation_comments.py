@@ -42,10 +42,11 @@ def _ends_with_continuation(line: str) -> bool:
     """
     if _is_comment(line):
         return False
-    stripped = line.rstrip()
-    if not stripped.endswith("\\"):
+    if not line.endswith("\\"):
+        # A backslash followed by whitespace escapes that whitespace instead of
+        # continuing the line, so the line has to be judged as written.
         return False
-    trailing = len(stripped) - len(stripped.rstrip("\\"))
+    trailing = len(line) - len(line.rstrip("\\"))
     return trailing % 2 == 1
 
 
