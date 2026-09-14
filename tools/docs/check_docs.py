@@ -728,7 +728,7 @@ def _starts_block(line: str) -> bool:
     # `#not-a-heading` is ordinary text: an ATX heading needs the space.  A table
     # row is not treated as a boundary either, because a table is only a table
     # once its delimiter row appears, which a single line cannot show.
-    if stripped.startswith("# ") or stripped.rstrip() == "#":
+    if re.match(r"#{1,6}(?:\s|$)", stripped):
         return True
     if stripped[:1] == ">":
         return True

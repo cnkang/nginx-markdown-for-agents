@@ -61,3 +61,10 @@ def test_a_swallowed_argument_in_a_workflow_run_block_is_reported(tmp_path) -> N
     errors = collect_errors(tmp_path)
 
     assert any("build.yml" in error for error in errors), errors
+
+
+def test_an_unrelated_command_below_is_not_swallowed() -> None:
+    """The command ends at the next line that starts in column one."""
+    script = "echo a \\\n  # a note\necho unrelated\n"
+
+    assert detect(script) == []

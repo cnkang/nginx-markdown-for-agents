@@ -521,3 +521,11 @@ def test_status_claim_requires_the_colon(tmp_path):
     path = tmp_path / "0.9.2-release-checklist.md"
     path.write_text("status rewrite planned\n", encoding="utf-8")
     assert docs_checker.check_release_checklist_is_static([path]) == []
+
+
+def test_a_second_level_heading_ends_a_task_item(tmp_path):
+    """Every ATX level opens a block, not only the first."""
+    path = tmp_path / "0.9.2-release-checklist.md"
+    path.write_text("- [ ] publish\n## Section\ncommit 1234567\n", encoding="utf-8")
+    assert docs_checker.check_release_checklist_is_static([path]) == []
+    assert docs_checker._checklist_items(path.read_text(), set()) == ["- [ ] publish"]
