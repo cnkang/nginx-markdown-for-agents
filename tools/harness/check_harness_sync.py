@@ -860,22 +860,79 @@ def _line_runs(line: str, stripped: str, parent: str) -> bool:
     return False
 
 
-RULE_CHECK_STAGE_ENTRY_FILES = {
-    "save": (".pre-commit-config.yaml", "Makefile"),
-    "commit": (".pre-commit-config.yaml", "Makefile"),
-    "push": ("Makefile", "tools/ci/pre_push_profile.py"),
-    "ci": ("Makefile",),
+# A stage is a list of Make targets its entry points call.  A command that sits
+# under some other target is not reachable from the stage, which is the drift
+# this mapping exists to catch.
+RULE_CHECK_STAGE_TARGETS = {
+    "save": ("harness-quick-checks",),
+    "commit": ("harness-quick-checks",),
+    "push": ("harness-security-checks", "pre-push-check"),
+    "ci": ("harness-security-checks", "harness-check"),
 }
 
 
+def _makefile_text() -> str:
+    """Return the root Makefile."""
+    return (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+
+
+def _make_recipe(target: str) -> str:
+    """Return the recipe lines of one Make target, without its dependencies."""
+    text = _makefile_text()
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith(f"{target}:") and line.strip() != f"{target}:":
+            continue
+        recipe: list[str] = []
+        for follower in lines[index + 1 :]:
+            if follower.startswith("\t"):
+                recipe.append(follower.lstrip("\t"))
+                continue
+            if follower.strip() and not follower.startswith("#"):
+                break
+        return "\n".join(recipe)
+    return ""
+
+
+def _stage_entry_ok(stage: str) -> bool:
+    """True when the stage's own entry point calls its declared targets."""
+    if stage in {"save", "commit"}:
+        return "entry: make harness-quick-checks" in _stage_config_text()
+    if stage == "push":
+        return "pre-push-check:" in _makefile_text()
+    if stage == "ci":
+        return any(
+            "harness-security-checks" in (REPO_ROOT / path).read_text(encoding="utf-8")
+            for path in _workflow_files()
+        )
+    return False
+
+
+def _stage_config_text() -> str:
+    """Return the pre-commit configuration."""
+    return (REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+
+
+def _workflow_files() -> list[Path]:
+    """Return the workflow files."""
+    return sorted((REPO_ROOT / ".github" / "workflows").glob("*.y*ml"))
+
+
 def _stage_wiring(stage: str) -> str:
-    """Return the text of the files that carry a stage's entry points."""
-    names = RULE_CHECK_STAGE_ENTRY_FILES.get(stage, ())
-    return "\n".join(
-        (REPO_ROOT / name).read_text(encoding="utf-8")
-        for name in names
-        if (REPO_ROOT / name).exists()
-    )
+    """Return everything a stage can reach.
+
+    The recipes of the declared targets, plus the entry points that call the
+    detectors directly: the hooks for the pre-commit stages, and the profile for
+    the push stage.
+    """
+    parts = [_make_recipe(target) for target in RULE_CHECK_STAGE_TARGETS.get(stage, ())]
+    if stage in {"save", "commit"}:
+        parts.append(_stage_config_text())
+    if stage == "push":
+        profile = REPO_ROOT / "tools/ci/pre_push_profile.py"
+        if profile.exists():
+            parts.append(profile.read_text(encoding="utf-8"))
+    return "\n".join(parts)
 
 
 def _wiring_text() -> str:
@@ -968,7 +1025,10 @@ def _stage_wiring_problems(stages: object, rule: str, check: object) -> list[str
         return []
     problems: list[str] = []
     for stage in stages:
-        if not isinstance(stage, str) or stage not in RULE_CHECK_STAGE_ENTRY_FILES:
+        if not isinstance(stage, str) or stage not in RULE_CHECK_STAGE_TARGETS:
+            continue
+        if not _stage_entry_ok(stage):
+            problems.append(f"rule {rule}: the {stage} entry point calls no target")
             continue
         if not _is_invoked(check, _stage_wiring(stage)):
             problems.append(f"rule {rule}: no {stage} entry point runs {check}")
