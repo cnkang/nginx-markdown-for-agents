@@ -145,29 +145,63 @@ def test_recursive_variables_cannot_certify(repo, definition):
 def test_a_defined_function_is_not_a_call_site() -> None:
     """A shell function that never runs cannot certify the checks in its body."""
     script = "noop() {\n  make root\n}\ntrue"
+    plain = "true\nmake root\n"
 
+    assert reach.literal_script_lines(plain) == ["true", "make root"]
     assert reach.literal_script_lines(script) == []
 
 
 def test_a_conditional_branch_is_not_evidence() -> None:
     """A target inside a branch that cannot be evaluated certifies nothing."""
-    makefile = (
+    guarded = (
         "root:\n\t@true\n"
         "ifeq (1,0)\nhidden:\n\tpython3 " + CHECK + "\nendif\n"
     )
+    # The same file without the conditional proves the entry really expands it.
+    plain = "root:\n\t@true\nhidden:\n\tpython3 " + CHECK + "\n"
 
-    reached = reach.reachable_commands(makefile, ["root"], PROFILE, [])
+    assert CHECK in reach.reachable_commands(plain, ["make hidden"], PROFILE, [])
+    reached = reach.reachable_commands(guarded, ["make hidden"], PROFILE, [])
 
-    assert "hidden" not in reached
+    # The entry line itself is always reported; the guard is the detector.
+    assert CHECK not in reached
+
+
+def test_a_conditional_variable_override_is_not_knowable() -> None:
+    """A variable an unevaluable branch rewrites cannot pick the target."""
+    makefile = (
+        "LIST := checked\n"
+        "root:\n\t@$(MAKE) $(LIST)\n"
+        "checked:\n\tpython3 " + CHECK + "\n"
+        "other:\n\t@true\n"
+        "ifeq (1,1)\nLIST := other\nendif\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
     assert CHECK not in reached
 
 
 def test_a_listing_invocation_does_not_expand_gates() -> None:
     """Only the invocation that runs the gates may expand them."""
-    makefile = f"root:\n\tpython3 {PROFILE} --list\n"
+    gates = ["make harness-security-checks"]
+    plain = f"root:\n\tpython3 {PROFILE}\n"
+    listing = f"root:\n\tpython3 {PROFILE} --list\n"
 
-    reached = reach.reachable_commands(
-        makefile, ["root"], PROFILE, ["make harness-security-checks"]
+    assert "harness-security-checks" in reach.reachable_commands(
+        plain, ["make root"], PROFILE, gates
     )
+    reached = reach.reachable_commands(listing, ["make root"], PROFILE, gates)
 
     assert "harness-security-checks" not in reached
+
+
+def test_an_option_makes_an_invocation_uncertain() -> None:
+    """`make -n` prints a recipe instead of running it."""
+    assert reach.make_targets("make -n root") == []
+    assert reach.make_targets("make root") == ["root"]
+
+
+def test_quoted_text_is_not_a_call() -> None:
+    """A call written inside a multi-line string never runs."""
+    assert reach.literal_script_lines('printf \'%s\\n\' "\nmake root\n"') == []
