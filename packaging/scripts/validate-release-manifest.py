@@ -331,7 +331,9 @@ def validate_manifest(
                 if not fpath.exists():
                     errors.append(f"{prefix}: file not found in artifacts: {fname}")
                 elif "sha256" in pkg:
-                    actual_sha = sha256_file(fpath)
+                    # Same single-open reader as the bundle: resolving and then
+                    # reopening by name leaves a window for a swap.
+                    actual_sha = sha256_no_follow(fpath)
                     if actual_sha != pkg["sha256"]:
                         errors.append(
                             f"{prefix}: SHA256 mismatch for {fname}: "
