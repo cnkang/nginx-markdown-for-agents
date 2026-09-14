@@ -674,7 +674,7 @@ def _is_task_list_line(line: str) -> bool:
     # A list marker may be followed by one to four spaces.
     if gap not in (1, 2, 3, 4):
         return False
-    return rest[:1] == "[" and rest[1:2] in (" ", "x", "X") and rest[2:3] == "]"
+    return rest.startswith("[") and rest[1:2] in (" ", "x", "X") and rest[2:3] == "]"
 
 
 def check_release_checklist_is_static(files: list[Path]) -> list[str]:
@@ -730,7 +730,7 @@ def _starts_block(line: str) -> bool:
     # once its delimiter row appears, which a single line cannot show.
     if re.match(r"#{1,6}(?:\s|$)", stripped):
         return True
-    if stripped[:1] == ">":
+    if stripped.startswith(">"):
         return True
     if stripped[:3] in ("```", "~~~"):
         return True
@@ -777,7 +777,6 @@ def _checklist_items(content: str, history: set[str]) -> list[str]:
             current.append(line.strip())
         else:
             _flush_task_item(items, current)
-            continue
 
     _flush_task_item(items, current)
     return items

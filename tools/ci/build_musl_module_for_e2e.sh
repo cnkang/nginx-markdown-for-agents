@@ -12,7 +12,8 @@ set -eux
 
 apk add --no-cache bash build-base brotli-dev curl gzip openssl-dev pcre-dev perl zlib-dev
 
-curl -fsSL -o /tmp/nginx.tar.gz "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+  -o /tmp/nginx.tar.gz "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
 bash /src/packaging/scripts/verify-checksum.sh \
   -f /tmp/nginx.tar.gz -c /src/packaging/checksums.sha256 -i "nginx-${NGINX_VERSION}"
 

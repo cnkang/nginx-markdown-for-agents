@@ -362,7 +362,8 @@ def test_iter_unfenced_lines_needs_a_matching_closer():
     """A block opened with ``` is not closed by ~~~."""
     text = "~~~\nhidden\n```\nstill hidden\n~~~\nvisible\n"
     kept = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
-    assert "hidden" not in kept and "still hidden" not in kept
+    assert "hidden" not in kept
+    assert "still hidden" not in kept
     assert "visible" in kept
 
 
@@ -383,7 +384,8 @@ def test_iter_unfenced_lines_respects_fence_run_rules():
     assert "after" not in kept  # the 4 run then opened a new block
     indented = "    ```\nnot a fence\n"
     kept2 = [line for _n, line in docs_checker.iter_unfenced_lines(indented)]
-    assert "    ```" in kept2 and "not a fence" in kept2
+    assert "    ```" in kept2
+    assert "not a fence" in kept2
 
 
 def test_checklist_guard_accepts_plus_markers(tmp_path):
@@ -391,7 +393,8 @@ def test_checklist_guard_accepts_plus_markers(tmp_path):
     path = tmp_path / "0.9.2-release-checklist.md"
     path.write_text("+ [ ] certified at 1234567\n", encoding="utf-8")
     failures = docs_checker.check_release_checklist_is_static([path])
-    assert failures and "names a commit" in failures[0]
+    assert failures
+    assert "names a commit" in failures[0]
 
 
 def test_checklist_guard_scans_continuation_lines(tmp_path):
@@ -403,7 +406,8 @@ def test_checklist_guard_scans_continuation_lines(tmp_path):
         encoding="utf-8",
     )
     failures = docs_checker.check_release_checklist_is_static([path])
-    assert failures and "names a commit" in failures[0]
+    assert failures
+    assert "names a commit" in failures[0]
 
 
 def test_closing_fence_must_not_carry_trailing_text():
@@ -433,7 +437,8 @@ def test_checklist_guard_sees_a_pinned_commit_after_extra_spaces(tmp_path):
     path = tmp_path / "0.9.2-release-checklist.md"
     path.write_text("-  [ ] certified at 1234567\n", encoding="utf-8")
     failures = docs_checker.check_release_checklist_is_static([path])
-    assert failures and "names a commit" in failures[0]
+    assert failures
+    assert "names a commit" in failures[0]
 
 
 def test_claim_split_across_lines_is_rejected(tmp_path):
@@ -446,7 +451,8 @@ def test_claim_split_across_lines_is_rejected(tmp_path):
         encoding="utf-8",
     )
     failures = docs_checker.check_release_checklist_is_static([path])
-    assert failures and "mutable candidate status" in failures[0]
+    assert failures
+    assert "mutable candidate status" in failures[0]
 
 
 def test_wrapped_prose_claim_is_rejected(tmp_path):
@@ -458,7 +464,8 @@ def test_wrapped_prose_claim_is_rejected(tmp_path):
         encoding="utf-8",
     )
     failures = docs_checker.check_release_checklist_is_static([path])
-    assert failures and "mutable candidate status" in failures[0]
+    assert failures
+    assert "mutable candidate status" in failures[0]
 
 
 def test_lazy_continuation_commit_is_rejected(tmp_path):
@@ -469,7 +476,8 @@ def test_lazy_continuation_commit_is_rejected(tmp_path):
         encoding="utf-8",
     )
     failures = docs_checker.check_release_checklist_is_static([path])
-    assert failures and "names a commit" in failures[0]
+    assert failures
+    assert "names a commit" in failures[0]
 
 
 def test_heading_ends_the_task_item(tmp_path):
