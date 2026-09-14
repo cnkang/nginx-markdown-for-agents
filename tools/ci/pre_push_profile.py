@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -47,6 +48,21 @@ class Outcome:
     detail: str = ""
 
 
+REF_RE = re.compile(r"[A-Za-z0-9._/@^~{}-]+")
+
+
+def _validated_ref(ref: str) -> str:
+    """Return the ref when it looks like one, otherwise refuse it.
+
+    The base comes from the command line and travels into git, so it is checked
+    against the characters a ref can contain before use: a value that does not
+    look like a ref is a mistake, not something to hand to a subprocess.
+    """
+    if not ref or REF_RE.fullmatch(ref) is None:
+        raise ValueError(f"not a ref: {ref!r}")
+    return ref
+
+
 def _git(args: list[str]) -> tuple[int, str]:
     """Run git and return the exit status with its output."""
     result = subprocess.run(
@@ -61,7 +77,7 @@ def _git(args: list[str]) -> tuple[int, str]:
 
 def _merge_base(base: str) -> str | None:
     """Return the merge base with a base ref, or None when it is unknown."""
-    status, out = _git(["merge-base", base, "HEAD"])
+    status, out = _git(["merge-base", _validated_ref(base), "HEAD"])
     return out.strip() if status == 0 and out.strip() else None
 
 
@@ -71,7 +87,7 @@ def _changed_files(base: str) -> list[str] | None:
     A failed diff is not an empty change set: treating it that way would skip
     every gate that depends on the change set and still report a pass.
     """
-    status, out = _git(["diff", "--name-only", "-z", f"{base}..HEAD"])
+    status, out = _git(["diff", "--name-only", "-z", f"{_validated_ref(base)}..HEAD"])
     if status != 0:
         return None
     return [name for name in out.split("\0") if name]
@@ -193,6 +209,12 @@ def main(argv: list[str]) -> int:
             marker = " (only when C changed)" if gate.needs_c_change else ""
             print(f"{gate.name}{marker}")
         return 0
+
+    try:
+        _validated_ref(args.base)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
 
     base = _merge_base(args.base)
     if base is None:
