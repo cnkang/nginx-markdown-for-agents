@@ -908,3 +908,18 @@ def test_every_declared_stage_in_the_manifest_is_reachable() -> None:
     result = sync._check_rule_checks(manifest)
 
     assert result.status == sync.PASS, result.detail
+
+
+def test_collection_is_not_execution() -> None:
+    """A runner that only lists tests has not run the check."""
+    assert sync._discovery_target(["python3", "-m", "pytest", "--collect-only", "tests/"]) is None
+    assert sync._discovery_target(["python3", "-m", "pytest", "tests/"]) == "tests"
+
+
+def test_a_step_running_elsewhere_does_not_certify() -> None:
+    """`working-directory` decides which Makefile a step's commands reach."""
+    steps = [{"run": "make root"}]
+
+    assert sync._enabled_step_commands(steps) == ["make root"]
+    assert sync._enabled_step_commands(steps, "packaging") == []
+    assert sync._enabled_step_commands([{"run": "make root", "working-directory": "tools"}]) == []

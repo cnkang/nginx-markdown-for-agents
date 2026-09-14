@@ -602,7 +602,8 @@ def _missing_manifest_segment(
             missing.extend(_missing_make_targets(command, segment, targets))
             break
         if token == "pytest":
-            missing.extend(_missing_command_paths(command, segment, index + 1))
+            if not any(item in NON_RUNNING_TEST_OPTIONS for item in segment[index + 1:]):
+                missing.extend(_missing_command_paths(command, segment, index + 1))
             break
         if token in {"python", "python3", "bash", "sh"}:
             missing.extend(_missing_interpreter_path(command, segment, index))
@@ -795,6 +796,10 @@ WIRING_FILES = (
 INTERPRETERS = ("python3", "python", "bash", "sh")
 
 
+# Options that make a test runner list work instead of doing it.
+NON_RUNNING_TEST_OPTIONS = {"--collect-only", "--co"}
+
+
 def _invocation_target(parts: list[str]) -> str | None:
     """Return the path an entry line runs, if the line runs a path at all."""
     while parts and "=" in parts[0] and not parts[0].startswith("-"):
@@ -818,6 +823,9 @@ def _discovery_target(parts: list[str]) -> str | None:
     if len(parts) < 3 or parts[0] not in INTERPRETERS or parts[1] != "-m":
         return None
     if parts[2] not in {"pytest", "unittest"}:
+        return None
+    if any(token in NON_RUNNING_TEST_OPTIONS for token in parts[3:]):
+        # Collection lists tests instead of running them.
         return None
     for token in parts[3:]:
         if token.startswith("-"):
@@ -944,11 +952,22 @@ def _document_run_commands(document: object) -> list[str]:
     for job in jobs.values():
         if not isinstance(job, dict) or job.get("if") is False:
             continue
-        commands.extend(_enabled_step_commands(job.get("steps", [])))
+        commands.extend(
+            _enabled_step_commands(job.get("steps", []), job.get("working-directory"))
+        )
     return commands
 
 
-def _enabled_step_commands(steps: object) -> list[str]:
+def _runs_elsewhere(directory: object) -> bool:
+    """A working directory this cannot establish as the root is not evidence."""
+    if directory is None:
+        return False
+    if not isinstance(directory, str):
+        return True
+    return directory.strip() not in {"", ".", "./"}
+
+
+def _enabled_step_commands(steps: object, job_directory: object = None) -> list[str]:
     """Extract enabled run steps; unsupported structures provide no evidence."""
     if not isinstance(steps, list):
         return []
@@ -956,10 +975,16 @@ def _enabled_step_commands(steps: object) -> list[str]:
     for step in steps:
         if not isinstance(step, dict) or step.get("if") is False:
             continue
-        if isinstance(step.get("run"), str):
-            from tools.harness.stage_reachability import literal_script_lines
+        if not isinstance(step.get("run"), str):
+            continue
+        # A step that runs elsewhere does not execute a repository-root gate.
+        if _runs_elsewhere(job_directory) or _runs_elsewhere(
+            step.get("working-directory")
+        ):
+            continue
+        from tools.harness.stage_reachability import literal_script_lines
 
-            commands.extend(literal_script_lines(step["run"]))
+        commands.extend(literal_script_lines(step["run"]))
     return commands
 
 
