@@ -490,3 +490,16 @@ def test_digest_only_image_is_rejected(tmp_path: Path) -> None:
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
     assert any("carries no version tag" in error for error in errors), errors
+
+
+def test_an_unparsable_workflow_is_reported_not_skipped(tmp_path: Path) -> None:
+    """A workflow YAML cannot read must not pass the image checks silently."""
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path / ".github/workflows/container-build.yml",
+        "jobs: [this is not: a mapping\n",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("does not parse" in error for error in errors), errors

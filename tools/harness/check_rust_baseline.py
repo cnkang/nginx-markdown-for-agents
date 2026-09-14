@@ -179,11 +179,18 @@ def _image_version(tag: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _workflow_document(content: str) -> dict:
-    """Parse a workflow, returning an empty mapping when it does not parse."""
+def _workflow_document(content: str, errors: list[str] | None = None) -> dict:
+    """Parse a workflow, recording a parse failure when a list is supplied.
+
+    An unparsable workflow is not an empty one: returning a mapping for it would
+    skip the image and version checks silently, so a caller that can report the
+    failure passes its error list in.
+    """
     try:
         document = yaml.safe_load(content)
-    except yaml.YAMLError:
+    except yaml.YAMLError as exc:
+        if errors is not None:
+            errors.append(f"workflow does not parse: {exc}")
         return {}
     return document if isinstance(document, dict) else {}
 
@@ -471,7 +478,7 @@ def _check_rust_container_images(root: Path, exact: str, errors: list[str]) -> N
         content = _read_text(root, workflows / path.name, errors)
         if content is None:
             continue
-        document = _workflow_document(content)
+        document = _workflow_document(content, errors)
         # The parsed document is authoritative: a line pattern would also match
         # a `RUST_VERSION:` that is not an environment declaration at all.
         declared_values = set(_declared_version_values(document))
