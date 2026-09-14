@@ -82,3 +82,17 @@ def test_a_deeper_continuation_inside_a_function_is_reported() -> None:
     script = "build() {\n  docker run --rm \\\n    # a note\n    rust:1.97.0 sh /src/b.sh\n}\n"
 
     assert detect(script) == [3]
+
+
+def test_a_comment_inside_a_multi_line_continuation_is_reported() -> None:
+    """The boundary is where the whole command starts, not its last line."""
+    script = "docker run --rm \\\n  -v /a:/a \\\n  # a note\n  rust:1.97.0 sh /src/b.sh\n"
+
+    assert detect(script) == [3]
+
+
+def test_a_sibling_command_after_a_multi_line_continuation_is_not() -> None:
+    """A line that starts a new command is not part of what was swallowed."""
+    script = "docker run --rm \\\n  -v /a:/a \\\n  # a note\necho unrelated\n"
+
+    assert detect(script) == []
