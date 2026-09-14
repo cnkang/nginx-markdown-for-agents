@@ -135,8 +135,8 @@ def _scan_file(path: Path) -> tuple[list[tuple[int, str]], str | None]:
     return findings, None
 
 
-def _resolve_src_dir(arguments: list[str]) -> Path:
-    """Return the directory to scan, refusing inputs that cannot be read."""
+def _resolve_src_dir(arguments: list[str]) -> Path | None:
+    """Return the directory to scan, or None when the argument is unusable."""
     if not arguments:
         return (
             Path(__file__).resolve().parents[2] / "components" / "nginx-module" / "src"
@@ -145,7 +145,7 @@ def _resolve_src_dir(arguments: list[str]) -> Path:
         return Path(validate_read_path(arguments[0]))
     except (OSError, ValueError) as exc:
         print(f"ERROR: cannot scan {arguments[0]}: {exc}", file=sys.stderr)
-        sys.exit(2)
+        return None
 
 
 def _collect(src_dir: Path) -> tuple[list[str], list[str], int]:
@@ -200,6 +200,8 @@ def main() -> None:
     # Exit convention: 0 = the scan completed and found nothing, 1 = orphan
     # closers found, 2 = the scan could not be completed.
     src_dir = _resolve_src_dir(sys.argv[1:])
+    if src_dir is None:
+        sys.exit(2)
     if not src_dir.exists():
         print(f"ERROR: directory not found: {src_dir}", file=sys.stderr)
         sys.exit(2)
