@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+from collections import deque
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -130,22 +131,37 @@ def _gates() -> list[Gate]:
 
 
 def _run(gate: Gate) -> Outcome:
-    """Run one gate and record its outcome."""
+    """Run one gate, echo its output, and record its outcome.
+
+    The output is streamed rather than captured, so a failure is visible while
+    it happens and the summary can carry the command that failed instead of a
+    final line that says "Error 1".
+    """
     if gate.requires_nginx and not os.environ.get("NGINX_BIN"):
         # A required gate without its environment is not a pass and not a
         # not-selected check: the profile cannot claim to have completed.
         return Outcome(gate, "BLOCKED", "NGINX_BIN is not set")
-    result = subprocess.run(
+
+    command = " ".join(gate.command)
+    print(f"", flush=True)
+    print(f"── {gate.name}: {command}", flush=True)
+    process = subprocess.Popen(
         gate.command,
         cwd=REPO_ROOT,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
-        check=False,
     )
-    if result.returncode == 0:
+    tail: deque[str] = deque(maxlen=6)  # type: ignore[var-annotated]
+    for line in process.stdout or []:
+        print(line, end="", flush=True)
+        if line.strip():
+            tail.append(line.rstrip())
+    code = process.wait()
+    if code == 0:
         return Outcome(gate, "PASS")
-    tail = (result.stderr or result.stdout).strip().splitlines()
-    return Outcome(gate, "FAIL", tail[-1] if tail else "")
+    detail = tail[-1] if tail else ""
+    return Outcome(gate, "FAIL", f"{command} -> {detail}" if detail else command)
 
 
 def _select(gates: list[Gate], changed: list[str]) -> list[Outcome]:
