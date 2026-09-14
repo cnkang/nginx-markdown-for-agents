@@ -486,6 +486,19 @@ class TestValidateManifest(unittest.TestCase):
             f"Expected required bootstrap asset errors, got: {errors}",
         )
 
+    def test_non_semantic_tag_cannot_satisfy_required_bootstrap_assets(self):
+        """Strict mode refuses a tag it cannot build the asset names from."""
+        manifest = self._make_valid_manifest()
+        manifest["git"]["tag"] = "nightly-2026-09-14"
+        self.manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+        errors = self._validate(require_bootstrap_assets=True)
+
+        self.assertTrue(
+            any("semantic release tag" in error for error in errors),
+            f"Expected the semantic-tag refusal, got: {errors}",
+        )
+
     def test_prerelease_build_tag_bootstrap_assets_validate(self):
         """Bootstrap filenames support full semantic release tags."""
         manifest = self._make_valid_manifest()
