@@ -208,3 +208,9 @@ def test_the_harness_job_provisions_the_pinned_rust_toolchain() -> None:
     assert "Set up Rust toolchain" in names, names
     setup = next(s for s in job["steps"] if s.get("name") == "Set up Rust toolchain")
     assert setup["with"]["toolchain"] == "1.98.1"
+    # A detector asks rustfmt for a check, so the components are part of the
+    # provisioning: without them a rustup proxy would fetch one mid-test.
+    components = {
+        item.strip() for item in str(setup["with"]["components"]).split(",")
+    }
+    assert {"rustfmt", "clippy"} <= components, components
