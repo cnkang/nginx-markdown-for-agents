@@ -126,7 +126,12 @@ def _conditional_delta(line: str) -> int | None:
     return None
 
 
-def _consume_recipe(line: str, nodes: dict[str, list[str]], current: str | None) -> str | None:
+def _consume_recipe(
+    line: str,
+    recipes: dict[str, list[tuple[int, str]]],
+    generation: dict[str, int],
+    current: str | None,
+) -> str | None:
     """Record a recipe line, dropping one whose exit status Make would ignore."""
     if current is None:
         return current
@@ -136,7 +141,7 @@ def _consume_recipe(line: str, nodes: dict[str, list[str]], current: str | None)
         # Make's prefixes come in any order; a `-` among them means the status
         # is ignored, so the command cannot be blocking evidence.
         return current
-    nodes[current].append(dropped)
+    recipes.setdefault(current, []).append((generation.get(current, 0), dropped))
     return current
 
 
@@ -176,43 +181,67 @@ def _apply_assignment(
     _drop(name, variables, simple)
 
 
-def _record_target(line: str, nodes: dict[str, list[str]], variables: dict[str, str]) -> str | None:
+def _record_target(
+    line: str,
+    dependencies: dict[str, list[str]],
+    generation: dict[str, int],
+    variables: dict[str, str],
+) -> str | None:
     """Record a target declaration, expanding its prerequisites where it is read."""
     target = TARGET.fullmatch(line)
     if target is None:
         return None
-    name, prerequisites = target[1], target[2]
-    existing = nodes.get(name, [])
-    if any(not item.startswith("make ") for item in existing):
-        # Make keeps the last recipe for a target and drops the earlier one.
-        nodes[name] = [item for item in existing if item.startswith("make ")]
-    nodes.setdefault(name, [])
-    nodes[name].append("make " + _expand(prerequisites.strip(), variables))
+    name = target[1]
+    # Every definition contributes prerequisites, while a later recipe replaces
+    # an earlier one, so the two are kept apart.
+    generation[name] = generation.get(name, 0) + 1
+    dependencies.setdefault(name, [])
+    dependencies[name].append(_expand(target[2].strip(), variables))
     return name
+
+
+def _target_script(
+    name: str,
+    dependencies: dict[str, list[str]],
+    recipes: dict[str, list[tuple[int, str]]],
+) -> str:
+    """Lines a target contributes: its prerequisites, then its last recipe."""
+    lines = [f"make {deps}" for deps in dependencies.get(name, []) if deps.strip()]
+    entries = recipes.get(name, [])
+    if entries:
+        last = max(index for index, _ in entries)
+        lines.extend(line for index, line in entries if index == last)
+    return "\n".join(lines)
 
 
 def _consume_make_line(
     line: str,
-    nodes: dict[str, list[str]],
+    dependencies: dict[str, list[str]],
+    recipes: dict[str, list[tuple[int, str]]],
+    generation: dict[str, int],
     variables: dict[str, str],
     simple: set[str],
     current: str | None,
 ) -> str | None:
     """Read one recipe, assignment or target line; return its target."""
     if line.startswith("\t"):
-        return _consume_recipe(line, nodes, current)
+        return _consume_recipe(line, recipes, generation, current)
     assignment = ASSIGNMENT.fullmatch(line)
     if assignment:
         _apply_assignment(assignment, variables, simple)
         return None
-    recorded = _record_target(line, nodes, variables)
+    recorded = _record_target(line, dependencies, generation, variables)
     if recorded is not None:
         return recorded
     return None if line.strip() and not line.startswith("#") else current
 
-def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
-    """Collect target dependencies and recipes from the root Makefile."""
-    nodes: dict[str, list[str]] = {}
+def _make_nodes(
+    text: str,
+) -> tuple[dict[str, list[str]], dict[str, list[tuple[int, str]]], dict[str, str]]:
+    """Collect target prerequisites and recipes from the root Makefile."""
+    dependencies: dict[str, list[str]] = {}
+    recipes: dict[str, list[tuple[int, str]]] = {}
+    generation: dict[str, int] = {}
     variables = {"MAKE": "make"}
     current: str | None = None
     conditionals = 0
@@ -232,8 +261,10 @@ def _make_nodes(text: str) -> tuple[dict[str, list[str]], dict[str, str]]:
                 variables.pop(poisoned[1], None)
                 simple.discard(poisoned[1])
             continue
-        current = _consume_make_line(line, nodes, variables, simple, current)
-    return nodes, variables
+        current = _consume_make_line(
+            line, dependencies, recipes, generation, variables, simple, current
+        )
+    return dependencies, recipes, variables
 
 
 def _runs_profile(words: list[str], profile: str) -> bool:
@@ -246,7 +277,7 @@ def _runs_profile(words: list[str], profile: str) -> bool:
 def reachable_commands(makefile: str, entries: list[str], profile: str,
                        gates: list[str]) -> str:
     """Follow only targets called by entries, including the push profile gates."""
-    nodes, variables = _make_nodes(makefile)
+    dependencies, recipes, variables = _make_nodes(makefile)
     pending = list(entries)
     visited: set[str] = set()
     reached: list[str] = []
@@ -264,5 +295,7 @@ def reachable_commands(makefile: str, entries: list[str], profile: str,
         for target in make_targets(line):
             if target not in visited:
                 visited.add(target)
-                pending.extend(literal_script_lines("\n".join(nodes.get(target, []))))
+                pending.extend(
+                    literal_script_lines(_target_script(target, dependencies, recipes))
+                )
     return "\n".join(reached)
