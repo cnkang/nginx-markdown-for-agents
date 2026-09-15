@@ -51,7 +51,8 @@ repos:
         language: system
         # The checks scan the tree, so they take no filename arguments.
         pass_filenames: false
-        always_run: true
+        # No always_run: the pattern below decides when this runs, so a commit
+        # that touches none of those paths does not pay for the scan.
         files: ^(tools/|packaging/|\.github/|Makefile|components/)
       - id: detect-pool-free
         name: detect pool/free mismatch

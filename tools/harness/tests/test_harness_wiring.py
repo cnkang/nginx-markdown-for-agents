@@ -181,3 +181,16 @@ def test_orphan_detector_refuses_a_file_argument(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 2, result.stdout + result.stderr
+
+
+def test_a_scoped_hook_does_not_always_run() -> None:
+    """A hook narrowed by a pattern must not run on every commit anyway."""
+    import yaml
+
+    config = yaml.safe_load((REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
+    for repo in config["repos"]:
+        for hook in repo.get("hooks", []):
+            if hook.get("files") and hook.get("always_run"):
+                raise AssertionError(
+                    f"{hook['id']} sets files and always_run: the pattern is dead"
+                )
