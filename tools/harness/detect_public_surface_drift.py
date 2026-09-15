@@ -197,14 +197,13 @@ def _validate_inventory_header(inventory):
 
 
 def _validate_reject_only_migration(inventory):
-    """Validate the retained reject-only migration directives.
+    """Validate the reject-only slice of the final 0.9.2 contract.
 
     The pre-LTS 0.9.2 convergence removed five directives (three dynconf
-    directives and two custom-selector directives) but retains their names in
-    the command registry behind an error-returning handler so any usage fails
-    ``nginx -t`` with migration guidance (LTS-R008). Require exactly those five
-    reject-only entries, each wired to the removed-directive handler, instead of
-    the pre-convergence zero-reject-only contract.
+    directives and two custom-selector directives) outright: no reject-only
+    entry remains, those names are absent from the command table, and using one
+    produces the ordinary NGINX unknown-directive failure.  No migration-only
+    runtime handler is retained, so zero entries are required here.
     """
     errors = []
     reject_only = inventory.get("reject_only_directives")

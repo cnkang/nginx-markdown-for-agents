@@ -194,3 +194,17 @@ def test_a_scoped_hook_does_not_always_run() -> None:
                 raise AssertionError(
                     f"{hook['id']} sets files and always_run: the pattern is dead"
                 )
+
+
+def test_the_harness_job_provisions_the_pinned_rust_toolchain() -> None:
+    """A harness test runs `rustc -Vv`, so the job must set the toolchain up."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
+    job = workflow["jobs"]["harness-tooling"]
+    names = [step.get("name") for step in job["steps"]]
+    assert "Set up Rust toolchain" in names, names
+    setup = next(s for s in job["steps"] if s.get("name") == "Set up Rust toolchain")
+    assert setup["with"]["toolchain"] == "1.98.1"
