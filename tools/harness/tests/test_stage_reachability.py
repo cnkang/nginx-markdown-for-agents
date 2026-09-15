@@ -391,3 +391,16 @@ def test_unknown_ignore_scope_fails_mapping(repo, directive):
     result = verdict("commit")
     assert result.status == sync.FAIL
     assert ".IGNORE" in result.detail
+
+
+def test_an_indented_comment_does_not_condemn_a_script() -> None:
+    """A comment with leading space is still a comment."""
+    script = "make root\n  # build the module\n  make checked\n"
+
+    assert reach.literal_script_lines(script) != []
+
+
+def test_an_entry_that_names_an_interpreter_invokes_the_path() -> None:
+    """`entry: python3 tools/x.py` runs the path the same way a line does."""
+    assert sync._is_invoked("tools/harness/detect_example.py", "entry: python3 tools/harness/detect_example.py")
+    assert not sync._is_invoked("tools/harness/detect_example.py", "entry: echo detect_example.py")

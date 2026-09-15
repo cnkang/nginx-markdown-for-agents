@@ -71,8 +71,10 @@ def literal_script_lines(script: str) -> list[str]:
     lines = script.replace("\\\n", " ").splitlines()
     for line in lines:
         words = command_words(line)
-        if not words and line.strip() and not line.startswith("#"):
-            # A line that carries no plain command is not evidence either.
+        stripped_line = line.strip()
+        if not words and stripped_line and not stripped_line.startswith("#"):
+            # A line that carries no plain command is not evidence either; an
+            # indented comment is a comment and does not condemn its script.
             return []
         if _quote_spans_lines(line):
             # Quoted text is data; a call written inside it never runs.
