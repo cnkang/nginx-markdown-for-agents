@@ -11,8 +11,8 @@ import shlex
 
 
 VARIABLE = re.compile(r"\$\((\w+)\)")
-ASSIGNMENT = re.compile(r"^(\w+)\s*([:?+]?=)\s*(.*)")
-TARGET = re.compile(r"^([\w.-]+):\s*([^=]*)")
+
+
 CONDITIONAL_START = re.compile(r"^(?:ifeq|ifneq|ifdef|ifndef)\b")
 
 
@@ -126,6 +126,33 @@ def _conditional_delta(line: str) -> int | None:
     return None
 
 
+ASSIGNMENT_OPERATORS = (":=", "?=", "+=", "=")
+
+
+def _assignment(line: str) -> tuple[str, str, str] | None:
+    """Split `NAME op value` without a pattern that could backtrack."""
+    name = re.match(r"\w+", line)
+    if name is None:
+        return None
+    rest = line[name.end():].lstrip()
+    for operator in ASSIGNMENT_OPERATORS:
+        if rest.startswith(operator):
+            return name.group(), operator, rest[len(operator):].lstrip()
+    return None
+
+
+def _target(line: str) -> tuple[str, str] | None:
+    """Split `NAME: prerequisites`, refusing a line that carries an `=`."""
+    name = re.match(r"[\w.-]+", line)
+    if name is None or len(name.group()) == len(line):
+        return None
+    rest = line[name.end():]
+    if not rest.startswith(":"):
+        return None
+    prerequisites = rest[1:].lstrip()
+    return None if "=" in prerequisites else (name.group(), prerequisites)
+
+
 def _consume_recipe(
     line: str,
     recipes: dict[str, list[tuple[int, str]]],
@@ -152,10 +179,10 @@ def _drop(name: str, variables: dict[str, str], simple: set[str]) -> None:
 
 
 def _apply_assignment(
-    assignment: "re.Match[str]", variables: dict[str, str], simple: set[str]
+    assignment: tuple[str, str, str], variables: dict[str, str], simple: set[str]
 ) -> None:
     """Apply one assignment the way Make would, flavor included."""
-    name, operator, value = assignment[1], assignment[2], assignment[3]
+    name, operator, value = assignment
     if operator == "?=":
         if name not in variables:
             variables[name] = value
@@ -188,15 +215,15 @@ def _record_target(
     variables: dict[str, str],
 ) -> str | None:
     """Record a target declaration, expanding its prerequisites where it is read."""
-    target = TARGET.fullmatch(line)
+    target = _target(line)
     if target is None:
         return None
-    name = target[1]
+    name = target[0]
     # Every definition contributes prerequisites, while a later recipe replaces
     # an earlier one, so the two are kept apart.
     generation[name] = generation.get(name, 0) + 1
     dependencies.setdefault(name, [])
-    dependencies[name].append(_expand(target[2].strip(), variables))
+    dependencies[name].append(_expand(target[1].strip(), variables))
     return name
 
 
@@ -226,8 +253,8 @@ def _consume_make_line(
     """Read one recipe, assignment or target line; return its target."""
     if line.startswith("\t"):
         return _consume_recipe(line, recipes, generation, current)
-    assignment = ASSIGNMENT.fullmatch(line)
-    if assignment:
+    assignment = _assignment(line)
+    if assignment is not None:
         _apply_assignment(assignment, variables, simple)
         return None
     recorded = _record_target(line, dependencies, generation, variables)
@@ -256,10 +283,10 @@ def _make_nodes(
             # The branch cannot be evaluated, so a variable it assigns may hold
             # either value.  It is dropped here, before any later declaration
             # could expand a dependency with the value from outside the branch.
-            poisoned = ASSIGNMENT.fullmatch(line.strip())
-            if poisoned:
-                variables.pop(poisoned[1], None)
-                simple.discard(poisoned[1])
+            poisoned = _assignment(line.strip())
+            if poisoned is not None:
+                variables.pop(poisoned[0], None)
+                simple.discard(poisoned[0])
             continue
         current = _consume_make_line(
             line, dependencies, recipes, generation, variables, simple, current
