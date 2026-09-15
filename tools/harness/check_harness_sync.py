@@ -855,7 +855,12 @@ def _line_runs(line: str, stripped: str, parent: str) -> bool:
     if not text or text.startswith("#"):
         return False
     if text.startswith(("entry:", "entry :")):
-        return text.split(":", 1)[1].strip() == stripped
+        value = text.split(":", 1)[1].strip()
+        if value == stripped:
+            return True
+        # An entry that names an interpreter runs the path it passes on, so it
+        # goes through the same analysis as any other line.
+        text = value
     from tools.harness.stage_reachability import command_words
 
     parts = command_words(text)
