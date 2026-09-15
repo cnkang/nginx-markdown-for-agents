@@ -70,8 +70,10 @@ def test_main_executes_shared_gate_and_propagates_failure(monkeypatch, capsys):
     """A real subprocess proves the runner consumes the declaration."""
     import sys
     command = [sys.executable, "-c", "import sys; print('gate executed'); sys.exit(7)"]
-    monkeypatch.setattr(profile, "GATES", [dict(name="probe", command=command,
-                         needs_c_change=False, requires_nginx=False)])
+    monkeypatch.setattr(profile, "GATES", [{
+        "name": "probe", "command": command,
+        "needs_c_change": False, "requires_nginx": False,
+    }])
     monkeypatch.setattr(profile, "_merge_base", lambda base: "base")
     monkeypatch.setattr(profile, "_changed_files", lambda base: [])
     assert profile.main(["prog"]) == 1
