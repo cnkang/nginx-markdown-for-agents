@@ -1,4 +1,5 @@
 """Prove stage edges by changing fixture files, never the resolver outputs."""
+import json
 from pathlib import Path
 
 import pytest
@@ -39,7 +40,7 @@ def repo(tmp_path, monkeypatch):
     write(tmp_path / ".pre-commit-config.yaml", 'repos:\n- repo: local\n  hooks:\n  - id: quick\n    entry: make root\n')
     write(tmp_path / ".github/workflows/check.yml", 'jobs:\n  check:\n    steps:\n    - run: make root\n')
     gate = dict(name="local", command=["make", "root"], needs_c_change=False, requires_nginx=False)
-    write(tmp_path / "tools/ci/pre_push_gates.py", "GATES = " + repr([gate]))
+    write(tmp_path / "tools/ci/pre_push_gates.json", json.dumps([gate]))
     monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(sync, "AGENTS_PATH", tmp_path / "AGENTS.md")
     return tmp_path
@@ -96,10 +97,10 @@ def test_push_endpoint_disconnected(repo, replacement):
 
 
 def test_removed_gate_is_not_reachable(repo):
-    path = repo / "tools/ci/pre_push_gates.py"
-    write(path, path.read_text().replace("'root'", "'other'"))
+    path = repo / "tools/ci/pre_push_gates.json"
+    write(path, path.read_text().replace('"root"', '"other"'))
     assert verdict("push").status == sync.FAIL
-    write(path, "GATES = []")
+    write(path, "[]")
     assert verdict("push").status == sync.FAIL
 
 
@@ -115,7 +116,7 @@ def test_gate_declaration_selects_harness_ci():
     # BaseLoader preserves the YAML 'on' key and workflow strings verbatim.
     workflow = yaml.load((root / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)
     import fnmatch
-    name = "tools/ci/pre_push_gates.py"
+    name = "tools/ci/pre_push_gates.json"
     for event in ("push", "pull_request"):
         assert any(fnmatch.fnmatchcase(name, p) for p in workflow["on"][event]["paths"])
     filters = next(step["with"]["filters"] for step in workflow["jobs"]["changes"]["steps"] if step.get("id") == "filter")
@@ -350,3 +351,43 @@ def test_a_branch_that_may_redefine_a_target_makes_it_unknown(tmp_path) -> None:
 
     assert CHECK not in _make_dry_run(tmp_path, makefile, "root")
     assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+@pytest.mark.parametrize("directive,target,expected", [
+    ("", "checked", True),
+    (".IGNORE:", "checked", False),
+    (".IGNORE: checked", "checked", False),
+    (".IGNORE: other", "checked", True),
+    (".IGNORE: outer", "outer", False),
+    (".IGNORE: parent", "parent", True),
+])
+def test_ignore_agrees_with_real_make(repo, directive, target, expected):
+    """Compare blocking evidence with Make's actual failure propagation."""
+    import subprocess
+    write(repo / CHECK, "raise SystemExit(7)\n")
+    makefile = f"""{directive}
+checked:
+\tpython3 {CHECK}
+outer:
+\t$(MAKE) checked
+parent: checked
+\t@true
+other:
+\t@true
+"""
+    write(repo / "Makefile", makefile)
+    result = subprocess.run(["make", target], cwd=repo, capture_output=True, text=True)
+    reached = reach.reachable_commands(makefile, [f"make {target}"], PROFILE, [])
+    assert (result.returncode != 0) == expected, result.stderr
+    assert sync._is_invoked(CHECK, reached) == expected
+
+
+@pytest.mark.parametrize("directive", [
+    "ifeq (1,1)\n.IGNORE: checked\nendif",
+    ".IGNORE: $(UNKNOWN)",
+])
+def test_unknown_ignore_scope_fails_mapping(repo, directive):
+    write(repo / "Makefile", directive + "\n" + MAKEFILE)
+    result = verdict("commit")
+    assert result.status == sync.FAIL
+    assert ".IGNORE" in result.detail
