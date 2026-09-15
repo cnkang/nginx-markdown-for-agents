@@ -1761,10 +1761,18 @@ jobs:
   # Security:
   #   - ONLY this job has contents: write permission (Req 10.4)
   #   - All other jobs use contents: read
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────  # The heavy real-environment checks qualify the candidate the release is
+  # published from.  A failure, a cancellation or a skip leaves the result
+  # short of 'success', and the publish condition below requires it.
+  rc-release-gates:
+    name: Release candidate gates
+    uses: ./.github/workflows/rc-release-gates.yml
+    permissions:
+      contents: read
+
   publish:
     name: Publish
-    needs: [release-gate, musl-build, integrity-checksums, integrity-signature, official-docker-release-gate]
+    needs: [release-gate, musl-build, integrity-checksums, integrity-signature, official-docker-release-gate, rc-release-gates]
     # Tag releases: signing always runs, so signing must succeed for publish.
     # workflow_dispatch: signing is skipped, publish proceeds without it.
     if: >-
@@ -1773,6 +1781,7 @@ jobs:
       && needs.integrity-checksums.result == 'success'
       && needs.release-gate.result == 'success'
       && needs.official-docker-release-gate.result == 'success'
+      && needs.rc-release-gates.result == 'success'
       && (needs.integrity-signature.result == 'success'
           || (needs.integrity-signature.result == 'skipped'
               && github.event_name == 'workflow_dispatch'))

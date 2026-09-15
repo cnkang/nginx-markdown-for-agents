@@ -9,10 +9,11 @@ name: Release Candidate Gates
 # env values (GITHUB_SHA, GITHUB_REPOSITORY, GITHUB_REF, GITHUB_RUN_ID), never
 # event payload text, so no untrusted input reaches a shell.
 on:
+  # Called by the canonical release workflow, which owns the publication
+  # dependency, and kept on workflow_dispatch so a candidate can be qualified
+  # or debugged by hand.
+  workflow_call:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: read
