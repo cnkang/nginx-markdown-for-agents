@@ -803,6 +803,12 @@ INTERPRETERS = ("python3", "python", "bash", "sh")
 # Options that make a test runner list work instead of doing it.
 NON_RUNNING_TEST_OPTIONS = {"--collect-only", "--co"}
 
+# Options whose value is the following word, which is not a path to run.
+VALUE_TAKING_TEST_OPTIONS = {
+    "-k", "-m", "-n", "-o", "-p", "-W", "-c", "--confcutdir", "--deselect",
+    "--ignore", "--ignore-glob", "--junitxml", "--maxfail", "--rootdir", "--tb",
+}
+
 
 def _invocation_target(parts: list[str]) -> str | None:
     """Return the path an entry line runs, if the line runs a path at all."""
@@ -843,8 +849,15 @@ def _discovery_target(parts: list[str]) -> str | None:
     if any(token in NON_RUNNING_TEST_OPTIONS for token in parts[3:]):
         # Collection lists tests instead of running them.
         return None
-    for token in parts[3:]:
+    index = 3
+    while index < len(parts):
+        token = parts[index]
+        if token in VALUE_TAKING_TEST_OPTIONS:
+            # The next word belongs to the option, not to the run.
+            index += 2
+            continue
         if token.startswith("-"):
+            index += 1
             continue
         return token.rstrip("/")
     return None

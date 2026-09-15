@@ -118,12 +118,15 @@ def _expand(text: str, variables: dict[str, str]) -> str:
 
 def _conditional_delta(line: str) -> int | None:
     """Depth change a Make conditional makes, or None for an ordinary line."""
+    if line.startswith("\t"):
+        # A recipe line is never a directive, whatever it spells.
+        return None
     stripped = line.strip()
     if CONDITIONAL_START.match(stripped):
         return 1
-    if stripped.startswith("endif"):
+    if re.match(r"endif\b", stripped):
         return -1
-    if stripped.startswith("else"):
+    if re.match(r"else\b", stripped):
         return 0
     return None
 
