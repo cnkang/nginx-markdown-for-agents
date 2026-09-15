@@ -81,7 +81,7 @@ for _sections in SECTION_REGISTRY.values():
 
 # Tier definitions from requirement 3
 TIER_DEFINITIONS: dict[str, str] = {
-    "supported": "CI passes, artifact produced, and install verified. A supported row is a release gate only when the matrix marks it release_blocking: true (primary and container rows); compat-floor maintenance rows stay supported but non-blocking.",
+    "supported": "CI passes, artifact produced, and install verified. A supported row is a release gate: a failure blocks the release, including compatibility-floor maintenance rows, which carry the same promise for the platforms they cover.",
     "experimental": "Available, not guaranteed, CI non-blocking, noted in release notes.",
     "best-effort": "The project may produce an artifact for the listed platform but the row is not a release gate. Availability is not guaranteed and the row does not block the release. Source-only rows use this tier when they are not part of the prebuilt-package surface.",
     "unsupported": "No artifacts, no commitment.",
@@ -893,7 +893,13 @@ def generate_release_notes(
 
     # --- Section 4: Changes from previous ---
     if previous_data is not None:
-        changes = _rn_generate_changes(data, entries, previous_data)
+        try:
+            changes = _rn_generate_changes(data, entries, previous_data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SystemExit(
+                "ERROR: the previous release data does not carry the fields the "
+                f"change summary reads: {exc}"
+            ) from exc
         lines.extend(changes)
 
     return "\n".join(lines)

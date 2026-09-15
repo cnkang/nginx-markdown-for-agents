@@ -366,7 +366,10 @@ echo "==> Running conditional-request validation scenario"
     echo "Converted response must not carry the source HTML Last-Modified" >&2
     exit 1
   fi
-  grep -q '^# Hello IMS$' resp1.body || {
+  # The converted page always starts with this heading; keep the pattern in one
+  # place so the four assertions cannot drift apart.
+  EXPECTED_MARKDOWN_TITLE='^# Hello IMS$'
+  grep -q "${EXPECTED_MARKDOWN_TITLE}" resp1.body || {
     echo "Converted response body does not contain expected Markdown heading" >&2
     exit 1
   }
@@ -438,7 +441,7 @@ echo "==> Running conditional-request validation scenario"
     echo "Fresh converted response after IMS-only request carries source Last-Modified" >&2
     exit 1
   fi
-  grep -q '^# Hello IMS$' resp4.body || {
+  grep -q "${EXPECTED_MARKDOWN_TITLE}" resp4.body || {
     echo "IMS-only fallback body is not the converted Markdown document" >&2
     exit 1
   }
@@ -453,8 +456,23 @@ echo "==> Running conditional-request validation scenario"
     echo "Proxied converted response missing markdown Content-Type" >&2
     exit 1
   }
-  grep -qi '^Vary: .*Accept' resp5.headers || {
+  # Match Accept as a complete comma-separated token so Accept-Encoding in the
+  # same header cannot satisfy the check.
+  awk '
+    { gsub(/\r/, "") }
+    /^[Vv]ary:/ {
+      line = tolower($0)
+      sub(/^vary:[ \t]*/, "", line)
+      n = split(line, tokens, /[ \t]*,[ \t]*/)
+      for (i = 1; i <= n; i++) if (tokens[i] == "accept") found = 1
+    }
+    END { exit found ? 0 : 1 }
+  ' resp5.headers || {
     echo "Proxied converted response missing Vary: Accept" >&2
+    exit 1
+  }
+  grep -q "${EXPECTED_MARKDOWN_TITLE}" resp5.body || {
+    echo "Proxied converted response body is not the expected Markdown" >&2
     exit 1
   }
   if grep -qi "${LAST_MODIFIED_HEADER_PATTERN}" resp5.headers; then
@@ -530,7 +548,7 @@ echo "==> Running conditional-request validation scenario"
     echo "Expected wildcard If-Match response 200, got ${code9}" >&2
     exit 1
   }
-  grep -q '^# Hello IMS$' resp9.body || {
+  grep -q "${EXPECTED_MARKDOWN_TITLE}" resp9.body || {
     echo "Wildcard If-Match response is not converted Markdown" >&2
     exit 1
   }

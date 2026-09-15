@@ -9,7 +9,7 @@ cleanup() {
     rm -f "$tmpdir/ngx_http_markdown_filter_module.so"
     rm -f "$tmpdir/captured.conf" "$tmpdir/output.json" \
         "$tmpdir/invalid.json"
-    rmdir "$tmpdir"
+    rm -rf "$tmpdir"
     return 0
 }
 trap cleanup EXIT

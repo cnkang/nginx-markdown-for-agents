@@ -43,6 +43,10 @@
 
 static ngx_http_markdown_metrics_t g_metrics;
 
+/* The conversion-peak recorder reads the shared metrics pointer, which this
+ * translation unit has to provide like the other unit tests do. */
+static ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
+
 #define NGX_HTTP_MARKDOWN_METRIC_INC(name) \
     do { g_metrics.name++; } while (0)
 #define NGX_HTTP_MARKDOWN_METRIC_ADD(name, value) \
@@ -1044,6 +1048,23 @@ test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     UNUSED(in);
     g_next_body_calls++;
     return g_next_body_rc;
+}
+
+/*
+ * The conversion-peak recorder performs a compare-and-swap, and the shared
+ * header keeps that requirement at the call site.  Define the helper before the
+ * include that reaches conversion_impl.h, the way the other unit tests do.
+ */
+typedef ngx_uint_t ngx_atomic_uint_t;
+
+static ngx_inline ngx_atomic_uint_t
+ngx_atomic_cmp_set(ngx_atomic_t *lock, ngx_atomic_t old, ngx_atomic_t set)
+{
+    if (*(volatile ngx_atomic_t *) lock == old) {
+        *lock = set;
+        return 1;
+    }
+    return 0;
 }
 
 #include "../../src/ngx_http_markdown_request_impl.h"

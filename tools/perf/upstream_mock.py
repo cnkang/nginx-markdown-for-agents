@@ -42,13 +42,18 @@ def _compress_brotli(data: bytes) -> bytes | None:
     if BROTLI_MODULE is not None:
         return BROTLI_MODULE.compress(data, quality=6)  # type: ignore[union-attr]
     if BROTLI_CLI is not None:
-        result = subprocess.run(
-            [BROTLI_CLI, "--quality=6", "-"],
-            input=data,
-            capture_output=True,
-            timeout=30,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                [BROTLI_CLI, "--quality=6", "-"],
+                input=data,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            # The caller treats a missing brotli encoder as identity encoding,
+            # so a hung CLI must not propagate as an exception.
+            return None
         if result.returncode == 0:
             return result.stdout
     return None
@@ -84,7 +89,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # pylint: disable=invalid-name
         """Handle GET requests dynamically serving corpus files."""
         parsed = urlparse(self.path)
-        query = parse_qs(parsed.query)
+        query = parse_qs(parsed.query, keep_blank_values=True)
         path_str = parsed.path.lstrip("/")
 
         file_path = self._resolve_and_verify_path(path_str)

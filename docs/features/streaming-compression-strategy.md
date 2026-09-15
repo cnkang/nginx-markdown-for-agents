@@ -11,7 +11,8 @@ full-buffer decompression.
 In 0.9.2, gzip, deflate, and Brotli responses are eligible for streaming
 decompression when `markdown_streaming force` or `auto` selects streaming,
 automatic decompression turns on, and cache validation is not `full`.
-The `auto` route uses an internal bounded size heuristic. It is not an
+The `auto` route follows the `markdown_streaming` policy and the hard
+compatibility gates. It applies no size heuristic, and there is no
 operator-facing threshold directive.
 
 Brotli streaming requires `NGX_HTTP_BROTLI` at compile time (enabled by

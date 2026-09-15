@@ -164,16 +164,68 @@ The module filename remains `ngx_http_markdown_filter_module.so`.
 
 ## Enable Module
 
-Add the matching `load_module` directive at the top level of the NGINX
-configuration, before `http`:
+`load_module` is a **main-context** directive: it belongs at the top level of
+`nginx.conf`, before the `events` and `http` blocks. It is invalid inside
+`http`, `server`, or `location`, and `conf.d/` is the wrong place for it.
 
-```nginx
-# DEB packages:
-load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;
+A relative module path in `load_module` resolves against the NGINX **prefix**
+(not against `--modules-path`), so whether the relative form works depends on
+which nginx package you installed. Inspect both values on your host:
 
-# RPM packages:
-load_module /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so;
+```bash
+nginx -V 2>&1 | tr ' ' '\n' | grep -E 'modules-path|prefix='
 ```
+
+Each package family installs the `.so` where that family expects it, and the
+directive form below is the one that resolves there:
+
+| Family | Module directory | Loader snippet | How it becomes active |
+| --- | --- | --- | --- |
+| DEB — distribution package (Debian/Ubuntu) | `/usr/lib/nginx/modules` | `/usr/share/nginx/modules-available/mod-markdown.conf` | Symlink it into `/etc/nginx/modules-enabled/`, which `nginx.conf` includes at the top level |
+| DEB — nginx.org package | `/usr/lib/nginx/modules` | `/usr/share/nginx/modules-available/mod-markdown.conf` | No `modules-enabled` directory and no module include: add the directive (absolute path) to the top level of `/etc/nginx/nginx.conf` |
+| RPM — nginx.org package (RHEL/Fedora/Alma/Rocky) | `/usr/lib64/nginx/modules` | `/usr/share/nginx/modules/mod-markdown.conf` | No automatic include: add the directive to the top level of `/etc/nginx/nginx.conf`, or `include /usr/share/nginx/modules/*.conf;` there |
+| Alpine — distribution package | `/usr/lib/nginx/modules` | `/etc/nginx/modules/*.conf` | `nginx.conf` includes that directory at the top level. Drop the directive in as a file |
+| Alpine — nginx.org package/image | `/usr/lib/nginx/modules` | — | No module include: add the directive to the top level of `/etc/nginx/nginx.conf` |
+| Arch/Omarchy — distribution package | `/usr/lib/nginx/modules` | `/etc/nginx/modules.d/*.conf` | `nginx.conf` includes that directory at the top level. Drop the directive in as a file |
+| Source build / custom prefix | `<prefix>/modules` (or the configured `--modules-path`) | — | Add the directive to the top level of your `nginx.conf` |
+
+Because the project's packages install the module only in the compiled modules
+directory, the shipped snippets use the form that resolves on their family: an
+absolute path for DEB (`/usr/lib/nginx/modules/...`, because distribution
+module packages also copy the `.so` into the prefix directory, which is why
+their own snippets can use the relative form) and the relative form for RPM (nginx.org
+ships `/etc/nginx/modules` as a symlink to `/usr/lib64/nginx/modules`).
+
+Enable it for the package you installed:
+
+```bash
+# DEB, distribution package: activate the shipped snippet, then reload.
+sudo ln -sf /usr/share/nginx/modules-available/mod-markdown.conf \
+    /etc/nginx/modules-enabled/50-mod-markdown.conf
+
+# DEB (nginx.org) / RPM / Alpine (nginx.org): add the directive at the top
+# level of nginx.conf — before the events block, e.g. with
+#   load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;   # DEB, Alpine
+#   load_module modules/ngx_http_markdown_filter_module.so;                  # RPM (nginx.org)
+# For RPM you can also keep the shipped snippet in play:
+sudo sed -i 's|^#load_module |load_module |' \
+    /usr/share/nginx/modules/mod-markdown.conf
+#   and add to the top level of nginx.conf:  include /usr/share/nginx/modules/*.conf;
+```
+
+This project verified the directory layout and include behaviour above
+against real packages instead of assuming them: Debian 12 (nginx 1.22.1 — `include
+/etc/nginx/modules-enabled/*.conf;` at line 5, and `libnginx-mod-http-geoip2`
+installs the `.so` into both `/usr/lib/nginx/modules` and
+`/usr/share/nginx/modules`), Ubuntu 24.04 with the nginx.org repository (nginx
+1.30.4 — no `modules-enabled`, no module include, `/etc/nginx/modules` is a
+symlink to `/usr/lib/nginx/modules`), Rocky Linux 9 with the nginx.org
+repository (nginx 1.30.4 — no module include, and `/etc/nginx/modules` symlinks
+to `/usr/lib64/nginx/modules`), Alpine 3.21 (nginx 1.26.3 — `include
+/etc/nginx/modules/*.conf;` at line 15), the nginx.org Alpine image (nginx
+1.30.4 — no module include), and Arch (`include modules.d/*.conf;` at line 13).
+Re-check your own host with the command above: distributions change this
+between releases.
 
 Then configure the filter in `http`, `server`, or `location` context:
 
@@ -183,11 +235,15 @@ location / {
 }
 ```
 
-Reload after validation:
+Reload after validation, and confirm the module loads:
 
 ```bash
 sudo nginx -t && sudo nginx -s reload
+sudo nginx -T 2>&1 | grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so'
 ```
+
+Loading the module does not change any response on its own: conversion stays
+opt-in per location through `markdown_filter on;`.
 
 ## Upgrade
 

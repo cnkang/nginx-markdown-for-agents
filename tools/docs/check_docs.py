@@ -113,21 +113,85 @@ def get_git_tracked_paths() -> set[str]:
         return set()
 
 
+def _fence_marker(line: str) -> tuple[str, int, str] | None:
+    """Return the fence marker a line carries, or None when it carries none.
+
+    A fence is three or more backticks or tildes with at most three leading
+    spaces.  A backtick fence may carry an info string, but not one containing a
+    backtick, so such a line is ordinary text.  The third element is whatever
+    follows the run, which a closing fence must leave empty.
+    """
+    indent = len(line) - len(line.lstrip(" "))
+    body = line[indent:]
+    char = body[:1]
+    if char not in ("`", "~") or indent > 3:
+        return None
+    run = len(body) - len(body.lstrip(char))
+    if run < 3:
+        return None
+    trailing = body[run:].strip()
+    if char == "`" and "`" in trailing:
+        return None
+    return char, run, trailing
+
+
+def iter_lines_with_fences(text: str) -> list[tuple[int, str, bool]]:
+    """Return every line, marking the fence markers themselves.
+
+    `iter_unfenced_lines` deliberately hides fenced blocks, but a caller that
+    assembles multi-line items has to know where a block starts so it can end that
+    block there.
+    """
+    found: list[tuple[int, str, bool]] = []
+    open_char: str | None = None
+    open_len = 0
+    for line_no, line in enumerate(text.splitlines(), 1):
+        marker = _fence_marker(line)
+        if marker is None:
+            if open_char is None:
+                found.append((line_no, line, False))
+            continue
+        open_char, open_len = _next_fence_state(marker, open_char, open_len)
+        found.append((line_no, line, True))
+    return found
+
+
+def _next_fence_state(
+    marker: tuple[str, int, str], open_char: str | None, open_len: int
+) -> tuple[str | None, int]:
+    """Return the fence state after a marker line.
+
+    A marker outside a block opens one; a marker of the same character, at least
+    as long, with nothing after the run, closes it.
+    """
+    char, run, trailing = marker
+    if open_char is None:
+        return char, run
+    if char == open_char and not trailing and run >= open_len:
+        return None, 0
+    return open_char, open_len
+
+
 def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
     """Extract lines that are outside fenced code blocks.
 
-    Returns a list of ``(line_number, line_text)`` tuples for lines not
-    inside `````...``` `` blocks, useful for checking Markdown structural
-    rules without false positives from code samples.
+    Returns a list of ``(line_number, line_text)`` tuples for lines not inside
+    a fenced code block.  Both fence styles count: backticks and tildes are
+    equally valid in Markdown, and a block opened with one must be closed with
+    the same marker, so the opener is remembered rather than toggled.
     """
     lines: list[tuple[int, str]] = []
-    in_fence = False
+    open_char: str | None = None
+    open_len = 0
+
     for line_no, line in enumerate(text.splitlines(), 1):
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
+        marker = _fence_marker(line)
+        if marker is None:
+            if open_char is None:
+                lines.append((line_no, line))
             continue
-        if not in_fence:
-            lines.append((line_no, line))
+        open_char, open_len = _next_fence_state(marker, open_char, open_len)
+
     return lines
 
 
@@ -580,6 +644,170 @@ def check_metric_family_count(files: list[Path]) -> list[str]:
     return failures
 
 
+_CHECKLIST_SHA_RE = re.compile(
+    r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b", re.IGNORECASE
+)
+_CHECKLIST_CLAIM_RE = re.compile(
+    r"current (?:head|candidate|branch head)s?\b|have not certified"
+    r"|has not certified"
+    r"|latest workflow|as of this (?:commit|writing)"
+    r"|\*{0,2}status:\*{0,2}\s|candidate (?:passed|passes|satisfied)"
+    r"|all required gates (?:passed|are green)"
+    r"|remote workflows? (?:have|has) (?:passed|certified)"
+    r"|workflow (?:set|suite) (?:is )?(?:passing|green|certified)",
+    re.IGNORECASE,
+)
+
+
+def _list_item_indent(line: str) -> int | None:
+    """Return the indentation of a task-list item, or None when it is not one."""
+    if not _is_task_list_line(line):
+        return None
+    return len(line) - len(line.lstrip())
+
+
+def _is_task_list_line(line: str) -> bool:
+    """True for a Markdown task-list item, whatever marker it uses."""
+    stripped = line.lstrip()
+    if stripped[:1] not in ("-", "*", "+"):
+        return False
+    rest = stripped[1:].lstrip(" \t")
+    gap = len(stripped) - 1 - len(rest)
+    # A list marker may be followed by one to four spaces.
+    if gap not in (1, 2, 3, 4):
+        return False
+    return rest.startswith("[") and rest[1:2] in (" ", "x", "X") and rest[2:3] == "]"
+
+
+def check_release_checklist_is_static(files: list[Path]) -> list[str]:
+    """A release checklist states requirements, never the state of a candidate.
+
+    A checklist that names the head of the day goes stale with the next commit,
+    and a stale checklist read as certification is worse than no checklist.  The
+    scan covers the whole document, because status text drifts wherever it sits,
+    but it ignores fenced code blocks and the Document Updates table, which
+    legitimately records commit identifiers as history.
+    """
+    failures: list[str] = []
+    for path in files:
+        if not path.name.endswith("-release-checklist.md"):
+            continue
+        content = path.read_text(encoding="utf-8")
+        history = _checklist_history(content)
+        for item in _checklist_items(content, history):
+            if _CHECKLIST_SHA_RE.search(item):
+                failures.append(
+                    f"{path}: a requirement names a commit; bind status to the "
+                    "candidate-bound release evidence instead"
+                )
+        for block in _logical_blocks(content, history):
+            if _CHECKLIST_CLAIM_RE.search(block):
+                failures.append(
+                    f"{path}: states mutable candidate status; keep the "
+                    "checklist to requirements"
+                )
+    return failures
+
+
+def _flush_task_item(items: list[str], current: list[str]) -> None:
+    """Append the open item, if any, and reset the accumulator."""
+    if current:
+        items.append(" ".join(current))
+        current.clear()
+
+
+def _checklist_history(content: str) -> set[str]:
+    """Return the lines belonging to the Document Updates history table."""
+    return set(_document_update_table_lines(content))
+
+
+THEMATIC_BREAK_RE = re.compile(r"^(?:-{3,}|\*{3,}|_{3,})\s*$")
+
+
+def _starts_block(line: str) -> bool:
+    """True when a line opens a new Markdown block rather than continuing one."""
+    stripped = line.lstrip()
+    # `#not-a-heading` is ordinary text: an ATX heading needs the space.  A table
+    # row is not treated as a boundary either, because a table is only a table
+    # once its delimiter row appears, which a single line cannot show.
+    if re.match(r"#{1,6}(?:\s|$)", stripped):
+        return True
+    if stripped.startswith(">"):
+        return True
+    if _fence_marker(line) is not None:
+        return True
+    if THEMATIC_BREAK_RE.match(stripped):
+        return True
+    # A list marker of any kind opens a new block.
+    return bool(re.match(r"[-*+]\s", stripped)) or bool(re.match(r"\d+[.)]\s", stripped))
+
+
+def _checklist_items(content: str, history: set[str]) -> list[str]:
+    """Assemble every task item in a checklist, continuation lines included.
+
+    A wrapped requirement carries part of its text on the following indented
+    lines, and the pinned commit can fall on any of them.
+    """
+    items: list[str] = []
+    current: list[str] = []
+    current_indent = 0
+
+    for _lineno, line, is_fence in iter_lines_with_fences(content):
+        if is_fence:
+            # A fenced block ends whatever was open; its contents are not prose.
+            _flush_task_item(items, current)
+            continue
+        if not line.strip() or line in history:
+            # A blank line ends the item: CommonMark starts a new paragraph, so
+            # prose below the item is not part of it.
+            _flush_task_item(items, current)
+            continue
+        indent = _list_item_indent(line)
+        if indent is not None:
+            if current and indent > current_indent:
+                # A nested item is part of the requirement above it; only a
+                # sibling or outer item ends the one that is open.
+                current.append(line.strip())
+                continue
+            _flush_task_item(items, current)
+            current_indent = indent
+            current.append(line)
+        elif current and not _starts_block(line):
+            # A lazy, unindented continuation belongs to the open item, because
+            # CommonMark reads it as part of the same paragraph.  A line that
+            # opens another block ends the item instead.
+            current.append(line.strip())
+        else:
+            _flush_task_item(items, current)
+
+    _flush_task_item(items, current)
+    return items
+
+
+def _logical_blocks(content: str, history: set[str]) -> list[str]:
+    """Group the prose into blocks so a wrapped sentence reads as one.
+
+    A status claim wrapped over two lines has to be judged as the sentence it
+    is, not as two fragments that each look harmless.
+    """
+    blocks: list[str] = []
+    current: list[str] = []
+    for _lineno, line, is_fence in iter_lines_with_fences(content):
+        if is_fence:
+            # A fenced block ends whatever was open; its contents are not prose.
+            _flush_task_item(blocks, current)
+            continue
+        if not line.strip() or line in history:
+            _flush_task_item(blocks, current)
+            continue
+        if _is_task_list_line(line):
+            # A task item stands on its own.
+            _flush_task_item(blocks, current)
+        current.append(line.strip())
+    _flush_task_item(blocks, current)
+    return blocks
+
+
 def main() -> int:
     """Entry point: run all doc consistency checks and print a report.
 
@@ -616,6 +844,7 @@ def main() -> int:
     failures.extend(check_duplicate_sync())
     failures.extend(check_document_updates_order(files))
     failures.extend(check_metric_family_count(files))
+    failures.extend(check_release_checklist_is_static(files))
 
     if failures:
         print("Documentation checks failed:")
@@ -633,6 +862,7 @@ def main() -> int:
     print("- Unreleased/stable release status consistency: OK")
     print("- Duplicate canonical/mirror sync: OK")
     print("- Document Updates chronological order (descending): OK")
+    print("- Release checklist states requirements only: OK")
     return 0
 
 

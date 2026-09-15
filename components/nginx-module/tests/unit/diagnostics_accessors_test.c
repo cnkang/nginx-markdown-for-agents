@@ -50,7 +50,6 @@ typedef struct {
         ngx_atomic_t  precommit_reject_total;
         ngx_atomic_t  budget_exceeded_total;
         ngx_atomic_t  last_ttfb_ms;
-        ngx_atomic_t  last_peak_memory_bytes;
         ngx_atomic_t  streaming_fallback_precommit_pass;
         ngx_atomic_t  streaming_fallback_precommit_reject;
         ngx_atomic_t  streaming_failure_postcommit_abort;

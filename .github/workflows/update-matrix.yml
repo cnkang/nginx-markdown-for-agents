@@ -51,7 +51,7 @@ jobs:
         id: changes
         run: |
           set -euo pipefail
-          allowed_files=$'tools/release-matrix.json\ndocs/releases/release-matrix.json\ndocs/guides/INSTALLATION.md'
+          allowed_files=$'tools/release-matrix.json\ndocs/releases/release-matrix.json\nREADME.md\nREADME_zh-CN.md\ndocs/guides/PACKAGE_COMPATIBILITY.md\ndocs/guides/PACKAGE_DISTRIBUTION.md\ndocs/guides/INSTALLATION.md\ndocs/project/PROJECT_STATUS.md'
           changed_files="$(git diff --name-only HEAD; git ls-files --others --exclude-standard)"
           if [[ -n "$changed_files" ]]; then
             while IFS= read -r path; do
@@ -137,7 +137,12 @@ jobs:
           git diff --binary -- \
             tools/release-matrix.json \
             docs/releases/release-matrix.json \
-            docs/guides/INSTALLATION.md > matrix-update.patch
+            README.md \
+            README_zh-CN.md \
+            docs/guides/PACKAGE_COMPATIBILITY.md \
+            docs/guides/PACKAGE_DISTRIBUTION.md \
+            docs/guides/INSTALLATION.md \
+            docs/project/PROJECT_STATUS.md > matrix-update.patch
           git diff --check
 
       - name: Upload review artifact
@@ -171,14 +176,16 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-matrix-update
+          path: ${{ runner.temp }}/matrix-artifacts
 
       - name: Apply and verify review artifact
         run: |
           set -euo pipefail
-          git apply --check matrix-update.patch
-          git apply matrix-update.patch
+          ARTIFACT_DIR="${{ runner.temp }}/matrix-artifacts"
+          git apply --check "${ARTIFACT_DIR}/matrix-update.patch"
+          git apply "${ARTIFACT_DIR}/matrix-update.patch"
           git diff --check
-          allowed_files=$'tools/release-matrix.json\ndocs/releases/release-matrix.json\ndocs/guides/INSTALLATION.md'
+          allowed_files=$'tools/release-matrix.json\ndocs/releases/release-matrix.json\nREADME.md\nREADME_zh-CN.md\ndocs/guides/PACKAGE_COMPATIBILITY.md\ndocs/guides/PACKAGE_DISTRIBUTION.md\ndocs/guides/INSTALLATION.md\ndocs/project/PROJECT_STATUS.md'
           changed_files="$(git diff --name-only HEAD; git ls-files --others --exclude-standard)"
           while IFS= read -r path; do
             if [[ -z "$path" ]]; then
@@ -195,12 +202,13 @@ jobs:
       - name: Read PR metadata
         id: pr_meta
         run: |
+          ARTIFACT_DIR="${{ runner.temp }}/matrix-artifacts"
           {
             echo 'title<<EOF_PR_TITLE'
-            cat pr-title.txt
+            cat "${ARTIFACT_DIR}/pr-title.txt"
             echo 'EOF_PR_TITLE'
             echo 'body<<EOF_PR_BODY'
-            cat pr-body.md
+            cat "${ARTIFACT_DIR}/pr-body.md"
             echo 'EOF_PR_BODY'
           } >> "$GITHUB_OUTPUT"
 

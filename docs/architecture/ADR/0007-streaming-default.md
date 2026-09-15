@@ -19,7 +19,11 @@ v0.5.x ships streaming engine as opt-in (`markdown_streaming_engine off` by defa
 
 Operators must currently opt in per-location. This creates adoption friction and means most deployments never benefit from streaming's lower TTFB and bounded memory.
 
-## Decision
+## Decision (superseded by ADR-0023)
+
+> The statements below describe the v0.6.0 directive surface. They are kept for
+> design history and do not describe the active contract, which is
+> `markdown_streaming off|auto|force` with default `off`.
 
 Change `markdown_streaming_engine` default from `off` to `auto` in v0.6.0.
 

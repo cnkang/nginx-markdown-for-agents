@@ -2990,6 +2990,20 @@ def _resolve_baseline(
             exit_code=1 if blocking else 0,
         )
 
+    if not isinstance(baseline_report, dict):
+        return {}, False, _report_integrity_failure(
+            report,
+            args,
+            [("baseline_report", "top-level JSON value is not an object")],
+            (
+                "FAIL: Checked-in baseline is malformed:"
+                if blocking else
+                "MISSING_EVIDENCE: Checked-in baseline is malformed:"
+            ),
+            "  Regenerate the baseline from a valid benchmark report.",
+            exit_code=1 if blocking else 0,
+        )
+
     head_result = _resolve_baseline_head_binding(
         report, args, blocking, baseline_report
     )

@@ -100,4 +100,4 @@ decision structs, and export got removed before the v1 ABI freeze.
 - **Config V2**: Directive syntax (see [MIGRATION-0.9.0.md](../guides/MIGRATION-0.9.0.md)).
 - **HeaderPlan**: Pre-commit/post-commit boundary (see [header mutation inventory](header-mutation-inventory.md)).
 - **Worker Inflight Guard**: Overload detection.
-- **Reason Code Registry**: See [Observability Schema v3](observability-schema-v2.md).
+- **Reason Code Registry**: See [Observability Schema v3](observability-schema-v3.md).

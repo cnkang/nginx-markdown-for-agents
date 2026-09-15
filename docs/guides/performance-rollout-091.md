@@ -137,13 +137,13 @@ curl -s http://localhost/markdown-metrics | \
 > **0.9.2 note:** the 0.9.2 release removed both `zero_copy_output_total`
 > and the `markdown_streaming_zero_copy` directive. The frozen v1 metrics
 > registry has no per-path output counter at all (see
-> [prometheus-metrics.md](prometheus-metrics.md) for the frozen 11-family
+> [prometheus-metrics.md](prometheus-metrics.md) for the frozen 10-family
 > list). Monitor `nginx_markdown_requests_total{outcome="converted"}`
 > and `nginx_markdown_conversion_deliveries_total{engine="streaming"}`
 > instead. The 0.9.1 steps above stay for rollback verification on the
 > 0.9.1 release line only.
 
-**How it works:**
+**How it works (0.9.1 only):**
 
 The `markdown_streaming_zero_copy` directive is a location-level `NGX_CONF_FLAG`
 that defaults to `off` (0). On HUP reload, NGINX re-reads the configuration
@@ -155,13 +155,13 @@ workers complete with their existing configuration. Graceful reloads normally
 preserve active requests, but NGINX may terminate old workers when
 `worker_shutdown_timeout` expires.
 
-**Memory Lifecycle and Safety Invariants:**
+**Memory Lifecycle and Safety Invariants (0.9.1 only):**
 
 NGINX request pool cleanup handlers manage the Rust-owned memory buffers allocated for zero-copy streaming chunks. This prevents use-after-free and ensures memory safety during asynchronous downstream transmissions. Consequently, *Rust-allocated buffers are not freed immediately after a single chunk is successfully delivered downstream*. Rather, they persist in memory throughout the request duration. The pool releases them in batch when it destroys the NGINX request pool upon request termination.
 
 For long-lived streaming responses with many chunks, this tail retention can cause memory usage to accumulate in the request pool. It can result in a higher worker RSS peak. Due to this characteristic, `markdown_streaming_zero_copy` stays **disabled by default**. It serves as an opt-in optimization under explicit profile selection (such as `streaming_first`). Latency reduction outweighs strict RSS floors there.
 
-**Scope:** Per-location. Different locations can independently enable or
+**Scope (0.9.1 only):** Per-location. Different locations can independently enable or
 disable zero-copy output.
 
 ---

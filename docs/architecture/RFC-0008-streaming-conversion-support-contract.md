@@ -8,6 +8,13 @@
 | Created        | 2026-06-04                |
 | Scope          | True streaming contract, defaults, fallback semantics, support matrix source |
 
+> **Which version governs.** This RFC specifies the 0.8.0 contract and its
+> implementation note describes 0.8.0/0.8.1. Section 2.2 carries the **active
+> 0.9.2 contract** for `markdown_streaming auto`: selection follows the policy
+> and the hard eligibility gates. 0.9.2 retires `markdown_stream_threshold` with no
+> replacement, and no size threshold takes part in the decision. Where the two
+> differ, section 2.2 governs.
+
 ## Implementation Note
 
 The 0.8.0 release implemented RFC-0008, shipping the true streaming contract,
@@ -70,8 +77,8 @@ The following patterns alone do **not** constitute true streaming:
 - Receiving input in batches but buffering the complete body internally before
   producing output on finalize.
 - Passing chunked responses through without conversion.
-- Treating a response-shape heuristic as a guarantee that the module will skip
-  conversion. In 0.9.2 the internal heuristic only selects a candidate path.
+- Treating streaming eligibility as a guarantee that the module will skip
+  conversion. In 0.9.2 eligibility only makes a response a streaming candidate.
   Hard eligibility and configured resource limits still decide conversion or
   policy-driven fallback.
 
@@ -117,34 +124,49 @@ markdown_streaming auto;
 | Value  | Behavior |
 |--------|----------|
 | `off`  | Disable true streaming. All convertible responses use the 0.7.x full-buffer path or are skipped per existing policy. |
-| `auto` | The module selects full-buffer or true streaming based on response type, size, transfer mode, feature combination, and risk assessment. |
+| `auto` | The module prefers true streaming for every convertible response that clears the eligibility gates. A response that stays eligible for conversion but fails a streaming gate falls back to full-buffer conversion; a response that is ineligible for conversion is not converted at all. Size and transfer mode take no part in the choice. |
 | `force` | Prefer true streaming. If the response does not meet streaming preconditions, fallback semantics apply — the module does not silently pretend it is streaming. |
 
-**Default**: `auto`
+**Default (0.9.2 contract)**: unset and `off` select bounded full-buffer conversion. `auto` is an explicit mode. 0.9.2 supersedes the historical 0.8.0 `auto` default.
 
-### 2.2 Automatic Streaming Heuristic (active 0.9.2 contract)
+### 2.2 Automatic Streaming Selection (active 0.9.2 contract)
 
 The retired `markdown_stream_threshold` directive is historical and is not
-active in 0.9.2. Current selection uses `markdown_streaming auto` and a bounded
-internal response-shape heuristic. There is no replacement threshold
-directive.
+active in 0.9.2. Current selection uses `markdown_streaming auto`, which applies
+the hard eligibility gates and a bounded internal pipeline. There is no
+replacement threshold directive and no size heuristic.
 
-In `auto` mode, a response becomes a **streaming candidate** when ANY of the
-following is true:
+In `auto` mode, every response that clears the eligibility gates is a
+**streaming candidate**. Response size is not part of the decision and there is
+no internal candidate boundary: an unknown-length response and a response with a
+the module treats a known `Content-Length` alike.
 
-- `Content-Length` header is absent.
-- Upstream uses chunked transfer encoding.
-- known `Content-Length` is at or above the internal 1 MiB candidate boundary.
+A response that is **not eligible for conversion** is never converted at all:
+the module bypasses the filter and forwards the upstream response. A response
+that is eligible for conversion but **not a streaming candidate**, the module converts it
+with the bounded full-buffer engine instead.
 
-Absence of `Content-Length` only makes the response a streaming candidate. It
-does not force streaming. The engine MUST still verify content type, feature
-compatibility, parser readiness, and configured rollout policy before selecting
-true streaming.
+`ngx_http_markdown_select_processing_path()` decides between the two conversion
+engines on these pre-selection guards alone:
 
-Responses below that internal candidate boundary with a known
-`Content-Length` default to the full-buffer path. Missing length and chunked
-responses are only candidates. Content type, cache validation, codec support,
-parser readiness, and resource policy still gate true streaming.
+- the configured `markdown_streaming` policy is `auto` or `force`. `off`, unset,
+  and out-of-range values resolve to bounded full-buffer
+- `markdown_front_matter on` requires the full-buffer engine
+- `HEAD` requests and `304 Not Modified` responses
+- a conditional-request policy that needs a complete ETag before the headers
+- content types excluded by the configuration
+
+Everything else is a streaming candidate. The module applies codec routing separately.
+Failures that occur after the module selects the streaming path fall into two classes,
+checked in this order:
+
+- a capability fallback (`ERROR_STREAMING_FALLBACK`) returns the response to the
+  bounded full-buffer engine regardless of the configured error policy
+- a header-snapshot rollback failure also fails closed regardless of policy: the
+  module aborts the streaming handle and rejects the response, because it can no
+  longer restore the header state
+- every other pre-commit failure follows `markdown_error_policy`: `pass` fails
+  open with the original HTML, `fail_closed` rejects the response
 
 ### 2.3 Pre-commit Replay Buffer
 
@@ -325,8 +347,9 @@ the parser allowance.
   maintain Markdown structure.
 - Streaming parser encounters input exceeding its look-behind capacity but
   recoverable via full-buffer.
-- `markdown_streaming auto` and the module assesses streaming risk
-  outweighs benefit.
+- `markdown_streaming auto` and the response is eligible for conversion but is
+  not a streaming candidate. A response that is not eligible for conversion is
+  never converted, so it is not a fallback case.
 
 If the response would exceed the full-buffer **input-size** limit
 (`markdown_limits conversion_memory=`) **and the size is

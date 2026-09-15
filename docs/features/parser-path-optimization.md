@@ -380,10 +380,11 @@ Markdown) exceeds `LARGE_BODY_THRESHOLD` (256 KB, a hardcoded constant in
 `converter.rs`). This threshold gets checked against the traversal output length
 after `traverse_node_with_context` completes — not against the input HTML size.
 
-The 256 KB value is chosen to match the order of magnitude of the fixed internal
-1 MiB streaming selection threshold. The two constants measure different things:
-this constant controls intermediate Markdown output size, while the streaming
-threshold controls response-shape selection. Documents below this threshold use
+The 256 KB value is an implementation constant chosen well below the parser
+and streaming budgets, so ordinary documents keep the two-pass path and only
+large intermediate Markdown output uses the fused normalization. It measures
+intermediate Markdown output size and has no counterpart in streaming
+selection, which applies no size threshold. Documents below this threshold use
 the standard `normalize_output` two-pass approach.
 
 ### Known limitations

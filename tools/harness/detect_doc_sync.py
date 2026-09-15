@@ -350,6 +350,58 @@ def _scan_for_pattern(
     return errors
 
 
+def _mode_line_value(line: str) -> str | None:
+    """Return the mode a `mode:` line carries, or None if it is not such a line.
+
+    The previous pattern allowed at most one optional quote on each side of the
+    value, so exactly that is stripped here and `mode: off''` stays rejected.
+    """
+    match = re.match(r"^ {4}mode:", line)
+    if match is None:
+        return None
+    raw = line[match.end():].strip()
+    if raw[:1] in ("\"", "'"):
+        raw = raw[1:]
+    if raw[-1:] in ("\"", "'"):
+        raw = raw[:-1]
+    return raw
+
+
+def _values_streaming_mode_is_valid(values: str) -> bool:
+    """Require a `streaming:` block whose `mode:` is empty or a known policy.
+
+    Scans lines directly rather than matching a regular expression with optional
+    groups surrounded by optional whitespace: that pattern backtracks
+    super-linearly, while a per-line scan stays linear on any input. A `mode:`
+    counts only while the scan is inside the `streaming:` mapping, so a sibling
+    block cannot satisfy the contract.
+    """
+    in_streaming_mapping = False
+    # Split on "\n" only: `str.splitlines` also breaks on a lone CR (and other
+    # separators) that `re.MULTILINE` never treated as a line boundary, which
+    # would widen the accepted language. Trailing CR from CRLF is trimmed below.
+    for line in values.split("\n"):
+        if line.rstrip() == "  streaming:":
+            in_streaming_mapping = True
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            # Blank lines and comments carry no indentation of their own, so
+            # they must not be read as the end of the mapping.
+            continue
+        if in_streaming_mapping and not line.startswith("   "):
+            in_streaming_mapping = False
+        if not in_streaming_mapping:
+            continue
+        value = _mode_line_value(line)
+        if value in ("", "off", "auto", "force"):
+            return True
+        # A `mode:` carrying something else is simply not a match; the pattern
+        # this replaced searched the whole block, so keep scanning for a valid
+        # one instead of deciding on the first occurrence.
+    return False
+
+
 def _check_chart_contract(template: str, values: str) -> List[str]:
     """Validate the public Helm streaming policy mapping."""
     errors: List[str] = []
@@ -367,12 +419,11 @@ def _check_chart_contract(template: str, values: str) -> List[str]:
     )
     if any(token in template for token in forbidden_template):
         errors.append(f"{CHART_TEMPLATE_PATH}: legacy streaming engine key is forbidden")
-    if re.search(r"(?m)^ {2}streaming:\s*$", values) is None or re.search(
-        r"(?m)^ {4}mode:\s*[\"']?(?:off|auto|force)[\"']?\s*$", values
-    ) is None:
+    if not _values_streaming_mode_is_valid(values):
         errors.append(
             f"{CHART_VALUES_PATH}: markdown.streaming.mode must define an "
-            "off|auto|force policy"
+            "off|auto|force policy, or leave the value empty so the module "
+            "default governs"
         )
     if re.search(r"(?m)^ {4}engine:\s*", values):
         errors.append(f"{CHART_VALUES_PATH}: markdown.streaming.engine is forbidden")
@@ -427,29 +478,35 @@ def _check_public_inventory(directives: str, inventory: str) -> List[str]:
     errors: List[str] = []
     names, rejected = _directive_registry(directives)
     count_match = re.search(
-        r"There are (\d+) `markdown_\*` command-table entries: "
-        r"(\d+) active parser entries and\s+(\d+) reject-only migration entries",
-        inventory,
+        r"There are (\d+) `markdown_\*` command-table entries", inventory
     )
     if count_match is None:
         errors.append(
             f"{PUBLIC_INVENTORY_PATH}: directive registry count statement is missing"
         )
     else:
-        documented = tuple(int(value) for value in count_match.groups())
-        actual = (len(names), len(names) - len(rejected), len(rejected))
-        if documented != actual:
+        documented = int(count_match.group(1))
+        if documented != len(names):
             errors.append(
-                f"{PUBLIC_INVENTORY_PATH}: directive counts {documented} do not "
-                f"match command table {actual}"
+                f"{PUBLIC_INVENTORY_PATH}: directive count {documented} does not "
+                f"match command table {len(names)}"
+            )
+        if not rejected and "active parser entry" not in inventory:
+            errors.append(
+                f"{PUBLIC_INVENTORY_PATH}: the inventory must state that the "
+                "command table holds only active parser entries"
             )
 
-    reject_section = inventory.partition("### Reject-only migration directives")[2]
-    errors.extend(
-        f"{PUBLIC_INVENTORY_PATH}: reject-only directive {name} is missing from the reject-only registry"
-        for name in rejected
-        if f"`{name}`" not in reject_section
-    )
+    if rejected:
+        # No reject-only entry is expected after the 0.9.2 removals; if one is
+        # reintroduced, its name must be listed in the registry section so the
+        # published contract still names every entry the table carries.
+        reject_section = inventory.partition("### Reject-only migration directives")[2]
+        errors.extend(
+            f"{PUBLIC_INVENTORY_PATH}: reject-only directive {name} is missing from the reject-only registry"
+            for name in rejected
+            if f"`{name}`" not in reject_section
+        )
     return errors
 
 

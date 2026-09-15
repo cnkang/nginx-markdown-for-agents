@@ -351,5 +351,41 @@ class TestFinishGate(unittest.TestCase):
         self.assertIn("C module: 73.0% line/74.0% function", rendered)
 
 
+class TestCriticalPathPresence(unittest.TestCase):
+    """Critical-path reporting must not pass without a measured category."""
+
+    def _write_lcov(self, text: str) -> Path:
+        handle = NamedTemporaryFile("w", suffix=".lcov", delete=False)
+        handle.write(text)
+        handle.close()
+        return Path(handle.name)
+
+    def test_unmatched_report_without_measured_category_is_an_error(self) -> None:
+        # The path enters the merged records (component tree, "src" segment)
+        # but matches no critical-path pattern, so no category is measured.
+        path = self._write_lcov(
+            "SF:components/nginx-module/src/unrelated_thing.c\n"
+            "DA:1,1\nDA:2,1\nend_of_record\n"
+        )
+        results: list[GateResult] = []
+        errors: list[str] = []
+
+        _append_critical_results(results, errors, [path], 80.0)
+
+        self.assertEqual(results, [])
+        self.assertIn(
+            "no critical-path category has measured lines in the lcov reports",
+            errors,
+        )
+
+    def test_empty_report_list_adds_nothing(self) -> None:
+        results: list[GateResult] = []
+        errors: list[str] = []
+
+        _append_critical_results(results, errors, [], 80.0)
+
+        self.assertEqual((results, errors), ([], []))
+
+
 if __name__ == "__main__":
     unittest.main()

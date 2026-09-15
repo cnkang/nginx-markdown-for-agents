@@ -10,7 +10,11 @@ import sys
 
 
 SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
-TAG_PATTERN = re.compile(r"v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?")
+TAG_PATTERN = re.compile(
+    r"v\d+\.\d+\.\d+"
+    r"(?:-[0-9A-Za-z.-]+)?"
+    r"(?:\+[0-9A-Za-z.-]+)?"
+)
 
 
 def verify_tag_candidate(

@@ -391,9 +391,16 @@ def test_makefile_passes_explicit_style_base():
     assert 'check_writing_style.py --changed --base "$(STYLE_BASE)"' in makefile
 
 
-def test_makefile_defaults_style_base_for_local_docs_check():
+def test_makefile_defaults_style_base_to_the_merge_base():
+    """Local runs must compare against the merge base, not HEAD.
+
+    With HEAD a committed change shows an empty diff, so the regression gate
+    reports nothing while CI still fails. The rule also forbids a fallback to
+    HEAD, which would quietly restore that blind spot on a shallow clone.
+    """
     makefile = (cws.ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "STYLE_BASE ?= HEAD" in makefile
+    assert "STYLE_BASE ?= $(shell git merge-base HEAD origin/main" in makefile
+    assert "?= HEAD" not in makefile
 
 
 def test_docs_check_uses_changed_file_style_gate_only():

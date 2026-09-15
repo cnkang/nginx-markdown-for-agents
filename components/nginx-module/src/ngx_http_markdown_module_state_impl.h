@@ -38,9 +38,12 @@ static ngx_atomic_uint_t ngx_http_markdown_pending_output_requests;
  *     changing the struct layout vs 0.9.1's v8 zone.  The version bump
  *     forces a fresh slab instead of reattaching a 0.9.1 allocation that
  *     would be misread under the new layout.
+ * v10: the conversion-peak gauge moves out of the streaming-only block into the
+ *     always-present perf group so every build reports it.  That appends a
+ *     field to the zone, so the suffix must change with it.
  */
 static ngx_str_t ngx_http_markdown_metrics_shm_name =
-    ngx_string("nginx_markdown_metrics_v9");
+    ngx_string("nginx_markdown_metrics_v10");
 static u_char ngx_http_markdown_empty_string[] = "";
 
 static void

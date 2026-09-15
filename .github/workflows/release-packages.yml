@@ -1,6 +1,8 @@
 # Release Packages — Unified DEB/RPM build, test, sign, and publish pipeline
 #
-# Architecture: prepare → build (matrix) → package (matrix) → smoke-test (matrix) → integrity → publish
+# Architecture: prepare → build (matrix) → package (matrix) → smoke-test (matrix)
+#   → release-gate + official-docker gate → RC real-environment qualification
+#   → integrity signing → publish
 # Tag releases also run release-gate after smoke-test; publish waits for both
 # release-gate and integrity to pass.
 #
@@ -37,7 +39,7 @@
 #     environment to the exact 40-character SHA approved by the release owner.
 #     Tag releases ALWAYS run the signing job; no repository variable needed.
 #
-# GPG Signing Policy (0.8.x release line):
+# GPG Signing Policy (0.9.x / pre-1.0 release line):
 #   Tag releases: signing is MANDATORY. The integrity-signing job always runs
 #   for tag pushes and the publish job requires signing to succeed. If GPG
 #   secrets are missing, the pipeline fails early with a clear preflight error.
@@ -82,7 +84,8 @@ permissions: {}
 #   - smoke-test:          Container install + module load verification (matrix)
 #   - release-gate:        Release governance and artifact layout gate
 #   - integrity-checksums: SHA256SUMS + release-manifest.json generation
-#   - integrity-signing:   Optional GPG signing (protected environment, tag only)
+#   - integrity-signing:   Mandatory GPG package signing for tag releases
+#     (skipped for workflow_dispatch; artifact-only dispatch stays intentional)
 #   - publish:             Upload to GitHub Release (tag) or workflow artifacts (dispatch)
 #
 # All third-party actions in jobs below MUST use full SHA pinning (Req 9.6).
@@ -666,7 +669,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # Package Job: Generate .deb/.rpm via nFPM (matrix)
   # Consumes the compiled .so from the build job and produces distribution
-  # packages following 0.8.x release package naming and layout conventions.
+  # packages following 0.9.x release package naming and layout conventions.
   # ─────────────────────────────────────────────────────────────────────────────
   package:
     name: Package - nginx-${{ matrix.nginx_version }} - ${{ matrix.arch }}
@@ -752,7 +755,7 @@ jobs:
               ;;
           esac
 
-          # Artifact filenames per 0.8.x release package naming and layout conventions
+          # Artifact filenames per 0.9.x release package naming and layout conventions
           RPM_NGINX_EVR="1:${NGINX_VERSION}"
           DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
           RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
@@ -1430,6 +1433,38 @@ jobs:
           test -s artifacts/nginx-markdown-for-agents-release.asc
         shell: bash
 
+      - name: Build canonical source bundle
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_SHA: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          bundle="artifacts/nginx-markdown-for-agents-source-${RELEASE_TAG}.tar.gz"
+          # The bundle is built from the exact commit being released, so its
+          # digest is reproducible and does not depend on the byte stability of
+          # an archive GitHub generates on our behalf.  `git archive` stamps
+          # every entry with the commit timestamp and `gzip -n` drops the
+          # archive name and timestamp, so the same commit always yields the
+          # same bytes.
+          git archive --format=tar \
+            --prefix="nginx-markdown-for-agents-${RELEASE_TAG}/" \
+            "${GH_SHA}" | gzip -n > "${bundle}"
+          test -s "${bundle}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            digest="$(sha256sum "${bundle}" | awk '{print $1}')"
+          else
+            digest="$(shasum -a 256 "${bundle}" | awk '{print $1}')"
+          fi
+          test -n "${digest}"
+          {
+            echo "SOURCE_SHA=${digest}"
+            echo "SOURCE_BUNDLE_NAME=$(basename "${bundle}")"
+            echo "SOURCE_URL=https://github.com/${GH_REPO}/releases/download/${RELEASE_TAG}/$(basename "${bundle}")"
+          } >> "${GITHUB_ENV}"
+        shell: bash
+
       - name: Generate release manifest
         env:
           GH_EVENT_NAME: ${{ github.event_name }}
@@ -1445,8 +1480,23 @@ jobs:
           if [[ "${GH_EVENT_NAME}" == "push" && "${GH_REF_TYPE}" == "tag" ]]; then
             TAG="${GH_REF_NAME}"
             VERSION="${TAG#v}"
-            SOURCE_URL="https://github.com/${GH_REPO}/archive/refs/tags/${TAG}.tar.gz"
-            SOURCE_SHA="$(curl -fsSL "${SOURCE_URL}" | sha256sum | awk '{print $1}')"
+            SOURCE_IDENTIFIER="source-${TAG}"
+            RECORDED_SHA="$(awk -v id="${SOURCE_IDENTIFIER}" '$2 == id { print $1 }' \
+              packaging/source-archive-digests.sha256)"
+            # The digest comes from the bundle this run built from the released
+            # commit, so provenance is self-contained: immutable SHA -> bundle
+            # -> SHA-256 -> manifest -> signed sums.  The registry under
+            # packaging/ is an audit record, not a prerequisite, and it cannot
+            # be one: its entry is committed after the tag, and a rerun of that
+            # tag checks out a tree that does not contain it.
+            if [[ -z "${SOURCE_SHA:-}" || -z "${SOURCE_URL:-}" ]]; then
+              echo "::error title=Source bundle missing::the source bundle step did not produce a digest, so no tag release can be published with provenance"
+              exit 1
+            fi
+            if [[ -n "${RECORDED_SHA}" && "${RECORDED_SHA}" != "${SOURCE_SHA}" ]]; then
+              echo "::error title=Source digest disagreement::packaging/source-archive-digests.sha256 holds ${RECORDED_SHA} for ${SOURCE_IDENTIFIER} but this release built ${SOURCE_SHA}"
+              exit 1
+            fi
             SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
             VERSION_ARGS=(--version "${VERSION}")
           else
@@ -1506,6 +1556,15 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
+      - name: Upload canonical source bundle
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: source-bundle
+          path: artifacts/nginx-markdown-for-agents-source-*.tar.gz
+          if-no-files-found: error
+          retention-days: 5
+
       - name: Upload installer bootstrap assets (tag)
         if: github.event_name == 'push' && github.ref_type == 'tag'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1519,7 +1578,8 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Integrity Signing Job: Mandatory GPG signing for tag releases
-  # Always runs for tag pushes; skipped for workflow_dispatch.
+  # Runs for qualified tag releases after the required release and RC gates
+    # pass; skipped for workflow_dispatch.
   # Requires Protected Environment "release-signing" with required reviewers.
   #
   # Security:
@@ -1529,8 +1589,11 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-signing:
     name: Integrity - GPG Sign
-    needs: [smoke-test, release-gate, musl-build, official-docker-release-gate]
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [smoke-test, release-gate, musl-build, official-docker-release-gate, rc-release-gates]
+    if: >-
+      github.event_name == 'push'
+      && github.ref_type == 'tag'
+      && needs.rc-release-gates.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1705,10 +1768,18 @@ jobs:
   # Security:
   #   - ONLY this job has contents: write permission (Req 10.4)
   #   - All other jobs use contents: read
-  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────  # The heavy real-environment checks qualify the candidate the release is
+  # published from.  A failure, a cancellation or a skip leaves the result
+  # short of 'success', and the publish condition below requires it.
+  rc-release-gates:
+    name: Release candidate gates
+    uses: ./.github/workflows/rc-release-gates.yml
+    permissions:
+      contents: read
+
   publish:
     name: Publish
-    needs: [release-gate, musl-build, integrity-checksums, integrity-signature, official-docker-release-gate]
+    needs: [release-gate, musl-build, integrity-checksums, integrity-signature, official-docker-release-gate, rc-release-gates]
     # Tag releases: signing always runs, so signing must succeed for publish.
     # workflow_dispatch: signing is skipped, publish proceeds without it.
     if: >-
@@ -1717,6 +1788,7 @@ jobs:
       && needs.integrity-checksums.result == 'success'
       && needs.release-gate.result == 'success'
       && needs.official-docker-release-gate.result == 'success'
+      && needs.rc-release-gates.result == 'success'
       && (needs.integrity-signature.result == 'success'
           || (needs.integrity-signature.result == 'skipped'
               && github.event_name == 'workflow_dispatch'))
@@ -1797,6 +1869,13 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-manifest
+          path: release-assets/
+
+      - name: Download canonical source bundle
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: source-bundle
           path: release-assets/
 
       - name: List release assets

@@ -68,6 +68,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--tag", "v0.8.3",
             "--commit", "abc1234def5678",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -102,6 +103,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--tag", "v0.8.3",
             "--commit", "abc1234",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -119,10 +121,40 @@ class TestGenerateManifest(unittest.TestCase):
             self.assertIn(pkg["arch"], ("amd64", "arm64"))
             self.assertIn(pkg["rpm_arch"], ("x86_64", "aarch64"))
 
+    def test_tag_without_source_digest_fails(self):
+        """A tag manifest has to carry the published bundle's digest."""
+        self._write_package(
+            "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
+        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--tag", "v0.8.3",
+            "--commit", "abc1234",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--source-sha", result.stderr)
+
+    def test_tag_with_source_url_and_no_digest_fails(self):
+        """The explicit URL path must enforce the digest for a tag too."""
+        self._write_package(
+            "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
+        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--tag", "v0.8.3",
+            "--commit", "abc1234",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-url", "https://example.com/bundle.tar.gz",
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--source-sha", result.stderr)
+
     def test_no_packages_fails(self):
         result = self._run_generate([
             "--version", "0.8.3",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertNotEqual(result.returncode, 0)
 
@@ -131,6 +163,7 @@ class TestGenerateManifest(unittest.TestCase):
         result = self._run_generate([
             "--version", "0.8.3",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertNotEqual(result.returncode, 0)
 
@@ -140,6 +173,7 @@ class TestGenerateManifest(unittest.TestCase):
         )
         result = self._run_generate([
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid semantic version", result.stderr)
@@ -153,6 +187,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--tag", "v1.2.3-alpha+001",
             "--commit", "abc1234",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -167,6 +202,7 @@ class TestGenerateManifest(unittest.TestCase):
         )
         result = self._run_generate([
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid semantic version", result.stderr)
@@ -179,6 +215,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--version", "1.2.3-alpha+001",
             "--tag", "v1.2.3",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("does not match", result.stderr)
@@ -203,6 +240,7 @@ class TestGenerateManifest(unittest.TestCase):
         result = self._run_generate([
             "--version", "0.8.3",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
             "--no-source",
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -217,6 +255,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--version", "0.8.3",
             "--commit", "deadbeef",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ]
         r1 = self._run_generate(args)
         r2 = self._run_generate(args)
@@ -267,6 +306,7 @@ class TestGenerateManifest(unittest.TestCase):
             "--tag", "v0.8.3",
             "--commit", "abc1234def5678",
             "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -328,6 +368,10 @@ class TestValidateManifest(unittest.TestCase):
                     "sha256": sha256_bytes(b"fake-content"),
                 }
             ]
+        # The tag pipeline publishes a source bundle built from the released
+        # commit, so a valid tag fixture carries that artifact and its digest.
+        bundle_name = "nginx-markdown-for-agents-source-v0.8.3.tar.gz"
+        (self.artifact_dir / bundle_name).write_bytes(b"fake-bundle")
         manifest = {
             "schema_version": 1,
             "project": "nginx-markdown-for-agents",
@@ -338,8 +382,11 @@ class TestValidateManifest(unittest.TestCase):
                 "commit": "abc1234def567890",
             },
             "source": {
-                "archive_url": "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz",
-                "sha256": "a" * 64,
+                "archive_url": (
+                    "https://github.com/cnkang/nginx-markdown-for-agents/releases/"
+                    "download/v0.8.3/nginx-markdown-for-agents-source-v0.8.3.tar.gz"
+                ),
+                "sha256": sha256_bytes(b"fake-bundle"),
                 "available": True,
             },
             "packages": packages,
@@ -439,11 +486,37 @@ class TestValidateManifest(unittest.TestCase):
             f"Expected required bootstrap asset errors, got: {errors}",
         )
 
+    def test_non_semantic_tag_cannot_satisfy_required_bootstrap_assets(self):
+        """Strict mode refuses a tag it cannot build the asset names from."""
+        manifest = self._make_valid_manifest()
+        manifest["git"]["tag"] = "nightly-2026-09-14"
+        self.manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+        errors = self._validate(require_bootstrap_assets=True)
+
+        self.assertTrue(
+            any("semantic release tag" in error for error in errors),
+            f"Expected the semantic-tag refusal, got: {errors}",
+        )
+
     def test_prerelease_build_tag_bootstrap_assets_validate(self):
         """Bootstrap filenames support full semantic release tags."""
         manifest = self._make_valid_manifest()
         tag = "v0.8.3-rc.1+build.7"
         manifest["git"]["tag"] = tag
+        # The published bundle is named for the tag, so a pre-release tag needs
+        # its own artifact and digest.
+        bundle_name = f"nginx-markdown-for-agents-source-{tag}.tar.gz"
+        (self.artifact_dir / bundle_name).write_bytes(b"fake-bundle")
+        # The helper's bundle belongs to the other tag, and the checksum sweep
+        # covers every tarball, so it would land in SHA256SUMS as an unexpected
+        # name for this tag.
+        (self.artifact_dir / "nginx-markdown-for-agents-source-v0.8.3.tar.gz").unlink()
+        manifest["source"]["sha256"] = sha256_bytes(b"fake-bundle")
+        manifest["source"]["archive_url"] = (
+            "https://github.com/cnkang/nginx-markdown-for-agents/releases/"
+            f"download/{tag}/{bundle_name}"
+        )
         self.manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
         installer = f"nginx-markdown-for-agents-installer-{tag}.sh"
@@ -658,8 +731,77 @@ class TestValidateManifest(unittest.TestCase):
         errors = self._validate()
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
-    def test_tag_missing_source_sha_fails(self):
-        """Tag release without source.sha256 should fail validation."""
+    def test_source_bundle_checked_without_checksum_file(self):
+        """A tag release with no SHA256SUMS must still be checked."""
+        manifest = self._make_valid_manifest()
+        manifest["workflow"]["ref_type"] = "tag"
+        # Point the URL at something else, and give the validator no checksum
+        # file at all: the mismatch must still be reported.
+        manifest["source"]["archive_url"] = (
+            "https://github.com/cnkang/nginx-markdown-for-agents/archive/"
+            "refs/tags/v0.8.3.tar.gz"
+        )
+        self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        if self.sha256sums_path.exists():
+            self.sha256sums_path.unlink()
+        errors = self._validate()
+        self.assertTrue(
+            any("archive_url does not point at the published bundle" in e for e in errors),
+            f"Expected a URL-mismatch error without SHA256SUMS, got: {errors}",
+        )
+
+    def test_source_bundle_outside_the_artifact_dir_is_rejected(self):
+        """Containment is checked on the resolved path, not through the URL.
+
+        The bundle name here stays a valid URL segment and an ordinary file name,
+        so only the containment rule can reject it: it is a symlink that leaves
+        the artifact directory.
+        """
+        manifest = self._make_valid_manifest()
+        manifest["workflow"]["ref_type"] = "tag"
+        outside = self.artifact_dir.parent / "outside-bundle.tar.gz"
+        outside.write_bytes(b"elsewhere")
+        link = self.artifact_dir / "nginx-markdown-for-agents-source-v0.8.3.tar.gz"
+        if link.exists():
+            link.unlink()
+        link.symlink_to(outside)
+        self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        self._make_sha256sums()
+        errors = self._validate()
+        self.assertTrue(
+            any("outside the artifact directory" in e for e in errors),
+            f"Expected a containment error, got: {errors}",
+        )
+
+    def test_source_url_pointing_elsewhere_is_rejected(self):
+        """An archive_url that names another artifact must not pass.
+
+        The URL is part of the provenance claim: pointing it at the generated
+        tag archive describes different bytes than the bundle whose digest the
+        manifest records."""
+        manifest = self._make_valid_manifest()
+        manifest["workflow"]["ref_type"] = "tag"
+        manifest["source"]["archive_url"] = (
+            "https://github.com/cnkang/nginx-markdown-for-agents/archive/"
+            "refs/tags/v0.8.3.tar.gz"
+        )
+        self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        self._make_sha256sums()
+        errors = self._validate()
+        self.assertTrue(
+            any(
+                "archive_url does not point at the published bundle" in e
+                for e in errors
+            ),
+            f"Expected a URL-mismatch error, got: {errors}",
+        )
+
+    def test_tag_missing_source_sha_is_rejected(self):
+        """Tag release without source.sha256 must fail validation.
+
+        The workflow builds the source bundle from the released commit and
+        records its digest, so a tag manifest without one means provenance was
+        lost and the release must not be published (see ADR-0028)."""
         fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
         path = self.artifact_dir / fname
         path.write_bytes(b"fake-content")
@@ -675,7 +817,7 @@ class TestValidateManifest(unittest.TestCase):
             "source": {
                 "available": True,
                 "archive_url": "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz",
-                # sha256 missing
+                # sha256 deliberately missing
             },
             "packages": [
                 {
@@ -702,14 +844,73 @@ class TestValidateManifest(unittest.TestCase):
         }
         self.manifest_path.write_text(json.dumps(manifest, indent=2))
         errors = self._validate()
-        self.assertTrue(any("source.sha256" in e for e in errors),
-                        f"Expected source.sha256 error, got: {errors}")
+        self.assertTrue(
+            any("source.sha256 is required for tag releases" in e for e in errors),
+            f"Expected a required-digest error, got: {errors}",
+        )
+
+    def test_tag_malformed_source_sha_fails(self):
+        """A present but malformed source.sha256 must still be rejected, so an
+        omitted digest and an invalid one are not conflated."""
+        fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
+        path = self.artifact_dir / fname
+        path.write_bytes(b"fake-content")
+        for bad in ("", "not-a-digest", "A" * 64):
+            with self.subTest(bad=bad):
+                manifest = {
+                    "schema_version": 1,
+                    "project": "nginx-markdown-for-agents",
+                    "version": "0.8.3",
+                    "git": {
+                        "repository": "cnkang/nginx-markdown-for-agents",
+                        "tag": "v0.8.3",
+                        "commit": "deadbeef12345678",
+                    },
+                    "source": {
+                        "available": True,
+                        "archive_url": "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz",
+                        "sha256": bad,
+                    },
+                    "packages": [
+                        {
+                            "filename": fname,
+                            "format": "deb",
+                            "version": "0.8.3",
+                            "nginx_version": "1.28.0",
+                            "arch": "amd64",
+                            "sha256": sha256_bytes(b"fake-content"),
+                        }
+                    ],
+                    "integrity": {
+                        "checksums": "SHA256SUMS",
+                        "signature": "SHA256SUMS.asc",
+                        "signature_available": True,
+                        "signature_type": "gpg-detached-ascii-armored",
+                        "signed_file": "SHA256SUMS",
+                    },
+                    "workflow": {
+                        "provider": "github-actions",
+                        "workflow": "release-packages.yml",
+                        "ref_type": "tag",
+                    },
+                }
+                self.manifest_path.write_text(json.dumps(manifest, indent=2))
+                errors = self._validate()
+                self.assertTrue(
+                    any("source.sha256" in e for e in errors),
+                    f"Expected a source.sha256 error for {bad!r}, got: {errors}",
+                )
 
     def test_tag_valid_source_sha_passes(self):
         """Tag release with valid source.sha256 should pass validation."""
         fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
         path = self.artifact_dir / fname
         path.write_bytes(b"fake-content")
+        # The pipeline publishes a bundle for the tag, so the artifact and the
+        # digest it records have to agree.
+        (self.artifact_dir / "nginx-markdown-for-agents-source-v0.8.3.tar.gz").write_bytes(
+            b"fake-bundle"
+        )
         manifest = {
             "schema_version": 1,
             "project": "nginx-markdown-for-agents",
@@ -721,8 +922,11 @@ class TestValidateManifest(unittest.TestCase):
             },
             "source": {
                 "available": True,
-                "archive_url": "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz",
-                "sha256": "a" * 64,
+                "archive_url": (
+                    "https://github.com/cnkang/nginx-markdown-for-agents/releases/"
+                    "download/v0.8.3/nginx-markdown-for-agents-source-v0.8.3.tar.gz"
+                ),
+                "sha256": sha256_bytes(b"fake-bundle"),
             },
             "packages": [
                 {
@@ -877,6 +1081,72 @@ class TestValidateManifest(unittest.TestCase):
             any("packages[0]: missing nginx_version" in e for e in errors),
             f"Expected missing nginx_version error, got: {errors}",
         )
+
+
+    def test_tag_release_accepts_the_published_source_bundle(self):
+        """The real tag pipeline puts the source bundle in SHA256SUMS.
+
+        The workflow builds the bundle from the released commit and publishes
+        it, and the checksum sweep covers every tarball, so the signed checksum
+        file lists a name that is not a package. The reverse scan must allow it
+        for a tag release, or every tag release fails validation.
+        """
+        fname = "nginx-module-markdown-for-agents_0.9.2_nginx-1.30.4_amd64.deb"
+        (self.artifact_dir / fname).write_bytes(b"fake-content")
+        bundle = "nginx-markdown-for-agents-source-v0.9.2.tar.gz"
+        (self.artifact_dir / bundle).write_bytes(b"fake-bundle")
+        manifest = {
+            "schema_version": 1,
+            "project": "nginx-markdown-for-agents",
+            "version": "0.9.2",
+            "git": {
+                "repository": "cnkang/nginx-markdown-for-agents",
+                "tag": "v0.9.2",
+                "commit": "deadbeef12345678",
+            },
+            "source": {
+                "available": True,
+                "archive_url": (
+                    "https://github.com/cnkang/nginx-markdown-for-agents/releases/"
+                    "download/v0.9.2/nginx-markdown-for-agents-source-v0.9.2.tar.gz"
+                ),
+                "sha256": sha256_bytes(b"fake-bundle"),
+            },
+            "packages": [
+                {
+                    "filename": fname,
+                    "format": "deb",
+                    "version": "0.9.2",
+                    "nginx_version": "1.30.4",
+                    "arch": "amd64",
+                    "sha256": sha256_bytes(b"fake-content"),
+                }
+            ],
+            "integrity": {
+                "checksums": "SHA256SUMS",
+                "signature": "SHA256SUMS.asc",
+                "signature_available": True,
+                "signature_type": "gpg-detached-ascii-armored",
+                "signed_file": "SHA256SUMS",
+            },
+            "workflow": {
+                "provider": "github-actions",
+                "workflow": "release-packages.yml",
+                "ref_type": "tag",
+            },
+        }
+        self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        entries = []
+        for f in sorted(self.artifact_dir.iterdir()):
+            entries.append(f"{sha256_bytes(f.read_bytes())}  {f.name}")
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+
+        errors = self._validate()
+
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
 
 if __name__ == "__main__":

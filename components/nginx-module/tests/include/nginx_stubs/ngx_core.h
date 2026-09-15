@@ -9,7 +9,7 @@ typedef struct {
 } ngx_str_t;
 
 typedef ngx_uint_t ngx_msec_t;
-typedef int ngx_atomic_t;
+typedef volatile ngx_uint_t ngx_atomic_t;   /* mirrors nginx: volatile atomic unsigned type */
 typedef ngx_uint_t ngx_atomic_uint_t;
 typedef ngx_int_t ngx_atomic_int_t;
 
@@ -27,14 +27,36 @@ typedef struct ngx_buf_s          ngx_buf_t;
 struct ngx_buf_s {
     u_char     *pos;
     u_char     *last;
-    u_char     *start;
-    u_char     *end;
+    off_t       file_pos;
+    off_t       file_last;
+
+    u_char     *start;         /* start of buffer */
+    u_char     *end;           /* end of buffer */
+    void       *tag;
+    void       *file;
+    void       *shadow;
+
+    /* the buf's content could be changed */
     unsigned    temporary:1;
+
+    /*
+     * the buf's content is in a memory cache or in a read only memory
+     * and must not be changed
+     */
     unsigned    memory:1;
-    unsigned    last_buf:1;
-    unsigned    last_in_chain:1;
+
+    /* the buf's content is mmap()ed and must not be changed */
+    unsigned    mmap:1;
+
+    unsigned    recycled:1;
+    unsigned    in_file:1;
     unsigned    flush:1;
     unsigned    sync:1;
+    unsigned    last_buf:1;
+    unsigned    last_in_chain:1;
+
+    unsigned    last_shadow:1;
+    unsigned    temp_file:1;
 };
 typedef struct ngx_http_complex_value_s ngx_http_complex_value_t;
 

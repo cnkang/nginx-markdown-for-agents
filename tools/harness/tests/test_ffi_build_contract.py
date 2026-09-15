@@ -139,15 +139,32 @@ def test_explicit_feature_contract_enables_only_matching_c_paths(
     assert "NM_CALLED=1" not in result.stdout
 
 
+def _rustc_release(output: str) -> str:
+    """Return the release field, failing with the output when it is absent."""
+    if "release: " not in output:
+        pytest.fail(
+            "rustc ran but its version output carries no release field, so the "
+            f"release identity cannot be validated: {output.strip()}"
+        )
+    return output.split("release: ", 1)[1].splitlines()[0]
+
+
 def test_release_build_identity_is_embedded_and_matches_rustc(
     tmp_path: Path,
 ) -> None:
     if shutil.which("rustc") is None:
         pytest.skip("rustc is required for release identity validation")
 
-    rust_version = subprocess.check_output(
-        ["rustc", "-Vv"], text=True
-    ).split("release: ", 1)[1].splitlines()[0]
+    rustc_info = subprocess.run(["rustc", "-Vv"], capture_output=True, text=True)
+    if rustc_info.returncode != 0:
+        # The shim resolves the toolchain pinned by `rust-toolchain.toml`, which
+        # needs it installed.  Reporting the reason here beats a bare
+        # CalledProcessError that says nothing about what is missing.
+        pytest.fail(
+            "rustc is present but not usable, so the release identity cannot be "
+            f"validated: {rustc_info.stderr.strip() or rustc_info.stdout.strip()}"
+        )
+    rust_version = _rustc_release(rustc_info.stdout)
     source_sha = "a" * 40
     manifest_digest = f"sha256:{'b' * 64}"
     result = _run_module_config(
@@ -256,3 +273,11 @@ def test_abi_validation_precedes_configuration_and_filter_registration() -> None
         module_source,
         flags=re.DOTALL,
     )
+
+
+def test_a_version_output_without_a_release_field_is_unusable() -> None:
+    """A rustc that answers with something else is not a usable toolchain."""
+    with pytest.raises(pytest.fail.Exception):
+        _rustc_release("rustc 1.98.1\n")
+
+    assert _rustc_release("rustc 1.98.1 (abc)\nrelease: 1.98.1\n") == "1.98.1"

@@ -1,0 +1,84 @@
+Building an NGINX Module for AI Agents
+
+# Building an NGINX Module for AI Agents
+
+ February 25, 2026 by [Jane Developer](http://127.0.0.1/author/jane)
+
+ ![NGINX Module Architecture](https://blog.example.com/images/nginx-module.png)
+
+## Introduction
+
+AI agents are becoming increasingly important in web automation and content processing. However, they often struggle with HTML parsing and extracting meaningful content from web pages.
+
+In this post, I'll share my experience building an NGINX module that converts HTML to Markdown format, making it easier for AI agents to consume web content.
+
+## The Problem
+
+Modern web pages contain a lot of noise:
+
+- Navigation menus
+- Advertisements
+- Tracking scripts
+- Social media widgets
+
+AI agents need clean, semantic content without all this clutter.
+
+## The Solution
+
+We built an NGINX module that:
+
+1. Intercepts HTTP responses
+1. Checks if the client accepts Markdown
+1. Converts HTML to clean Markdown
+1. Returns the Markdown response
+
+### Architecture
+
+The module consists of two parts:
+
+#### Rust Conversion Engine
+
+We chose Rust for memory safety and performance:
+
+```rust
+pub fn convert_html_to_markdown(html: &str) -> Result<String, Error> {
+    let dom = parse_html(html)?;
+    let markdown = generate_markdown(&dom)?;
+    Ok(markdown)
+}
+```
+
+#### NGINX C Module
+
+The C module integrates with NGINX's filter chain:
+
+```c
+static ngx_int_t
+ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    // Buffer response
+    // Call Rust converter
+    // Update headers
+    // Return converted response
+}
+```
+
+## Results
+
+The module achieves impressive results:
+
+- **70\-85% token reduction** compared to raw HTML
+- **\<50ms latency** for typical pages
+- **Zero crashes** thanks to Rust's memory safety
+
+"This module has transformed how our AI agents consume web content. The token savings alone justify the implementation effort."
+
+## Conclusion
+
+Building an NGINX module for AI agents was a rewarding challenge. The combination of Rust's safety and NGINX's performance creates a powerful solution for content transformation.
+
+Check out the [source code on GitHub](https://github.com/example/nginx-markdown) and let me know what you think!
+
+ Share on Twitter Share on LinkedIn Share on Facebook
+
+### Comments

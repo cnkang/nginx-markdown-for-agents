@@ -148,3 +148,29 @@ def test_stale_symbol_check_fails_when_git_times_out(monkeypatch, tmp_path):
     assert exit_code == 1
     assert stdout == ""
     assert stderr == "Error listing tracked files: git ls-files timed out after 15s"
+
+
+def test_scan_tracked_file_refuses_a_symlink(tmp_path):
+    """The scan must not follow a tracked symlink outside the repository."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside.conf"
+    outside.write_text("markdown_timeout on;\n")
+    (repo / "chat.conf").symlink_to(outside)
+
+    findings, error = check_stale_symbols._scan_tracked_file(repo, "chat.conf")
+
+    assert findings == []
+    assert error == ""
+
+
+def test_scan_tracked_file_reports_symbols_in_a_regular_file(tmp_path):
+    """The refusal above must not hide a regular file's findings."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "chat.conf").write_text("markdown_timeout on;\n")
+
+    findings, error = check_stale_symbols._scan_tracked_file(repo, "chat.conf")
+
+    assert error == ""
+    assert findings, "a regular file carrying a stale symbol must be reported"

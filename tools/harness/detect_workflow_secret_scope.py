@@ -124,13 +124,16 @@ def check_sonar_token_steps(text: str) -> list[Finding]:
                 "SonarCloud scan step env maps",
             )
         )
-    if occurrences and occurrences[0] > next(
+    checkout_index = next(
         (
             index
             for index, line in enumerate(lines)
             if re.match(r"^\s{6}- name:\s*Checkout repository\s*$", line)
         ),
-        len(lines),
+        None,
+    )
+    if occurrences and (
+        checkout_index is None or occurrences[0] > checkout_index
     ):
         findings.append(
             Finding(

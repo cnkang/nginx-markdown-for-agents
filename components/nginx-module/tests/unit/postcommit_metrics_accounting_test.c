@@ -10,7 +10,7 @@
 
 #define MARKDOWN_STREAMING_ENABLED 1
 
-typedef unsigned long  ngx_atomic_t;
+typedef volatile unsigned long  ngx_atomic_t;   /* mirrors nginx */
 
 typedef struct {
     struct {

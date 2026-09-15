@@ -46,7 +46,7 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 | `nginx_markdown_conversion_duration_seconds` | histogram | `engine` | bounded |
 | `nginx_markdown_input_bytes_total` | counter | — | fixed |
 | `nginx_markdown_output_bytes_total` | counter | — | fixed |
-| `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | fixed |
+| `nginx_markdown_conversion_peak_memory_bytes` | gauge | — | fixed |
 | `nginx_markdown_streaming_events_total` | counter | `reason`, `transition` | bounded |
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | bounded |
 | `nginx_markdown_build_info` | gauge | `features`, `nginx_version`, `version` | bounded |
@@ -114,9 +114,10 @@ CONFIGURATION_STRUCTURE.md documents the effective module defaults.
 ## Removed Surface
 
 Removed directives are invalid in 0.9.2 and must not appear in configuration
-examples. The five names removed by the pre-LTS convergence remain registered
-as reject-only migration entries so `nginx -t` can report an actionable
-message. They do not contribute to the 20 active directives above. See
+examples. The five names removed by the pre-LTS convergence are no longer
+registered, so `nginx -t` reports NGINX's standard `unknown directive` error and
+`docs/guides/MIGRATION-0.9.2.md` names the replacement for each. They do not
+contribute to the 20 active directives above. See
 `docs/guides/0.9.2-breaking-changes.md` for the authoritative names and
 migration guidance.
 

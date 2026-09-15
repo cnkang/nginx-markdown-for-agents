@@ -712,68 +712,19 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 
     if (r->connection->sockaddr == NULL) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-            "markdown: no client address, "
-            "denying diagnostics access");
+            "markdown: no client address, denying diagnostics access");
         return NGX_HTTP_FORBIDDEN;
     }
 
-#if (NGX_HAVE_UNIX_DOMAIN)
-    if (r->connection->sockaddr->sa_family == AF_UNIX) {
-        /* UNIX-domain peers connect through a local socket path and
-         * cannot originate from a remote host, so the loopback-only
-         * boundary is inherently satisfied. */
-        return NGX_OK;
-    }
-#endif
-
-    if (r->connection->sockaddr->sa_family == AF_INET) {
-        const struct sockaddr_in *sin =
-            (const struct sockaddr_in *) r->connection->sockaddr;
-
-        /* Accept any address in 127.0.0.0/8, not only INADDR_LOOPBACK. */
-        if ((ntohl(sin->sin_addr.s_addr) & 0xFF000000U) != 0x7F000000U) {
-            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                "markdown: access denied from non-loopback IPv4 address");
-            return NGX_HTTP_FORBIDDEN;
-        }
-    }
-#if (NGX_HAVE_INET6)
-    else if (r->connection->sockaddr->sa_family == AF_INET6) {
-        const struct sockaddr_in6 *sin6 =
-            (const struct sockaddr_in6 *) r->connection->sockaddr;
-
-        /* Accept native IPv6 loopback (::1) and IPv4-mapped loopback
-         * (::ffff:127.0.0.0/8), matching the IPv4 127.0.0.0/8 acceptance
-         * above.  Deny all other IPv6 addresses. */
-        if (!IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
-            uint32_t  mapped;
-
-            if (!IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
-                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                    "markdown: access denied from non-localhost IPv6 address");
-                return NGX_HTTP_FORBIDDEN;
-            }
-
-            mapped = ((uint32_t) sin6->sin6_addr.s6_addr[12] << 24)
-                   | ((uint32_t) sin6->sin6_addr.s6_addr[13] << 16)
-                   | ((uint32_t) sin6->sin6_addr.s6_addr[14] << 8)
-                   | sin6->sin6_addr.s6_addr[15];
-            if ((mapped & 0xFF000000U) != 0x7F000000U) {
-                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                    "markdown: access denied from non-localhost IPv6 address");
-                return NGX_HTTP_FORBIDDEN;
-            }
-        }
-    }
-#endif
-    else {
+    if (!ngx_http_markdown_peer_is_loopback(r)) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-            "markdown: access denied from unknown address family");
+            "markdown: access denied from non-localhost peer");
         return NGX_HTTP_FORBIDDEN;
     }
 
     return NGX_OK;
 }
+
 
 
 /*

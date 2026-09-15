@@ -62,7 +62,7 @@ jobs:
 YAML
 
 exit_code=0
-(cd "$tmp_dir" && bash "$DETECTOR") >"$output_file" 2>&1 || exit_code=$?
+(cd "$tmp_dir" && MARKDOWN_WORKFLOW_DIR="$workflow_dir" bash "$DETECTOR") >"$output_file" 2>&1 || exit_code=$?
 if [[ "$exit_code" -eq 0 ]]; then
     pass "pinned action and file download -> exit 0"
 else
@@ -83,7 +83,7 @@ jobs:
 YAML
 
 exit_code=0
-(cd "$tmp_dir" && bash "$DETECTOR") >"$output_file" 2>&1 || exit_code=$?
+(cd "$tmp_dir" && MARKDOWN_WORKFLOW_DIR="$workflow_dir" bash "$DETECTOR") >"$output_file" 2>&1 || exit_code=$?
 if [[ "$exit_code" -ne 0 ]] &&
     grep -q 'Network-to-shell execution' "$output_file"; then
     pass "multiline curl pipe to sh -> exit nonzero"
@@ -104,7 +104,7 @@ jobs:
 YAML
 
 exit_code=0
-(cd "$tmp_dir" && bash "$DETECTOR") >"$output_file" 2>&1 || exit_code=$?
+(cd "$tmp_dir" && MARKDOWN_WORKFLOW_DIR="$workflow_dir" bash "$DETECTOR") >"$output_file" 2>&1 || exit_code=$?
 if [[ "$exit_code" -ne 0 ]] &&
     grep -q 'Network-to-shell execution' "$output_file"; then
     pass "bash process substitution from curl -> exit nonzero"

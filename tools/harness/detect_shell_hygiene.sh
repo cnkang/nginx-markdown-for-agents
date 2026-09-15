@@ -231,7 +231,10 @@ readonly WARNING_ALLOWLIST=(
 # Files where specific violations are known and accepted.
 # Format: "relative/path"
 # The array is retained for the scanner loop; add only scoped exceptions.
+# Fixture tests intentionally embed the defect shapes they assert on, so the
+# shell snippets inside their heredocs are data, not code under review.
 readonly RETURN_EXEMPT_FILES=(
+    "tools/harness/tests/test_check_postinst_safety.sh"
 )
 
 # Files exempt from pattern (f) ($? inside negated conditionals):

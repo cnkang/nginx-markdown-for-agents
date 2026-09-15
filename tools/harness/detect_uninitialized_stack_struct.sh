@@ -123,6 +123,13 @@ while IFS= read -r -d '' file; do
             fi
 
             var_name=$(echo "$content" | sed -E "s/^[[:space:]]*${type}[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*).*/\1/")
+            # Validate the extracted identifier: a malformed declaration
+            # (e.g. a pointer or array declarator that the sed pattern
+            # cannot capture) must be skipped, not fed into the grep
+            # windows below where it could match unrelated lines.
+            if [[ ! "$var_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+                continue
+            fi
             [[ -z "$var_name" ]] && continue
 
             # Look at the preceding 8 lines and the following 15 lines for

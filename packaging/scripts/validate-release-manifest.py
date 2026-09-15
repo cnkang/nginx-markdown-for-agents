@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import json
 import re
 import sys
@@ -84,6 +85,104 @@ def parse_sha256sums(path: Path, errors: list[str]) -> dict[str, str]:
         entries[filename] = digest
 
     return entries
+
+
+def sha256_no_follow(path: Path) -> str:
+    """Hash a file without following a symlink at the final component.
+
+    The containment check resolves the path, so re-opening by name leaves a
+    window in which the entry could be replaced; opening the descriptor once
+    closes it.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    digest = hashlib.sha256()
+    fd = os.open(path, flags)
+    try:
+        handle = os.fdopen(fd, "rb")
+    except OSError:
+        os.close(fd)
+        raise
+    with handle:
+        for chunk in iter(lambda: handle.read(64 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _source_bundle_name(tag: str) -> str:
+    """Name of the source bundle the release workflow publishes for a tag."""
+    return f"nginx-markdown-for-agents-source-{tag}.tar.gz"
+
+
+def _check_source_bundle(
+    source,
+    bundle_name: str,
+    expected_url: str | None,
+    artifact_dir: Path,
+    sha256_entries: dict[str, str],
+    errors: list[str],
+) -> None:
+    """Check the published source bundle and the digests that describe it.
+
+    Allowing the name in SHA256SUMS is not enough: the bundle is the provenance
+    artifact, so its on-disk digest must match both the signed checksum file and
+    the manifest.  A manifest that records a digest without publishing the
+    artifact is exactly the gap this check exists to close.
+    """
+    bundle_path = artifact_dir / bundle_name
+    recorded = source.get("sha256") if isinstance(source, dict) else None
+
+    # The name comes from the manifest, so the resolved path has to stay inside
+    # the artifact directory: a traversal or an escaping symlink must not make
+    # these checks read something else.
+    try:
+        root = artifact_dir.resolve()
+        resolved = bundle_path.resolve()
+    except (OSError, RuntimeError) as exc:
+        errors.append(f"{bundle_name} cannot be resolved ({exc})")
+        return
+    if not resolved.is_relative_to(root):
+        errors.append(
+            f"{bundle_name} resolves outside the artifact directory and is not "
+            "inspected"
+        )
+        return
+
+    # The URL is part of the provenance claim: a link to a differently named or
+    # differently tagged artifact would describe something other than the bundle
+    # whose digest the manifest records.
+    if expected_url is not None:
+        actual_url = source.get("archive_url") if isinstance(source, dict) else None
+        if actual_url != expected_url:
+            errors.append(
+                "source.archive_url does not point at the published bundle: "
+                f"expected={expected_url}, actual={actual_url}"
+            )
+
+    if not bundle_path.is_file():
+        if recorded:
+            errors.append(
+                f"{bundle_name} is missing from the artifact directory while "
+                "the manifest records source.sha256"
+            )
+        return
+
+    try:
+        actual = sha256_no_follow(bundle_path)
+    except OSError as exc:
+        errors.append(f"{bundle_name} cannot be read safely ({exc})")
+        return
+    # This comparison needs the checksum data; the presence and URL checks above
+    # do not, which is why they run for every tag release.
+    if sha256_entries and sha256_entries.get(bundle_name) != actual:
+        errors.append(
+            f"SHA256SUMS digest mismatch for {bundle_name}: "
+            f"sha256sums={sha256_entries.get(bundle_name)}, actual={actual}"
+        )
+    if recorded != actual:
+        errors.append(
+            f"source.sha256 does not match the published bundle: "
+            f"manifest={recorded}, actual={actual}"
+        )
 
 
 def validate_manifest(
@@ -232,12 +331,18 @@ def validate_manifest(
                 if not fpath.exists():
                     errors.append(f"{prefix}: file not found in artifacts: {fname}")
                 elif "sha256" in pkg:
-                    actual_sha = sha256_file(fpath)
-                    if actual_sha != pkg["sha256"]:
-                        errors.append(
-                            f"{prefix}: SHA256 mismatch for {fname}: "
-                            f"manifest={pkg['sha256']}, actual={actual_sha}"
-                        )
+                    # Same single-open reader as the bundle: resolving and then
+                    # reopening by name leaves a window for a swap.
+                    try:
+                        actual_sha = sha256_no_follow(fpath)
+                    except OSError as exc:
+                        errors.append(f"{prefix}: cannot read {fname}: {exc}")
+                    else:
+                        if actual_sha != pkg["sha256"]:
+                            errors.append(
+                                f"{prefix}: SHA256 mismatch for {fname}: "
+                                f"manifest={pkg['sha256']}, actual={actual_sha}"
+                            )
 
             if "format" in pkg and pkg["format"] not in ("deb", "rpm", "dynamic-module"):
                 errors.append(f"{prefix}: unexpected format: {pkg['format']}")
@@ -259,12 +364,25 @@ def validate_manifest(
                 errors.append("source.archive_url is required for tag releases")
             else:
                 check_no_placeholders(source["archive_url"], "source.archive_url", errors)
-            if "sha256" not in source or not source["sha256"]:
-                errors.append("source.sha256 is required for tag releases")
+            # The digest is required for tag releases.  The release workflow
+            # builds the source bundle from the released commit and records its
+            # digest, so provenance is self-contained and no longer depends on a
+            # registry entry that can only be written after the tag exists.
+            if "sha256" not in source:
+                errors.append(
+                    "source.sha256 is required for tag releases: the release "
+                    "workflow builds the source bundle from the released commit"
+                )
             else:
-                check_no_placeholders(source["sha256"], "source.sha256", errors)
-                if not re.match(r"^[0-9a-f]{64}$", source["sha256"]):
-                    errors.append("source.sha256 is not a 64-char hex string")
+                digest = source["sha256"]
+                if not isinstance(digest, str) or not digest:
+                    errors.append(
+                        "source.sha256 must be a non-empty string for tag releases"
+                    )
+                else:
+                    check_no_placeholders(digest, "source.sha256", errors)
+                    if not re.match(r"^[0-9a-f]{64}$", digest):
+                        errors.append("source.sha256 is not a 64-char hex string")
     elif source and isinstance(source, dict):
         # Non-tag: source is optional; if present and available, validate fields
         if source.get("available", False):
@@ -324,8 +442,52 @@ def validate_manifest(
             )
 
     # SHA256SUMS inclusion and digest consistency
+    # Parse the checksum file first: the source-bundle check below compares
+    # against it when it is available, and the rest of the checksum validation
+    # reads the same mapping.
+    sha256_entries: dict[str, str] = {}
     if sha256sums_path and sha256sums_path.exists():
         sha256_entries = parse_sha256sums(sha256sums_path, errors)
+
+    # A tag that is not a semantic release tag cannot name the bootstrap assets
+    # at all, so a strict run has to refuse instead of finding nothing to check.
+    # This stands outside the checksum-file branch: the requirement is about the
+    # tag, not about which files happen to be present.
+    if require_bootstrap_assets and is_tag_release and isinstance(git, dict):
+        required_tag = git.get("tag", "")
+        if not (
+            isinstance(required_tag, str) and SEMVER_TAG_RE.fullmatch(required_tag)
+        ):
+            errors.append(
+                "git.tag must be a semantic release tag to validate bootstrap assets"
+            )
+
+    # The bundle is the provenance artifact for a tag release, so its
+    # presence, its recorded digest and the URL that points at it are
+    # checked for every tag release, not only when a checksum file happens
+    # to be available.  Only the comparison against SHA256SUMS needs the
+    # checksum data.
+    if is_tag_release and isinstance(git, dict):
+        release_tag = git.get("tag", "")
+        if isinstance(release_tag, str) and release_tag:
+            bundle_name = _source_bundle_name(release_tag)
+            repository = git.get("repository")
+            expected_url = (
+                f"https://github.com/{repository}/releases/download/"
+                f"{release_tag}/{bundle_name}"
+                if repository
+                else None
+            )
+            _check_source_bundle(
+                source,
+                bundle_name,
+                expected_url,
+                artifact_dir,
+                sha256_entries,
+                errors,
+            )
+
+    if sha256sums_path and sha256sums_path.exists():
         if "release-manifest.json" not in sha256_entries:
             errors.append("release-manifest.json not found in SHA256SUMS")
 
@@ -349,15 +511,19 @@ def validate_manifest(
         bootstrap_filenames: set[str] = set()
         if is_tag_release and isinstance(git, dict):
             tag = git.get("tag", "")
+            if isinstance(tag, str) and tag:
+                # The bundle is published for every tag, so the reverse scan
+                # must allow its name whatever the tag looks like.
+                allowed_sha256_names.add(_source_bundle_name(tag))
             if isinstance(tag, str) and SEMVER_TAG_RE.fullmatch(tag):
                 bootstrap_filenames = {
                     f"nginx-markdown-for-agents-installer-{tag}.sh",
                     "nginx-markdown-for-agents-release.asc",
                 }
-            elif require_bootstrap_assets:
-                errors.append(
-                    "git.tag must be a semantic release tag to validate bootstrap assets"
-                )
+                # The release workflow builds this bundle from the released
+                # commit and publishes it, so the signed checksum file covers
+                # it.  Without this entry every tag release fails the reverse
+                # scan below with "Unexpected file in SHA256SUMS".
 
         allowed_sha256_names.update(bootstrap_filenames)
 

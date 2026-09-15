@@ -8,7 +8,6 @@ on:
       observation_ref:
         description: 'Maintenance branch/ref to validate'
         required: false
-        default: dev/wip-0.9.2rc7
         type: string
 
 permissions: {}
@@ -24,7 +23,7 @@ jobs:
       - name: Checkout maintenance branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.observation_ref || 'dev/wip-0.9.2rc7' }}
+          ref: ${{ inputs.observation_ref || github.ref }}
           persist-credentials: false
 
       - name: Validate branch-bound release contracts
@@ -47,7 +46,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.observation_ref || 'dev/wip-0.9.2rc7' }}
+          ref: ${{ inputs.observation_ref || github.ref }}
           persist-credentials: false
 
       - name: Set up Rust toolchain
@@ -126,7 +125,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.observation_ref || 'dev/wip-0.9.2rc7' }}
+          ref: ${{ inputs.observation_ref || github.ref }}
           persist-credentials: false
 
       - name: Resolve sanitizer matrix row

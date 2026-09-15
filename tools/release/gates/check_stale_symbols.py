@@ -141,6 +141,10 @@ def _find_field_leaks(path: str, lines: list[str], content: str) -> list[str]:
 def _scan_tracked_file(repo: Path, path: str) -> tuple[list[str], str]:
     """Return stale-symbol findings or a read error for one tracked file."""
     f_path = repo / path
+    if f_path.is_symlink():
+        # Following a tracked symlink would read content that is not part of
+        # this repository, so the scan refuses the entry instead.
+        return [], ""
     if not f_path.is_file():
         return [], ""
 

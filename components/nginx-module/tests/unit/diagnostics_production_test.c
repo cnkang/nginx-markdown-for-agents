@@ -357,6 +357,58 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
 
 #define NGX_HTTP_MARKDOWN_FILTER_MODULE_H
 
+/*
+ * The production loopback gate classifies the peer through realip_remote_addr
+ * with a fallback to the socket address.  This stub request carries only a
+ * socket address, so the stub applies the same loopback rules to it and the
+ * access-control cases below keep their expectations.
+ */
+static ngx_inline ngx_flag_t
+ngx_http_markdown_peer_is_loopback(ngx_http_request_t *r)
+{
+    if (r == NULL || r->connection == NULL
+        || r->connection->sockaddr == NULL)
+    {
+        return 0;
+    }
+
+#if (NGX_HAVE_UNIX_DOMAIN)
+    if (r->connection->sockaddr->sa_family == AF_UNIX) {
+        return 1;
+    }
+#endif
+
+    if (r->connection->sockaddr->sa_family == AF_INET) {
+        const struct sockaddr_in *sin =
+            (const struct sockaddr_in *) r->connection->sockaddr;
+
+        return (ntohl(sin->sin_addr.s_addr) & 0xff000000U) == 0x7f000000U;
+    }
+
+#if (NGX_HAVE_INET6)
+    if (r->connection->sockaddr->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *sin6 =
+            (const struct sockaddr_in6 *) r->connection->sockaddr;
+        uint32_t                   v4;
+
+        if (IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
+            return 1;
+        }
+
+        if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
+            v4 = ((uint32_t) sin6->sin6_addr.s6_addr[12] << 24)
+                 | ((uint32_t) sin6->sin6_addr.s6_addr[13] << 16)
+                 | ((uint32_t) sin6->sin6_addr.s6_addr[14] << 8)
+                 | (uint32_t) sin6->sin6_addr.s6_addr[15];
+
+            return (v4 & 0xff000000U) == 0x7f000000U;
+        }
+    }
+#endif
+
+    return 0;
+}
+
 /* Constants needed by diagnostics.c streaming_config formatter */
 #ifndef NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED
 #define NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED  16384

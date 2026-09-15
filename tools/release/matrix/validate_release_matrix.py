@@ -300,6 +300,14 @@ def check_source_bool_fields(source: dict) -> None:
                 f"ERROR: policy matrix entry {index}: release_blocking must "
                 f"be a boolean, got {type(value).__name__}"
             )
+        if entry.get("support_tier") == "supported" and value is False:
+            # "Supported" is a release promise: a failing supported row must
+            # stop a release.  A row that should not block is reclassified
+            # instead of staying supported and non-blocking.
+            raise SystemExit(
+                f"ERROR: policy matrix entry {index}: a supported row must be "
+                "release-blocking; reclassify the row or mark it blocking"
+            )
 
 
 def check_source_projection(matrix: dict) -> None:

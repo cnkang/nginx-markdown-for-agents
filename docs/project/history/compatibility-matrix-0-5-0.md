@@ -4,7 +4,7 @@
 
 This matrix explicitly classifies each existing operator-facing capability's support
 status under the streaming path. Every capability must carry exactly one of the
-three allowed states, a fourth state ("theoretically supported but silently degrades on
+three allowed states. A fourth state ("theoretically supported but silently degrades on
 failure") is forbidden.
 
 ## State Definitions

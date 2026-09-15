@@ -83,8 +83,9 @@ when the result differs.
 
 ## 0.9.2 configuration essentials
 
-0.9.2 freezes the public configuration at 20 active directives (plus five
-retained reject-only migration names). Configure the
+0.9.2 freezes the public configuration at 20 active directives. The five names removed by
+the convergence are no longer registered and fail `nginx -t` with
+NGINX's standard `unknown directive` error. Configure the
 behavior explicitly so `nginx -T` shows the settings that operators selected.
 
 ```nginx
@@ -106,9 +107,11 @@ http {
 }
 ```
 
-- `markdown_streaming off` selects full-buffer conversion. `auto` uses a
-  bounded response-shape heuristic. `force` requests streaming after the
-  cache and eligibility checks pass.
+- `markdown_streaming off` selects full-buffer conversion. `auto` prefers
+  streaming for every response that clears the eligibility gates. A response
+  that is eligible for conversion but cannot stream, the module converts with the
+  full-buffer engine instead, and it passes a response that is not eligible for
+  conversion through unchanged. `force` requests streaming after the same checks pass.
 - `markdown_limits` bounds conversion memory, time, decompression, streaming
   buffers, and concurrent work.
 - `markdown_accept strict` is a safe default for staged rollout. Use
@@ -161,8 +164,10 @@ eligibility checks still apply.
 0.9.2 is a breaking release candidate. Read the
 [release notes](docs/releases/0.9.2-release-notes.md) before upgrading.
 
-- 0.9.2 freezes 20 active directives and retains five removed names as
-  reject-only migration entries. Profiles, OTel, per-path metrics, shadow
+- 0.9.2 freezes 20 active directives. The five names removed by the convergence
+  are no longer registered, so `nginx -t` reports NGINX's standard
+  `unknown directive` error and [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)
+  names the replacement for each. Profiles, OTel, per-path metrics, shadow
   mode, and other removed legacy directives are no longer active. Run
   `nginx -t` after migration.
 - The convergence removed runtime dynamic configuration files, watchers,
@@ -214,28 +219,28 @@ installation-specific details.
 | 1.31.5 | mainline | almalinux9 | glibc | arm64 | rpm-package | best-effort | No |
 | 1.31.5 | mainline | almalinux9 | glibc | amd64 | rpm-package | best-effort | No |
 | 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | No |
-| 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
-| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
-| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
+| 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
 | 1.30.4 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
 | 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
-| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
-| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
+| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
 | 1.28.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
 | 1.28.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
 | 1.28.3 | stable | any | n/a | any | source | best-effort | No |
 | 1.28.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
 | 1.28.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | No |
-| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
-| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
-| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
+| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
@@ -247,14 +252,14 @@ installation-specific details.
 | 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | dynamic-module | best-effort | No |
 | 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | dynamic-module | best-effort | No |
-| 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
-| 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
-| 1.24.0 | stable | linux | musl | amd64 | dynamic-module | supported | No |
-| 1.24.0 | stable | debian12 | glibc | arm64 | deb-package | supported | No |
-| 1.24.0 | stable | debian12 | glibc | amd64 | deb-package | supported | No |
-| 1.24.0 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | No |
-| 1.24.0 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | No |
+| 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
+| 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.24.0 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
+| 1.24.0 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.24.0 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.24.0 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.24.0 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 <!-- END:release-matrix:support-matrix -->
 
 ## Documentation

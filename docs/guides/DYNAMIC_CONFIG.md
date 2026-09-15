@@ -7,8 +7,9 @@ following directives and their JSON file watcher no longer exist:
 - `markdown_dynamic_config_path`
 - `markdown_dynconf_dry_run`
 
-The module keeps the names as reject-only migration entries so `nginx -t`
-reports an actionable error. It does not read a runtime configuration file,
+The names are no longer registered, so `nginx -t` reports NGINX's standard
+`unknown directive` error. `MIGRATION-0.9.2.md` names the replacement for each.
+The module does not read a runtime configuration file,
 maintain a last-known-good dynconf snapshot, or expose a dynconf metrics
 family. Configure the static directives in
 [CONFIGURATION.md](CONFIGURATION.md), run `nginx -t`, and use a controlled

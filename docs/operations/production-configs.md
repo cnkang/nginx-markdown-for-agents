@@ -21,8 +21,10 @@ to the cleartext backend listener.
 ## Choosing a Streaming Policy
 
 - **`auto`** — recommended starting point for most deployments. The module
-  chooses streaming only when its bounded eligibility heuristic and cache
-  constraints allow it.
+  streams every response that clears its eligibility gates. A response that
+  stays eligible for conversion but cannot stream, the module converts it with the
+  full-buffer engine, and the module passes a response that is not eligible for
+  conversion through unchanged.
 
 - **`off`** — optimized for deployments that require full-buffer conversion and
   deterministic cache validation.

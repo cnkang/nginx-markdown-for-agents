@@ -83,7 +83,7 @@ conversion outcomes into `nginx_markdown_requests_total{outcome=...}` and
 | `nginx_markdown_conversion_duration_seconds`      | histogram | `engine`        |
 | `nginx_markdown_input_bytes_total`                | counter   | —               |
 | `nginx_markdown_output_bytes_total`               | counter   | —               |
-| `nginx_markdown_streaming_peak_memory_bytes`      | gauge     | —               |
+| `nginx_markdown_conversion_peak_memory_bytes`      | gauge     | —               |
 | `nginx_markdown_streaming_events_total`            | counter   | `reason`,`transition` |
 | `nginx_markdown_decompression_events_total`       | counter   | `encoding`,`outcome`,`reason` |
 | `nginx_markdown_build_info`                       | gauge     | `features`,`nginx_version`,`version` |

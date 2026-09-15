@@ -1319,6 +1319,43 @@ def _is_generated_dynamic_row(entry: object) -> bool:
     )
 
 
+
+def _is_dynamic_module_entry(entry: object) -> bool:
+    """Return True when ``entry`` describes an OS dynamic-module row.
+
+    The identity's libc field selects the dynamic-module OS set, and an
+    explicit ``artifact_type`` must agree with that selection: a row that
+    declares a different artifact type is never a dynamic-module row, while a
+    row without the field (older matrix inputs) stays eligible.
+    """
+    if not isinstance(entry, dict):
+        return False
+
+    artifact_type = entry.get("artifact_type")
+    if artifact_type is not None and artifact_type != "dynamic-module":
+        return False
+
+    return _matrix_entry_identity(entry)[1] in OS_TYPES
+
+
+def _dynamic_entry_sort_key(entry: dict) -> tuple:
+    """Return the stable ordering key for a dynamic-module row."""
+    identity = _matrix_entry_identity(entry)
+    return (version_tuple(identity[0]), identity[1], identity[2])
+
+
+def _stamp_dynamic_channel(entries: list) -> None:
+    """Set ``nginx_channel`` on every generated dynamic row (best effort)."""
+    for entry in entries:
+        if not _is_generated_dynamic_row(entry):
+            continue
+        try:
+            version = _matrix_entry_identity(entry)[0]
+        except (TypeError, ValueError):
+            continue
+        entry["nginx_channel"] = classify_version(version)
+
+
 def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
     """Replace generated dynamic-module rows while preserving other artifacts.
 
@@ -1332,10 +1369,7 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         _matrix_error("Canonical release matrix is missing an entries list")
 
     merged_dynamic = [
-        entry
-        for entry in merged
-        if isinstance(entry, dict)
-        and _matrix_entry_identity(entry)[1] in OS_TYPES
+        entry for entry in merged if _is_dynamic_module_entry(entry)
     ]
     existing_dynamic = [
         entry for entry in entries if _is_generated_dynamic_row(entry)
@@ -1366,21 +1400,9 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
     # declarations), but they are rebound like the regenerated rows so the
     # tool input never carries a mixed bound/unbound state.
     _rebind_stale_dynamic_rows(other_entries)
-    dynamic_entries.sort(
-        key=lambda entry: (
-            version_tuple(_matrix_entry_identity(entry)[0]),
-            _matrix_entry_identity(entry)[1],
-            _matrix_entry_identity(entry)[2],
-        )
-    )
+    dynamic_entries.sort(key=_dynamic_entry_sort_key)
     data["entries"] = dynamic_entries + other_entries
-    for entry in data["entries"]:
-        if _is_generated_dynamic_row(entry):
-            try:
-                version = _matrix_entry_identity(entry)[0]
-            except (TypeError, ValueError):
-                continue
-            entry["nginx_channel"] = classify_version(version)
+    _stamp_dynamic_channel(entries)
     data.pop("updated_at", None)
     data.pop("matrix", None)
 

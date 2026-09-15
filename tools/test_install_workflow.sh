@@ -126,8 +126,7 @@ ASSET_NAME="$(basename "$ARTIFACT")"
 ASSET_SHA256="$(sha256_file "$ARTIFACT")"
 MOCK_PORT_FILE="${MOCK_DIR}/port"
 
-(
-  python3 - "$MOCK_DIR" "$MOCK_PORT_FILE" "$MOCK_CERT_FILE" "$MOCK_KEY_FILE" <<'PY'
+python3 - "$MOCK_DIR" "$MOCK_PORT_FILE" "$MOCK_CERT_FILE" "$MOCK_KEY_FILE" <<'PY' &
 import ssl
 import sys
 from functools import partial
@@ -149,7 +148,6 @@ try:
 finally:
     server.server_close()
 PY
-) &
 SERVER_PID=$!
 
 MOCK_PORT=""

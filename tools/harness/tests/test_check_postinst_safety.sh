@@ -121,7 +121,7 @@ else
 fi
 
 # Self-referencing PATH is not unconditional, so gate should report missing
-if printf '%s\n' "${OUTPUT}" | grep -qi "VIOLATION"; then
+if printf '%s\n' "${OUTPUT}" | grep -qE "^\[VIOLATION\]"; then
     pass "Fixture 2: VIOLATION reported for self-referencing PATH"
 else
     fail "Fixture 2: no VIOLATION reported"
@@ -307,6 +307,70 @@ if [[ "${NFPM_SCRIPTS_FOUND}" -eq 3 ]]; then
     pass "Fixture 7: default target set includes all 3 nfpm scripts"
 else
     fail "Fixture 7: missing nfpm scripts in default set:${NFPM_SCRIPTS_MISSING}"
+fi
+
+echo "" >&2
+
+##############################################################################
+# Fixture 8: Braces inside quotes/comments do not close a function body early
+##############################################################################
+
+echo "--- Fixture 8: Quoted and commented braces ---" >&2
+
+FIXTURE_8="${WORK_DIR}/fixture_quoted_braces.sh"
+cat > "${FIXTURE_8}" <<'SCRIPT'
+#!/bin/sh
+set -e
+helper() {
+    # a comment with a stray brace }
+    echo "a brace } in a quoted string" >&2
+    cat /dev/null
+    return 0
+}
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+cat /dev/null
+exit 0
+SCRIPT
+chmod +x "${FIXTURE_8}"
+
+RC=0
+OUTPUT="$(bash "${GATE_SCRIPT}" "${FIXTURE_8}" 2>&1)" || RC=$?
+
+if [[ "${RC}" -eq 0 ]]; then
+    pass "Fixture 8: a command inside a function body stays out of the top-level scan"
+else
+    fail "Fixture 8: quoted or commented braces misclassified a function body" \
+        "gate returned ${RC}: ${OUTPUT}"
+fi
+
+echo "" >&2
+
+##############################################################################
+# Fixture 9: A later top-level PATH assignment replaces the trusted value
+##############################################################################
+
+echo "--- Fixture 9: Later top-level PATH replacement ---" >&2
+
+FIXTURE_9="${WORK_DIR}/fixture_late_path.sh"
+cat > "${FIXTURE_9}" <<'SCRIPT'
+#!/bin/sh
+set -e
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+PATH="$PATH:/usr/local/bin"
+cat /dev/null
+exit 0
+SCRIPT
+chmod +x "${FIXTURE_9}"
+
+RC=0
+OUTPUT="$(bash "${GATE_SCRIPT}" "${FIXTURE_9}" 2>&1)" || RC=$?
+
+if printf '%s\n' "${OUTPUT}" | grep -q "later top-level PATH assignment replaces"; then
+    pass "Fixture 9: a later top-level PATH assignment is a violation"
+else
+    fail "Fixture 9: expected a later-PATH violation" "gate output: ${OUTPUT}"
 fi
 
 echo "" >&2

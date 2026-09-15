@@ -117,7 +117,7 @@ def main() -> int:
         "nginx_markdown_streaming_precommit_failopen_total",
         "nginx_markdown_streaming_postcommit_error_total",
         "nginx_markdown_streaming_budget_exceeded_total",
-        "nginx_markdown_streaming_peak_memory_bytes",
+        "nginx_markdown_conversion_peak_memory_bytes",
         "nginx_markdown_streaming_ttfb_seconds",
     ]
     known_reason_codes = [

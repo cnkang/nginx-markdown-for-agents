@@ -10,7 +10,7 @@
       "artifact_type": "rpm-package",
       "test_level": "smoke-test",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
@@ -32,7 +32,7 @@
       "artifact_type": "rpm-package",
       "test_level": "smoke-test",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
@@ -54,7 +54,7 @@
       "artifact_type": "deb-package",
       "test_level": "smoke-test",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
@@ -76,7 +76,7 @@
       "artifact_type": "deb-package",
       "test_level": "smoke-test",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
@@ -108,7 +108,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -130,7 +130,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -152,7 +152,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -174,7 +174,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -448,7 +448,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -470,7 +470,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -492,7 +492,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -514,7 +514,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -669,7 +669,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -691,7 +691,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -713,7 +713,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -735,7 +735,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -845,7 +845,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -867,7 +867,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -889,7 +889,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
@@ -911,7 +911,7 @@
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {

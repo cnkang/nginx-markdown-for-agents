@@ -572,6 +572,7 @@ grep "markdown:" /var/log/nginx/error.log | \
 # that window (no client traffic of your own inside it).
 sleep 5
 before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  -H "Host: ${ROLLBACK_HOST:-localhost}" \
   http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
 if [ -z "$before" ]; then
@@ -580,6 +581,7 @@ if [ -z "$before" ]; then
 fi
 sleep 5
 after=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  -H "Host: ${ROLLBACK_HOST:-localhost}" \
   http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_(conversion_attempts_total|conversion_deliveries_total)")
 if [ -z "$after" ]; then
@@ -588,16 +590,89 @@ if [ -z "$after" ]; then
 fi
 # Capture disabled-request signal separately without changing the conversion metric comparison
 # Trigger a unique request first so the disabled signal is guaranteed to be
-# emitted by this verification, not by unrelated traffic.
-curl -fsS -o /dev/null \
-  -H "Accept: text/markdown" \
-  "http://localhost/rollback-probe-$(date +%s)"
-sleep 1
-disabled=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+# emitted by this verification, not by unrelated traffic.  Use a FIXED path
+# covered by the affected markdown_filter scope (a timestamp-based path may
+# fall outside the location that disables conversion) and include the Host
+# header so the request reaches that scope.
+disabled_before=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  -H "Host: ${ROLLBACK_HOST:-localhost}" \
   http://localhost/markdown-metrics | \
-  grep -E 'nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"')
-if [ -z "$disabled" ]; then
-  echo "FAIL: disabled signal not present after rollback check (expected requests_total outcome=skipped reason=disabled)"
+  awk '/nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"/ {sum += $NF} END {print sum+0}')
+# Trigger a unique request first so the disabled signal is guaranteed to be
+# emitted by this verification, not by unrelated traffic.  Use a FIXED path
+# covered by the affected markdown_filter scope (a timestamp-based path may
+# fall outside the location that disables conversion) and include the Host
+# header so the request reaches that scope.  The path is configurable so the
+# probe can target the ACTUAL location affected by the rollback.
+# Isolation semantics: the default path below is RUN-UNIQUE
+# (/rollback-probe-<epoch>-<pid>), so a shared instance cannot attribute an
+# unrelated request to this probe even inside the offset window.  The
+# decision-log corroboration additionally reads ONLY the bytes appended after
+# LOG_OFFSET.  Override ROLLBACK_PROBE_PATH only when your probe location is a
+# fixed path; keep that location a PREFIX match (for example
+# `location /rollback-probe` or `location ^~ /rollback-probe/`) so it covers the
+# run-unique default as well as a fixed override.
+ROLLBACK_PROBE_PATH="${ROLLBACK_PROBE_PATH:-/rollback-probe-$(date +%s)-$$}"
+LOG_OFFSET=$(wc -c < /var/log/nginx/error.log 2>/dev/null || echo 0)
+curl -sS -o /dev/null \
+  -H "Accept: text/markdown" \
+  -H "Host: ${ROLLBACK_HOST:-localhost}" \
+  "http://localhost${ROLLBACK_PROBE_PATH}"
+sleep 1
+disabled_after=$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  -H "Host: ${ROLLBACK_HOST:-localhost}" \
+  http://localhost/markdown-metrics | \
+  awk '/nginx_markdown_requests_total.*outcome="skipped".*reason="disabled"/ {sum += $NF} END {print sum+0}')
+if [ -z "$disabled_after" ] || [ "$disabled_after" -le "$disabled_before" ]; then
+  echo "FAIL: disabled signal did not increase after the rollback probe (before=$disabled_before after=$disabled_after; expected the probe request to be counted as outcome=skipped reason=disabled)"
+  exit 1
+fi
+# Corroborate with the decision log: the probe's own path must appear in
+# a disabled entry written AFTER the recorded offset.  A counter delta
+# alone cannot prove THIS request was the one counted.  The check is
+# mandatory: when the log level cannot carry non-failure entries
+# (module verbosity below info/debug OR error_log below info/debug),
+# the probe FAILS with an isolate-and-rerun instruction instead of
+# trusting the global counter delta.
+LOG_LEVEL_OK=0
+# Capture nginx -T ONCE and search the captured output: a short-circuiting
+# grep -q on a large nginx -T stream can SIGPIPE the producer and, under
+# pipefail, make the condition falsely fail.  The exit status is captured
+# separately: a failed nginx -T must fail the probe explicitly instead of
+# being masked by partial output.
+nginx_t_status=0
+NGINX_T_OUTPUT="$(nginx -T 2>/dev/null)" || nginx_t_status=$?
+if [ "$nginx_t_status" -ne 0 ]; then
+  echo "FAIL: nginx -T failed (exit $nginx_t_status); cannot verify the logging configuration" >&2
+  exit 1
+fi
+# Match the first condition with a shell pattern instead of piping into
+# grep -q: a short-circuiting grep would SIGPIPE printf and, under pipefail,
+# fail the pipeline even though the directive is present.
+case "$NGINX_T_OUTPUT" in
+  *markdown_log_verbosity*info* | *markdown_log_verbosity*debug*)
+    if printf '%s\n' "$NGINX_T_OUTPUT" \
+        | grep -E "^[[:space:]]*error_log[[:space:]]+[^;]*[[:space:]]+(info|debug)[[:space:]]*;" >/dev/null; then
+      LOG_LEVEL_OK=1
+    fi
+    ;;
+esac
+if [ "$LOG_LEVEL_OK" -eq 1 ]; then
+  # Capture the filtered output FIRST, then test it: a short-circuiting
+  # grep -q in the pipeline would SIGPIPE the upstream greps and, under
+  # pipefail, make the whole pipeline fail even when the entry exists.
+  # The `|| true` also normalizes the no-match exit status so the
+  # assignment itself cannot trip set -e before the test below.
+  PROBE_LOG_ENTRIES="$(tail -c +$((LOG_OFFSET + 1)) /var/log/nginx/error.log 2>/dev/null \
+      | grep "markdown:" | grep "reason=disabled" | grep -F "uri=${ROLLBACK_PROBE_PATH} " || true)"
+  if [ -n "$PROBE_LOG_ENTRIES" ]; then
+    echo "OK: decision log corroborates the rollback-probe disabled entry"
+  else
+    echo "FAIL: no disabled decision-log entry for ${ROLLBACK_PROBE_PATH} after the recorded offset (log level is info/debug but the entry is missing)"
+    exit 1
+  fi
+else
+  echo "FAIL: decision-log corroboration unavailable (log level below info/debug). The global disabled counter delta cannot prove THIS probe request was the one counted — unrelated traffic may have produced the delta. Isolate the instance (or raise the log level) and re-run the probe." >&2
   exit 1
 fi
 if [ "$before" = "$after" ]; then

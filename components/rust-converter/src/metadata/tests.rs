@@ -7,6 +7,30 @@ use crate::parser::parse_html;
 use super::{MetadataExtractor, PageMetadata};
 
 #[test]
+fn test_relative_metadata_urls_resolve_against_the_base() {
+    // A relative `og:url` and `og:image` must become absolute against the
+    // configured base; the streaming converter asserts the same values for the
+    // same input so the two engines cannot drift apart.
+    let html = b"<html><head>\
+        <meta property=\"og:url\" content=\"article\">\
+        <meta property=\"og:image\" content=\"icons/logo.svg\">\
+        </head></html>";
+    let dom = parse_html(html).unwrap();
+    let extractor =
+        MetadataExtractor::new(Some("https://example.com/docs/page.html".to_string()), true);
+    let metadata = extractor.extract(&dom).unwrap();
+
+    assert_eq!(
+        metadata.url.as_deref(),
+        Some("https://example.com/docs/article")
+    );
+    assert_eq!(
+        metadata.image.as_deref(),
+        Some("https://example.com/docs/icons/logo.svg")
+    );
+}
+
+#[test]
 fn test_extract_title_from_title_tag() {
     let html = b"<html><head><title>Test Title</title></head></html>";
     let dom = parse_html(html).unwrap();
@@ -295,12 +319,14 @@ fn test_resolve_absolute_url() {
 }
 
 #[test]
-fn test_resolve_protocol_relative_url() {
+fn test_resolve_network_path_url_inherits_the_base_scheme() {
+    // A network-path reference keeps its authority and takes the base scheme,
+    // so the emitted metadata URL is fetchable rather than scheme-relative.
     let extractor = MetadataExtractor::new(Some("https://example.com/page".to_string()), true);
 
     assert_eq!(
         extractor.resolve_url("//cdn.example.com/image.jpg"),
-        "//cdn.example.com/image.jpg"
+        "https://cdn.example.com/image.jpg"
     );
 }
 

@@ -322,8 +322,9 @@ def _evaluate_d01(metrics: Dict[str, Any]) -> RuleResult:
                 ),
                 advice=(
                     "High fallback rate suggests streaming eligibility issues. "
-                    "Check response sizes, Content-Type patterns, and the "
-                    "markdown_streaming policy; the size heuristic is internal."
+                    "Check the configured resource limits, Content-Type patterns, "
+                    "and the markdown_streaming policy; size takes no part in the "
+                    "selection, which follows the eligibility gates."
                 ),
                 metrics_used={
                     "fallback_total": fallback,

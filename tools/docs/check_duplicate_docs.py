@@ -142,6 +142,7 @@ def _find_duplicate_tables(root: Path) -> list[tuple[str, int, str, int]]:
     for path in sorted(root.rglob("*.md")):
         relative_path = path.relative_to(root)
         if relative_path.parts and relative_path.parts[0] in {
+            "archive",
             "harness",
             "project",
             "releases",
