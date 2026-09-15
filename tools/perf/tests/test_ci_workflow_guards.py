@@ -611,10 +611,14 @@ def test_tag_workflow_uses_092_blocking_evidence() -> None:
     publish_block = workflow[publish_start:]
     assert (
         "needs: [release-gate, musl-build, integrity-checksums, "
-        "integrity-signature, official-docker-release-gate]"
+        "integrity-signature, official-docker-release-gate, "
+        "rc-release-gates]"
     ) in publish_block
     assert "github.event_name == 'workflow_dispatch'" in publish_block
     assert "needs.release-gate.result == 'success'" in publish_block
+    assert "needs.rc-release-gates.result == 'success'" in publish_block, (
+        "a tag publish must require the candidate gates to succeed"
+    )
 
 
 # ---------------------------------------------------------------------------
