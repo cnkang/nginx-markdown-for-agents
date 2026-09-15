@@ -157,7 +157,9 @@ def collect_errors(root: Path) -> list[str]:
     for path in _shell_scripts(root):
         try:
             text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
+            # Its commands were not read, so the scan is incomplete here.
+            errors.append(f"{path.relative_to(root)}: cannot be read: {exc}")
             continue
         for line in scan_shell_text(text):
             errors.append(
