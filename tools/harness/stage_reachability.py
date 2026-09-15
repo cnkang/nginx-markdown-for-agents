@@ -10,9 +10,9 @@ import re
 import shlex
 
 
-VARIABLE = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_]*)\)")
-ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*([:?+]?=)\s*(.*)$")
-TARGET = re.compile(r"^([A-Za-z0-9_.-]+):\s*([^=]*)$")
+VARIABLE = re.compile(r"\$\((\w+)\)")
+ASSIGNMENT = re.compile(r"^(\w+)\s*([:?+]?=)\s*(.*)")
+TARGET = re.compile(r"^([\w.-]+):\s*([^=]*)")
 CONDITIONAL_START = re.compile(r"^(?:ifeq|ifneq|ifdef|ifndef)\b")
 
 
@@ -22,7 +22,7 @@ def command_words(line: str) -> list[str]:
         words = shlex.split(line.lstrip("@-+"), comments=True)
     except ValueError:
         return []
-    while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+    while words and re.fullmatch(r"\w+=.*", words[0]):
         name = words[0].split("=", 1)[0]
         if name in {"MAKEFLAGS", "GNUMAKEFLAGS", "MFLAGS"}:
             # Those carry options such as -n that decide whether a recipe runs.
@@ -47,7 +47,7 @@ def _defines_or_braces(words: list[str]) -> bool:
         return False
     if words[0].endswith("()") or "{" in words or "}" in words:
         return True
-    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\(\)", words[0])) if len(words) > 1 else False
+    return bool(re.fullmatch(r"\w+\(\)", words[0])) if len(words) > 1 else False
 
 
 def _quote_spans_lines(line: str) -> bool:
