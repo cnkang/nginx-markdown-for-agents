@@ -164,11 +164,14 @@ def _consume_recipe(
         return current
     recipe = line.strip()
     dropped = recipe.lstrip("@-+")
-    if "-" in recipe[: len(recipe) - len(dropped)]:
-        # Make's prefixes come in any order; a `-` among them means the status
-        # is ignored, so the command cannot be blocking evidence.
-        return current
-    recipes.setdefault(current, []).append((generation.get(current, 0), dropped))
+    ignored = "-" in recipe[: len(recipe) - len(dropped)]
+    # The definition is recorded either way: Make has replaced the earlier
+    # recipe, so nothing from it may be used.  A recipe whose status Make
+    # ignores is stored without a command, because it cannot be the evidence
+    # that fails a build.
+    recipes.setdefault(current, []).append(
+        (generation.get(current, 0), None if ignored else dropped)
+    )
     return current
 
 
@@ -237,7 +240,9 @@ def _target_script(
     entries = recipes.get(name, [])
     if entries:
         last = max(index for index, _ in entries)
-        lines.extend(line for index, line in entries if index == last)
+        lines.extend(
+            line for index, line in entries if index == last and line is not None
+        )
     return "\n".join(lines)
 
 
@@ -281,12 +286,19 @@ def _make_nodes(
             continue
         if conditionals:
             # The branch cannot be evaluated, so a variable it assigns may hold
-            # either value.  It is dropped here, before any later declaration
-            # could expand a dependency with the value from outside the branch.
+            # either value and a target it defines may replace the one outside.
+            # Both are dropped here, before a later declaration could rely on
+            # the value or the recipe from outside the branch.
             poisoned = _assignment(line.strip())
             if poisoned is not None:
                 variables.pop(poisoned[0], None)
                 simple.discard(poisoned[0])
+            redefined = _target(line.strip())
+            if redefined is not None:
+                generation[redefined[0]] = generation.get(redefined[0], 0) + 1
+                recipes.setdefault(redefined[0], []).append(
+                    (generation[redefined[0]], None)
+                )
             continue
         current = _consume_make_line(
             line, dependencies, recipes, generation, variables, simple, current
