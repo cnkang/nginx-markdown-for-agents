@@ -866,13 +866,25 @@ def _line_runs(line: str, stripped: str, parent: str) -> bool:
     if _invocation_target(parts) == stripped:
         return True
     discovered = _discovery_target(parts)
-    if discovered is not None and (
+    if discovered is not None and _is_collected(stripped) and (
         discovered == stripped
         or discovered == parent
         or stripped.startswith(discovered + "/")
     ):
         return True
     return False
+
+
+def _is_collected(path: str) -> bool:
+    """True when pytest's default collection would run this file.
+
+    A directory argument hands the runner a directory; only the test files under
+    it are executed, so a detector living there is not reached by that run.
+    """
+    name = path.rsplit("/", 1)[-1]
+    return name.endswith(".py") and (
+        name.startswith("test_") or name.endswith("_test.py")
+    )
 
 
 def _makefile_text() -> str:
@@ -1005,7 +1017,7 @@ def _profile_gate_text() -> str:
     """Read validated shared data without executing the declaration module."""
     from tools.ci.pre_push_gates import load_gates
 
-    gates = load_gates(REPO_ROOT / "tools/ci/pre_push_gates.py")
+    gates = load_gates(REPO_ROOT / "tools/ci/pre_push_gates.json")
     return "\n".join(shlex.join(gate["command"]) for gate in gates)
 
 

@@ -155,7 +155,7 @@ def _target(line: str) -> tuple[str, str] | None:
 
 def _consume_recipe(
     line: str,
-    recipes: dict[str, list[tuple[int, str]]],
+    recipes: dict[str, list[tuple[int, str | None]]],
     generation: dict[str, int],
     current: str | None,
 ) -> str | None:
@@ -233,12 +233,13 @@ def _record_target(
 def _target_script(
     name: str,
     dependencies: dict[str, list[str]],
-    recipes: dict[str, list[tuple[int, str]]],
+    recipes: dict[str, list[tuple[int, str | None]]],
+    ignored: set[str],
 ) -> str:
     """Lines a target contributes: its prerequisites, then its last recipe."""
     lines = [f"make {deps}" for deps in dependencies.get(name, []) if deps.strip()]
     entries = recipes.get(name, [])
-    if entries:
+    if entries and name not in ignored and "*" not in ignored:
         last = max(index for index, _ in entries)
         lines.extend(
             line for index, line in entries if index == last and line is not None
@@ -249,7 +250,7 @@ def _target_script(
 def _consume_make_line(
     line: str,
     dependencies: dict[str, list[str]],
-    recipes: dict[str, list[tuple[int, str]]],
+    recipes: dict[str, list[tuple[int, str | None]]],
     generation: dict[str, int],
     variables: dict[str, str],
     simple: set[str],
@@ -269,10 +270,10 @@ def _consume_make_line(
 
 def _make_nodes(
     text: str,
-) -> tuple[dict[str, list[str]], dict[str, list[tuple[int, str]]], dict[str, str]]:
+) -> tuple[dict[str, list[str]], dict[str, list[tuple[int, str | None]]], dict[str, str]]:
     """Collect target prerequisites and recipes from the root Makefile."""
     dependencies: dict[str, list[str]] = {}
-    recipes: dict[str, list[tuple[int, str]]] = {}
+    recipes: dict[str, list[tuple[int, str | None]]] = {}
     generation: dict[str, int] = {}
     variables = {"MAKE": "make"}
     current: str | None = None
@@ -294,6 +295,8 @@ def _make_nodes(
                 variables.pop(poisoned[0], None)
                 simple.discard(poisoned[0])
             redefined = _target(line.strip())
+            if redefined is not None and redefined[0] == ".IGNORE":
+                raise ValueError("cannot verify conditional .IGNORE scope")
             if redefined is not None:
                 generation[redefined[0]] = generation.get(redefined[0], 0) + 1
                 recipes.setdefault(redefined[0], []).append(
@@ -304,6 +307,23 @@ def _make_nodes(
             line, dependencies, recipes, generation, variables, simple, current
         )
     return dependencies, recipes, variables
+
+
+def _ignored_targets(dependencies: dict[str, list[str]]) -> set[str]:
+    """Resolve .IGNORE at read time; unknown scopes cannot prove blocking calls."""
+    ignored: set[str] = set()
+    for declaration in dependencies.get(".IGNORE", []):
+        try:
+            names = shlex.split(declaration, comments=True)
+        except ValueError as exc:
+            raise ValueError("cannot verify .IGNORE scope") from exc
+        if not names:
+            ignored.add("*")
+        for name in names:
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+                raise ValueError("cannot verify dynamic .IGNORE scope")
+            ignored.add(name)
+    return ignored
 
 
 def _runs_profile(words: list[str], profile: str) -> bool:
@@ -317,6 +337,7 @@ def reachable_commands(makefile: str, entries: list[str], profile: str,
                        gates: list[str]) -> str:
     """Follow only targets called by entries, including the push profile gates."""
     dependencies, recipes, variables = _make_nodes(makefile)
+    ignored = _ignored_targets(dependencies)
     pending = list(entries)
     visited: set[str] = set()
     reached: list[str] = []
@@ -335,6 +356,6 @@ def reachable_commands(makefile: str, entries: list[str], profile: str,
             if target not in visited:
                 visited.add(target)
                 pending.extend(
-                    literal_script_lines(_target_script(target, dependencies, recipes))
+                    literal_script_lines(_target_script(target, dependencies, recipes, ignored))
                 )
     return "\n".join(reached)
