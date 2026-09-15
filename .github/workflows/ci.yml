@@ -293,6 +293,10 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: 1.98.1
+          # The harness reads `rustc -Vv` and a detector asks rustfmt for a
+          # check, so the components are installed here rather than left to a
+          # rustup proxy that would fetch them on demand mid-test.
+          components: rustfmt,clippy
 
       - name: Install test dependencies
         run: >-
